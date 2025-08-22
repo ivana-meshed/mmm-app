@@ -29,7 +29,7 @@ infra/terraform/
 docker/
   Dockerfile           # Multi-arch capable; installs R pkgs & Python deps
 ```
-
+ 
 ## Prerequisites
 
 - Google Cloud project with billing enabled
