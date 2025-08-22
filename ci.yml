@@ -23,7 +23,7 @@ jobs:
       WIF_PROVIDER: github-oidc
       SA_EMAIL: github-deployer@datawarehouse-422511.iam.gserviceaccount.com
       RUNTIME_SA: mmm-trainer-sa@datawarehouse-422511.iam.gserviceaccount.com
-      REPOSITORY: ivanapenc/mmm-app      # <— exact GitHub repo
+      REPOSITORY: ivana-meshed/mmm-app      # <— exact GitHub repo
     steps:
       - uses: actions/checkout@v4
 
