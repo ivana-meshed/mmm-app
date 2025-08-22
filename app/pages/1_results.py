@@ -165,12 +165,8 @@ if trials is not None: extra += f" · trials={trials}"
 st.caption(f"Auto-selected latest run: **revision={rev} · country={country_disp} · stamp={stamp}{extra}**")
 # Build folder path and a Console URL
 prefix_path = f"robyn/{rev}/{country}/{stamp}/"          # keep actual case used in GCS
-project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT") or ""
-if project:
-    gcs_url = f"https://console.cloud.google.com/storage/browser/{bucket_name}/{quote(prefix_path)}?project={project}"
-else:
-    # Fallback works too (auth required)
-    gcs_url = f"https://storage.cloud.google.com/{bucket_name}/{quote(prefix_path)}"
+
+gcs_url = f"https://console.cloud.google.com/storage/browser/{bucket_name}/{quote(prefix_path)}"
 
 # Clickable path that opens in a new tab
 st.markdown(
