@@ -1,0 +1,42 @@
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+.streamlit/secrets.toml
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+.Rprofile
+.Renviron
+renv/library/
+.Rcache/
+
+# Node/Cache-ish
+.cache/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Local data & temp
+data/
+tmp/
+temp/
+*.tmp
+
+# Credentials (never commit!)
+*service*account*.json
+*sa-key*.json
+*credentials*.json
+secrets/
+

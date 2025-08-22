@@ -1,0 +1,6 @@
+streamlit==1.36.0
+pandas
+snowflake-connector-python
+google-cloud-secret-manager
+google-cloud-storage
+protobuf<5
