@@ -29,7 +29,7 @@ RUN mkdir -p /root/.cache/R/reticulate/uv/bin \
 ENV RETICULATE_PYTHON=/usr/bin/python3
 ENV RETICULATE_AUTOCONFIGURE=0
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
-ENV RSPM=
+#ENV RSPM=
 
 # Build-time sanity check: fail the build if imports don’t work
 RUN python3 - <<'PY'
