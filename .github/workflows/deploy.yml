@@ -92,4 +92,4 @@ jobs:
         run: |
           terraform init -input=false
           terraform validate
-          terraform apply -auto-approve -input=false
+          terraform apply -auto-approve -input=false -replace=google_cloud_run_service.svc -auto-approve
