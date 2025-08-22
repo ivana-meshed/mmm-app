@@ -1,0 +1,95 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: datawarehouse-422511
+      PROJECT_NUMBER: "321233323695"
+      REGION: europe-west1
+      ARTIFACT_REPO: mmm-repo
+      IMAGE: mmm-app
+      SERVICE: mmm-app
+      BUCKET: mmm-app-output
+      WIF_POOL: github-pool
+      WIF_PROVIDER: github-oidc
+      SA_EMAIL: github-deployer@datawarehouse-422511.iam.gserviceaccount.com
+      RUNTIME_SA: mmm-trainer-sa@datawarehouse-422511.iam.gserviceaccount.com
+      REPOSITORY: ivanapenc/mmm-app      # <— exact GitHub repo
+      # Image tag: use tag name if present, else short SHA
+      IMG_TAG: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth to Google (OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/${{ env.PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL }}/providers/${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.SA_EMAIL }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker auth for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Set up QEMU (multi-arch)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & Push multi-arch image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:latest
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:${{ env.IMG_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy to Cloud Run
+        env:
+          IMG: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:${{ env.IMG_TAG }}
+        run: |
+          gcloud run deploy "${SERVICE}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --image "${IMG}" \
+            --service-account "${RUNTIME_SA}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --max-instances=10 \
+            --timeout=900 \
+            --set-env-vars "GCS_BUCKET=${BUCKET},PORT=8080,APP_ROOT=/app" \
+            --update-secrets "" \
+            --quiet
+          # optional: pin traffic to the new revision (100%)
+          gcloud run services update-traffic "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --to-latest
+
+      - name: Terraform init/validate/apply
+        working-directory: infra/terraform
+        env:
+          TF_IN_AUTOMATION: "true"
+        run: |
+          terraform init -input=false
+          terraform validate
+          terraform apply -auto-approve -input=false
