@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     branches: [ main ]
+  push:
+    branches: [ ci-cd ]
 
 permissions:
   id-token: write
@@ -95,3 +97,5 @@ jobs:
           terraform fmt -check
           terraform validate
           terraform plan -input=false -out=tfplan
+          terraform apply -auto-approve -input=false -replace=google_cloud_run_service.svc
+          terraform apply -auto-approve -input=false -replace=google_cloud_run_service.svc
