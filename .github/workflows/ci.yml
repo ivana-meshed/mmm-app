@@ -92,8 +92,13 @@ jobs:
           TF_IN_AUTOMATION: "true"
           TF_CLI_CONFIG_FILE: ${{ env.HOME }}/.terraformrc
         run: |
+          
           terraform -version
           terraform init -input=false -upgrade
+          terraform state show google_service_account.runner >/dev/null 2>&1 || \
+          terraform import google_service_account.runner \
+          projects/${PROJECT_ID}/serviceAccounts/mmm-trainer-sa@${PROJECT_ID}.iam.gserviceaccount.com
+          
           terraform fmt -check
           terraform validate
           terraform plan -input=false -out=tfplan
