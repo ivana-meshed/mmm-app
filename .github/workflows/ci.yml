@@ -61,22 +61,34 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.8.5
+          terraform_version: 1.13.0
           terraform_wrapper: false
+        
+      - name: Configure Terraform CLI & plugin cache
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.terraform.d/plugin-cache"
+          cat > "$HOME/.terraformrc" <<'EOF'
+          plugin_cache_dir = "$HOME/.terraform.d/plugin-cache"
+          disable_checkpoint = true
+          EOF
+          # also expose legacy env var just in case
+          echo "TF_PLUGIN_CACHE_DIR=$HOME/.terraform.d/plugin-cache" >> "$GITHUB_ENV"
+
 
       # (Optional) cache provider/plugins to speed up init
       - name: Cache Terraform plugins
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.terraform.d/plugin-cache
-            infra/terraform/.terraform
-          key: ${{ runner.os }}-tf-${{ hashFiles('infra/terraform/**/*.tf') }}
+          path: ~/.terraform.d/plugin-cache
+          key: ${{ runner.os }}-tf-plugins-${{ hashFiles('infra/terraform/.terraform.lock.hcl') }}
+          restore-keys: ${{ runner.os }}-tf-plugins-
 
       - name: Terraform init/validate/plan
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
+          TF_CLI_CONFIG_FILE: ${{ env.HOME }}/.terraformrc
         run: |
           terraform -version
           terraform init -input=false -upgrade
