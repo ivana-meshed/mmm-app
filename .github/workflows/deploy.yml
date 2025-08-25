@@ -2,8 +2,8 @@ name: Deploy
 
 on:
   push:
-    branches: [ main ]
-    tags: [ "v*" ]
+    branches: [ ci-cd ]
+    #tags: [ "v*" ]
 
 permissions:
   id-token: write
@@ -57,8 +57,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          file: ./docker/Dockerfile
+          platforms: linux/amd64 #,linux/arm64
           push: true
           tags: |
             ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:latest
