@@ -1,0 +1,59 @@
+name: Deploy (prod)
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+env:
+  PROJECT_ID:  ${{ vars.GCP_PROJECT_ID }}
+  REGION:      ${{ vars.GAR_REGION }}
+  REPO:        ${{ vars.GAR_REPO }}
+  IMAGE:       mmm-app
+  TAG:         ${{ github.ref_name }}
+  IMAGE_URI:   ${{ vars.GAR_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GAR_REPO }}/mmm-app:${{ github.ref_name }}
+  SERVICE:     ${{ vars.CLOUD_RUN_SERVICE_PROD }}
+  RUN_REGION:  ${{ vars.CLOUD_RUN_REGION }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Configure AR
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build & push (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_URI }}
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/${{ env.IMAGE }}:stable
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy to Cloud Run (prod)
+        run: |
+          gcloud run deploy ${{ env.SERVICE }} \
+            --image=${{ env.IMAGE_URI }} \
+            --project=${{ env.PROJECT_ID }} \
+            --region=${{ env.RUN_REGION }} \
+            --platform=managed \
+            --service-account=mmm-trainer-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com \
+            --set-env-vars=GCS_BUCKET=mmm-app-output,STREAMLIT_SERVER_HEADLESS=true \
+            --allow-unauthenticated
