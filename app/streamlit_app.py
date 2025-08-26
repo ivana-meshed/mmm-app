@@ -144,7 +144,7 @@ if st.button("Train"):
     if not os.path.isfile(RSCRIPT):
         st.error(f"R script not found at: {RSCRIPT}. Make sure your Dockerfile copies it (e.g. `COPY r/ /app/r/`).")
     else:
-        with st.spinner("Running R script…"):
+        with st.spinner("Training… this may take a few minutes."):
             with tempfile.TemporaryDirectory() as td:
                 # 1) If user provided SQL/table, pull data in Python and save to CSV
                 sql = effective_sql()
@@ -163,14 +163,14 @@ if st.button("Train"):
                         st.error(f"Query failed: {e}")
                         st.stop()
 
-                # 2) Handle optional annotations upload
+                # 2) Optional annotations upload
                 annotations_path = None
                 if ann_file is not None:
                     annotations_path = os.path.join(td, "enriched_annotations.csv")
                     with open(annotations_path, "wb") as f:
                         f.write(ann_file.read())
 
-                # 3) Build job.json (with csv_path if present)
+                # 3) Build job.json
                 job_cfg = build_job_json(td, csv_path=csv_path, annotations_path=annotations_path)
 
                 # 4) Prefer env var for Snowflake password (R will ignore if csv_path is set)
@@ -179,21 +179,26 @@ if st.button("Train"):
                     env["SNOWFLAKE_PASSWORD"] = sf_password
 
                 cmd = ["Rscript", RSCRIPT, f"job_cfg={job_cfg}"]
-                st.write("Launching:", " ".join(shlex.quote(x) for x in cmd))
 
-                proc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, env=env
+                # 5) RUN QUIETLY: capture all output, don’t print it
+                result = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    env=env,
                 )
 
-                log_lines = []
-                for line in iter(proc.stdout.readline, ""):
-                    log_lines.append(line)
-                    st.write(line.rstrip())
-                code = proc.wait()
-                st.code("".join(log_lines), language="bash")
+        # 6) Show minimal status + optional log download
+        if result.returncode == 0:
+            st.success("Training finished. Artifacts should be in your GCS bucket.")
+        else:
+            st.error("Training failed. Download the run log for details.")
 
-                if code == 0:
-                    st.success("Done! Check your GCS bucket for artifacts.")
-                else:
-                    st.error("Run failed – see logs above.")
+        st.download_button(
+            "Download training log",
+            data=result.stdout or "(no output)",
+            file_name="robyn_run.log",
+            mime="text/plain",
+            key="dl_robyn_run_log",
+        )
