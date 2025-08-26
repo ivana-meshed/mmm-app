@@ -50,7 +50,7 @@ def parse_stamp(stamp: str):
         return datetime.datetime.strptime(stamp, "%m%d_%H%M%S")
     except Exception:
         return stamp  # lexical
-def parse_rev(rev: str):
+def parse_rev_key(rev: str):
     # numeric-aware sort key: ("is_non_numeric", value)
     m = re.search(r'(\d+)$', (rev or '').strip())
     if m:
@@ -180,7 +180,7 @@ if not current_key:
 current_rev, current_country, current_stamp = current_key
 
 # ---------- Filters (default to current run & country) ----------
-all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev, reverse=True)
+all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
 latest_any = sorted(runs.keys(), key=lambda k: (parse_rev_key(k[0]), parse_stamp(k[2])), reverse=True)[0]
 default_rev, default_country = latest_any[0], latest_any[1]
 
