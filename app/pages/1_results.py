@@ -176,29 +176,43 @@ st.markdown(
 
 # ---------- Inline displays ----------
 col1, col2 = st.columns([2, 1])
-
-st.divider()
-st.subheader("📁 All files in this run")
-for b in sorted(selected, key=lambda x: x.name):
-    fn = os.path.basename(b.name)
-    url = try_signed_url(b)
-    with st.container(border=True):
-        st.write(f"`{fn}` — {b.size:,} bytes")
-        if url:
-            st.markdown(f"[Open / Download (signed URL)]({url})")
-        else:
-            mime = "application/octet-stream"
-            if fn.lower().endswith(".csv"): mime = "text/csv"
-            elif fn.lower().endswith(".txt"): mime = "text/plain"
-            elif fn.lower().endswith(".png"): mime = "image/png"
-            elif fn.lower().endswith(".pdf"): mime = "application/pdf"
-            st.download_button(
-                f"Download {fn}",
-                data=download_bytes(b),
-                file_name=fn,
-                mime=mime,
-                key=blob_key("dl_any", b.name),
-            )
+st.subheader("📊 Allocator metrics")
+metrics_csv = find_blob(selected, "/allocator_metrics.csv")
+metrics_txt = find_blob(selected, "/allocator_metrics.txt")
+if metrics_csv:
+    df = pd.read_csv(io.BytesIO(download_bytes(metrics_csv)))
+    st.dataframe(df, use_container_width=True)
+    url = try_signed_url(metrics_csv)
+    if url:
+        st.markdown(f"⬇️ [Download {os.path.basename(metrics_csv.name)}]({url})")
+    else:
+        st.download_button("Download allocator_metrics.csv",
+                            data=download_bytes(metrics_csv),
+                            file_name="allocator_metrics.csv",
+                            mime="text/csv",
+                            key=blob_key("dl_metrics_csv", metrics_csv.name))
+elif metrics_txt:
+    raw = download_bytes(metrics_txt).decode("utf-8", errors="ignore")
+    rows = []
+    for line in raw.splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            rows.append({"metric": k.strip(), "value": v.strip()})
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    else:
+        st.code(raw)
+    url = try_signed_url(metrics_txt)
+    if url:
+        st.markdown(f"⬇️ [Download {os.path.basename(metrics_txt.name)}]({url})")
+    else:
+        st.download_button("Download allocator_metrics.txt",
+                            data=raw.encode("utf-8"),
+                            file_name="allocator_metrics.txt",
+                            mime="text/plain",
+                            key=blob_key("dl_metrics_txt", metrics_txt.name))
+else:
+    st.info("No allocator metrics found (allocator_metrics.csv/txt).")
 
 #with col1:
 st.subheader("📈 Allocator plot")
@@ -231,41 +245,26 @@ else:
     st.warning("best_model_id.txt not found; cannot locate onepager.")
 
 #with col2:
-    st.subheader("📊 Allocator metrics")
-    metrics_csv = find_blob(selected, "/allocator_metrics.csv")
-    metrics_txt = find_blob(selected, "/allocator_metrics.txt")
-    if metrics_csv:
-        df = pd.read_csv(io.BytesIO(download_bytes(metrics_csv)))
-        st.dataframe(df, use_container_width=True)
-        url = try_signed_url(metrics_csv)
+    
+st.divider()
+st.subheader("📁 All files in this run")
+for b in sorted(selected, key=lambda x: x.name):
+    fn = os.path.basename(b.name)
+    url = try_signed_url(b)
+    with st.container(border=True):
+        st.write(f"`{fn}` — {b.size:,} bytes")
         if url:
-            st.markdown(f"⬇️ [Download {os.path.basename(metrics_csv.name)}]({url})")
+            st.markdown(f"[Open / Download (signed URL)]({url})")
         else:
-            st.download_button("Download allocator_metrics.csv",
-                               data=download_bytes(metrics_csv),
-                               file_name="allocator_metrics.csv",
-                               mime="text/csv",
-                               key=blob_key("dl_metrics_csv", metrics_csv.name))
-    elif metrics_txt:
-        raw = download_bytes(metrics_txt).decode("utf-8", errors="ignore")
-        rows = []
-        for line in raw.splitlines():
-            if ":" in line:
-                k, v = line.split(":", 1)
-                rows.append({"metric": k.strip(), "value": v.strip()})
-        if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
-        else:
-            st.code(raw)
-        url = try_signed_url(metrics_txt)
-        if url:
-            st.markdown(f"⬇️ [Download {os.path.basename(metrics_txt.name)}]({url})")
-        else:
-            st.download_button("Download allocator_metrics.txt",
-                               data=raw.encode("utf-8"),
-                               file_name="allocator_metrics.txt",
-                               mime="text/plain",
-                               key=blob_key("dl_metrics_txt", metrics_txt.name))
-    else:
-        st.info("No allocator metrics found (allocator_metrics.csv/txt).")
-
+            mime = "application/octet-stream"
+            if fn.lower().endswith(".csv"): mime = "text/csv"
+            elif fn.lower().endswith(".txt"): mime = "text/plain"
+            elif fn.lower().endswith(".png"): mime = "image/png"
+            elif fn.lower().endswith(".pdf"): mime = "application/pdf"
+            st.download_button(
+                f"Download {fn}",
+                data=download_bytes(b),
+                file_name=fn,
+                mime=mime,
+                key=blob_key("dl_any", b.name),
+            )
