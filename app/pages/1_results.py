@@ -181,192 +181,173 @@ current_rev, current_country, current_stamp = current_key
 
 # ---------- Filters (default to current run & country) ----------
 all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev, reverse=True)
-rev_idx = all_revs.index(current_rev) if current_rev in all_revs else 0
-selected_rev = st.sidebar.selectbox("Revision", all_revs, index=rev_idx)
+latest_any = sorted(runs.keys(), key=lambda k: (parse_rev_key(k[0]), parse_stamp(k[2])), reverse=True)[0]
+default_rev, default_country = latest_any[0], latest_any[1]
 
-rev_countries = sorted({k[1] for k in runs.keys() if k[0] == selected_rev})
-default_countries = [current_country] if selected_rev == current_rev else []
-selected_countries = st.sidebar.multiselect(
-    "Countries (clear to show all)", rev_countries, default=default_countries
+rev = st.selectbox("Revision", all_revs, index=all_revs.index(default_rev))
+
+# Countries that have this revision
+rev_countries = sorted({k[1] for k in runs.keys() if k[0] == rev})
+# Default country = the country of the latest run within this revision
+latest_in_rev = sorted([k for k in runs.keys() if k[0] == rev],
+                       key=lambda k: parse_stamp(k[2]),
+                       reverse=True)[0]
+default_country_in_rev = latest_in_rev[1]
+
+countries_sel = st.multiselect(
+    "Countries (latest run per selected country will be shown)",
+    rev_countries,
+    default=[default_country_in_rev],
 )
 
-# ---------- Section A: Latest results per country (for selected revision) ----------
-st.subheader(f"Latest results per country — revision **{selected_rev}**")
-countries_to_show = rev_countries if len(selected_countries) == 0 else selected_countries
-
-if not countries_to_show:
-    st.info("No countries for this revision.")
-else:
-    for c in sorted(countries_to_show):
-        latest_key = latest_stamp_for_country(runs, selected_rev, c)
-        if not latest_key:
-            continue
-        _, _, stamp = latest_key
-        blobs_for_run = runs[latest_key]
-        best_id, iters, trials = parse_best_meta(blobs_for_run)
-        country_disp = c.upper()
-
-        # Path link to Cloud Console folder
-        prefix_path = f"robyn/{selected_rev}/{c}/{stamp}/"
-        gcs_url = f"https://console.cloud.google.com/storage/browser/{bucket_name}/{quote(prefix_path)}"
-
-        with st.container(border=True):
-            st.markdown(
-                f"**{country_disp}** — stamp `{stamp}`"
-                + (f" · iterations={iters}" if iters is not None else "")
-                + (f" · trials={trials}" if trials is not None else "")
-            )
-            st.markdown(
-                f'Path: <a href="{gcs_url}" target="_blank">gs://{bucket_name}/{prefix_path}</a>',
-                unsafe_allow_html=True,
-            )
-
-            # Quick links if present
-            metrics_csv = find_blob(blobs_for_run, "/allocator_metrics.csv")
-            op_blob = find_onepager_blob(blobs_for_run, best_id) if best_id else None
-            row = []
-            if metrics_csv:
-                url = try_signed_url(metrics_csv)
-                if url: row.append(f"[metrics.csv]({url})")
-            if op_blob:
-                url = try_signed_url(op_blob)
-                if url: row.append(f"[onepager]({url})")
-            if row:
-                st.markdown(" • ".join(row))
-            else:
-                st.caption("No quick links available (onepager/metrics not found or signing not allowed).")
-
-# ---------- Section B: Detailed view (focus run) ----------
-st.divider()
-st.subheader("Detailed view")
-
-# Pick focused country: if exactly one selected, use it; else use current_country (from latest overall)
-focus_country = selected_countries[0] if len(selected_countries) == 1 else current_country
-focus_key = latest_stamp_for_country(runs, selected_rev, focus_country)
-if not focus_key:
-    st.info("No run found for that selection.")
+if not countries_sel:
+    st.info("Select at least one country.")
     st.stop()
 
-rev, country, stamp = focus_key
-selected = runs[focus_key]
-best_id, iters, trials = parse_best_meta(selected)
-country_disp = country.upper()
+# Small renderer to avoid copy/paste and ensure unique keys
+def render_run_for_country(bucket_name: str, rev: str, country: str):
+    # Pick latest stamp for this (rev,country)
+    try:
+        key = sorted([k for k in runs.keys() if k[0] == rev and k[1] == country],
+                     key=lambda k: parse_stamp(k[2]),
+                     reverse=True)[0]
+    except IndexError:
+        st.warning(f"No runs found for {rev}/{country}.")
+        return
+    _, _, stamp = key
+    blobs = runs[key]
+    best_id, iters, trials = parse_best_meta(blobs)
 
-extra = ""
-if iters is not None:  extra += f" · iterations={iters}"
-if trials is not None: extra += f" · trials={trials}"
+    country_disp = country.upper()
+    meta_bits = []
+    if iters is not None:  meta_bits.append(f"iterations={iters}")
+    if trials is not None: meta_bits.append(f"trials={trials}")
+    meta_str = (" · " + " · ".join(meta_bits)) if meta_bits else ""
 
-st.caption(f"Focused run: **revision={rev} · country={country_disp} · stamp={stamp}{extra}**")
+    st.markdown(f"### {country_disp} — latest: `{stamp}`{meta_str}")
 
-prefix_path = f"robyn/{rev}/{country}/{stamp}/"
-gcs_url = f"https://console.cloud.google.com/storage/browser/{bucket_name}/{quote(prefix_path)}"
-st.markdown(
-    f'**Path:** <a href="{gcs_url}" target="_blank">gs://{bucket_name}/{prefix_path}</a>',
-    unsafe_allow_html=True,
-)
+    # Link to the run folder in Cloud Console
+    prefix_path = f"robyn/{rev}/{country}/{stamp}/"
+    gcs_url = f"https://console.cloud.google.com/storage/browser/{bucket_name}/{quote(prefix_path)}"
+    st.markdown(
+        f'**Path:** <a href="{gcs_url}" target="_blank">gs://{bucket_name}/{prefix_path}</a>',
+        unsafe_allow_html=True,
+    )
 
-# ----- Allocator metrics -----
-st.subheader("📊 Allocator metrics")
-metrics_csv = find_blob(selected, "/allocator_metrics.csv")
-metrics_txt = find_blob(selected, "/allocator_metrics.txt")
-if metrics_csv:
-    df = pd.read_csv(io.BytesIO(download_bytes(metrics_csv)))
-    st.dataframe(df, use_container_width=True)
-    url = try_signed_url(metrics_csv)
-    if url:
-        st.markdown(f"⬇️ [Download {os.path.basename(metrics_csv.name)}]({url})")
-    else:
-        st.download_button(
-            "Download allocator_metrics.csv",
-            data=download_bytes(metrics_csv),
-            file_name="allocator_metrics.csv",
-            mime="text/csv",
-            key=blob_key("dl_metrics_csv", metrics_csv.name),
-        )
-elif metrics_txt:
-    raw = download_bytes(metrics_txt).decode("utf-8", errors="ignore")
-    rows = []
-    for line in raw.splitlines():
-        if ":" in line:
-            k, v = line.split(":", 1)
-            rows.append({"metric": k.strip(), "value": v.strip()})
-    if rows:
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
-    else:
-        st.code(raw)
-    url = try_signed_url(metrics_txt)
-    if url:
-        st.markdown(f"⬇️ [Download {os.path.basename(metrics_txt.name)}]({url})")
-    else:
-        st.download_button(
-            "Download allocator_metrics.txt",
-            data=raw.encode("utf-8"),
-            file_name="allocator_metrics.txt",
-            mime="text/plain",
-            key=blob_key("dl_metrics_txt", metrics_txt.name),
-        )
-else:
-    st.info("No allocator metrics found (allocator_metrics.csv/txt).")
-
-# ----- Allocator plots -----
-st.subheader("📈 Allocator plot")
-alloc_pngs = find_all(selected, r"(?:^|/)allocator_.*\.png$")
-if alloc_pngs:
-    for b in alloc_pngs:
-        st.image(download_bytes(b), caption=os.path.basename(b.name), use_container_width=True)
-else:
-    st.info("No allocator PNG found (expecting `allocator_*.png`).")
-
-# ----- Onepager -----
-st.subheader("🧾 Onepager")
-if best_id:
-    op_blob = find_onepager_blob(selected, best_id)
-    if op_blob:
-        name = os.path.basename(op_blob.name)
-        data = download_bytes(op_blob)
-        if name.lower().endswith(".png"):
-            st.image(data, caption="onepager", use_column_width=True)
-            st.download_button(
-                "Download onepager",
-                data=data,
-                file_name=name,
-                mime="image/png",
-                key=blob_key("dl_onepager_png", op_blob.name),
-            )
-        else:
-            st.info("Onepager is a PDF.")
-            st.download_button(
-                "Download onepager",
-                data=data,
-                file_name=name,
-                mime="application/pdf",
-                key=blob_key("dl_onepager_pdf", op_blob.name),
-            )
-    else:
-        st.warning(f"No onepager found for best model id '{best_id}' (expected {best_id}.png or .pdf).")
-else:
-    st.warning("best_model_id.txt not found; cannot locate onepager.")
-
-# ----- All files -----
-st.divider()
-st.subheader("📁 All files in this run")
-for b in sorted(selected, key=lambda x: x.name):
-    fn = os.path.basename(b.name)
-    url = try_signed_url(b)
-    with st.container(border=True):
-        st.write(f"`{fn}` — {b.size:,} bytes")
+    # --- Metrics (CSV preferred, fallback TXT)
+    st.subheader("📊 Allocator metrics")
+    metrics_csv = find_blob(blobs, "/allocator_metrics.csv")
+    metrics_txt = find_blob(blobs, "/allocator_metrics.txt")
+    if metrics_csv:
+        df = pd.read_csv(io.BytesIO(download_bytes(metrics_csv)))
+        st.dataframe(df, use_container_width=True)
+        url = try_signed_url(metrics_csv)
+        fn = os.path.basename(metrics_csv.name)
         if url:
-            st.markdown(f"[Open / Download (signed URL)]({url})")
+            st.markdown(f"⬇️ [Download {fn}]({url})")
         else:
-            mime = "application/octet-stream"
-            if fn.lower().endswith(".csv"): mime = "text/csv"
-            elif fn.lower().endswith(".txt"): mime = "text/plain"
-            elif fn.lower().endswith(".png"): mime = "image/png"
-            elif fn.lower().endswith(".pdf"): mime = "application/pdf"
             st.download_button(
                 f"Download {fn}",
-                data=download_bytes(b),
+                data=download_bytes(metrics_csv),
                 file_name=fn,
-                mime=mime,
-                key=blob_key("dl_any", b.name),
+                mime="text/csv",
+                key=blob_key(f"dl_metrics_csv_{country}_{stamp}", metrics_csv.name),
             )
+    elif metrics_txt:
+        raw = download_bytes(metrics_txt).decode("utf-8", errors="ignore")
+        rows = []
+        for line in raw.splitlines():
+            if ":" in line:
+                k, v = line.split(":", 1)
+                rows.append({"metric": k.strip(), "value": v.strip()})
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        else:
+            st.code(raw)
+        fn = os.path.basename(metrics_txt.name)
+        url = try_signed_url(metrics_txt)
+        if url:
+            st.markdown(f"⬇️ [Download {fn}]({url})")
+        else:
+            st.download_button(
+                f"Download {fn}",
+                data=raw.encode("utf-8"),
+                file_name=fn,
+                mime="text/plain",
+                key=blob_key(f"dl_metrics_txt_{country}_{stamp}", metrics_txt.name),
+            )
+    else:
+        st.info("No allocator metrics found (allocator_metrics.csv/txt).")
+
+    # --- Allocator plot(s)
+    st.subheader("📈 Allocator plot")
+    alloc_pngs = find_all(blobs, r"(?:^|/)allocator_.*\.png$")
+    if alloc_pngs:
+        for b in alloc_pngs:
+            st.image(download_bytes(b),
+                     caption=os.path.basename(b.name),
+                     use_container_width=True)
+    else:
+        st.info("No allocator PNG found (expecting `allocator_*.png`).")
+
+    # --- One-pager from best_model_id
+    st.subheader("🧾 Onepager")
+    if best_id:
+        op_blob = find_onepager_blob(blobs, best_id)
+        if op_blob:
+            name = os.path.basename(op_blob.name)
+            data = download_bytes(op_blob)
+            if name.lower().endswith(".png"):
+                st.image(data, caption="onepager", use_container_width=True)
+                st.download_button(
+                    "Download onepager",
+                    data=data,
+                    file_name=name,
+                    mime="image/png",
+                    key=blob_key(f"dl_onepager_png_{country}_{stamp}", op_blob.name),
+                )
+            elif name.lower().endswith(".pdf"):
+                st.info("Onepager available as PDF.")
+                st.download_button(
+                    "Download onepager",
+                    data=data,
+                    file_name=name,
+                    mime="application/pdf",
+                    key=blob_key(f"dl_onepager_pdf_{country}_{stamp}", op_blob.name),
+                )
+            else:
+                st.warning(f"Found a onepager file ({name}) with an unexpected extension.")
+        else:
+            st.warning(f"No onepager found for best model id '{best_id}' (expected {best_id}.png or .pdf).")
+    else:
+        st.warning("best_model_id.txt not found; cannot locate onepager.")
+
+    # --- All files in this run
+    st.subheader("📁 All files")
+    for b in sorted(blobs, key=lambda x: x.name):
+        fn = os.path.basename(b.name)
+        url = try_signed_url(b)
+        with st.container(border=True):
+            st.write(f"`{fn}` — {b.size:,} bytes")
+            if url:
+                st.markdown(f"[Open / Download (signed URL)]({url})")
+            else:
+                mime = "application/octet-stream"
+                if fn.lower().endswith(".csv"): mime = "text/csv"
+                elif fn.lower().endswith(".txt"): mime = "text/plain"
+                elif fn.lower().endswith(".png"): mime = "image/png"
+                elif fn.lower().endswith(".pdf"): mime = "application/pdf"
+                st.download_button(
+                    f"Download {fn}",
+                    data=download_bytes(b),
+                    file_name=fn,
+                    mime=mime,
+                    key=blob_key(f"dl_any_{country}_{stamp}", b.name),
+                )
+
+# ---- Render each selected country’s latest run for this revision ----
+st.markdown(f"## Detailed View — revision `{rev}`")
+for c in countries_sel:
+    with st.container():
+        render_run_for_country(bucket_name, rev, c)
+        st.divider()
