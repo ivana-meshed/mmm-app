@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  #pull_request:
-  #  branches: [ ci-cd ]
   push:
     branches: [ ci-cd ]
 
@@ -42,24 +40,33 @@ jobs:
       - name: Configure Docker auth for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
+      - name: Compute image tag and URL
+        shell: bash
+        run: |
+          # Use commit SHA as tag (or use Git tag if you prefer)
+          echo "IMG_TAG=${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "IMAGE_URL=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "IMAGE_URL_LATEST=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:latest" >> "$GITHUB_ENV"
+
       - name: Set up QEMU (multi-arch)
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build (no push) multi-arch image
+      - name: Build & Push image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./docker/Dockerfile
-          platforms: linux/amd64 #, linux/arm64
-          push: false
-          tags: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:ci-${{ github.sha }}
+          platforms: linux/amd64   # keep consistent with your Cloud Run CPU platform
+          push: true
+          tags: |
+            ${{ env.IMAGE_URL }}
+            ${{ env.IMAGE_URL_LATEST }}
           cache-from: type=gha,scope=mmm-app
           cache-to:   type=gha,mode=max,scope=mmm-app
 
-      # ⬇️ Install Terraform
       # Terraform only from here on
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -108,13 +115,14 @@ jobs:
         env:
           TF_IN_AUTOMATION: "true"
         run: |
+          echo "Deploying image: ${IMAGE_URL}"
           terraform plan -input=false \
             -var "project_id=${PROJECT_ID}" \
             -var "region=${REGION}" \
             -var "service_name=${SERVICE}" \
             -var "bucket_name=${BUCKET}" \
             -var "deployer_sa=${SA_EMAIL}" \
-            -var "image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:${{ env.IMG_TAG }}" \
+            -var "image=${IMAGE_URL}" \
             -out=tfplan
 
       - name: Terraform apply
