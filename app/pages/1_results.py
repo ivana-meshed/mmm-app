@@ -5,7 +5,6 @@ import streamlit as st
 from google.cloud import storage
 from urllib.parse import quote
 
-
 st.set_page_config(page_title="Results: Robyn MMM", layout="wide")
 st.title("📦 Results browser (GCS)")
 
@@ -19,12 +18,12 @@ def gcs_client():
 
 client = gcs_client()
 
+# ---------- Helpers ----------
 def blob_key(prefix: str, name: str) -> str:
     h = hashlib.sha1(name.encode("utf-8")).hexdigest()[:10]
     return f"{prefix}_{h}"
 
 def list_blobs(bucket_name: str, prefix: str):
-    # Recursive listing (includes files in subfolders)
     bucket = client.bucket(bucket_name)
     return list(client.list_blobs(bucket_or_name=bucket, prefix=prefix))
 
@@ -46,7 +45,7 @@ def group_runs(blobs):
     return runs
 
 def parse_stamp(stamp: str):
-    # "MMDD_HHMMSS" -> datetime; fallback to lexical order if parse fails
+    # "MMDD_HHMMSS" -> datetime; fallback to lexical
     try:
         return datetime.datetime.strptime(stamp, "%m%d_%H%M%S")
     except Exception:
@@ -77,7 +76,14 @@ def latest_run_key(runs, rev_filter=None, country_filter=None):
         keys = [k for k in keys if k[1] == country_filter]
     if not keys:
         return None
-    # Sort by parsed timestamp descending
+    keys.sort(key=lambda k: parse_stamp(k[2]), reverse=True)
+    return keys[0]
+
+def latest_stamp_for_country(runs, rev, country):
+    # Return latest (rev,country,stamp) or None
+    keys = [k for k in runs.keys() if k[0] == rev and k[1] == country]
+    if not keys:
+        return None
     keys.sort(key=lambda k: parse_stamp(k[2]), reverse=True)
     return keys[0]
 
@@ -94,11 +100,13 @@ def try_signed_url(blob, minutes=60):
 def download_bytes(blob):
     return blob.download_as_bytes()
 
+def read_text_blob(blob) -> str:
+    return blob.download_as_bytes().decode("utf-8", errors="replace")
+
 def find_blob(blobs, endswith: str):
     for b in blobs:
         if b.name.endswith(endswith):
             return b
-    # also allow exact base-name match
     for b in blobs:
         if os.path.basename(b.name) == os.path.basename(endswith):
             return b
@@ -108,15 +116,28 @@ def find_all(blobs, pattern):
     r = re.compile(pattern, re.IGNORECASE)
     return [b for b in blobs if r.search(b.name)]
 
-def read_text_blob(blob) -> str:
-    return blob.download_as_bytes().decode("utf-8", errors="replace")
+def parse_best_meta(blobs):
+    """Return (best_id, iterations, trials) from best_model_id.txt if present."""
+    b = find_blob(blobs, "/best_model_id.txt") or find_blob(blobs, "best_model_id.txt")
+    best_id, iters, trials = None, None, None
+    if not b:
+        return best_id, iters, trials
+    txt = read_text_blob(b)
+    lines = [ln.strip() for ln in txt.splitlines() if ln.strip()]
+    if lines:
+        best_id = lines[0].split()[0]
+    for ln in lines[1:]:
+        m = re.search(r"Iterations:\s*(\d+)", ln, re.I)
+        if m: iters = int(m.group(1))
+        m = re.search(r"Trials:\s*(\d+)", ln, re.I)
+        if m: trials = int(m.group(1))
+    return best_id, iters, trials
 
 def find_onepager_blob(blobs, best_id: str):
-    # Prefer {id}.png, fallback {id}.pdf anywhere under the run
+    # Prefer {id}.png, fallback {id}.pdf anywhere in the run
     for ext in (".png", ".pdf"):
         b = find_blob(blobs, f"/{best_id}{ext}")
         if b: return b
-        # also check root-level file names
         for bb in blobs:
             if os.path.basename(bb.name).lower() == f"{best_id}{ext}":
                 return bb
@@ -125,9 +146,7 @@ def find_onepager_blob(blobs, best_id: str):
 # ---------- Sidebar (filters + refresh) ----------
 with st.sidebar:
     bucket_name = st.text_input("GCS bucket", value=DEFAULT_BUCKET)
-    prefix = st.text_input("Root prefix", value=DEFAULT_PREFIX, help="Usually 'robyn/' or narrower like 'robyn/r100/it/'")
-    rev_filter = st.text_input("(Optional) limit to revision", value="") or None
-    country_filter = st.text_input("(Optional) limit to country", value="") or None
+    prefix = st.text_input("Root prefix", value=DEFAULT_PREFIX, help="Usually 'robyn/' or narrower like 'robyn/r100/'")
     do_scan = st.button("🔄 Refresh listing")
 
 # Cache & refresh
@@ -146,36 +165,100 @@ if not runs:
     st.info("No runs found under this prefix.")
     st.stop()
 
-# ---------- Auto-pick latest run (respecting optional filters) ----------
-key = latest_run_key(runs, rev_filter=rev_filter, country_filter=country_filter)
-if not key:
-    st.warning("No runs match the selected filters.")
+# ---------- Determine current (latest overall) run ----------
+current_key = latest_run_key(runs)
+if not current_key:
+    st.warning("No runs found.")
+    st.stop()
+current_rev, current_country, current_stamp = current_key
+
+# ---------- Filters (default to current run & country) ----------
+all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev, reverse=True)
+rev_idx = all_revs.index(current_rev) if current_rev in all_revs else 0
+selected_rev = st.sidebar.selectbox("Revision", all_revs, index=rev_idx)
+
+rev_countries = sorted({k[1] for k in runs.keys() if k[0] == selected_rev})
+default_countries = [current_country] if selected_rev == current_rev else []
+selected_countries = st.sidebar.multiselect(
+    "Countries (clear to show all)", rev_countries, default=default_countries
+)
+
+# ---------- Section A: Latest results per country (for selected revision) ----------
+st.subheader(f"Latest results per country — revision **{selected_rev}**")
+countries_to_show = rev_countries if len(selected_countries) == 0 else selected_countries
+
+if not countries_to_show:
+    st.info("No countries for this revision.")
+else:
+    for c in sorted(countries_to_show):
+        latest_key = latest_stamp_for_country(runs, selected_rev, c)
+        if not latest_key:
+            continue
+        _, _, stamp = latest_key
+        blobs_for_run = runs[latest_key]
+        best_id, iters, trials = parse_best_meta(blobs_for_run)
+        country_disp = c.upper()
+
+        # Path link to Cloud Console folder
+        prefix_path = f"robyn/{selected_rev}/{c}/{stamp}/"
+        gcs_url = f"https://console.cloud.google.com/storage/browser/{bucket_name}/{quote(prefix_path)}"
+
+        with st.container(border=True):
+            st.markdown(
+                f"**{country_disp}** — stamp `{stamp}`"
+                + (f" · iterations={iters}" if iters is not None else "")
+                + (f" · trials={trials}" if trials is not None else "")
+            )
+            st.markdown(
+                f'Path: <a href="{gcs_url}" target="_blank">gs://{bucket_name}/{prefix_path}</a>',
+                unsafe_allow_html=True,
+            )
+
+            # Quick links if present
+            metrics_csv = find_blob(blobs_for_run, "/allocator_metrics.csv")
+            op_blob = find_onepager_blob(blobs_for_run, best_id) if best_id else None
+            row = []
+            if metrics_csv:
+                url = try_signed_url(metrics_csv)
+                if url: row.append(f"[metrics.csv]({url})")
+            if op_blob:
+                url = try_signed_url(op_blob)
+                if url: row.append(f"[onepager]({url})")
+            if row:
+                st.markdown(" • ".join(row))
+            else:
+                st.caption("No quick links available (onepager/metrics not found or signing not allowed).")
+
+# ---------- Section B: Detailed view (focus run) ----------
+st.divider()
+st.subheader("Detailed view")
+
+# Pick focused country: if exactly one selected, use it; else use current_country (from latest overall)
+focus_country = selected_countries[0] if len(selected_countries) == 1 else current_country
+focus_key = latest_stamp_for_country(runs, selected_rev, focus_country)
+if not focus_key:
+    st.info("No run found for that selection.")
     st.stop()
 
-rev, country, stamp = key
-selected = runs[key]
-
+rev, country, stamp = focus_key
+selected = runs[focus_key]
 best_id, iters, trials = parse_best_meta(selected)
-
 country_disp = country.upper()
+
 extra = ""
 if iters is not None:  extra += f" · iterations={iters}"
 if trials is not None: extra += f" · trials={trials}"
 
-st.caption(f"Auto-selected latest run: **revision={rev} · country={country_disp} · stamp={stamp}{extra}**")
-# Build folder path and a Console URL
-prefix_path = f"robyn/{rev}/{country}/{stamp}/"          # keep actual case used in GCS
+st.caption(f"Focused run: **revision={rev} · country={country_disp} · stamp={stamp}{extra}**")
 
+prefix_path = f"robyn/{rev}/{country}/{stamp}/"
 gcs_url = f"https://console.cloud.google.com/storage/browser/{bucket_name}/{quote(prefix_path)}"
-
-# Clickable path that opens in a new tab
 st.markdown(
     f'**Path:** <a href="{gcs_url}" target="_blank">gs://{bucket_name}/{prefix_path}</a>',
     unsafe_allow_html=True,
 )
 
-# ---------- Inline displays ----------
-col1, col2 = st.columns([2, 1])
+# ----- Allocator metrics -----
 st.subheader("📊 Allocator metrics")
 metrics_csv = find_blob(selected, "/allocator_metrics.csv")
 metrics_txt = find_blob(selected, "/allocator_metrics.txt")
@@ -186,11 +269,13 @@ if metrics_csv:
     if url:
         st.markdown(f"⬇️ [Download {os.path.basename(metrics_csv.name)}]({url})")
     else:
-        st.download_button("Download allocator_metrics.csv",
-                            data=download_bytes(metrics_csv),
-                            file_name="allocator_metrics.csv",
-                            mime="text/csv",
-                            key=blob_key("dl_metrics_csv", metrics_csv.name))
+        st.download_button(
+            "Download allocator_metrics.csv",
+            data=download_bytes(metrics_csv),
+            file_name="allocator_metrics.csv",
+            mime="text/csv",
+            key=blob_key("dl_metrics_csv", metrics_csv.name),
+        )
 elif metrics_txt:
     raw = download_bytes(metrics_txt).decode("utf-8", errors="ignore")
     rows = []
@@ -206,17 +291,18 @@ elif metrics_txt:
     if url:
         st.markdown(f"⬇️ [Download {os.path.basename(metrics_txt.name)}]({url})")
     else:
-        st.download_button("Download allocator_metrics.txt",
-                            data=raw.encode("utf-8"),
-                            file_name="allocator_metrics.txt",
-                            mime="text/plain",
-                            key=blob_key("dl_metrics_txt", metrics_txt.name))
+        st.download_button(
+            "Download allocator_metrics.txt",
+            data=raw.encode("utf-8"),
+            file_name="allocator_metrics.txt",
+            mime="text/plain",
+            key=blob_key("dl_metrics_txt", metrics_txt.name),
+        )
 else:
     st.info("No allocator metrics found (allocator_metrics.csv/txt).")
 
-#with col1:
+# ----- Allocator plots -----
 st.subheader("📈 Allocator plot")
-# Match any .../allocator_*.png (subfolders included)
 alloc_pngs = find_all(selected, r"(?:^|/)allocator_.*\.png$")
 if alloc_pngs:
     for b in alloc_pngs:
@@ -224,28 +310,37 @@ if alloc_pngs:
 else:
     st.info("No allocator PNG found (expecting `allocator_*.png`).")
 
+# ----- Onepager -----
 st.subheader("🧾 Onepager")
-
 if best_id:
     op_blob = find_onepager_blob(selected, best_id)
     if op_blob:
         name = os.path.basename(op_blob.name)
         data = download_bytes(op_blob)
         if name.lower().endswith(".png"):
-            st.image(data, caption="onepager", use_container_width=True)
-            st.download_button("Download onepager", data=data, file_name=name, mime="image/png",
-                                key=blob_key("dl_onepager_png", op_blob.name))
+            st.image(data, caption="onepager", use_column_width=True)
+            st.download_button(
+                "Download onepager",
+                data=data,
+                file_name=name,
+                mime="image/png",
+                key=blob_key("dl_onepager_png", op_blob.name),
+            )
         else:
             st.info("Onepager is a PDF.")
-            st.download_button("Download onepager", data=data, file_name=name, mime="application/pdf",
-                                key=blob_key("dl_onepager_pdf", op_blob.name))
+            st.download_button(
+                "Download onepager",
+                data=data,
+                file_name=name,
+                mime="application/pdf",
+                key=blob_key("dl_onepager_pdf", op_blob.name),
+            )
     else:
         st.warning(f"No onepager found for best model id '{best_id}' (expected {best_id}.png or .pdf).")
 else:
     st.warning("best_model_id.txt not found; cannot locate onepager.")
 
-#with col2:
-    
+# ----- All files -----
 st.divider()
 st.subheader("📁 All files in this run")
 for b in sorted(selected, key=lambda x: x.name):
