@@ -383,8 +383,8 @@ writeLines(c(
   paste("R2 (test):", round(best_row$rsq_test, 4)),
   paste("NRMSE (test):", round(best_row$nrmse_test, 4)),
   paste("DECOMP.RSSD (train):", round(best_row$decomp.rssd, 4)),
-  paste("Allocator Total Response:", ifelse(is.na(total_response), alloc_summary$total_response, round(total_response,2))),
-  paste("Allocator Total Spend   :", ifelse(is.na(total_spend),    alloc_summary$total_spend,    round(total_spend,2))),
+  #paste("Allocator Total Response:", ifelse(is.na(total_response), alloc_summary$total_response, round(total_response,2))),
+  #paste("Allocator Total Spend   :", ifelse(is.na(total_spend),    alloc_summary$total_spend,    round(total_spend,2))),
   paste("Recomputed Spend (window):", round(sum_spend_window,2))
 ), con = metrics_file)
 gcs_put(metrics_file, file.path(gcs_prefix,"allocator_metrics.txt"))
