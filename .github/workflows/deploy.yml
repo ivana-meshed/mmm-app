@@ -2,7 +2,7 @@ name: Deploy
 
 on:
   push:
-    branches: [ ci-cd ]
+    branches: [ ci- ]
     #tags: [ "v*" ]
 
 permissions:
@@ -79,8 +79,7 @@ jobs:
             --allow-unauthenticated \
             --max-instances=10 \
             --timeout=900 \
-            --set-env-vars "GCS_BUCKET=${BUCKET},PORT=8080,APP_ROOT=/app" \
-            --update-secrets "" \
+            --set-env-vars "GCS_BUCKET=${BUCKET},APP_ROOT=/app" \
             --quiet
           # optional: pin traffic to the new revision (100%)
           gcloud run services update-traffic "${SERVICE}" --project "${PROJECT_ID}" --region "${REGION}" --to-latest
