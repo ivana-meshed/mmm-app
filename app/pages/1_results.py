@@ -50,6 +50,13 @@ def parse_stamp(stamp: str):
         return datetime.datetime.strptime(stamp, "%m%d_%H%M%S")
     except Exception:
         return stamp  # lexical
+def parse_rev(rev: str):
+    # numeric-aware sort key: ("is_non_numeric", value)
+    m = re.search(r'(\d+)$', (rev or '').strip())
+    if m:
+        return (0, int(m.group(1)))   # numeric revs sort before non-numeric
+    return (1, (rev or '').lower())   # fallback: lexical
+
     
 def parse_best_meta(blobs):
     """Return (best_id, iterations, trials) from best_model_id.txt if present."""
