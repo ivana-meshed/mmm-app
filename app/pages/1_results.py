@@ -177,37 +177,60 @@ st.markdown(
 # ---------- Inline displays ----------
 col1, col2 = st.columns([2, 1])
 
-with col1:
-    st.subheader("📈 Allocator plot")
-    # Match any .../allocator_*.png (subfolders included)
-    alloc_pngs = find_all(selected, r"(?:^|/)allocator_.*\.png$")
-    if alloc_pngs:
-        for b in alloc_pngs:
-            st.image(download_bytes(b), caption=os.path.basename(b.name), use_container_width=True)
-    else:
-        st.info("No allocator PNG found (expecting `allocator_*.png`).")
-
-    st.subheader("🧾 Onepager")
-
-    if best_id:
-        op_blob = find_onepager_blob(selected, best_id)
-        if op_blob:
-            name = os.path.basename(op_blob.name)
-            data = download_bytes(op_blob)
-            if name.lower().endswith(".png"):
-                st.image(data, caption="onepager", use_container_width=True)
-                st.download_button("Download onepager", data=data, file_name=name, mime="image/png",
-                                   key=blob_key("dl_onepager_png", op_blob.name))
-            else:
-                st.info("Onepager is a PDF.")
-                st.download_button("Download onepager", data=data, file_name=name, mime="application/pdf",
-                                   key=blob_key("dl_onepager_pdf", op_blob.name))
+st.divider()
+st.subheader("📁 All files in this run")
+for b in sorted(selected, key=lambda x: x.name):
+    fn = os.path.basename(b.name)
+    url = try_signed_url(b)
+    with st.container(border=True):
+        st.write(f"`{fn}` — {b.size:,} bytes")
+        if url:
+            st.markdown(f"[Open / Download (signed URL)]({url})")
         else:
-            st.warning(f"No onepager found for best model id '{best_id}' (expected {best_id}.png or .pdf).")
-    else:
-        st.warning("best_model_id.txt not found; cannot locate onepager.")
+            mime = "application/octet-stream"
+            if fn.lower().endswith(".csv"): mime = "text/csv"
+            elif fn.lower().endswith(".txt"): mime = "text/plain"
+            elif fn.lower().endswith(".png"): mime = "image/png"
+            elif fn.lower().endswith(".pdf"): mime = "application/pdf"
+            st.download_button(
+                f"Download {fn}",
+                data=download_bytes(b),
+                file_name=fn,
+                mime=mime,
+                key=blob_key("dl_any", b.name),
+            )
 
-with col2:
+#with col1:
+st.subheader("📈 Allocator plot")
+# Match any .../allocator_*.png (subfolders included)
+alloc_pngs = find_all(selected, r"(?:^|/)allocator_.*\.png$")
+if alloc_pngs:
+    for b in alloc_pngs:
+        st.image(download_bytes(b), caption=os.path.basename(b.name), use_container_width=True)
+else:
+    st.info("No allocator PNG found (expecting `allocator_*.png`).")
+
+st.subheader("🧾 Onepager")
+
+if best_id:
+    op_blob = find_onepager_blob(selected, best_id)
+    if op_blob:
+        name = os.path.basename(op_blob.name)
+        data = download_bytes(op_blob)
+        if name.lower().endswith(".png"):
+            st.image(data, caption="onepager", use_container_width=True)
+            st.download_button("Download onepager", data=data, file_name=name, mime="image/png",
+                                key=blob_key("dl_onepager_png", op_blob.name))
+        else:
+            st.info("Onepager is a PDF.")
+            st.download_button("Download onepager", data=data, file_name=name, mime="application/pdf",
+                                key=blob_key("dl_onepager_pdf", op_blob.name))
+    else:
+        st.warning(f"No onepager found for best model id '{best_id}' (expected {best_id}.png or .pdf).")
+else:
+    st.warning("best_model_id.txt not found; cannot locate onepager.")
+
+#with col2:
     st.subheader("📊 Allocator metrics")
     metrics_csv = find_blob(selected, "/allocator_metrics.csv")
     metrics_txt = find_blob(selected, "/allocator_metrics.txt")
@@ -246,25 +269,3 @@ with col2:
     else:
         st.info("No allocator metrics found (allocator_metrics.csv/txt).")
 
-st.divider()
-st.subheader("📁 All files in this run")
-for b in sorted(selected, key=lambda x: x.name):
-    fn = os.path.basename(b.name)
-    url = try_signed_url(b)
-    with st.container(border=True):
-        st.write(f"`{fn}` — {b.size:,} bytes")
-        if url:
-            st.markdown(f"[Open / Download (signed URL)]({url})")
-        else:
-            mime = "application/octet-stream"
-            if fn.lower().endswith(".csv"): mime = "text/csv"
-            elif fn.lower().endswith(".txt"): mime = "text/plain"
-            elif fn.lower().endswith(".png"): mime = "image/png"
-            elif fn.lower().endswith(".pdf"): mime = "application/pdf"
-            st.download_button(
-                f"Download {fn}",
-                data=download_bytes(b),
-                file_name=fn,
-                mime=mime,
-                key=blob_key("dl_any", b.name),
-            )
