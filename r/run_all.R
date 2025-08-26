@@ -20,14 +20,6 @@ suppressPackageStartupMessages({
   library(reticulate)
 })
 
-## ---------- PY / NEVERGRAD ----------
-reticulate::use_python("/usr/bin/python3", required = TRUE)
-cat("---- reticulate::py_config() ----\n")
-print(reticulate::py_config())
-cat("-------------------------------\n")
-if (!reticulate::py_module_available("nevergrad")) {
-  stop("nevergrad not importable via reticulate. Ensure python3-dev + pip install nevergrad/numpy/scipy.")
-}
 
 `%||%` <- function(a, b) {
   if (is.null(a) || length(a) == 0) {
@@ -147,23 +139,46 @@ gcs_prefix <- file.path("robyn", revision, country, timestamp)
 ## ---------- LOGGING (TEE to file; always upload) ----------
 log_file <- file.path(dir_path, "robyn_console.log")
 dir.create(dirname(log_file), recursive = TRUE, showWarnings = FALSE)
-sink(log_file, split = TRUE)
-sink(log_file, type = "message", split = TRUE)
 
-.on_exit <- function() {
-  # close sinks
-  try(sink(NULL), silent = TRUE)
-  try(sink(NULL, type = "message"), silent = TRUE)
-  # upload log last
+# Open two connections: one for stdout (write), one for messages (append)
+log_con_out <- file(log_file, open = "wt")
+log_con_err <- file(log_file, open = "at")
+
+# Tee normal output to file (and keep printing to console)
+sink(log_con_out, split = TRUE)
+
+# For messages, you must pass an open connection (split is not supported here)
+sink(log_con_err, type = "message")
+
+cleanup <- function() {
+  # unwind sinks (message first)
+  try(sink(type = "message"), silent = TRUE)
+  try(sink(), silent = TRUE)
+
+  # close connections
+  try(close(log_con_err), silent = TRUE)
+  try(close(log_con_out), silent = TRUE)
+
+  # upload the log (best-effort)
   try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
 }
+
 options(error = function(e) {
   traceback()
   message("FATAL ERROR: ", conditionMessage(e))
-  .on_exit()
+  cleanup()
   quit(status = 1)
 })
-on.exit(.on_exit(), add = TRUE)
+on.exit(cleanup(), add = TRUE)
+
+## ---------- PY / NEVERGRAD ----------
+reticulate::use_python("/usr/bin/python3", required = TRUE)
+cat("---- reticulate::py_config() ----\n")
+print(reticulate::py_config())
+cat("-------------------------------\n")
+if (!reticulate::py_module_available("nevergrad")) {
+  stop("nevergrad not importable via reticulate. Ensure python3-dev + pip install nevergrad/numpy/scipy.")
+}
 
 ## ---------- GCS AUTH ----------
 options(googleAuthR.scopes.selected = "https://www.googleapis.com/auth/devstorage.read_write")
