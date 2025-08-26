@@ -82,7 +82,13 @@ resource "google_cloud_run_service" "svc" {
 
       containers {
         image = var.image
-
+        startup_probe {
+          tcp_socket { port = 8080 }
+          period_seconds        = 120
+          timeout_seconds       = 100
+          failure_threshold     = 1
+          initial_delay_seconds = 0
+        }
         resources {
           limits = {
             cpu    = "4"
