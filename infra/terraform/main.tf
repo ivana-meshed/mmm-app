@@ -76,24 +76,25 @@ resource "google_cloud_run_service" "svc" {
 
   template {
     spec {
-      service_account_name = google_service_account.runner.email
+      service_account_name  = google_service_account.runner.email
+      container_concurrency = 1
+      timeout_seconds       = 3600
+
       containers {
         image = var.image
 
-        # Give up to 5 minutes for the server to come up
-        startup_probe {
-          tcp_socket { port = 8080 }
-          period_seconds        = 120
-          timeout_seconds       = 100
-          failure_threshold     = 1
-          initial_delay_seconds = 0
+        resources {
+          limits = {
+            cpu    = "4"
+            memory = "16Gi"
+          }
         }
 
-        resources { limits = { cpu = "2", memory = "4Gi" } }
         env {
           name  = "GCS_BUCKET"
           value = var.bucket_name
         }
+
         env {
           name  = "APP_ROOT"
           value = "/app"
@@ -107,15 +108,14 @@ resource "google_cloud_run_service" "svc" {
     latest_revision = true
   }
 
-  # CHANGED: ensure APIs, repo, and IAM are ready before deploying
   depends_on = [
     google_project_service.run,
     google_project_service.ar,
     google_project_service.cloudbuild,
-    #google_artifact_registry_repository.mmm-repo,
-    google_project_iam_member.sa_ar_reader
+    google_project_iam_member.sa_ar_reader,
   ]
 }
+
 
 resource "google_cloud_run_service_iam_member" "invoker" {
   location = google_cloud_run_service.svc.location
