@@ -189,6 +189,11 @@ if st.button("Train"):
                     env=env,
                 )
 
+                # Persist for future reruns (so download button works)
+                st.session_state["train_log_text"] = result.stdout or "(no output)"
+                st.session_state["train_exit_code"] = int(result.returncode)
+
+
         # 6) Show minimal status + optional log download
         if result.returncode == 0:
             st.success("Training finished. Artifacts should be in your GCS bucket.")
@@ -202,3 +207,23 @@ if st.button("Train"):
             mime="text/plain",
             key="dl_robyn_run_log",
         )
+if "train_exit_code" in st.session_state:
+    ok = (st.session_state["train_exit_code"] == 0)
+    if ok:
+        st.success("Training finished. Artifacts should be in your GCS bucket.")
+    else:
+        st.error("Training failed. Download the run log for details.")
+
+    # Show tail and a downloadable file
+    log_text = st.session_state.get("train_log_text", "(no output)")
+    with st.expander("Show last 200 lines of training log"):
+        tail = "\n".join(log_text.splitlines()[-200:])
+        st.code(tail or "(empty)", language="bash")
+
+    st.download_button(
+        "Download training log",
+        data=log_text.encode("utf-8"),
+        file_name="robyn_run.log",
+        mime="text/plain",
+        key="dl_robyn_run_log_persisted",
+    )
