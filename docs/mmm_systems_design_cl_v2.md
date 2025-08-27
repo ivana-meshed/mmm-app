@@ -1219,6 +1219,507 @@ ORDER BY timestamp DESC
 
 ---
 
+### Performance Optimization
+
+#### Container Optimization
+- **Multi-stage builds**: Reduce final image size
+- **Layer caching**: Leverage GitHub Actions cache for faster builds
+- **Base image selection**: Use optimized R/Python base images
+
+#### Resource Allocation
+- **CPU**: 4 vCPUs for parallel R processing
+- **Memory**: 16 GiB for large dataset handling
+- **Timeout**: 1 hour for complex training jobs
+- **Concurrency**: 1 to prevent resource conflicts
+
+#### Storage Optimization
+- **GCS lifecycle policies**: Automatic cleanup of old training runs
+- **Compression**: Gzip compression for text files
+- **Signed URLs**: Reduce egress costs through direct downloads
+
+## Training Speed Optimization Strategy
+
+### Current Performance Bottlenecks
+
+**Performance Analysis of Current Architecture**
+```mermaid
+gantt
+    title Current Training Job Timeline (Typical 200 iterations, 5 trials)
+    dateFormat X
+    axisFormat %M
+    
+    section Container Lifecycle
+    Cold Start           :crit, cold, 0, 2
+    Dependency Loading   :active, deps, 2, 5
+    Ready to Process     :milestone, ready, 5
+    
+    section Data Processing
+    Snowflake Query      :done, sf_query, 5, 8
+    Data Download        :done, sf_down, 8, 10
+    Data Cleaning        :done, clean, 10, 12
+    Feature Engineering  :done, features, 12, 15
+    
+    section Model Training
+    Robyn Setup         :active, setup, 15, 17
+    Hyperparameter Opt  :crit, hyper, 17, 45
+    Model Validation    :active, valid, 45, 50
+    
+    section Output Generation
+    Visualizations      :done, viz, 50, 55
+    Allocator Analysis  :done, alloc, 55, 58
+    GCS Upload         :done, upload, 58, 60
+    
+    section Bottlenecks
+    Python/R Bridge    :crit, bridge, 17, 45
+    Sequential Processing :crit, seq, 17, 58
+```
+
+**Resource Utilization Issues**
+```mermaid
+graph TB
+    subgraph "Current Single-Instance Architecture"
+        CR[☁️ Cloud Run Instance<br/>4 vCPU, 16GB RAM]
+        
+        subgraph "Resource Usage Over Time"
+            IDLE[⏳ 0-15min: <50% CPU<br/>Data loading, setup]
+            PEAK[🔥 15-45min: 100% CPU<br/>Hyperparameter optimization]
+            MIXED[📊 45-60min: 70% CPU<br/>Visualization, upload]
+        end
+        
+        CR --> IDLE
+        CR --> PEAK  
+        CR --> MIXED
+    end
+    
+    subgraph "Identified Bottlenecks"
+        B1[🐌 Cold Start Penalty<br/>2-3 minutes]
+        B2[🔗 Python/R Integration<br/>Communication overhead]
+        B3[📊 Sequential Processing<br/>No parallel trials]
+        B4[💾 Memory Constraints<br/>Large dataset limitations]
+        B5[🌐 Network I/O<br/>GCS uploads during training]
+    end
+    
+    classDef bottleneck fill:#ffcdd2
+    classDef resource fill:#e3f2fd
+    classDef timing fill:#fff3e0
+    
+    class B1,B2,B3,B4,B5 bottleneck
+    class CR resource
+    class IDLE,PEAK,MIXED timing
+```
+
+### Optimization Strategy 1: Parallel Training Architecture
+
+**Multi-Instance Parallel Processing**
+```mermaid
+graph TB
+    subgraph "Optimized Architecture"
+        subgraph "Orchestration Layer"
+            COORD[🎯 Training Coordinator<br/>Cloud Run Job Controller]
+            QUEUE[📋 Job Queue<br/>Cloud Tasks]
+        end
+        
+        subgraph "Parallel Training Workers"
+            W1[⚡ Worker 1<br/>Trials 1-2]
+            W2[⚡ Worker 2<br/>Trials 3-4]  
+            W3[⚡ Worker 3<br/>Trial 5]
+            W4[⚡ Worker 4<br/>Validation]
+        end
+        
+        subgraph "Shared Infrastructure"
+            CACHE[🗄️ Redis Cache<br/>Preprocessed Data]
+            GCS[☁️ GCS Bucket<br/>Shared Results]
+        end
+        
+        subgraph "Results Aggregation"
+            AGG[📊 Result Aggregator<br/>Model Selection]
+            VIZ[🎨 Visualization Generator<br/>Final Outputs]
+        end
+    end
+    
+    COORD --> QUEUE
+    QUEUE --> W1
+    QUEUE --> W2
+    QUEUE --> W3
+    QUEUE --> W4
+    
+    W1 --> CACHE
+    W2 --> CACHE
+    W3 --> CACHE
+    W4 --> CACHE
+    
+    W1 --> GCS
+    W2 --> GCS
+    W3 --> GCS
+    W4 --> GCS
+    
+    GCS --> AGG
+    AGG --> VIZ
+    
+    classDef orchestration fill:#e8f5e8
+    classDef worker fill:#e3f2fd
+    classDef shared fill:#fff3e0
+    classDef results fill:#f3e5f5
+    
+    class COORD,QUEUE orchestration
+    class W1,W2,W3,W4 worker
+    class CACHE,GCS shared
+    class AGG,VIZ results
+```
+
+**Performance Improvement Timeline**
+```mermaid
+gantt
+    title Optimized Training Job Timeline (Same 200 iterations, 5 trials)
+    dateFormat X
+    axisFormat %M
+    
+    section Preparation (Parallel)
+    Data Preprocessing   :done, prep, 0, 3
+    Worker Warm-up      :active, warmup, 0, 1
+    
+    section Parallel Training
+    Trial 1 (Worker 1)  :active, t1, 3, 15
+    Trial 2 (Worker 2)  :active, t2, 3, 15
+    Trial 3 (Worker 3)  :active, t3, 3, 15
+    Trial 4 (Worker 4)  :active, t4, 3, 15
+    Trial 5 (Worker 1)  :active, t5, 15, 25
+    
+    section Aggregation
+    Result Collection   :done, collect, 25, 27
+    Model Selection     :done, select, 27, 28
+    Final Visualizations :done, final_viz, 28, 30
+    
+    section Speed Improvement
+    Original Duration   :crit, original, 0, 60
+    Optimized Duration  :milestone, optimized, 30
+```
+
+### Optimization Strategy 2: Pre-warmed Container Pool
+
+**Container Pool Management**
+```mermaid
+stateDiagram-v2
+    [*] --> Cold
+    Cold --> Warming: Start container
+    Warming --> Warm: Dependencies loaded
+    Warm --> Training: Assign job
+    Training --> Warm: Job complete
+    Warm --> Scaling: High demand
+    Scaling --> Multiple: Spin up replicas
+    Multiple --> Warm: Demand decreases
+    Warm --> Cold: Idle timeout (5 min)
+    Cold --> [*]: Container destroyed
+    
+    note right of Warm
+        Pre-loaded:
+        - R libraries
+        - Python packages
+        - Base datasets
+        - Model templates
+    end note
+    
+    note right of Training
+        Reduced startup:
+        2-3 min → 30 sec
+    end note
+```
+
+**Implementation Architecture**
+```yaml
+Container Pool Configuration:
+  Minimum Instances: 2
+  Maximum Instances: 10
+  Warm-up Strategy:
+    - Pre-load R/Python dependencies
+    - Cache common datasets in memory
+    - Initialize Robyn framework
+    - Pre-authenticate GCS connections
+  
+  Scaling Rules:
+    - Scale up: When queue > 2 jobs
+    - Scale down: When idle > 5 minutes
+    - Health checks: Every 30 seconds
+```
+
+### Optimization Strategy 3: Compute-Optimized Infrastructure
+
+**Enhanced Resource Allocation**
+```mermaid
+graph TB
+    subgraph "Current Setup"
+        CR1[☁️ Cloud Run<br/>4 vCPU, 16GB RAM<br/>General Purpose]
+    end
+    
+    subgraph "Optimized Setup"
+        CR2[☁️ Cloud Run<br/>8 vCPU, 32GB RAM<br/>CPU-Optimized]
+        
+        subgraph "Alternative: GCE Custom"
+            GCE[🖥️ Compute Engine<br/>16 vCPU, 64GB RAM<br/>N2-highmem instances]
+            GPU[🎮 Optional GPU<br/>T4 or V100<br/>For deep learning components]
+        end
+        
+        subgraph "Alternative: Batch Processing"
+            BATCH[⚡ Cloud Batch<br/>Massive parallel jobs<br/>Spot instances for cost]
+        end
+    end
+    
+    CR1 -.->|Upgrade Path| CR2
+    CR2 -.->|For Heavy Workloads| GCE
+    CR2 -.->|For Cost Optimization| BATCH
+    
+    classDef current fill:#ffcdd2
+    classDef optimized fill:#c8e6c9
+    classDef alternative fill:#e3f2fd
+    
+    class CR1 current
+    class CR2 optimized
+    class GCE,GPU,BATCH alternative
+```
+
+**Resource Sizing Recommendations**
+```yaml
+Training Job Sizing:
+  Small Jobs (<50 iterations, 1-3 trials):
+    CPU: 4 vCPU
+    Memory: 16 GiB
+    Expected Duration: 10-15 minutes
+  
+  Medium Jobs (100-200 iterations, 5 trials):
+    CPU: 8 vCPU  
+    Memory: 32 GiB
+    Expected Duration: 15-25 minutes (with optimization)
+    
+  Large Jobs (500+ iterations, 10+ trials):
+    CPU: 16 vCPU
+    Memory: 64 GiB  
+    Consider: Compute Engine or Batch
+    Expected Duration: 30-45 minutes
+```
+
+### Optimization Strategy 4: Data Pipeline Optimization
+
+**Caching & Data Flow Improvements**
+```mermaid
+graph TB
+    subgraph "Current Data Flow"
+        SF1[❄️ Snowflake] --> STREAM1[🌐 Streamlit]
+        STREAM1 --> CSV1[📄 CSV File]
+        CSV1 --> R1[🔷 R Process]
+        R1 --> CLEAN1[🧹 Data Cleaning]
+        CLEAN1 --> TRAIN1[🏋️ Training]
+    end
+    
+    subgraph "Optimized Data Flow"
+        SF2[❄️ Snowflake] --> CACHE[🗄️ Redis/Memcached<br/>Preprocessed Data]
+        CACHE --> WORKERS[⚡ Training Workers<br/>Parallel Access]
+        
+        subgraph "Pre-processing Pipeline"
+            SF2 --> PREP[🔧 Data Preprocessor<br/>Cloud Function]
+            PREP --> PARQUET[📊 Parquet Files<br/>Columnar Format]
+            PARQUET --> CACHE
+        end
+        
+        WORKERS --> TRAIN2[🏋️ Parallel Training]
+    end
+    
+    classDef current fill:#ffcdd2
+    classDef optimized fill:#c8e6c9
+    classDef preprocessing fill:#e3f2fd
+    
+    class SF1,STREAM1,CSV1,R1,CLEAN1,TRAIN1 current
+    class SF2,CACHE,WORKERS,TRAIN2 optimized
+    class PREP,PARQUET preprocessing
+```
+
+**Data Optimization Techniques**
+```yaml
+Data Format Optimization:
+  Current: CSV (text-based, slow parsing)
+  Optimized: Parquet (columnar, 5-10x faster)
+  
+Caching Strategy:
+  Level 1: In-memory (Redis) - Hot data
+  Level 2: SSD cache - Warm data  
+  Level 3: Cold storage - Archive
+  
+Preprocessing Pipeline:
+  1. Incremental data updates
+  2. Feature engineering cache
+  3. Statistical summaries pre-computed
+  4. Data validation automated
+```
+
+### Optimization Strategy 5: Algorithm-Level Improvements
+
+**Robyn Training Optimizations**
+```mermaid
+flowchart TD
+    START([Training Start]) --> STRATEGY{Choose Strategy}
+    
+    STRATEGY -->|Current| SEQUENTIAL[🐌 Sequential Trials<br/>Trial 1 → Trial 2 → ...]
+    STRATEGY -->|Optimized| PARALLEL[⚡ Parallel Trials<br/>All trials simultaneously]
+    STRATEGY -->|Advanced| ADAPTIVE[🧠 Adaptive Optimization<br/>Early stopping + pruning]
+    
+    SEQUENTIAL --> SLOW[⏱️ 45-60 minutes]
+    PARALLEL --> FAST[⚡ 15-25 minutes]
+    ADAPTIVE --> SMART[🎯 10-20 minutes]
+    
+    subgraph "Adaptive Techniques"
+        EARLY[🛑 Early Stopping<br/>Stop poor performers]
+        PRUNE[✂️ Hyperparameter Pruning<br/>Focus on promising regions]
+        WARM[🔄 Warm Starting<br/>Reuse previous results]
+    end
+    
+    ADAPTIVE --> EARLY
+    ADAPTIVE --> PRUNE  
+    ADAPTIVE --> WARM
+    
+    classDef current fill:#ffcdd2
+    classDef optimized fill:#fff3e0
+    classDef advanced fill:#c8e6c9
+    
+    class SEQUENTIAL,SLOW current
+    class PARALLEL,FAST optimized
+    class ADAPTIVE,SMART,EARLY,PRUNE,WARM advanced
+```
+
+**Implementation Code Changes**
+```r
+# Current approach (sequential)
+for (trial in 1:trials) {
+  result <- robyn_run(trial_params)
+  results[[trial]] <- result
+}
+
+# Optimized approach (parallel)
+library(parallel)
+cl <- makeCluster(detectCores())
+results <- parLapply(cl, trial_list, function(trial) {
+  robyn_run(trial_params)
+})
+stopCluster(cl)
+
+# Advanced approach (adaptive with early stopping)
+library(optuna)  # Or similar optimization framework
+study <- create_study()
+optimize(study, objective_function, n_trials=trials, 
+         pruner=MedianPruner(), timeout=3600)
+```
+
+### Complete Optimization Implementation Plan
+
+**Phase 1: Quick Wins (1-2 weeks)**
+```mermaid
+gantt
+    title Optimization Implementation Phases
+    dateFormat YYYY-MM-DD
+    section Phase 1: Quick Wins
+    Resource Scaling     :p1a, 2024-01-01, 3d
+    Container Warm-up    :p1b, 2024-01-04, 4d
+    Data Format Switch   :p1c, 2024-01-08, 3d
+    
+    section Phase 2: Architecture  
+    Parallel Processing  :p2a, 2024-01-12, 10d
+    Caching Layer       :p2b, 2024-01-22, 7d
+    Worker Pool         :p2c, 2024-01-29, 5d
+    
+    section Phase 3: Advanced
+    Adaptive Algorithms :p3a, 2024-02-05, 14d
+    GPU Integration     :p3b, 2024-02-19, 10d
+    Auto-scaling       :p3c, 2024-03-01, 7d
+```
+
+**Expected Performance Improvements**
+```yaml
+Performance Metrics:
+  Current Baseline:
+    Small Jobs: 20-30 minutes
+    Medium Jobs: 45-60 minutes  
+    Large Jobs: 90-120 minutes
+    
+  After Phase 1 (Quick Wins):
+    Small Jobs: 10-15 minutes (50% improvement)
+    Medium Jobs: 25-35 minutes (40% improvement)
+    Large Jobs: 60-75 minutes (30% improvement)
+    
+  After Phase 2 (Architecture):
+    Small Jobs: 5-8 minutes (70% improvement)
+    Medium Jobs: 15-20 minutes (65% improvement)
+    Large Jobs: 30-40 minutes (60% improvement)
+    
+  After Phase 3 (Advanced):
+    Small Jobs: 3-5 minutes (80% improvement)
+    Medium Jobs: 10-15 minutes (75% improvement)
+    Large Jobs: 20-25 minutes (75% improvement)
+```
+
+**Cost-Benefit Analysis**
+```mermaid
+graph TB
+    subgraph "Implementation Costs"
+        DEV[👨‍💻 Development Time<br/>4-6 weeks]
+        INFRA[💰 Infrastructure Costs<br/>+50-100% compute]
+        COMPLEX[🔧 Operational Complexity<br/>Medium increase]
+    end
+    
+    subgraph "Benefits"
+        SPEED[⚡ Training Speed<br/>60-80% faster]
+        THROUGHPUT[📈 Job Throughput<br/>3-5x more jobs/day]
+        UX[👤 User Experience<br/>Near real-time results]
+        COST_EFF[💡 Cost Efficiency<br/>Better resource utilization]
+    end
+    
+    DEV -.->|Investment| SPEED
+    INFRA -.->|Higher Usage| THROUGHPUT
+    COMPLEX -.->|Worth It| UX
+    
+    classDef cost fill:#ffcdd2
+    classDef benefit fill:#c8e6c9
+    
+    class DEV,INFRA,COMPLEX cost
+    class SPEED,THROUGHPUT,UX,COST_EFF benefit
+```
+
+### Implementation Priority Matrix
+
+| Optimization | Impact | Effort | Priority | Timeline |
+|-------------|---------|---------|----------|----------|
+| **Resource Scaling** | High | Low | 🔴 Critical | Week 1 |
+| **Data Format (Parquet)** | High | Low | 🔴 Critical | Week 1 |
+| **Container Pre-warming** | Medium | Low | 🟡 High | Week 2 |
+| **Parallel Trials** | High | Medium | 🔴 Critical | Week 3-4 |
+| **Caching Layer** | Medium | Medium | 🟡 High | Week 5-6 |
+| **Adaptive Algorithms** | High | High | 🟢 Medium | Month 2 |
+| **GPU Integration** | Medium | High | 🟢 Medium | Month 3 |
+| **Auto-scaling** | Low | Medium | 🟢 Low | Month 3 |
+
+### Monitoring & Validation
+
+**Performance Tracking Dashboard**
+```yaml
+Key Metrics to Track:
+  Training Duration:
+    - P50, P95, P99 completion times
+    - By job size categories
+    - Before/after optimization comparisons
+    
+  Resource Utilization:
+    - CPU usage over time
+    - Memory consumption patterns
+    - Instance scaling events
+    
+  Cost Metrics:
+    - Cost per training job
+    - Resource efficiency ratios
+    - Idle time percentages
+    
+  Quality Metrics:
+    - Model accuracy (ensure no degradation)
+    - Training convergence rates
+    - Error rates and retry frequency
+```
+
 ## Conclusion
 
 The MMM Trainer system provides a robust, scalable platform for marketing mix modeling with comprehensive automation, security, and monitoring capabilities. The cloud-native architecture ensures reliable execution of complex R/Python workloads while maintaining ease of use through the Streamlit web interface.
