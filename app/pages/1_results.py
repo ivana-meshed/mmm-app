@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 from google.cloud import storage
 from urllib.parse import quote
+from uuid import uuid4
 
 st.set_page_config(page_title="Results: Robyn MMM", layout="wide")
 st.title("Results browser (GCS)")
@@ -123,31 +124,41 @@ def download_bytes_safe(blob):
         st.error(f"Download failed for {blob.name}: {e}")
         return None
 
-def download_link_for_blob(blob, label=None, mime_hint=None, minutes=60):
+def download_link_for_blob(blob, label=None, mime_hint=None, minutes=60, key_suffix: str | None = None):
     """
-    Prefer a signed URL (works reliably on Cloud Run). If we can't sign,
-    fall back to streaming the bytes via download_link_for_blob.
+    Prefer a signed URL (best on Cloud Run). If signing fails, fall back to a
+    Streamlit download_button with a guaranteed-unique key.
     """
     name = os.path.basename(blob.name)
-    url = signed_url_or_none(blob, minutes)
     label = label or f"⬇️ Download {name}"
 
+    # Try signed URL first
+    url = signed_url_or_none(blob, minutes)
     if url:
-        # Signed URL avoids Streamlit's "file wasn't available on site" issue
         st.markdown(f"[{label}]({url})")
         return
+    else:
+        # Helpful hint so you can see *why* we hit the fallback
+        if IS_CLOUDRUN:
+            st.caption("⚠️ Couldn’t create a signed URL; falling back to in-app download. "
+                       "Check that the Cloud Run runtime service account has roles/iam.serviceAccountTokenCreator.")
 
-    # Fallback: stream from the app
+    # Fallback: stream bytes via the app (uses Streamlit media store)
     data = download_bytes_safe(blob)
     if data is None:
         st.warning(f"Couldn't fetch {name} for direct download.")
         return
+
+    # Build a unique key to avoid StreamlitDuplicateElementKey
+    # Combine path + gen/size + caller's suffix + a tiny random to eliminate collisions within one run
+    gen = getattr(blob, "generation", "")
+    uniq = f"{blob.name}|{gen}|{blob.size}|{key_suffix or ''}|{uuid4().hex[:6]}"
     st.download_button(
-        label,
+        label=label,
         data=data,
         file_name=name,
         mime=mime_hint or "application/octet-stream",
-        key=blob_key("dl_fallback", blob.name),
+        key=blob_key("dl_fallback", uniq),
     )
 
 
@@ -263,7 +274,7 @@ def render_metrics_section(blobs, country, stamp):
                 st.markdown(df.to_html(escape=False, index=False), unsafe_allow_html=True)
                 
                 # Our own download button
-                download_link_for_blob(metrics_csv, label=f"📥 Download {fn}", mime_hint="text/csv")
+                download_link_for_blob(metrics_csv, label=f"📥 Download {fn}", mime_hint="text/csv", key_suffix=f"metrics_csv|{country}|{stamp}")
 
             else:
                 st.warning(f"Could not read {fn}")
@@ -293,7 +304,7 @@ def render_metrics_section(blobs, country, stamp):
                     st.code(raw)
                 
                 # Download button
-                download_link_for_blob(metrics_txt, label=f"📥 Download {fn}", mime_hint="text/plain")
+                download_link_for_blob(metrics_txt, label=f"📥 Download {fn}", mime_hint="text/plain", key_suffix=f"metrics_txt|{country}|{stamp}")
                 
             else:
                 st.warning(f"Could not read {fn}")
@@ -325,7 +336,7 @@ def render_allocator_section(blobs, country, stamp):
                     )
                     
                     # Download button
-                    download_link_for_blob(b, label=f"Download {fn}", mime_hint="image/png")
+                    download_link_for_blob(b, label=f"Download {fn}", mime_hint="image/png", key_suffix=f"alloc|{country}|{stamp}|{i}")
 
                 else:
                     st.error("Could not load image data")
@@ -384,7 +395,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                         )
                         
                         # Download button
-                        download_link_for_blob(b, label=f"Download {name}", mime_hint="image/png")
+                        download_link_for_blob(op_blob, label=f"Download {name}", mime_hint="image/png", key_suffix=f"onepager|{country}|{stamp}")
 
                     else:
                         st.warning("Image data is empty")
@@ -397,7 +408,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                 try:
                     pdf_data = download_bytes_safe(op_blob)
                     if pdf_data:
-                        download_link_for_blob(op_blob, label=f"Download {name}", mime_hint="application/pdf")
+                        download_link_for_blob(op_blob, label=f"Download {name}", mime_hint="application/pdf", key_suffix=f"onepager|{country}|{stamp}")
 
                 except Exception as e:
                     st.error(f"PDF download failed: {e}")
@@ -456,12 +467,16 @@ def render_all_files_section(blobs, bucket_name, country, stamp):
         if n.endswith(".rds"): return "application/octet-stream"
         return "application/octet-stream"
 
-    for b in sorted(blobs, key=lambda x: x.name):
+    for i, b in enumerate(sorted(blobs, key=lambda x: x.name)):
         fn = os.path.basename(b.name)
         with st.container(border=True):
             st.write(f"`{fn}` — {b.size:,} bytes")
-            # Prefer signed URL; fallback to streaming
-            download_link_for_blob(b, label=f"Download {fn}", mime_hint=guess_mime(fn))
+            download_link_for_blob(
+                b,
+                label=f"Download {fn}",
+                mime_hint=guess_mime(fn),
+                key_suffix=f"all|{country}|{stamp}|{i}"
+            )
 
 
 
