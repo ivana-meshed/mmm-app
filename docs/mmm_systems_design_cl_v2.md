@@ -1393,7 +1393,8 @@ gantt
     
     section Speed Improvement
     Original Duration   :crit, original, 0, 60
-    Optimized Duration  :milestone, optimized, 30
+    Optimized Duration  :milestone, optimized, 30, 30
+
 ```
 
 ### Optimization Strategy 2: Pre-warmed Container Pool
