@@ -242,12 +242,15 @@ if not countries_sel:
 def render_run_for_country(bucket_name: str, rev: str, country: str):
     # Pick latest stamp for this (rev,country)
     try:
-        key = sorted([k for k in runs.keys() if k[0] == rev and k[1] == country],
-                     key=lambda k: parse_stamp(k[2]),
-                     reverse=True)[0]
+        key = sorted(
+            [k for k in runs.keys() if k[0] == rev and k[1] == country],
+            key=lambda k: parse_stamp(k[2]),
+            reverse=True
+        )[0]
     except IndexError:
         st.warning(f"No runs found for {rev}/{country}.")
         return
+
     _, _, stamp = key
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
@@ -268,18 +271,26 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
         unsafe_allow_html=True,
     )
 
-    # --- Metrics (CSV preferred, fallback TXT)
+    # --- 📊 Allocator metrics (CSV preferred, fallback TXT)
     st.subheader("📊 Allocator metrics")
     metrics_csv = find_blob(blobs, "/allocator_metrics.csv")
     metrics_txt = find_blob(blobs, "/allocator_metrics.txt")
     if metrics_csv:
-        df = pd.read_csv(io.BytesIO(download_bytes(metrics_csv)))
-        st.dataframe(df, use_container_width=True)
-        url = try_signed_url(metrics_csv)
         fn = os.path.basename(metrics_csv.name)
+        # Preview table (best effort)
+        try:
+            df = pd.read_csv(io.BytesIO(download_bytes(metrics_csv)))
+            st.dataframe(df, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Couldn't preview `{fn}` as a table: {e}")
+
+        # Signed URL (nice-to-have)
+        url = try_signed_url(metrics_csv)
         if url:
-            st.markdown(f"⬇️ [Download {fn}]({url})")
-        else:
+            st.markdown(f"⬇️ [Open {fn} (signed URL)]({url})")
+
+        # Guaranteed fallback: stream bytes from server
+        try:
             st.download_button(
                 f"Download {fn}",
                 data=download_bytes(metrics_csv),
@@ -287,84 +298,98 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
                 mime="text/csv",
                 key=blob_key(f"dl_metrics_csv_{country}_{stamp}", metrics_csv.name),
             )
+        except Exception as e:
+            st.warning(f"Could not stream `{fn}`: {e}")
+
     elif metrics_txt:
-        raw = download_bytes(metrics_txt).decode("utf-8", errors="ignore")
-        rows = []
-        for line in raw.splitlines():
-            if ":" in line:
-                k, v = line.split(":", 1)
-                rows.append({"metric": k.strip(), "value": v.strip()})
-        if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
-        else:
-            st.code(raw)
         fn = os.path.basename(metrics_txt.name)
+        # Try to render as key/value table
+        try:
+            raw = download_bytes(metrics_txt).decode("utf-8", errors="ignore")
+            rows = []
+            for line in raw.splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    rows.append({"metric": k.strip(), "value": v.strip()})
+            if rows:
+                st.dataframe(pd.DataFrame(rows), use_container_width=True)
+            else:
+                st.code(raw)
+        except Exception as e:
+            st.warning(f"Couldn't preview `{fn}`: {e}")
+
+        # Signed URL (nice-to-have)
         url = try_signed_url(metrics_txt)
         if url:
-            st.markdown(f"⬇️ [Download {fn}]({url})")
-        else:
+            st.markdown(f"⬇️ [Open {fn} (signed URL)]({url})")
+
+        # Guaranteed fallback
+        try:
             st.download_button(
                 f"Download {fn}",
-                data=raw.encode("utf-8"),
+                data=(raw.encode("utf-8") if 'raw' in locals() else download_bytes(metrics_txt)),
                 file_name=fn,
                 mime="text/plain",
                 key=blob_key(f"dl_metrics_txt_{country}_{stamp}", metrics_txt.name),
             )
+        except Exception as e:
+            st.warning(f"Could not stream `{fn}`: {e}")
     else:
         st.info("No allocator metrics found (allocator_metrics.csv/txt).")
 
-    # --- Allocator plot(s)
+    # --- 📈 Allocator plot(s)
     st.subheader("📈 Allocator plot")
     alloc_pngs = find_all(blobs, r"(?:^|/)allocator_.*\.png$")
     if alloc_pngs:
         for b in alloc_pngs:
-            st.image(download_bytes(b),
-                     caption=os.path.basename(b.name),
-                     use_container_width=True)
+            try:
+                st.image(download_bytes(b),
+                         caption=os.path.basename(b.name),
+                         use_container_width=True)
+            except Exception as e:
+                st.warning(f"Couldn't show `{b.name}`: {e}")
     else:
         st.info("No allocator PNG found (expecting `allocator_*.png`).")
 
-    # --- One-pager from best_model_id
-    # --- 🧾 Onepager (best_model_id.{png|pdf}) ---
-st.subheader("🧾 Onepager")
+    # --- 🧾 Onepager (best_model_id.{png|pdf})
+    st.subheader("🧾 Onepager")
+    if best_id:
+        op_blob = find_onepager_blob(blobs, best_id)
+        if op_blob:
+            name = os.path.basename(op_blob.name)
+            lower = name.lower()
 
-if best_id:
-    op_blob = find_onepager_blob(selected, best_id)
-    if op_blob:
-        name = os.path.basename(op_blob.name)
-        lower = name.lower()
+            # Preview inline for PNG
+            if lower.endswith(".png"):
+                try:
+                    st.image(download_bytes(op_blob), caption="onepager", use_container_width=True)
+                except Exception as e:
+                    st.warning(f"Couldn't preview `{name}`: {e}")
+            elif lower.endswith(".pdf"):
+                st.info("Onepager available as PDF.")
 
-        # Preview (PNG inline; for PDF we just offer links/downloads)
-        if lower.endswith(".png"):
+            # Signed URL (nice-to-have)
+            url = try_signed_url(op_blob)
+            if url:
+                st.markdown(f"⬇️ [Open {name} (signed URL)]({url})")
+
+            # Guaranteed fallback: stream bytes
             try:
-                st.image(download_bytes(op_blob), caption="onepager", use_container_width=True)
+                st.download_button(
+                    "Download onepager",
+                    data=download_bytes(op_blob),
+                    file_name=name,
+                    mime=("image/png" if lower.endswith(".png") else "application/pdf"),
+                    key=blob_key(f"dl_onepager_any_{country}_{stamp}", op_blob.name),
+                )
             except Exception as e:
-                st.warning(f"Couldn't preview `{name}`: {e}")
-        elif lower.endswith(".pdf"):
-            st.info("Onepager available as PDF.")
-
-        # Signed URL (nice-to-have)
-        url = try_signed_url(op_blob)
-        if url:
-            st.markdown(f"⬇️ [Open {name} (signed URL)]({url})")
-
-        # Guaranteed fallback: stream bytes
-        try:
-            st.download_button(
-                "Download onepager",
-                data=download_bytes(op_blob),
-                file_name=name,
-                mime=("image/png" if lower.endswith(".png") else "application/pdf"),
-                key=blob_key("dl_onepager_any", op_blob.name),
-            )
-        except Exception as e:
-            st.warning(f"Could not stream `{name}`: {e}")
+                st.warning(f"Could not stream `{name}`: {e}")
+        else:
+            st.warning(f"No onepager found for best model id '{best_id}' (expected {best_id}.png or .pdf).")
     else:
-        st.warning(f"No onepager found for best model id '{best_id}' (expected {best_id}.png or .pdf).")
-else:
-    st.warning("best_model_id.txt not found; cannot locate onepager.")
+        st.warning("best_model_id.txt not found; cannot locate onepager.")
 
-    # --- All files in this run
+    # --- 📁 All files in this run
     st.subheader("📁 All files")
     for b in sorted(blobs, key=lambda x: x.name):
         fn = os.path.basename(b.name)
