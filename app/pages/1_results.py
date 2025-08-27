@@ -432,7 +432,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
 
 def render_all_files_section(blobs, bucket_name, country, stamp):
     """Render the all files section with improved download handling"""
-    st.subheader("📁 All files")
+    st.subheader("All files")
     
     # Group files by type for better organization
     files_by_type = {
@@ -474,33 +474,60 @@ def render_all_files_section(blobs, bucket_name, country, stamp):
                     st.write(f"`{fn}` — {b.size:,} bytes")
                 
                 with col2:
-                    # Determine MIME type
-                    mime = "application/octet-stream"
-                    if fn.lower().endswith(".csv"): 
-                        mime = "text/csv"
-                    elif fn.lower().endswith(".txt"): 
-                        mime = "text/plain"
-                    elif fn.lower().endswith(".png"): 
-                        mime = "image/png"
-                    elif fn.lower().endswith(".pdf"): 
-                        mime = "application/pdf"
-                    elif fn.lower().endswith(".log"):
-                        mime = "text/plain"
-                    
-                    try:
-                        file_data = download_bytes_safe(b)
-                        if file_data:
-                            st.download_button(
-                                f"📥 Download",
-                                data=file_data,
-                                file_name=fn,
-                                mime=mime,
-                                key=blob_key("file_download", f"{country}_{stamp}_{category}_{i}_{fn}"),
-                            )
-                        else:
-                            st.error("Empty file")
-                    except Exception as e:
-                        st.error(f"Download failed: {e}")
+                    # Only provide downloads for files under 50MB to avoid memory issues
+                    if b.size < 50 * 1024 * 1024:  # 50MB limit
+                        # Determine MIME type
+                        mime = "application/octet-stream"
+                        if fn.lower().endswith(".csv"): 
+                            mime = "text/csv"
+                        elif fn.lower().endswith(".txt"): 
+                            mime = "text/plain"
+                        elif fn.lower().endswith(".png"): 
+                            mime = "image/png"
+                        elif fn.lower().endswith(".pdf"): 
+                            mime = "application/pdf"
+                        elif fn.lower().endswith(".log"):
+                            mime = "text/plain"
+                        
+                        try:
+                            # Use a more robust download approach
+                            if st.button(f"Download", key=f"download_{country}_{stamp}_{category}_{i}_{fn}"):
+                                file_data = download_bytes_safe(b)
+                                if file_data:
+                                    # Force download via session state to avoid media system
+                                    st.session_state[f"download_ready_{fn}"] = {
+                                        "data": file_data,
+                                        "filename": fn,
+                                        "mime": mime
+                                    }
+                                    st.success(f"File {fn} ready for download")
+                                    st.rerun()
+                                else:
+                                    st.error("Could not prepare file for download")
+                            
+                            # Check if file is ready for download
+                            download_key = f"download_ready_{fn}"
+                            if download_key in st.session_state:
+                                download_info = st.session_state[download_key]
+                                st.download_button(
+                                    f"Save {fn}",
+                                    data=download_info["data"],
+                                    file_name=download_info["filename"],
+                                    mime=download_info["mime"],
+                                    key=f"save_{country}_{stamp}_{category}_{i}_{fn}",
+                                )
+                                # Clean up session state after download
+                                if st.button(f"Clear", key=f"clear_{country}_{stamp}_{category}_{i}_{fn}"):
+                                    del st.session_state[download_key]
+                                    st.rerun()
+                        
+                        except Exception as e:
+                            st.error(f"Download error: {e}")
+                    else:
+                        st.info(f"File too large ({b.size:,} bytes) - download via GCS console")
+                        # Provide GCS console link for large files
+                        gcs_url = f"https://console.cloud.google.com/storage/browser/_details/{bucket_name}/{b.name}"
+                        st.markdown(f"[View in GCS Console]({gcs_url})")
 
 # ---------- Sidebar (filters + refresh) ----------
 with st.sidebar:
