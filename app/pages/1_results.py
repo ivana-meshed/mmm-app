@@ -24,8 +24,14 @@ def blob_key(prefix: str, name: str) -> str:
     return f"{prefix}_{h}"
 
 def list_blobs(bucket_name: str, prefix: str):
-    bucket = client.bucket(bucket_name)
-    return list(client.list_blobs(bucket_or_name=bucket, prefix=prefix))
+    # Safer listing with visible errors if IAM is missing
+    try:
+        bucket = client.bucket(bucket_name)
+        return list(client.list_blobs(bucket_or_name=bucket, prefix=prefix))
+    except Exception as e:
+        st.error(f"❌ Failed to list gs://{bucket_name}/{prefix} — {e}")
+        return []
+
 
 def parse_path(name: str):
     # Expected: robyn/<rev>/<country>/<stamp>/file...
@@ -154,7 +160,27 @@ def find_onepager_blob(blobs, best_id: str):
 with st.sidebar:
     bucket_name = st.text_input("GCS bucket", value=DEFAULT_BUCKET)
     prefix = st.text_input("Root prefix", value=DEFAULT_PREFIX, help="Usually 'robyn/' or narrower like 'robyn/r100/'")
+
+    # NEW: make sure prefix ends with a slash (GCS treats prefixes literally)
+    if prefix and not prefix.endswith("/"):
+        prefix = prefix + "/"
+
     do_scan = st.button("🔄 Refresh listing")
+
+    # NEW: quick IAM/permission self-test
+    if st.button("Run storage self-test"):
+        try:
+            test_blobs = list_blobs(bucket_name, prefix)
+            st.write(f"Found {len(test_blobs)} blobs under gs://{bucket_name}/{prefix}")
+            if test_blobs:
+                # Try an actual download to verify storage.objects.get
+                _ = test_blobs[0].download_as_bytes()
+                st.success("Download OK (storage.objects.get works).")
+            elif len(test_blobs) == 0:
+                st.info("Listing returned 0 objects. If you expect data here, check the bucket/prefix and IAM.")
+        except Exception as e:
+            st.error(f"Download failed (likely missing storage.objects.get): {e}")
+
 
 # Cache & refresh
 if do_scan or "runs_cache" not in st.session_state or \
@@ -169,7 +195,10 @@ else:
     runs = st.session_state["runs_cache"]
 
 if not runs:
-    st.info("No runs found under this prefix.")
+    st.info(
+        f"No runs found under gs://{bucket_name}/{prefix}. "
+        f"If you’re on Cloud Run, make sure the service account has at least roles/storage.objectViewer."
+    )
     st.stop()
 
 # ---------- Determine current (latest overall) run ----------
