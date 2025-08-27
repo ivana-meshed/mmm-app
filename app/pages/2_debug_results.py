@@ -8,6 +8,15 @@ from urllib.parse import quote
 st.set_page_config(page_title="DEBUG Results", layout="wide")
 st.title("🔍 DEBUG Results browser")
 
+# Force clear session state and cache
+if st.button("🧹 Clear ALL cache and session"):
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
+
+st.write("**Session State Keys:**", list(st.session_state.keys()))
 # ---------- Settings / Auth ----------
 DEFAULT_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 DEFAULT_PREFIX = "robyn/"
@@ -118,3 +127,5 @@ if st.button("🔄 List files"):
         st.info("No PNG files found")
 
 st.write("**Debug Status:** This page uses NO st.dataframe, NO st.image, only base64 HTML images and basic st.download_button")
+st.write("**Current time:**", datetime.datetime.now().strftime("%H:%M:%S"))
+st.write("**User agent:**", st.context.headers.get("user-agent", "unknown"))
