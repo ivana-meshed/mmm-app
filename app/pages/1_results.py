@@ -20,6 +20,20 @@ client = gcs_client()
 
 # ---------- Helpers ----------
 
+IS_CLOUDRUN = bool(os.getenv("K_SERVICE"))
+
+def signed_url_or_none(blob, minutes=60):
+    try:
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=datetime.timedelta(minutes=minutes),
+            method="GET",
+        )
+    except Exception:
+        return None
+
+
+
 def gcs_console_url(bucket: str, prefix: str) -> str:
     # keep "/" unencoded so the Console URL resolves correctly
     return f"https://console.cloud.google.com/storage/browser/{bucket}/{quote(prefix, safe='/')}"
@@ -108,6 +122,34 @@ def download_bytes_safe(blob):
     except Exception as e:
         st.error(f"Download failed for {blob.name}: {e}")
         return None
+
+def download_link_for_blob(blob, label=None, mime_hint=None, minutes=60):
+    """
+    Prefer a signed URL (works reliably on Cloud Run). If we can't sign,
+    fall back to streaming the bytes via download_link_for_blob.
+    """
+    name = os.path.basename(blob.name)
+    url = try_signed_url(blob, minutes)
+    label = label or f"⬇️ Download {name}"
+
+    if url:
+        # Signed URL avoids Streamlit's "file wasn't available on site" issue
+        st.markdown(f"[{label}]({url})")
+        return
+
+    # Fallback: stream from the app
+    data = download_bytes_safe(blob)
+    if data is None:
+        st.warning(f"Couldn't fetch {name} for direct download.")
+        return
+    st.download_button(
+        label,
+        data=data,
+        file_name=name,
+        mime=mime_hint or "application/octet-stream",
+        key=blob_key("dl_fallback", blob.name),
+    )
+
 
 def read_text_blob(blob) -> str:
     try:
@@ -221,13 +263,8 @@ def render_metrics_section(blobs, country, stamp):
                 st.markdown(df.to_html(escape=False, index=False), unsafe_allow_html=True)
                 
                 # Our own download button
-                st.download_button(
-                    f"📥 Download {fn}",
-                    data=csv_data,
-                    file_name=fn,
-                    mime="text/csv",
-                    key=blob_key("metrics_csv", f"{country}_{stamp}_{fn}"),
-                )
+                download_link_for_blob(metrics_csv, label=f"📥 Download {fn}", mime_hint="text/csv")
+
             else:
                 st.warning(f"Could not read {fn}")
         except Exception as e:
@@ -256,13 +293,8 @@ def render_metrics_section(blobs, country, stamp):
                     st.code(raw)
                 
                 # Download button
-                st.download_button(
-                    f"📥 Download {fn}",
-                    data=txt_data,
-                    file_name=fn,
-                    mime="text/plain",
-                    key=blob_key("metrics_txt", f"{country}_{stamp}_{fn}"),
-                )
+                download_link_for_blob(metrics_csv, label=f"📥 Download {fn}", mime_hint="text/plain"),
+                
             else:
                 st.warning(f"Could not read {fn}")
         except Exception as e:
@@ -293,13 +325,8 @@ def render_allocator_section(blobs, country, stamp):
                     )
                     
                     # Download button
-                    st.download_button(
-                        f"Download {fn}",
-                        data=image_data,
-                        file_name=fn,
-                        mime="image/png",
-                        key=blob_key("allocator_plot", f"{country}_{stamp}_{i}_{fn}"),
-                    )
+                    download_link_for_blob(b, label=f"Download {fn}", mime_hint="image/png")
+
                 else:
                     st.error("Could not load image data")
                     
@@ -357,13 +384,8 @@ def render_onepager_section(blobs, best_id, country, stamp):
                         )
                         
                         # Download button
-                        st.download_button(
-                            f"Download {name}",
-                            data=image_data,
-                            file_name=name,
-                            mime="image/png",
-                            key=blob_key("onepager_download", f"{country}_{stamp}_{name}"),
-                        )
+                        download_link_for_blob(b, label=f"Download {fn}", mime_hint="image/png")
+
                     else:
                         st.warning("Image data is empty")
                 except Exception as e:
@@ -375,13 +397,8 @@ def render_onepager_section(blobs, best_id, country, stamp):
                 try:
                     pdf_data = download_bytes_safe(op_blob)
                     if pdf_data:
-                        st.download_button(
-                            f"Download {name}",
-                            data=pdf_data,
-                            file_name=name,
-                            mime="application/pdf",
-                            key=blob_key("onepager_pdf_download", f"{country}_{stamp}_{name}"),
-                        )
+                        download_link_for_blob(op_blob, label=f"Download {name}", mime_hint="application/pdf")
+
                 except Exception as e:
                     st.error(f"PDF download failed: {e}")
         else:
@@ -412,13 +429,8 @@ def render_onepager_section(blobs, best_id, country, stamp):
                                             unsafe_allow_html=True
                                         )
                                         # Add download button
-                                        st.download_button(
-                                            f"Download {fn}",
-                                            data=image_data,
-                                            file_name=fn,
-                                            mime="image/png",
-                                            key=blob_key("potential_onepager_dl", f"{country}_{stamp}_{i}_{fn}"),
-                                        )
+                                        download_link_for_blob(op_blob, label=f"Download {name}", mime_hint="image/png")
+
                                 except Exception as e:
                                     st.error(f"Could not display: {e}")
                             else:
@@ -431,6 +443,24 @@ def render_onepager_section(blobs, best_id, country, stamp):
         st.warning("best_model_id.txt not found; cannot locate onepager.")
 
 def render_all_files_section(blobs, bucket_name, country, stamp):
+    # Determine MIME type
+    mime = "application/octet-stream"
+    if fn.lower().endswith(".csv"): 
+        mime = "text/csv"
+    elif fn.lower().endswith(".txt"): 
+        mime = "text/plain"
+    elif fn.lower().endswith(".png"): 
+        mime = "image/png"
+    elif fn.lower().endswith(".pdf"): 
+        mime = "application/pdf"
+    elif fn.lower().endswith(".log"):
+        mime = "text/plain"
+
+    # Prefer signed URL; fallback to streaming
+    download_link_for_blob(b, label=f"Download {fn}", mime_hint=mime)
+
+
+def render_all_files_section_old(blobs, bucket_name, country, stamp):
     """Render the all files section with improved download handling"""
     st.subheader("All files")
     
