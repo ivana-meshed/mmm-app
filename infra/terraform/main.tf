@@ -130,6 +130,11 @@ resource "google_cloud_run_service" "svc" {
           name  = "APP_ROOT"
           value = "/app"
         }
+        env {
+          name  = "RUN_SERVICE_ACCOUNT_EMAIL"
+          value = google_service_account.runner.email
+        }
+
       }
     }
   }
