@@ -38,6 +38,8 @@ def signed_url_or_none(blob, minutes=60):
         # Use ADC + IAM Signer (works on Cloud Run without a private key)
         creds, _ = google_auth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
         sa_email = _sa_email_from_creds(creds)
+        print(sa_email)
+        print(creds)
         if not sa_email:
             raise RuntimeError("Could not determine service account email for signing")
 
@@ -53,52 +55,6 @@ def signed_url_or_none(blob, minutes=60):
     except Exception as e:
         st.caption(f"Signed URL error: {e}")
         return None
-'''
-def signed_url_or_none(blob, minutes=60):
-    import google.auth
-    from google.auth.transport.requests import Request
-    from google.cloud import iam_credentials_v1
-    try:
-        # Fast path: many recent storage libs can use ADC to IAM-sign implicitly
-        return blob.generate_signed_url(
-            version="v4",
-            expiration=datetime.timedelta(minutes=minutes),
-            method="GET",
-            response_disposition=f'attachment; filename="{os.path.basename(blob.name)}"',
-            credentials=client._credentials,   # ← use the same ADC creds as the Storage client
-        )
-    except Exception as e1:
-        # Fallback: wire IAM Credentials explicitly
-        try:
-            creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-
-            # Figure out the service account email
-            sa_email = os.getenv("RUN_SERVICE_ACCOUNT_EMAIL")
-            if not sa_email and IS_CLOUDRUN:
-                try:
-                    # Query metadata for the default SA email
-                    from google.auth.compute_engine import _metadata
-                    sa_email = _metadata.get("instance/service-accounts/default/email")
-                except Exception:
-                    pass
-            if not sa_email:
-                raise RuntimeError("service account email unknown for signing")
-
-            iam_client = iam_credentials_v1.IAMCredentialsClient()
-            return blob.generate_signed_url(
-                version="v4",
-                expiration=datetime.timedelta(minutes=minutes),
-                method="GET",
-                response_disposition=f'attachment; filename="{os.path.basename(blob.name)}"',
-                service_account_email=sa_email,
-                credentials=creds,
-                iam_client=iam_client,
-            )
-        except Exception as e2:
-            if IS_CLOUDRUN:
-                st.caption(f"⚠️ Signed URL failed: {e2!s}")
-            return None
-'''
 
 
 
