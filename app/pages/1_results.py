@@ -275,10 +275,15 @@ def render_allocator_section(blobs, country, stamp):
                 fn = os.path.basename(b.name)
                 st.write(f"**{fn}** ({b.size:,} bytes)")
                 
-                # Display the plot
+                # Display the plot using base64 encoding to avoid Streamlit media cache
                 image_data = download_bytes_safe(b)
                 if image_data:
-                    st.image(image_data, caption=fn, use_container_width=True)
+                    import base64
+                    b64 = base64.b64encode(image_data).decode()
+                    st.markdown(
+                        f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="{fn}">',
+                        unsafe_allow_html=True
+                    )
                     
                     # Download button with unique key
                     st.download_button(
@@ -311,7 +316,12 @@ def render_allocator_section(blobs, country, stamp):
                         try:
                             image_data = download_bytes_safe(b)
                             if image_data:
-                                st.image(image_data, caption=fn, use_container_width=True)
+                                import base64
+                                b64 = base64.b64encode(image_data).decode()
+                                st.markdown(
+                                    f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="{fn}">',
+                                    unsafe_allow_html=True
+                                )
                         except Exception as e:
                             st.error(f"Could not display: {e}")
             else:
@@ -329,12 +339,17 @@ def render_onepager_section(blobs, best_id, country, stamp):
             
             st.success(f"Found onepager: **{name}** ({op_blob.size:,} bytes)")
 
-            # Preview inline for PNG
+            # Preview inline for PNG using base64 encoding
             if lower.endswith(".png"):
                 try:
                     image_data = download_bytes_safe(op_blob)
                     if image_data:
-                        st.image(image_data, caption="Onepager", use_container_width=True)
+                        import base64
+                        b64 = base64.b64encode(image_data).decode()
+                        st.markdown(
+                            f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="Onepager">',
+                            unsafe_allow_html=True
+                        )
                         
                         # Download button
                         st.download_button(
@@ -386,7 +401,12 @@ def render_onepager_section(blobs, best_id, country, stamp):
                                 try:
                                     image_data = download_bytes_safe(b)
                                     if image_data:
-                                        st.image(image_data, use_container_width=True)
+                                        import base64
+                                        b64 = base64.b64encode(image_data).decode()
+                                        st.markdown(
+                                            f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="{fn}">',
+                                            unsafe_allow_html=True
+                                        )
                                         # Add download button
                                         st.download_button(
                                             f"📥 Download {fn}",
