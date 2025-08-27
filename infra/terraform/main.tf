@@ -63,7 +63,12 @@ resource "google_service_account_iam_member" "runner_token_creator" {
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${google_service_account.runner.email}"
 }
-
+# (Optional) fallback allow the deployer to sign on behalf of the runtime SA
+resource "google_service_account_iam_member" "deployer_token_creator" {
+  service_account_id = google_service_account.runner.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${var.deployer_sa}"
+}
 # (Recommended) make sure the IAM Credentials API is enabled
 resource "google_project_service" "iamcredentials" {
   project            = var.project_id
