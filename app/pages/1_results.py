@@ -19,6 +19,11 @@ def gcs_client():
 client = gcs_client()
 
 # ---------- Helpers ----------
+
+def gcs_console_url(bucket: str, prefix: str) -> str:
+    # keep "/" unencoded so the Console URL resolves correctly
+    return f"https://console.cloud.google.com/storage/browser/{bucket}/{quote(prefix, safe='/')}"
+
 def blob_key(prefix: str, name: str) -> str:
     h = hashlib.sha1(name.encode("utf-8")).hexdigest()[:10]
     return f"{prefix}_{h}"
@@ -257,7 +262,7 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
 
     # Link to the run folder in Cloud Console
     prefix_path = f"robyn/{rev}/{country}/{stamp}/"
-    gcs_url = f"https://console.cloud.google.com/storage/browser/{bucket_name}/{quote(prefix_path)}"
+    gcs_url = gcs_console_url(bucket_name, prefix_path)
     st.markdown(
         f'**Path:** <a href="{gcs_url}" target="_blank">gs://{bucket_name}/{prefix_path}</a>',
         unsafe_allow_html=True,
@@ -320,36 +325,44 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
         st.info("No allocator PNG found (expecting `allocator_*.png`).")
 
     # --- One-pager from best_model_id
-    st.subheader("🧾 Onepager")
-    if best_id:
-        op_blob = find_onepager_blob(blobs, best_id)
-        if op_blob:
-            name = os.path.basename(op_blob.name)
-            data = download_bytes(op_blob)
-            if name.lower().endswith(".png"):
-                st.image(data, caption="onepager", use_container_width=True)
-                st.download_button(
-                    "Download onepager",
-                    data=data,
-                    file_name=name,
-                    mime="image/png",
-                    key=blob_key(f"dl_onepager_png_{country}_{stamp}", op_blob.name),
-                )
-            elif name.lower().endswith(".pdf"):
-                st.info("Onepager available as PDF.")
-                st.download_button(
-                    "Download onepager",
-                    data=data,
-                    file_name=name,
-                    mime="application/pdf",
-                    key=blob_key(f"dl_onepager_pdf_{country}_{stamp}", op_blob.name),
-                )
-            else:
-                st.warning(f"Found a onepager file ({name}) with an unexpected extension.")
-        else:
-            st.warning(f"No onepager found for best model id '{best_id}' (expected {best_id}.png or .pdf).")
+    # --- 🧾 Onepager (best_model_id.{png|pdf}) ---
+st.subheader("🧾 Onepager")
+
+if best_id:
+    op_blob = find_onepager_blob(selected, best_id)
+    if op_blob:
+        name = os.path.basename(op_blob.name)
+        lower = name.lower()
+
+        # Preview (PNG inline; for PDF we just offer links/downloads)
+        if lower.endswith(".png"):
+            try:
+                st.image(download_bytes(op_blob), caption="onepager", use_container_width=True)
+            except Exception as e:
+                st.warning(f"Couldn't preview `{name}`: {e}")
+        elif lower.endswith(".pdf"):
+            st.info("Onepager available as PDF.")
+
+        # Signed URL (nice-to-have)
+        url = try_signed_url(op_blob)
+        if url:
+            st.markdown(f"⬇️ [Open {name} (signed URL)]({url})")
+
+        # Guaranteed fallback: stream bytes
+        try:
+            st.download_button(
+                "Download onepager",
+                data=download_bytes(op_blob),
+                file_name=name,
+                mime=("image/png" if lower.endswith(".png") else "application/pdf"),
+                key=blob_key("dl_onepager_any", op_blob.name),
+            )
+        except Exception as e:
+            st.warning(f"Could not stream `{name}`: {e}")
     else:
-        st.warning("best_model_id.txt not found; cannot locate onepager.")
+        st.warning(f"No onepager found for best model id '{best_id}' (expected {best_id}.png or .pdf).")
+else:
+    st.warning("best_model_id.txt not found; cannot locate onepager.")
 
     # --- All files in this run
     st.subheader("📁 All files")
@@ -366,13 +379,16 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
                 elif fn.lower().endswith(".txt"): mime = "text/plain"
                 elif fn.lower().endswith(".png"): mime = "image/png"
                 elif fn.lower().endswith(".pdf"): mime = "application/pdf"
-                st.download_button(
-                    f"Download {fn}",
-                    data=download_bytes(b),
-                    file_name=fn,
-                    mime=mime,
-                    key=blob_key(f"dl_any_{country}_{stamp}", b.name),
-                )
+                try:
+                    st.download_button(
+                        f"Download {fn}",
+                        data=download_bytes(b),
+                        file_name=fn,
+                        mime=mime,
+                        key=blob_key(f"dl_any_{country}_{stamp}", b.name),
+                    )
+                except Exception as e:
+                    st.warning(f"Could not stream `{fn}` from server: {e}")
 
 # ---- Render each selected country’s latest run for this revision ----
 st.markdown(f"## Detailed View — revision `{rev}`")
