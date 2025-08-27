@@ -18,6 +18,28 @@ pkgs = [
     "protobuf",
 ]
 
+def signed_url_or_none(blob, minutes=60):
+    try:
+        # Use ADC + IAM Signer (works on Cloud Run without a private key)
+        creds, _ = google_auth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        sa_email = _sa_email_from_creds(creds)
+        if not sa_email:
+            raise RuntimeError("Could not determine service account email for signing")
+
+        signer = IAMSigner(Request(), creds, sa_email)
+
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=datetime.timedelta(minutes=minutes),
+            method="GET",
+            signer=signer,                   # <— key bit
+            service_account_email=sa_email,  # helps gcs lib set the signer ID
+        )
+    except Exception as e:
+        st.caption(f"Signed URL error: {e}")
+        return None
+
+
 rows = []
 for p in pkgs:
     try:
@@ -50,3 +72,12 @@ st.json({
 
 # Also print to logs
 print("DIAG_VERSIONS", json.dumps(rows))
+
+import datetime
+from google.cloud import storage
+client = storage.Client()
+bucket = client.bucket(os.getenv("GCS_BUCKET"))
+test = bucket.blob("diagnostics/healthcheck.txt")
+test.upload_from_string("ok")
+url = signed_url_or_none(test, minutes=10)
+st.write("Signed URL:", url)

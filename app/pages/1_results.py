@@ -35,7 +35,7 @@ def _sa_email_from_creds(creds):
 
 def signed_url_or_none(blob, minutes=60):
     try:
-        # Use ADC + IAM Signer (works on Cloud Run without a private key)
+        # Get ADC creds from Cloud Run
         creds, _ = google_auth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
         sa_email = _sa_email_from_creds(creds)
         print(sa_email)
@@ -43,18 +43,20 @@ def signed_url_or_none(blob, minutes=60):
         if not sa_email:
             raise RuntimeError("Could not determine service account email for signing")
 
+        # Build an IAM Signer that uses the IAM Credentials API
         signer = IAMSigner(Request(), creds, sa_email)
 
         return blob.generate_signed_url(
             version="v4",
             expiration=datetime.timedelta(minutes=minutes),
             method="GET",
-            signer=signer,                   # <— key bit
-            service_account_email=sa_email,  # helps gcs lib set the signer ID
+            signer=signer,
+            service_account_email=sa_email,
         )
-    except Exception as e:
-        st.caption(f"Signed URL error: {e}")
+    except Exception:
+        # Be quiet; we’ll fall back to the in-app download
         return None
+
 
 
 
@@ -154,21 +156,7 @@ def gcs_object_details_url(blob) -> str:
     # _details view; keep slashes in the object path
     return f"https://console.cloud.google.com/storage/browser/_details/{blob.bucket.name}/{quote(blob.name, safe='/')}"
 
-def signed_url_or_none(blob, minutes=60):
-    """Return a V4 signed URL or None; also sets a friendly download filename."""
-    try:
-        return blob.generate_signed_url(
-            version="v4",
-            expiration=datetime.timedelta(minutes=minutes),
-            method="GET",
-            # Force browser download with a clean filename
-            response_disposition=f'attachment; filename="{os.path.basename(blob.name)}"',
-        )
-    except Exception as e:
-        # Tiny, non-invasive hint so you can diagnose in Cloud Run
-        if IS_CLOUDRUN:
-            st.caption(f"⚠️ Signed URL failed: {e!s}")
-        return None
+
 
 def download_link_for_blob(blob, label=None, mime_hint=None, minutes=60, key_suffix: str | None = None):
     """
