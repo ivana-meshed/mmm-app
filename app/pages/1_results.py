@@ -123,43 +123,64 @@ def download_bytes_safe(blob):
     except Exception as e:
         st.error(f"Download failed for {blob.name}: {e}")
         return None
+# --- helpers to add/replace ---
+
+DATA_URI_MAX_BYTES = int(os.getenv("DATA_URI_MAX_BYTES", str(8 * 1024 * 1024)))  # 8 MB default
+
+def gcs_object_details_url(blob) -> str:
+    # _details view; keep slashes in the object path
+    return f"https://console.cloud.google.com/storage/browser/_details/{blob.bucket.name}/{quote(blob.name, safe='/')}"
+
+def signed_url_or_none(blob, minutes=60):
+    """Return a V4 signed URL or None; also sets a friendly download filename."""
+    try:
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=datetime.timedelta(minutes=minutes),
+            method="GET",
+            # Force browser download with a clean filename
+            response_disposition=f'attachment; filename="{os.path.basename(blob.name)}"',
+        )
+    except Exception as e:
+        # Tiny, non-invasive hint so you can diagnose in Cloud Run
+        if IS_CLOUDRUN:
+            st.caption(f"⚠️ Signed URL failed: {e!s}")
+        return None
 
 def download_link_for_blob(blob, label=None, mime_hint=None, minutes=60, key_suffix: str | None = None):
     """
-    Prefer a signed URL (best on Cloud Run). If signing fails, fall back to a
-    Streamlit download_button with a guaranteed-unique key.
+    1) Try signed URL (best on Cloud Run) via <a download>.
+    2) Else use a data: URI <a download> (no Streamlit media store).
+    3) If too large for data URI, show GCS Console object link.
     """
     name = os.path.basename(blob.name)
     label = label or f"⬇️ Download {name}"
+    mime = mime_hint or "application/octet-stream"
 
-    # Try signed URL first
+    # 1) Signed URL
     url = signed_url_or_none(blob, minutes)
     if url:
-        st.markdown(f"[{label}]({url})")
+        st.markdown(f'<a href="{url}" download="{name}">{label}</a>', unsafe_allow_html=True)
         return
-    else:
-        # Helpful hint so you can see *why* we hit the fallback
-        if IS_CLOUDRUN:
-            st.caption("⚠️ Couldn’t create a signed URL; falling back to in-app download. "
-                       "Check that the Cloud Run runtime service account has roles/iam.serviceAccountTokenCreator.")
 
-    # Fallback: stream bytes via the app (uses Streamlit media store)
+    # 2) Data-URI fallback (no /media, survives reruns)
     data = download_bytes_safe(blob)
     if data is None:
-        st.warning(f"Couldn't fetch {name} for direct download.")
+        st.warning(f"Couldn't fetch {name} for download.")
         return
 
-    # Build a unique key to avoid StreamlitDuplicateElementKey
-    # Combine path + gen/size + caller's suffix + a tiny random to eliminate collisions within one run
-    gen = getattr(blob, "generation", "")
-    uniq = f"{blob.name}|{gen}|{blob.size}|{key_suffix or ''}|{uuid4().hex[:6]}"
-    st.download_button(
-        label=label,
-        data=data,
-        file_name=name,
-        mime=mime_hint or "application/octet-stream",
-        key=blob_key("dl_fallback", uniq),
+    if len(data) <= DATA_URI_MAX_BYTES:
+        b64 = base64.b64encode(data).decode()
+        href = f"data:{mime};base64,{b64}"
+        st.markdown(f'<a href="{href}" download="{name}">{label}</a>', unsafe_allow_html=True)
+        return
+
+    # 3) Too big for data URI: guide user to Console (and hint about signing)
+    st.info(
+        "File is large and a signed URL couldn’t be created. "
+        "Open it directly in the GCS Console (or enable URL signing for your Cloud Run service account)."
     )
+    st.markdown(f'[Open **{name}** in GCS Console]({gcs_object_details_url(blob)})')
 
 
 def read_text_blob(blob) -> str:
