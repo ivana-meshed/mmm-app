@@ -5,6 +5,10 @@ import streamlit as st
 from google.cloud import storage
 from urllib.parse import quote
 from uuid import uuid4
+from google.auth import default as google_auth_default
+from google.auth.transport.requests import Request
+from google.auth.iam import Signer as IAMSigner
+
 
 st.set_page_config(page_title="Results: Robyn MMM", layout="wide")
 st.title("Results browser (GCS)")
@@ -23,6 +27,33 @@ client = gcs_client()
 
 IS_CLOUDRUN = bool(os.getenv("K_SERVICE"))
 
+def _sa_email_from_creds(creds):
+    return (
+        os.getenv("RUN_SERVICE_ACCOUNT_EMAIL")
+        or getattr(creds, "service_account_email", None)
+    )
+
+def signed_url_or_none(blob, minutes=60):
+    try:
+        # Use ADC + IAM Signer (works on Cloud Run without a private key)
+        creds, _ = google_auth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        sa_email = _sa_email_from_creds(creds)
+        if not sa_email:
+            raise RuntimeError("Could not determine service account email for signing")
+
+        signer = IAMSigner(Request(), creds, sa_email)
+
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=datetime.timedelta(minutes=minutes),
+            method="GET",
+            signer=signer,                   # <— key bit
+            service_account_email=sa_email,  # helps gcs lib set the signer ID
+        )
+    except Exception as e:
+        st.caption(f"Signed URL error: {e}")
+        return None
+'''
 def signed_url_or_none(blob, minutes=60):
     import google.auth
     from google.auth.transport.requests import Request
@@ -67,7 +98,7 @@ def signed_url_or_none(blob, minutes=60):
             if IS_CLOUDRUN:
                 st.caption(f"⚠️ Signed URL failed: {e2!s}")
             return None
-
+'''
 
 
 
