@@ -293,7 +293,7 @@ def render_metrics_section(blobs, country, stamp):
                     st.code(raw)
                 
                 # Download button
-                download_link_for_blob(metrics_csv, label=f"📥 Download {fn}", mime_hint="text/plain"),
+                download_link_for_blob(metrics_txt, label=f"📥 Download {fn}", mime_hint="text/plain")
                 
             else:
                 st.warning(f"Could not read {fn}")
@@ -384,7 +384,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                         )
                         
                         # Download button
-                        download_link_for_blob(b, label=f"Download {fn}", mime_hint="image/png")
+                        download_link_for_blob(b, label=f"Download {name}", mime_hint="image/png")
 
                     else:
                         st.warning("Image data is empty")
@@ -404,7 +404,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
         else:
             st.warning(f"No onepager found for best model id '{best_id}' using standard patterns.")
             
-            # Look for potential onepagers
+            '''# Look for potential onepagers
             potential_onepagers = [b for b in blobs if 
                                  (b.name.lower().endswith('.png') or b.name.lower().endswith('.pdf')) 
                                  and b.size > 50000]  # > 50KB
@@ -429,7 +429,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                                             unsafe_allow_html=True
                                         )
                                         # Add download button
-                                        download_link_for_blob(op_blob, label=f"Download {name}", mime_hint="image/png")
+                                        download_link_for_blob(op_blob, label=f"Download {fn}", mime_hint="image/png")
 
                                 except Exception as e:
                                     st.error(f"Could not display: {e}")
@@ -438,26 +438,31 @@ def render_onepager_section(blobs, best_id, country, stamp):
             else:
                 # Show debug info
                 with st.expander("Show all files"):
-                    debug_blob_info(blobs)
+                    debug_blob_info(blobs)'''
     else:
         st.warning("best_model_id.txt not found; cannot locate onepager.")
 
 def render_all_files_section(blobs, bucket_name, country, stamp):
-    # Determine MIME type
-    mime = "application/octet-stream"
-    if fn.lower().endswith(".csv"): 
-        mime = "text/csv"
-    elif fn.lower().endswith(".txt"): 
-        mime = "text/plain"
-    elif fn.lower().endswith(".png"): 
-        mime = "image/png"
-    elif fn.lower().endswith(".pdf"): 
-        mime = "application/pdf"
-    elif fn.lower().endswith(".log"):
-        mime = "text/plain"
+    """Render the all files section using signed URLs (fallback to streaming)."""
+    st.subheader("All files")
 
-    # Prefer signed URL; fallback to streaming
-    download_link_for_blob(b, label=f"Download {fn}", mime_hint=mime)
+    def guess_mime(name: str) -> str:
+        n = name.lower()
+        if n.endswith(".csv"): return "text/csv"
+        if n.endswith(".txt"): return "text/plain"
+        if n.endswith(".png"): return "image/png"
+        if n.endswith(".pdf"): return "application/pdf"
+        if n.endswith(".log"): return "text/plain"
+        if n.endswith(".rds"): return "application/octet-stream"
+        return "application/octet-stream"
+
+    for b in sorted(blobs, key=lambda x: x.name):
+        fn = os.path.basename(b.name)
+        with st.container(border=True):
+            st.write(f"`{fn}` — {b.size:,} bytes")
+            # Prefer signed URL; fallback to streaming
+            download_link_for_blob(b, label=f"Download {fn}", mime_hint=guess_mime(fn))
+
 
 
 def render_all_files_section_old(blobs, bucket_name, country, stamp):
