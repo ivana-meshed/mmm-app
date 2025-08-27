@@ -24,8 +24,9 @@ def gcs_console_url(bucket: str, prefix: str) -> str:
     # keep "/" unencoded so the Console URL resolves correctly
     return f"https://console.cloud.google.com/storage/browser/{bucket}/{quote(prefix, safe='/')}"
 
-def blob_key(prefix: str, name: str) -> str:
-    h = hashlib.sha1(name.encode("utf-8")).hexdigest()[:10]
+def blob_key(prefix: str, name: str, suffix: str = "") -> str:
+    # Create unique keys by combining prefix, file hash, and optional suffix
+    h = hashlib.sha1((name + suffix).encode("utf-8")).hexdigest()[:10]
     return f"{prefix}_{h}"
 
 def list_blobs(bucket_name: str, prefix: str):
@@ -96,29 +97,8 @@ def latest_run_key(runs, rev_filter=None, country_filter=None):
     keys.sort(key=lambda k: parse_stamp(k[2]), reverse=True)
     return keys[0]
 
-def latest_stamp_for_country(runs, rev, country):
-    # Return latest (rev,country,stamp) or None
-    keys = [k for k in runs.keys() if k[0] == rev and k[1] == country]
-    if not keys:
-        return None
-    keys.sort(key=lambda k: parse_stamp(k[2]), reverse=True)
-    return keys[0]
-
-def try_signed_url(blob, minutes=60):
-    """Generate signed URL with better error handling"""
-    try:
-        url = blob.generate_signed_url(
-            version="v4",
-            expiration=datetime.timedelta(minutes=minutes),
-            method="GET",
-        )
-        return url
-    except Exception as e:
-        st.warning(f"Signed URL generation failed: {e}")
-        return None
-
-def download_bytes(blob):
-    """Download blob with error handling"""
+def download_bytes_safe(blob):
+    """Download blob with comprehensive error handling"""
     try:
         data = blob.download_as_bytes()
         if len(data) == 0:
@@ -210,7 +190,7 @@ def debug_blob_info(blobs):
             "name": b.name,
             "basename": os.path.basename(b.name),
             "size_bytes": b.size,
-            "size_mb": round(b.size / 1024 / 1024, 2),
+            "size_mb": round(b.size / 1024 / 1024, 2) if b.size > 0 else 0,
             "is_png": b.name.lower().endswith('.png'),
             "is_pdf": b.name.lower().endswith('.pdf'),
         })
@@ -219,9 +199,9 @@ def debug_blob_info(blobs):
     file_info.sort(key=lambda x: x["size_bytes"], reverse=True)
     
     for info in file_info:
-        st.write(f"- `{info['basename']}` ({info['size_mb']} MB) - {info['name']}")
+        st.write(f"- `{info['basename']}` ({info['size_mb']} MB)")
 
-def render_metrics_section(blobs):
+def render_metrics_section(blobs, country, stamp):
     """Render the allocator metrics section"""
     st.subheader("📊 Allocator metrics")
     
@@ -232,46 +212,29 @@ def render_metrics_section(blobs):
         fn = os.path.basename(metrics_csv.name)
         # Preview table (best effort)
         try:
-            csv_data = download_bytes(metrics_csv)
+            csv_data = download_bytes_safe(metrics_csv)
             if csv_data:
                 df = pd.read_csv(io.BytesIO(csv_data))
                 st.dataframe(df, use_container_width=True)
+                
+                # Download button
+                st.download_button(
+                    f"📥 Download {fn}",
+                    data=csv_data,
+                    file_name=fn,
+                    mime="text/csv",
+                    key=blob_key("metrics_csv", f"{country}_{stamp}_{fn}"),
+                )
             else:
                 st.warning(f"Could not read {fn}")
         except Exception as e:
             st.warning(f"Couldn't preview `{fn}` as a table: {e}")
 
-        # Download options
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Signed URL (nice-to-have)
-            url = try_signed_url(metrics_csv)
-            if url:
-                st.markdown(f"⬇️ [Open {fn} (direct link)]({url})")
-
-        with col2:
-            # Guaranteed fallback: stream bytes from server
-            try:
-                csv_data = download_bytes(metrics_csv)
-                if csv_data:
-                    st.download_button(
-                        f"📥 Download {fn}",
-                        data=csv_data,
-                        file_name=fn,
-                        mime="text/csv",
-                        key=f"dl_metrics_csv_{fn}",
-                    )
-                else:
-                    st.error("Could not download CSV file")
-            except Exception as e:
-                st.error(f"Could not stream `{fn}`: {e}")
-
     elif metrics_txt:
         fn = os.path.basename(metrics_txt.name)
         # Try to render as key/value table
         try:
-            txt_data = download_bytes(metrics_txt)
+            txt_data = download_bytes_safe(metrics_txt)
             if txt_data:
                 raw = txt_data.decode("utf-8", errors="ignore")
                 rows = []
@@ -283,36 +246,19 @@ def render_metrics_section(blobs):
                     st.dataframe(pd.DataFrame(rows), use_container_width=True)
                 else:
                     st.code(raw)
+                
+                # Download button
+                st.download_button(
+                    f"📥 Download {fn}",
+                    data=txt_data,
+                    file_name=fn,
+                    mime="text/plain",
+                    key=blob_key("metrics_txt", f"{country}_{stamp}_{fn}"),
+                )
             else:
                 st.warning(f"Could not read {fn}")
         except Exception as e:
             st.warning(f"Couldn't preview `{fn}`: {e}")
-
-        # Download options
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Signed URL (nice-to-have)
-            url = try_signed_url(metrics_txt)
-            if url:
-                st.markdown(f"⬇️ [Open {fn} (direct link)]({url})")
-
-        with col2:
-            # Guaranteed fallback
-            try:
-                txt_data = download_bytes(metrics_txt)
-                if txt_data:
-                    st.download_button(
-                        f"📥 Download {fn}",
-                        data=txt_data,
-                        file_name=fn,
-                        mime="text/plain",
-                        key=f"dl_metrics_txt_{fn}",
-                    )
-                else:
-                    st.error("Could not download TXT file")
-            except Exception as e:
-                st.error(f"Could not stream `{fn}`: {e}")
     else:
         st.info("No allocator metrics found (allocator_metrics.csv/txt).")
 
@@ -326,20 +272,21 @@ def render_allocator_section(blobs, country, stamp):
         st.success(f"Found {len(alloc_plots)} allocator plot(s)")
         for i, b in enumerate(alloc_plots):
             try:
-                st.write(f"**{os.path.basename(b.name)}** ({b.size:,} bytes)")
+                fn = os.path.basename(b.name)
+                st.write(f"**{fn}** ({b.size:,} bytes)")
                 
                 # Display the plot
-                image_data = download_bytes(b)
+                image_data = download_bytes_safe(b)
                 if image_data:
-                    st.image(image_data, caption=os.path.basename(b.name), use_container_width=True)
+                    st.image(image_data, caption=fn, use_container_width=True)
                     
-                    # Download button
+                    # Download button with unique key
                     st.download_button(
-                        f"📥 Download {os.path.basename(b.name)}",
+                        f"📥 Download {fn}",
                         data=image_data,
-                        file_name=os.path.basename(b.name),
+                        file_name=fn,
                         mime="image/png",
-                        key=f"dl_allocator_{country}_{stamp}_{i}",
+                        key=blob_key("allocator_plot", f"{country}_{stamp}_{i}_{fn}"),
                     )
                 else:
                     st.error("Could not load image data")
@@ -354,17 +301,17 @@ def render_allocator_section(blobs, country, stamp):
             png_files = [b for b in blobs if b.name.lower().endswith('.png')]
             if png_files:
                 st.write("Found PNG files:")
-                for b in png_files:
-                    st.write(f"- `{os.path.basename(b.name)}` ({b.size:,} bytes)")
-                    st.write(f"  Full path: `{b.name}`")
+                for i, b in enumerate(png_files):
+                    fn = os.path.basename(b.name)
+                    st.write(f"- `{fn}` ({b.size:,} bytes)")
                     
                     # Try to display any PNG as a potential allocator plot
-                    if st.button(f"Try displaying {os.path.basename(b.name)}", 
-                                key=f"try_png_{os.path.basename(b.name)}_{stamp}"):
+                    if st.button(f"Try displaying {fn}", 
+                                key=blob_key("try_png", f"{country}_{stamp}_{i}_{fn}")):
                         try:
-                            image_data = download_bytes(b)
+                            image_data = download_bytes_safe(b)
                             if image_data:
-                                st.image(image_data, caption=os.path.basename(b.name), use_container_width=True)
+                                st.image(image_data, caption=fn, use_container_width=True)
                         except Exception as e:
                             st.error(f"Could not display: {e}")
             else:
@@ -385,42 +332,38 @@ def render_onepager_section(blobs, best_id, country, stamp):
             # Preview inline for PNG
             if lower.endswith(".png"):
                 try:
-                    image_data = download_bytes(op_blob)
+                    image_data = download_bytes_safe(op_blob)
                     if image_data:
                         st.image(image_data, caption="Onepager", use_container_width=True)
+                        
+                        # Download button
+                        st.download_button(
+                            f"📥 Download {name}",
+                            data=image_data,
+                            file_name=name,
+                            mime="image/png",
+                            key=blob_key("onepager_download", f"{country}_{stamp}_{name}"),
+                        )
                     else:
                         st.warning("Image data is empty")
                 except Exception as e:
                     st.error(f"Couldn't preview `{name}`: {e}")
             elif lower.endswith(".pdf"):
                 st.info("Onepager available as PDF (preview not supported).")
-
-            # Download options
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Signed URL (if available)
-                url = try_signed_url(op_blob)
-                if url:
-                    st.markdown(f"⬇️ [Open {name} (direct link)]({url})")
-
-            with col2:
-                # Stream download (guaranteed to work)
+                
+                # Download button for PDF
                 try:
-                    file_data = download_bytes(op_blob)
-                    if file_data:
-                        mime_type = "image/png" if lower.endswith(".png") else "application/pdf"
+                    pdf_data = download_bytes_safe(op_blob)
+                    if pdf_data:
                         st.download_button(
                             f"📥 Download {name}",
-                            data=file_data,
+                            data=pdf_data,
                             file_name=name,
-                            mime=mime_type,
-                            key=f"dl_onepager_{country}_{stamp}",
+                            mime="application/pdf",
+                            key=blob_key("onepager_pdf_download", f"{country}_{stamp}_{name}"),
                         )
-                    else:
-                        st.error("Could not download file - empty data")
                 except Exception as e:
-                    st.error(f"Download failed: {e}")
+                    st.error(f"PDF download failed: {e}")
         else:
             st.warning(f"No onepager found for best model id '{best_id}' using standard patterns.")
             
@@ -431,25 +374,26 @@ def render_onepager_section(blobs, best_id, country, stamp):
             
             if potential_onepagers:
                 st.info("Found potential onepager files:")
-                for b in potential_onepagers:
+                for i, b in enumerate(potential_onepagers):
+                    fn = os.path.basename(b.name)
                     col1, col2 = st.columns([3, 1])
                     with col1:
-                        st.write(f"**{os.path.basename(b.name)}** ({b.size:,} bytes)")
+                        st.write(f"**{fn}** ({b.size:,} bytes)")
                     with col2:
                         if st.button(f"Try as onepager", 
-                                    key=f"try_onepager_{os.path.basename(b.name)}_{stamp}"):
+                                    key=blob_key("try_onepager", f"{country}_{stamp}_{i}_{fn}")):
                             if b.name.lower().endswith('.png'):
                                 try:
-                                    image_data = download_bytes(b)
+                                    image_data = download_bytes_safe(b)
                                     if image_data:
                                         st.image(image_data, use_container_width=True)
                                         # Add download button
                                         st.download_button(
-                                            f"📥 Download {os.path.basename(b.name)}",
+                                            f"📥 Download {fn}",
                                             data=image_data,
-                                            file_name=os.path.basename(b.name),
+                                            file_name=fn,
                                             mime="image/png",
-                                            key=f"dl_potential_onepager_{country}_{stamp}_{os.path.basename(b.name)}",
+                                            key=blob_key("potential_onepager_dl", f"{country}_{stamp}_{i}_{fn}"),
                                         )
                                 except Exception as e:
                                     st.error(f"Could not display: {e}")
@@ -466,68 +410,93 @@ def render_all_files_section(blobs, bucket_name, country, stamp):
     """Render the all files section with improved download handling"""
     st.subheader("📁 All files")
     
+    # Group files by type for better organization
+    files_by_type = {
+        "Images (PNG/PDF)": [],
+        "Data (CSV/TXT)": [],
+        "Models (RDS)": [],
+        "Logs": [],
+        "Other": []
+    }
+    
     for b in sorted(blobs, key=lambda x: x.name):
         fn = os.path.basename(b.name)
+        fn_lower = fn.lower()
         
-        with st.container(border=True):
-            st.write(f"`{fn}` — {b.size:,} bytes")
+        if fn_lower.endswith(('.png', '.pdf')):
+            files_by_type["Images (PNG/PDF)"].append(b)
+        elif fn_lower.endswith(('.csv', '.txt')):
+            files_by_type["Data (CSV/TXT)"].append(b)
+        elif fn_lower.endswith('.rds'):
+            files_by_type["Models (RDS)"].append(b)
+        elif fn_lower.endswith('.log'):
+            files_by_type["Logs"].append(b)
+        else:
+            files_by_type["Other"].append(b)
+    
+    for category, file_list in files_by_type.items():
+        if not file_list:
+            continue
             
-            col1, col2 = st.columns(2)
+        st.write(f"**{category}**")
+        
+        for i, b in enumerate(file_list):
+            fn = os.path.basename(b.name)
             
-            with col1:
-                # Try signed URL first
-                url = try_signed_url(b)
-                if url:
-                    st.markdown(f"[🔗 Open/Download (direct link)]({url})")
-            
-            with col2:
-                # Guaranteed download via stream
-                mime = "application/octet-stream"
-                if fn.lower().endswith(".csv"): 
-                    mime = "text/csv"
-                elif fn.lower().endswith(".txt"): 
-                    mime = "text/plain"
-                elif fn.lower().endswith(".png"): 
-                    mime = "image/png"
-                elif fn.lower().endswith(".pdf"): 
-                    mime = "application/pdf"
-                elif fn.lower().endswith(".rds"):
-                    mime = "application/octet-stream"
+            with st.container(border=True):
+                col1, col2 = st.columns([3, 1])
                 
-                try:
-                    file_data = download_bytes(b)
-                    if file_data:
-                        st.download_button(
-                            f"📥 Download {fn}",
-                            data=file_data,
-                            file_name=fn,
-                            mime=mime,
-                            key=f"dl_any_{country}_{stamp}_{fn}",
-                        )
-                    else:
-                        st.error("Could not download - empty file")
-                except Exception as e:
-                    st.error(f"Could not stream `{fn}` from server: {e}")
+                with col1:
+                    st.write(f"`{fn}` — {b.size:,} bytes")
+                
+                with col2:
+                    # Determine MIME type
+                    mime = "application/octet-stream"
+                    if fn.lower().endswith(".csv"): 
+                        mime = "text/csv"
+                    elif fn.lower().endswith(".txt"): 
+                        mime = "text/plain"
+                    elif fn.lower().endswith(".png"): 
+                        mime = "image/png"
+                    elif fn.lower().endswith(".pdf"): 
+                        mime = "application/pdf"
+                    elif fn.lower().endswith(".log"):
+                        mime = "text/plain"
+                    
+                    try:
+                        file_data = download_bytes_safe(b)
+                        if file_data:
+                            st.download_button(
+                                f"📥 Download",
+                                data=file_data,
+                                file_name=fn,
+                                mime=mime,
+                                key=blob_key("file_download", f"{country}_{stamp}_{category}_{i}_{fn}"),
+                            )
+                        else:
+                            st.error("Empty file")
+                    except Exception as e:
+                        st.error(f"Download failed: {e}")
 
 # ---------- Sidebar (filters + refresh) ----------
 with st.sidebar:
     bucket_name = st.text_input("GCS bucket", value=DEFAULT_BUCKET)
     prefix = st.text_input("Root prefix", value=DEFAULT_PREFIX, help="Usually 'robyn/' or narrower like 'robyn/r100/'")
 
-    # NEW: make sure prefix ends with a slash (GCS treats prefixes literally)
+    # Make sure prefix ends with a slash (GCS treats prefixes literally)
     if prefix and not prefix.endswith("/"):
         prefix = prefix + "/"
 
     do_scan = st.button("🔄 Refresh listing")
 
-    # NEW: quick IAM/permission self-test
+    # Storage self-test
     if st.button("Run storage self-test"):
         try:
             test_blobs = list_blobs(bucket_name, prefix)
             st.write(f"Found {len(test_blobs)} blobs under gs://{bucket_name}/{prefix}")
             if test_blobs:
                 # Try an actual download to verify storage.objects.get
-                test_data = download_bytes(test_blobs[0])
+                test_data = download_bytes_safe(test_blobs[0])
                 if test_data is not None:
                     st.success("✅ Download OK (storage.objects.get works).")
                 else:
@@ -535,7 +504,7 @@ with st.sidebar:
             elif len(test_blobs) == 0:
                 st.info("Listing returned 0 objects. If you expect data here, check the bucket/prefix and IAM.")
         except Exception as e:
-            st.error(f"Download failed (likely missing storage.objects.get): {e}")
+            st.error(f"Test failed: {e}")
 
 # Cache & refresh
 if do_scan or "runs_cache" not in st.session_state or \
@@ -624,8 +593,8 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
     if best_id:
         st.info(f"**Best Model ID:** {best_id}")
 
-    # Render each section
-    render_metrics_section(blobs)
+    # Render each section with unique context
+    render_metrics_section(blobs, country, stamp)
     render_allocator_section(blobs, country, stamp)
     render_onepager_section(blobs, best_id, country, stamp)
     render_all_files_section(blobs, bucket_name, country, stamp)
