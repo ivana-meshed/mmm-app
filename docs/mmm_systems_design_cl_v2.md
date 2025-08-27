@@ -929,17 +929,18 @@ gantt
     Cold Start     :crit, cold1, 0, 60
     Warm Serving   :active, warm1, 60, 1800
     Training Job   :done, train1, 1800, 5400
-    Idle Timeout   :milestone, idle1, 5400
+    Idle Timeout   :milestone, idle1, 5400, 0
     
     section Instance 2  
     Cold Start     :crit, cold2, 300, 360
     Warm Serving   :active, warm2, 360, 1200
-    Idle Timeout   :milestone, idle2, 1200
+    Idle Timeout   :milestone, idle2, 1200, 0
     
     section Cost Impact
-    Billing Start  :milestone, bill1, 60
+    Billing Start  :milestone, bill1, 60, 0
     Peak Usage     :crit, peak, 1800, 5400
-    Billing End    :milestone, bill2, 5400
+    Billing End    :milestone, bill2, 5400, 0
+
 ```
 
 **Cost Breakdown Analysis**
