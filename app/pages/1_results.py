@@ -1,12 +1,12 @@
 # app/pages/1_Results.py
-import os, io, re, datetime, hashlib
+import os, io, re, datetime, hashlib, base64
 import pandas as pd
 import streamlit as st
 from google.cloud import storage
 from urllib.parse import quote
 
 st.set_page_config(page_title="Results: Robyn MMM", layout="wide")
-st.title("📦 Results browser (GCS)")
+st.title("Results browser (GCS)")
 
 # ---------- Settings / Auth ----------
 DEFAULT_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
@@ -210,14 +210,17 @@ def render_metrics_section(blobs, country, stamp):
     
     if metrics_csv:
         fn = os.path.basename(metrics_csv.name)
-        # Preview table (best effort)
+        # Preview table WITHOUT using st.dataframe (which has built-in download buttons)
         try:
             csv_data = download_bytes_safe(metrics_csv)
             if csv_data:
                 df = pd.read_csv(io.BytesIO(csv_data))
-                st.dataframe(df, use_container_width=True)
                 
-                # Download button
+                # Display as HTML table instead of st.dataframe to avoid built-in downloads
+                st.markdown("**Metrics Preview:**")
+                st.markdown(df.to_html(escape=False, index=False), unsafe_allow_html=True)
+                
+                # Our own download button
                 st.download_button(
                     f"📥 Download {fn}",
                     data=csv_data,
@@ -237,13 +240,18 @@ def render_metrics_section(blobs, country, stamp):
             txt_data = download_bytes_safe(metrics_txt)
             if txt_data:
                 raw = txt_data.decode("utf-8", errors="ignore")
+                
+                # Parse and display as HTML table instead of st.dataframe
                 rows = []
                 for line in raw.splitlines():
                     if ":" in line:
                         k, v = line.split(":", 1)
                         rows.append({"metric": k.strip(), "value": v.strip()})
+                
                 if rows:
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+                    df = pd.DataFrame(rows)
+                    st.markdown("**Metrics:**")
+                    st.markdown(df.to_html(escape=False, index=False), unsafe_allow_html=True)
                 else:
                     st.code(raw)
                 
@@ -263,8 +271,8 @@ def render_metrics_section(blobs, country, stamp):
         st.info("No allocator metrics found (allocator_metrics.csv/txt).")
 
 def render_allocator_section(blobs, country, stamp):
-    """Render allocator plots with improved finding logic"""
-    st.subheader("📈 Allocator plot")
+    """Render allocator plots with base64 display"""
+    st.subheader("Allocator plot")
     
     alloc_plots = find_allocator_plots(blobs)
     
@@ -275,19 +283,18 @@ def render_allocator_section(blobs, country, stamp):
                 fn = os.path.basename(b.name)
                 st.write(f"**{fn}** ({b.size:,} bytes)")
                 
-                # Display the plot using base64 encoding to avoid Streamlit media cache
+                # Display using base64 HTML to avoid Streamlit media cache
                 image_data = download_bytes_safe(b)
                 if image_data:
-                    import base64
                     b64 = base64.b64encode(image_data).decode()
                     st.markdown(
                         f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="{fn}">',
                         unsafe_allow_html=True
                     )
                     
-                    # Download button with unique key
+                    # Download button
                     st.download_button(
-                        f"📥 Download {fn}",
+                        f"Download {fn}",
                         data=image_data,
                         file_name=fn,
                         mime="image/png",
@@ -301,8 +308,8 @@ def render_allocator_section(blobs, country, stamp):
     else:
         st.info("No allocator plots found using standard patterns.")
         
-        # Debug: show what we're looking for
-        with st.expander("🔍 Debug: Show all PNG files"):
+        # Debug: show what PNG files exist
+        with st.expander("Show all PNG files"):
             png_files = [b for b in blobs if b.name.lower().endswith('.png')]
             if png_files:
                 st.write("Found PNG files:")
@@ -310,13 +317,12 @@ def render_allocator_section(blobs, country, stamp):
                     fn = os.path.basename(b.name)
                     st.write(f"- `{fn}` ({b.size:,} bytes)")
                     
-                    # Try to display any PNG as a potential allocator plot
-                    if st.button(f"Try displaying {fn}", 
+                    # Try button to display
+                    if st.button(f"Display {fn}", 
                                 key=blob_key("try_png", f"{country}_{stamp}_{i}_{fn}")):
                         try:
                             image_data = download_bytes_safe(b)
                             if image_data:
-                                import base64
                                 b64 = base64.b64encode(image_data).decode()
                                 st.markdown(
                                     f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="{fn}">',
@@ -328,8 +334,8 @@ def render_allocator_section(blobs, country, stamp):
                 st.write("No PNG files found at all.")
 
 def render_onepager_section(blobs, best_id, country, stamp):
-    """Render the onepager section with improved file finding"""
-    st.subheader("🧾 Onepager")
+    """Render the onepager section with base64 display"""
+    st.subheader("Onepager")
     
     if best_id:
         op_blob = find_onepager_blob(blobs, best_id)
@@ -339,12 +345,11 @@ def render_onepager_section(blobs, best_id, country, stamp):
             
             st.success(f"Found onepager: **{name}** ({op_blob.size:,} bytes)")
 
-            # Preview inline for PNG using base64 encoding
+            # Display using base64 HTML
             if lower.endswith(".png"):
                 try:
                     image_data = download_bytes_safe(op_blob)
                     if image_data:
-                        import base64
                         b64 = base64.b64encode(image_data).decode()
                         st.markdown(
                             f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="Onepager">',
@@ -353,7 +358,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                         
                         # Download button
                         st.download_button(
-                            f"📥 Download {name}",
+                            f"Download {name}",
                             data=image_data,
                             file_name=name,
                             mime="image/png",
@@ -371,7 +376,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                     pdf_data = download_bytes_safe(op_blob)
                     if pdf_data:
                         st.download_button(
-                            f"📥 Download {name}",
+                            f"Download {name}",
                             data=pdf_data,
                             file_name=name,
                             mime="application/pdf",
@@ -382,7 +387,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
         else:
             st.warning(f"No onepager found for best model id '{best_id}' using standard patterns.")
             
-            # Look for any large image files that might be onepagers
+            # Look for potential onepagers
             potential_onepagers = [b for b in blobs if 
                                  (b.name.lower().endswith('.png') or b.name.lower().endswith('.pdf')) 
                                  and b.size > 50000]  # > 50KB
@@ -395,13 +400,12 @@ def render_onepager_section(blobs, best_id, country, stamp):
                     with col1:
                         st.write(f"**{fn}** ({b.size:,} bytes)")
                     with col2:
-                        if st.button(f"Try as onepager", 
+                        if st.button(f"Display", 
                                     key=blob_key("try_onepager", f"{country}_{stamp}_{i}_{fn}")):
                             if b.name.lower().endswith('.png'):
                                 try:
                                     image_data = download_bytes_safe(b)
                                     if image_data:
-                                        import base64
                                         b64 = base64.b64encode(image_data).decode()
                                         st.markdown(
                                             f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="{fn}">',
@@ -409,7 +413,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                                         )
                                         # Add download button
                                         st.download_button(
-                                            f"📥 Download {fn}",
+                                            f"Download {fn}",
                                             data=image_data,
                                             file_name=fn,
                                             mime="image/png",
@@ -420,8 +424,8 @@ def render_onepager_section(blobs, best_id, country, stamp):
                             else:
                                 st.info("PDF preview not supported, but you can download it.")
             else:
-                # Show debug info to help troubleshoot
-                with st.expander("🔍 Debug: Show all files"):
+                # Show debug info
+                with st.expander("Show all files"):
                     debug_blob_info(blobs)
     else:
         st.warning("best_model_id.txt not found; cannot locate onepager.")
