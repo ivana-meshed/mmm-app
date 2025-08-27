@@ -129,7 +129,7 @@ def download_link_for_blob(blob, label=None, mime_hint=None, minutes=60):
     fall back to streaming the bytes via download_link_for_blob.
     """
     name = os.path.basename(blob.name)
-    url = try_signed_url(blob, minutes)
+    url = signed_url_or_none(blob, minutes)
     label = label or f"⬇️ Download {name}"
 
     if url:
