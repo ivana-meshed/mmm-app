@@ -1,39 +1,120 @@
 # app/pages/1_Results.py
-import os, io, re, datetime, hashlib
+
+import base64
+import datetime
+import hashlib
+import io
+import os
+import re
+from urllib.parse import quote
+
 import pandas as pd
 import streamlit as st
+from google.auth import default as google_auth_default
+from google.auth.iam import Signer as IAMSigner
+from google.auth.transport.requests import Request
 from google.cloud import storage
-from urllib.parse import quote
 
 
 st.set_page_config(page_title="Results: Robyn MMM", layout="wide")
-st.title("📦 Results browser (GCS)")
+st.title("Results browser (GCS)")
 
 # ---------- Settings / Auth ----------
 DEFAULT_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 DEFAULT_PREFIX = "robyn/"
 
+
 @st.cache_resource
 def gcs_client():
     return storage.Client()
 
+
 client = gcs_client()
 
-def blob_key(prefix: str, name: str) -> str:
-    h = hashlib.sha1(name.encode("utf-8")).hexdigest()[:10]
+# ---------- Helpers ----------
+
+IS_CLOUDRUN = bool(os.getenv("K_SERVICE"))
+
+
+def _sa_email_from_creds(creds):
+    return (
+        os.getenv("RUN_SERVICE_ACCOUNT_EMAIL")
+        or getattr(creds, "service_account_email", None)
+    )
+
+
+def signed_url_or_none(blob, minutes: int = 60):
+    try:
+        # Get ADC creds from Cloud Run
+        creds, _ = google_auth_default(
+            scopes=[
+                "https://www.googleapis.com/auth/cloud-platform",
+            ]
+        )
+        sa_email = _sa_email_from_creds(creds)
+        print(sa_email)
+        print(creds)
+        if not sa_email:
+            raise RuntimeError(
+                "Could not determine service account email for signing"
+            )
+
+        # Build an IAM Signer that uses the IAM Credentials API
+        signer = IAMSigner(Request(), creds, sa_email)
+
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=datetime.timedelta(minutes=minutes),
+            method="GET",
+            signer=signer,
+            service_account_email=sa_email,
+        )
+    except Exception:
+        # Be quiet; we’ll fall back to the in-app download
+        return None
+
+
+
+def gcs_console_url(bucket: str, prefix: str) -> str:
+    # keep "/" unencoded so the Console URL resolves correctly
+    return (
+        "https://console.cloud.google.com/storage/browser/"
+        f"{bucket}/{quote(prefix, safe='/')}"
+    )
+
+
+def blob_key(prefix: str, name: str, suffix: str = "") -> str:
+    # Create unique keys by combining prefix, file hash, and optional suffix
+    h = hashlib.sha1((name + suffix).encode("utf-8")).hexdigest()[:10]
     return f"{prefix}_{h}"
 
+
 def list_blobs(bucket_name: str, prefix: str):
-    # Recursive listing (includes files in subfolders)
-    bucket = client.bucket(bucket_name)
-    return list(client.list_blobs(bucket_or_name=bucket, prefix=prefix))
+    # Safer listing with visible errors if IAM is missing
+    try:
+        bucket = client.bucket(bucket_name)
+        return list(
+            client.list_blobs(bucket_or_name=bucket, prefix=prefix)
+        )
+    except Exception as e:
+        st.error(
+            f"❌ Failed to list gs://{bucket_name}/{prefix} — {e}"
+        )
+        return []
+
 
 def parse_path(name: str):
     # Expected: robyn/<rev>/<country>/<stamp>/file...
     parts = name.split("/")
     if len(parts) >= 5 and parts[0] == "robyn":
-        return {"rev": parts[1], "country": parts[2], "stamp": parts[3], "file": "/".join(parts[4:])}
+        return {
+            "rev": parts[1],
+            "country": parts[2],
+            "stamp": parts[3],
+            "file": "/".join(parts[4:]),
+        }
     return None
+
 
 def group_runs(blobs):
     runs = {}  # (rev, country, stamp) -> [blob...]
@@ -45,16 +126,30 @@ def group_runs(blobs):
         runs.setdefault(key, []).append(b)
     return runs
 
+
 def parse_stamp(stamp: str):
-    # "MMDD_HHMMSS" -> datetime; fallback to lexical order if parse fails
+    # "MMDD_HHMMSS" -> datetime; fallback to lexical
     try:
         return datetime.datetime.strptime(stamp, "%m%d_%H%M%S")
     except Exception:
         return stamp  # lexical
-    
+
+
+def parse_rev_key(rev: str):
+    # numeric-aware sort key: ("is_non_numeric", value)
+    m = re.search(r"(\d+)$", (rev or "").strip())
+    if m:
+        # numeric revs sort before non-numeric
+        return (0, int(m.group(1)))
+    # fallback: lexical
+    return (1, (rev or "").lower())
+
+
 def parse_best_meta(blobs):
     """Return (best_id, iterations, trials) from best_model_id.txt if present."""
-    b = find_blob(blobs, "/best_model_id.txt") or find_blob(blobs, "best_model_id.txt")
+    b = find_blob(blobs, "/best_model_id.txt") or find_blob(
+        blobs, "best_model_id.txt"
+    )
     best_id, iters, trials = None, None, None
     if not b:
         return best_id, iters, trials
@@ -64,10 +159,13 @@ def parse_best_meta(blobs):
         best_id = lines[0].split()[0]
     for ln in lines[1:]:
         m = re.search(r"Iterations:\s*(\d+)", ln, re.I)
-        if m: iters = int(m.group(1))
+        if m:
+            iters = int(m.group(1))
         m = re.search(r"Trials:\s*(\d+)", ln, re.I)
-        if m: trials = int(m.group(1))
+        if m:
+            trials = int(m.group(1))
     return best_id, iters, trials
+
 
 def latest_run_key(runs, rev_filter=None, country_filter=None):
     keys = list(runs.keys())
@@ -77,63 +175,524 @@ def latest_run_key(runs, rev_filter=None, country_filter=None):
         keys = [k for k in keys if k[1] == country_filter]
     if not keys:
         return None
-    # Sort by parsed timestamp descending
     keys.sort(key=lambda k: parse_stamp(k[2]), reverse=True)
     return keys[0]
 
-def try_signed_url(blob, minutes=60):
+
+def download_bytes_safe(blob):
+    """Download blob with comprehensive error handling"""
     try:
-        return blob.generate_signed_url(
-            version="v4",
-            expiration=datetime.timedelta(minutes=minutes),
-            method="GET",
-        )
-    except Exception:
+        data = blob.download_as_bytes()
+        if len(data) == 0:
+            st.warning(f"Downloaded file is empty: {blob.name}")
+            return None
+        return data
+    except Exception as e:
+        st.error(f"Download failed for {blob.name}: {e}")
         return None
 
-def download_bytes(blob):
-    return blob.download_as_bytes()
+
+# --- helpers to add/replace ---
+DATA_URI_MAX_BYTES = int(
+    os.getenv("DATA_URI_MAX_BYTES", str(8 * 1024 * 1024))
+)  # 8 MB default
+
+
+def gcs_object_details_url(blob) -> str:
+    # _details view; keep slashes in the object path
+    return (
+        "https://console.cloud.google.com/storage/browser/_details/"
+        f"{blob.bucket.name}/"
+        f"{quote(blob.name, safe='/')}"
+    )
+
+
+
+def download_link_for_blob(
+    blob,
+    label=None,
+    mime_hint=None,
+    minutes: int = 60,
+    key_suffix: str | None = None,
+):
+    """
+    1) Try signed URL (best on Cloud Run) via <a download>.
+    2) Else use a data: URI <a download> (no Streamlit media store).
+    3) If too large for data URI, show GCS Console object link.
+    """
+    name = os.path.basename(blob.name)
+    label = label or f"⬇️ Download {name}"
+    mime = mime_hint or "application/octet-stream"
+
+    # 1) Signed URL
+    url = signed_url_or_none(blob, minutes)
+    if url:
+        st.markdown(
+            f'<a href="{url}" download="{name}">{label}</a>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # 2) Data-URI fallback (no /media, survives reruns)
+    data = download_bytes_safe(blob)
+    if data is None:
+        st.warning(f"Couldn't fetch {name} for download.")
+        return
+
+    if len(data) <= DATA_URI_MAX_BYTES:
+        b64 = base64.b64encode(data).decode()
+        href = f"data:{mime};base64,{b64}"
+        st.markdown(
+            f'<a href="{href}" download="{name}">{label}</a>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # 3) Too big for data URI: guide user to Console (and hint about signing)
+    st.info(
+        "File is large and a signed URL couldn’t be created. "
+        "Open it directly in the GCS Console (or enable URL signing for your "
+        "Cloud Run service account)."
+    )
+    st.markdown(
+        f"[Open **{name}** in GCS Console]({gcs_object_details_url(blob)})"
+    )
+
+
+
+def read_text_blob(blob) -> str:
+    try:
+        return blob.download_as_bytes().decode("utf-8", errors="replace")
+    except Exception as e:
+        st.error(f"Failed to read text from {blob.name}: {e}")
+        return ""
+
+
 
 def find_blob(blobs, endswith: str):
     for b in blobs:
         if b.name.endswith(endswith):
             return b
-    # also allow exact base-name match
     for b in blobs:
         if os.path.basename(b.name) == os.path.basename(endswith):
             return b
     return None
 
+
+
 def find_all(blobs, pattern):
     r = re.compile(pattern, re.IGNORECASE)
     return [b for b in blobs if r.search(b.name)]
 
-def read_text_blob(blob) -> str:
-    return blob.download_as_bytes().decode("utf-8", errors="replace")
+
 
 def find_onepager_blob(blobs, best_id: str):
-    # Prefer {id}.png, fallback {id}.pdf anywhere under the run
+    """Find onepager with improved logic to handle actual Robyn file patterns"""
+
+    # First try exact match with best_id
     for ext in (".png", ".pdf"):
-        b = find_blob(blobs, f"/{best_id}{ext}")
-        if b: return b
-        # also check root-level file names
-        for bb in blobs:
-            if os.path.basename(bb.name).lower() == f"{best_id}{ext}":
-                return bb
+        exact_match = f"{best_id}{ext}"
+        for b in blobs:
+            if os.path.basename(b.name).lower() == exact_match.lower():
+                return b
+
+    # Then try any PNG/PDF that might be a onepager
+    # Robyn often generates files like "1_7_3.png" regardless of the model ID
+    for ext in (".png", ".pdf"):
+        candidates = []
+        for b in blobs:
+            filename = os.path.basename(b.name).lower()
+            # Look for files that could be onepagers (exclude known other types)
+            if (
+                filename.endswith(ext)
+                and not filename.startswith("allocator")
+                and not filename.startswith("response")
+                and not filename.startswith("saturation")
+                and b.size > 50_000
+            ):
+                candidates.append(b)
+
+        if candidates:
+            # Sort by size (largest first, as onepagers are usually big)
+            candidates.sort(key=lambda x: x.size, reverse=True)
+            return candidates[0]
+
     return None
+
+
+
+def find_allocator_plots(blobs):
+    """Find allocator plots with improved search logic"""
+    allocator_plots = []
+
+    # Look for files with 'allocator' in the name
+    for b in blobs:
+        filename = os.path.basename(b.name).lower()
+        if (
+            "allocator" in filename
+            and filename.endswith(".png")
+            and b.size > 1000
+        ):
+            allocator_plots.append(b)
+
+    # Also look for plots in allocator_plots subdirectories
+    # Since your files might be in allocator_plots_TIMESTAMP/
+    for b in blobs:
+        if (
+            "allocator_plots_" in b.name
+            and b.name.endswith(".png")
+            and b.size > 1000
+        ):
+            allocator_plots.append(b)
+
+    return allocator_plots
+
+
+
+def debug_blob_info(blobs):
+    """Helper function to debug what files we actually have"""
+    st.write("**Debug: All files in this run:**")
+
+    file_info = []
+    for b in blobs:
+        file_info.append(
+            {
+                "name": b.name,
+                "basename": os.path.basename(b.name),
+                "size_bytes": b.size,
+                "size_mb": round(b.size / 1024 / 1024, 2) if b.size > 0 else 0,
+                "is_png": b.name.lower().endswith(".png"),
+                "is_pdf": b.name.lower().endswith(".pdf"),
+            }
+        )
+
+    # Sort by size (largest first)
+    file_info.sort(key=lambda x: x["size_bytes"], reverse=True)
+
+    for info in file_info:
+        st.write(f"- `{info['basename']}` ({info['size_mb']} MB)")
+
+
+
+def render_metrics_section(blobs, country, stamp):
+    """Render the allocator metrics section"""
+    st.subheader("📊 Allocator metrics")
+
+    metrics_csv = find_blob(blobs, "/allocator_metrics.csv")
+    metrics_txt = find_blob(blobs, "/allocator_metrics.txt")
+
+    if metrics_csv:
+        fn = os.path.basename(metrics_csv.name)
+        # Preview table WITHOUT using st.dataframe
+        try:
+            csv_data = download_bytes_safe(metrics_csv)
+            if csv_data:
+                df = pd.read_csv(io.BytesIO(csv_data))
+
+                # Display as HTML table to avoid built-in downloads
+                st.markdown("**Metrics Preview:**")
+                st.markdown(
+                    df.to_html(escape=False, index=False),
+                    unsafe_allow_html=True,
+                )
+
+                # Our own download button
+                download_link_for_blob(
+                    metrics_csv,
+                    label=f"📥 Download {fn}",
+                    mime_hint="text/csv",
+                    key_suffix=f"metrics_csv|{country}|{stamp}",
+                )
+            else:
+                st.warning(f"Could not read {fn}")
+        except Exception as e:
+            st.warning(
+                f"Couldn't preview `{fn}` as a table: {e}"
+            )
+
+    elif metrics_txt:
+        fn = os.path.basename(metrics_txt.name)
+        # Try to render as key/value table
+        try:
+            txt_data = download_bytes_safe(metrics_txt)
+            if txt_data:
+                raw = txt_data.decode("utf-8", errors="ignore")
+
+                # Parse and display as HTML table
+                rows = []
+                for line in raw.splitlines():
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        rows.append(
+                            {"metric": k.strip(), "value": v.strip()}
+                        )
+
+                if rows:
+                    df = pd.DataFrame(rows)
+                    st.markdown("**Metrics:**")
+                    st.markdown(
+                        df.to_html(escape=False, index=False),
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.code(raw)
+
+                # Download button
+                download_link_for_blob(
+                    metrics_txt,
+                    label=f"📥 Download {fn}",
+                    mime_hint="text/plain",
+                    key_suffix=f"metrics_txt|{country}|{stamp}",
+                )
+            else:
+                st.warning(f"Could not read {fn}")
+        except Exception as e:
+            st.warning(f"Couldn't preview `{fn}`: {e}")
+    else:
+        st.info(
+            "No allocator metrics found (allocator_metrics.csv/txt)."
+        )
+
+
+
+def render_allocator_section(blobs, country, stamp):
+    """Render allocator plots with base64 display"""
+    st.subheader("Allocator plot")
+
+    alloc_plots = find_allocator_plots(blobs)
+
+    if alloc_plots:
+        st.success(f"Found {len(alloc_plots)} allocator plot(s)")
+        for i, b in enumerate(alloc_plots):
+            try:
+                fn = os.path.basename(b.name)
+                st.write(f"**{fn}** ({b.size:,} bytes)")
+
+                # Display using base64 HTML to avoid Streamlit media cache
+                image_data = download_bytes_safe(b)
+                if image_data:
+                    b64 = base64.b64encode(image_data).decode()
+                    st.markdown(
+                        (
+                            f'<img src="data:image/png;base64,{b64}" '
+                            f'style="width: 100%; height: auto;" '
+                            f'alt="{fn}">'
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
+                    # Download button
+                    download_link_for_blob(
+                        b,
+                        label=f"Download {fn}",
+                        mime_hint="image/png",
+                        key_suffix=(
+                            f"alloc|{country}|{stamp}|{i}"
+                        ),
+                    )
+                else:
+                    st.error("Could not load image data")
+
+            except Exception as e:
+                st.error(f"Error with {os.path.basename(b.name)}: {e}")
+    else:
+        st.info("No allocator plots found using standard patterns.")
+
+        # Debug: show what PNG files exist
+        with st.expander("Show all PNG files"):
+            png_files = [
+                b for b in blobs if b.name.lower().endswith(".png")
+            ]
+            if png_files:
+                st.write("Found PNG files:")
+                for i, b in enumerate(png_files):
+                    fn = os.path.basename(b.name)
+                    st.write(f"- `{fn}` ({b.size:,} bytes)")
+
+                    # Try button to display
+                    if st.button(
+                        f"Display {fn}",
+                        key=blob_key(
+                            "try_png",
+                            f"{country}_{stamp}_{i}_{fn}",
+                        ),
+                    ):
+                        try:
+                            image_data = download_bytes_safe(b)
+                            if image_data:
+                                b64 = base64.b64encode(image_data).decode()
+                                st.markdown(
+                                    (
+                                        f'<img src="data:image/png;base64,{b64}" '
+                                        'style="width: 100%; height: auto;" '
+                                        f'alt="{fn}">'
+                                    ),
+                                    unsafe_allow_html=True,
+                                )
+                        except Exception as e:
+                            st.error(
+                                f"Could not display: {e}"
+                            )
+            else:
+                st.write("No PNG files found at all.")
+
+
+
+def render_onepager_section(blobs, best_id, country, stamp):
+    """Render the onepager section with base64 display"""
+    st.subheader("Onepager")
+
+    if best_id:
+        op_blob = find_onepager_blob(blobs, best_id)
+        if op_blob:
+            name = os.path.basename(op_blob.name)
+            lower = name.lower()
+
+            st.success(
+                f"Found onepager: **{name}** ({op_blob.size:,} bytes)"
+            )
+
+            # Display using base64 HTML
+            if lower.endswith(".png"):
+                try:
+                    image_data = download_bytes_safe(op_blob)
+                    if image_data:
+                        b64 = base64.b64encode(image_data).decode()
+                        st.markdown(
+                            (
+                                '<img '
+                                f'src="data:image/png;base64,{b64}" '
+                                'style="width: 100%; height: auto;" '
+                                'alt="Onepager">'
+                            ),
+                            unsafe_allow_html=True,
+                        )
+
+                        # Download button
+                        download_link_for_blob(
+                            op_blob,
+                            label=f"Download {name}",
+                            mime_hint="image/png",
+                            key_suffix=(
+                                f"onepager|{country}|{stamp}"
+                            ),
+                        )
+
+                    else:
+                        st.warning("Image data is empty")
+                except Exception as e:
+                    st.error(f"Couldn't preview `{name}`: {e}")
+            elif lower.endswith(".pdf"):
+                st.info(
+                    "Onepager available as PDF (preview not supported)."
+                )
+
+                # Download button for PDF
+                try:
+                    pdf_data = download_bytes_safe(op_blob)
+                    if pdf_data:
+                        download_link_for_blob(
+                            op_blob,
+                            label=f"Download {name}",
+                            mime_hint="application/pdf",
+                            key_suffix=(
+                                f"onepager|{country}|{stamp}"
+                            ),
+                        )
+
+                except Exception as e:
+                    st.error(f"PDF download failed: {e}")
+        else:
+            st.warning(
+                "No onepager found for best model id "
+                f"'{best_id}' using standard patterns."
+            )
+    else:
+        st.warning(
+            "best_model_id.txt not found; cannot locate onepager."
+        )
+
+
+
+def render_all_files_section(blobs, bucket_name, country, stamp):
+    """Render the all files section using signed URLs (fallback to streaming)."""
+    st.subheader("All files")
+
+    def guess_mime(name: str) -> str:
+        n = name.lower()
+        if n.endswith(".csv"):
+            return "text/csv"
+        if n.endswith(".txt"):
+            return "text/plain"
+        if n.endswith(".png"):
+            return "image/png"
+        if n.endswith(".pdf"):
+            return "application/pdf"
+        if n.endswith(".log"):
+            return "text/plain"
+        if n.endswith(".rds"):
+            return "application/octet-stream"
+        return "application/octet-stream"
+
+    for i, b in enumerate(sorted(blobs, key=lambda x: x.name)):
+        fn = os.path.basename(b.name)
+        with st.container(border=True):
+            st.write(f"`{fn}` — {b.size:,} bytes")
+            download_link_for_blob(
+                b,
+                label=f"Download {fn}",
+                mime_hint=guess_mime(fn),
+                key_suffix=f"all|{country}|{stamp}|{i}",
+            )
+
 
 # ---------- Sidebar (filters + refresh) ----------
 with st.sidebar:
     bucket_name = st.text_input("GCS bucket", value=DEFAULT_BUCKET)
-    prefix = st.text_input("Root prefix", value=DEFAULT_PREFIX, help="Usually 'robyn/' or narrower like 'robyn/r100/it/'")
-    rev_filter = st.text_input("(Optional) limit to revision", value="") or None
-    country_filter = st.text_input("(Optional) limit to country", value="") or None
+    prefix = st.text_input(
+        "Root prefix",
+        value=DEFAULT_PREFIX,
+        help="Usually 'robyn/' or narrower like 'robyn/r100/'",
+    )
+
+    # Make sure prefix ends with a slash (GCS treats prefixes literally)
+    if prefix and not prefix.endswith("/"):
+        prefix = prefix + "/"
+
     do_scan = st.button("🔄 Refresh listing")
 
+    # Storage self-test
+    if st.button("Run storage self-test"):
+        try:
+            test_blobs = list_blobs(bucket_name, prefix)
+            st.write(
+                f"Found {len(test_blobs)} blobs under "
+                f"gs://{bucket_name}/{prefix}"
+            )
+            if test_blobs:
+                # Try an actual download to verify storage.objects.get
+                test_data = download_bytes_safe(test_blobs[0])
+                if test_data is not None:
+                    st.success(
+                        "✅ Download OK (storage.objects.get works)."
+                    )
+                else:
+                    st.error("❌ Download failed - got empty data")
+            elif len(test_blobs) == 0:
+                st.info(
+                    "Listing returned 0 objects. If you expect data here, "
+                    "check the bucket/prefix and IAM."
+                )
+        except Exception as e:
+            st.error(f"Test failed: {e}")
+
 # Cache & refresh
-if do_scan or "runs_cache" not in st.session_state or \
-   st.session_state.get("last_bucket") != bucket_name or \
-   st.session_state.get("last_prefix") != prefix:
+if (
+    do_scan
+    or "runs_cache" not in st.session_state
+    or st.session_state.get("last_bucket") != bucket_name
+    or st.session_state.get("last_prefix") != prefix
+):
     blobs = list_blobs(bucket_name, prefix)
     runs = group_runs(blobs)
     st.session_state["runs_cache"] = runs
@@ -143,128 +702,105 @@ else:
     runs = st.session_state["runs_cache"]
 
 if not runs:
-    st.info("No runs found under this prefix.")
+    st.info(
+        f"No runs found under gs://{bucket_name}/{prefix}. "
+        "If you're on Cloud Run, make sure the service account has at least "
+        "roles/storage.objectViewer."
+    )
     st.stop()
 
-# ---------- Auto-pick latest run (respecting optional filters) ----------
-key = latest_run_key(runs, rev_filter=rev_filter, country_filter=country_filter)
-if not key:
-    st.warning("No runs match the selected filters.")
+# ---------- Determine current (latest overall) run ----------
+current_key = latest_run_key(runs)
+if not current_key:
+    st.warning("No runs found.")
     st.stop()
 
-rev, country, stamp = key
-selected = runs[key]
+# ---------- Filters (default to current run & country) ----------
+all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
+latest_any = sorted(
+    runs.keys(),
+    key=lambda k: (parse_rev_key(k[0]), parse_stamp(k[2])),
+    reverse=True,
+)[0]
 
-best_id, iters, trials = parse_best_meta(selected)
+default_rev, default_country = latest_any[0], latest_any[1]
 
-country_disp = country.upper()
-extra = ""
-if iters is not None:  extra += f" · iterations={iters}"
-if trials is not None: extra += f" · trials={trials}"
+rev = st.selectbox("Revision", all_revs, index=all_revs.index(default_rev))
 
-st.caption(f"Auto-selected latest run: **revision={rev} · country={country_disp} · stamp={stamp}{extra}**")
-# Build folder path and a Console URL
-prefix_path = f"robyn/{rev}/{country}/{stamp}/"          # keep actual case used in GCS
+# Countries that have this revision
+rev_countries = sorted({k[1] for k in runs.keys() if k[0] == rev})
+# Default country = the country of the latest run within this revision
+latest_in_rev = sorted(
+    [k for k in runs.keys() if k[0] == rev],
+    key=lambda k: parse_stamp(k[2]),
+    reverse=True,
+)[0]
 
-gcs_url = f"https://console.cloud.google.com/storage/browser/{bucket_name}/{quote(prefix_path)}"
+default_country_in_rev = latest_in_rev[1]
 
-# Clickable path that opens in a new tab
-st.markdown(
-    f'**Path:** <a href="{gcs_url}" target="_blank">gs://{bucket_name}/{prefix_path}</a>',
-    unsafe_allow_html=True,
+countries_sel = st.multiselect(
+    "Countries (latest run per selected country will be shown)",
+    rev_countries,
+    default=[default_country_in_rev],
 )
 
-# ---------- Inline displays ----------
-col1, col2 = st.columns([2, 1])
+if not countries_sel:
+    st.info("Select at least one country.")
+    st.stop()
 
-with col1:
-    st.subheader("📈 Allocator plot")
-    # Match any .../allocator_*.png (subfolders included)
-    alloc_pngs = find_all(selected, r"(?:^|/)allocator_.*\.png$")
-    if alloc_pngs:
-        for b in alloc_pngs:
-            st.image(download_bytes(b), caption=os.path.basename(b.name), use_container_width=True)
-    else:
-        st.info("No allocator PNG found (expecting `allocator_*.png`).")
 
-    st.subheader("🧾 Onepager")
+# Main renderer to avoid copy/paste and ensure unique keys
+def render_run_for_country(bucket_name: str, rev: str, country: str):
+    # Pick latest stamp for this (rev,country)
+    try:
+        key = sorted(
+            [k for k in runs.keys() if k[0] == rev and k[1] == country],
+            key=lambda k: parse_stamp(k[2]),
+            reverse=True,
+        )[0]
+    except IndexError:
+        st.warning(f"No runs found for {rev}/{country}.")
+        return
 
+    _, _, stamp = key
+    blobs = runs[key]
+    best_id, iters, trials = parse_best_meta(blobs)
+
+    country_disp = country.upper()
+    meta_bits = []
+    if iters is not None:
+        meta_bits.append(f"iterations={iters}")
+    if trials is not None:
+        meta_bits.append(f"trials={trials}")
+    meta_str = (" · " + " · ".join(meta_bits)) if meta_bits else ""
+
+    st.markdown(f"### {country_disp} — latest: `{stamp}`{meta_str}")
+
+    # Link to the run folder in Cloud Console
+    prefix_path = f"robyn/{rev}/{country}/{stamp}/"
+    gcs_url = gcs_console_url(bucket_name, prefix_path)
+    st.markdown(
+        (
+            f"**Path:** <a href=\"{gcs_url}\" target=\"_blank\">"
+            f"gs://{bucket_name}/{prefix_path}</a>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+    # Show best model ID if available
     if best_id:
-        op_blob = find_onepager_blob(selected, best_id)
-        if op_blob:
-            name = os.path.basename(op_blob.name)
-            data = download_bytes(op_blob)
-            if name.lower().endswith(".png"):
-                st.image(data, caption="onepager", use_container_width=True)
-                st.download_button("Download onepager", data=data, file_name=name, mime="image/png",
-                                   key=blob_key("dl_onepager_png", op_blob.name))
-            else:
-                st.info("Onepager is a PDF.")
-                st.download_button("Download onepager", data=data, file_name=name, mime="application/pdf",
-                                   key=blob_key("dl_onepager_pdf", op_blob.name))
-        else:
-            st.warning(f"No onepager found for best model id '{best_id}' (expected {best_id}.png or .pdf).")
-    else:
-        st.warning("best_model_id.txt not found; cannot locate onepager.")
+        st.info(f"**Best Model ID:** {best_id}")
 
-with col2:
-    st.subheader("📊 Allocator metrics")
-    metrics_csv = find_blob(selected, "/allocator_metrics.csv")
-    metrics_txt = find_blob(selected, "/allocator_metrics.txt")
-    if metrics_csv:
-        df = pd.read_csv(io.BytesIO(download_bytes(metrics_csv)))
-        st.dataframe(df, use_container_width=True)
-        url = try_signed_url(metrics_csv)
-        if url:
-            st.markdown(f"⬇️ [Download {os.path.basename(metrics_csv.name)}]({url})")
-        else:
-            st.download_button("Download allocator_metrics.csv",
-                               data=download_bytes(metrics_csv),
-                               file_name="allocator_metrics.csv",
-                               mime="text/csv",
-                               key=blob_key("dl_metrics_csv", metrics_csv.name))
-    elif metrics_txt:
-        raw = download_bytes(metrics_txt).decode("utf-8", errors="ignore")
-        rows = []
-        for line in raw.splitlines():
-            if ":" in line:
-                k, v = line.split(":", 1)
-                rows.append({"metric": k.strip(), "value": v.strip()})
-        if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
-        else:
-            st.code(raw)
-        url = try_signed_url(metrics_txt)
-        if url:
-            st.markdown(f"⬇️ [Download {os.path.basename(metrics_txt.name)}]({url})")
-        else:
-            st.download_button("Download allocator_metrics.txt",
-                               data=raw.encode("utf-8"),
-                               file_name="allocator_metrics.txt",
-                               mime="text/plain",
-                               key=blob_key("dl_metrics_txt", metrics_txt.name))
-    else:
-        st.info("No allocator metrics found (allocator_metrics.csv/txt).")
+    # Render each section with unique context
+    render_metrics_section(blobs, country, stamp)
+    render_allocator_section(blobs, country, stamp)
+    render_onepager_section(blobs, best_id, country, stamp)
+    render_all_files_section(blobs, bucket_name, country, stamp)
 
-st.divider()
-st.subheader("📁 All files in this run")
-for b in sorted(selected, key=lambda x: x.name):
-    fn = os.path.basename(b.name)
-    url = try_signed_url(b)
-    with st.container(border=True):
-        st.write(f"`{fn}` — {b.size:,} bytes")
-        if url:
-            st.markdown(f"[Open / Download (signed URL)]({url})")
-        else:
-            mime = "application/octet-stream"
-            if fn.lower().endswith(".csv"): mime = "text/csv"
-            elif fn.lower().endswith(".txt"): mime = "text/plain"
-            elif fn.lower().endswith(".png"): mime = "image/png"
-            elif fn.lower().endswith(".pdf"): mime = "application/pdf"
-            st.download_button(
-                f"Download {fn}",
-                data=download_bytes(b),
-                file_name=fn,
-                mime=mime,
-                key=blob_key("dl_any", b.name),
-            )
+
+# ---- Render each selected country's latest run for this revision ----
+st.markdown(f"## Detailed View — revision `{rev}`")
+for c in countries_sel:
+    with st.container():
+        render_run_for_country(bucket_name, rev, c)
+        st.divider()

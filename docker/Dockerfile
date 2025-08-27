@@ -29,6 +29,7 @@ RUN mkdir -p /root/.cache/R/reticulate/uv/bin \
 ENV RETICULATE_PYTHON=/usr/bin/python3
 ENV RETICULATE_AUTOCONFIGURE=0
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+#ENV RSPM=
 
 # Build-time sanity check: fail the build if imports don’t work
 RUN python3 - <<'PY'
@@ -45,17 +46,31 @@ RUN R -q -e "options(Ncpus=parallel::detectCores()); \
     repos='https://cloud.r-project.org'); \
     install.packages('nloptr', repos='https://cloud.r-project.org', type='source')"
 
+# Make sure ggplot2 is new enough; then install patchwork v1.3.1
 RUN R -q -e "options(Ncpus=parallel::detectCores()); \
-    if (!requireNamespace('patchwork', quietly=TRUE) || \
-    utils::packageVersion('patchwork') < '1.3.1') { \
-    remotes::install_github('thomasp85/patchwork', upgrade='never'); \
+    repos <- c(CRAN='https://cloud.r-project.org'); \
+    if (!requireNamespace('ggplot2', quietly=TRUE) || utils::packageVersion('ggplot2') < '3.5.1') { \
+    install.packages('ggplot2', repos=repos); \
     }; \
-    cat('patchwork version:', as.character(utils::packageVersion('patchwork')), '\n')"
+    if (!requireNamespace('patchwork', quietly=TRUE) || utils::packageVersion('patchwork') < '1.3.1') { \
+    remotes::install_github('thomasp85/patchwork@v1.3.1', upgrade='never', dependencies=TRUE); \
+    }; \
+    stopifnot(utils::packageVersion('ggplot2') >= '3.5.1'); \
+    stopifnot(utils::packageVersion('patchwork') >= '1.3.1'); \
+    cat('ggplot2:', as.character(utils::packageVersion('ggplot2')), \
+    ' patchwork:', as.character(utils::packageVersion('patchwork')),'\n')"
+
+#RUN R -q -e "options(Ncpus=parallel::detectCores()); \
+#    if (!requireNamespace('patchwork', quietly=TRUE) || \
+#    utils::packageVersion('patchwork') < '1.3.1') { \
+#    remotes::install_github('thomasp85/patchwork', upgrade='never'); \
+#    }; \
+#    cat('patchwork version:', as.character(utils::packageVersion('patchwork')), '\n')"
 
 # R base deps + nloptr first
-RUN R -q -e "options(Ncpus=parallel::detectCores()); \
-    install.packages(c('jsonlite','dplyr','tidyr','lubridate','readr','stringr','googleCloudStorageR','mime','reticulate','remotes','prophet'), repos='https://cloud.r-project.org'); \
-    install.packages('nloptr', repos='https://cloud.r-project.org', type='source')"
+#RUN R -q -e "options(Ncpus=parallel::detectCores()); \
+#    install.packages(c('jsonlite','dplyr','tidyr','lubridate','readr','stringr','googleCloudStorageR','mime','reticulate','remotes','prophet'), repos='https://cloud.r-project.org'); \
+#    install.packages('nloptr', repos='https://cloud.r-project.org', type='source')"
 
 # Robyn from GitHub (avoid Suggests to keep it light)
 RUN R -q -e "options(Ncpus=parallel::detectCores()); \
