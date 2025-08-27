@@ -52,6 +52,21 @@ resource "google_storage_bucket_iam_member" "runtime_sa_object_admin" {
   member = "serviceAccount:${google_service_account.runner.email}"
 }
 
+# Allow the runtime SA to mint signing tokens for itself (needed for V4 signed URLs)
+resource "google_service_account_iam_member" "runner_token_creator" {
+  service_account_id = google_service_account.runner.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.runner.email}"
+}
+
+# (Recommended) make sure the IAM Credentials API is enabled
+resource "google_project_service" "iamcredentials" {
+  project            = var.project_id
+  service            = "iamcredentials.googleapis.com"
+  disable_on_destroy = false
+}
+
+
 resource "google_project_service" "run" {
   project            = var.project_id
   service            = "run.googleapis.com"

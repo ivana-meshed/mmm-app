@@ -18,6 +18,12 @@ def gcs_client():
 
 client = gcs_client()
 
+# ---------- Cached bytes loader (prevents 'file not available on site') ----------
+@st.cache_data(show_spinner=False, max_entries=512, ttl=3600)
+def load_blob_bytes_cached(bucket_name: str, blob_name: str) -> bytes:
+    bkt = client.bucket(bucket_name)
+    return bkt.blob(blob_name).download_as_bytes()
+
 # ---------- Helpers ----------
 
 def gcs_console_url(bucket: str, prefix: str) -> str:
@@ -36,7 +42,6 @@ def list_blobs(bucket_name: str, prefix: str):
     except Exception as e:
         st.error(f"❌ Failed to list gs://{bucket_name}/{prefix} — {e}")
         return []
-
 
 def parse_path(name: str):
     # Expected: robyn/<rev>/<country>/<stamp>/file...
@@ -61,62 +66,13 @@ def parse_stamp(stamp: str):
         return datetime.datetime.strptime(stamp, "%m%d_%H%M%S")
     except Exception:
         return stamp  # lexical
+
 def parse_rev_key(rev: str):
     # numeric-aware sort key: ("is_non_numeric", value)
     m = re.search(r'(\d+)$', (rev or '').strip())
     if m:
         return (0, int(m.group(1)))   # numeric revs sort before non-numeric
     return (1, (rev or '').lower())   # fallback: lexical
-
-    
-def parse_best_meta(blobs):
-    """Return (best_id, iterations, trials) from best_model_id.txt if present."""
-    b = find_blob(blobs, "/best_model_id.txt") or find_blob(blobs, "best_model_id.txt")
-    best_id, iters, trials = None, None, None
-    if not b:
-        return best_id, iters, trials
-    txt = read_text_blob(b)
-    lines = [ln.strip() for ln in txt.splitlines() if ln.strip()]
-    if lines:
-        best_id = lines[0].split()[0]
-    for ln in lines[1:]:
-        m = re.search(r"Iterations:\s*(\d+)", ln, re.I)
-        if m: iters = int(m.group(1))
-        m = re.search(r"Trials:\s*(\d+)", ln, re.I)
-        if m: trials = int(m.group(1))
-    return best_id, iters, trials
-
-def latest_run_key(runs, rev_filter=None, country_filter=None):
-    keys = list(runs.keys())
-    if rev_filter:
-        keys = [k for k in keys if k[0] == rev_filter]
-    if country_filter:
-        keys = [k for k in keys if k[1] == country_filter]
-    if not keys:
-        return None
-    keys.sort(key=lambda k: parse_stamp(k[2]), reverse=True)
-    return keys[0]
-
-def latest_stamp_for_country(runs, rev, country):
-    # Return latest (rev,country,stamp) or None
-    keys = [k for k in runs.keys() if k[0] == rev and k[1] == country]
-    if not keys:
-        return None
-    keys.sort(key=lambda k: parse_stamp(k[2]), reverse=True)
-    return keys[0]
-
-def try_signed_url(blob, minutes=60):
-    try:
-        return blob.generate_signed_url(
-            version="v4",
-            expiration=datetime.timedelta(minutes=minutes),
-            method="GET",
-        )
-    except Exception:
-        return None
-
-def download_bytes(blob):
-    return blob.download_as_bytes()
 
 def read_text_blob(blob) -> str:
     return blob.download_as_bytes().decode("utf-8", errors="replace")
@@ -151,6 +107,27 @@ def parse_best_meta(blobs):
         if m: trials = int(m.group(1))
     return best_id, iters, trials
 
+def latest_run_key(runs, rev_filter=None, country_filter=None):
+    keys = list(runs.keys())
+    if rev_filter:
+        keys = [k for k in keys if k[0] == rev_filter]
+    if country_filter:
+        keys = [k for k in keys if k[1] == country_filter]
+    if not keys:
+        return None
+    keys.sort(key=lambda k: parse_stamp(k[2]), reverse=True)
+    return keys[0]
+
+def try_signed_url(blob, minutes=60):
+    try:
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=datetime.timedelta(minutes=minutes),
+            method="GET",
+        )
+    except Exception:
+        return None
+
 def find_onepager_blob(blobs, best_id: str):
     # Prefer {id}.png, fallback {id}.pdf anywhere in the run
     for ext in (".png", ".pdf"):
@@ -166,13 +143,13 @@ with st.sidebar:
     bucket_name = st.text_input("GCS bucket", value=DEFAULT_BUCKET)
     prefix = st.text_input("Root prefix", value=DEFAULT_PREFIX, help="Usually 'robyn/' or narrower like 'robyn/r100/'")
 
-    # NEW: make sure prefix ends with a slash (GCS treats prefixes literally)
+    # ensure prefix ends with a slash
     if prefix and not prefix.endswith("/"):
         prefix = prefix + "/"
 
     do_scan = st.button("🔄 Refresh listing")
 
-    # NEW: quick IAM/permission self-test
+    # Quick IAM/permission self-test
     if st.button("Run storage self-test"):
         try:
             test_blobs = list_blobs(bucket_name, prefix)
@@ -185,7 +162,6 @@ with st.sidebar:
                 st.info("Listing returned 0 objects. If you expect data here, check the bucket/prefix and IAM.")
         except Exception as e:
             st.error(f"Download failed (likely missing storage.objects.get): {e}")
-
 
 # Cache & refresh
 if do_scan or "runs_cache" not in st.session_state or \
@@ -222,7 +198,7 @@ rev = st.selectbox("Revision", all_revs, index=all_revs.index(default_rev))
 
 # Countries that have this revision
 rev_countries = sorted({k[1] for k in runs.keys() if k[0] == rev})
-# Default country = the country of the latest run within this revision
+# Default = country of latest run within this revision
 latest_in_rev = sorted([k for k in runs.keys() if k[0] == rev],
                        key=lambda k: parse_stamp(k[2]),
                        reverse=True)[0]
@@ -238,9 +214,9 @@ if not countries_sel:
     st.info("Select at least one country.")
     st.stop()
 
-# Small renderer to avoid copy/paste and ensure unique keys
+# ---------- Renderer per country ----------
 def render_run_for_country(bucket_name: str, rev: str, country: str):
-    # Pick latest stamp for this (rev,country)
+    # latest stamp for (rev, country)
     try:
         key = sorted(
             [k for k in runs.keys() if k[0] == rev and k[1] == country],
@@ -263,7 +239,7 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
 
     st.markdown(f"### {country_disp} — latest: `{stamp}`{meta_str}")
 
-    # Link to the run folder in Cloud Console
+    # Link to run folder in Console
     prefix_path = f"robyn/{rev}/{country}/{stamp}/"
     gcs_url = gcs_console_url(bucket_name, prefix_path)
     st.markdown(
@@ -277,23 +253,23 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
     metrics_txt = find_blob(blobs, "/allocator_metrics.txt")
     if metrics_csv:
         fn = os.path.basename(metrics_csv.name)
-        # Preview table (best effort)
+        # Preview table
         try:
-            df = pd.read_csv(io.BytesIO(download_bytes(metrics_csv)))
+            df = pd.read_csv(io.BytesIO(load_blob_bytes_cached(bucket_name, metrics_csv.name)))
             st.dataframe(df, use_container_width=True)
         except Exception as e:
             st.warning(f"Couldn't preview `{fn}` as a table: {e}")
 
-        # Signed URL (nice-to-have)
+        # Signed URL
         url = try_signed_url(metrics_csv)
         if url:
             st.markdown(f"⬇️ [Open {fn} (signed URL)]({url})")
 
-        # Guaranteed fallback: stream bytes from server
+        # Fallback: bytes
         try:
             st.download_button(
                 f"Download {fn}",
-                data=download_bytes(metrics_csv),
+                data=load_blob_bytes_cached(bucket_name, metrics_csv.name),
                 file_name=fn,
                 mime="text/csv",
                 key=blob_key(f"dl_metrics_csv_{country}_{stamp}", metrics_csv.name),
@@ -303,9 +279,10 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
 
     elif metrics_txt:
         fn = os.path.basename(metrics_txt.name)
-        # Try to render as key/value table
+        raw = None
+        # Try to render key/value table
         try:
-            raw = download_bytes(metrics_txt).decode("utf-8", errors="ignore")
+            raw = load_blob_bytes_cached(bucket_name, metrics_txt.name).decode("utf-8", errors="ignore")
             rows = []
             for line in raw.splitlines():
                 if ":" in line:
@@ -318,16 +295,16 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
         except Exception as e:
             st.warning(f"Couldn't preview `{fn}`: {e}")
 
-        # Signed URL (nice-to-have)
+        # Signed URL
         url = try_signed_url(metrics_txt)
         if url:
             st.markdown(f"⬇️ [Open {fn} (signed URL)]({url})")
 
-        # Guaranteed fallback
+        # Fallback
         try:
             st.download_button(
                 f"Download {fn}",
-                data=(raw.encode("utf-8") if 'raw' in locals() else download_bytes(metrics_txt)),
+                data=(raw.encode("utf-8") if isinstance(raw, str) else load_blob_bytes_cached(bucket_name, metrics_txt.name)),
                 file_name=fn,
                 mime="text/plain",
                 key=blob_key(f"dl_metrics_txt_{country}_{stamp}", metrics_txt.name),
@@ -343,7 +320,7 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
     if alloc_pngs:
         for b in alloc_pngs:
             try:
-                st.image(download_bytes(b),
+                st.image(load_blob_bytes_cached(bucket_name, b.name),
                          caption=os.path.basename(b.name),
                          use_container_width=True)
             except Exception as e:
@@ -362,22 +339,23 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
             # Preview inline for PNG
             if lower.endswith(".png"):
                 try:
-                    st.image(download_bytes(op_blob), caption="onepager", use_container_width=True)
+                    st.image(load_blob_bytes_cached(bucket_name, op_blob.name),
+                             caption="onepager", use_container_width=True)
                 except Exception as e:
                     st.warning(f"Couldn't preview `{name}`: {e}")
             elif lower.endswith(".pdf"):
                 st.info("Onepager available as PDF.")
 
-            # Signed URL (nice-to-have)
+            # Signed URL
             url = try_signed_url(op_blob)
             if url:
                 st.markdown(f"⬇️ [Open {name} (signed URL)]({url})")
 
-            # Guaranteed fallback: stream bytes
+            # Fallback: bytes
             try:
                 st.download_button(
                     "Download onepager",
-                    data=download_bytes(op_blob),
+                    data=load_blob_bytes_cached(bucket_name, op_blob.name),
                     file_name=name,
                     mime=("image/png" if lower.endswith(".png") else "application/pdf"),
                     key=blob_key(f"dl_onepager_any_{country}_{stamp}", op_blob.name),
@@ -407,7 +385,7 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
                 try:
                     st.download_button(
                         f"Download {fn}",
-                        data=download_bytes(b),
+                        data=load_blob_bytes_cached(bucket_name, b.name),
                         file_name=fn,
                         mime=mime,
                         key=blob_key(f"dl_any_{country}_{stamp}", b.name),
