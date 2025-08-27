@@ -14,6 +14,8 @@ PROVIDER_ID="github-oidc"
 REPO="ivana-meshed/mmm-app"
 SA_EMAIL="gh-actions-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
 
+RUNTIME_SA=mmm-trainer-sa@${PROJECT_ID}.iam.gserviceaccount.com      # Cloud Run runtime SA
+
 #############################################################################
 PROJECT_ID="datawarehouse-422511"
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
@@ -23,6 +25,7 @@ PROVIDER="github-oidc"
 REPO="ivana-meshed/mmm-app"   # org/repo
 DEPLOYER_SA_ID="github-deployer"
 DEPLOYER_SA="${DEPLOYER_SA_ID}@${PROJECT_ID}.iam.gserviceaccount.com"
+RUNTIME_SA=mmm-trainer-sa@${PROJECT_ID}.iam.gserviceaccount.com      # Cloud Run runtime SA
 
 # Pool
 gcloud iam workload-identity-pools describe "$POOL" --location=global \
