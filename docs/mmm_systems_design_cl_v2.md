@@ -1251,7 +1251,7 @@ gantt
     section Container Lifecycle
     Cold Start           :crit, cold, 0, 2
     Dependency Loading   :active, deps, 2, 5
-    Ready to Process     :milestone, ready, 5
+    Ready to Process     :milestone, ready, 5, 5
     
     section Data Processing
     Snowflake Query      :done, sf_query, 5, 8
@@ -1272,6 +1272,7 @@ gantt
     section Bottlenecks
     Python/R Bridge    :crit, bridge, 17, 45
     Sequential Processing :crit, seq, 17, 58
+
 ```
 
 **Resource Utilization Issues**
