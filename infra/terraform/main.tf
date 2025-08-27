@@ -32,13 +32,18 @@ resource "google_project_iam_member" "sa_ar_reader" {
   role    = "roles/artifactregistry.reader"
   member  = "serviceAccount:${var.deployer_sa}" #member  = "serviceAccount:${google_service_account.runner.email}"
 }
-
+resource "google_project_iam_member" "mmm_sa_ar_reader" {
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${google_service_account.runner.email}"
+}
 # Allow the SA to write to your bucket (bucket must already exist)
 resource "google_storage_bucket_iam_member" "sa_writer" {
   bucket = var.bucket_name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${var.deployer_sa}" #"serviceAccount:${google_service_account.runner.email}"
 }
+
 
 resource "google_storage_bucket_iam_member" "runtime_sa_object_creator" {
   bucket = var.bucket_name
