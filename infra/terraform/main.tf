@@ -98,90 +98,71 @@ resource "google_cloud_run_service" "svc" {
   template {
     metadata {
       annotations = {
-        # Enable CPU allocation during request processing only
         "run.googleapis.com/cpu-throttling" = "false"
-        # Set minimum instances for pre-warming (see section 3)
-        "run.googleapis.com/min-instances" = "2"
-        # Set maximum instances for scaling
-        "run.googleapis.com/max-instances" = "10"
+        # NEW: Pre-warming configuration
+        "run.googleapis.com/min-instances" = var.min_instances
+        "run.googleapis.com/max-instances" = var.max_instances
+        # Allocate CPU during startup for warming
+        "run.googleapis.com/cpu-throttling" = "false"
+        # Increase startup timeout for warming
+        "run.googleapis.com/timeout" = "600s"
       }
     }
 
     spec {
       service_account_name  = google_service_account.runner.email
-      container_concurrency = 1    # Keep at 1 for resource-intensive training
-      timeout_seconds       = 3600 # 1 hour timeout
+      container_concurrency = 1
+      timeout_seconds       = 3600
 
       containers {
         image = var.image
 
-        # UPGRADED RESOURCE ALLOCATION
         resources {
           limits = {
-            cpu    = "8"    # ⬆️ Increased from "4"
-            memory = "32Gi" # ⬆️ Increased from "16Gi"
+            cpu    = var.cpu_limit
+            memory = var.memory_limit
           }
           requests = {
-            cpu    = "4"    # Minimum guaranteed CPU
-            memory = "16Gi" # Minimum guaranteed memory
+            cpu    = "2"   # Minimum for warming
+            memory = "8Gi" # Minimum for warming
           }
         }
 
-        # Startup probe with longer timeout for heavy containers
+        # NEW: Extended startup probe for warming
         startup_probe {
-          tcp_socket { port = 8080 }
-          period_seconds        = 30 # Check every 30 seconds
-          timeout_seconds       = 10 # Wait 10 seconds per check
-          failure_threshold     = 20 # Allow up to 10 minutes for startup
-          initial_delay_seconds = 30 # Wait 30 seconds before first check
+          http_get {
+            path = "/health" # Our health endpoint
+            port = 8080
+          }
+          period_seconds        = 15 # Check every 15 seconds
+          timeout_seconds       = 10 # 10 seconds per check
+          failure_threshold     = 30 # Allow up to 7.5 minutes for warmup
+          initial_delay_seconds = 10 # Wait 10 seconds before first check
         }
 
         # Liveness probe for running containers
         liveness_probe {
           http_get {
-            path = "/health" # We'll implement this endpoint
+            path = "/health"
             port = 8080
           }
-          period_seconds    = 60
-          timeout_seconds   = 30
-          failure_threshold = 3
+          period_seconds        = 60
+          timeout_seconds       = 10
+          failure_threshold     = 3
+          initial_delay_seconds = 120 # Wait 2 minutes after startup
+        }
+
+        # ... [existing environment variables] ...
+
+        # NEW: Warming configuration
+        env {
+          name  = "ENABLE_WARMING"
+          value = "true"
         }
 
         env {
-          name  = "GCS_BUCKET"
-          value = var.bucket_name
-        }
-
-        env {
-          name  = "APP_ROOT"
-          value = "/app"
-        }
-
-        env {
-          name  = "RUN_SERVICE_ACCOUNT_EMAIL"
-          value = google_service_account.runner.email
-        }
-
-        # NEW: Performance optimization flags
-        env {
-          name  = "R_MAX_CORES"
-          value = "8" # Use all available CPU cores
-        }
-
-        env {
-          name  = "OPENBLAS_NUM_THREADS"
-          value = "8" # Optimize BLAS operations
-        }
-
-        env {
-          name  = "OMP_NUM_THREADS"
-          value = "8" # OpenMP parallelization
-        }
-
-        # Enable parallel processing in Python
-        env {
-          name  = "PYTHONUNBUFFERED"
-          value = "1"
+          name  = "WARMING_TIMEOUT"
+          value = "300" # 5 minutes
         }
       }
     }
@@ -199,6 +180,40 @@ resource "google_cloud_run_service" "svc" {
     google_project_iam_member.sa_ar_reader,
   ]
 }
+
+# NEW: Cloud Scheduler job for keeping instances warm
+resource "google_cloud_scheduler_job" "warmup_job" {
+  name             = "mmm-warmup-job"
+  description      = "Keep MMM trainer instances warm"
+  schedule         = "*/5 * * * *" # Every 5 minutes
+  time_zone        = "Europe/London"
+  attempt_deadline = "60s"
+
+  retry_config {
+    retry_count = 1
+  }
+
+  http_target {
+    http_method = "GET"
+    uri         = "${google_cloud_run_service.svc.status[0].url}/health"
+
+    headers = {
+      "User-Agent" = "Cloud-Scheduler-Warmup"
+    }
+  }
+
+  depends_on = [
+    google_cloud_run_service.svc
+  ]
+}
+
+# Enable Cloud Scheduler API
+resource "google_project_service" "scheduler" {
+  project            = var.project_id
+  service            = "cloudscheduler.googleapis.com"
+  disable_on_destroy = false
+}
+
 # Add autoscaling configuration
 resource "google_cloud_run_service_iam_member" "autoscaling_admin" {
   location = google_cloud_run_service.svc.location

@@ -86,14 +86,56 @@ WORKDIR /app
 COPY app/ /app/
 COPY r/   /app/r/
 COPY requirements.txt /app/
+
+# NEW: Make warming script executable
+RUN chmod +x /app/warm_container.py
+
 ENV APP_ROOT=/app
 
-# Cloud Run will inject PORT. Default to 8080 for local runs.
-ENV PORT=8080
+# NEW: Create warming entrypoint script
 
-# Expose for local testing
+# Ensure LF endings (use dos2unix on Windows checkouts)
+
+RUN set -Eeuo pipefail; \
+    cat >/app/entrypoint.sh <<'EOF' \
+    && chmod +x /app/entrypoint.sh
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+echo "🚀 Starting MMM Trainer container..."
+
+if [[ "${WARMUP_ONLY:-}" == "true" ]]; then
+  echo "🔥 Running warmup only..."
+  python3 /app/warm_container.py
+  exit 0
+fi
+
+echo "🔥 Warming container..."
+python3 /app/warm_container.py &
+WARMUP_PID=$!
+
+echo "🌐 Starting Streamlit application..."
+test -f streamlit_app.py || { echo 'Missing /app/streamlit_app.py'; ls -la; exit 1; }
+
+python3 -m streamlit run streamlit_app.py \
+  --server.address=0.0.0.0 \
+  --server.port="${PORT:-8080}" &
+STREAMLIT_PID=$!
+
+if wait "$WARMUP_PID"; then
+  echo "✅ Container warming completed successfully"
+else
+  echo "⚠️ Container warming completed with issues"
+fi
+
+wait "$STREAMLIT_PID"
+EOF
+
+ENV PORT=8080
 EXPOSE 8080
+CMD ["/app/entrypoint.sh"]
+
 
 # ✅ Use a shell entry so $PORT expands; bind to 0.0.0.0
 # Also fail fast if the app file is missing.
-CMD ["bash","-lc","test -f streamlit_app.py || { echo 'Missing /app/streamlit_app.py'; ls -la; exit 1; }; python3 -m streamlit run streamlit_app.py --server.address=0.0.0.0 --server.port=${PORT}"]
+#CMD ["bash","-lc","test -f streamlit_app.py || { echo 'Missing /app/streamlit_app.py'; ls -la; exit 1; }; python3 -m streamlit run streamlit_app.py --server.address=0.0.0.0 --server.port=${PORT}"]
