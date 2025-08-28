@@ -105,16 +105,16 @@ resource "google_cloud_run_service" "svc" {
         "run.googleapis.com/min-instances"  = var.min_instances
         "run.googleapis.com/max-instances"  = var.max_instances
         # Add session affinity to reduce rate limiting
-        "run.googleapis.com/sessionAffinity" = "true"
+        #"run.googleapis.com/sessionAffinity" = "true"
         # Increase timeout
         "run.googleapis.com/timeout" = "3600s"
       }
     }
 
     spec {
-      service_account_name  = google_service_account.runner.email
-      container_concurrency = 1 # Important: Keep at 1 for training jobs
-      timeout_seconds       = 3600
+      service_account_name = google_service_account.runner.email
+      #container_concurrency = 1 # Important: Keep at 1 for training jobs
+      timeout_seconds = 3600
 
       containers {
         image = var.image
@@ -133,7 +133,7 @@ resource "google_cloud_run_service" "svc" {
         # Improved startup probe
         startup_probe {
           http_get {
-            path = "/" # Use root path instead of /health for now
+            path = "/health"
             port = 8080
           }
           period_seconds        = 10
@@ -145,7 +145,7 @@ resource "google_cloud_run_service" "svc" {
         # Liveness probe
         liveness_probe {
           http_get {
-            path = "/"
+            path = "/health"
             port = 8080
           }
           period_seconds        = 60
