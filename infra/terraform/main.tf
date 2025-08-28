@@ -113,7 +113,7 @@ resource "google_cloud_run_service" "svc" {
 
     spec {
       service_account_name  = google_service_account.runner.email
-      container_concurrency = 16 # Important: Keep at 1 for training jobs
+      container_concurrency = 64 # Important: Keep at 1 for training jobs
       timeout_seconds       = 3600
 
       containers {
@@ -133,7 +133,7 @@ resource "google_cloud_run_service" "svc" {
         # Improved startup probe
         startup_probe {
           http_get {
-            path = "/health"
+            path = "/_stcore/health"
             port = 8080
           }
           period_seconds        = 10
@@ -145,7 +145,7 @@ resource "google_cloud_run_service" "svc" {
         # Liveness probe
         liveness_probe {
           http_get {
-            path = "/health"
+            path = "/_stcore/health"
             port = 8080
           }
           period_seconds        = 60
