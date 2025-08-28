@@ -112,9 +112,9 @@ resource "google_cloud_run_service" "svc" {
     }
 
     spec {
-      service_account_name = google_service_account.runner.email
-      #container_concurrency = 1 # Important: Keep at 1 for training jobs
-      timeout_seconds = 3600
+      service_account_name  = google_service_account.runner.email
+      container_concurrency = 16 # Important: Keep at 1 for training jobs
+      timeout_seconds       = 3600
 
       containers {
         image = var.image
