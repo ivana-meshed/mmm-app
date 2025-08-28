@@ -34,6 +34,9 @@ tmp/
 temp/
 *.tmp
 
+*.pdf
+docs/*.png
+
 # Credentials (never commit!)
 *service*account*.json
 *sa-key*.json
