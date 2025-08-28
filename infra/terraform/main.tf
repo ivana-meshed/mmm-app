@@ -181,7 +181,21 @@ resource "google_cloud_run_service" "svc" {
   ]
 }
 
-# NEW: Cloud Scheduler job for keeping instances warm
+# Add Cloud Scheduler permissions for the deployer SA
+resource "google_project_iam_member" "deployer_scheduler_admin" {
+  project = var.project_id
+  role    = "roles/cloudscheduler.admin"
+  member  = "serviceAccount:${var.deployer_sa}"
+}
+
+# Make sure the Cloud Scheduler API is enabled BEFORE creating jobs
+resource "google_project_service" "scheduler" {
+  project            = var.project_id
+  service            = "cloudscheduler.googleapis.com"
+  disable_on_destroy = false
+}
+
+# Update the scheduler job to depend on the API and permissions
 resource "google_cloud_scheduler_job" "warmup_job" {
   name             = "mmm-warmup-job"
   description      = "Keep MMM trainer instances warm"
@@ -203,15 +217,10 @@ resource "google_cloud_scheduler_job" "warmup_job" {
   }
 
   depends_on = [
-    google_cloud_run_service.svc
+    google_cloud_run_service.svc,
+    google_project_service.scheduler,
+    google_project_iam_member.deployer_scheduler_admin # Wait for permissions
   ]
-}
-
-# Enable Cloud Scheduler API
-resource "google_project_service" "scheduler" {
-  project            = var.project_id
-  service            = "cloudscheduler.googleapis.com"
-  disable_on_destroy = false
 }
 
 # Add autoscaling configuration
