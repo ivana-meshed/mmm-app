@@ -2,12 +2,20 @@ import json, os, subprocess, tempfile, time, shlex
 import streamlit as st
 import pandas as pd
 import snowflake.connector as sf
+from data_processor import DataProcessor  # NEW: Import our data processor
 
 st.set_page_config(page_title="Robyn MMM Trainer", layout="wide")
 st.title("Robyn MMM Trainer")
 
 APP_ROOT = os.environ.get("APP_ROOT", "/app")
 RSCRIPT  = os.path.join(APP_ROOT, "r", "run_all.R")   # expect /app/r/run_all.R inside the container
+
+# NEW: Initialize data processor
+@st.cache_resource
+def get_data_processor():
+    return DataProcessor()
+
+data_processor = get_data_processor()
 
 # --- Snowflake params
 with st.expander("Snowflake connection"):
@@ -104,28 +112,29 @@ if st.button("Test connection & preview 5 rows"):
         except Exception as e:
             st.error(f"Preview failed: {e}")
 
-def build_job_json(tmp_dir, csv_path=None, annotations_path=None):
+def build_job_json(tmp_dir, csv_path=None, parquet_path=None, annotations_path=None):
+    """Updated to support both CSV and Parquet paths"""
     job = {
         "country": country,
         "iterations": int(iterations),
         "trials": int(trials),
-        "train_size": parse_train_size(train_size),  # [start, end]
+        "train_size": parse_train_size(train_size),
         "revision": revision,
         "date_input": date_input,
         "gcs_bucket": gcs_bucket,
-        # We pass data via CSV; still include metadata for provenance
         "table": table,
         "query": query,
-        "csv_path": csv_path,                 # <-- R will prefer this
+        # NEW: Support both formats
+        "csv_path": csv_path,
+        "parquet_path": parquet_path,  # NEW: Parquet path for faster loading
         "paid_media_spends": [s.strip() for s in paid_media_spends.split(",") if s.strip()],
-        "paid_media_vars":   [s.strip() for s in paid_media_vars.split(",") if s.strip()],
-        "context_vars":      [s.strip() for s in context_vars.split(",") if s.strip()],
-        "factor_vars":       [s.strip() for s in factor_vars.split(",") if s.strip()],
-        "organic_vars":      [s.strip() for s in organic_vars.split(",") if s.strip()],
-        # Keep Snowflake block (no password) just for traceability / fallback
+        "paid_media_vars": [s.strip() for s in paid_media_vars.split(",") if s.strip()],
+        "context_vars": [s.strip() for s in context_vars.split(",") if s.strip()],
+        "factor_vars": [s.strip() for s in factor_vars.split(",") if s.strip()],
+        "organic_vars": [s.strip() for s in organic_vars.split(",") if s.strip()],
         "snowflake": {
             "user": sf_user,
-            "password": None,  # do NOT write the password to disk
+            "password": None,
             "account": sf_account,
             "warehouse": sf_wh,
             "database": sf_db,
@@ -133,7 +142,10 @@ def build_job_json(tmp_dir, csv_path=None, annotations_path=None):
             "role": sf_role
         },
         "annotations_csv": annotations_path,
-        "cache_snapshot": True
+        "cache_snapshot": True,
+        # NEW: Performance flags
+        "use_parquet": True,
+        "parallel_processing": True
     }
     job_path = os.path.join(tmp_dir, "job.json")
     with open(job_path, "w") as f:
@@ -142,13 +154,15 @@ def build_job_json(tmp_dir, csv_path=None, annotations_path=None):
 
 if st.button("Train"):
     if not os.path.isfile(RSCRIPT):
-        st.error(f"R script not found at: {RSCRIPT}. Make sure your Dockerfile copies it (e.g. `COPY r/ /app/r/`).")
+        st.error(f"R script not found at: {RSCRIPT}")
     else:
         with st.spinner("Training… this may take a few minutes."):
             with tempfile.TemporaryDirectory() as td:
-                # 1) If user provided SQL/table, pull data in Python and save to CSV
+                # 1) Query data from Snowflake
                 sql = effective_sql()
                 csv_path = None
+                parquet_path = None
+                
                 if sql:
                     if not sf_password:
                         st.error("Password is required to pull data from Snowflake.")
@@ -156,9 +170,29 @@ if st.button("Train"):
                     try:
                         st.write("Querying Snowflake…")
                         df = run_sql(sql)
+                        
+                        # NEW: Create both CSV (for compatibility) and Parquet (for speed)
                         csv_path = os.path.join(td, "input_snapshot.csv")
+                        parquet_path = os.path.join(td, "input_snapshot.parquet")
+                        
+                        # Save CSV for backward compatibility
                         df.to_csv(csv_path, index=False)
-                        st.success(f"Pulled {len(df):,} rows from Snowflake")
+                        
+                        # NEW: Create optimized Parquet file
+                        st.write("Optimizing data format (CSV → Parquet)...")
+                        parquet_buffer = data_processor.csv_to_parquet(df, parquet_path)
+                        
+                        # Show optimization results
+                        csv_size = os.path.getsize(csv_path) / 1024**2
+                        parquet_size = os.path.getsize(parquet_path) / 1024**2
+                        compression_ratio = (1 - parquet_size / csv_size) * 100
+                        
+                        st.success(f"Data optimization complete:")
+                        st.write(f"- Original CSV: {csv_size:.1f} MB")
+                        st.write(f"- Optimized Parquet: {parquet_size:.1f} MB")
+                        st.write(f"- Size reduction: {compression_ratio:.1f}%")
+                        st.write(f"- Pulled {len(df):,} rows from Snowflake")
+                        
                     except Exception as e:
                         st.error(f"Query failed: {e}")
                         st.stop()
@@ -170,17 +204,27 @@ if st.button("Train"):
                     with open(annotations_path, "wb") as f:
                         f.write(ann_file.read())
 
-                # 3) Build job.json
-                job_cfg = build_job_json(td, csv_path=csv_path, annotations_path=annotations_path)
+                # 3) Build job.json with both CSV and Parquet paths
+                job_cfg = build_job_json(
+                    td, 
+                    csv_path=csv_path, 
+                    parquet_path=parquet_path,  # NEW: Pass Parquet path
+                    annotations_path=annotations_path
+                )
 
-                # 4) Prefer env var for Snowflake password (R will ignore if csv_path is set)
+                # 4) Set environment variables for performance
                 env = os.environ.copy()
                 if sf_password:
                     env["SNOWFLAKE_PASSWORD"] = sf_password
+                
+                # NEW: Performance environment variables
+                env["R_MAX_CORES"] = str(os.cpu_count() or 4)
+                env["OMP_NUM_THREADS"] = str(os.cpu_count() or 4)
+                env["OPENBLAS_NUM_THREADS"] = str(os.cpu_count() or 4)
 
                 cmd = ["Rscript", RSCRIPT, f"job_cfg={job_cfg}"]
 
-                # 5) RUN QUIETLY: capture all output, don’t print it
+                # 5) Execute training
                 result = subprocess.run(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -189,12 +233,11 @@ if st.button("Train"):
                     env=env,
                 )
 
-                # Persist for future reruns (so download button works)
+                # Store results for download
                 st.session_state["train_log_text"] = result.stdout or "(no output)"
                 st.session_state["train_exit_code"] = int(result.returncode)
 
-
-        # 6) Show minimal status + optional log download
+        # Show results
         if result.returncode == 0:
             st.success("Training finished. Artifacts should be in your GCS bucket.")
         else:

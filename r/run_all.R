@@ -4,7 +4,11 @@
 Sys.setenv(
   RETICULATE_PYTHON = "/usr/bin/python3",
   RETICULATE_AUTOCONFIGURE = "0",
-  TZ = "Europe/Berlin"
+  TZ = "Europe/Berlin",
+  # NEW: Performance settings
+  R_MAX_CORES = Sys.getenv("R_MAX_CORES", "4"),
+  OMP_NUM_THREADS = Sys.getenv("OMP_NUM_THREADS", "4"),
+  OPENBLAS_NUM_THREADS = Sys.getenv("OPENBLAS_NUM_THREADS", "4")
 )
 
 suppressPackageStartupMessages({
@@ -18,7 +22,15 @@ suppressPackageStartupMessages({
   library(googleCloudStorageR) # uses googleAuthR under the hood
   library(mime)
   library(reticulate)
+  library(arrow) # NEW: For Parquet support
+  library(future) # NEW: For parallel processing
+  library(future.apply) # NEW: For parallel apply functions
+  library(parallel) # NEW: For parallel processing
 })
+
+# NEW: Configure parallel processing
+max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "4"))
+plan(multisession, workers = max_cores)
 
 `%||%` <- function(a, b) {
   if (is.null(a) || length(a) == 0) {
@@ -255,19 +267,48 @@ cat(
 )
 
 ## ---------- 1) LOAD DATA (CSV ONLY) ----------
-if (is.null(cfg$csv_path) || !file.exists(cfg$csv_path)) {
-  stop(
-    paste(
-      "csv_path missing in job.json or file not found.",
-      "Streamlit must write the input CSV and pass csv_path to R."
-    )
+# NEW: Check for Parquet file first (faster loading)
+if (!is.null(cfg$parquet_path) && file.exists(cfg$parquet_path)) {
+  message("→ Reading optimized Parquet file: ", cfg$parquet_path)
+
+  # Load Parquet file (much faster than CSV)
+  df <- arrow::read_parquet(
+    cfg$parquet_path,
+    # Optimize memory usage
+    as_data_frame = TRUE
   )
+
+  message(sprintf(
+    "✅ Parquet loaded: %s rows, %s columns in %.2f seconds",
+    format(nrow(df), big.mark = ","),
+    ncol(df),
+    proc.time()[["elapsed"]]
+  ))
+} else if (!is.null(cfg$csv_path) && file.exists(cfg$csv_path)) {
+  message("→ Reading CSV provided by Streamlit: ", cfg$csv_path)
+
+  # Fallback to CSV with optimized reading
+  df <- readr::read_csv(
+    cfg$csv_path,
+    col_types = cols(.default = col_guess()),
+    locale = locale(encoding = "UTF-8"),
+    lazy = FALSE,
+    show_col_types = FALSE
+  )
+
+  message(sprintf(
+    "✅ CSV loaded: %s rows, %s columns",
+    format(nrow(df), big.mark = ","),
+    ncol(df)
+  ))
+} else {
+  stop(paste(
+    "Neither parquet_path nor csv_path found in job.json or files missing.",
+    "Streamlit must provide input data."
+  ))
 }
-message("→ Reading CSV provided by Streamlit: ", cfg$csv_path)
-df <- read.csv(
-  cfg$csv_path,
-  check.names = FALSE, stringsAsFactors = FALSE
-)
+
+df <- as.data.frame(df)
 names(df) <- toupper(names(df))
 
 ## ---------- 2) DATE & CLEAN ----------
@@ -471,23 +512,70 @@ alloc_start <- alloc_end - 364
 ## ---------- 7) HYPERPARAMS ----------
 hyper_vars <- c(paid_media_vars, organic_vars)
 hyperparameters <- list()
-for (v in hyper_vars) {
-  if (v == "ORGANIC_TRAFFIC") {
-    hyperparameters[[paste0(v, "_alphas")]] <- c(0.5, 2.0)
-    hyperparameters[[paste0(v, "_gammas")]] <- c(0.3, 0.7)
-    hyperparameters[[paste0(v, "_thetas")]] <- c(0.9, 0.99)
-  } else if (v == "TV_COST") {
-    hyperparameters[[paste0(v, "_alphas")]] <- c(0.8, 2.2)
-    hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.99)
-    hyperparameters[[paste0(v, "_thetas")]] <- c(0.7, 0.95)
-  } else if (v == "PARTNERSHIP_COSTS") {
-    hyperparameters[[paste0(v, "_alphas")]] <- c(0.65, 2.25)
-    hyperparameters[[paste0(v, "_gammas")]] <- c(0.45, 0.875)
-    hyperparameters[[paste0(v, "_thetas")]] <- c(0.3, 0.625)
-  } else {
-    hyperparameters[[paste0(v, "_alphas")]] <- c(1.0, 3.0)
-    hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.9)
-    hyperparameters[[paste0(v, "_thetas")]] <- c(0.1, 0.4)
+
+# NEW: Use parallel processing for hyperparameter setup if needed
+if (length(hyper_vars) > 10) {
+  message("→ Setting up hyperparameters in parallel...")
+
+  hyperparameters <- future_lapply(hyper_vars, function(v) {
+    if (v == "ORGANIC_TRAFFIC") {
+      list(
+        alphas = c(0.5, 2.0),
+        gammas = c(0.3, 0.7),
+        thetas = c(0.9, 0.99)
+      )
+    } else if (v == "TV_COST") {
+      list(
+        alphas = c(0.8, 2.2),
+        gammas = c(0.6, 0.99),
+        thetas = c(0.7, 0.95)
+      )
+    } else if (v == "PARTNERSHIP_COSTS") {
+      list(
+        alphas = c(0.65, 2.25),
+        gammas = c(0.45, 0.875),
+        thetas = c(0.3, 0.625)
+      )
+    } else {
+      list(
+        alphas = c(1.0, 3.0),
+        gammas = c(0.6, 0.9),
+        thetas = c(0.1, 0.4)
+      )
+    }
+  }, future.seed = TRUE)
+
+  # Convert to named list
+  names(hyperparameters) <- hyper_vars
+
+  # Flatten the structure for Robyn
+  hyperparameters_flat <- list()
+  for (v in names(hyperparameters)) {
+    hyperparameters_flat[[paste0(v, "_alphas")]] <- hyperparameters[[v]]$alphas
+    hyperparameters_flat[[paste0(v, "_gammas")]] <- hyperparameters[[v]]$gammas
+    hyperparameters_flat[[paste0(v, "_thetas")]] <- hyperparameters[[v]]$thetas
+  }
+  hyperparameters <- hyperparameters_flat
+} else {
+  # Original sequential approach for smaller parameter sets
+  for (v in hyper_vars) {
+    if (v == "ORGANIC_TRAFFIC") {
+      hyperparameters[[paste0(v, "_alphas")]] <- c(0.5, 2.0)
+      hyperparameters[[paste0(v, "_gammas")]] <- c(0.3, 0.7)
+      hyperparameters[[paste0(v, "_thetas")]] <- c(0.9, 0.99)
+    } else if (v == "TV_COST") {
+      hyperparameters[[paste0(v, "_alphas")]] <- c(0.8, 2.2)
+      hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.99)
+      hyperparameters[[paste0(v, "_thetas")]] <- c(0.7, 0.95)
+    } else if (v == "PARTNERSHIP_COSTS") {
+      hyperparameters[[paste0(v, "_alphas")]] <- c(0.65, 2.25)
+      hyperparameters[[paste0(v, "_gammas")]] <- c(0.45, 0.875)
+      hyperparameters[[paste0(v, "_thetas")]] <- c(0.3, 0.625)
+    } else {
+      hyperparameters[[paste0(v, "_alphas")]] <- c(1.0, 3.0)
+      hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.9)
+      hyperparameters[[paste0(v, "_thetas")]] <- c(0.1, 0.4)
+    }
   }
 }
 hyperparameters[["train_size"]] <- train_size
@@ -502,13 +590,15 @@ if (!reticulate::py_module_available("nevergrad")) {
 }
 
 ## ---------- 8) TRAIN ----------
+message("→ Starting optimized Robyn training with ", max_cores, " cores...")
+
 OutputModels <- robyn_run(
   InputCollect = InputCollect,
   iterations = iter,
   trials = trials,
   ts_validation = TRUE,
   add_penalty_factor = TRUE,
-  cores = NULL
+  cores = max_cores # Use all available CPU cores
 )
 
 saveRDS(OutputModels, file.path(dir_path, "OutputModels.RDS"))
