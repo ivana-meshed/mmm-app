@@ -3,9 +3,42 @@ import streamlit as st
 import pandas as pd
 import snowflake.connector as sf
 from data_processor import DataProcessor  # NEW: Import our data processor
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 st.set_page_config(page_title="Robyn MMM Trainer", layout="wide")
+# Debug info in sidebar
+with st.sidebar:
+    st.subheader("🔧 Debug Info")
+    st.write(f"**Container CPU Count**: {os.cpu_count()}")
+    st.write(f"**R_MAX_CORES**: {os.getenv('R_MAX_CORES', 'Not set')}")
+    st.write(f"**OMP_NUM_THREADS**: {os.getenv('OMP_NUM_THREADS', 'Not set')}")
+    st.write(f"**GCS_BUCKET**: {os.getenv('GCS_BUCKET', 'Not set')}")
+    
+    # Memory info
+    try:
+        import psutil
+        memory = psutil.virtual_memory()
+        st.write(f"**Available Memory**: {memory.available / 1024**3:.1f} GB")
+        st.write(f"**Memory Usage**: {memory.percent:.1f}%")
+    except ImportError:
+        st.write("**Memory Info**: psutil not available")
+
 st.title("Robyn MMM Trainer")
+
+# Add error handling wrapper
+def safe_execute(func, error_msg="Operation failed"):
+    """Execute function with error handling"""
+    try:
+        return func()
+    except Exception as e:
+        st.error(f"{error_msg}: {str(e)}")
+        logger.error(f"{error_msg}: {str(e)}", exc_info=True)
+        return None
 
 APP_ROOT = os.environ.get("APP_ROOT", "/app")
 RSCRIPT  = os.path.join(APP_ROOT, "r", "run_all.R")   # expect /app/r/run_all.R inside the container
