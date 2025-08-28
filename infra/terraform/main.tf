@@ -32,11 +32,7 @@ resource "google_project_iam_member" "sa_ar_reader" {
   role    = "roles/artifactregistry.reader"
   member  = "serviceAccount:${var.deployer_sa}" #member  = "serviceAccount:${google_service_account.runner.email}"
 }
-#resource "google_project_iam_member" "mmm_sa_ar_reader" {
-#  project = var.project_id
-#  role    = "roles/artifactregistry.reader"
-#  member  = "serviceAccount:${google_service_account.runner.email}"
-#}
+
 # Allow the SA to write to your bucket (bucket must already exist)
 resource "google_storage_bucket_iam_member" "sa_writer" {
   bucket = var.bucket_name
@@ -100,25 +96,55 @@ resource "google_cloud_run_service" "svc" {
   location = var.region
 
   template {
+    metadata {
+      annotations = {
+        # Enable CPU allocation during request processing only
+        "run.googleapis.com/cpu-throttling" = "false"
+        # Set minimum instances for pre-warming (see section 3)
+        "run.googleapis.com/min-instances" = "2"
+        # Set maximum instances for scaling
+        "run.googleapis.com/max-instances" = "10"
+      }
+    }
+
     spec {
       service_account_name  = google_service_account.runner.email
-      container_concurrency = 1
-      timeout_seconds       = 3600
+      container_concurrency = 1    # Keep at 1 for resource-intensive training
+      timeout_seconds       = 3600 # 1 hour timeout
 
       containers {
         image = var.image
-        startup_probe {
-          tcp_socket { port = 8080 }
-          period_seconds        = 120
-          timeout_seconds       = 100
-          failure_threshold     = 1
-          initial_delay_seconds = 0
-        }
+
+        # UPGRADED RESOURCE ALLOCATION
         resources {
           limits = {
-            cpu    = "4"
-            memory = "16Gi"
+            cpu    = "8"    # ⬆️ Increased from "4"
+            memory = "32Gi" # ⬆️ Increased from "16Gi"
           }
+          requests = {
+            cpu    = "4"    # Minimum guaranteed CPU
+            memory = "16Gi" # Minimum guaranteed memory
+          }
+        }
+
+        # Startup probe with longer timeout for heavy containers
+        startup_probe {
+          tcp_socket { port = 8080 }
+          period_seconds        = 30 # Check every 30 seconds
+          timeout_seconds       = 10 # Wait 10 seconds per check
+          failure_threshold     = 20 # Allow up to 10 minutes for startup
+          initial_delay_seconds = 30 # Wait 30 seconds before first check
+        }
+
+        # Liveness probe for running containers
+        liveness_probe {
+          http_get {
+            path = "/health" # We'll implement this endpoint
+            port = 8080
+          }
+          period_seconds    = 60
+          timeout_seconds   = 30
+          failure_threshold = 3
         }
 
         env {
@@ -130,11 +156,33 @@ resource "google_cloud_run_service" "svc" {
           name  = "APP_ROOT"
           value = "/app"
         }
+
         env {
           name  = "RUN_SERVICE_ACCOUNT_EMAIL"
           value = google_service_account.runner.email
         }
 
+        # NEW: Performance optimization flags
+        env {
+          name  = "R_MAX_CORES"
+          value = "8" # Use all available CPU cores
+        }
+
+        env {
+          name  = "OPENBLAS_NUM_THREADS"
+          value = "8" # Optimize BLAS operations
+        }
+
+        env {
+          name  = "OMP_NUM_THREADS"
+          value = "8" # OpenMP parallelization
+        }
+
+        # Enable parallel processing in Python
+        env {
+          name  = "PYTHONUNBUFFERED"
+          value = "1"
+        }
       }
     }
   }
@@ -151,7 +199,13 @@ resource "google_cloud_run_service" "svc" {
     google_project_iam_member.sa_ar_reader,
   ]
 }
-
+# Add autoscaling configuration
+resource "google_cloud_run_service_iam_member" "autoscaling_admin" {
+  location = google_cloud_run_service.svc.location
+  service  = google_cloud_run_service.svc.name
+  role     = "roles/run.admin"
+  member   = "serviceAccount:${google_service_account.runner.email}"
+}
 
 resource "google_cloud_run_service_iam_member" "invoker" {
   location = google_cloud_run_service.svc.location
