@@ -102,19 +102,18 @@ resource "google_cloud_run_service" "svc" {
     metadata {
       annotations = {
         "run.googleapis.com/cpu-throttling" = "false"
-        # NEW: Pre-warming configuration
-        "run.googleapis.com/min-instances" = var.min_instances
-        "run.googleapis.com/max-instances" = var.max_instances
-        # Allocate CPU during startup for warming
-        "run.googleapis.com/cpu-throttling" = "false"
-        # Increase startup timeout for warming
-        "run.googleapis.com/timeout" = "600s"
+        "run.googleapis.com/min-instances"  = var.min_instances
+        "run.googleapis.com/max-instances"  = var.max_instances
+        # Add session affinity to reduce rate limiting
+        "run.googleapis.com/sessionAffinity" = "true"
+        # Increase timeout
+        "run.googleapis.com/timeout" = "3600s"
       }
     }
 
     spec {
       service_account_name  = google_service_account.runner.email
-      container_concurrency = 1
+      container_concurrency = 1 # Important: Keep at 1 for training jobs
       timeout_seconds       = 3600
 
       containers {
@@ -122,50 +121,84 @@ resource "google_cloud_run_service" "svc" {
 
         resources {
           limits = {
-            cpu    = var.cpu_limit
-            memory = var.memory_limit
+            cpu    = "8"
+            memory = "32Gi"
           }
           requests = {
-            cpu    = "2"   # Minimum for warming
-            memory = "8Gi" # Minimum for warming
+            cpu    = "4"
+            memory = "16Gi"
           }
         }
 
-        # NEW: Extended startup probe for warming
+        # Improved startup probe
         startup_probe {
           http_get {
-            path = "/health" # Our health endpoint
+            path = "/" # Use root path instead of /health for now
             port = 8080
           }
-          period_seconds        = 15 # Check every 15 seconds
-          timeout_seconds       = 10 # 10 seconds per check
-          failure_threshold     = 30 # Allow up to 7.5 minutes for warmup
-          initial_delay_seconds = 10 # Wait 10 seconds before first check
+          period_seconds        = 10
+          timeout_seconds       = 8
+          failure_threshold     = 30
+          initial_delay_seconds = 10
         }
 
-        # Liveness probe for running containers
+        # Liveness probe
         liveness_probe {
           http_get {
-            path = "/health"
+            path = "/"
             port = 8080
           }
           period_seconds        = 60
           timeout_seconds       = 10
           failure_threshold     = 3
-          initial_delay_seconds = 120 # Wait 2 minutes after startup
+          initial_delay_seconds = 120
         }
 
-        # ... [existing environment variables] ...
-
-        # NEW: Warming configuration
+        # Environment variables
         env {
-          name  = "ENABLE_WARMING"
+          name  = "GCS_BUCKET"
+          value = var.bucket_name
+        }
+
+        env {
+          name  = "APP_ROOT"
+          value = "/app"
+        }
+
+        env {
+          name  = "RUN_SERVICE_ACCOUNT_EMAIL"
+          value = google_service_account.runner.email
+        }
+
+        env {
+          name  = "R_MAX_CORES"
+          value = "8"
+        }
+
+        env {
+          name  = "OPENBLAS_NUM_THREADS"
+          value = "8"
+        }
+
+        env {
+          name  = "OMP_NUM_THREADS"
+          value = "8"
+        }
+
+        env {
+          name  = "PYTHONUNBUFFERED"
+          value = "1"
+        }
+
+        # Add Streamlit specific config
+        env {
+          name  = "STREAMLIT_SERVER_HEADLESS"
           value = "true"
         }
 
         env {
-          name  = "WARMING_TIMEOUT"
-          value = "300" # 5 minutes
+          name  = "STREAMLIT_SERVER_ENABLE_CORS"
+          value = "false"
         }
       }
     }
@@ -179,11 +212,10 @@ resource "google_cloud_run_service" "svc" {
   depends_on = [
     google_project_service.run,
     google_project_service.ar,
-    google_project_service.cloudbuild,
+    google_project_iam_member.deployer_run_admin,
     google_project_iam_member.sa_ar_reader,
   ]
 }
-
 
 
 # Add autoscaling configuration
