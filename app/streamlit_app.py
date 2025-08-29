@@ -4,6 +4,8 @@ import pandas as pd
 import snowflake.connector as sf
 from data_processor import DataProcessor  # NEW: Import our data processor
 import logging
+from contextlib import contextmanager
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -59,6 +61,27 @@ if st.query_params.get("api") == "train":
         st.stop()
 
 st.set_page_config(page_title="Robyn MMM Trainer", layout="wide")
+
+def _fmt_secs(s: float) -> str:
+    if s < 60:
+        return f"{s:.2f}s"
+    m, sec = divmod(s, 60)
+    return f"{int(m)}m {sec:.1f}s"
+
+@contextmanager
+def timed_step(name: str, bucket: list):
+    """Context manager to time a step and print live status in Streamlit."""
+    start = time.perf_counter()
+    ph = st.empty()
+    ph.info(f"⏳ {name}…")
+    try:
+        yield
+    finally:
+        dt = time.perf_counter() - start
+        ph.success(f"✅ {name} – {_fmt_secs(dt)}")
+        bucket.append({"Step": name, "Time (s)": round(dt, 2)})
+        logger.info(f"Step '{name}' completed in {dt:.2f}s")
+
 # Debug info in sidebar
 with st.sidebar:
     st.subheader("🔧 Debug Info")
@@ -234,46 +257,49 @@ def build_job_json(tmp_dir, csv_path=None, parquet_path=None, annotations_path=N
     return job_path
 
 if st.button("Train"):
+    # fresh run: clear any previous timings
+    timings = []
+
     if not os.path.isfile(RSCRIPT):
         st.error(f"R script not found at: {RSCRIPT}")
     else:
         with st.spinner("Training… this may take a few minutes."):
             with tempfile.TemporaryDirectory() as td:
-                # 1) Query data from Snowflake
+                # 1) Query data from Snowflake (optional)
                 sql = effective_sql()
                 csv_path = None
                 parquet_path = None
-                
+
                 if sql:
                     if not sf_password:
                         st.error("Password is required to pull data from Snowflake.")
                         st.stop()
                     try:
-                        st.write("Querying Snowflake…")
-                        df = run_sql(sql)
-                        
-                        # NEW: Create both CSV (for compatibility) and Parquet (for speed)
-                        csv_path = os.path.join(td, "input_snapshot.csv")
-                        parquet_path = os.path.join(td, "input_snapshot.parquet")
-                        
-                        # Save CSV for backward compatibility
-                        df.to_csv(csv_path, index=False)
-                        
-                        # NEW: Create optimized Parquet file
-                        st.write("Optimizing data format (CSV → Parquet)...")
-                        parquet_buffer = data_processor.csv_to_parquet(df, parquet_path)
-                        
-                        # Show optimization results
-                        csv_size = os.path.getsize(csv_path) / 1024**2
-                        parquet_size = os.path.getsize(parquet_path) / 1024**2
-                        compression_ratio = (1 - parquet_size / csv_size) * 100
-                        
-                        st.success(f"Data optimization complete:")
+                        with timed_step("Query Snowflake", timings):
+                            df = run_sql(sql)
+
+                        # Save CSV for compatibility
+                        with timed_step("Write CSV snapshot", timings):
+                            csv_path = os.path.join(td, "input_snapshot.csv")
+                            df.to_csv(csv_path, index=False)
+
+                        # Convert to Parquet (optimized)
+                        with timed_step("Convert CSV → Parquet", timings):
+                            parquet_path = os.path.join(td, "input_snapshot.parquet")
+                            parquet_buffer = data_processor.csv_to_parquet(df, parquet_path)
+
+                        # Compute and display format stats (tiny but timed)
+                        with timed_step("Compute snapshot stats", timings):
+                            csv_size = os.path.getsize(csv_path) / 1024**2
+                            parquet_size = os.path.getsize(parquet_path) / 1024**2
+                            compression_ratio = (1 - parquet_size / csv_size) * 100
+
+                        st.success("Data optimization complete:")
                         st.write(f"- Original CSV: {csv_size:.1f} MB")
                         st.write(f"- Optimized Parquet: {parquet_size:.1f} MB")
                         st.write(f"- Size reduction: {compression_ratio:.1f}%")
                         st.write(f"- Pulled {len(df):,} rows from Snowflake")
-                        
+
                     except Exception as e:
                         st.error(f"Query failed: {e}")
                         st.stop()
@@ -281,39 +307,39 @@ if st.button("Train"):
                 # 2) Optional annotations upload
                 annotations_path = None
                 if ann_file is not None:
-                    annotations_path = os.path.join(td, "enriched_annotations.csv")
-                    with open(annotations_path, "wb") as f:
-                        f.write(ann_file.read())
+                    with timed_step("Read uploaded annotations", timings):
+                        annotations_path = os.path.join(td, "enriched_annotations.csv")
+                        with open(annotations_path, "wb") as f:
+                            f.write(ann_file.read())
 
                 # 3) Build job.json with both CSV and Parquet paths
-                job_cfg = build_job_json(
-                    td, 
-                    csv_path=csv_path, 
-                    parquet_path=parquet_path,  # NEW: Pass Parquet path
-                    annotations_path=annotations_path
-                )
+                with timed_step("Build job.json", timings):
+                    job_cfg = build_job_json(
+                        td,
+                        csv_path=csv_path,
+                        parquet_path=parquet_path,
+                        annotations_path=annotations_path,
+                    )
 
-                # 4) Set environment variables for performance
-                env = os.environ.copy()
-                if sf_password:
-                    env["SNOWFLAKE_PASSWORD"] = sf_password
-                
-                # NEW: Performance environment variables
-                env["R_MAX_CORES"] = str(os.cpu_count() or 4)
-                env["OMP_NUM_THREADS"] = str(os.cpu_count() or 4)
-                env["OPENBLAS_NUM_THREADS"] = str(os.cpu_count() or 4)
+                # 4) Prepare environment for training
+                with timed_step("Prepare training environment", timings):
+                    env = os.environ.copy()
+                    if sf_password:
+                        env["SNOWFLAKE_PASSWORD"] = sf_password
+                    env["R_MAX_CORES"] = str(os.cpu_count() or 4)
+                    env["OMP_NUM_THREADS"] = str(os.cpu_count() or 4)
+                    env["OPENBLAS_NUM_THREADS"] = str(os.cpu_count() or 4)
+                    cmd = ["Rscript", RSCRIPT, f"job_cfg={job_cfg}"]
 
-                cmd = ["Rscript", RSCRIPT, f"job_cfg={job_cfg}"]
-
-                # 5) Execute training
-                result = subprocess.run(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    env=env,
-                )
-
+                # 5) Execute training (Rscript)
+                with timed_step("Run Rscript (Robyn training)", timings):
+                    result = subprocess.run(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        env=env,
+                    )
                 # Store results for download
                 st.session_state["train_log_text"] = result.stdout or "(no output)"
                 st.session_state["train_exit_code"] = int(result.returncode)
@@ -331,6 +357,20 @@ if st.button("Train"):
             mime="text/plain",
             key="dl_robyn_run_log",
         )
+
+        # 🔎 Execution time summary
+        if timings:
+            df_times = pd.DataFrame(timings)
+            total = float(df_times["Time (s)"].sum())
+            df_times["% of total"] = (df_times["Time (s)"] / total * 100).round(1)
+            with st.expander("⏱️ Execution timeline & totals", expanded=True):
+                st.dataframe(df_times, use_container_width=True)
+                st.write(f"**Total elapsed:** {_fmt_secs(total)}")
+
+        
+'''st.session_state["train_log_text"] = result.stdout or "(no output)"
+st.session_state["train_exit_code"] = int(result.returncode)
+                
 if "train_exit_code" in st.session_state:
     ok = (st.session_state["train_exit_code"] == 0)
     if ok:
@@ -350,4 +390,4 @@ if "train_exit_code" in st.session_state:
         file_name="robyn_run.log",
         mime="text/plain",
         key="dl_robyn_run_log_persisted",
-    )
+    )'''
