@@ -98,20 +98,21 @@ resource "google_project_service" "cloudbuild" {
   disable_on_destroy = false
 }
 
+
 resource "google_cloud_run_v2_service" "svc" {
   provider = google-beta
   name     = var.service_name
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL" # same public behavior as before
+  ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
     service_account = google_service_account.runner.email
     timeout         = "3600s"
 
-    # v2 concurrency
+    # Concurrency (v2 field)
     max_instance_request_concurrency = 64
 
-    # v2 scaling (replaces min/max instance annotations)
+    # Scaling replaces min/max instance annotations
     scaling {
       min_instance_count = var.min_instances
       max_instance_count = var.max_instances
@@ -120,35 +121,27 @@ resource "google_cloud_run_v2_service" "svc" {
     containers {
       image = var.image
 
-      # v2 resources (cpu_idle=false == no CPU throttling)
+      # Resources; cpu_idle=false disables CPU throttling in v2
       resources {
         limits = {
           cpu    = "8"
           memory = "32Gi"
         }
         cpu_idle = false
-        # requests are not explicitly supported in v2; limits suffice
       }
 
-      # ✅ STARTUP: server reachable?
+      # ✅ STARTUP: consider the app "started" when HTTP / responds.
+      # If you prefer to wait for Streamlit's stcore to mount,
+      # point this to "/_stcore/health" and increase thresholds.
       startup_probe {
         http_get { path = "/health" }
         period_seconds        = 10
         timeout_seconds       = 8
-        failure_threshold     = 30
+        failure_threshold     = 30 # ~5 min
         initial_delay_seconds = 5
       }
 
-      # ✅ READINESS: Streamlit fully ready (stcore mounted)
-      readiness_probe {
-        http_get { path = "/_stcore/health" }
-        period_seconds        = 5
-        timeout_seconds       = 4
-        failure_threshold     = 12
-        initial_delay_seconds = 0
-      }
-
-      # ✅ LIVENESS: stays healthy over time
+      # ✅ LIVENESS: keep watching Streamlit’s health afterwards
       liveness_probe {
         http_get { path = "/_stcore/health" }
         period_seconds        = 60
@@ -156,7 +149,6 @@ resource "google_cloud_run_v2_service" "svc" {
         failure_threshold     = 3
         initial_delay_seconds = 120
       }
-
       # Environment variables
       env {
         name  = "GCS_BUCKET"
@@ -213,6 +205,7 @@ resource "google_cloud_run_v2_service" "svc" {
 
 # Add autoscaling configuration
 resource "google_cloud_run_v2_service_iam_member" "autoscaling_admin" {
+  provider = google-beta
   location = google_cloud_run_v2_service.svc.location
   name     = google_cloud_run_v2_service.svc.name
   role     = "roles/run.admin"
