@@ -224,5 +224,9 @@ resource "google_cloud_run_v2_service_iam_member" "invoker" {
 }
 
 output "url" {
-  value = google_cloud_run_v2_service.svc.uri
+  value = coalesce(
+    google_cloud_run_v2_service.svc.uri,
+    try(google_cloud_run_v2_service.svc.urls[0], "")
+  )
 }
+
