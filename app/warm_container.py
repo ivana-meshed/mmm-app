@@ -1,3 +1,6 @@
+"""
+Container warming script to pre-load dependencies and authenticate services
+"""
 import os
 import sys
 import time
@@ -236,3 +239,6 @@ def main():
     else:
         logger.info("✅ Container is warm and ready")
         sys.exit(0)
+
+if __name__ == "__main__":
+    main()
