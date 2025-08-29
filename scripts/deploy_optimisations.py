@@ -1,242 +1,241 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env python3
+"""
+Test script to validate optimization implementations
+"""
+import time
+import requests
+import pandas as pd
+import pyarrow.parquet as pq
+import subprocess
+import os
+import json
 
-echo "🚀 Deploying MMM Trainer Optimizations"
+def test_resource_scaling():
+    """Test that the container is using upgraded resources"""
+    print("🧪 Testing Resource Scaling...")
+    
+    try:
+        import psutil
+        cpu_count = psutil.cpu_count()
+        memory = psutil.virtual_memory()
+        
+        print(f"✅ CPU cores available: {cpu_count}")
+        print(f"✅ Total memory: {memory.total // 1024**3} GB")
+        
+        # Verify environment variables are set
+        r_cores = os.getenv('R_MAX_CORES', 'Not set')
+        omp_threads = os.getenv('OMP_NUM_THREADS', 'Not set') 
+        
+        print(f"✅ R_MAX_CORES: {r_cores}")
+        print(f"✅ OMP_NUM_THREADS: {omp_threads}")
+        
+        if cpu_count >= 8 and memory.total >= 30 * 1024**3:  # 30GB+
+            print("✅ Resource scaling test PASSED")
+            return True
+        else:
+            print("❌ Resource scaling test FAILED - insufficient resources")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Resource scaling test ERROR: {e}")
+        return False
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+def test_parquet_performance():
+    """Test Parquet vs CSV performance"""
+    print("\n🧪 Testing Parquet Performance...")
+    
+    try:
+        # Create test dataset
+        test_data = pd.DataFrame({
+            'date': pd.date_range('2024-01-01', periods=10000, freq='D'),
+            'cost_column_1': np.random.rand(10000) * 1000,
+            'cost_column_2': np.random.rand(10000) * 500, 
+            'impressions': np.random.randint(0, 100000, 10000),
+            'category': np.random.choice(['A', 'B', 'C', 'D'], 10000)
+        })
+        
+        # Test CSV writing/reading
+        csv_start = time.time()
+        test_data.to_csv('/tmp/test.csv', index=False)
+        csv_write_time = time.time() - csv_start
+        
+        csv_start = time.time() 
+        csv_loaded = pd.read_csv('/tmp/test.csv')
+        csv_read_time = time.time() - csv_start
+        
+        # Test Parquet writing/reading
+        parquet_start = time.time()
+        test_data.to_parquet('/tmp/test.parquet', compression='snappy')
+        parquet_write_time = time.time() - parquet_start
+        
+        parquet_start = time.time()
+        parquet_loaded = pd.read_parquet('/tmp/test.parquet') 
+        parquet_read_time = time.time() - parquet_start
+        
+        # Compare file sizes
+        csv_size = os.path.getsize('/tmp/test.csv') / 1024**2  # MB
+        parquet_size = os.path.getsize('/tmp/test.parquet') / 1024**2  # MB
+        
+        print(f"📊 CSV - Write: {csv_write_time:.3f}s, Read: {csv_read_time:.3f}s, Size: {csv_size:.1f}MB")
+        print(f"📊 Parquet - Write: {parquet_write_time:.3f}s, Read: {parquet_read_time:.3f}s, Size: {parquet_size:.1f}MB")
+        
+        read_speedup = csv_read_time / parquet_read_time
+        size_reduction = (1 - parquet_size / csv_size) * 100
+        
+        print(f"✅ Read speedup: {read_speedup:.1f}x")
+        print(f"✅ Size reduction: {size_reduction:.1f}%")
+        
+        if read_speedup > 1.5 and size_reduction > 20:
+            print("✅ Parquet performance test PASSED")
+            return True
+        else:
+            print("❌ Parquet performance test FAILED")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Parquet performance test ERROR: {e}")
+        return False
 
-# Function to print colored output
-print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
+def test_container_warming():
+    """Test container warming functionality"""
+    print("\n🧪 Testing Container Warming...")
+    
+    try:
+        # Test health endpoint
+        response = requests.get('http://localhost:8080/health', timeout=10)
+        
+        if response.status_code == 200:
+            print("✅ Health endpoint accessible")
+            
+            # Check if warming status file exists
+            if os.path.exists('/tmp/warming_status.json'):
+                with open('/tmp/warming_status.json', 'r') as f:
+                    warming_status = json.load(f)
+                
+                print(f"✅ Warming status: {warming_status}")
+                
+                successful_components = sum(1 for status in warming_status['warming_status'].values() if status)
+                total_components = len(warming_status['warming_status'])
+                
+                if successful_components >= 3:  # At least 3 of 4 components
+                    print("✅ Container warming test PASSED")
+                    return True
+                else:
+                    print("❌ Container warming test FAILED - insufficient components warmed")
+                    return False
+            else:
+                print("⚠️ Warming status file not found - container may not be fully warmed")
+                return False
+        else:
+            print(f"❌ Health endpoint returned status {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Container warming test ERROR: {e}")
+        return False
 
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
+def test_r_performance():
+    """Test R environment performance"""
+    print("\n🧪 Testing R Performance...")
+    
+    try:
+        r_test_script = """
+        # Test parallel processing
+        library(parallel)
+        library(future)
+        
+        # Check core configuration
+        max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "1"))
+        cat("R_MAX_CORES:", max_cores, "\\n")
+        
+        # Test parallel computation
+        start_time <- Sys.time()
+        plan(multisession, workers = max_cores)
+        
+        # Parallel computation test
+        result <- future_lapply(1:1000, function(x) {
+            sum(rnorm(1000))
+        }, future.seed = TRUE)
+        
+        end_time <- Sys.time()
+        elapsed <- as.numeric(end_time - start_time)
+        
+        cat("Parallel computation time:", elapsed, "seconds\\n")
+        
+        # Test arrow/parquet reading
+        if (requireNamespace("arrow", quietly = TRUE)) {
+            cat("Arrow package available\\n")
+        } else {
+            cat("Arrow package NOT available\\n")
+        }
+        
+        cat("R performance test completed\\n")
+        """
+        
+        result = subprocess.run(
+            ['R', '--slave', '--vanilla', '-e', r_test_script],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            print("✅ R performance test output:")
+            print(result.stdout)
+            print("✅ R performance test PASSED")
+            return True
+        else:
+            print("❌ R performance test FAILED:")
+            print(result.stderr)
+            return False
+            
+    except Exception as e:
+        print(f"❌ R performance test ERROR: {e}")
+        return False
 
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
+def main():
+    """Run all optimization tests"""
+    print("🚀 Running Optimization Tests\n")
+    
+    tests = [
+        ("Resource Scaling", test_resource_scaling),
+        ("Parquet Performance", test_parquet_performance), 
+        ("Container Warming", test_container_warming),
+        ("R Performance", test_r_performance)
+    ]
+    
+    results = {}
+    
+    for test_name, test_func in tests:
+        try:
+            results[test_name] = test_func()
+        except Exception as e:
+            print(f"❌ {test_name} test crashed: {e}")
+            results[test_name] = False
+        print()  # Add spacing between tests
+    
+    # Summary
+    print("📋 Test Results Summary:")
+    print("=" * 50)
+    
+    passed = sum(1 for result in results.values() if result)
+    total = len(results)
+    
+    for test_name, passed_test in results.items():
+        status = "✅ PASSED" if passed_test else "❌ FAILED"
+        print(f"{test_name}: {status}")
+    
+    print(f"\nOverall: {passed}/{total} tests passed")
+    
+    if passed == total:
+        print("🎉 All optimization tests PASSED!")
+        return 0
+    else:
+        print("⚠️ Some optimization tests FAILED")
+        return 1
 
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Check prerequisites
-print_status "Checking prerequisites..."
-
-if ! command -v terraform &> /dev/null; then
-    print_error "Terraform not found. Please install Terraform."
-    exit 1
-fi
-
-if ! command -v gcloud &> /dev/null; then
-    print_error "gcloud CLI not found. Please install Google Cloud SDK."
-    exit 1
-fi
-
-if ! command -v docker &> /dev/null; then
-    print_error "Docker not found. Please install Docker."
-    exit 1
-fi
-
-print_success "Prerequisites check passed"
-
-# Set variables
-PROJECT_ID=${PROJECT_ID:-"datawarehouse-422511"}
-REGION=${REGION:-"europe-west1"}
-IMAGE_NAME="mmm-app"
-REPO_NAME="mmm-repo"
-SERVICE_NAME="mmm-app"
-
-print_status "Using PROJECT_ID: $PROJECT_ID"
-print_status "Using REGION: $REGION"
-
-# Step 1: Build and push optimized Docker image
-print_status "Building optimized Docker image..."
-
-IMAGE_TAG=$(date +%Y%m%d-%H%M%S)
-FULL_IMAGE_NAME="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$IMAGE_NAME:$IMAGE_TAG"
-
-docker build -f docker/Dockerfile -t $FULL_IMAGE_NAME .
-docker tag $FULL_IMAGE_NAME "$REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$IMAGE_NAME:latest"
-
-print_status "Pushing images to Artifact Registry..."
-docker push $FULL_IMAGE_NAME
-docker push "$REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$IMAGE_NAME:latest"
-
-print_success "Docker image built and pushed: $FULL_IMAGE_NAME"
-
-# Step 2: Update Terraform configuration
-print_status "Deploying infrastructure updates..."
-
-cd infra/terraform
-
-# Update terraform.tfvars with new image
-cat > terraform.tfvars << EOF
-project_id     = "$PROJECT_ID"
-region         = "$REGION"  
-bucket_name    = "mmm-app-output"
-image          = "$FULL_IMAGE_NAME"
-cpu_limit      = "8"
-memory_limit   = "32Gi" 
-min_instances  = 2
-max_instances  = 10
-EOF
-
-# Initialize and apply Terraform
-terraform init
-terraform plan -out=optimization.tfplan
-terraform apply -auto-approve optimization.tfplan
-
-print_success "Infrastructure updates deployed"
-
-# Step 3: Wait for service to be ready
-print_status "Waiting for service to be ready..."
-
-SERVICE_URL=$(terraform output -raw url)
-print_status "Service URL: $SERVICE_URL"
-
-# Wait for health endpoint to be available
-max_attempts=30
-attempt=1
-
-while [ $attempt -le $max_attempts ]; do
-    if curl -s "$SERVICE_URL/health" > /dev/null 2>&1; then
-        print_success "Service is responding to health checks"
-        break
-    else
-        print_status "Attempt $attempt/$max_attempts: Waiting for service..."
-        sleep 10
-        ((attempt++))
-    fi
-done
-
-if [ $attempt -gt $max_attempts ]; then
-    print_error "Service failed to respond after $max_attempts attempts"
-    exit 1
-fi
-
-# Step 4: Run optimization tests
-print_status "Running optimization validation tests..."
-
-# Test 1: Resource allocation
-print_status "Testing resource allocation..."
-RESOURCE_CHECK=$(gcloud run services describe $SERVICE_NAME --region=$REGION --format="value(spec.template.spec.template.spec.containers[0].resources.limits.cpu)")
-
-if [ "$RESOURCE_CHECK" = "8" ]; then
-    print_success "✅ CPU limit correctly set to 8 vCPUs"
-else
-    print_warning "⚠️ CPU limit is $RESOURCE_CHECK, expected 8"
-fi
-
-# Test 2: Container warming
-print_status "Testing container warming..."
-HEALTH_RESPONSE=$(curl -s "$SERVICE_URL/health" | jq -r '.warm_status.container_ready // false')
-
-if [ "$HEALTH_RESPONSE" = "true" ]; then
-    print_success "✅ Container is properly warmed"
-else
-    print_warning "⚠️ Container warming may not be working correctly"
-fi
-
-# Test 3: Performance benchmark
-print_status "Running performance benchmark..."
-
-# Create a simple training job to test performance
-BENCHMARK_RESULT=$(curl -s -X POST "$SERVICE_URL/api/benchmark" \
-    -H "Content-Type: application/json" \
-    -d '{"test_size": "small", "format": "parquet"}' || echo "benchmark_failed")
-
-if [ "$BENCHMARK_RESULT" != "benchmark_failed" ]; then
-    print_success "✅ Performance benchmark completed"
-else  
-    print_warning "⚠️ Performance benchmark could not be run"
-fi
-
-cd ../..
-
-# Step 5: Generate optimization report
-print_status "Generating optimization report..."
-
-cat > optimization_report.md << EOF
-# MMM Trainer Optimization Report
-
-## Deployment Summary
-- **Deployment Time**: $(date)
-- **Image**: $FULL_IMAGE_NAME  
-- **Service URL**: $SERVICE_URL
-
-## Optimizations Applied
-
-### ✅ Resource Scaling
-- CPU: 4 → 8 vCPUs
-- Memory: 16GB → 32GB  
-- Parallel processing: Enabled
-- Status: **DEPLOYED**
-
-### ✅ Data Format Optimization  
-- Format: CSV → Parquet
-- Compression: Snappy
-- Expected speedup: 5-10x faster data loading
-- Status: **DEPLOYED**
-
-### ✅ Container Pre-warming
-- Minimum instances: 2
-- Warming components: Python, R, GCS, System
-- Health checks: Enabled
-- Keep-alive scheduler: Every 5 minutes
-- Status: **DEPLOYED**
-
-## Performance Expectations
-
-### Before Optimizations
-- Small jobs: 20-30 minutes
-- Medium jobs: 45-60 minutes  
-- Large jobs: 90-120 minutes
-
-### After Optimizations (Expected)
-- Small jobs: 10-15 minutes (50% improvement)
-- Medium jobs: 25-35 minutes (40% improvement)
-- Large jobs: 60-75 minutes (30% improvement)
-
-## Next Steps
-1. Monitor job performance over the next week
-2. Collect performance metrics and compare to baseline
-3. Consider implementing parallel trial processing (Phase 2)
-4. Evaluate cost vs performance trade-offs
-
-## Rollback Plan
-If issues arise, rollback with:
-\`\`\`bash
-# Revert to previous image
-terraform apply -var="cpu_limit=4" -var="memory_limit=16Gi" -var="min_instances=0"
-
-# Or use previous image
-terraform apply -var="image=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$IMAGE_NAME:previous"
-\`\`\`
-
-EOF
-
-print_success "Optimization report generated: optimization_report.md"
-
-# Final summary
-echo ""
-echo "🎉 MMM Trainer Optimizations Successfully Deployed!"
-echo ""
-echo "📊 Summary:"
-echo "  - Resource scaling: ✅ 4→8 vCPU, 16→32GB RAM"  
-echo "  - Data format: ✅ CSV→Parquet optimization"
-echo "  - Container warming: ✅ Pre-warmed instances"
-echo "  - Service URL: $SERVICE_URL"
-echo ""
-echo "📈 Expected Performance Improvement: 40-50%"
-echo "💰 Expected Cost Increase: 50-75% (but higher efficiency)"
-echo ""
-echo "🔍 Next: Monitor performance and run test training jobs"
-echo "📋 Report: See optimization_report.md for details"
+if __name__ == "__main__":
+    import sys
+    import numpy as np  # Import here for test
+    exit_code = main()
+    sys.exit(exit_code)
