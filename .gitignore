@@ -45,3 +45,8 @@ secrets/
 
 *.json
 *.png
+*.plan
+*.txt
+./terraformd/*
+/infra/terraform/~/.terraform.d/*
+/infra/terraform/.terraform/*
