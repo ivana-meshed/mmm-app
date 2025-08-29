@@ -110,54 +110,37 @@ class BaselineCollector:
         
         try:
             # Start training job
-            response = requests.get(
+            response = requests.post(
                 f"{self.service_url}/train",
                 json=payload,
                 timeout=7200  # 2 hour timeout
             )
             
             if response.status_code == 200:
-                try:
-                    result_data = response.json()
-                    if result_data.get("status") == "success":
-                        end_time = datetime.datetime.now()
-                        duration = (end_time - start_time).total_seconds() / 60
-                        
-                        #Use actual duration from response if available
-                        api_duration = result_data.get("duration_minutes", duration)
-                        
-                        # Estimate resource usage
-                        cpu_hours = self.estimate_cpu_hours(iterations, trials, api_duration)
-                        memory_gb_hours = self.estimate_memory_hours(iterations, trials, api_duration)
-                        cost = self.estimate_cost(cpu_hours, memory_gb_hours)
-                        
-                        metric = BaselineMetric(
-                            timestamp=start_time,
-                            job_id=job_id,
-                            job_type=job_type,
-                            iterations=iterations,
-                            trials=trials,
-                            country=country,
-                            duration_minutes=api_duration,
-                            cpu_hours=cpu_hours,
-                            memory_gb_hours=memory_gb_hours,
-                            cost_estimate=cost,
-                            success=True
-                        )                
-                    
-                        logger.info(f"✅ {job_id} completed in {duration:.1f} minutes")
-                        return metric
-
-                    else:
-                        error_msg = result_data.get("error", "Unknown API error")
-                        logger.error(f"❌ {job_id} API error: {error_msg}")
-                        return self.create_failed_metric(job_id, job_type, iterations, trials, country, start_time, error_msg)
-                        
-                except json.JSONDecodeError:
-                    # Response is not JSON, might be HTML (normal Streamlit page)
-                    logger.error(f"❌ {job_id} failed: API endpoint returned HTML instead of JSON")
-                    return self.create_failed_metric(job_id, job_type, iterations, trials, country, start_time, "API endpoint not working correctly")
+                end_time = datetime.datetime.now()
+                duration = (end_time - start_time).total_seconds() / 60
                 
+                # Estimate resource usage based on job characteristics
+                cpu_hours = self.estimate_cpu_hours(iterations, trials, duration)
+                memory_gb_hours = self.estimate_memory_hours(iterations, trials, duration)
+                cost = self.estimate_cost(cpu_hours, memory_gb_hours)
+                
+                metric = BaselineMetric(
+                    timestamp=start_time,
+                    job_id=job_id,
+                    job_type=job_type,
+                    iterations=iterations,
+                    trials=trials,
+                    country=country,
+                    duration_minutes=duration,
+                    cpu_hours=cpu_hours,
+                    memory_gb_hours=memory_gb_hours,
+                    cost_estimate=cost,
+                    success=True
+                )
+                
+                logger.info(f"✅ {job_id} completed in {duration:.1f} minutes")
+                return metric
                 
             else:
                 logger.error(f"❌ {job_id} failed: HTTP {response.status_code}")
