@@ -82,6 +82,19 @@ def timed_step(name: str, bucket: list):
         bucket.append({"Step": name, "Time (s)": round(dt, 2)})
         logger.info(f"Step '{name}' completed in {dt:.2f}s")
 
+def upload_to_gcs(bucket_name: str, local_path: str, dest_blob: str) -> str:
+    """Upload a local file to GCS and return the gs:// URI."""
+    try:
+        from google.cloud import storage  # ensure 'google-cloud-storage' is in requirements.txt
+    except ImportError as e:
+        raise RuntimeError("google-cloud-storage not installed in the image") from e
+
+    client = storage.Client()  # uses Cloud Run default creds
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(dest_blob)
+    blob.upload_from_filename(local_path)
+    return f"gs://{bucket_name}/{dest_blob}"
+
 # Debug info in sidebar
 with st.sidebar:
     st.subheader("🔧 Debug Info")
@@ -359,35 +372,40 @@ if st.button("Train"):
         )
 
         # 🔎 Execution time summary
-        if timings:
-            df_times = pd.DataFrame(timings)
-            total = float(df_times["Time (s)"].sum())
-            df_times["% of total"] = (df_times["Time (s)"] / total * 100).round(1)
-            with st.expander("⏱️ Execution timeline & totals", expanded=True):
-                st.dataframe(df_times, use_container_width=True)
-                st.write(f"**Total elapsed:** {_fmt_secs(total)}")
+        # 🔎 Execution time summary
+if timings:
+    df_times = pd.DataFrame(timings)
+    total = float(df_times["Time (s)"].sum())
+    df_times["% of total"] = (df_times["Time (s)"] / total * 100).round(1)
 
-        
-'''st.session_state["train_log_text"] = result.stdout or "(no output)"
-st.session_state["train_exit_code"] = int(result.returncode)
-                
-if "train_exit_code" in st.session_state:
-    ok = (st.session_state["train_exit_code"] == 0)
-    if ok:
-        st.success("Training finished. Artifacts should be in your GCS bucket.")
-    else:
-        st.error("Training failed. Download the run log for details.")
+    with st.expander("⏱️ Execution timeline & totals", expanded=True):
+        st.dataframe(df_times, use_container_width=True)
+        st.write(f"**Total elapsed:** {_fmt_secs(total)}")
 
-    # Show tail and a downloadable file
-    log_text = st.session_state.get("train_log_text", "(no output)")
-    with st.expander("Show last 200 lines of training log"):
-        tail = "\n".join(log_text.splitlines()[-200:])
-        st.code(tail or "(empty)", language="bash")
+    # === Save & upload timings CSV ===
+    from datetime import datetime
+    import uuid
 
+    # keep files together by revision/date; add a run id
+    run_id = datetime.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
+    dest_blob = f"robyn/runs/{country}/{revision}/{date_input}/{run_id}/timings.csv"
+
+    # write locally first (inside our temp dir used above)
+    timings_csv_local = os.path.join(td, "timings.csv")
+    df_times.to_csv(timings_csv_local, index=False)
+
+    gcs_uri = None
+    try:
+        gcs_uri = upload_to_gcs(gcs_bucket, timings_csv_local, dest_blob)
+        st.success(f"Timings CSV uploaded to **{gcs_uri}**")
+    except Exception as e:
+        st.warning(f"Couldn’t upload timings to GCS: {e}. You can still download it below.")
+
+    # Also offer a direct download in the UI
     st.download_button(
-        "Download training log",
-        data=log_text.encode("utf-8"),
-        file_name="robyn_run.log",
-        mime="text/plain",
-        key="dl_robyn_run_log_persisted",
-    )'''
+        "Download timings.csv",
+        data=df_times.to_csv(index=False),
+        file_name="timings.csv",
+        mime="text/csv",
+        key="dl_timings_csv",
+    )
