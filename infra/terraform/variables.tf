@@ -9,7 +9,7 @@ variable "deployer_sa" { default = "github-deployer@datawarehouse-422511.iam.gse
 variable "cpu_limit" {
   description = "CPU limit for Cloud Run service"
   type        = string
-  default     = "8"
+  default     = "16"
 }
 
 variable "memory_limit" {
