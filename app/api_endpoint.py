@@ -1,9 +1,10 @@
-import streamlit as st
 import json
+import os
 import subprocess
 import tempfile
-import os
 from datetime import datetime
+
+import streamlit as st
 
 
 def handle_train_api():
@@ -13,7 +14,6 @@ def handle_train_api():
     if st.query_params.get("api") == "train" and hasattr(
         st.session_state, "api_request_data"
     ):
-
         try:
             # Get request data from session state (set by main app)
             request_data = st.session_state.api_request_data

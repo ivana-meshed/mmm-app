@@ -2,14 +2,15 @@
 """
 Performance monitoring script for optimized MMM Trainer
 """
-import time
-import requests
-import json
 import datetime
+import json
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
+
 import matplotlib.pyplot as plt
 import pandas as pd
+import requests
 
 
 @dataclass
@@ -231,7 +232,9 @@ class PerformanceMonitor:
 """
 
         if avg_cpu > 80:
-            report += "- ⚠️ High CPU usage detected - consider further scaling\n"
+            report += (
+                "- ⚠️ High CPU usage detected - consider further scaling\n"
+            )
         elif avg_cpu < 30:
             report += "- 💡 Low CPU usage - resources may be over-provisioned\n"
         else:

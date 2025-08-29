@@ -4,12 +4,14 @@ import os
 import sys
 from datetime import datetime
 
+
 def get_health_status():
     try:
         import psutil
+
         cpu = psutil.cpu_percent(interval=0.1)
         memory = psutil.virtual_memory()
-        
+
         return {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
@@ -17,14 +19,15 @@ def get_health_status():
             "cpu_usage": round(cpu, 1),
             "memory_usage": round(memory.percent, 1),
             "available_memory_gb": round(memory.available / (1024**3), 2),
-            "scheduler_warmup": True
+            "scheduler_warmup": True,
         }
     except Exception as e:
         return {
             "status": "error",
             "timestamp": datetime.now().isoformat(),
-            "error": str(e)
+            "error": str(e),
         }
+
 
 if __name__ == "__main__":
     health = get_health_status()

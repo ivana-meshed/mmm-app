@@ -2,14 +2,15 @@
 """
 Collect baseline performance metrics before optimization deployment
 """
-import time
-import requests
-import json
 import datetime
+import json
 import logging
-from dataclasses import dataclass, asdict
-from typing import List, Dict
+import time
+from dataclasses import asdict, dataclass
+from typing import Dict, List
+
 import pandas as pd
+import requests
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

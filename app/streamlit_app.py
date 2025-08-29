@@ -1,13 +1,17 @@
-import json, os, subprocess, tempfile, time, shlex
-import streamlit as st
-import pandas as pd
-import snowflake.connector as sf
-from data_processor import DataProcessor  # NEW: Import our data processor
+import json
 import logging
-from contextlib import contextmanager
+import os
+import shlex
+import subprocess
+import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime
 
+import pandas as pd
+import snowflake.connector as sf
+import streamlit as st
+from data_processor import DataProcessor  # NEW: Import our data processor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -94,9 +98,9 @@ def timed_step(name: str, bucket: list):
 def upload_to_gcs(bucket_name: str, local_path: str, dest_blob: str) -> str:
     """Upload a local file to GCS and return the gs:// URI."""
     try:
-        from google.cloud import (
+        from google.cloud import (  # ensure 'google-cloud-storage' is in requirements.txt
             storage,
-        )  # ensure 'google-cloud-storage' is in requirements.txt
+        )
     except ImportError as e:
         raise RuntimeError(
             "google-cloud-storage not installed in the image"

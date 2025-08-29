@@ -2,12 +2,13 @@
 Container warming script to pre-load dependencies and authenticate services
 """
 
+import logging
 import os
+import subprocess
 import sys
 import time
-import logging
-import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import psutil
 
 # Configure logging
@@ -30,20 +31,20 @@ class ContainerWarmer:
 
         try:
             # Import data processing libraries
-            import pandas as pd
             import numpy as np
+            import pandas as pd
             import pyarrow as pa
             import pyarrow.parquet as pq
 
-            # Import cloud libraries
-            from google.cloud import storage, secretmanager
-            from google.auth import default
+            # Import snowflake
+            import snowflake.connector
 
             # Import streamlit
             import streamlit as st
+            from google.auth import default
 
-            # Import snowflake
-            import snowflake.connector
+            # Import cloud libraries
+            from google.cloud import secretmanager, storage
 
             # Pre-create commonly used objects
             _ = storage.Client()  # Initialize GCS client
@@ -125,8 +126,8 @@ class ContainerWarmer:
         start_time = time.time()
 
         try:
-            from google.cloud import storage
             from google.auth import default
+            from google.cloud import storage
 
             # Get default credentials
             credentials, project = default()

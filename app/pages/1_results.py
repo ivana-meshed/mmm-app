@@ -15,7 +15,6 @@ from google.auth.iam import Signer as IAMSigner
 from google.auth.transport.requests import Request
 from google.cloud import storage
 
-
 st.set_page_config(page_title="Results: Robyn MMM", layout="wide")
 st.title("Results browser (GCS)")
 
