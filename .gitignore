@@ -50,3 +50,6 @@ secrets/
 ./terraformd/*
 /infra/terraform/~/.terraform.d/*
 /infra/terraform/.terraform/*
+/infra/terraform/tfplan
+baseline_report.md
+performance_report.md
