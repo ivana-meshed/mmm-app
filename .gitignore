@@ -43,3 +43,5 @@ docs/*.png
 *credentials*.json
 secrets/
 
+*.json
+*.png
