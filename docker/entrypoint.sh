@@ -3,6 +3,13 @@ set -e
 
 echo "🚀 Starting MMM Trainer container..."
 
+# Check if this is a health check request
+if [ "$1" = "health" ]; then
+    echo "Running health check..."
+    python3 /app/health_api.py
+    exit 0
+fi
+
 # Check if this is a warmup request
 if [ "$WARMUP_ONLY" = "true" ]; then
     echo "🔥 Running warmup only..."
