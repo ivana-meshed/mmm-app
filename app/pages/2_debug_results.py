@@ -5,6 +5,7 @@ import streamlit as st
 from google.cloud import storage
 from urllib.parse import quote
 
+
 st.set_page_config(page_title="DEBUG Results", layout="wide")
 st.title("🔍 DEBUG Results browser")
 
@@ -21,11 +22,14 @@ st.write("**Session State Keys:**", list(st.session_state.keys()))
 DEFAULT_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 DEFAULT_PREFIX = "robyn/"
 
+
 @st.cache_resource
 def gcs_client():
     return storage.Client()
 
+
 client = gcs_client()
+
 
 def list_blobs(bucket_name: str, prefix: str):
     try:
@@ -34,6 +38,7 @@ def list_blobs(bucket_name: str, prefix: str):
     except Exception as e:
         st.error(f"Failed to list gs://{bucket_name}/{prefix} — {e}")
         return []
+
 
 def download_bytes_safe(blob):
     """Download blob with error handling"""
@@ -47,11 +52,18 @@ def download_bytes_safe(blob):
         st.error(f"Download failed for {blob.name}: {e}")
         return None
 
+
 def parse_path(name: str):
     parts = name.split("/")
     if len(parts) >= 5 and parts[0] == "robyn":
-        return {"rev": parts[1], "country": parts[2], "stamp": parts[3], "file": "/".join(parts[4:])}
+        return {
+            "rev": parts[1],
+            "country": parts[2],
+            "stamp": parts[3],
+            "file": "/".join(parts[4:]),
+        }
     return None
+
 
 def group_runs(blobs):
     runs = {}
@@ -63,6 +75,7 @@ def group_runs(blobs):
         runs.setdefault(key, []).append(b)
     return runs
 
+
 # Get inputs
 bucket_name = st.text_input("GCS bucket", value=DEFAULT_BUCKET)
 prefix = st.text_input("Root prefix", value=DEFAULT_PREFIX)
@@ -72,45 +85,46 @@ if prefix and not prefix.endswith("/"):
 if st.button("🔄 List files"):
     blobs = list_blobs(bucket_name, prefix)
     runs = group_runs(blobs)
-    
+
     if not runs:
         st.info("No runs found")
         st.stop()
-    
+
     st.write(f"Found {len(runs)} runs")
-    
+
     # Pick the first run for testing
     first_run = list(runs.keys())[0]
     rev, country, stamp = first_run
     blobs = runs[first_run]
-    
+
     st.write(f"Testing with run: {rev}/{country}/{stamp}")
     st.write(f"Files in run: {len(blobs)}")
-    
+
     # List all files (NO st.dataframe)
     st.subheader("Files (as text)")
     for b in blobs:
         st.write(f"- {os.path.basename(b.name)} ({b.size:,} bytes)")
-    
+
     # Find PNG files and display with base64 only
-    png_files = [b for b in blobs if b.name.lower().endswith('.png')]
-    
+    png_files = [b for b in blobs if b.name.lower().endswith(".png")]
+
     if png_files:
         st.subheader("PNG Files (base64 display)")
         for i, b in enumerate(png_files):
             fn = os.path.basename(b.name)
             st.write(f"**{fn}** ({b.size:,} bytes)")
-            
+
             try:
                 image_data = download_bytes_safe(b)
                 if image_data:
                     import base64
+
                     b64 = base64.b64encode(image_data).decode()
                     st.markdown(
                         f'<img src="data:image/png;base64,{b64}" style="max-width: 500px; height: auto;" alt="{fn}">',
-                        unsafe_allow_html=True
+                        unsafe_allow_html=True,
                     )
-                    
+
                     # Simple download button
                     st.download_button(
                         f"Download {fn}",
@@ -126,6 +140,8 @@ if st.button("🔄 List files"):
     else:
         st.info("No PNG files found")
 
-st.write("**Debug Status:** This page uses NO st.dataframe, NO st.image, only base64 HTML images and basic st.download_button")
+st.write(
+    "**Debug Status:** This page uses NO st.dataframe, NO st.image, only base64 HTML images and basic st.download_button"
+)
 st.write("**Current time:**", datetime.datetime.now().strftime("%H:%M:%S"))
 st.write("**User agent:**", st.context.headers.get("user-agent", "unknown"))

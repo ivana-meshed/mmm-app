@@ -37,9 +37,8 @@ IS_CLOUDRUN = bool(os.getenv("K_SERVICE"))
 
 
 def _sa_email_from_creds(creds):
-    return (
-        os.getenv("RUN_SERVICE_ACCOUNT_EMAIL")
-        or getattr(creds, "service_account_email", None)
+    return os.getenv("RUN_SERVICE_ACCOUNT_EMAIL") or getattr(
+        creds, "service_account_email", None
     )
 
 
@@ -74,7 +73,6 @@ def signed_url_or_none(blob, minutes: int = 60):
         return None
 
 
-
 def gcs_console_url(bucket: str, prefix: str) -> str:
     # keep "/" unencoded so the Console URL resolves correctly
     return (
@@ -93,13 +91,9 @@ def list_blobs(bucket_name: str, prefix: str):
     # Safer listing with visible errors if IAM is missing
     try:
         bucket = client.bucket(bucket_name)
-        return list(
-            client.list_blobs(bucket_or_name=bucket, prefix=prefix)
-        )
+        return list(client.list_blobs(bucket_or_name=bucket, prefix=prefix))
     except Exception as e:
-        st.error(
-            f"❌ Failed to list gs://{bucket_name}/{prefix} — {e}"
-        )
+        st.error(f"❌ Failed to list gs://{bucket_name}/{prefix} — {e}")
         return []
 
 
@@ -207,7 +201,6 @@ def gcs_object_details_url(blob) -> str:
     )
 
 
-
 def download_link_for_blob(
     blob,
     label=None,
@@ -259,14 +252,12 @@ def download_link_for_blob(
     )
 
 
-
 def read_text_blob(blob) -> str:
     try:
         return blob.download_as_bytes().decode("utf-8", errors="replace")
     except Exception as e:
         st.error(f"Failed to read text from {blob.name}: {e}")
         return ""
-
 
 
 def find_blob(blobs, endswith: str):
@@ -279,11 +270,9 @@ def find_blob(blobs, endswith: str):
     return None
 
 
-
 def find_all(blobs, pattern):
     r = re.compile(pattern, re.IGNORECASE)
     return [b for b in blobs if r.search(b.name)]
-
 
 
 def find_onepager_blob(blobs, best_id: str):
@@ -320,7 +309,6 @@ def find_onepager_blob(blobs, best_id: str):
     return None
 
 
-
 def find_allocator_plots(blobs):
     """Find allocator plots with improved search logic"""
     allocator_plots = []
@@ -348,7 +336,6 @@ def find_allocator_plots(blobs):
     return allocator_plots
 
 
-
 def debug_blob_info(blobs):
     """Helper function to debug what files we actually have"""
     st.write("**Debug: All files in this run:**")
@@ -371,7 +358,6 @@ def debug_blob_info(blobs):
 
     for info in file_info:
         st.write(f"- `{info['basename']}` ({info['size_mb']} MB)")
-
 
 
 def render_metrics_section(blobs, country, stamp):
@@ -406,9 +392,7 @@ def render_metrics_section(blobs, country, stamp):
             else:
                 st.warning(f"Could not read {fn}")
         except Exception as e:
-            st.warning(
-                f"Couldn't preview `{fn}` as a table: {e}"
-            )
+            st.warning(f"Couldn't preview `{fn}` as a table: {e}")
 
     elif metrics_txt:
         fn = os.path.basename(metrics_txt.name)
@@ -423,9 +407,7 @@ def render_metrics_section(blobs, country, stamp):
                 for line in raw.splitlines():
                     if ":" in line:
                         k, v = line.split(":", 1)
-                        rows.append(
-                            {"metric": k.strip(), "value": v.strip()}
-                        )
+                        rows.append({"metric": k.strip(), "value": v.strip()})
 
                 if rows:
                     df = pd.DataFrame(rows)
@@ -449,10 +431,7 @@ def render_metrics_section(blobs, country, stamp):
         except Exception as e:
             st.warning(f"Couldn't preview `{fn}`: {e}")
     else:
-        st.info(
-            "No allocator metrics found (allocator_metrics.csv/txt)."
-        )
-
+        st.info("No allocator metrics found (allocator_metrics.csv/txt).")
 
 
 def render_allocator_section(blobs, country, stamp):
@@ -486,9 +465,7 @@ def render_allocator_section(blobs, country, stamp):
                         b,
                         label=f"Download {fn}",
                         mime_hint="image/png",
-                        key_suffix=(
-                            f"alloc|{country}|{stamp}|{i}"
-                        ),
+                        key_suffix=(f"alloc|{country}|{stamp}|{i}"),
                     )
                 else:
                     st.error("Could not load image data")
@@ -500,9 +477,7 @@ def render_allocator_section(blobs, country, stamp):
 
         # Debug: show what PNG files exist
         with st.expander("Show all PNG files"):
-            png_files = [
-                b for b in blobs if b.name.lower().endswith(".png")
-            ]
+            png_files = [b for b in blobs if b.name.lower().endswith(".png")]
             if png_files:
                 st.write("Found PNG files:")
                 for i, b in enumerate(png_files):
@@ -530,12 +505,9 @@ def render_allocator_section(blobs, country, stamp):
                                     unsafe_allow_html=True,
                                 )
                         except Exception as e:
-                            st.error(
-                                f"Could not display: {e}"
-                            )
+                            st.error(f"Could not display: {e}")
             else:
                 st.write("No PNG files found at all.")
-
 
 
 def render_onepager_section(blobs, best_id, country, stamp):
@@ -548,9 +520,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
             name = os.path.basename(op_blob.name)
             lower = name.lower()
 
-            st.success(
-                f"Found onepager: **{name}** ({op_blob.size:,} bytes)"
-            )
+            st.success(f"Found onepager: **{name}** ({op_blob.size:,} bytes)")
 
             # Display using base64 HTML
             if lower.endswith(".png"):
@@ -560,7 +530,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                         b64 = base64.b64encode(image_data).decode()
                         st.markdown(
                             (
-                                '<img '
+                                "<img "
                                 f'src="data:image/png;base64,{b64}" '
                                 'style="width: 100%; height: auto;" '
                                 'alt="Onepager">'
@@ -573,9 +543,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                             op_blob,
                             label=f"Download {name}",
                             mime_hint="image/png",
-                            key_suffix=(
-                                f"onepager|{country}|{stamp}"
-                            ),
+                            key_suffix=(f"onepager|{country}|{stamp}"),
                         )
 
                     else:
@@ -583,9 +551,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                 except Exception as e:
                     st.error(f"Couldn't preview `{name}`: {e}")
             elif lower.endswith(".pdf"):
-                st.info(
-                    "Onepager available as PDF (preview not supported)."
-                )
+                st.info("Onepager available as PDF (preview not supported).")
 
                 # Download button for PDF
                 try:
@@ -595,9 +561,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                             op_blob,
                             label=f"Download {name}",
                             mime_hint="application/pdf",
-                            key_suffix=(
-                                f"onepager|{country}|{stamp}"
-                            ),
+                            key_suffix=(f"onepager|{country}|{stamp}"),
                         )
 
                 except Exception as e:
@@ -608,10 +572,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                 f"'{best_id}' using standard patterns."
             )
     else:
-        st.warning(
-            "best_model_id.txt not found; cannot locate onepager."
-        )
-
+        st.warning("best_model_id.txt not found; cannot locate onepager.")
 
 
 def render_all_files_section(blobs, bucket_name, country, stamp):
@@ -673,9 +634,7 @@ with st.sidebar:
                 # Try an actual download to verify storage.objects.get
                 test_data = download_bytes_safe(test_blobs[0])
                 if test_data is not None:
-                    st.success(
-                        "✅ Download OK (storage.objects.get works)."
-                    )
+                    st.success("✅ Download OK (storage.objects.get works).")
                 else:
                     st.error("❌ Download failed - got empty data")
             elif len(test_blobs) == 0:
@@ -781,7 +740,7 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
     gcs_url = gcs_console_url(bucket_name, prefix_path)
     st.markdown(
         (
-            f"**Path:** <a href=\"{gcs_url}\" target=\"_blank\">"
+            f'**Path:** <a href="{gcs_url}" target="_blank">'
             f"gs://{bucket_name}/{prefix_path}</a>"
         ),
         unsafe_allow_html=True,
