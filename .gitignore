@@ -40,3 +40,5 @@ temp/
 *credentials*.json
 secrets/
 
+*.json
+*.png
