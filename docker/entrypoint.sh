@@ -10,17 +10,14 @@ if [ "$1" = "health" ]; then
     exit 0
 fi
 
-# Check if this is a warmup request
-if [ "$WARMUP_ONLY" = "true" ]; then
-    echo "🔥 Running warmup only..."
-    python3 /app/warm_container.py
-    exit 0
-fi
-
-# Always run warming on startup
 echo "🔥 Warming container..."
-python3 /app/warm_container.py &
-WARMUP_PID=$!
+if [ -f "/app/warm_container.py" ]; then
+    python3 /app/warm_container.py &
+    WARMUP_PID=$!
+else
+    echo "⚠️ Warming script not found, skipping..."
+    WARMUP_PID=""
+fi
 
 # Start the main application
 echo "🌐 Starting Streamlit application..."
