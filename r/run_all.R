@@ -163,8 +163,8 @@ date_input <- cfg$date_input
 iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
+timestamp <- cfg$timestamp %||% format(Sys.time(), "%m%d_%H%M%S")
 
-timestamp <- format(Sys.time(), "%m%d_%H%M%S")
 dir_path <- path.expand(
   file.path("~/budget/datasets", revision, country, timestamp)
 )

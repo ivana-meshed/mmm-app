@@ -229,7 +229,7 @@ if st.button("Test connection & preview 5 rows"):
         except Exception as e:
             st.error(f"Preview failed: {e}")
 
-def build_job_json(tmp_dir, csv_path=None, parquet_path=None, annotations_path=None):
+def build_job_json(tmp_dir, csv_path=None, parquet_path=None, annotations_path=None, timestamp=None):
     """Updated to support both CSV and Parquet paths"""
     job = {
         "country": country,
@@ -262,7 +262,9 @@ def build_job_json(tmp_dir, csv_path=None, parquet_path=None, annotations_path=N
         "cache_snapshot": True,
         # NEW: Performance flags
         "use_parquet": True,
-        "parallel_processing": True
+        "parallel_processing": True,
+        "timestamp": timestamp
+
     }
     job_path = os.path.join(tmp_dir, "job.json")
     with open(job_path, "w") as f:
@@ -327,11 +329,13 @@ if st.button("Train"):
 
                 # 3) Build job.json with both CSV and Parquet paths
                 with timed_step("Build job.json", timings):
+                    timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
                     job_cfg = build_job_json(
                         td,
                         csv_path=csv_path,
                         parquet_path=parquet_path,
                         annotations_path=annotations_path,
+                        timestamp=timestamp
                     )
 
                 # 4) Prepare environment for training
@@ -381,26 +385,18 @@ if st.button("Train"):
                 st.dataframe(df_times, use_container_width=True)
                 st.write(f"**Total elapsed:** {_fmt_secs(total)}")
 
-            # === Save & upload timings CSV ===
-            from datetime import datetime
-            import uuid
+            gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
 
-            # keep files together by revision/date; add a run id
-            run_id = datetime.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
-            dest_blob = f"robyn/runs/{country}/{revision}/{date_input}/{run_id}/timings.csv"
+            # Save to a guaranteed existing temp file
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
+                df_times.to_csv(tmp.name, index=False)
+                timings_csv_local = tmp.name  # keep path to upload afterwards
 
-            # write locally first (inside our temp dir used above)
-            timings_csv_local = os.path.join(td, "timings.csv")
-            df_times.to_csv(timings_csv_local, index=False)
+            # Upload to the same prefix as R
+            dest_blob = f"{gcs_prefix}/timings.csv"
+            gcs_uri = upload_to_gcs(gcs_bucket, timings_csv_local, dest_blob)
 
-            gcs_uri = None
-            try:
-                gcs_uri = upload_to_gcs(gcs_bucket, timings_csv_local, dest_blob)
-                st.success(f"Timings CSV uploaded to **{gcs_uri}**")
-            except Exception as e:
-                st.warning(f"Couldn’t upload timings to GCS: {e}. You can still download it below.")
-
-            # Also offer a direct download in the UI
+            st.success(f"Timings CSV uploaded to **{gcs_uri}**")
             st.download_button(
                 "Download timings.csv",
                 data=df_times.to_csv(index=False),
