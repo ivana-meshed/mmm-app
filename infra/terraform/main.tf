@@ -99,106 +99,92 @@ resource "google_project_service" "cloudbuild" {
 }
 
 
-resource "google_cloud_run_v2_service" "svc" {
-  provider = google-beta
+resource "google_cloud_run_service" "svc" {
   name     = var.service_name
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
-
-  deletion_protection = false
 
   template {
-    service_account = google_service_account.runner.email
-    timeout         = "3600s"
-
-    # Concurrency (v2 field)
-    max_instance_request_concurrency = 64
-
-    # Scaling replaces min/max instance annotations
-    scaling {
-      min_instance_count = var.min_instances
-      max_instance_count = var.max_instances
+    metadata {
+      annotations = {
+        "run.googleapis.com/cpu-throttling" = "false"
+        # NEW: Pre-warming configuration
+        "run.googleapis.com/min-instances" = var.min_instances
+        "run.googleapis.com/max-instances" = var.max_instances
+        # Allocate CPU during startup for warming
+        "run.googleapis.com/cpu-throttling" = "false"
+        # Increase startup timeout for warming
+        "run.googleapis.com/timeout" = "600s"
+      }
     }
 
-    containers {
-      image = var.image
+    spec {
+      service_account_name  = google_service_account.runner.email
+      container_concurrency = 8
+      timeout_seconds       = 3600
 
-      # Resources; cpu_idle=false disables CPU throttling in v2
-      resources {
-        limits = {
-          cpu    = "8"
-          memory = "32Gi"
+      containers {
+        image = var.image
+
+        resources {
+          limits = {
+            cpu    = var.cpu_limit
+            memory = var.memory_limit
+          }
+          requests = {
+            cpu    = "2"   # Minimum for warming
+            memory = "8Gi" # Minimum for warming
+          }
         }
-        cpu_idle = false
-      }
 
-      # ✅ STARTUP: consider the app "started" when HTTP / responds.
-      # If you prefer to wait for Streamlit's stcore to mount,
-      # point this to "/_stcore/health" and increase thresholds.
-      startup_probe {
-        tcp_socket { port = 8080 }
-        period_seconds        = 2
-        timeout_seconds       = 1
-        failure_threshold     = 10
-        initial_delay_seconds = 0
-      }
+        # NEW: Extended startup probe for warming
+        startup_probe {
+          http_get {
+            path = "/health" # Our health endpoint
+            port = 8080
+          }
+          period_seconds        = 15 # Check every 15 seconds
+          timeout_seconds       = 10 # 10 seconds per check
+          failure_threshold     = 30 # Allow up to 7.5 minutes for warmup
+          initial_delay_seconds = 10 # Wait 10 seconds before first check
+        }
 
-      # ✅ LIVENESS: keep watching Streamlit’s health afterwards
-      liveness_probe {
-        http_get { path = "/_stcore/health" }
-        period_seconds        = 60
-        timeout_seconds       = 10
-        failure_threshold     = 3
-        initial_delay_seconds = 120
-      }
-      # Environment variables
-      env {
-        name  = "GCS_BUCKET"
-        value = var.bucket_name
-      }
-      env {
-        name  = "APP_ROOT"
-        value = "/app"
-      }
-      env {
-        name  = "RUN_SERVICE_ACCOUNT_EMAIL"
-        value = google_service_account.runner.email
-      }
-      env {
-        name  = "R_MAX_CORES"
-        value = "8"
-      }
-      env {
-        name  = "OPENBLAS_NUM_THREADS"
-        value = "8"
-      }
-      env {
-        name  = "OMP_NUM_THREADS"
-        value = "8"
-      }
-      env {
-        name  = "PYTHONUNBUFFERED"
-        value = "1"
-      }
-      env {
-        name  = "STREAMLIT_SERVER_HEADLESS"
-        value = "true"
-      }
-      env {
-        name  = "STREAMLIT_SERVER_ENABLE_CORS"
-        value = "false"
+        # Liveness probe for running containers
+        liveness_probe {
+          http_get {
+            path = "/health"
+            port = 8080
+          }
+          period_seconds        = 60
+          timeout_seconds       = 10
+          failure_threshold     = 3
+          initial_delay_seconds = 120 # Wait 2 minutes after startup
+        }
+
+        # ... [existing environment variables] ...
+
+        # NEW: Warming configuration
+        env {
+          name  = "ENABLE_WARMING"
+          value = "true"
+        }
+
+        env {
+          name  = "WARMING_TIMEOUT"
+          value = "100" # 5 minutes
+        }
       }
     }
   }
 
   traffic {
-    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
-    percent = 100
+    percent         = 100
+    latest_revision = true
   }
 
   depends_on = [
     google_project_service.run,
     google_project_service.ar,
+    google_project_service.cloudbuild,
     google_project_iam_member.deployer_run_admin,
     google_project_iam_member.sa_ar_reader,
   ]
@@ -206,27 +192,20 @@ resource "google_cloud_run_v2_service" "svc" {
 
 
 # Add autoscaling configuration
-resource "google_cloud_run_v2_service_iam_member" "autoscaling_admin" {
-  provider = google-beta
-  location = google_cloud_run_v2_service.svc.location
-  name     = google_cloud_run_v2_service.svc.name
+resource "google_cloud_run_service_iam_member" "autoscaling_admin" {
+  location = google_cloud_run_service.svc.location
+  service  = google_cloud_run_service.svc.name
   role     = "roles/run.admin"
   member   = "serviceAccount:${google_service_account.runner.email}"
 }
 
-# Public access (replace your v1 IAM resource)
-resource "google_cloud_run_v2_service_iam_member" "invoker" {
-  provider = google-beta
-  name     = google_cloud_run_v2_service.svc.name
-  location = google_cloud_run_v2_service.svc.location
+resource "google_cloud_run_service_iam_member" "invoker" {
+  location = google_cloud_run_service.svc.location
+  service  = google_cloud_run_service.svc.name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }
 
 output "url" {
-  value = coalesce(
-    google_cloud_run_v2_service.svc.uri,
-    try(google_cloud_run_v2_service.svc.urls[0], "")
-  )
+  value = google_cloud_run_service.svc.status[0].url
 }
-
