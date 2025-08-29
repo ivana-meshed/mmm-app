@@ -136,11 +136,11 @@ resource "google_cloud_run_v2_service" "svc" {
       # If you prefer to wait for Streamlit's stcore to mount,
       # point this to "/_stcore/health" and increase thresholds.
       startup_probe {
-        http_get { path = "/health" }
-        period_seconds        = 10
-        timeout_seconds       = 8
-        failure_threshold     = 30 # ~5 min
-        initial_delay_seconds = 5
+        tcp_socket { port = 8080 }
+        period_seconds        = 2
+        timeout_seconds       = 1
+        failure_threshold     = 10
+        initial_delay_seconds = 0
       }
 
       # ✅ LIVENESS: keep watching Streamlit’s health afterwards
