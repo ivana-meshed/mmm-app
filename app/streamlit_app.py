@@ -372,40 +372,39 @@ if st.button("Train"):
         )
 
         # 🔎 Execution time summary
-        # 🔎 Execution time summary
-if timings:
-    df_times = pd.DataFrame(timings)
-    total = float(df_times["Time (s)"].sum())
-    df_times["% of total"] = (df_times["Time (s)"] / total * 100).round(1)
+        if timings:
+            df_times = pd.DataFrame(timings)
+            total = float(df_times["Time (s)"].sum())
+            df_times["% of total"] = (df_times["Time (s)"] / total * 100).round(1)
 
-    with st.expander("⏱️ Execution timeline & totals", expanded=True):
-        st.dataframe(df_times, use_container_width=True)
-        st.write(f"**Total elapsed:** {_fmt_secs(total)}")
+            with st.expander("⏱️ Execution timeline & totals", expanded=True):
+                st.dataframe(df_times, use_container_width=True)
+                st.write(f"**Total elapsed:** {_fmt_secs(total)}")
 
-    # === Save & upload timings CSV ===
-    from datetime import datetime
-    import uuid
+            # === Save & upload timings CSV ===
+            from datetime import datetime
+            import uuid
 
-    # keep files together by revision/date; add a run id
-    run_id = datetime.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
-    dest_blob = f"robyn/runs/{country}/{revision}/{date_input}/{run_id}/timings.csv"
+            # keep files together by revision/date; add a run id
+            run_id = datetime.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
+            dest_blob = f"robyn/runs/{country}/{revision}/{date_input}/{run_id}/timings.csv"
 
-    # write locally first (inside our temp dir used above)
-    timings_csv_local = os.path.join(td, "timings.csv")
-    df_times.to_csv(timings_csv_local, index=False)
+            # write locally first (inside our temp dir used above)
+            timings_csv_local = os.path.join(td, "timings.csv")
+            df_times.to_csv(timings_csv_local, index=False)
 
-    gcs_uri = None
-    try:
-        gcs_uri = upload_to_gcs(gcs_bucket, timings_csv_local, dest_blob)
-        st.success(f"Timings CSV uploaded to **{gcs_uri}**")
-    except Exception as e:
-        st.warning(f"Couldn’t upload timings to GCS: {e}. You can still download it below.")
+            gcs_uri = None
+            try:
+                gcs_uri = upload_to_gcs(gcs_bucket, timings_csv_local, dest_blob)
+                st.success(f"Timings CSV uploaded to **{gcs_uri}**")
+            except Exception as e:
+                st.warning(f"Couldn’t upload timings to GCS: {e}. You can still download it below.")
 
-    # Also offer a direct download in the UI
-    st.download_button(
-        "Download timings.csv",
-        data=df_times.to_csv(index=False),
-        file_name="timings.csv",
-        mime="text/csv",
-        key="dl_timings_csv",
-    )
+            # Also offer a direct download in the UI
+            st.download_button(
+                "Download timings.csv",
+                data=df_times.to_csv(index=False),
+                file_name="timings.csv",
+                mime="text/csv",
+                key="dl_timings_csv",
+            )
