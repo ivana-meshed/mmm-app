@@ -131,7 +131,7 @@ resource "google_cloud_run_service" "svc" {
             memory = var.memory_limit
           }
           requests = {
-            cpu    = "2"   # Minimum for warming
+            cpu    = "8"   # Minimum for warming
             memory = "8Gi" # Minimum for warming
           }
         }
