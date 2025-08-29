@@ -53,3 +53,4 @@ secrets/
 /infra/terraform/tfplan
 baseline_report.md
 performance_report.md
+scripts/reports/*
