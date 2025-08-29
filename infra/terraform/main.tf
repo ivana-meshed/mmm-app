@@ -105,6 +105,8 @@ resource "google_cloud_run_v2_service" "svc" {
   location = var.region
   ingress  = "INGRESS_TRAFFIC_ALL"
 
+  deletion_protection = false
+
   template {
     service_account = google_service_account.runner.email
     timeout         = "3600s"
