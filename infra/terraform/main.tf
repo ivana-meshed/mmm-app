@@ -2,6 +2,10 @@ provider "google" {
   project = var.project_id
   region  = var.region
 }
+provider "google-beta" {
+  project = var.project_id
+  region  = var.region
+}
 
 #resource "google_artifact_registry_repository" "repo" {
 #  location      = var.region
@@ -94,119 +98,108 @@ resource "google_project_service" "cloudbuild" {
   disable_on_destroy = false
 }
 
-resource "google_cloud_run_service" "svc" {
+resource "google_cloud_run_v2_service" "svc" {
+  provider = google-beta
   name     = var.service_name
   location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL" # same public behavior as before
 
   template {
-    metadata {
-      annotations = {
-        "run.googleapis.com/cpu-throttling" = "false"
-        "run.googleapis.com/min-instances"  = var.min_instances
-        "run.googleapis.com/max-instances"  = var.max_instances
-        # Add session affinity to reduce rate limiting
-        #"run.googleapis.com/sessionAffinity" = "true"
-        # Increase timeout
-        "run.googleapis.com/timeout" = "3600s"
-      }
+    service_account = google_service_account.runner.email
+    timeout         = "3600s"
+
+    # v2 concurrency
+    max_instance_request_concurrency = 64
+
+    # v2 scaling (replaces min/max instance annotations)
+    scaling {
+      min_instance_count = var.min_instances
+      max_instance_count = var.max_instances
     }
 
-    spec {
-      service_account_name  = google_service_account.runner.email
-      container_concurrency = 64 # Important: Keep at 1 for training jobs
-      timeout_seconds       = 3600
+    containers {
+      image = var.image
 
-      containers {
-        image = var.image
-
-        resources {
-          limits = {
-            cpu    = "8"
-            memory = "32Gi"
-          }
-          requests = {
-            cpu    = "4"
-            memory = "16Gi"
-          }
+      # v2 resources (cpu_idle=false == no CPU throttling)
+      resources {
+        limits = {
+          cpu    = "8"
+          memory = "32Gi"
         }
+        cpu_idle = false
+        # requests are not explicitly supported in v2; limits suffice
+      }
 
-        # Improved startup probe
-        startup_probe {
-          http_get {
-            path = "/_stcore/health"
-            port = 8080
-          }
-          period_seconds        = 10
-          timeout_seconds       = 8
-          failure_threshold     = 30
-          initial_delay_seconds = 10
-        }
+      # ✅ STARTUP: server reachable?
+      startup_probe {
+        http_get { path = "/health" }
+        period_seconds        = 10
+        timeout_seconds       = 8
+        failure_threshold     = 30
+        initial_delay_seconds = 5
+      }
 
-        # Liveness probe
-        liveness_probe {
-          http_get {
-            path = "/_stcore/health"
-            port = 8080
-          }
-          period_seconds        = 60
-          timeout_seconds       = 10
-          failure_threshold     = 3
-          initial_delay_seconds = 120
-        }
+      # ✅ READINESS: Streamlit fully ready (stcore mounted)
+      readiness_probe {
+        http_get { path = "/_stcore/health" }
+        period_seconds        = 5
+        timeout_seconds       = 4
+        failure_threshold     = 12
+        initial_delay_seconds = 0
+      }
 
-        # Environment variables
-        env {
-          name  = "GCS_BUCKET"
-          value = var.bucket_name
-        }
+      # ✅ LIVENESS: stays healthy over time
+      liveness_probe {
+        http_get { path = "/_stcore/health" }
+        period_seconds        = 60
+        timeout_seconds       = 10
+        failure_threshold     = 3
+        initial_delay_seconds = 120
+      }
 
-        env {
-          name  = "APP_ROOT"
-          value = "/app"
-        }
-
-        env {
-          name  = "RUN_SERVICE_ACCOUNT_EMAIL"
-          value = google_service_account.runner.email
-        }
-
-        env {
-          name  = "R_MAX_CORES"
-          value = "8"
-        }
-
-        env {
-          name  = "OPENBLAS_NUM_THREADS"
-          value = "8"
-        }
-
-        env {
-          name  = "OMP_NUM_THREADS"
-          value = "8"
-        }
-
-        env {
-          name  = "PYTHONUNBUFFERED"
-          value = "1"
-        }
-
-        # Add Streamlit specific config
-        env {
-          name  = "STREAMLIT_SERVER_HEADLESS"
-          value = "true"
-        }
-
-        env {
-          name  = "STREAMLIT_SERVER_ENABLE_CORS"
-          value = "false"
-        }
+      # Environment variables
+      env {
+        name  = "GCS_BUCKET"
+        value = var.bucket_name
+      }
+      env {
+        name  = "APP_ROOT"
+        value = "/app"
+      }
+      env {
+        name  = "RUN_SERVICE_ACCOUNT_EMAIL"
+        value = google_service_account.runner.email
+      }
+      env {
+        name  = "R_MAX_CORES"
+        value = "8"
+      }
+      env {
+        name  = "OPENBLAS_NUM_THREADS"
+        value = "8"
+      }
+      env {
+        name  = "OMP_NUM_THREADS"
+        value = "8"
+      }
+      env {
+        name  = "PYTHONUNBUFFERED"
+        value = "1"
+      }
+      env {
+        name  = "STREAMLIT_SERVER_HEADLESS"
+        value = "true"
+      }
+      env {
+        name  = "STREAMLIT_SERVER_ENABLE_CORS"
+        value = "false"
       }
     }
   }
 
   traffic {
-    percent         = 100
-    latest_revision = true
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+    percent = 100
   }
 
   depends_on = [
@@ -219,20 +212,22 @@ resource "google_cloud_run_service" "svc" {
 
 
 # Add autoscaling configuration
-resource "google_cloud_run_service_iam_member" "autoscaling_admin" {
-  location = google_cloud_run_service.svc.location
-  service  = google_cloud_run_service.svc.name
+resource "google_cloud_run_v2_service_iam_member" "autoscaling_admin" {
+  location = google_cloud_run_v2_service.svc.location
+  name     = google_cloud_run_v2_service.svc.name
   role     = "roles/run.admin"
   member   = "serviceAccount:${google_service_account.runner.email}"
 }
 
-resource "google_cloud_run_service_iam_member" "invoker" {
-  location = google_cloud_run_service.svc.location
-  service  = google_cloud_run_service.svc.name
+# Public access (replace your v1 IAM resource)
+resource "google_cloud_run_v2_service_iam_member" "invoker" {
+  provider = google-beta
+  name     = google_cloud_run_v2_service.svc.name
+  location = google_cloud_run_v2_service.svc.location
   role     = "roles/run.invoker"
   member   = "allUsers"
 }
 
 output "url" {
-  value = google_cloud_run_service.svc.status[0].url
+  value = google_cloud_run_v2_service.svc.uri
 }
