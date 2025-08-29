@@ -40,9 +40,9 @@ ENV RETICULATE_AUTOCONFIGURE=0
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # NEW: Performance environment variables
-ENV R_MAX_CORES=8
-ENV OPENBLAS_NUM_THREADS=8
-ENV OMP_NUM_THREADS=8
+ENV R_MAX_CORES=16
+ENV OPENBLAS_NUM_THREADS=16
+ENV OMP_NUM_THREADS=16
 
 # Build-time sanity check: fail the build if imports don't work
 RUN python3 - <<'PY'
