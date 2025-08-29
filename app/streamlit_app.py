@@ -9,6 +9,30 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+query_params = st.query_params
+logger.info("Starting app/streamlit_app.py", extra={"query_params": query_params})
+
+if query_params.get("health") == "true":
+    try:
+        # Import your health checker
+        from health import health_checker
+        
+        # Get health status
+        health_status = health_checker.check_container_health()
+        
+        # Return JSON response for API consumers
+        st.json(health_status)
+        st.stop()
+        
+    except Exception as e:
+        # Simple fallback
+        st.json({
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        })
+        st.stop()
+
 # Check for API requests
 if st.query_params.get("api") == "train":
     # This is a training API request
