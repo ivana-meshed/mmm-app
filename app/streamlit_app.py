@@ -9,6 +9,30 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Check for API requests
+if st.query_params.get("api") == "train":
+    # This is a training API request
+    try:
+        # In a real API, you'd get data from request body
+        # For now, we'll use query parameters
+        api_data = {
+            "country": st.query_params.get("country", "test"),
+            "iterations": int(st.query_params.get("iterations", "50")),
+            "trials": int(st.query_params.get("trials", "2")),
+            "job_id": st.query_params.get("job_id", f"api-{int(time.time())}"),
+            "paid_media_spends": ["GA_SUPPLY_COST", "GA_DEMAND_COST"],
+            "paid_media_vars": ["GA_SUPPLY_COST", "GA_DEMAND_COST"],
+            "context_vars": ["IS_WEEKEND"],
+            "factor_vars": ["IS_WEEKEND"],
+            "organic_vars": ["ORGANIC_TRAFFIC"]
+        }
+        
+        st.session_state.api_request_data = api_data
+        handle_train_api()
+        
+    except Exception as e:
+        st.json({"status": "error", "error": str(e)})
+        st.stop()
 
 st.set_page_config(page_title="Robyn MMM Trainer", layout="wide")
 # Debug info in sidebar
