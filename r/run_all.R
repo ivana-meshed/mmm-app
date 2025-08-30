@@ -6,9 +6,9 @@ Sys.setenv(
   RETICULATE_AUTOCONFIGURE = "0",
   TZ = "Europe/Berlin",
   # NEW: Performance settings
-  R_MAX_CORES = Sys.getenv("R_MAX_CORES", "4"),
-  OMP_NUM_THREADS = Sys.getenv("OMP_NUM_THREADS", "4"),
-  OPENBLAS_NUM_THREADS = Sys.getenv("OPENBLAS_NUM_THREADS", "4")
+  R_MAX_CORES = Sys.getenv("R_MAX_CORES", "8"),
+  OMP_NUM_THREADS = Sys.getenv("OMP_NUM_THREADS", "8"),
+  OPENBLAS_NUM_THREADS = Sys.getenv("OPENBLAS_NUM_THREADS", "8")
 )
 
 suppressPackageStartupMessages({
@@ -29,7 +29,7 @@ suppressPackageStartupMessages({
 })
 
 # NEW: Configure parallel processing
-max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "4"))
+max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "8"))
 plan(multisession, workers = max_cores)
 
 `%||%` <- function(a, b) {
@@ -163,8 +163,8 @@ date_input <- cfg$date_input
 iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
+timestamp <- cfg$timestamp %||% format(Sys.time(), "%m%d_%H%M%S")
 
-timestamp <- format(Sys.time(), "%m%d_%H%M%S")
 dir_path <- path.expand(
   file.path("~/budget/datasets", revision, country, timestamp)
 )

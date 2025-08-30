@@ -15,7 +15,7 @@ variable "cpu_limit" {
 variable "memory_limit" {
   description = "Memory limit for Cloud Run service"
   type        = string
-  default     = "32Gi"
+  default     = "8Gi"
 }
 
 variable "min_instances" {
