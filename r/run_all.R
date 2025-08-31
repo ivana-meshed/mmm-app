@@ -130,8 +130,15 @@ safe_parse_numbers <- function(df, cols) {
 }
 
 get_cfg_from_env <- function() {
-  cfg_path <- Sys.getenv("JOB_CONFIG_GCS_PATH")
-  if (!nzchar(cfg_path)) stop("JOB_CONFIG_GCS_PATH not set")
+  cfg_path <- Sys.getenv("JOB_CONFIG_GCS_PATH", unset = "")
+  if (cfg_path == "") {
+    # Fallback to a stable location if the Python client couldn’t pass overrides
+    bucket <- Sys.getenv("GCS_BUCKET", unset = "mmm-app-output")
+    cfg_path <- sprintf("gs://%s/training-configs/latest/job_config.json", bucket)
+    message("JOB_CONFIG_GCS_PATH not set; falling back to ", cfg_path)
+  }
+
+  # Download & parse
   tmp <- tempfile(fileext = ".json")
   gcs_download(cfg_path, tmp)
   on.exit(unlink(tmp), add = TRUE)

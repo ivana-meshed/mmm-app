@@ -83,52 +83,41 @@ class CloudRunJobManager:
         self.executions_client = run_v2.ExecutionsClient()
 
     def _job_fqn(self, job_name: str) -> str:
-        # Accept either "mmm-app-training" or "projects/.../jobs/mmm-app-training"
-        return (
-            job_name
-            if job_name.startswith("projects/")
-            else (
-                f"projects/{self.project_id}/locations/{self.region}/jobs/{job_name}"
-            )
-        )
-
-    def _job_fqn(self, job_name: str) -> str:
-        return (
-            job_name
-            if job_name.startswith("projects/")
-            else (
-                f"projects/{self.project_id}/locations/{self.region}/jobs/{job_name}"
-            )
-        )
+        # Accept either short name or fully-qualified name
+        if job_name.startswith("projects/"):
+            return job_name
+        return f"projects/{self.project_id}/locations/{self.region}/jobs/{job_name}"
 
     def create_execution(self, job_name: str, env_vars: Dict[str, str]) -> str:
-        """Create a new execution of the training job."""
-        try:
-            # Pass a plain dict (compatible across library versions)
-            overrides = {
-                "container_overrides": [
-                    {
-                        # name is optional for single-container jobs
-                        "env": [
-                            {"name": k, "value": v} for k, v in env_vars.items()
-                        ]
-                    }
-                ]
-            }
+        """Run a job with overrides when supported; otherwise run without overrides."""
+        fqn = self._job_fqn(job_name)
+        overrides = {
+            "container_overrides": [
+                {
+                    # name optional for single-container jobs
+                    "env": [
+                        {"name": k, "value": v} for k, v in env_vars.items()
+                    ]
+                }
+            ]
+        }
 
+        try:
+            # Newer clients: pass everything in a single request dict
             op = self.client.run_job(
-                name=self._job_fqn(job_name),
-                overrides=overrides,
+                request={"name": fqn, "overrides": overrides}
             )
-            execution = op.result()  # Wait until execution resource exists
-            logging.info("Created execution: %s", execution.name)
-            return execution.name
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to start Cloud Run Job '{job_name}'. "
-                f"Ensure the web SA has roles/run.developer on the job, and "
-                f"iam.serviceAccountUser on the training job SA. Underlying error: {e}"
-            ) from e
+        except TypeError:
+            # Older client (no 'overrides' support). Run the job anyway.
+            logging.warning(
+                "Cloud Run Python client does not support 'overrides'. "
+                "Starting job without per-execution env."
+            )
+            op = self.client.run_job(name=fqn)
+
+        execution = op.result()
+        logging.info("Created execution: %s", execution.name)
+        return execution.name
 
     def get_execution_status(self, execution_name: str) -> Dict[str, Any]:
         try:
@@ -433,6 +422,10 @@ if st.button("🚀 Start Training Job", type="primary"):
                 config_blob = f"training-configs/{timestamp}/job_config.json"
                 config_gcs_path = upload_to_gcs(
                     gcs_bucket, config_path, config_blob
+                )
+                latest_blob = "training-configs/latest/job_config.json"
+                latest_gcs_path = upload_to_gcs(
+                    gcs_bucket, config_path, latest_blob
                 )
 
             # Launch job
