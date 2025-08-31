@@ -21,11 +21,11 @@ resource "google_service_account" "training_job_sa" {
 }
 
 # Allow web service to execute training jobs
-resource "google_service_account_iam_member" "web_service_job_executor" {
-  service_account_id = google_service_account.training_job_sa.name
-  role               = "roles/run.invoker"
-  member             = "serviceAccount:${google_service_account.web_service_sa.email}"
-}
+#resource "google_service_account_iam_member" "web_service_job_executor" {
+#  service_account_id = google_service_account.training_job_sa.name
+#  role               = "roles/run.invoker"
+#  member             = "serviceAccount:${google_service_account.web_service_sa.email}"
+#}
 
 resource "google_project_iam_member" "web_service_job_admin" {
   project = var.project_id
@@ -77,6 +77,22 @@ resource "google_storage_bucket_iam_member" "training_sa_bucket_access" {
   bucket = var.bucket_name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.training_job_sa.email}"
+}
+# needs provider google or google-beta >= recent
+resource "google_artifact_registry_repository_iam_member" "web_ar_reader" {
+  project    = var.project_id
+  location   = var.region
+  repository = "mmm-repo"
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
+
+resource "google_artifact_registry_repository_iam_member" "train_ar_reader" {
+  project    = var.project_id
+  location   = var.region
+  repository = "mmm-repo"
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.training_job_sa.email}"
 }
 
 # Token creator permissions for signed URLs
@@ -253,6 +269,19 @@ resource "google_cloud_run_v2_job" "training_job" {
     google_project_service.run,
     google_project_service.ar,
   ]
+}
+resource "google_service_account_iam_member" "web_can_act_as_training_sa" {
+  service_account_id = google_service_account.training_job_sa.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
+resource "google_cloud_run_v2_job_iam_member" "training_job_runner" {
+  provider = google-beta
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_job.training_job.name
+  role     = "roles/run.developer" # includes run.jobs.run
+  member   = "serviceAccount:${google_service_account.web_service_sa.email}"
 }
 
 ##############################################################
