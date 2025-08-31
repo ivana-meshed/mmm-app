@@ -117,4 +117,4 @@ ENV TRAINING_MODE=1
 ENV TZ=Europe/Berlin
 
 # Entry point for Cloud Run Jobs
-ENTRYPOINT ["/app/training_entrypoint.sh"]
+ENTRYPOINT ["/app/entrypoint.sh"]
