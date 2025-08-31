@@ -89,29 +89,21 @@ class CloudRunJobManager:
         return f"projects/{self.project_id}/locations/{self.region}/jobs/{job_name}"
 
     def create_execution(self, job_name: str, env_vars: Dict[str, str]) -> str:
-        """Run a job with overrides when supported; otherwise run without overrides."""
         fqn = self._job_fqn(job_name)
         overrides = {
             "container_overrides": [
-                {
-                    # name optional for single-container jobs
-                    "env": [
-                        {"name": k, "value": v} for k, v in env_vars.items()
-                    ]
-                }
+                {"env": [{"name": k, "value": v} for k, v in env_vars.items()]}
             ]
         }
-
         try:
-            # Newer clients: pass everything in a single request dict
+            # newer clients
             op = self.client.run_job(
                 request={"name": fqn, "overrides": overrides}
             )
         except TypeError:
-            # Older client (no 'overrides' support). Run the job anyway.
+            # older clients
             logging.warning(
-                "Cloud Run Python client does not support 'overrides'. "
-                "Starting job without per-execution env."
+                "Cloud Run client lacks 'overrides'; starting job without per-run env."
             )
             op = self.client.run_job(name=fqn)
 

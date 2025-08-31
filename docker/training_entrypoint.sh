@@ -54,4 +54,13 @@ export LAPACK=libopenblas.so
 
 # Run the training script
 echo "Starting Robyn training with 32 CPUs..."
+
+set -euo pipefail
+
+echo "=== Training entrypoint ==="
+echo "JOB_CONFIG_GCS_PATH=${JOB_CONFIG_GCS_PATH:-<unset>}"
+echo "GCS_BUCKET=${GCS_BUCKET:-<unset>}"
+echo "PROJECT_ID=${PROJECT_ID:-<unset>}"
+echo "REGION=${REGION:-<unset>}"
+
 exec Rscript /app/run_all.R
