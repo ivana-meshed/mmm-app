@@ -21,9 +21,7 @@ RUN pip install --no-cache-dir \
 WORKDIR /app
 
 # Copy only web application files
-COPY app/streamlit_app.py /app/streamlit_app.py
-COPY app/data_processor.py /app/data_processor.py
-COPY app/health.py /app/health.py
+COPY app/ /app/
 COPY requirements.txt /app/requirements.txt
 COPY docker/web_entrypoint.sh /app/entrypoint.sh
 
