@@ -334,7 +334,7 @@ def create_job_config(
         "timestamp": timestamp,
         "use_parquet": True,
         "parallel_processing": True,
-        "max_cores": 32,
+        "max_cores": 8,
     }
 
 

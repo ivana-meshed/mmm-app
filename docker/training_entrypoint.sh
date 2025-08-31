@@ -7,9 +7,9 @@ echo "Starting MMM Training Job on Cloud Run..."
 echo "Environment Check:"
 echo "- CPU cores available: $(nproc)"
 echo "- Memory available: $(free -h | grep 'Mem:' | awk '{print $2}')"
-echo "- R_MAX_CORES: ${R_MAX_CORES:-32}"
-echo "- OMP_NUM_THREADS: ${OMP_NUM_THREADS:-32}"
-echo "- OPENBLAS_NUM_THREADS: ${OPENBLAS_NUM_THREADS:-32}"
+echo "- R_MAX_CORES: ${R_MAX_CORES:-8}"
+echo "- OMP_NUM_THREADS: ${OMP_NUM_THREADS:-8}"
+echo "- OPENBLAS_NUM_THREADS: ${OPENBLAS_NUM_THREADS:-8}"
 
 # Verify required environment variables
 if [ -z "$JOB_CONFIG_GCS_PATH" ]; then
@@ -53,7 +53,7 @@ export BLAS=libopenblas.so
 export LAPACK=libopenblas.so
 
 # Run the training script
-echo "Starting Robyn training with 32 CPUs..."
+echo "Starting Robyn training with 8 CPUs..."
 
 set -euo pipefail
 

@@ -239,17 +239,17 @@ resource "google_cloud_run_v2_job" "training_job" {
 
         env {
           name  = "R_MAX_CORES"
-          value = "32"
+          value = "8"
         }
 
         env {
           name  = "OMP_NUM_THREADS"
-          value = "32"
+          value = "8"
         }
 
         env {
           name  = "OPENBLAS_NUM_THREADS"
-          value = "32"
+          value = "8"
         }
 
         env {
