@@ -129,6 +129,37 @@ safe_parse_numbers <- function(df, cols) {
   df
 }
 
+## ---------- GCS AUTH (must happen before any gcs_* calls) ----------
+options(
+  googleAuthR.scopes.selected = c(
+    "https://www.googleapis.com/auth/devstorage.read_write"
+  )
+)
+
+ensure_gcs_auth <- local({
+  authed <- FALSE
+  function() {
+    if (authed) {
+      return(invisible(TRUE))
+    }
+
+    # 1) Use a JSON key if provided (local dev / CI)
+    creds <- Sys.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if (nzchar(creds) && file.exists(creds)) {
+      googleCloudStorageR::gcs_auth(json_file = creds)
+    } else {
+      # 2) Cloud Run default service account via metadata server
+      googleAuthR::gar_gce_auth(
+        scopes = "https://www.googleapis.com/auth/devstorage.read_write"
+      )
+      googleCloudStorageR::gcs_auth(token = googleAuthR::gar_token())
+    }
+    authed <<- TRUE
+    invisible(TRUE)
+  }
+})
+
+
 get_cfg_from_env <- function() {
   cfg_path <- Sys.getenv("JOB_CONFIG_GCS_PATH", unset = "")
   if (cfg_path == "") {
@@ -156,6 +187,7 @@ to_scalar <- function(x) {
 
 ## ---------- LOAD CFG ----------
 message("Loading configuration from Cloud Run Jobs environment...")
+ensure_gcs_auth()
 cfg <- get_cfg_from_env()
 
 country <- cfg$country
@@ -229,6 +261,8 @@ cat(
 if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
   message("→ Downloading training data from GCS: ", cfg$data_gcs_path)
   temp_data <- tempfile(fileext = ".parquet")
+
+  ensure_gcs_auth()
   gcs_download(cfg$data_gcs_path, temp_data)
   df <- arrow::read_parquet(temp_data, as_data_frame = TRUE)
   unlink(temp_data)
