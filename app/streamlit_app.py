@@ -11,11 +11,7 @@ import pandas as pd
 import snowflake.connector as sf
 import streamlit as st
 from google.cloud import run_v2
-from google.cloud.run_v2.types import (
-    Overrides,
-    ContainerOverride,
-    EnvVar,
-)  # ✅ correct types
+
 from google.cloud import storage
 from data_processor import DataProcessor
 
@@ -96,32 +92,42 @@ class CloudRunJobManager:
             )
         )
 
+    def _job_fqn(self, job_name: str) -> str:
+        return (
+            job_name
+            if job_name.startswith("projects/")
+            else (
+                f"projects/{self.project_id}/locations/{self.region}/jobs/{job_name}"
+            )
+        )
+
     def create_execution(self, job_name: str, env_vars: Dict[str, str]) -> str:
         """Create a new execution of the training job."""
         try:
-            overrides = Overrides(
-                container_overrides=[
-                    ContainerOverride(
-                        # v2 requires EnvVar messages
-                        env=[
-                            EnvVar(name=k, value=v) for k, v in env_vars.items()
+            # Pass a plain dict (compatible across library versions)
+            overrides = {
+                "container_overrides": [
+                    {
+                        # name is optional for single-container jobs
+                        "env": [
+                            {"name": k, "value": v} for k, v in env_vars.items()
                         ]
-                    )
+                    }
                 ]
-            )
+            }
+
             op = self.client.run_job(
-                name=self._job_fqn(job_name), overrides=overrides
+                name=self._job_fqn(job_name),
+                overrides=overrides,
             )
-            execution = op.result()  # wait until execution resource is created
-            logger.info(f"Created execution: {execution.name}")
-            return execution.name  # FQN of execution
+            execution = op.result()  # Wait until execution resource exists
+            logging.info("Created execution: %s", execution.name)
+            return execution.name
         except Exception as e:
-            # Make the common IAM error obvious
             raise RuntimeError(
                 f"Failed to start Cloud Run Job '{job_name}'. "
-                f"Check that your web service SA can run the job "
-                f"(roles/run.developer on the job + iam.serviceAccountUser on the job's SA). "
-                f"Underlying error: {e}"
+                f"Ensure the web SA has roles/run.developer on the job, and "
+                f"iam.serviceAccountUser on the training job SA. Underlying error: {e}"
             ) from e
 
     def get_execution_status(self, execution_name: str) -> Dict[str, Any]:
