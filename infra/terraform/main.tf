@@ -227,8 +227,8 @@ resource "google_cloud_run_v2_job" "training_job" {
 
         resources {
           limits = {
-            cpu    = "32.0"  # Maximum available CPUs
-            memory = "128Gi" # Maximum available memory
+            cpu    = "8.0"  # Maximum available CPUs
+            memory = "32Gi" # Maximum available memory
           }
         }
 
