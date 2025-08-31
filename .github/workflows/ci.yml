@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [ main ]
   push:
-    branches: [ opt ]
+    branches: [ speed]
 
 permissions:
   id-token: write
@@ -18,15 +18,18 @@ jobs:
       PROJECT_NUMBER: "321233323695"
       REGION: europe-west1
       ARTIFACT_REPO: mmm-repo
-      IMAGE: mmm-app
-      SERVICE: mmm-app
+      WEB_IMAGE: mmm-web
+      TRAINING_IMAGE: mmm-training
+      SERVICE_NAME: mmm-app
       BUCKET: mmm-app-output
       WIF_POOL: github-pool
       WIF_PROVIDER: github-oidc
       SA_EMAIL: github-deployer@datawarehouse-422511.iam.gserviceaccount.com
-      RUNTIME_SA: mmm-trainer-sa@datawarehouse-422511.iam.gserviceaccount.com
+      WEB_RUNTIME_SA: mmm-web-service-sa@datawarehouse-422511.iam.gserviceaccount.com
+      TRAINING_RUNTIME_SA: mmm-training-job-sa@datawarehouse-422511.iam.gserviceaccount.com
       REPOSITORY: ivana-meshed/mmm-app
       TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
+
     steps:
       - uses: actions/checkout@v4
 
@@ -42,13 +45,18 @@ jobs:
       - name: Configure Docker auth for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
-      - name: Compute image tag and URL
+      - name: Compute image tags and URLs
         shell: bash
         run: |
-          # Use commit SHA as tag (or use Git tag if you prefer)
-          echo "IMG_TAG=${GITHUB_SHA}" >> "$GITHUB_ENV"
-          echo "IMAGE_URL=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:${GITHUB_SHA}" >> "$GITHUB_ENV"
-          echo "IMAGE_URL_LATEST=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE }}:latest" >> "$GITHUB_ENV"
+          echo "IMG_TAG=${{ github.sha }}" >> "$GITHUB_ENV"
+
+          # Web service image
+          echo "WEB_IMAGE_URL=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}" >> "$GITHUB_ENV"
+          echo "WEB_IMAGE_URL_LATEST=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:latest" >> "$GITHUB_ENV"
+
+          # Training job image
+          echo "TRAINING_IMAGE_URL=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:${{ github.sha }}" >> "$GITHUB_ENV"
+          echo "TRAINING_IMAGE_URL_LATEST=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:latest" >> "$GITHUB_ENV"
 
       - name: Set up QEMU (multi-arch)
         uses: docker/setup-qemu-action@v3
@@ -56,20 +64,32 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build & Push image
+      - name: Build & Push web service image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./docker/Dockerfile
-          platforms: linux/amd64   # keep consistent with your Cloud Run CPU platform
+          file: ./docker/Dockerfile.web
+          platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.IMAGE_URL }}
-            ${{ env.IMAGE_URL_LATEST }}
-          cache-from: type=gha,scope=mmm-app
-          cache-to:   type=gha,mode=max,scope=mmm-app
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:latest
+          cache-from: type=gha,scope=mmm-web
+          cache-to: type=gha,mode=max,scope=mmm-web
 
-      # Terraform only from here on
+      - name: Build & Push training job image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile.training
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:${{ github.sha }}
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:latest
+          cache-from: type=gha,scope=mmm-training
+          cache-to: type=gha,mode=max,scope=mmm-training
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -103,60 +123,77 @@ jobs:
           terraform fmt -check
           terraform validate
 
-      # (First run only) Import an already-existing runtime SA so TF can manage it
-      - name: Import runtime SA if it already exists
+      - name: Import existing service accounts if needed
         working-directory: infra/terraform
         shell: bash
         run: |
           set -euo pipefail
-          terraform state show google_service_account.runner >/dev/null 2>&1 || \
-          terraform import google_service_account.runner "projects/${PROJECT_ID}/serviceAccounts/${RUNTIME_SA}" || true
-      - name: Clear taint & disable deletion protection on live service
+
+          # Import web service SA if it exists
+          terraform state show google_service_account.web_service_sa >/dev/null 2>&1 || \
+          terraform import google_service_account.web_service_sa "projects/${PROJECT_ID}/serviceAccounts/${WEB_RUNTIME_SA}" || true
+
+          # Import training job SA if it exists
+          terraform state show google_service_account.training_job_sa >/dev/null 2>&1 || \
+          terraform import google_service_account.training_job_sa "projects/${PROJECT_ID}/serviceAccounts/${TRAINING_RUNTIME_SA}" || true
+
+      - name: Clear taint & disable deletion protection
         working-directory: infra/terraform
         shell: bash
         env:
           PROJECT_ID: ${{ env.PROJECT_ID }}
           REGION: ${{ env.REGION }}
-          SERVICE: ${{ env.SERVICE }}
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
         run: |
           set -euo pipefail
 
-          echo "🔓 Disabling Cloud Run deletion protection (out-of-band) ..."
-          gcloud run services update "$SERVICE" \
+          # Disable deletion protection on web service
+          echo "Disabling Cloud Run deletion protection..."
+          gcloud run services update "${SERVICE_NAME}-web" \
             --region="$REGION" \
             --no-deletion-protection || true
 
-          echo "🧼 Clearing Terraform taint (if supported) ..."
+          # Clear taints on Terraform resources
+          echo "Clearing Terraform taints..."
           if terraform -version | grep -qE '^Terraform v1\.'; then
-            # untaint works on 1.x; ignore if not tainted
-            terraform untaint google_cloud_run_v2_service.svc || true
+            terraform untaint google_cloud_run_service.web_service || true
+            terraform untaint google_cloud_run_v2_job.training_job || true
           fi
 
-          # If untaint subcommand isn’t available or didn’t work, re-import to clear taint.
-          # (Safe: just resyncs state to the live resource)
+          # Re-import if still tainted
           if terraform plan -refresh-only -no-color 2>&1 | grep -q "is tainted"; then
-            echo "♻️  Re-importing service to clear taint ..."
-            terraform state rm google_cloud_run_v2_service.svc || true
-            terraform import google_cloud_run_v2_service.svc \
-              "projects/${PROJECT_ID}/locations/${REGION}/services/${SERVICE}"
-          fi
+            echo "Re-importing resources to clear taints..."
 
-          # Sanity: make sure the state reflects deletion_protection=false
-            terraform plan -refresh-only -no-color || true
+            # Re-import web service
+            terraform state rm google_cloud_run_service.web_service || true
+            terraform import google_cloud_run_service.web_service \
+              "projects/${PROJECT_ID}/locations/${REGION}/services/${SERVICE_NAME}-web" || true
+
+            # Re-import training job
+            terraform state rm google_cloud_run_v2_job.training_job || true
+            terraform import google_cloud_run_v2_job.training_job \
+              "projects/${PROJECT_ID}/locations/${REGION}/jobs/${SERVICE_NAME}-training" || true
+          fi
 
       - name: Terraform plan
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
+          WEB_IMAGE_URL: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
+          TRAINING_IMAGE_URL: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:${{ github.sha }}
         run: |
-          echo "Deploying image: ${IMAGE_URL}"
+          echo "Deploying images:"
+          echo "  Web service: $WEB_IMAGE_URL"
+          echo "  Training job: $TRAINING_IMAGE_URL"
+
           terraform plan -input=false \
-            -var "project_id=${PROJECT_ID}" \
-            -var "region=${REGION}" \
-            -var "service_name=${SERVICE}" \
-            -var "bucket_name=${BUCKET}" \
-            -var "deployer_sa=${SA_EMAIL}" \
-            -var "image=${IMAGE_URL}" \
+            -var "project_id=$PROJECT_ID" \
+            -var "region=$REGION" \
+            -var "service_name=$SERVICE_NAME" \
+            -var "bucket_name=$BUCKET" \
+            -var "deployer_sa=$SA_EMAIL" \
+            -var "web_image=$WEB_IMAGE_URL" \
+            -var "training_image=$TRAINING_IMAGE_URL" \
             -out=tfplan
 
       - name: Terraform apply
@@ -165,6 +202,18 @@ jobs:
           TF_IN_AUTOMATION: "true"
         run: terraform apply -input=false -auto-approve tfplan
 
-      - name: Print service URL
+      - name: Print deployment info
         working-directory: infra/terraform
-        run: terraform output url
+        run: |
+          echo "Deployment completed successfully!"
+          echo ""
+          echo "Web Service URL:"
+          terraform output web_service_url
+          echo ""
+          echo "Training Job Name:"
+          terraform output training_job_name
+          echo ""
+          echo "Architecture:"
+          echo "  - Web Interface: Cloud Run Service (2 CPUs, 4GB)"
+          echo "  - Training Jobs: Cloud Run Jobs (up to 32 CPUs, 128GB)"
+          echo "  - Storage: GCS Bucket (${BUCKET})"
