@@ -233,6 +233,11 @@ resource "google_cloud_run_v2_job" "training_job" {
         }
 
         env {
+          name  = "JOB_CONFIG_GCS_PATH"
+          value = "gs://${var.bucket_name}/training-configs/latest/job_config.json"
+        }
+
+        env {
           name  = "GCS_BUCKET"
           value = var.bucket_name
         }

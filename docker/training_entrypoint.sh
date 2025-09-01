@@ -12,10 +12,11 @@ echo "- OMP_NUM_THREADS: ${OMP_NUM_THREADS:-8}"
 echo "- OPENBLAS_NUM_THREADS: ${OPENBLAS_NUM_THREADS:-8}"
 
 # Verify required environment variables
-if [ -z "$JOB_CONFIG_GCS_PATH" ]; then
-    echo "ERROR: JOB_CONFIG_GCS_PATH environment variable not set"
-    exit 1
-fi
+# ✅ new
+: "${GCS_BUCKET:=mmm-app-output}"
+: "${JOB_CONFIG_GCS_PATH:=gs://${GCS_BUCKET}/training-configs/latest/job_config.json}"
+export JOB_CONFIG_GCS_PATH
+
 
 echo "Job configuration: $JOB_CONFIG_GCS_PATH"
 
