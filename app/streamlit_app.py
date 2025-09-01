@@ -633,7 +633,50 @@ if st.session_state.job_executions:
 else:
     st.info("No jobs launched yet in this session. Start a training job above.")
 # ===== Execution timeline & upload timings =====
+# ===== Execution timeline & upload timings =====
 if st.session_state.last_timings:
+    with st.expander("⏱️ Execution Timeline", expanded=True):
+        df_times = st.session_state.last_timings["df"]
+        total = float(df_times["Time (s)"].sum()) if not df_times.empty else 0.0
+        if total > 0:
+            df_times = df_times.copy()
+            df_times["% of total"] = (df_times["Time (s)"] / total * 100).round(
+                1
+            )
+        st.dataframe(df_times, use_container_width=True)
+        st.write(f"**Total setup time:** {_fmt_secs(total)}")
+        st.write("**Note**: Training runs asynchronously in Cloud Run Jobs.")
+
+        # ✅ Only upload the initial timings if the object doesn't exist yet
+        try:
+            ts = st.session_state.last_timings["timestamp"]
+            rev = st.session_state.last_timings["revision"]
+            ctry = st.session_state.last_timings["country"]
+            bucket = st.session_state.last_timings["gcs_bucket"]
+            gcs_prefix = f"robyn/{rev}/{ctry}/{ts}"
+            dest_blob = f"{gcs_prefix}/timings.csv"
+
+            client = storage.Client()
+            blob = client.bucket(bucket).blob(dest_blob)
+
+            if not blob.exists():  # <-- critical guard
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".csv", delete=False
+                ) as tmp:
+                    df_times.to_csv(tmp.name, index=False)
+                    tmp_path = tmp.name
+                upload_to_gcs(bucket, tmp_path, dest_blob)
+                st.success(
+                    f"Timings CSV uploaded to **gs://{bucket}/{dest_blob}**"
+                )
+            else:
+                st.info(
+                    "`timings.csv` already exists in GCS — leaving it for the job to append its R row."
+                )
+        except Exception as e:
+            st.warning(f"Skipped uploading timings: {e}")
+
+"""if st.session_state.last_timings:
     with st.expander("⏱️ Execution Timeline", expanded=True):
         df_times = st.session_state.last_timings["df"]
         total = float(df_times["Time (s)"].sum()) if not df_times.empty else 0.0
@@ -683,7 +726,7 @@ if st.session_state.last_timings:
                 mime="text/csv",
                 key="dl_timings_csv_fallback",
             )
-
+"""
 # Architecture info
 with st.expander("🏗️ Architecture Info"):
     st.markdown(
