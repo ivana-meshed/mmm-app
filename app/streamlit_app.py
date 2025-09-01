@@ -26,7 +26,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 query_params = st.query_params
-logger.info("Starting app.py", extra={"query_params": dict(query_params)})
+logger.info(
+    "Starting app/streamlit_app.py", extra={"query_params": dict(query_params)}
+)
 
 # Health check endpoint (returns JSON, does not render UI)
 if query_params.get("health") == "true":
@@ -103,8 +105,7 @@ class CloudRunJobManager:
         NOTE: run_job() does not accept per-run overrides; pass dynamic data via GCS config.
         """
         job_path = self._job_fqn(job_name)
-        # Fire-and-forget; do not call .result()
-        _ = self.client.run_job(name=job_path)
+        _ = self.client.run_job(name=job_path)  # fire-and-forget
 
         # Heuristic: fetch most recent execution
         execution_name = None
@@ -249,6 +250,45 @@ def parse_train_size(txt: str):
 
 
 # ─────────────────────────────
+# Optional: show training time button (only if a job exists)
+# ─────────────────────────────
+if st.session_state.job_executions:
+    latest_job_for_time = st.session_state.job_executions[-1]
+    time_prefix = (
+        latest_job_for_time.get("gcs_prefix")
+        or f"robyn/{latest_job_for_time.get('revision','r100')}/{latest_job_for_time.get('country','fr')}/{latest_job_for_time.get('timestamp','')}"
+    )
+    if st.button("⏱️ Refresh training time"):
+        s = read_status_json(GCS_BUCKET, time_prefix)
+        if not s:
+            st.info("No status.json yet (job may still be starting).")
+        else:
+            if s.get("state") == "SUCCEEDED" and "duration_minutes" in s:
+                st.success(f"Training time: {s['duration_minutes']} minutes")
+            elif "start_time" in s:
+                try:
+                    started = datetime.fromisoformat(
+                        s["start_time"].replace("Z", "")
+                    )
+                    elapsed = (
+                        datetime.now(timezone.utc)
+                        - started.replace(tzinfo=timezone.utc)
+                    ).total_seconds() / 60
+                    st.info(f"Running… elapsed ~{elapsed:.1f} minutes")
+                except Exception:
+                    st.info("Running… (could not parse start time)")
+else:
+    st.info("No jobs launched yet in this session. Start a training job below.")
+
+# Auto-refresh toggle (manual)
+if st.toggle(
+    "Auto-refresh status",
+    value=st.session_state["auto_refresh"],
+    key="auto_refresh",
+):
+    st.experimental_rerun()
+
+# ─────────────────────────────
 # Sidebar
 # ─────────────────────────────
 with st.sidebar:
@@ -388,7 +428,6 @@ if st.button("Test connection & preview 5 rows"):
         except Exception as e:
             st.error(f"Preview failed: {e}")
 
-
 # ─────────────────────────────
 # Launch Training
 # ─────────────────────────────
@@ -507,6 +546,7 @@ if st.button("🚀 Start Training Job", type="primary"):
                             "status": "LAUNCHED",
                             "config_path": config_gcs_path,
                             "data_path": data_gcs_path,
+                            # used later by “View Results”
                             "revision": revision,
                             "country": country,
                             "gcs_prefix": gcs_prefix,
@@ -578,15 +618,17 @@ if st.session_state.job_executions:
 
     with col2:
         if st.button("📁 View Results"):
-            gcs_prefix = latest_job.get("gcs_prefix")
-            bucket = latest_job.get("gcs_bucket", GCS_BUCKET)
-            st.info(f"Check results at: gs://{bucket}/{gcs_prefix}/")
+            gcs_prefix_view = latest_job.get("gcs_prefix")
+            bucket_view = latest_job.get("gcs_bucket", GCS_BUCKET)
+            st.info(f"Check results at: gs://{bucket_view}/{gcs_prefix_view}/")
 
             # Try to fetch training log
             try:
                 client = storage.Client()
-                bucket_obj = client.bucket(bucket)
-                log_blob = bucket_obj.blob(f"{gcs_prefix}/robyn_console.log")
+                bucket_obj = client.bucket(bucket_view)
+                log_blob = bucket_obj.blob(
+                    f"{gcs_prefix_view}/robyn_console.log"
+                )
                 if log_blob.exists():
                     log_bytes = log_blob.download_as_bytes()
                     tail = (
@@ -631,45 +673,8 @@ if st.session_state.job_executions:
                 ]
             )
             st.dataframe(df_jobs, use_container_width=True)
-
-    # Optional: training time refresh (reads status.json written by R)
-    with st.container():
-        prefix = (
-            latest_job.get("gcs_prefix")
-            or f"robyn/{latest_job.get('revision','r100')}/{latest_job.get('country','fr')}/{latest_job.get('timestamp','')}"
-        )
-        if st.button("⏱️ Refresh training time"):
-            s = read_status_json(GCS_BUCKET, prefix)
-            if not s:
-                st.info("No status.json yet (job may still be starting).")
-            else:
-                if s.get("state") == "SUCCEEDED" and "duration_minutes" in s:
-                    st.success(
-                        f"Training time: {s['duration_minutes']} minutes"
-                    )
-                elif "start_time" in s:
-                    try:
-                        started = datetime.fromisoformat(
-                            s["start_time"].replace("Z", "")
-                        )
-                        elapsed = (
-                            datetime.now(timezone.utc)
-                            - started.replace(tzinfo=timezone.utc)
-                        ).total_seconds() / 60
-                        st.info(f"Running… elapsed ~{elapsed:.1f} minutes")
-                    except Exception:
-                        st.info("Running… (could not parse start time)")
-
 else:
     st.info("No jobs launched yet in this session. Start a training job above.")
-
-# Auto-refresh toggle (manual)
-if st.toggle(
-    "Auto-refresh status",
-    value=st.session_state["auto_refresh"],
-    key="auto_refresh",
-):
-    st.experimental_rerun()
 
 # ─────────────────────────────
 # Execution timeline & timings.csv handling
@@ -694,22 +699,22 @@ if st.session_state.last_timings:
             ts = st.session_state.last_timings["timestamp"]
             rev = st.session_state.last_timings["revision"]
             ctry = st.session_state.last_timings["country"]
-            bucket = st.session_state.last_timings["gcs_bucket"]
-            gcs_prefix = f"robyn/{rev}/{ctry}/{ts}"
-            dest_blob = f"{gcs_prefix}/timings.csv"
+            bucket_seed = st.session_state.last_timings["gcs_bucket"]
+            gcs_prefix_seed = f"robyn/{rev}/{ctry}/{ts}"
+            dest_blob_seed = f"{gcs_prefix_seed}/timings.csv"
 
             client = storage.Client()
-            blob = client.bucket(bucket).blob(dest_blob)
-            if not blob.exists() and not df_times.empty:
+            blob_seed = client.bucket(bucket_seed).blob(dest_blob_seed)
+            if not blob_seed.exists() and not df_times.empty:
                 with tempfile.NamedTemporaryFile(
                     mode="w", suffix=".csv", delete=False
                 ) as tmp:
                     df_times.to_csv(tmp.name, index=False)
-                    upload_to_gcs(bucket, tmp.name, dest_blob)
+                    upload_to_gcs(bucket_seed, tmp.name, dest_blob_seed)
                 st.success(
-                    f"Timings CSV uploaded to **gs://{bucket}/{dest_blob}**"
+                    f"Timings CSV uploaded to **gs://{bucket_seed}/{dest_blob_seed}**"
                 )
-            elif blob.exists():
+            elif blob_seed.exists():
                 st.info(
                     "`timings.csv` already exists — job will append the R row."
                 )
@@ -718,9 +723,11 @@ if st.session_state.last_timings:
 
         # Authoritative copy from GCS (this is where the R row appears)
         try:
-            blob = storage.Client().bucket(bucket).blob(dest_blob)
-            if blob.exists():
-                gcs_bytes = blob.download_as_bytes()
+            blob_live = (
+                storage.Client().bucket(bucket_seed).blob(dest_blob_seed)
+            )
+            if blob_live.exists():
+                gcs_bytes = blob_live.download_as_bytes()
                 df_gcs = pd.read_csv(io.BytesIO(gcs_bytes))
                 st.markdown("**Timings from GCS (authoritative)**")
                 st.dataframe(df_gcs, use_container_width=True)
