@@ -205,25 +205,36 @@ def read_status_json(bucket_name: str, prefix: str) -> Optional[dict]:
 
 
 # inside your monitor UI:
-latest_job = st.session_state.job_executions[-1]
-prefix = f"robyn/{latest_job.get('revision','r100')}/{latest_job.get('country','fr')}/{latest_job['timestamp']}"
+# Optional: show training time from status.json if a job exists
+if st.session_state.job_executions:
+    latest_job = st.session_state.job_executions[-1]
+    prefix = (
+        latest_job.get("gcs_prefix")
+        or f"robyn/{latest_job.get('revision','r100')}/{latest_job.get('country','fr')}/{latest_job.get('timestamp','')}"
+    )
+    if st.button("⏱️ Refresh training time"):
+        s = read_status_json(GCS_BUCKET, prefix)  # fixed var name
+        if not s:
+            st.info("No status.json yet (job may still be starting).")
+        else:
+            if s.get("state") == "SUCCEEDED" and "duration_minutes" in s:
+                st.success(f"Training time: {s['duration_minutes']} minutes")
+            elif "start_time" in s:
+                try:
+                    started = datetime.fromisoformat(
+                        s["start_time"].replace("Z", "")
+                    )
+                    elapsed = (
+                        datetime.now(timezone.utc)
+                        - started.replace(tzinfo=timezone.utc)
+                    ).total_seconds() / 60
+                    st.info(f"Running… elapsed ~{elapsed:.1f} minutes")
+                except Exception:
+                    st.info("Running… (could not parse start time)")
+else:
+    st.info("No jobs launched yet in this session. Start a training job above.")
 
-if st.button("⏱️ Refresh training time"):
-    s = read_status_json(GSC_BUCKET, prefix)
-    if not s:
-        st.info("No status.json yet (job may still be starting).")
-    else:
-        if s.get("state") == "SUCCEEDED" and "duration_minutes" in s:
-            st.success(f"Training time: {s['duration_minutes']} minutes")
-        elif "start_time" in s:
-            try:
-                started = datetime.fromisoformat(
-                    s["start_time"].replace("Z", "")
-                ).replace(tzinfo=None)
-                elapsed = (datetime.utcnow() - started).total_seconds() / 60
-                st.info(f"Running… elapsed ~{elapsed:.1f} minutes")
-            except Exception:
-                st.info("Running… (could not parse start time)")
+
 st.session_state.setdefault("auto_refresh", False)
 if st.toggle(
     "Auto-refresh status",
@@ -414,6 +425,8 @@ if st.button("🚀 Start Training Job", type="primary"):
 
     # One timestamp for the entire run (used in data path + R outputs)
     timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+    gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
+
     timings: list[dict[str, float]] = []
     try:
         with st.spinner("Preparing and launching training job..."):
@@ -525,42 +538,21 @@ if st.button("🚀 Start Training Job", type="primary"):
                         st.error(str(e))
                         logger.error(f"Job launch error: {e}", exc_info=True)
 
-                execution_name = job_manager.create_execution(
-                    TRAINING_JOB_NAME, env_vars
-                )
-
-                st.session_state.job_executions.append(
-                    {
-                        "execution_name": execution_name,
-                        "timestamp": timestamp,
-                        "status": "LAUNCHED",
-                        "config_path": config_gcs_path,
-                        "data_path": data_gcs_path,
-                        "revision": revision,
-                        "country": country,
-                    }
-                )
-                st.success("🎉 Training job launched successfully!")
-                st.info(f"**Execution ID**: `{execution_name.split('/')[-1]}`")
-                st.info(f"**Training Resources**: 8 CPUs, 32GB RAM")
-
     finally:
         # Upload timings no matter what (if we collected any)
         if timings:
             df_times = pd.DataFrame(timings)
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".csv", delete=False
-                ) as tmp:
-                    df_times.to_csv(tmp.name, index=False)
-                    upload_to_gcs(
-                        gcs_bucket, tmp.name, f"{gcs_prefix}/timings.csv"
-                    )
-                st.success(
-                    f"Timings CSV uploaded to gs://{gcs_bucket}/{gcs_prefix}/timings.csv"
-                )
-            except Exception as e:
-                st.warning(f"Failed to upload timings: {e}")
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".csv", delete=False
+            ) as tmp:
+                df_times.to_csv(tmp.name, index=False)
+                upload_to_gcs(gcs_bucket, tmp.name, f"{gcs_prefix}/timings.csv")
+            st.success(
+                f"Timings CSV uploaded to gs://{gcs_bucket}/{gcs_prefix}/timings.csv"
+            )
+        except Exception as e:
+            st.warning(f"Failed to upload timings: {e}")
 
     # Keep timings from this run for the timeline section
     st.session_state.last_timings = {
