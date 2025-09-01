@@ -453,8 +453,10 @@ OutputModels <- robyn_run(
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
 
-## ---------- APPEND R TRAINING TIME TO timings.csv ----------
-timings_obj <- file.path(gcs_prefix, "timings.csv")
+## ---------- APPEND R TRAINING TIME TO timings.csv --
+ensure_gcs_auth() # <--- add this line
+--------
+  timings_obj <- file.path(gcs_prefix, "timings.csv")
 timings_local <- file.path(tempdir(), "timings.csv")
 
 # Build the row in seconds to match the web-side CSV schema
