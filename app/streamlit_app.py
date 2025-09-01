@@ -53,6 +53,13 @@ TRAINING_JOB_NAME = os.getenv(
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 
 
+# --- put this near the top, after imports / env ---
+st.session_state.setdefault("job_executions", [])
+st.session_state.setdefault(
+    "gcs_bucket", os.getenv("GCS_BUCKET", "mmm-app-output")
+)
+
+
 def _fmt_secs(s: float) -> str:
     if s < 60:
         return f"{s:.2f}s"
@@ -291,7 +298,10 @@ with st.expander("Variable mapping"):
 
 # --- Outputs
 with st.expander("Outputs"):
-    gcs_bucket = st.text_input("GCS bucket for outputs", value=GCS_BUCKET)
+    gcs_bucket = st.text_input(
+        "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
+    )
+    st.session_state["gcs_bucket"] = gcs_bucket
     ann_file = st.file_uploader(
         "Optional: enriched_annotations.csv", type=["csv"]
     )
@@ -561,9 +571,9 @@ if st.button("🚀 Start Training Job", type="primary"):
         "gcs_bucket": gcs_bucket,
     }
 
-# ===== Job status & results =====
+    # ===== Job status & results =====
+st.subheader("📊 Job Status Monitor")
 if st.session_state.job_executions:
-    st.subheader("📊 Job Status Monitor")
     latest_job = st.session_state.job_executions[-1]
     execution_name = latest_job["execution_name"]
 
@@ -628,6 +638,8 @@ if st.session_state.job_executions:
             )
             st.dataframe(df_jobs, use_container_width=True)
 
+else:
+    st.info("No jobs launched yet in this session. Start a training job above.")
 # ===== Execution timeline & upload timings =====
 if st.session_state.last_timings:
     with st.expander("⏱️ Execution Timeline", expanded=True):
