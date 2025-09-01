@@ -453,6 +453,50 @@ OutputModels <- robyn_run(
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
 
+## ---------- APPEND R TRAINING TIME TO timings.csv ----------
+timings_obj <- file.path(gcs_prefix, "timings.csv")
+timings_local <- file.path(tempdir(), "timings.csv")
+
+# Build the row in seconds to match the web-side CSV schema
+r_row <- data.frame(
+  Step = "R training (robyn_run)",
+  `Time (s)` = round(training_time * 60, 2),
+  check.names = FALSE
+)
+
+# Try to download existing timings.csv, append, and re-upload
+had_existing <- FALSE
+try(
+  {
+    googleCloudStorageR::gcs_get_object(
+      object_name = timings_obj,
+      bucket = googleCloudStorageR::gcs_get_global_bucket(),
+      saveToDisk = timings_local,
+      overwrite = TRUE
+    )
+    had_existing <- TRUE
+  },
+  silent = TRUE
+)
+
+if (had_existing) {
+  old <- try(readr::read_csv(timings_local, show_col_types = FALSE), silent = TRUE)
+  if (inherits(old, "try-error")) {
+    out <- rbind(r_row)
+  } else {
+    # Avoid duplicate R rows if retried
+    if ("Step" %in% names(old)) {
+      old <- dplyr::filter(old, Step != "R training (robyn_run)")
+    }
+    out <- dplyr::bind_rows(old, r_row)
+  }
+} else {
+  out <- rbind(r_row)
+}
+
+readr::write_csv(out, timings_local)
+gcs_put_safe(timings_local, timings_obj)
+
 saveRDS(OutputModels, file.path(dir_path, "OutputModels.RDS"))
 saveRDS(InputCollect, file.path(dir_path, "InputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputModels.RDS"), file.path(gcs_prefix, "OutputModels.RDS"))
