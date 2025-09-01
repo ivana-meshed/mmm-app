@@ -5,6 +5,7 @@ import time
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime
+from datetime import timezone
 from typing import Dict, Any, Optional
 
 import pandas as pd
@@ -89,27 +90,41 @@ class CloudRunJobManager:
         return f"projects/{self.project_id}/locations/{self.region}/jobs/{job_name}"
 
     def create_execution(self, job_name: str, env_vars: Dict[str, str]) -> str:
-        fqn = self._job_fqn(job_name)
-        overrides = {
-            "container_overrides": [
-                {"env": [{"name": k, "value": v} for k, v in env_vars.items()]}
-            ]
-        }
-        try:
-            # newer clients
-            op = self.client.run_job(
-                request={"name": fqn, "overrides": overrides}
-            )
-        except TypeError:
-            # older clients
-            logging.warning(
-                "Cloud Run client lacks 'overrides'; starting job without per-run env."
-            )
-            op = self.client.run_job(name=fqn)
+        """Kick off a job and return the execution name ASAP (non-blocking)."""
 
-        execution = op.result()
-        logging.info("Created execution: %s", execution.name)
-        return execution.name
+        # Build the fully-qualified job name
+        job_path = f"projects/{self.project_id}/locations/{self.region}/jobs/{job_name}"
+
+        # Launch the job (DO NOT call .result())
+        # NOTE: run_job currently doesn't accept overrides in your env;
+        # pass static env via the job template, and dynamic bits via GCS config.
+        op = self.client.run_job(name=job_path)
+
+        # Try to find the new execution created by this run
+        # (best-effort polling for a few seconds)
+        execution_name = None
+        deadline = time.time() + 20
+        last_seen = None
+        while time.time() < deadline and not execution_name:
+            try:
+                execs = list(
+                    self.executions_client.list_executions(parent=job_path)
+                )
+                # pick the most recent by create_time
+                if execs:
+                    execs.sort(
+                        key=lambda e: getattr(e, "create_time", None),
+                        reverse=True,
+                    )
+                    last_seen = execs[0]
+                    execution_name = last_seen.name
+                    break
+            except Exception:
+                pass
+            time.sleep(1)
+
+        # Fallback: still return something; UI can show "pending"
+        return execution_name or f"{job_path}/executions/unknown"
 
     def get_execution_status(self, execution_name: str) -> Dict[str, Any]:
         try:
@@ -168,6 +183,47 @@ job_manager = get_job_manager()
 # Session state defaults (prevents NameError on first render)
 st.session_state.setdefault("job_executions", [])
 st.session_state.setdefault("last_timings", None)
+
+
+def read_status_json(bucket_name: str, prefix: str) -> Optional[dict]:
+    try:
+        client = storage.Client()
+        b = client.bucket(bucket_name)
+        blob = b.blob(f"{prefix}/status.json")
+        if not blob.exists():
+            return None
+        return json.loads(blob.download_as_text())
+    except Exception:
+        return None
+
+
+# inside your monitor UI:
+latest_job = st.session_state.job_executions[-1]
+prefix = f"robyn/{latest_job.get('revision','r100')}/{latest_job.get('country','fr')}/{latest_job['timestamp']}"
+
+if st.button("⏱️ Refresh training time"):
+    s = read_status_json(GSC_BUCKET, prefix)
+    if not s:
+        st.info("No status.json yet (job may still be starting).")
+    else:
+        if s.get("state") == "SUCCEEDED" and "duration_minutes" in s:
+            st.success(f"Training time: {s['duration_minutes']} minutes")
+        elif "start_time" in s:
+            try:
+                started = datetime.fromisoformat(
+                    s["start_time"].replace("Z", "")
+                ).replace(tzinfo=None)
+                elapsed = (datetime.utcnow() - started).total_seconds() / 60
+                st.info(f"Running… elapsed ~{elapsed:.1f} minutes")
+            except Exception:
+                st.info("Running… (could not parse start time)")
+st.session_state.setdefault("auto_refresh", False)
+if st.toggle(
+    "Auto-refresh status",
+    value=st.session_state["auto_refresh"],
+    key="auto_refresh",
+):
+    st.experimental_rerun()  # or st_autorefresh(interval=10000, key="poll")
 
 # Sidebar
 with st.sidebar:
@@ -349,113 +405,152 @@ if st.button("🚀 Start Training Job", type="primary"):
     # One timestamp for the entire run (used in data path + R outputs)
     timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
     timings: list[dict[str, float]] = []
+    try:
+        with st.spinner("Preparing and launching training job..."):
+            with tempfile.TemporaryDirectory() as td:
+                sql = effective_sql()
+                data_gcs_path = None
+                annotations_gcs_path = None
 
-    with st.spinner("Preparing and launching training job..."):
-        with tempfile.TemporaryDirectory() as td:
-            sql = effective_sql()
-            data_gcs_path = None
-            annotations_gcs_path = None
-
-            if not sql:
-                st.error(
-                    "Provide a table or SQL query to prepare training data."
-                )
-                st.stop()
-
-            if not sf_password:
-                st.error("Password required for Snowflake.")
-                st.stop()
-
-            try:
-                with timed_step("Query Snowflake", timings):
-                    df = run_sql(sql)
-
-                with timed_step("Convert to Parquet", timings):
-                    parquet_path = os.path.join(td, "input_data.parquet")
-                    data_processor.csv_to_parquet(df, parquet_path)
-
-                with timed_step("Upload data to GCS", timings):
-                    data_blob = f"training-data/{timestamp}/input_data.parquet"
-                    data_gcs_path = upload_to_gcs(
-                        gcs_bucket, parquet_path, data_blob
+                if not sql:
+                    st.error(
+                        "Provide a table or SQL query to prepare training data."
                     )
+                    st.stop()
 
-                st.success(
-                    f"Data prepared: {len(df):,} rows uploaded to {data_gcs_path}"
-                )
+                if not sf_password:
+                    st.error("Password required for Snowflake.")
+                    st.stop()
 
-            except Exception as e:
-                st.error(f"Data preparation failed: {e}")
-                st.stop()
-
-            # Optional annotations
-            if ann_file is not None:
-                with timed_step("Upload annotations to GCS", timings):
-                    annotations_path = os.path.join(
-                        td, "enriched_annotations.csv"
-                    )
-                    with open(annotations_path, "wb") as f:
-                        f.write(ann_file.read())
-                    annotations_blob = (
-                        f"training-data/{timestamp}/enriched_annotations.csv"
-                    )
-                    annotations_gcs_path = upload_to_gcs(
-                        gcs_bucket, annotations_path, annotations_blob
-                    )
-
-            # Job config
-            with timed_step("Create job configuration", timings):
-                job_config = create_job_config(
-                    data_gcs_path, timestamp, annotations_gcs_path
-                )
-                config_path = os.path.join(td, "job_config.json")
-                with open(config_path, "w") as f:
-                    json.dump(job_config, f, indent=2)
-                config_blob = f"training-configs/{timestamp}/job_config.json"
-                config_gcs_path = upload_to_gcs(
-                    gcs_bucket, config_path, config_blob
-                )
-                latest_blob = "training-configs/latest/job_config.json"
-                latest_gcs_path = upload_to_gcs(
-                    gcs_bucket, config_path, latest_blob
-                )
-
-            # Launch job
-            with timed_step("Launch training job", timings):
-                env_vars = {
-                    "JOB_CONFIG_GCS_PATH": config_gcs_path,
-                    "SNOWFLAKE_PASSWORD": sf_password or "",
-                    "TIMESTAMP": timestamp,
-                }
                 try:
-                    execution_name = job_manager.create_execution(
-                        TRAINING_JOB_NAME, env_vars
+                    with timed_step("Query Snowflake", timings):
+                        df = run_sql(sql)
+
+                    with timed_step("Convert to Parquet", timings):
+                        parquet_path = os.path.join(td, "input_data.parquet")
+                        data_processor.csv_to_parquet(df, parquet_path)
+
+                    with timed_step("Upload data to GCS", timings):
+                        data_blob = (
+                            f"training-data/{timestamp}/input_data.parquet"
+                        )
+                        data_gcs_path = upload_to_gcs(
+                            gcs_bucket, parquet_path, data_blob
+                        )
+
+                    st.success(
+                        f"Data prepared: {len(df):,} rows uploaded to {data_gcs_path}"
                     )
 
-                    exec_info = {
+                except Exception as e:
+                    st.error(f"Data preparation failed: {e}")
+                    st.stop()
+
+                # Optional annotations
+                if ann_file is not None:
+                    with timed_step("Upload annotations to GCS", timings):
+                        annotations_path = os.path.join(
+                            td, "enriched_annotations.csv"
+                        )
+                        with open(annotations_path, "wb") as f:
+                            f.write(ann_file.read())
+                        annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
+                        annotations_gcs_path = upload_to_gcs(
+                            gcs_bucket, annotations_path, annotations_blob
+                        )
+
+                # Job config
+                with timed_step("Create job configuration", timings):
+                    job_config = create_job_config(
+                        data_gcs_path, timestamp, annotations_gcs_path
+                    )
+                    config_path = os.path.join(td, "job_config.json")
+                    with open(config_path, "w") as f:
+                        json.dump(job_config, f, indent=2)
+                    config_blob = (
+                        f"training-configs/{timestamp}/job_config.json"
+                    )
+                    config_gcs_path = upload_to_gcs(
+                        gcs_bucket, config_path, config_blob
+                    )
+                    latest_blob = "training-configs/latest/job_config.json"
+                    latest_gcs_path = upload_to_gcs(
+                        gcs_bucket, config_path, latest_blob
+                    )
+
+                # Launch job
+                with timed_step("Launch training job", timings):
+                    env_vars = {
+                        "JOB_CONFIG_GCS_PATH": config_gcs_path,
+                        "SNOWFLAKE_PASSWORD": sf_password or "",
+                        "TIMESTAMP": timestamp,
+                    }
+                    try:
+                        execution_name = job_manager.create_execution(
+                            TRAINING_JOB_NAME, env_vars
+                        )
+
+                        exec_info = {
+                            "execution_name": execution_name,
+                            "timestamp": timestamp,
+                            "status": "LAUNCHED",
+                            "config_path": config_gcs_path,
+                            "data_path": data_gcs_path,
+                            # ✅ used later by “View Results”
+                            "revision": revision,
+                            "country": country,
+                            "gcs_prefix": f"robyn/{revision}/{country}/{timestamp}",
+                        }
+                        st.session_state.job_executions.append(exec_info)
+
+                        st.success("🎉 Training job launched!")
+                        st.info(
+                            f"**Execution ID**: `{execution_name.split('/')[-1]}`"
+                        )
+                        st.info(
+                            "**Training Resources**: 8 CPUs, 32GB RAM (per Terraform)"
+                        )
+
+                    except Exception as e:
+                        st.error(str(e))
+                        logger.error(f"Job launch error: {e}", exc_info=True)
+
+                execution_name = job_manager.create_execution(
+                    TRAINING_JOB_NAME, env_vars
+                )
+
+                st.session_state.job_executions.append(
+                    {
                         "execution_name": execution_name,
                         "timestamp": timestamp,
                         "status": "LAUNCHED",
                         "config_path": config_gcs_path,
                         "data_path": data_gcs_path,
-                        # ✅ used later by “View Results”
                         "revision": revision,
                         "country": country,
-                        "gcs_prefix": f"robyn/{revision}/{country}/{timestamp}",
                     }
-                    st.session_state.job_executions.append(exec_info)
+                )
+                st.success("🎉 Training job launched successfully!")
+                st.info(f"**Execution ID**: `{execution_name.split('/')[-1]}`")
+                st.info(f"**Training Resources**: 8 CPUs, 32GB RAM")
 
-                    st.success("🎉 Training job launched!")
-                    st.info(
-                        f"**Execution ID**: `{execution_name.split('/')[-1]}`"
+    finally:
+        # Upload timings no matter what (if we collected any)
+        if timings:
+            df_times = pd.DataFrame(timings)
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".csv", delete=False
+                ) as tmp:
+                    df_times.to_csv(tmp.name, index=False)
+                    upload_to_gcs(
+                        gcs_bucket, tmp.name, f"{gcs_prefix}/timings.csv"
                     )
-                    st.info(
-                        "**Training Resources**: 8 CPUs, 32GB RAM (per Terraform)"
-                    )
-
-                except Exception as e:
-                    st.error(str(e))
-                    logger.error(f"Job launch error: {e}", exc_info=True)
+                st.success(
+                    f"Timings CSV uploaded to gs://{gcs_bucket}/{gcs_prefix}/timings.csv"
+                )
+            except Exception as e:
+                st.warning(f"Failed to upload timings: {e}")
 
     # Keep timings from this run for the timeline section
     st.session_state.last_timings = {

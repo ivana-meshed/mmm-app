@@ -202,6 +202,19 @@ dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timest
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
 gcs_prefix <- file.path("robyn", revision, country, timestamp)
 
+# after you set: dir_path, gcs_prefix
+job_started <- Sys.time()
+status_json <- file.path(dir_path, "status.json")
+writeLines(
+  jsonlite::toJSON(
+    list(state = "RUNNING", start_time = as.character(job_started)),
+    auto_unbox = TRUE
+  ),
+  status_json
+)
+gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+
+
 ## ---------- LOGGING ----------
 log_file <- file.path(dir_path, "robyn_console.log")
 dir.create(dirname(log_file), recursive = TRUE, showWarnings = FALSE)
@@ -576,3 +589,18 @@ cat(
   "Training time: ", round(training_time, 2), " minutes using ", max_cores, " cores\n",
   sep = ""
 )
+
+job_finished <- Sys.time()
+writeLines(
+  jsonlite::toJSON(
+    list(
+      state = "SUCCEEDED",
+      start_time = as.character(job_started),
+      end_time = as.character(job_finished),
+      duration_minutes = round(as.numeric(difftime(job_finished, job_started, units = "mins")), 2)
+    ),
+    auto_unbox = TRUE
+  ),
+  status_json
+)
+gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
