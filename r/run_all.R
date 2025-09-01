@@ -586,7 +586,7 @@ for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
 cat(
   "✅ Cloud Run Job completed successfully!\n",
   "Outputs in gs://", googleCloudStorageR::gcs_get_global_bucket(), "/", gcs_prefix, "/\n",
-  "Training time: ", round(training_time, 2), " minutes using ", max_cores, " cores\n",
+  "Training time: ", round(training_time, 2), " minutes using ", max_cores, " cores\n", # nolint
   sep = ""
 )
 
@@ -597,7 +597,7 @@ writeLines(
       state = "SUCCEEDED",
       start_time = as.character(job_started),
       end_time = as.character(job_finished),
-      duration_minutes = round(as.numeric(difftime(job_finished, job_started, units = "mins")), 2)
+      duration_minutes = round(as.numeric(difftime(job_finished, job_started, units = "mins")), 2) # nolint
     ),
     auto_unbox = TRUE
   ),
