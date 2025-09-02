@@ -277,8 +277,6 @@ if st.session_state.job_executions:
                     st.info(f"Running… elapsed ~{elapsed:.1f} minutes")
                 except Exception:
                     st.info("Running… (could not parse start time)")
-else:
-    st.info("No jobs launched yet in this session. Start a training job below.")
 
 # Auto-refresh toggle (manual)
 if st.toggle(
