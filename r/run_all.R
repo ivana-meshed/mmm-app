@@ -454,47 +454,76 @@ training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
 
 ## ---------- APPEND R TRAINING TIME TO timings.csv --
-ensure_gcs_auth() # <--- add this line
---------
-  timings_obj <- file.path(gcs_prefix, "timings.csv")
-timings_local <- file.path(tempdir(), "timings.csv")
 
-# Build the row in seconds to match the web-side CSV schema
+ensure_gcs_auth() # <--- add this line
+
+## ---------- APPEND R TRAINING TIME TO timings.csv ----------
+timings_obj <- file.path(gcs_prefix, "timings.csv")
+timings_local <- file.path(tempdir(), "timings.csv")
+message("Appending training time to: gs://", googleCloudStorageR::gcs_get_global_bucket(), "/", timings_obj)
+
 r_row <- data.frame(
   Step = "R training (robyn_run)",
   `Time (s)` = round(training_time * 60, 2),
   check.names = FALSE
 )
 
-# Try to download existing timings.csv, append, and re-upload
+# Small retry loop in case timings.csv hasn’t been uploaded yet
 had_existing <- FALSE
-try(
-  {
-    googleCloudStorageR::gcs_get_object(
-      object_name = timings_obj,
-      bucket = googleCloudStorageR::gcs_get_global_bucket(),
-      saveToDisk = timings_local,
-      overwrite = TRUE
-    )
+for (i in 1:5) {
+  ok <- tryCatch(
+    {
+      googleCloudStorageR::gcs_get_object(
+        object_name = timings_obj,
+        bucket = googleCloudStorageR::gcs_get_global_bucket(),
+        saveToDisk = timings_local,
+        overwrite = TRUE
+      )
+      TRUE
+    },
+    error = function(e) FALSE
+  )
+  if (ok && file.exists(timings_local)) {
     had_existing <- TRUE
-  },
-  silent = TRUE
-)
+    break
+  }
+  Sys.sleep(2) # wait a bit then try again
+}
 
 if (had_existing) {
   old <- try(readr::read_csv(timings_local, show_col_types = FALSE), silent = TRUE)
   if (inherits(old, "try-error")) {
-    out <- rbind(r_row)
+    out <- r_row
   } else {
-    # Avoid duplicate R rows if retried
-    if ("Step" %in% names(old)) {
-      old <- dplyr::filter(old, Step != "R training (robyn_run)")
-    }
+    if ("Step" %in% names(old)) old <- dplyr::filter(old, Step != "R training (robyn_run)")
     out <- dplyr::bind_rows(old, r_row)
   }
 } else {
-  out <- rbind(r_row)
+  out <- r_row
 }
+
+readr::write_csv(out, timings_local, na = "")
+gcs_put_safe(timings_local, timings_obj)
+
+# Verify for the logs (best-effort)
+try(
+  {
+    ver_local <- tempfile(fileext = ".csv")
+    googleCloudStorageR::gcs_get_object(
+      object_name = timings_obj,
+      bucket = googleCloudStorageR::gcs_get_global_bucket(),
+      saveToDisk = ver_local,
+      overwrite = TRUE
+    )
+    ver <- readr::read_csv(ver_local, show_col_types = FALSE)
+    message(
+      "timings.csv now has ", nrow(ver), " rows: ",
+      paste(ver$Step, collapse = " | ")
+    )
+  },
+  silent = TRUE
+)
+
 
 readr::write_csv(out, timings_local)
 gcs_put_safe(timings_local, timings_obj)
