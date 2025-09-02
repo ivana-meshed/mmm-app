@@ -286,7 +286,7 @@ if st.toggle(
     value=st.session_state["auto_refresh"],
     key="auto_refresh",
 ):
-    st.experimental_rerun()
+    st.rerun()
 
 # ─────────────────────────────
 # Sidebar
