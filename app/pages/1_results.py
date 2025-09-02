@@ -61,6 +61,10 @@ def gcs_console_url(bucket: str, prefix: str) -> str:
     )
 
 
+def run_has_allocator_plot(blobs) -> bool:
+    return len(find_allocator_plots(blobs)) > 0
+
+
 def gcs_object_details_url(blob) -> str:
     return (
         "https://console.cloud.google.com/storage/browser/_details/"
@@ -534,31 +538,43 @@ if not runs:
     )
     st.stop()
 
-# ---------- Defaults / filters ----------
-current_key = latest_run_key(runs)
-if not current_key:
-    st.warning("No runs found.")
-    st.stop()
-
-all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
-latest_any = sorted(
+# ---------- Defaults / filters (prefer runs with allocator plots) ----------
+# Sort newest-first across all runs (by rev, then stamp)
+keys_sorted = sorted(
     runs.keys(),
     key=lambda k: (parse_rev_key(k[0]), parse_stamp(k[2])),
     reverse=True,
-)[0]
-default_rev, default_country = latest_any[0], latest_any[1]
+)
+
+# Pick the newest (rev,country,stamp) that HAS an allocator plot; fallback to absolute newest
+latest_with_alloc = next(
+    (k for k in keys_sorted if run_has_allocator_plot(runs[k])), None
+)
+latest_any = keys_sorted[0]
+seed_key = latest_with_alloc or latest_any
+
+default_rev = seed_key[0]
+
+# UI: revision choices
+all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
 rev = st.selectbox("Revision", all_revs, index=all_revs.index(default_rev))
 
-rev_countries = sorted({k[1] for k in runs.keys() if k[0] == rev})
-latest_in_rev = sorted(
-    [k for k in runs.keys() if k[0] == rev],
-    key=lambda k: parse_stamp(k[2]),
-    reverse=True,
-)[0]
-default_country_in_rev = latest_in_rev[1]
+# Countries available in this revision
+rev_keys = [k for k in runs.keys() if k[0] == rev]
+rev_countries = sorted({k[1] for k in rev_keys})
+
+# Default country = newest run WITH allocator plot in this revision (fallback to newest run)
+rev_keys_sorted = sorted(
+    rev_keys, key=lambda k: parse_stamp(k[2]), reverse=True
+)
+best_country_key = next(
+    (k for k in rev_keys_sorted if run_has_allocator_plot(runs[k])),
+    rev_keys_sorted[0],
+)
+default_country_in_rev = best_country_key[1]
 
 countries_sel = st.multiselect(
-    "Countries (latest run per selected country will be shown)",
+    "Countries (newest run **with allocator plot** will be shown; falls back to newest)",
     rev_countries,
     default=[default_country_in_rev],
 )
@@ -569,15 +585,21 @@ if not countries_sel:
 
 # ---------- Main renderer ----------
 def render_run_for_country(bucket_name: str, rev: str, country: str):
-    try:
-        key = sorted(
-            [k for k in runs.keys() if k[0] == rev and k[1] == country],
-            key=lambda k: parse_stamp(k[2]),
-            reverse=True,
-        )[0]
-    except IndexError:
+    # All candidate runs for this (rev, country), newest first
+    candidates = sorted(
+        [k for k in runs.keys() if k[0] == rev and k[1] == country],
+        key=lambda k: parse_stamp(k[2]),
+        reverse=True,
+    )
+    if not candidates:
         st.warning(f"No runs found for {rev}/{country}.")
         return
+
+    # Prefer the newest run that HAS an allocator plot; fallback to newest
+    key = next(
+        (k for k in candidates if run_has_allocator_plot(runs[k])),
+        candidates[0],
+    )
 
     _, _, stamp = key
     blobs = runs[key]
@@ -589,8 +611,13 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
     if trials is not None:
         meta_bits.append(f"trials={trials}")
     meta_str = (" · " + " · ".join(meta_bits)) if meta_bits else ""
+    has_alloc = (
+        "with allocator plot"
+        if run_has_allocator_plot(blobs)
+        else "no allocator plot found"
+    )
 
-    st.markdown(f"### {country.upper()} — latest: `{stamp}`{meta_str}")
+    st.markdown(f"### {country.upper()} — `{stamp}` ({has_alloc}){meta_str}")
 
     prefix_path = f"robyn/{rev}/{country}/{stamp}/"
     gcs_url = gcs_console_url(bucket_name, prefix_path)
