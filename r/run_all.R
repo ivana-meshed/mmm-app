@@ -527,6 +527,22 @@ writeLines(
 )
 gcs_put_safe(file.path(dir_path, "best_model_id.txt"), file.path(gcs_prefix, "best_model_id.txt"))
 
+# onepagers for top models
+top_models <- OutputCollect$resultHypParam$solID[
+  1:min(3, nrow(OutputCollect$resultHypParam))
+]
+for (m in top_models) {
+  try(
+    robyn_onepagers(
+      InputCollect,
+      OutputCollect,
+      select_model = m,
+      export = TRUE
+    ),
+    silent = TRUE
+  )
+}
+
 # Onepagers: try PNG first, then PDF (restored fallback)
 all_files <- list.files(dir_path, recursive = TRUE, full.names = TRUE)
 escaped_id <- gsub("\\.", "\\\\.", best_id)
@@ -545,8 +561,25 @@ if (length(cand_png)) {
   file.copy(cand_pdf[1], canonical, overwrite = TRUE)
   gcs_put_safe(canonical, file.path(gcs_prefix, paste0(best_id, ".pdf")))
 } else {
-  message("No onepager PNG/PDF found for best_id=", best_id)
+  pdf_pat <- paste0("(?i)(onepager).*", escaped_id, ".*\\.pdf$")
+  cand_pdf <- all_files[
+    grepl(pdf_pat, all_files, perl = TRUE)
+  ]
+  if (!length(cand_pdf)) {
+    cand_pdf <- all_files[basename(all_files) == paste0(best_id, ".pdf")]
+  }
+  if (length(cand_pdf)) {
+    canonical <- file.path(dir_path, paste0(best_id, ".pdf"))
+    file.copy(cand_pdf[1], canonical, overwrite = TRUE)
+    gcs_put_safe(
+      canonical,
+      file.path(gcs_prefix, paste0(best_id, ".pdf"))
+    )
+  } else {
+    message("No onepager image/pdf found for best_id=", best_id)
+  }
 }
+
 
 ## ---------- ALLOCATOR ----------
 is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
