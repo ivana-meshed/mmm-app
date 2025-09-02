@@ -129,36 +129,47 @@ class CloudRunJobManager:
         return execution_name or f"{job_path}/executions/unknown"
 
     def get_execution_status(self, execution_name: str) -> Dict[str, Any]:
+    def _ts(dtobj):
         try:
-            execution = self.executions_client.get_execution(
-                name=execution_name
-            )
-            status = {
-                "name": execution.name,
-                "uid": execution.uid,
-                "creation_timestamp": execution.creation_timestamp,
-                "completion_timestamp": execution.completion_timestamp,
-                "running_count": execution.running_count,
-                "succeeded_count": execution.succeeded_count,
-                "failed_count": execution.failed_count,
-                "cancelled_count": execution.cancelled_count,
-            }
-            if execution.completion_timestamp and execution.succeeded_count > 0:
+            return dtobj.isoformat() if dtobj else None
+        except Exception:
+            return str(dtobj) if dtobj is not None else None
+
+    try:
+        execution = self.executions_client.get_execution(name=execution_name)
+
+        status = {
+            "name": execution.name,
+            "uid": getattr(execution, "uid", None),
+            "create_time": _ts(getattr(execution, "create_time", None)),
+            "start_time": _ts(getattr(execution, "start_time", None)),
+            "completion_time": _ts(getattr(execution, "completion_time", None)),
+            "running_count": getattr(execution, "running_count", None),
+            "succeeded_count": getattr(execution, "succeeded_count", None),
+            "failed_count": getattr(execution, "failed_count", None),
+            "cancelled_count": getattr(execution, "cancelled_count", None),
+        }
+
+        # Derive a simple overall_status
+        if getattr(execution, "completion_time", None):
+            if (getattr(execution, "succeeded_count", 0) or 0) > 0:
                 status["overall_status"] = "SUCCEEDED"
-            elif execution.completion_timestamp and execution.failed_count > 0:
+            elif (getattr(execution, "failed_count", 0) or 0) > 0:
                 status["overall_status"] = "FAILED"
-            elif (
-                execution.completion_timestamp and execution.cancelled_count > 0
-            ):
+            elif (getattr(execution, "cancelled_count", 0) or 0) > 0:
                 status["overall_status"] = "CANCELLED"
-            elif execution.running_count > 0:
-                status["overall_status"] = "RUNNING"
             else:
-                status["overall_status"] = "PENDING"
-            return status
-        except Exception as e:
-            logger.error(f"Error getting execution status: {e}")
-            return {"overall_status": "ERROR", "error": str(e)}
+                status["overall_status"] = "COMPLETED"
+        elif (getattr(execution, "running_count", 0) or 0) > 0 or getattr(execution, "start_time", None):
+            status["overall_status"] = "RUNNING"
+        else:
+            status["overall_status"] = "PENDING"
+
+        return status
+
+    except Exception as e:
+        logger.error(f"Error getting execution status: {e}", exc_info=True)
+        return {"overall_status": "ERROR", "error": str(e)}
 
 
 def upload_to_gcs(bucket_name: str, local_path: str, dest_blob: str) -> str:
@@ -600,72 +611,59 @@ if st.session_state.job_executions:
     latest_job = st.session_state.job_executions[-1]
     execution_name = latest_job["execution_name"]
 
-    col1, col2, col3 = st.columns(3)
+    if st.button("🔍 Check Status"):
+        status_info = job_manager.get_execution_status(execution_name)
+        st.json(status_info)
+        latest_job["status"] = status_info.get("overall_status", "UNKNOWN")
+        latest_job["last_checked"] = datetime.now().isoformat()
 
-    with col1:
-        if st.button("🔍 Check Status"):
-            status_info = job_manager.get_execution_status(execution_name)
-            st.json(status_info)
-            latest_job["status"] = status_info.get("overall_status", "UNKNOWN")
-            latest_job["last_checked"] = datetime.now().isoformat()
+    if st.button("📁 View Results"):
+        gcs_prefix_view = latest_job.get("gcs_prefix")
+        bucket_view = latest_job.get("gcs_bucket", GCS_BUCKET)
+        st.info(f"Check results at: gs://{bucket_view}/{gcs_prefix_view}/")
 
-    with col2:
-        if st.button("📁 View Results"):
-            gcs_prefix_view = latest_job.get("gcs_prefix")
-            bucket_view = latest_job.get("gcs_bucket", GCS_BUCKET)
-            st.info(f"Check results at: gs://{bucket_view}/{gcs_prefix_view}/")
-
-            # Try to fetch training log
-            try:
-                client = storage.Client()
-                bucket_obj = client.bucket(bucket_view)
-                log_blob = bucket_obj.blob(
-                    f"{gcs_prefix_view}/robyn_console.log"
+        # Try to fetch training log
+        try:
+            client = storage.Client()
+            bucket_obj = client.bucket(bucket_view)
+            log_blob = bucket_obj.blob(f"{gcs_prefix_view}/robyn_console.log")
+            if log_blob.exists():
+                log_bytes = log_blob.download_as_bytes()
+                tail = log_bytes[-2000:] if len(log_bytes) > 2000 else log_bytes
+                st.text_area(
+                    "Training Log (last 2000 chars):",
+                    value=tail.decode("utf-8", errors="replace"),
+                    height=240,
                 )
-                if log_blob.exists():
-                    log_bytes = log_blob.download_as_bytes()
-                    tail = (
-                        log_bytes[-2000:]
-                        if len(log_bytes) > 2000
-                        else log_bytes
-                    )
-                    st.text_area(
-                        "Training Log (last 2000 chars):",
-                        value=tail.decode("utf-8", errors="replace"),
-                        height=240,
-                    )
-                    st.download_button(
-                        "Download full training log",
-                        data=log_bytes,
-                        file_name=f"robyn_training_{latest_job.get('timestamp','')}.log",
-                        mime="text/plain",
-                        key=f"dl_log_{latest_job.get('timestamp','')}",
-                    )
-                else:
-                    st.info(
-                        "Training log not yet available. Check again after job completes."
-                    )
-            except Exception as e:
-                st.warning(f"Could not fetch training log: {e}")
+                st.download_button(
+                    "Download full training log",
+                    data=log_bytes,
+                    file_name=f"robyn_training_{latest_job.get('timestamp','')}.log",
+                    mime="text/plain",
+                    key=f"dl_log_{latest_job.get('timestamp','')}",
+                )
+            else:
+                st.info(
+                    "Training log not yet available. Check again after job completes."
+                )
+        except Exception as e:
+            st.warning(f"Could not fetch training log: {e}")
 
-    with col3:
-        if st.button("📋 Show All Jobs"):
-            df_jobs = pd.DataFrame(
-                [
-                    {
-                        "Timestamp": job.get("timestamp", ""),
-                        "Status": job.get("status", "UNKNOWN"),
-                        "Execution": job.get("execution_name", "").split("/")[
-                            -1
-                        ],
-                        "Last Checked": job.get("last_checked", "Never"),
-                        "Revision": job.get("revision", ""),
-                        "Country": job.get("country", ""),
-                    }
-                    for job in st.session_state.job_executions
-                ]
-            )
-            st.dataframe(df_jobs, use_container_width=True)
+    if st.button("📋 Show All Jobs"):
+        df_jobs = pd.DataFrame(
+            [
+                {
+                    "Timestamp": job.get("timestamp", ""),
+                    "Status": job.get("status", "UNKNOWN"),
+                    "Execution": job.get("execution_name", "").split("/")[-1],
+                    "Last Checked": job.get("last_checked", "Never"),
+                    "Revision": job.get("revision", ""),
+                    "Country": job.get("country", ""),
+                }
+                for job in st.session_state.job_executions
+            ]
+        )
+        st.dataframe(df_jobs, use_container_width=True)
 else:
     st.info("No jobs launched yet in this session. Start a training job above.")
 
