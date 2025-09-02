@@ -1,5 +1,4 @@
 # app.py — Streamlit front-end for launching & monitoring Robyn training jobs on Cloud Run Jobs
-
 import io
 import json
 import logging
@@ -60,7 +59,17 @@ st.session_state.setdefault("gcs_bucket", GCS_BUCKET)
 st.session_state.setdefault("last_timings", None)
 st.session_state.setdefault("auto_refresh", False)
 
+# Persistent Snowflake session objects/params
+st.session_state.setdefault(
+    "sf_params", None
+)  # dict of connection params (sans password echo)
+st.session_state.setdefault("sf_connected", False)
+st.session_state.setdefault("sf_conn", None)  # live connection object (reused)
 
+
+# ─────────────────────────────
+# Small utils
+# ─────────────────────────────
 def _fmt_secs(s: float) -> str:
     if s < 60:
         return f"{s:.2f}s"
@@ -80,6 +89,24 @@ def timed_step(name: str, bucket: list):
         ph.success(f"✅ {name} – {_fmt_secs(dt)}")
         bucket.append({"Step": name, "Time (s)": round(dt, 2)})
         logger.info(f"Step '{name}' completed in {dt:.2f}s")
+
+
+def effective_sql(table: str, query: str) -> Optional[str]:
+    if query and query.strip():
+        return query.strip()
+    if table and table.strip():
+        return f"SELECT * FROM {table.strip()}"
+    return None
+
+
+def parse_train_size(txt: str):
+    try:
+        vals = [float(x.strip()) for x in txt.split(",") if x.strip()]
+        if len(vals) == 2:
+            return vals
+    except Exception:
+        pass
+    return [0.7, 0.9]
 
 
 # ─────────────────────────────
@@ -139,7 +166,6 @@ class CloudRunJobManager:
             execution = self.executions_client.get_execution(
                 name=execution_name
             )
-
             status = {
                 "name": execution.name,
                 "uid": getattr(execution, "uid", None),
@@ -153,8 +179,6 @@ class CloudRunJobManager:
                 "failed_count": getattr(execution, "failed_count", None),
                 "cancelled_count": getattr(execution, "cancelled_count", None),
             }
-
-            # Derive a simple overall_status
             if getattr(execution, "completion_time", None):
                 if (getattr(execution, "succeeded_count", 0) or 0) > 0:
                     status["overall_status"] = "SUCCEEDED"
@@ -170,14 +194,15 @@ class CloudRunJobManager:
                 status["overall_status"] = "RUNNING"
             else:
                 status["overall_status"] = "PENDING"
-
             return status
-
         except Exception as e:
             logger.error(f"Error getting execution status: {e}", exc_info=True)
             return {"overall_status": "ERROR", "error": str(e)}
 
 
+# ─────────────────────────────
+# GCS helpers
+# ─────────────────────────────
 def upload_to_gcs(bucket_name: str, local_path: str, dest_blob: str) -> str:
     client = storage.Client()
     bucket = client.bucket(bucket_name)
@@ -186,6 +211,21 @@ def upload_to_gcs(bucket_name: str, local_path: str, dest_blob: str) -> str:
     return f"gs://{bucket_name}/{dest_blob}"
 
 
+def read_status_json(bucket_name: str, prefix: str) -> Optional[dict]:
+    try:
+        client = storage.Client()
+        b = client.bucket(bucket_name)
+        blob = b.blob(f"{prefix}/status.json")
+        if not blob.exists():
+            return None
+        return json.loads(blob.download_as_text())
+    except Exception:
+        return None
+
+
+# ─────────────────────────────
+# Data processor & job manager
+# ─────────────────────────────
 @st.cache_resource
 def get_data_processor():
     return DataProcessor()
@@ -201,105 +241,592 @@ job_manager = get_job_manager()
 
 
 # ─────────────────────────────
-# Helpers
+# Snowflake connection management (persistent)
 # ─────────────────────────────
-def read_status_json(bucket_name: str, prefix: str) -> Optional[dict]:
-    try:
-        client = storage.Client()
-        b = client.bucket(bucket_name)
-        blob = b.blob(f"{prefix}/status.json")
-        if not blob.exists():
-            return None
-        return json.loads(blob.download_as_text())
-    except Exception:
-        return None
-
-
-def sf_connect(
-    sf_user, sf_password, sf_account, sf_wh, sf_db, sf_schema, sf_role
+def _connect_snowflake(
+    user, password, account, warehouse, database, schema, role
 ):
     return sf.connect(
-        user=sf_user,
-        password=sf_password,
-        account=sf_account,
-        warehouse=sf_wh,
-        database=sf_db,
-        schema=sf_schema,
-        role=sf_role if sf_role else None,
+        user=user,
+        password=password,
+        account=account,
+        warehouse=warehouse,
+        database=database,
+        schema=schema,
+        role=role if role else None,
     )
 
 
-def run_sql(
-    sql: str, sf_user, sf_password, sf_account, sf_wh, sf_db, sf_schema, sf_role
-) -> pd.DataFrame:
-    con = sf_connect(
-        sf_user, sf_password, sf_account, sf_wh, sf_db, sf_schema, sf_role
-    )
+def ensure_sf_conn() -> sf.SnowflakeConnection:
+    """
+    Return a live Snowflake connection from session_state, reconnecting if needed.
+    """
+    conn = st.session_state.get("sf_conn")
+    params = st.session_state.get("sf_params") or {}
+    if conn is not None:
+        try:
+            # ping the connection
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.fetchall()
+            cur.close()
+            return conn
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            st.session_state["sf_conn"] = None
+
+    # (Re)connect using stored params
+    if not params:
+        raise RuntimeError(
+            "No Snowflake connection parameters found. Please connect first."
+        )
+    conn = _connect_snowflake(**params)
+    st.session_state["sf_conn"] = conn
+    st.session_state["sf_connected"] = True
+    return conn
+
+
+def run_sql(sql: str) -> pd.DataFrame:
+    conn = ensure_sf_conn()
+    cur = conn.cursor()
     try:
-        cur = con.cursor()
         cur.execute(sql)
-        df = cur.fetch_pandas_all()
-        return df
+        return cur.fetch_pandas_all()
     finally:
         try:
             cur.close()
         except Exception:
             pass
-        con.close()
-
-
-def effective_sql(table: str, query: str) -> Optional[str]:
-    if query and query.strip():
-        return query.strip()
-    if table and table.strip():
-        return f"SELECT * FROM {table.strip()}"
-    return None
-
-
-def parse_train_size(txt: str):
-    try:
-        vals = [float(x.strip()) for x in txt.split(",") if x.strip()]
-        if len(vals) == 2:
-            return vals
-    except Exception:
-        pass
-    return [0.7, 0.9]
+        # IMPORTANT: do not close the connection; keep it alive for the session
 
 
 # ─────────────────────────────
-# Optional: show training time button (only if a job exists)
+# UI layout: two tabs
 # ─────────────────────────────
-if st.session_state.job_executions:
-    latest_job_for_time = st.session_state.job_executions[-1]
-    time_prefix = (
-        latest_job_for_time.get("gcs_prefix")
-        or f"robyn/{latest_job_for_time.get('revision','r100')}/{latest_job_for_time.get('country','fr')}/{latest_job_for_time.get('timestamp','')}"
-    )
-    if st.button("⏱️ Refresh training time"):
-        s = read_status_json(GCS_BUCKET, time_prefix)
-        if not s:
-            st.info("No status.json yet (job may still be starting).")
-        else:
-            if s.get("state") == "SUCCEEDED" and "duration_minutes" in s:
-                st.success(f"Training time: {s['duration_minutes']} minutes")
-            elif "start_time" in s:
+st.title("Robyn MMM Trainer")
+
+tab_conn, tab_train = st.tabs(
+    ["1) Snowflake Connection", "2) Configure & Train Models"]
+)
+
+# ============= TAB 1: Snowflake Connection =============
+with tab_conn:
+    st.subheader("Connect to Snowflake (persists for this session)")
+
+    with st.form("sf_connect_form", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            sf_user = st.text_input(
+                "User", value=(st.session_state.sf_params or {}).get("user", "")
+            )
+            sf_account = st.text_input(
+                "Account",
+                value=(st.session_state.sf_params or {}).get("account", ""),
+            )
+            sf_wh = st.text_input(
+                "Warehouse",
+                value=(st.session_state.sf_params or {}).get("warehouse", ""),
+            )
+            sf_db = st.text_input(
+                "Database",
+                value=(st.session_state.sf_params or {}).get("database", ""),
+            )
+        with c2:
+            sf_schema = st.text_input(
+                "Schema",
+                value=(st.session_state.sf_params or {}).get("schema", ""),
+            )
+            sf_role = st.text_input(
+                "Role", value=(st.session_state.sf_params or {}).get("role", "")
+            )
+            sf_password = st.text_input("Password", type="password")
+
+        submitted = st.form_submit_button("🔌 Connect")
+        if submitted:
+            try:
+                conn = _connect_snowflake(
+                    user=sf_user,
+                    password=sf_password,
+                    account=sf_account,
+                    warehouse=sf_wh,
+                    database=sf_db,
+                    schema=sf_schema,
+                    role=sf_role,
+                )
+                # store params (without password) for reuse
+                st.session_state["sf_params"] = dict(
+                    user=sf_user,
+                    account=sf_account,
+                    warehouse=sf_wh,
+                    database=sf_db,
+                    schema=sf_schema,
+                    role=sf_role,
+                )
+                st.session_state["sf_conn"] = conn
+                st.session_state["sf_connected"] = True
+                st.success(
+                    f"Connected to Snowflake as `{sf_user}` on `{sf_account}`."
+                )
+            except Exception as e:
+                st.session_state["sf_connected"] = False
+                st.error(f"Connection failed: {e}")
+
+    if st.session_state.sf_connected:
+        with st.container(border=True):
+            st.markdown("**Status:** ✅ Connected")
+            c1, c2, c3 = st.columns(3)
+            c1.write(
+                f"**Warehouse:** `{st.session_state.sf_params.get('warehouse','')}`"
+            )
+            c2.write(
+                f"**Database:** `{st.session_state.sf_params.get('database','')}`"
+            )
+            c3.write(
+                f"**Schema:** `{st.session_state.sf_params.get('schema','')}`"
+            )
+
+            dc1, dc2 = st.columns(2)
+            if dc1.button("🔄 Reconnect"):
                 try:
-                    started = datetime.fromisoformat(
-                        s["start_time"].replace("Z", "")
-                    )
-                    elapsed = (
-                        datetime.now(timezone.utc)
-                        - started.replace(tzinfo=timezone.utc)
-                    ).total_seconds() / 60
-                    st.info(f"Running… elapsed ~{elapsed:.1f} minutes")
-                except Exception:
-                    st.info("Running… (could not parse start time)")
-else:
-    st.info("No jobs launched yet in this session. Start a training job below.")
+                    ensure_sf_conn()
+                    st.success("Reconnected.")
+                except Exception as e:
+                    st.error(f"Reconnect failed: {e}")
+            if dc2.button("⏏️ Disconnect"):
+                try:
+                    conn = st.session_state.get("sf_conn")
+                    if conn:
+                        conn.close()
+                    st.session_state["sf_conn"] = None
+                    st.session_state["sf_connected"] = False
+                    st.success("Disconnected.")
+                except Exception as e:
+                    st.error(f"Disconnect error: {e}")
 
+        # Optional: ad-hoc query runner (uses the persistent connection)
+        with st.expander("🧪 Query Runner (optional)"):
+            adhoc_sql = st.text_area(
+                "Enter SQL to preview (SELECT only)",
+                value="SELECT CURRENT_TIMESTAMP;",
+            )
+            if st.button("Run query", key="run_adhoc"):
+                try:
+                    df_prev = run_sql(adhoc_sql)
+                    st.dataframe(df_prev, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Query failed: {e}")
+    else:
+        st.info("Not connected. Fill the form above and click **Connect**.")
+
+# ============= TAB 2: Configure & Train =============
+with tab_train:
+    st.subheader("Robyn configuration & training")
+    if not st.session_state.sf_connected:
+        st.warning("Please connect to Snowflake in tab 1 first.")
+        st.stop()
+
+    # Data selection (uses persistent Snowflake connection)
+    with st.expander("Data selection"):
+        table = st.text_input("Table (DB.SCHEMA.TABLE)")
+        query = st.text_area("Custom SQL (optional)")
+        if st.button("Test connection & preview 5 rows"):
+            sql_eff = effective_sql(table, query)
+            if not sql_eff:
+                st.warning("Provide a table or a SQL query.")
+            else:
+                try:
+                    preview_sql = f"SELECT * FROM ({sql_eff}) t LIMIT 5"
+                    df_prev = run_sql(preview_sql)
+                    st.success("Connection OK")
+                    st.dataframe(df_prev, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Preview failed: {e}")
+
+    # Robyn config
+    with st.expander("Robyn configuration"):
+        country = st.text_input("Country", value="fr")
+        iterations = st.number_input("Iterations", value=200, min_value=50)
+        trials = st.number_input("Trials", value=5, min_value=1)
+        train_size = st.text_input("Train size", value="0.7,0.9")
+        revision = st.text_input("Revision tag", value="r100")
+        date_input = st.text_input("Date tag", value=time.strftime("%Y-%m-%d"))
+
+    # Variables
+    with st.expander("Variable mapping"):
+        paid_media_spends = st.text_input(
+            "paid_media_spends (comma-separated)",
+            value="GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
+        )
+        paid_media_vars = st.text_input(
+            "paid_media_vars (comma-separated)",
+            value="GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
+        )
+        context_vars = st.text_input(
+            "context_vars", value="IS_WEEKEND,TV_IS_ON"
+        )
+        factor_vars = st.text_input("factor_vars", value="IS_WEEKEND,TV_IS_ON")
+        organic_vars = st.text_input("organic_vars", value="ORGANIC_TRAFFIC")
+
+    # Outputs
+    with st.expander("Outputs"):
+        gcs_bucket = st.text_input(
+            "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
+        )
+        st.session_state["gcs_bucket"] = gcs_bucket
+        ann_file = st.file_uploader(
+            "Optional: enriched_annotations.csv", type=["csv"]
+        )
+
+    def create_job_config(
+        data_gcs_path: str,
+        timestamp: str,
+        annotations_gcs_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "country": country,
+            "iterations": int(iterations),
+            "trials": int(trials),
+            "train_size": parse_train_size(train_size),
+            "revision": revision,
+            "date_input": date_input,
+            "gcs_bucket": gcs_bucket,
+            "data_gcs_path": data_gcs_path,
+            "annotations_gcs_path": annotations_gcs_path,
+            "paid_media_spends": [
+                s.strip() for s in paid_media_spends.split(",") if s.strip()
+            ],
+            "paid_media_vars": [
+                s.strip() for s in paid_media_vars.split(",") if s.strip()
+            ],
+            "context_vars": [
+                s.strip() for s in context_vars.split(",") if s.strip()
+            ],
+            "factor_vars": [
+                s.strip() for s in factor_vars.split(",") if s.strip()
+            ],
+            "organic_vars": [
+                s.strip() for s in organic_vars.split(",") if s.strip()
+            ],
+            "timestamp": timestamp,
+            "use_parquet": True,
+            "parallel_processing": True,
+            "max_cores": 8,
+        }
+
+    # Launch Training
+    if st.button("🚀 Start Training Job", type="primary"):
+        if not all([PROJECT_ID, REGION, TRAINING_JOB_NAME]):
+            st.error(
+                "Missing configuration. Check environment variables on the web service."
+            )
+            st.stop()
+
+        timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+        gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
+
+        timings: list[dict[str, float]] = []
+        try:
+            with st.spinner("Preparing and launching training job..."):
+                with tempfile.TemporaryDirectory() as td:
+                    sql_eff = effective_sql(table, query)
+                    data_gcs_path = None
+                    annotations_gcs_path = None
+
+                    if not sql_eff:
+                        st.error(
+                            "Provide a table or SQL query to prepare training data."
+                        )
+                        st.stop()
+
+                    try:
+                        # 1) Query Snowflake
+                        with timed_step("Query Snowflake", timings):
+                            df = run_sql(sql_eff)
+
+                        # 2) Convert to Parquet
+                        with timed_step("Convert to Parquet", timings):
+                            parquet_path = os.path.join(
+                                td, "input_data.parquet"
+                            )
+                            data_processor.csv_to_parquet(df, parquet_path)
+
+                        # 3) Upload data to GCS
+                        with timed_step("Upload data to GCS", timings):
+                            data_blob = (
+                                f"training-data/{timestamp}/input_data.parquet"
+                            )
+                            data_gcs_path = upload_to_gcs(
+                                gcs_bucket, parquet_path, data_blob
+                            )
+
+                        st.success(
+                            f"Data prepared: {len(df):,} rows uploaded to {data_gcs_path}"
+                        )
+
+                    except Exception as e:
+                        st.error(f"Data preparation failed: {e}")
+                        st.stop()
+
+                    # Optional annotations
+                    if ann_file is not None:
+                        with timed_step("Upload annotations to GCS", timings):
+                            annotations_path = os.path.join(
+                                td, "enriched_annotations.csv"
+                            )
+                            with open(annotations_path, "wb") as f:
+                                f.write(ann_file.read())
+                            annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
+                            annotations_gcs_path = upload_to_gcs(
+                                gcs_bucket, annotations_path, annotations_blob
+                            )
+
+                    # 4) Create job config
+                    with timed_step("Create job configuration", timings):
+                        job_config = create_job_config(
+                            data_gcs_path, timestamp, annotations_gcs_path
+                        )
+                        config_path = os.path.join(td, "job_config.json")
+                        with open(config_path, "w") as f:
+                            json.dump(job_config, f, indent=2)
+                        config_blob = (
+                            f"training-configs/{timestamp}/job_config.json"
+                        )
+                        config_gcs_path = upload_to_gcs(
+                            gcs_bucket, config_path, config_blob
+                        )
+                        _ = upload_to_gcs(
+                            gcs_bucket,
+                            config_path,
+                            "training-configs/latest/job_config.json",
+                        )
+
+                    # 5) Launch Cloud Run Job
+                    with timed_step("Launch training job", timings):
+                        env_vars = {
+                            "JOB_CONFIG_GCS_PATH": config_gcs_path,
+                            "SNOWFLAKE_PASSWORD": "",  # not needed by job; data already exported
+                            "TIMESTAMP": timestamp,
+                        }
+                        try:
+                            execution_name = job_manager.create_execution(
+                                TRAINING_JOB_NAME, env_vars
+                            )
+                            exec_info = {
+                                "execution_name": execution_name,
+                                "timestamp": timestamp,
+                                "status": "LAUNCHED",
+                                "config_path": config_gcs_path,
+                                "data_path": data_gcs_path,
+                                "revision": revision,
+                                "country": country,
+                                "gcs_prefix": gcs_prefix,
+                                "gcs_bucket": gcs_bucket,
+                            }
+                            st.session_state.job_executions.append(exec_info)
+
+                            st.success("🎉 Training job launched!")
+                            st.info(
+                                f"**Execution ID**: `{execution_name.split('/')[-1]}`"
+                            )
+                            st.info(
+                                "**Training Resources**: 8 CPUs, 32GB RAM (per Terraform)"
+                            )
+                        except Exception as e:
+                            st.error(str(e))
+                            logger.error(
+                                f"Job launch error: {e}", exc_info=True
+                            )
+
+        finally:
+            # Seed timings.csv once (web-side steps only). The R job will append its own row later.
+            if timings:
+                df_times = pd.DataFrame(timings)
+                try:
+                    client = storage.Client()
+                    dest_blob = f"{gcs_prefix}/timings.csv"
+                    blob = client.bucket(gcs_bucket).blob(dest_blob)
+                    if not blob.exists():  # only seed if not present
+                        with tempfile.NamedTemporaryFile(
+                            mode="w", suffix=".csv", delete=False
+                        ) as tmp:
+                            df_times.to_csv(tmp.name, index=False)
+                            upload_to_gcs(gcs_bucket, tmp.name, dest_blob)
+                        st.success(
+                            f"Timings CSV uploaded to gs://{gcs_bucket}/{dest_blob}"
+                        )
+                    else:
+                        st.info(
+                            "`timings.csv` already exists — leaving it for the job to append its R row."
+                        )
+                except Exception as e:
+                    st.warning(f"Failed to upload timings: {e}")
+
+            # Cache timings locally for UI display
+            st.session_state.last_timings = {
+                "df": pd.DataFrame(timings),
+                "timestamp": timestamp,
+                "revision": revision,
+                "country": country,
+                "gcs_bucket": gcs_bucket,
+            }
+
+    # ─────────────────────────────
+    # Job Status Monitor
+    # ─────────────────────────────
+    st.subheader("📊 Job Status Monitor")
+    if st.session_state.job_executions:
+        latest_job = st.session_state.job_executions[-1]
+        execution_name = latest_job["execution_name"]
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("🔍 Check Status"):
+                status_info = job_manager.get_execution_status(execution_name)
+                st.json(status_info)
+                latest_job["status"] = status_info.get(
+                    "overall_status", "UNKNOWN"
+                )
+                latest_job["last_checked"] = datetime.now().isoformat()
+
+        with c2:
+            if st.button("📁 View Results"):
+                gcs_prefix_view = latest_job.get("gcs_prefix")
+                bucket_view = latest_job.get("gcs_bucket", GCS_BUCKET)
+                st.info(
+                    f"Check results at: gs://{bucket_view}/{gcs_prefix_view}/"
+                )
+                # Try to fetch training log
+                try:
+                    client = storage.Client()
+                    bucket_obj = client.bucket(bucket_view)
+                    log_blob = bucket_obj.blob(
+                        f"{gcs_prefix_view}/robyn_console.log"
+                    )
+                    if log_blob.exists():
+                        log_bytes = log_blob.download_as_bytes()
+                        tail = (
+                            log_bytes[-2000:]
+                            if len(log_bytes) > 2000
+                            else log_bytes
+                        )
+                        st.text_area(
+                            "Training Log (last 2000 chars):",
+                            value=tail.decode("utf-8", errors="replace"),
+                            height=240,
+                        )
+                        st.download_button(
+                            "Download full training log",
+                            data=log_bytes,
+                            file_name=f"robyn_training_{latest_job.get('timestamp','')}.log",
+                            mime="text/plain",
+                            key=f"dl_log_{latest_job.get('timestamp','')}",
+                        )
+                    else:
+                        st.info(
+                            "Training log not yet available. Check again after job completes."
+                        )
+                except Exception as e:
+                    st.warning(f"Could not fetch training log: {e}")
+
+        with c3:
+            if st.button("📋 Show All Jobs"):
+                df_jobs = pd.DataFrame(
+                    [
+                        {
+                            "Timestamp": job.get("timestamp", ""),
+                            "Status": job.get("status", "UNKNOWN"),
+                            "Execution": job.get("execution_name", "").split(
+                                "/"
+                            )[-1],
+                            "Last Checked": job.get("last_checked", "Never"),
+                            "Revision": job.get("revision", ""),
+                            "Country": job.get("country", ""),
+                        }
+                        for job in st.session_state.job_executions
+                    ]
+                )
+                st.dataframe(df_jobs, use_container_width=True)
+    else:
+        st.info(
+            "No jobs launched yet in this session. Start a training job above."
+        )
+
+    # ─────────────────────────────
+    # Execution timeline & timings.csv handling
+    # ─────────────────────────────
+    if st.session_state.last_timings:
+        with st.expander("⏱️ Execution Timeline", expanded=True):
+            df_times = st.session_state.last_timings["df"]
+            total = (
+                float(df_times["Time (s)"].sum()) if not df_times.empty else 0.0
+            )
+            if total > 0:
+                df_times = df_times.copy()
+                df_times["% of total"] = (
+                    df_times["Time (s)"] / total * 100
+                ).round(1)
+
+            st.markdown("**Setup steps (this session)**")
+            st.dataframe(df_times, use_container_width=True)
+            st.write(f"**Total setup time:** {_fmt_secs(total)}")
+            st.write(
+                "**Note**: Training runs asynchronously in Cloud Run Jobs."
+            )
+
+            # Seed timings file if missing (idempotent)
+            try:
+                ts = st.session_state.last_timings["timestamp"]
+                rev = st.session_state.last_timings["revision"]
+                ctry = st.session_state.last_timings["country"]
+                bucket_seed = st.session_state.last_timings["gcs_bucket"]
+                gcs_prefix_seed = f"robyn/{rev}/{ctry}/{ts}"
+                dest_blob_seed = f"{gcs_prefix_seed}/timings.csv"
+
+                client = storage.Client()
+                blob_seed = client.bucket(bucket_seed).blob(dest_blob_seed)
+                if not blob_seed.exists() and not df_times.empty:
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".csv", delete=False
+                    ) as tmp:
+                        df_times.to_csv(tmp.name, index=False)
+                        upload_to_gcs(bucket_seed, tmp.name, dest_blob_seed)
+                    st.success(
+                        f"Timings CSV uploaded to **gs://{bucket_seed}/{dest_blob_seed}**"
+                    )
+                elif blob_seed.exists():
+                    st.info(
+                        "`timings.csv` already exists — job will append the R row."
+                    )
+            except Exception as e:
+                st.warning(f"Skipped uploading timings: {e}")
+
+            # Authoritative copy from GCS (where the R row appears)
+            try:
+                blob_live = (
+                    storage.Client().bucket(bucket_seed).blob(dest_blob_seed)
+                )
+                if blob_live.exists():
+                    gcs_bytes = blob_live.download_as_bytes()
+                    df_gcs = pd.read_csv(io.BytesIO(gcs_bytes))
+                    st.markdown("**Timings from GCS (authoritative)**")
+                    st.dataframe(df_gcs, use_container_width=True)
+                    st.download_button(
+                        "Download timings.csv",
+                        data=gcs_bytes,
+                        file_name="timings.csv",
+                        mime="text/csv",
+                        key="dl_timings_from_gcs",
+                    )
+                else:
+                    st.info("`timings.csv` not in GCS yet.")
+            except Exception as e:
+                st.warning(f"Could not load timings from GCS: {e}")
 
 # ─────────────────────────────
-# Sidebar
+# Sidebar: system info + auto-refresh
 # ─────────────────────────────
 with st.sidebar:
     st.subheader("🔧 System Info")
@@ -324,434 +851,10 @@ with st.sidebar:
             st.write(f"**Job {i+1}**: {status}")
             st.write(f"*{ts}*")
 
-# ─────────────────────────────
-# Main UI
-# ─────────────────────────────
-st.title("Robyn MMM Trainer")
-
-# Snowflake params
-with st.expander("Snowflake connection"):
-    sf_user = st.text_input("User", value="IPENC")
-    sf_account = st.text_input("Account", value="AMXUZTH-AWS_BRIDGE")
-    sf_wh = st.text_input("Warehouse", value="SMALL_WH")
-    sf_db = st.text_input("Database", value="MESHED_BUYCYCLE")
-    sf_schema = st.text_input("Schema", value="GROWTH")
-    sf_role = st.text_input("Role", value="ACCOUNTADMIN")
-    sf_password = st.text_input("Password", type="password")
-
-# Data selection
-with st.expander("Data selection"):
-    table = st.text_input("Table (DB.SCHEMA.TABLE)")
-    query = st.text_area("Custom SQL (optional)")
-
-# Robyn config
-with st.expander("Robyn configuration"):
-    country = st.text_input("Country", value="fr")
-    iterations = st.number_input("Iterations", value=200, min_value=50)
-    trials = st.number_input("Trials", value=5, min_value=1)
-    train_size = st.text_input("Train size", value="0.7,0.9")
-    revision = st.text_input("Revision tag", value="r100")
-    date_input = st.text_input("Date tag", value=time.strftime("%Y-%m-%d"))
-
-# Variables
-with st.expander("Variable mapping"):
-    paid_media_spends = st.text_input(
-        "paid_media_spends (comma-separated)",
-        value="GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-    )
-    paid_media_vars = st.text_input(
-        "paid_media_vars (comma-separated)",
-        value="GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-    )
-    context_vars = st.text_input("context_vars", value="IS_WEEKEND,TV_IS_ON")
-    factor_vars = st.text_input("factor_vars", value="IS_WEEKEND,TV_IS_ON")
-    organic_vars = st.text_input("organic_vars", value="ORGANIC_TRAFFIC")
-
-# Outputs
-with st.expander("Outputs"):
-    gcs_bucket = st.text_input(
-        "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
-    )
-    st.session_state["gcs_bucket"] = gcs_bucket
-    ann_file = st.file_uploader(
-        "Optional: enriched_annotations.csv", type=["csv"]
-    )
-
-
-def create_job_config(
-    data_gcs_path: str,
-    timestamp: str,
-    annotations_gcs_path: Optional[str] = None,
-) -> Dict[str, Any]:
-    return {
-        "country": country,
-        "iterations": int(iterations),
-        "trials": int(trials),
-        "train_size": parse_train_size(train_size),
-        "revision": revision,
-        "date_input": date_input,
-        "gcs_bucket": gcs_bucket,
-        "data_gcs_path": data_gcs_path,
-        "annotations_gcs_path": annotations_gcs_path,
-        "paid_media_spends": [
-            s.strip() for s in paid_media_spends.split(",") if s.strip()
-        ],
-        "paid_media_vars": [
-            s.strip() for s in paid_media_vars.split(",") if s.strip()
-        ],
-        "context_vars": [
-            s.strip() for s in context_vars.split(",") if s.strip()
-        ],
-        "factor_vars": [s.strip() for s in factor_vars.split(",") if s.strip()],
-        "organic_vars": [
-            s.strip() for s in organic_vars.split(",") if s.strip()
-        ],
-        "timestamp": timestamp,
-        "use_parquet": True,
-        "parallel_processing": True,
-        "max_cores": 8,
-    }
-
-
-# Quick connection test
-if st.button("Test connection & preview 5 rows"):
-    sql = effective_sql(table, query)
-    if not sql:
-        st.warning("Provide a table or a SQL query.")
-    elif not sf_password:
-        st.error("Password is required to connect.")
-    else:
-        try:
-            preview_sql = f"SELECT * FROM ({sql}) t LIMIT 5"
-            df_prev = run_sql(
-                preview_sql,
-                sf_user,
-                sf_password,
-                sf_account,
-                sf_wh,
-                sf_db,
-                sf_schema,
-                sf_role,
-            )
-            st.success("Connection OK")
-            st.dataframe(df_prev)
-        except Exception as e:
-            st.error(f"Preview failed: {e}")
-
-# ─────────────────────────────
-# Launch Training
-# ─────────────────────────────
-if st.button("🚀 Start Training Job", type="primary"):
-    if not all([PROJECT_ID, REGION, TRAINING_JOB_NAME]):
-        st.error(
-            "Missing configuration. Check environment variables on the web service."
-        )
-        st.stop()
-
-    timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
-    gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
-
-    timings: list[dict[str, float]] = []
-    try:
-        with st.spinner("Preparing and launching training job..."):
-            with tempfile.TemporaryDirectory() as td:
-                sql = effective_sql(table, query)
-                data_gcs_path = None
-                annotations_gcs_path = None
-
-                if not sql:
-                    st.error(
-                        "Provide a table or SQL query to prepare training data."
-                    )
-                    st.stop()
-
-                if not sf_password:
-                    st.error("Password required for Snowflake.")
-                    st.stop()
-
-                try:
-                    # 1) Query Snowflake
-                    with timed_step("Query Snowflake", timings):
-                        df = run_sql(
-                            sql,
-                            sf_user,
-                            sf_password,
-                            sf_account,
-                            sf_wh,
-                            sf_db,
-                            sf_schema,
-                            sf_role,
-                        )
-
-                    # 2) Convert to Parquet
-                    with timed_step("Convert to Parquet", timings):
-                        parquet_path = os.path.join(td, "input_data.parquet")
-                        data_processor.csv_to_parquet(df, parquet_path)
-
-                    # 3) Upload data to GCS
-                    with timed_step("Upload data to GCS", timings):
-                        data_blob = (
-                            f"training-data/{timestamp}/input_data.parquet"
-                        )
-                        data_gcs_path = upload_to_gcs(
-                            gcs_bucket, parquet_path, data_blob
-                        )
-
-                    st.success(
-                        f"Data prepared: {len(df):,} rows uploaded to {data_gcs_path}"
-                    )
-
-                except Exception as e:
-                    st.error(f"Data preparation failed: {e}")
-                    st.stop()
-
-                # Optional annotations
-                if ann_file is not None:
-                    with timed_step("Upload annotations to GCS", timings):
-                        annotations_path = os.path.join(
-                            td, "enriched_annotations.csv"
-                        )
-                        with open(annotations_path, "wb") as f:
-                            f.write(ann_file.read())
-                        annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
-                        annotations_gcs_path = upload_to_gcs(
-                            gcs_bucket, annotations_path, annotations_blob
-                        )
-
-                # 4) Create job config
-                with timed_step("Create job configuration", timings):
-                    job_config = create_job_config(
-                        data_gcs_path, timestamp, annotations_gcs_path
-                    )
-                    config_path = os.path.join(td, "job_config.json")
-                    with open(config_path, "w") as f:
-                        json.dump(job_config, f, indent=2)
-                    config_blob = (
-                        f"training-configs/{timestamp}/job_config.json"
-                    )
-                    config_gcs_path = upload_to_gcs(
-                        gcs_bucket, config_path, config_blob
-                    )
-                    _ = upload_to_gcs(
-                        gcs_bucket,
-                        config_path,
-                        "training-configs/latest/job_config.json",
-                    )
-
-                # 5) Launch Cloud Run Job
-                with timed_step("Launch training job", timings):
-                    # run_job doesn't accept overrides; R script has fallback to latest/ if needed
-                    env_vars = {
-                        "JOB_CONFIG_GCS_PATH": config_gcs_path,
-                        "SNOWFLAKE_PASSWORD": sf_password or "",
-                        "TIMESTAMP": timestamp,
-                    }
-                    try:
-                        execution_name = job_manager.create_execution(
-                            TRAINING_JOB_NAME, env_vars
-                        )
-                        exec_info = {
-                            "execution_name": execution_name,
-                            "timestamp": timestamp,
-                            "status": "LAUNCHED",
-                            "config_path": config_gcs_path,
-                            "data_path": data_gcs_path,
-                            # used later by “View Results”
-                            "revision": revision,
-                            "country": country,
-                            "gcs_prefix": gcs_prefix,
-                            "gcs_bucket": gcs_bucket,
-                        }
-                        st.session_state.job_executions.append(exec_info)
-
-                        st.success("🎉 Training job launched!")
-                        st.info(
-                            f"**Execution ID**: `{execution_name.split('/')[-1]}`"
-                        )
-                        st.info(
-                            "**Training Resources**: 8 CPUs, 32GB RAM (per Terraform)"
-                        )
-                    except Exception as e:
-                        st.error(str(e))
-                        logger.error(f"Job launch error: {e}", exc_info=True)
-
-    finally:
-        # Seed timings.csv once (web-side steps only). The R job will append its own row later.
-        if timings:
-            df_times = pd.DataFrame(timings)
-            try:
-                client = storage.Client()
-                dest_blob = f"{gcs_prefix}/timings.csv"
-                blob = client.bucket(gcs_bucket).blob(dest_blob)
-                if not blob.exists():  # only seed if not present
-                    with tempfile.NamedTemporaryFile(
-                        mode="w", suffix=".csv", delete=False
-                    ) as tmp:
-                        df_times.to_csv(tmp.name, index=False)
-                        upload_to_gcs(gcs_bucket, tmp.name, dest_blob)
-                    st.success(
-                        f"Timings CSV uploaded to gs://{gcs_bucket}/{dest_blob}"
-                    )
-                else:
-                    st.info(
-                        "`timings.csv` already exists — leaving it for the job to append its R row."
-                    )
-            except Exception as e:
-                st.warning(f"Failed to upload timings: {e}")
-
-        # Cache timings locally for UI display
-        st.session_state.last_timings = {
-            "df": pd.DataFrame(timings),
-            "timestamp": timestamp,
-            "revision": revision,
-            "country": country,
-            "gcs_bucket": gcs_bucket,
-        }
-
-# ─────────────────────────────
-# Job Status Monitor
-# ─────────────────────────────
-st.subheader("📊 Job Status Monitor")
-
-if st.session_state.job_executions:
-    latest_job = st.session_state.job_executions[-1]
-    execution_name = latest_job["execution_name"]
-
-    if st.button("🔍 Check Status"):
-        status_info = job_manager.get_execution_status(execution_name)
-        st.json(status_info)
-        latest_job["status"] = status_info.get("overall_status", "UNKNOWN")
-        latest_job["last_checked"] = datetime.now().isoformat()
-
-    if st.button("📁 View Results"):
-        gcs_prefix_view = latest_job.get("gcs_prefix")
-        bucket_view = latest_job.get("gcs_bucket", GCS_BUCKET)
-        st.info(f"Check results at: gs://{bucket_view}/{gcs_prefix_view}/")
-
-        # Try to fetch training log
-        try:
-            client = storage.Client()
-            bucket_obj = client.bucket(bucket_view)
-            log_blob = bucket_obj.blob(f"{gcs_prefix_view}/robyn_console.log")
-            if log_blob.exists():
-                log_bytes = log_blob.download_as_bytes()
-                tail = log_bytes[-2000:] if len(log_bytes) > 2000 else log_bytes
-                st.text_area(
-                    "Training Log (last 2000 chars):",
-                    value=tail.decode("utf-8", errors="replace"),
-                    height=240,
-                )
-                st.download_button(
-                    "Download full training log",
-                    data=log_bytes,
-                    file_name=f"robyn_training_{latest_job.get('timestamp','')}.log",
-                    mime="text/plain",
-                    key=f"dl_log_{latest_job.get('timestamp','')}",
-                )
-            else:
-                st.info(
-                    "Training log not yet available. Check again after job completes."
-                )
-        except Exception as e:
-            st.warning(f"Could not fetch training log: {e}")
-
-    if st.button("📋 Show All Jobs"):
-        df_jobs = pd.DataFrame(
-            [
-                {
-                    "Timestamp": job.get("timestamp", ""),
-                    "Status": job.get("status", "UNKNOWN"),
-                    "Execution": job.get("execution_name", "").split("/")[-1],
-                    "Last Checked": job.get("last_checked", "Never"),
-                    "Revision": job.get("revision", ""),
-                    "Country": job.get("country", ""),
-                }
-                for job in st.session_state.job_executions
-            ]
-        )
-        st.dataframe(df_jobs, use_container_width=True)
-else:
-    st.info("No jobs launched yet in this session. Start a training job above.")
-
-# ─────────────────────────────
-# Execution timeline & timings.csv handling
-# ─────────────────────────────
-if st.session_state.last_timings:
-    with st.expander("⏱️ Execution Timeline", expanded=True):
-        df_times = st.session_state.last_timings["df"]
-        total = float(df_times["Time (s)"].sum()) if not df_times.empty else 0.0
-        if total > 0:
-            df_times = df_times.copy()
-            df_times["% of total"] = (df_times["Time (s)"] / total * 100).round(
-                1
-            )
-
-        st.markdown("**Setup steps (this session)**")
-        st.dataframe(df_times, use_container_width=True)
-        st.write(f"**Total setup time:** {_fmt_secs(total)}")
-        st.write("**Note**: Training runs asynchronously in Cloud Run Jobs.")
-
-        # Seed the timings file if it's missing (idempotent)
-        try:
-            ts = st.session_state.last_timings["timestamp"]
-            rev = st.session_state.last_timings["revision"]
-            ctry = st.session_state.last_timings["country"]
-            bucket_seed = st.session_state.last_timings["gcs_bucket"]
-            gcs_prefix_seed = f"robyn/{rev}/{ctry}/{ts}"
-            dest_blob_seed = f"{gcs_prefix_seed}/timings.csv"
-
-            client = storage.Client()
-            blob_seed = client.bucket(bucket_seed).blob(dest_blob_seed)
-            if not blob_seed.exists() and not df_times.empty:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".csv", delete=False
-                ) as tmp:
-                    df_times.to_csv(tmp.name, index=False)
-                    upload_to_gcs(bucket_seed, tmp.name, dest_blob_seed)
-                st.success(
-                    f"Timings CSV uploaded to **gs://{bucket_seed}/{dest_blob_seed}**"
-                )
-            elif blob_seed.exists():
-                st.info(
-                    "`timings.csv` already exists — job will append the R row."
-                )
-        except Exception as e:
-            st.warning(f"Skipped uploading timings: {e}")
-
-        # Authoritative copy from GCS (this is where the R row appears)
-        try:
-            blob_live = (
-                storage.Client().bucket(bucket_seed).blob(dest_blob_seed)
-            )
-            if blob_live.exists():
-                gcs_bytes = blob_live.download_as_bytes()
-                df_gcs = pd.read_csv(io.BytesIO(gcs_bytes))
-                st.markdown("**Timings from GCS (authoritative)**")
-                st.dataframe(df_gcs, use_container_width=True)
-                st.download_button(
-                    "Download timings.csv",
-                    data=gcs_bytes,
-                    file_name="timings.csv",
-                    mime="text/csv",
-                    key="dl_timings_from_gcs",
-                )
-            else:
-                st.info("`timings.csv` not in GCS yet.")
-        except Exception as e:
-            st.warning(f"Could not load timings from GCS: {e}")
-
-# ─────────────────────────────
-# Architecture info
-# ─────────────────────────────
-with st.expander("🏗️ Architecture Info"):
-    st.markdown(
-        """
-**Cloud Run Jobs Architecture:**
-- **Web Interface**: Cloud Run Service (this app)
-- **Training Jobs**: Cloud Run Jobs v2
-- **Storage**: Google Cloud Storage (Parquet)
-- **Orchestration**: Cloud Run Jobs API
-
-**Benefits:** up to 8 CPUs/32GB per your Terraform, async jobs, web stays responsive
-"""
-    )
+    # Manual auto-refresh
+    if st.toggle(
+        "Auto-refresh status",
+        value=st.session_state["auto_refresh"],
+        key="auto_refresh",
+    ):
+        st.rerun()
