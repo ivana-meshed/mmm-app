@@ -129,47 +129,53 @@ class CloudRunJobManager:
         return execution_name or f"{job_path}/executions/unknown"
 
     def get_execution_status(self, execution_name: str) -> Dict[str, Any]:
-    def _ts(dtobj):
+        def _ts(dtobj):
+            try:
+                return dtobj.isoformat() if dtobj else None
+            except Exception:
+                return str(dtobj) if dtobj is not None else None
+
         try:
-            return dtobj.isoformat() if dtobj else None
-        except Exception:
-            return str(dtobj) if dtobj is not None else None
+            execution = self.executions_client.get_execution(
+                name=execution_name
+            )
 
-    try:
-        execution = self.executions_client.get_execution(name=execution_name)
+            status = {
+                "name": execution.name,
+                "uid": getattr(execution, "uid", None),
+                "create_time": _ts(getattr(execution, "create_time", None)),
+                "start_time": _ts(getattr(execution, "start_time", None)),
+                "completion_time": _ts(
+                    getattr(execution, "completion_time", None)
+                ),
+                "running_count": getattr(execution, "running_count", None),
+                "succeeded_count": getattr(execution, "succeeded_count", None),
+                "failed_count": getattr(execution, "failed_count", None),
+                "cancelled_count": getattr(execution, "cancelled_count", None),
+            }
 
-        status = {
-            "name": execution.name,
-            "uid": getattr(execution, "uid", None),
-            "create_time": _ts(getattr(execution, "create_time", None)),
-            "start_time": _ts(getattr(execution, "start_time", None)),
-            "completion_time": _ts(getattr(execution, "completion_time", None)),
-            "running_count": getattr(execution, "running_count", None),
-            "succeeded_count": getattr(execution, "succeeded_count", None),
-            "failed_count": getattr(execution, "failed_count", None),
-            "cancelled_count": getattr(execution, "cancelled_count", None),
-        }
-
-        # Derive a simple overall_status
-        if getattr(execution, "completion_time", None):
-            if (getattr(execution, "succeeded_count", 0) or 0) > 0:
-                status["overall_status"] = "SUCCEEDED"
-            elif (getattr(execution, "failed_count", 0) or 0) > 0:
-                status["overall_status"] = "FAILED"
-            elif (getattr(execution, "cancelled_count", 0) or 0) > 0:
-                status["overall_status"] = "CANCELLED"
+            # Derive a simple overall_status
+            if getattr(execution, "completion_time", None):
+                if (getattr(execution, "succeeded_count", 0) or 0) > 0:
+                    status["overall_status"] = "SUCCEEDED"
+                elif (getattr(execution, "failed_count", 0) or 0) > 0:
+                    status["overall_status"] = "FAILED"
+                elif (getattr(execution, "cancelled_count", 0) or 0) > 0:
+                    status["overall_status"] = "CANCELLED"
+                else:
+                    status["overall_status"] = "COMPLETED"
+            elif (getattr(execution, "running_count", 0) or 0) > 0 or getattr(
+                execution, "start_time", None
+            ):
+                status["overall_status"] = "RUNNING"
             else:
-                status["overall_status"] = "COMPLETED"
-        elif (getattr(execution, "running_count", 0) or 0) > 0 or getattr(execution, "start_time", None):
-            status["overall_status"] = "RUNNING"
-        else:
-            status["overall_status"] = "PENDING"
+                status["overall_status"] = "PENDING"
 
-        return status
+            return status
 
-    except Exception as e:
-        logger.error(f"Error getting execution status: {e}", exc_info=True)
-        return {"overall_status": "ERROR", "error": str(e)}
+        except Exception as e:
+            logger.error(f"Error getting execution status: {e}", exc_info=True)
+            return {"overall_status": "ERROR", "error": str(e)}
 
 
 def upload_to_gcs(bucket_name: str, local_path: str, dest_blob: str) -> str:
