@@ -681,74 +681,66 @@ with tab_train:
         latest_job = st.session_state.job_executions[-1]
         execution_name = latest_job["execution_name"]
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            if st.button("🔍 Check Status"):
-                status_info = job_manager.get_execution_status(execution_name)
-                st.json(status_info)
-                latest_job["status"] = status_info.get(
-                    "overall_status", "UNKNOWN"
-                )
-                latest_job["last_checked"] = datetime.now().isoformat()
+        if st.button("🔍 Check Status"):
+            status_info = job_manager.get_execution_status(execution_name)
+            st.json(status_info)
+            latest_job["status"] = status_info.get("overall_status", "UNKNOWN")
+            latest_job["last_checked"] = datetime.now().isoformat()
 
-        with c2:
-            if st.button("📁 View Results"):
-                gcs_prefix_view = latest_job.get("gcs_prefix")
-                bucket_view = latest_job.get("gcs_bucket", GCS_BUCKET)
-                st.info(
-                    f"Check results at: gs://{bucket_view}/{gcs_prefix_view}/"
+        if st.button("📁 View Results"):
+            gcs_prefix_view = latest_job.get("gcs_prefix")
+            bucket_view = latest_job.get("gcs_bucket", GCS_BUCKET)
+            st.info(f"Check results at: gs://{bucket_view}/{gcs_prefix_view}/")
+            # Try to fetch training log
+            try:
+                client = storage.Client()
+                bucket_obj = client.bucket(bucket_view)
+                log_blob = bucket_obj.blob(
+                    f"{gcs_prefix_view}/robyn_console.log"
                 )
-                # Try to fetch training log
-                try:
-                    client = storage.Client()
-                    bucket_obj = client.bucket(bucket_view)
-                    log_blob = bucket_obj.blob(
-                        f"{gcs_prefix_view}/robyn_console.log"
+                if log_blob.exists():
+                    log_bytes = log_blob.download_as_bytes()
+                    tail = (
+                        log_bytes[-2000:]
+                        if len(log_bytes) > 2000
+                        else log_bytes
                     )
-                    if log_blob.exists():
-                        log_bytes = log_blob.download_as_bytes()
-                        tail = (
-                            log_bytes[-2000:]
-                            if len(log_bytes) > 2000
-                            else log_bytes
-                        )
-                        st.text_area(
-                            "Training Log (last 2000 chars):",
-                            value=tail.decode("utf-8", errors="replace"),
-                            height=240,
-                        )
-                        st.download_button(
-                            "Download full training log",
-                            data=log_bytes,
-                            file_name=f"robyn_training_{latest_job.get('timestamp','')}.log",
-                            mime="text/plain",
-                            key=f"dl_log_{latest_job.get('timestamp','')}",
-                        )
-                    else:
-                        st.info(
-                            "Training log not yet available. Check again after job completes."
-                        )
-                except Exception as e:
-                    st.warning(f"Could not fetch training log: {e}")
+                    st.text_area(
+                        "Training Log (last 2000 chars):",
+                        value=tail.decode("utf-8", errors="replace"),
+                        height=240,
+                    )
+                    st.download_button(
+                        "Download full training log",
+                        data=log_bytes,
+                        file_name=f"robyn_training_{latest_job.get('timestamp','')}.log",
+                        mime="text/plain",
+                        key=f"dl_log_{latest_job.get('timestamp','')}",
+                    )
+                else:
+                    st.info(
+                        "Training log not yet available. Check again after job completes."
+                    )
+            except Exception as e:
+                st.warning(f"Could not fetch training log: {e}")
 
-        with c3:
-            if st.button("📋 Show All Jobs"):
-                df_jobs = pd.DataFrame(
-                    [
-                        {
-                            "Timestamp": job.get("timestamp", ""),
-                            "Status": job.get("status", "UNKNOWN"),
-                            "Execution": job.get("execution_name", "").split(
-                                "/"
-                            )[-1],
-                            "Last Checked": job.get("last_checked", "Never"),
-                            "Revision": job.get("revision", ""),
-                            "Country": job.get("country", ""),
-                        }
-                        for job in st.session_state.job_executions
-                    ]
-                )
-                st.dataframe(df_jobs, use_container_width=True)
+        if st.button("📋 Show All Jobs"):
+            df_jobs = pd.DataFrame(
+                [
+                    {
+                        "Timestamp": job.get("timestamp", ""),
+                        "Status": job.get("status", "UNKNOWN"),
+                        "Execution": job.get("execution_name", "").split("/")[
+                            -1
+                        ],
+                        "Last Checked": job.get("last_checked", "Never"),
+                        "Revision": job.get("revision", ""),
+                        "Country": job.get("country", ""),
+                    }
+                    for job in st.session_state.job_executions
+                ]
+            )
+            st.dataframe(df_jobs, use_container_width=True)
     else:
         st.info(
             "No jobs launched yet in this session. Start a training job above."
