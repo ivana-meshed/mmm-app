@@ -62,3 +62,4 @@ scripts/ci_cd.sh
 scripts/setup_dev_env.sh
 scripts/run_all.sh
 scripts/collect_baseline.py
+scripts/perf_test.py

@@ -3,7 +3,7 @@ name: Deploy (Terraform only)
 on:
   push:
     branches:
-      - main       # <-- fix trigger (was `ci-`)
+      - ci       # <-- fix trigger (was `ci-`)
 
 permissions:
   id-token: write
