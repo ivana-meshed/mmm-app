@@ -25,6 +25,11 @@ resource "google_service_account" "scheduler" {
   display_name = "Robyn Queue Scheduler"
 }
 
+data "google_secret_manager_secret" "sf_password" {
+  project   = var.project_id
+  secret_id = "sf-password"
+}
+
 
 # Allow web service to execute training jobs
 #resource "google_service_account_iam_member" "web_service_job_executor" {
@@ -116,9 +121,9 @@ resource "google_service_account_iam_member" "training_sa_token_creator" {
 
 # Allow Scheduler SA to invoke your web Cloud Run service
 resource "google_cloud_run_service_iam_member" "web_invoker" {
-  service  = google_cloud_run_service_iam_member.web.name
-  project  = google_cloud_run_service_iam_member.web.project
-  location = google_cloud_run_service_iam_member.web.location
+  service  = google_cloud_run_service_iam_member.web_service_sa.name
+  project  = google_cloud_run_service_iam_member.web_service_sa.project
+  location = google_cloud_run_service_iam_member.web_service_sa.location
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
 }
