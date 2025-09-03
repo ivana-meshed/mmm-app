@@ -1348,7 +1348,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             f"{sum(e['status']=='PENDING' for e in st.session_state.job_queue)} pending · "
             f"{sum(e['status']=='RUNNING' for e in st.session_state.job_queue)} running"
         )
-        st.write(f"Last saved at (GCS): {doc.get('saved_at','—')}")
+        # doc = load_queue_from_gcs(queue_name, bucket_name=bucket_name)
+        # st.write(f"Last saved at (GCS): {doc.get('saved_at','—')}")
         if st.button("🔁 Refresh from GCS"):
             _ = load_queue_from_gcs(st.session_state.queue_name)
             st.success("Refreshed from GCS.")
