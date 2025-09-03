@@ -573,20 +573,89 @@ def load_queue_from_gcs(
     return []
 
 
-def save_queue_to_gcs(
-    queue_name: str, entries: list[dict], bucket_name: Optional[str] = None
-) -> None:
+# Track when we last loaded the queue
+st.session_state.setdefault("queue_saved_at", None)
+
+
+def load_queue_payload(
+    queue_name: str, bucket_name: Optional[str] = None
+) -> dict:
+    """Return {'version':1, 'saved_at': str|None, 'queue_running': bool, 'entries': list}."""
     bucket_name = bucket_name or st.session_state.get("gcs_bucket", GCS_BUCKET)
     bucket = storage.Client().bucket(bucket_name)
     blob = bucket.blob(_queue_blob_path(queue_name))
+    if not blob.exists():
+        return {
+            "version": 1,
+            "saved_at": None,
+            "queue_running": False,
+            "entries": [],
+        }
+    try:
+        payload = json.loads(blob.download_as_text())
+        if isinstance(payload, list):  # legacy format
+            return {
+                "version": 1,
+                "saved_at": None,
+                "queue_running": False,
+                "entries": payload,
+            }
+        # ensure fields exist
+        payload.setdefault("queue_running", False)
+        payload.setdefault("entries", [])
+        payload.setdefault("saved_at", None)
+        return payload
+    except Exception as e:
+        logger.warning("Failed to load queue payload from GCS: %s", e)
+        return {
+            "version": 1,
+            "saved_at": None,
+            "queue_running": False,
+            "entries": [],
+        }
+
+
+def save_queue_to_gcs(
+    queue_name: str,
+    entries: list[dict],
+    bucket_name: Optional[str] = None,
+    queue_running: Optional[bool] = None,
+) -> str:
+    """Save queue entries + meta to GCS. Returns saved_at ISO string."""
+    bucket_name = bucket_name or st.session_state.get("gcs_bucket", GCS_BUCKET)
+    bucket = storage.Client().bucket(bucket_name)
+    blob = bucket.blob(_queue_blob_path(queue_name))
+    saved_at = datetime.utcnow().isoformat() + "Z"
     payload = {
         "version": 1,
-        "saved_at": datetime.utcnow().isoformat() + "Z",
+        "saved_at": saved_at,
+        "queue_running": (
+            queue_running
+            if queue_running is not None
+            else bool(st.session_state.get("queue_running", False))
+        ),
         "entries": entries,
     }
     blob.upload_from_string(
         json.dumps(payload, indent=2), content_type="application/json"
     )
+    return saved_at
+
+
+def maybe_refresh_queue_from_gcs(force: bool = False):
+    """Refresh local session state from GCS if remote changed (or force=True)."""
+    payload = load_queue_payload(st.session_state.queue_name)
+    remote_saved_at = payload.get("saved_at")
+    if force or (
+        remote_saved_at
+        and remote_saved_at != st.session_state.get("queue_saved_at")
+    ):
+        st.session_state.job_queue = payload.get("entries", [])
+        # keep UI toggle in sync too (useful when multiple sessions are open)
+        st.session_state.queue_running = payload.get(
+            "queue_running", st.session_state.get("queue_running", False)
+        )
+        st.session_state.queue_saved_at = remote_saved_at
 
 
 def queue_tick_once_headless(
@@ -652,6 +721,16 @@ def queue_tick_once_headless(
         save_queue_to_gcs(queue_name, q, bucket_name=bucket_name)
     return {"ok": True, "message": entry["message"], "changed": True}
 
+
+# ─────────────────────────────
+# Stateless queue tick endpoint (AFTER defs/constants)
+# ─────────────────────────────
+if query_params.get("queue_tick") == "1":
+    qname = query_params.get("name") or DEFAULT_QUEUE_NAME
+    bkt = query_params.get("bucket") or GCS_BUCKET
+    res = queue_tick_once_headless(qname, bucket_name=bkt)
+    st.json(res)
+    st.stop()
 
 # ─────────────────────────────
 # UI layout: two tabs
@@ -993,6 +1072,7 @@ with tab_train:
         "📚 Batch queue (CSV) — queue & run multiple jobs sequentially",
         expanded=False,
     ):
+        maybe_refresh_queue_from_gcs()
         # Queue name + Load/Save
         cqn1, cqn2, cqn3 = st.columns([2, 1, 1])
         new_qname = cqn1.text_input(
@@ -1004,17 +1084,19 @@ with tab_train:
             st.session_state["queue_name"] = new_qname
 
         if cqn2.button("⬇️ Load from GCS"):
-            st.session_state.job_queue = load_queue_from_gcs(
-                st.session_state.queue_name
-            )
+            payload = load_queue_payload(st.session_state.queue_name)
+            st.session_state.job_queue = payload["entries"]
+            st.session_state.queue_running = payload.get("queue_running", False)
+            st.session_state.queue_saved_at = payload.get("saved_at")
             st.success(f"Loaded queue '{st.session_state.queue_name}' from GCS")
 
         if cqn3.button("⬆️ Save to GCS"):
-            save_queue_to_gcs(
-                st.session_state.queue_name, st.session_state.job_queue
+            st.session_state.queue_saved_at = save_queue_to_gcs(
+                st.session_state.queue_name,
+                st.session_state.job_queue,
+                queue_running=st.session_state.queue_running,
             )
             st.success(f"Saved queue '{st.session_state.queue_name}' to GCS")
-
         st.markdown(
             """
 Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country`, `revision`, and data source):
@@ -1192,20 +1274,25 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             "▶️ Start Queue", disabled=(len(st.session_state.job_queue) == 0)
         ):
             st.session_state["queue_running"] = True
-            save_queue_to_gcs(
-                st.session_state.queue_name, st.session_state.job_queue
+            st.session_state.queue_saved_at = save_queue_to_gcs(
+                st.session_state.queue_name,
+                st.session_state.job_queue,
+                queue_running=True,
             )
         if qc2.button("⏸️ Stop Queue"):
             st.session_state["queue_running"] = False
-            save_queue_to_gcs(
-                st.session_state.queue_name, st.session_state.job_queue
+            st.session_state.queue_saved_at = save_queue_to_gcs(
+                st.session_state.queue_name,
+                st.session_state.job_queue,
+                queue_running=False,
             )
         if qc3.button("⏭️ Process Next Step"):
             res = queue_tick_once_headless(
                 st.session_state.queue_name, st.session_state["gcs_bucket"]
             )
             st.toast(res.get("message", "tick"))
-            st.rerun()  # tick happens below
+            maybe_refresh_queue_from_gcs(force=True)
+            st.rerun()
         if qc4.button("💾 Save now"):
             save_queue_to_gcs(
                 st.session_state.queue_name, st.session_state.job_queue
@@ -1213,6 +1300,14 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             st.success("Queue saved to GCS.")
 
         # Queue table
+        maybe_refresh_queue_from_gcs()
+        st.caption(
+            f"GCS saved_at: {st.session_state.get('queue_saved_at') or '—'} · "
+            f"{sum(e['status']=='PENDING' for e in st.session_state.job_queue)} pending · "
+            f"{sum(e['status']=='RUNNING' for e in st.session_state.job_queue)} running · "
+            f"Queue is {'RUNNING' if st.session_state.queue_running else 'STOPPED'}"
+        )
+
         if st.session_state.job_queue:
             df_queue = pd.DataFrame(
                 [
@@ -1236,6 +1331,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
     # Queue worker (state machine)
     # ─────────────────────────────
     def _queue_tick():
+        maybe_refresh_queue_from_gcs()
         q = st.session_state.job_queue
         if not q:
             return
@@ -1296,7 +1392,11 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 changed = True
 
         if changed:
-            save_queue_to_gcs(st.session_state.queue_name, q)
+            st.session_state.queue_saved_at = save_queue_to_gcs(
+                st.session_state.queue_name,
+                q,
+                queue_running=st.session_state.queue_running,
+            )
 
     # Tick the queue on every rerun
     _queue_tick()
