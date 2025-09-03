@@ -134,6 +134,19 @@ resource "google_secret_manager_secret_iam_member" "sf_password_access" {
   member    = "serviceAccount:${google_service_account.web_service_sa.email}"
 }
 
+# Let the Terraform deployer impersonate (act as) the Scheduler SA
+resource "google_service_account_iam_member" "allow_deployer_actas_scheduler" {
+  service_account_id = google_service_account.scheduler.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${var.deployer_sa}"
+}
+
+# Allow the deployer to create/update Cloud Scheduler jobs
+resource "google_project_iam_member" "deployer_scheduler_admin" {
+  project = var.project_id
+  role    = "roles/cloudscheduler.admin"
+  member  = "serviceAccount:${var.deployer_sa}"
+}
 
 ##############################################################
 # APIs
