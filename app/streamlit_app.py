@@ -46,6 +46,15 @@ if query_params.get("health") == "true":
         )
     st.stop()
 
+# Stateless queue tick endpoint: /?queue_tick=1&name=<queue>&bucket=<bucket>
+if query_params.get("queue_tick") == "1":
+    qname = query_params.get("name") or DEFAULT_QUEUE_NAME
+    bkt = query_params.get("bucket") or GCS_BUCKET
+    res = queue_tick_once_headless(qname, bucket_name=bkt)
+    st.json(res)
+    st.stop()
+
+
 # ─────────────────────────────
 # Environment / constants
 # ─────────────────────────────
@@ -287,9 +296,43 @@ def _connect_snowflake(
     )
 
 
+# --- Snowflake env-fallback (headless) ---
+def _sf_params_from_env() -> Optional[dict]:
+    u = os.getenv("SF_USER")
+    p = os.getenv("SF_PASSWORD")
+    a = os.getenv("SF_ACCOUNT")
+    w = os.getenv("SF_WAREHOUSE")
+    d = os.getenv("SF_DATABASE")
+    s = os.getenv("SF_SCHEMA")
+    r = os.getenv("SF_ROLE", "")
+    if all([u, p, a, w, d, s]):
+        return dict(
+            user=u,
+            password=p,
+            account=a,
+            warehouse=w,
+            database=d,
+            schema=s,
+            role=r,
+        )
+    return None
+
+
 def ensure_sf_conn() -> sf.SnowflakeConnection:
     conn = st.session_state.get("sf_conn")
     params = st.session_state.get("sf_params") or {}
+    if not params:
+        envp = _sf_params_from_env()
+        if envp:
+            params = envp
+            # store redacted copy so code paths relying on sf_params don't crash
+            st.session_state["sf_params"] = {
+                k: v for k, v in envp.items() if k != "password"
+            }
+        else:
+            raise RuntimeError(
+                "No Snowflake params. Use UI once or set SF_* env vars."
+            )
     if conn is not None:
         try:
             cur = conn.cursor()
@@ -511,11 +554,11 @@ def _queue_blob_path(queue_name: str) -> str:
     return f"{QUEUE_ROOT}/{q}/queue.json"
 
 
-def load_queue_from_gcs(queue_name: str) -> list[dict]:
-    """Load queue entries list from GCS; returns [] if missing."""
-    bucket = storage.Client().bucket(
-        st.session_state.get("gcs_bucket", GCS_BUCKET)
-    )
+def load_queue_from_gcs(
+    queue_name: str, bucket_name: Optional[str] = None
+) -> list[dict]:
+    bucket_name = bucket_name or st.session_state.get("gcs_bucket", GCS_BUCKET)
+    bucket = storage.Client().bucket(bucket_name)
     blob = bucket.blob(_queue_blob_path(queue_name))
     if not blob.exists():
         return []
@@ -526,15 +569,15 @@ def load_queue_from_gcs(queue_name: str) -> list[dict]:
         if isinstance(payload, list):
             return payload
     except Exception as e:
-        st.warning(f"Failed to load queue from GCS: {e}")
+        logger.warning("Failed to load queue from GCS: %s", e)
     return []
 
 
-def save_queue_to_gcs(queue_name: str, entries: list[dict]) -> None:
-    """Save queue entries list to GCS."""
-    bucket = storage.Client().bucket(
-        st.session_state.get("gcs_bucket", GCS_BUCKET)
-    )
+def save_queue_to_gcs(
+    queue_name: str, entries: list[dict], bucket_name: Optional[str] = None
+) -> None:
+    bucket_name = bucket_name or st.session_state.get("gcs_bucket", GCS_BUCKET)
+    bucket = storage.Client().bucket(bucket_name)
     blob = bucket.blob(_queue_blob_path(queue_name))
     payload = {
         "version": 1,
@@ -544,6 +587,70 @@ def save_queue_to_gcs(queue_name: str, entries: list[dict]) -> None:
     blob.upload_from_string(
         json.dumps(payload, indent=2), content_type="application/json"
     )
+
+
+def queue_tick_once_headless(
+    queue_name: str, bucket_name: Optional[str] = None
+) -> dict:
+    """Advance the queue by at most one transition; safe to call from Scheduler."""
+    bucket_name = bucket_name or GCS_BUCKET
+    q = load_queue_from_gcs(queue_name, bucket_name=bucket_name)
+    if not q:
+        return {"ok": True, "message": "empty queue", "changed": False}
+
+    changed = False
+
+    # 1) Update RUNNING job
+    run_idx = next(
+        (i for i, e in enumerate(q) if e.get("status") == "RUNNING"), None
+    )
+    if run_idx is not None:
+        entry = q[run_idx]
+        try:
+            status_info = job_manager.get_execution_status(
+                entry["execution_name"]
+            )
+            s = status_info.get("overall_status")
+            if s in ("SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"):
+                entry["status"] = (
+                    "SUCCEEDED" if s in ("SUCCEEDED", "COMPLETED") else s
+                )
+                entry["message"] = status_info.get("error", "") or s
+                changed = True
+        except Exception as e:
+            entry["status"] = "ERROR"
+            entry["message"] = str(e)
+            changed = True
+
+        if changed:
+            save_queue_to_gcs(queue_name, q, bucket_name=bucket_name)
+            return {"ok": True, "message": "updated running", "changed": True}
+
+    # 2) Launch next PENDING if not running
+    pend_idx = next(
+        (i for i, e in enumerate(q) if e.get("status") == "PENDING"), None
+    )
+    if pend_idx is None:
+        return {"ok": True, "message": "no pending", "changed": False}
+
+    entry = q[pend_idx]
+    try:
+        exec_info = prepare_and_launch_job(entry["params"])
+        time.sleep(SAFE_LAG_SECONDS_AFTER_RUNNING)
+        entry["execution_name"] = exec_info["execution_name"]
+        entry["timestamp"] = exec_info["timestamp"]
+        entry["gcs_prefix"] = exec_info["gcs_prefix"]
+        entry["status"] = "RUNNING"
+        entry["message"] = "Launched"
+        changed = True
+    except Exception as e:
+        entry["status"] = "ERROR"
+        entry["message"] = f"launch failed: {e}"
+        changed = True
+
+    if changed:
+        save_queue_to_gcs(queue_name, q, bucket_name=bucket_name)
+    return {"ok": True, "message": entry["message"], "changed": True}
 
 
 # ─────────────────────────────
@@ -1094,7 +1201,11 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.session_state.queue_name, st.session_state.job_queue
             )
         if qc3.button("⏭️ Process Next Step"):
-            pass  # tick happens below
+            res = queue_tick_once_headless(
+                st.session_state.queue_name, st.session_state["gcs_bucket"]
+            )
+            st.toast(res.get("message", "tick"))
+            st.rerun()  # tick happens below
         if qc4.button("💾 Save now"):
             save_queue_to_gcs(
                 st.session_state.queue_name, st.session_state.job_queue

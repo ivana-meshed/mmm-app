@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [ main ]
   push:
-    branches: [ queue]
+    branches: [ scheduler]
 
 permissions:
   id-token: write
