@@ -556,21 +556,108 @@ def _queue_blob_path(queue_name: str) -> str:
 
 def load_queue_from_gcs(
     queue_name: str, bucket_name: Optional[str] = None
-) -> list[dict]:
+) -> dict:
+    """
+    Load the full queue document: {version, saved_at, entries: [...], queue_running: bool}.
+    If the blob doesn't exist, return an empty running queue by default.
+    Also refresh st.session_state.job_queue and st.session_state.queue_running.
+    """
     bucket_name = bucket_name or st.session_state.get("gcs_bucket", GCS_BUCKET)
     bucket = storage.Client().bucket(bucket_name)
     blob = bucket.blob(_queue_blob_path(queue_name))
+
     if not blob.exists():
-        return []
+        doc = {
+            "version": 1,
+            "saved_at": datetime.utcnow().isoformat() + "Z",
+            "entries": [],
+            "queue_running": True,  # default to running
+        }
+        st.session_state.job_queue = []
+        st.session_state.queue_running = True
+        return doc
+
     try:
         payload = json.loads(blob.download_as_text())
-        if isinstance(payload, dict) and "entries" in payload:
-            return payload["entries"]
+        # Back-compat: if payload is a list, wrap it as a doc and assume running
         if isinstance(payload, list):
-            return payload
+            payload = {
+                "version": 1,
+                "saved_at": datetime.utcnow().isoformat() + "Z",
+                "entries": payload,
+                "queue_running": True,
+            }
+        # Defaults
+        payload.setdefault("version", 1)
+        payload.setdefault("queue_running", True)
+        # Refresh session
+        st.session_state.job_queue = payload.get("entries", [])
+        st.session_state.queue_running = payload.get("queue_running", True)
+        return payload
     except Exception as e:
-        logger.warning("Failed to load queue from GCS: %s", e)
-    return []
+        logger.warning("Failed to load queue doc from GCS: %s", e)
+        # Safe default: show empty queue but running
+        st.session_state.job_queue = []
+        st.session_state.queue_running = True
+        return {
+            "version": 1,
+            "saved_at": datetime.utcnow().isoformat() + "Z",
+            "entries": [],
+            "queue_running": True,
+        }
+
+
+def save_queue_to_gcs(
+    queue_name: str,
+    entries: Optional[list[dict]] = None,
+    queue_running: Optional[bool] = None,
+    bucket_name: Optional[str] = None,
+) -> str:
+    """
+    Save the full queue doc back to GCS. Returns saved_at timestamp.
+    """
+    bucket_name = bucket_name or st.session_state.get("gcs_bucket", GCS_BUCKET)
+    bucket = storage.Client().bucket(bucket_name)
+    blob = bucket.blob(_queue_blob_path(queue_name))
+
+    # Use session defaults if not provided
+    entries = (
+        entries
+        if entries is not None
+        else st.session_state.get("job_queue", [])
+    )
+    if queue_running is None:
+        queue_running = st.session_state.get("queue_running", True)
+
+    saved_at = datetime.utcnow().isoformat() + "Z"
+    payload = {
+        "version": 1,
+        "saved_at": saved_at,
+        "entries": entries,
+        "queue_running": bool(queue_running),
+    }
+    blob.upload_from_string(
+        json.dumps(payload, indent=2), content_type="application/json"
+    )
+    return saved_at
+
+
+def set_queue_running(
+    queue_name: str, running: bool, bucket_name: Optional[str] = None
+) -> None:
+    """
+    Toggle the persisted queue_running flag and update session.
+    """
+    # Load to ensure we don't clobber entries
+    doc = load_queue_from_gcs(queue_name, bucket_name=bucket_name)
+    st.session_state.queue_running = bool(running)
+    # Save existing entries + new flag
+    save_queue_to_gcs(
+        queue_name,
+        entries=doc.get("entries", []),
+        queue_running=running,
+        bucket_name=bucket_name,
+    )
 
 
 # Track when we last loaded the queue
@@ -615,33 +702,6 @@ def load_queue_payload(
         }
 
 
-def save_queue_to_gcs(
-    queue_name: str,
-    entries: list[dict],
-    bucket_name: Optional[str] = None,
-    queue_running: Optional[bool] = None,
-) -> str:
-    """Save queue entries + meta to GCS. Returns saved_at ISO string."""
-    bucket_name = bucket_name or st.session_state.get("gcs_bucket", GCS_BUCKET)
-    bucket = storage.Client().bucket(bucket_name)
-    blob = bucket.blob(_queue_blob_path(queue_name))
-    saved_at = datetime.utcnow().isoformat() + "Z"
-    payload = {
-        "version": 1,
-        "saved_at": saved_at,
-        "queue_running": (
-            queue_running
-            if queue_running is not None
-            else bool(st.session_state.get("queue_running", False))
-        ),
-        "entries": entries,
-    }
-    blob.upload_from_string(
-        json.dumps(payload, indent=2), content_type="application/json"
-    )
-    return saved_at
-
-
 def maybe_refresh_queue_from_gcs(force: bool = False):
     """Refresh local session state from GCS if remote changed (or force=True)."""
     payload = load_queue_payload(st.session_state.queue_name)
@@ -661,15 +721,24 @@ def maybe_refresh_queue_from_gcs(force: bool = False):
 def queue_tick_once_headless(
     queue_name: str, bucket_name: Optional[str] = None
 ) -> dict:
-    """Advance the queue by at most one transition; safe to call from Scheduler."""
+    """
+    Advance the queue by at most one transition; safe to call from Scheduler.
+    Uses only GCS state (stateless), so it survives UI reloads.
+    """
     bucket_name = bucket_name or GCS_BUCKET
-    q = load_queue_from_gcs(queue_name, bucket_name=bucket_name)
+    doc = load_queue_from_gcs(queue_name, bucket_name=bucket_name)
+    q = doc.get("entries", [])
+    running_flag = doc.get("queue_running", True)
+
     if not q:
         return {"ok": True, "message": "empty queue", "changed": False}
 
+    if not running_flag:
+        return {"ok": True, "message": "queue is paused", "changed": False}
+
     changed = False
 
-    # 1) Update RUNNING job
+    # 1) Update RUNNING job if any
     run_idx = next(
         (i for i, e in enumerate(q) if e.get("status") == "RUNNING"), None
     )
@@ -692,10 +761,15 @@ def queue_tick_once_headless(
             changed = True
 
         if changed:
-            save_queue_to_gcs(queue_name, q, bucket_name=bucket_name)
+            save_queue_to_gcs(
+                queue_name,
+                entries=q,
+                queue_running=running_flag,
+                bucket_name=bucket_name,
+            )
             return {"ok": True, "message": "updated running", "changed": True}
 
-    # 2) Launch next PENDING if not running
+    # 2) Launch next PENDING if none running
     pend_idx = next(
         (i for i, e in enumerate(q) if e.get("status") == "PENDING"), None
     )
@@ -718,7 +792,12 @@ def queue_tick_once_headless(
         changed = True
 
     if changed:
-        save_queue_to_gcs(queue_name, q, bucket_name=bucket_name)
+        save_queue_to_gcs(
+            queue_name,
+            entries=q,
+            queue_running=running_flag,
+            bucket_name=bucket_name,
+        )
     return {"ok": True, "message": entry["message"], "changed": True}
 
 
@@ -1269,23 +1348,23 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             f"{sum(e['status']=='PENDING' for e in st.session_state.job_queue)} pending · "
             f"{sum(e['status']=='RUNNING' for e in st.session_state.job_queue)} running"
         )
+        st.write(f"Last saved at (GCS): {doc.get('saved_at','—')}")
+        if st.button("🔁 Refresh from GCS"):
+            _ = load_queue_from_gcs(st.session_state.queue_name)
+            st.success("Refreshed from GCS.")
+            st.rerun()
+
         qc1, qc2, qc3, qc4 = st.columns(4)
         if qc1.button(
             "▶️ Start Queue", disabled=(len(st.session_state.job_queue) == 0)
         ):
-            st.session_state["queue_running"] = True
-            st.session_state.queue_saved_at = save_queue_to_gcs(
-                st.session_state.queue_name,
-                st.session_state.job_queue,
-                queue_running=True,
-            )
+            set_queue_running(st.session_state.queue_name, True)
+            st.success("Queue set to RUNNING.")
+            st.rerun()
         if qc2.button("⏸️ Stop Queue"):
-            st.session_state["queue_running"] = False
-            st.session_state.queue_saved_at = save_queue_to_gcs(
-                st.session_state.queue_name,
-                st.session_state.job_queue,
-                queue_running=False,
-            )
+            set_queue_running(st.session_state.queue_name, False)
+            st.info("Queue paused.")
+            st.rerun()
         if qc3.button("⏭️ Process Next Step"):
             res = queue_tick_once_headless(
                 st.session_state.queue_name, st.session_state["gcs_bucket"]
@@ -1325,7 +1404,50 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     for e in st.session_state.job_queue
                 ]
             )
-            st.dataframe(df_queue, use_container_width=True)
+            edited = st.data_editor(
+                df_queue,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Delete": st.column_config.CheckboxColumn(
+                        "Delete", help="Mark to remove from queue"
+                    )
+                },
+            )
+
+            if st.button("🗑 Delete selected (PENDING/ERROR only)"):
+                ids_to_delete = set(edited.loc[edited["Delete"], "ID"].tolist())
+                # keep RUNNING entries and any not selected
+                new_q = []
+                blocked = []
+                for e in st.session_state.job_queue:
+                    if e["id"] in ids_to_delete:
+                        if e.get("status") in (
+                            "PENDING",
+                            "ERROR",
+                            "CANCELLED",
+                            "FAILED",
+                        ):
+                            continue  # drop it
+                        else:
+                            blocked.append(e["id"])  # don't delete RUNNING
+                            new_q.append(e)
+                    else:
+                        new_q.append(e)
+
+                st.session_state.job_queue = new_q
+                # persist to GCS so headless scheduler sees the change
+                st.session_state.queue_saved_at = save_queue_to_gcs(
+                    st.session_state.queue_name,
+                    st.session_state.job_queue,
+                )
+                if blocked:
+                    st.warning(
+                        f"Did not delete RUNNING entries: {sorted(blocked)}"
+                    )
+                st.success("Queue updated.")
+                st.rerun()
+            # st.dataframe(df_queue, use_container_width=True)
 
     # ─────────────────────────────
     # Queue worker (state machine)
