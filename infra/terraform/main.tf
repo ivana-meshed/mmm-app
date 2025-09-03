@@ -119,14 +119,14 @@ resource "google_service_account_iam_member" "training_sa_token_creator" {
   member             = "serviceAccount:${google_service_account.training_job_sa.email}"
 }
 
-# Allow Scheduler SA to invoke your web Cloud Run service
-resource "google_cloud_run_service_iam_member" "web_invoker" {
-  service  = google_cloud_run_service_iam_member.web_service_sa.name
-  project  = google_cloud_run_service_iam_member.web_service_sa.project
-  location = google_cloud_run_service_iam_member.web_service_sa.location
+resource "google_cloud_run_service_iam_member" "scheduler_can_invoke_web" {
+  project  = var.project_id
+  location = google_cloud_run_service.web_service.location
+  service  = google_cloud_run_service.web_service.name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
 }
+
 
 resource "google_secret_manager_secret_iam_member" "sf_password_access" {
   secret_id = data.google_secret_manager_secret.sf_password.id
@@ -405,9 +405,11 @@ resource "google_cloud_scheduler_job" "robyn_queue_tick" {
 
   depends_on = [
     google_project_service.scheduler,
-    google_cloud_run_v2_service_iam_member.web_invoker
+    google_cloud_run_service.web_service,
+    google_cloud_run_service_iam_member.scheduler_can_invoke_web
   ]
 }
+
 
 
 ##############################################################
