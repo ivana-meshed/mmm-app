@@ -46,14 +46,6 @@ if query_params.get("health") == "true":
         )
     st.stop()
 
-# Stateless queue tick endpoint: /?queue_tick=1&name=<queue>&bucket=<bucket>
-if query_params.get("queue_tick") == "1":
-    qname = query_params.get("name") or DEFAULT_QUEUE_NAME
-    bkt = query_params.get("bucket") or GCS_BUCKET
-    res = queue_tick_once_headless(qname, bucket_name=bkt)
-    st.json(res)
-    st.stop()
-
 
 # ─────────────────────────────
 # Environment / constants
@@ -822,9 +814,10 @@ tab_conn, tab_train = st.tabs(
 # Auto-load persisted queue once per session (per queue_name)
 if not st.session_state.queue_loaded_from_gcs:
     try:
-        st.session_state.job_queue = load_queue_from_gcs(
-            st.session_state.queue_name
-        )
+        payload = load_queue_from_gcs(st.session_state.queue_name)
+        st.session_state.job_queue = payload.get("entries", [])
+        st.session_state.queue_running = payload.get("queue_running", True)
+        st.session_state.queue_saved_at = payload.get("saved_at")
         st.session_state.queue_loaded_from_gcs = True
     except Exception as e:
         st.warning(f"Could not auto-load queue from GCS: {e}")
@@ -1405,8 +1398,12 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     for e in st.session_state.job_queue
                 ]
             )
+            if "Delete" not in df_queue.columns:
+                df_queue.insert(0, "Delete", False)
+
             edited = st.data_editor(
                 df_queue,
+                key="queue_editor",  # keep widget state stable across reruns
                 hide_index=True,
                 use_container_width=True,
                 column_config={
@@ -1416,11 +1413,17 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 },
             )
 
+            # Safe read: if user or Streamlit removes the column, don't crash
+            ids_to_delete = set()
+            if "Delete" in edited.columns:
+                ids_to_delete = set(
+                    edited.loc[edited["Delete"] == True, "ID"]
+                    .astype(int)
+                    .tolist()
+                )
+
             if st.button("🗑 Delete selected (PENDING/ERROR only)"):
-                ids_to_delete = set(edited.loc[edited["Delete"], "ID"].tolist())
-                # keep RUNNING entries and any not selected
-                new_q = []
-                blocked = []
+                new_q, blocked = [], []
                 for e in st.session_state.job_queue:
                     if e["id"] in ids_to_delete:
                         if e.get("status") in (
@@ -1429,26 +1432,28 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                             "CANCELLED",
                             "FAILED",
                         ):
-                            continue  # drop it
+                            # drop it
+                            continue
                         else:
-                            blocked.append(e["id"])  # don't delete RUNNING
+                            # don't delete RUNNING/SUCCEEDED
+                            blocked.append(e["id"])
                             new_q.append(e)
                     else:
                         new_q.append(e)
 
                 st.session_state.job_queue = new_q
-                # persist to GCS so headless scheduler sees the change
                 st.session_state.queue_saved_at = save_queue_to_gcs(
                     st.session_state.queue_name,
                     st.session_state.job_queue,
+                    queue_running=st.session_state.queue_running,
                 )
                 if blocked:
                     st.warning(
-                        f"Did not delete RUNNING entries: {sorted(blocked)}"
+                        f"Did not delete non-deletable entries: {sorted(blocked)}"
                     )
                 st.success("Queue updated.")
                 st.rerun()
-            # st.dataframe(df_queue, use_container_width=True)
+                # st.dataframe(df_queue, use_container_width=True)
 
     # ─────────────────────────────
     # Queue worker (state machine)
