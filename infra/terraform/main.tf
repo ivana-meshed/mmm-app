@@ -129,7 +129,7 @@ resource "google_cloud_run_service_iam_member" "web_invoker" {
 }
 
 resource "google_secret_manager_secret_iam_member" "sf_password_access" {
-  secret_id = google_secret_manager_secret.sf_password.id
+  secret_id = data.google_secret_manager_secret.sf_password.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.web_service_sa.email}"
 }
@@ -281,7 +281,7 @@ resource "google_cloud_run_service" "web_service" {
           name = "SF_PASSWORD"
           value_from {
             secret_key_ref {
-              name = google_secret_manager_secret.sf_password.secret_id
+              name = data.google_secret_manager_secret.sf_password.secret_id
               key  = "latest"
             }
           }
