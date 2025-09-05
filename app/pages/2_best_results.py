@@ -17,7 +17,8 @@ from google.cloud import storage
 
 # ---------- Page ----------
 st.set_page_config(
-    page_title="Best models per country: Robyn MMM", layout="wide"
+    page_title="Best models per country: Robyn MMM",
+    layout="wide",
 )
 st.title("Best results browser (GCS)")
 
@@ -26,6 +27,14 @@ DEFAULT_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 DEFAULT_PREFIX = "robyn/"
 DATA_URI_MAX_BYTES = int(os.getenv("DATA_URI_MAX_BYTES", str(8 * 1024 * 1024)))
 IS_CLOUDRUN = bool(os.getenv("K_SERVICE"))
+
+# ---------- Global defaults for sliders / scoring (persisted) ----------
+DEFAULT_WEIGHTS = (0.2, 0.5, 0.3)  # train, val, test
+DEFAULT_ALPHA = 1.0
+DEFAULT_BETA = 1.0
+st.session_state.setdefault("weights", DEFAULT_WEIGHTS)
+st.session_state.setdefault("alpha", DEFAULT_ALPHA)
+st.session_state.setdefault("beta", DEFAULT_BETA)
 
 
 # ---------- Clients / cached ----------
@@ -485,7 +494,6 @@ def render_all_files_section(blobs, bucket_name, country, stamp):
 
 
 # --- BEST-MODEL DISCOVERY HELPERS ---------------------------------------------
-
 _METRIC_ALIASES = {
     "r.squared": "r2",
     "rsq": "r2",
@@ -527,7 +535,6 @@ def _minmax_norm(s: pd.Series) -> pd.Series:
     s = s.copy()
     mask = s.notna()
     if mask.sum() <= 1:
-        # If all missing or all equal -> neutral 0.5
         s.loc[mask] = 0.5
         return s
     v = s[mask]
@@ -548,13 +555,11 @@ def _extract_from_long(df: pd.DataFrame) -> dict:
     test  | .. |  ...  | ...
     """
     df = _lower_cols(df)
-    # find split column
     split_col = next(
         (c for c in df.columns if c in ("split", "set", "phase")), None
     )
     if not split_col:
         return {}
-    # normalize split names
     df["_split"] = df[split_col].map(
         lambda s: _SPLIT_ALIASES.get(str(s).strip().lower(), None)
     )
@@ -582,9 +587,8 @@ def _extract_from_wide(df: pd.DataFrame) -> dict:
     out = {}
     for col, val in row.items():
         parts = re.split(r"[_\s]+", str(col))
-        parts = [p for p in parts if p]  # remove empties
+        parts = [p for p in parts if p]
         parts_l = [p.lower() for p in parts]
-        # try detect metric & split in either order
         metric = None
         split = None
         for p in parts_l:
@@ -616,7 +620,6 @@ def extract_core_metrics_from_blobs(blobs: list) -> dict:
     Missing keys are OK.
     """
     csvs = [b for b in blobs if b.name.lower().endswith(".csv")]
-    # most likely first
     preferred = [
         b
         for b in csvs
@@ -628,21 +631,18 @@ def extract_core_metrics_from_blobs(blobs: list) -> dict:
         df = _try_read_csv(b)
         if df is None:
             continue
-        # decide whether long or wide
         extracted = {}
         cols_l = [c.lower() for c in df.columns]
         if any(c in cols_l for c in ("split", "set", "phase")):
             extracted = _extract_from_long(df)
         else:
             extracted = _extract_from_wide(df)
-
-        # Heuristic: keep the first table that yields at least one r2 or nrmse
         if any(k.startswith("r2_") for k in extracted.keys()) or any(
             k.startswith("nrmse_") for k in extracted.keys()
         ):
             return extracted
 
-    # Fallback: look for allocator_metrics.csv if nothing else matched
+    # Fallback: allocator_metrics.csv
     alloc = find_blob(blobs, "/allocator_metrics.csv")
     if alloc:
         df = _try_read_csv(alloc)
@@ -751,7 +751,7 @@ def render_run_from_key(runs: dict, key: tuple, bucket_name: str):
     if best_id:
         st.info(f"**Best Model ID:** {best_id}")
 
-    # reuse your existing sections
+    # reuse the existing sections
     render_metrics_section(blobs, country, stamp)
     render_allocator_section(blobs, country, stamp)
     render_onepager_section(blobs, best_id, country, stamp)
@@ -766,27 +766,43 @@ with st.sidebar:
         value=DEFAULT_PREFIX,
         help="Usually 'robyn/' or narrower like 'robyn/r100/'",
     )
-
     if prefix and not prefix.endswith("/"):
         prefix = prefix + "/"
 
     do_scan = st.button("🔄 Refresh listing")
+
     st.subheader("Best-model scoring")
     auto_best = st.checkbox(
         "Auto-pick best across ALL revisions per country", value=True
     )
-    w_train = st.slider("Train weight", 0.0, 1.0, 0.2, 0.05)
-    w_val = st.slider("Validation weight", 0.0, 1.0, 0.5, 0.05)
-    w_test = st.slider("Test weight", 0.0, 1.0, 0.3, 0.05)
-    # normalize to sum 1
+
+    # Sliders with persistent defaults
+    w_train = st.slider(
+        "Train weight", 0.0, 1.0, st.session_state["weights"][0], 0.05
+    )
+    w_val = st.slider(
+        "Validation weight", 0.0, 1.0, st.session_state["weights"][1], 0.05
+    )
+    w_test = st.slider(
+        "Test weight", 0.0, 1.0, st.session_state["weights"][2], 0.05
+    )
     ws = [w_train, w_val, w_test]
     s = sum(ws) or 1.0
-    weights = (ws[0] / s, ws[1] / s, ws[2] / s)
-    alpha = st.slider(
-        "Penalty α for NRMSE (lower is better)", 0.0, 3.0, 1.0, 0.1
+    st.session_state["weights"] = (ws[0] / s, ws[1] / s, ws[2] / s)
+
+    st.session_state["alpha"] = st.slider(
+        "Penalty α for NRMSE (lower is better)",
+        0.0,
+        3.0,
+        st.session_state["alpha"],
+        0.1,
     )
-    beta = st.slider(
-        "Penalty β for Decomp RSSD (lower is better)", 0.0, 3.0, 1.0, 0.1
+    st.session_state["beta"] = st.slider(
+        "Penalty β for Decomp RSSD (lower is better)",
+        0.0,
+        3.0,
+        st.session_state["beta"],
+        0.1,
     )
 
     # Storage self-test
@@ -831,53 +847,8 @@ if not runs:
     )
     st.stop()
 
-# ---------- Defaults / filters (prefer runs with allocator plots) ----------
-# Sort newest-first across all runs (by rev, then stamp)
-"""keys_sorted = sorted(
-    runs.keys(),
-    key=lambda k: (parse_rev_key(k[0]), parse_stamp(k[2])),
-    reverse=True,
-)
 
-# Pick the newest (rev,country,stamp) that HAS an allocator plot; fallback to absolute newest
-latest_with_alloc = next(
-    (k for k in keys_sorted if run_has_allocator_plot(runs[k])), None
-)
-latest_any = keys_sorted[0]
-seed_key = latest_with_alloc or latest_any
-
-default_rev = seed_key[0]
-
-# UI: revision choices
-all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
-rev = st.selectbox("Revision", all_revs, index=all_revs.index(default_rev))
-
-# Countries available in this revision
-rev_keys = [k for k in runs.keys() if k[0] == rev]
-rev_countries = sorted({k[1] for k in rev_keys})
-
-# Default country = newest run WITH allocator plot in this revision (fallback to newest run)
-rev_keys_sorted = sorted(
-    rev_keys, key=lambda k: parse_stamp(k[2]), reverse=True
-)
-best_country_key = next(
-    (k for k in rev_keys_sorted if run_has_allocator_plot(runs[k])),
-    rev_keys_sorted[0],
-)
-default_country_in_rev = best_country_key[1]
-
-countries_sel = st.multiselect(
-    "Countries (newest run **with allocator plot** will be shown; falls back to newest)",
-    rev_countries,
-    default=[default_country_in_rev],
-)
-if not countries_sel:
-    st.info("Select at least one country.")
-    st.stop()
-"""
-
-
-# ---------- Main renderer ----------
+# ---------- Manual browse helpers (for non-auto mode) ----------
 def render_run_for_country(bucket_name: str, rev: str, country: str):
     # All candidate runs for this (rev, country), newest first
     candidates = sorted(
@@ -929,84 +900,136 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
     render_all_files_section(blobs, bucket_name, country, stamp)
 
 
-# ---------- Render selected countries ----------
-"""st.markdown(f"## Detailed View — revision `{rev}`")
-for ctry in countries_sel:
-    with st.container():
-        render_run_for_country(bucket_name, rev, ctry)
-        st.divider()
-"""
-
-# ---------- Countries available across ALL revisions ----------
-all_countries = sorted({k[1] for k in runs.keys()})
-if not all_countries:
-    st.info("No countries found in the provided prefix.")
-    st.stop()
-
-countries_sel = st.multiselect(
-    "Countries",
-    all_countries,
-    default=[all_countries[0]],
-)
-
-if not countries_sel:
-    st.info("Select at least one country.")
-    st.stop()
-
-st.markdown("## Detailed View — Best run per country (auto)")
-
-for ctry in countries_sel:
-    best_key, table = rank_runs_for_country(
-        runs, ctry, weights=weights, alpha=alpha, beta=beta
+# ---------- Mode: manual browse by revision ----------
+if not auto_best:
+    # Sort newest-first across all runs (by rev key, then stamp)
+    keys_sorted = sorted(
+        runs.keys(),
+        key=lambda k: (parse_rev_key(k[0]), parse_stamp(k[2])),
+        reverse=True,
     )
-    if best_key is None:
-        st.warning(
-            f"No metric-bearing runs found for {ctry}. Showing newest run instead."
+
+    # Pick the newest (rev,country,stamp) that HAS an allocator plot; fallback to absolute newest
+    latest_with_alloc = next(
+        (k for k in keys_sorted if run_has_allocator_plot(runs[k])), None
+    )
+    latest_any = keys_sorted[0]
+    seed_key = latest_with_alloc or latest_any
+
+    default_rev = seed_key[0]
+
+    # UI: revision choices
+    all_revs = sorted(
+        {k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True
+    )
+    rev = st.selectbox("Revision", all_revs, index=all_revs.index(default_rev))
+
+    # Countries available in this revision
+    rev_keys = [k for k in runs.keys() if k[0] == rev]
+    rev_countries = sorted({k[1] for k in rev_keys})
+
+    # Default country = newest run WITH allocator plot in this revision (fallback to newest run)
+    rev_keys_sorted = sorted(
+        rev_keys, key=lambda k: parse_stamp(k[2]), reverse=True
+    )
+    best_country_key = next(
+        (k for k in rev_keys_sorted if run_has_allocator_plot(runs[k])),
+        rev_keys_sorted[0],
+    )
+    default_country_in_rev = best_country_key[1]
+
+    countries_sel = st.multiselect(
+        "Countries (newest run **with allocator plot** will be shown; falls back to newest)",
+        rev_countries,
+        default=(
+            [default_country_in_rev]
+            if default_country_in_rev in rev_countries
+            else []
+        ),
+    )
+    if not countries_sel:
+        st.info("Select at least one country.")
+        st.stop()
+
+    st.markdown(f"## Detailed View — revision `{rev}`")
+    for ctry in countries_sel:
+        with st.container():
+            render_run_for_country(bucket_name, rev, ctry)
+            st.divider()
+
+# ---------- Mode: auto best across all revisions ----------
+else:
+    # Countries available across ALL revisions
+    all_countries = sorted({k[1] for k in runs.keys()})
+    if not all_countries:
+        st.info("No countries found in the provided prefix.")
+        st.stop()
+
+    countries_sel = st.multiselect(
+        "Countries",
+        all_countries,
+        default=[all_countries[0]],
+    )
+
+    if not countries_sel:
+        st.info("Select at least one country.")
+        st.stop()
+
+    st.markdown("## Detailed View — Best run per country (auto)")
+    for ctry in countries_sel:
+        best_key, table = rank_runs_for_country(
+            runs,
+            ctry,
+            weights=st.session_state["weights"],
+            alpha=st.session_state["alpha"],
+            beta=st.session_state["beta"],
         )
-        # fallback to absolute newest entry for country
-        candidates = sorted(
-            [k for k in runs.keys() if k[1] == ctry],
-            key=lambda k: parse_stamp(k[2]),
-            reverse=True,
-        )
-        if not candidates:
-            st.info(f"No runs at all for {ctry}.")
+        if best_key is None:
+            st.warning(
+                f"No metric-bearing runs found for {ctry}. Showing newest run instead."
+            )
+            candidates = sorted(
+                [k for k in runs.keys() if k[1] == ctry],
+                key=lambda k: parse_stamp(k[2]),
+                reverse=True,
+            )
+            if not candidates:
+                st.info(f"No runs at all for {ctry}.")
+                continue
+            best_key = candidates[0]
+            render_run_from_key(runs, best_key, bucket_name)
+            st.divider()
             continue
-        best_key = candidates[0]
+
+        # Show ranking table
+        with st.expander(
+            f"Ranking table for {ctry.upper()} (higher score is better)",
+            expanded=False,
+        ):
+            cols = [
+                "score",
+                "r2_w",
+                "nrmse_w",
+                "drssd_w",
+                "rev",
+                "stamp",
+                "best_id",
+                "has_alloc",
+                "r2_train",
+                "r2_val",
+                "r2_test",
+                "nrmse_train",
+                "nrmse_val",
+                "nrmse_test",
+                "decomp_rssd_train",
+                "decomp_rssd_val",
+                "decomp_rssd_test",
+            ]
+            display = table[[c for c in cols if c in table.columns]].copy()
+            st.dataframe(display, use_container_width=True)
+
+        st.success(
+            f"Best run for **{ctry.upper()}**: `{best_key[0]}` / `{best_key[2]}`"
+        )
         render_run_from_key(runs, best_key, bucket_name)
         st.divider()
-        continue
-
-    # Show ranking table
-    with st.expander(
-        f"Ranking table for {ctry.upper()} (higher score is better)",
-        expanded=False,
-    ):
-        # Select a compact set of columns for readability
-        cols = [
-            "score",
-            "r2_w",
-            "nrmse_w",
-            "drssd_w",
-            "rev",
-            "stamp",
-            "best_id",
-            "has_alloc",
-            "r2_train",
-            "r2_val",
-            "r2_test",
-            "nrmse_train",
-            "nrmse_val",
-            "nrmse_test",
-            "decomp_rssd_train",
-            "decomp_rssd_val",
-            "decomp_rssd_test",
-        ]
-        display = table[[c for c in cols if c in table.columns]].copy()
-        st.dataframe(display, use_container_width=True)
-
-    st.success(
-        f"Best run for **{ctry.upper()}**: `{best_key[0]}` / `{best_key[2]}`"
-    )
-    render_run_from_key(runs, best_key, bucket_name)
-    st.divider()
