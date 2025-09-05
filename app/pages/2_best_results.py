@@ -98,7 +98,9 @@ def list_blobs(bucket_name: str, prefix: str):
 
 
 def parse_path(name: str):
-    # Expected: robyn/<rev>/<country>/<stamp>/file...
+    # Accept both:
+    #  robyn/<rev>/<country>/<stamp>/file...
+    #  robyn/<rev>/<country>/file...               (no explicit stamp dir)
     parts = name.split("/")
     if len(parts) >= 5 and parts[0] == "robyn":
         return {
@@ -106,6 +108,14 @@ def parse_path(name: str):
             "country": parts[2],
             "stamp": parts[3],
             "file": "/".join(parts[4:]),
+        }
+    if len(parts) == 4 and parts[0] == "robyn":
+        # Synthesize a stamp so it still groups as a run; label shows as “_root”
+        return {
+            "rev": parts[1],
+            "country": parts[2],
+            "stamp": "_root",
+            "file": parts[3],
         }
     return None
 
@@ -680,9 +690,7 @@ def rank_runs_for_country(
     for (rev, ctry, stamp), blobs in runs.items():
         if ctry != country:
             continue
-        metrics = extract_core_metrics_from_blobs(blobs)
-        if not metrics:
-            continue
+        metrics = extract_core_metrics_from_blobs(blobs) or {}
         best_id, iters, trials = parse_best_meta(blobs)
         rows.append(
             {
@@ -693,6 +701,7 @@ def rank_runs_for_country(
                 "iters": iters,
                 "trials": trials,
                 "has_alloc": run_has_allocator_plot(blobs),
+                "missing_metrics": (len(metrics) == 0),  # NEW
                 **metrics,
             }
         )
@@ -785,6 +794,10 @@ with st.sidebar:
         prefix = prefix + "/"
 
     do_scan = st.button("🔄 Refresh listing")
+
+    force_rescan = st.button("🧹 Force re-scan (clear cache)")
+    if force_rescan:
+        st.session_state.pop("runs_cache", None)
 
     st.subheader("Best-model scoring")
     auto_best = st.checkbox(
