@@ -20,6 +20,17 @@ resource "google_service_account" "training_job_sa" {
   display_name = "Service Account for MMM Training Jobs"
 }
 
+resource "google_service_account" "scheduler" {
+  account_id   = "robyn-queue-scheduler"
+  display_name = "Robyn Queue Scheduler"
+}
+
+data "google_secret_manager_secret" "sf_password" {
+  project   = var.project_id
+  secret_id = "sf-password"
+}
+
+
 # Allow web service to execute training jobs
 #resource "google_service_account_iam_member" "web_service_job_executor" {
 #  service_account_id = google_service_account.training_job_sa.name
@@ -108,6 +119,35 @@ resource "google_service_account_iam_member" "training_sa_token_creator" {
   member             = "serviceAccount:${google_service_account.training_job_sa.email}"
 }
 
+resource "google_cloud_run_service_iam_member" "scheduler_can_invoke_web" {
+  project  = var.project_id
+  location = google_cloud_run_service.web_service.location
+  service  = google_cloud_run_service.web_service.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.scheduler.email}"
+}
+
+
+resource "google_secret_manager_secret_iam_member" "sf_password_access" {
+  secret_id = data.google_secret_manager_secret.sf_password.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
+
+# Let the Terraform deployer impersonate (act as) the Scheduler SA
+resource "google_service_account_iam_member" "allow_deployer_actas_scheduler" {
+  service_account_id = google_service_account.scheduler.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${var.deployer_sa}"
+}
+
+# Allow the deployer to create/update Cloud Scheduler jobs
+resource "google_project_iam_member" "deployer_scheduler_admin" {
+  project = var.project_id
+  role    = "roles/cloudscheduler.admin"
+  member  = "serviceAccount:${var.deployer_sa}"
+}
+
 ##############################################################
 # APIs
 ##############################################################
@@ -134,6 +174,19 @@ resource "google_project_service" "iamcredentials" {
   service            = "iamcredentials.googleapis.com"
   disable_on_destroy = false
 }
+
+resource "google_project_service" "scheduler" {
+  project            = var.project_id
+  service            = "cloudscheduler.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "secretmanager" {
+  project            = var.project_id
+  service            = "secretmanager.googleapis.com"
+  disable_on_destroy = false
+}
+
 
 ##############################################################
 # Cloud Run Service (Streamlit Web Interface)
@@ -193,6 +246,58 @@ resource "google_cloud_run_service" "web_service" {
         env {
           name  = "REGION"
           value = var.region
+        }
+
+        env {
+          name  = "DEFAULT_QUEUE_NAME"
+          value = "default"
+        }
+        env {
+          name  = "QUEUE_ROOT"
+          value = "robyn-queues"
+        }
+        env {
+          name  = "SAFE_LAG_SECONDS_AFTER_RUNNING"
+          value = "5"
+        }
+
+        env {
+          name  = "SF_USER"
+          value = var.sf_user
+        }
+
+        env {
+          name  = "SF_ACCOUNT"
+          value = var.sf_account
+        }
+
+        env {
+          name  = "SF_WAREHOUSE"
+          value = var.sf_warehouse
+        }
+
+        env {
+          name  = "SF_DATABASE"
+          value = var.sf_database
+        }
+
+        env {
+          name  = "SF_SCHEMA"
+          value = var.sf_schema
+        }
+
+        env {
+          name  = "SF_ROLE"
+          value = var.sf_role
+        }
+        env {
+          name = "SF_PASSWORD"
+          value_from {
+            secret_key_ref {
+              name = data.google_secret_manager_secret.sf_password.secret_id
+              key  = "latest"
+            }
+          }
         }
       }
     }
@@ -289,6 +394,36 @@ resource "google_cloud_run_v2_job_iam_member" "training_job_runner" {
   role     = "roles/run.developer" # includes run.jobs.run
   member   = "serviceAccount:${google_service_account.web_service_sa.email}"
 }
+
+
+###############################################################
+# Scheduler to trigger queue ticks
+###############################################################
+
+resource "google_cloud_scheduler_job" "robyn_queue_tick" {
+  name             = "robyn-queue-tick"
+  description      = "Advance Robyn training queue (headless)"
+  schedule         = "*/1 * * * *" # every minute
+  time_zone        = "Etc/UTC"
+  attempt_deadline = "320s"
+
+  http_target {
+    http_method = "GET"
+    uri         = "${google_cloud_run_service.web_service.status[0].url}?queue_tick=1&name=${var.queue_name}"
+    oidc_token {
+      service_account_email = google_service_account.scheduler.email
+      audience              = google_cloud_run_service.web_service.status[0].url
+    }
+  }
+
+  depends_on = [
+    google_project_service.scheduler,
+    google_cloud_run_service.web_service,
+    google_cloud_run_service_iam_member.scheduler_can_invoke_web
+  ]
+}
+
+
 
 ##############################################################
 # IAM for public access

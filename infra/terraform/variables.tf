@@ -7,6 +7,18 @@ variable "web_image" { default = "europe-west1-docker.pkg.dev@datawarehouse-4225
 variable "training_image" { default = "europe-west1-docker.pkg.dev@datawarehouse-422511.iam.gserviceaccount.com" }
 variable "deployer_sa" { default = "github-deployer@datawarehouse-422511.iam.gserviceaccount.com" }
 
+variable "sf_user" { type = string }
+variable "sf_account" { type = string }
+variable "sf_warehouse" { type = string }
+variable "sf_database" { type = string }
+variable "sf_schema" { type = string }
+variable "sf_role" { type = string }
+
+variable "queue_name" {
+  type    = string
+  default = "default"
+}
+
 # NEW: Resource sizing variables
 variable "cpu_limit" {
   description = "CPU limit for Cloud Run service"
@@ -31,3 +43,12 @@ variable "max_instances" {
   type        = number
   default     = 10
 }
+
+variable "sf_password" {
+  type      = string
+  sensitive = true
+  default   = null # set via TF var or CI, or skip and add secret version via gcloud in CI
+}
+
+
+
