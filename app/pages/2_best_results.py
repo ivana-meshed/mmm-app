@@ -502,6 +502,7 @@ _METRIC_ALIASES = {
     "nrmsd": "nrmse",
     "decomp_rssd": "decomp_rssd",
     "decomprssd": "decomp_rssd",
+    "decomp.rssd": "decomp_rssd",  #
     "rssd": "decomp_rssd",
 }
 _SPLIT_ALIASES = {
@@ -534,15 +535,15 @@ def _weighted_avg(values, weights):
 def _minmax_norm(s: pd.Series) -> pd.Series:
     s = s.copy()
     mask = s.notna()
-    if mask.sum() <= 1:
+    if mask.sum() == 0:
+        s[:] = 0.5
+        return s
+    if mask.sum() == 1:
         s.loc[mask] = 0.5
         return s
     v = s[mask]
     lo, hi = v.min(), v.max()
-    if hi == lo:
-        s.loc[mask] = 0.5
-    else:
-        s.loc[mask] = (v - lo) / (hi - lo)
+    s.loc[mask] = 0.5 if hi == lo else (v - lo) / (hi - lo)
     return s
 
 
@@ -566,7 +567,13 @@ def _extract_from_long(df: pd.DataFrame) -> dict:
     df = df[df["_split"].notna()].copy()
     out = {}
     for metric_col in df.columns:
-        m_std = _METRIC_ALIASES.get(metric_col, None)
+        if metric_col in (split_col, "_split"):
+            continue
+        # normalize punctuation to underscores before alias lookup
+        norm = re.sub(r"[()\[\]{}:.\s\-]+", "_", str(metric_col).lower()).strip(
+            "_"
+        )
+        m_std = _METRIC_ALIASES.get(norm, None)
         if not m_std:
             continue
         for sp, val in df.groupby("_split")[metric_col].first().items():
@@ -583,21 +590,29 @@ def _extract_from_wide(df: pd.DataFrame) -> dict:
     df = _lower_cols(df)
     if len(df) == 0:
         return {}
-    row = df.iloc[0]  # assume single-row summary
+    row = df.iloc[0]
     out = {}
     for col, val in row.items():
-        parts = re.split(r"[_\s]+", str(col))
+        col_l = str(col).lower()
+        # normalize parens/colons into underscores first
+        clean = re.sub(r"[()\[\]{}:]+", "_", col_l)
+        # split on underscore, dot, hyphen or whitespace
+        parts = re.split(r"[ _.\-]+", clean)
         parts = [p for p in parts if p]
-        parts_l = [p.lower() for p in parts]
         metric = None
         split = None
-        for p in parts_l:
+        for p in parts:
             if p in _METRIC_ALIASES:
                 metric = _METRIC_ALIASES[p]
             if p in _SPLIT_ALIASES:
                 split = _SPLIT_ALIASES[p]
         if metric and split:
             out[f"{metric}_{split}"] = pd.to_numeric(val, errors="coerce")
+        # Optional fallback: if a “metric with no split” column exists, copy to all splits
+        if metric and not split and metric not in ("r2",):  # keep r2 strict
+            v = pd.to_numeric(val, errors="coerce")
+            for sp in ("train", "val", "test"):
+                out.setdefault(f"{metric}_{sp}", v)
     return out
 
 
