@@ -337,7 +337,9 @@ df <- df %>% mutate(
   ORGxTV = BRAND_HEALTH * coalesce(TV_COST, 0),
   GA_OTHER_IMPRESSIONS = rowSums(select(., tidyselect::matches("^GA_.*_IMPRESSIONS$") & !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
   BING_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE),
-  META_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE)
+  META_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE),
+  BING_TOTAL_CLICKS = rowSums(select(., tidyselect::matches("^BING_.*_CLICKS$")), na.rm = TRUE),
+  META_TOTAL_CLICKS = rowSums(select(., tidyselect::matches("^META_.*_CLICKS$")), na.rm = TRUE)
 )
 
 ## ---------- WINDOW / FLAGS ----------
@@ -712,3 +714,89 @@ writeLines(
   status_json
 )
 gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+
+
+## ---------- MONTHLY PROJECTIONS (next 3 months) ----------
+suppressPackageStartupMessages({ library(lubridate) })
+
+# 1) Choose budgets: env override or fallback to last full month's total media spend
+override <- Sys.getenv("FORECAST_MONTHLY_BUDGETS", unset = "")
+parse_nums <- function(x) as.numeric(unlist(strsplit(x, "[,;\\s]+")))
+budgets <- if (nzchar(override)) {
+  b <- parse_nums(override); if (length(b) < 3) rep(b[1], 3) else b[1:3]
+} else {
+  last_day <- max(InputCollect$dt_input$date, na.rm = TRUE)
+  lm_start <- floor_date(last_day, "month")
+  lm_end   <- ceiling_date(lm_start, "month") - days(1)
+  last_month <- InputCollect$dt_input[InputCollect$dt_input$date >= lm_start &
+                                        InputCollect$dt_input$date <= lm_end, , drop = FALSE]
+  total <- sum(sapply(InputCollect$paid_media_spends, function(v)
+    sum(last_month[[v]], na.rm = TRUE)), na.rm = TRUE)
+  rep(total, 3)
+}
+
+# 2) Baseline/day from last 28 days of decomposed base (prophet + intercept)
+decomp <- OutputCollect$resultDecomp
+base_cols <- intersect(c("intercept","trend","season","holiday","weekday"), names(decomp))
+if (length(base_cols)) {
+  base_series <- rowSums(decomp[, base_cols, drop = FALSE], na.rm = TRUE)
+} else {
+  # Fallback: dep_var minus modeled channels
+  ch_cols <- intersect(c(InputCollect$paid_media_vars,
+                         InputCollect$organic_vars,
+                         InputCollect$context_vars,
+                         InputCollect$factor_vars), names(decomp))
+  dep_col <- intersect(c("dep_var","depVar","y"), names(decomp))
+  if (!length(dep_col)) stop("Could not locate dep_var in resultDecomp.")
+  base_series <- decomp[[dep_col[1]]] - rowSums(decomp[, ch_cols, drop = FALSE], na.rm = TRUE)
+}
+base_daily <- mean(tail(base_series, 28), na.rm = TRUE)
+
+# 3) Three future calendar months starting *after* the last data date
+start_next <- max(InputCollect$dt_input$date, na.rm = TRUE) + 1
+m0 <- floor_date(start_next, "month")
+month_starts <- if (m0 < start_next) c(m0 %m+% months(1), m0 %m+% months(2), m0 %m+% months(3))
+                else                    c(m0,               m0 %m+% months(1), m0 %m+% months(2))
+month_ends   <- (month_starts %m+% months(1)) - days(1)
+month_days   <- as.integer(month_ends - month_starts + 1)
+
+# 4) Run allocator per month to get incremental response for the budget
+proj_rows <- list()
+for (i in seq_along(month_starts)) {
+  b <- budgets[i]
+  al <- try(
+    robyn_allocator(
+      InputCollect = InputCollect,
+      OutputCollect = OutputCollect,
+      select_model = best_id,
+      date_range = c(alloc_start, alloc_end),    # trained period; allocator uses model params
+      expected_spend = b,
+      scenario = "max_historical_response",
+      channel_constr_low = low_bounds,
+      channel_constr_up  = up_bounds,
+      export = FALSE
+    ),
+    silent = TRUE
+  )
+  incr <- if (inherits(al, "try-error")) NA_real_ else to_scalar(al$total_response)
+  proj_rows[[i]] <- data.frame(
+    month          = format(month_starts[i], "%Y-%m"),
+    start          = as.Date(month_starts[i]),
+    end            = as.Date(month_ends[i]),
+    days           = month_days[i],
+    budget         = round(b, 2),
+    baseline       = round(base_daily * month_days[i], 2),
+    incremental    = round(incr, 2),
+    forecast_total = round(base_daily * month_days[i] + incr, 2),
+    stringsAsFactors = FALSE
+  )
+}
+proj <- do.call(rbind, proj_rows)
+
+# 5) Save & upload
+forecast_csv <- file.path(dir_path, "forecast_next3m.csv")
+readr::write_csv(proj, forecast_csv, na = "")
+gcs_put_safe(forecast_csv, file.path(gcs_prefix, "forecast_next3m.csv"))
+
+message("Wrote monthly projections (next 3) to: ", forecast_csv)
+print(proj)
