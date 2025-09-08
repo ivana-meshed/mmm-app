@@ -790,6 +790,11 @@ try(
   silent = TRUE
 )
 
+# ADD: separate folder for predicted-month allocator plots
+pred_alloc_dir <- file.path(dir_path, paste0("allocator_pred_plots_", timestamp))
+dir.create(pred_alloc_dir, showWarnings = FALSE)
+
+
 ## ---------- SMART MONTHLY PROJECTIONS (next 3 months; no robyn_predict) ----------
 suppressPackageStartupMessages({
   library(lubridate)
@@ -870,6 +875,40 @@ for (i in seq_along(months_vec)) {
 
   al_tbl <- if (!inherits(al, "try-error")) al$result_allocator else NULL
   incr <- to_scalar(if (!is.null(al_tbl)) al_tbl$total_response else NA_real_)
+  # --- ADD: plot + upload allocator for this forecast month ---
+  if (!inherits(al, "try-error")) {
+    pred_fname <- sprintf("allocator_pred_%s.png", format(m, "%Y-%m"))
+    pred_local <- file.path(pred_alloc_dir, pred_fname)
+    pred_key <- file.path(paste0("allocator_pred_plots_", timestamp), pred_fname)
+
+    try(
+      {
+        png(pred_local, width = 1200, height = 800)
+        plot(al) # Robyn's allocator plot
+        dev.off()
+        gcs_put_safe(pred_local, file.path(gcs_prefix, pred_key))
+      },
+      silent = TRUE
+    )
+
+    # (optional) stash a small row to build an index CSV later
+    if (!exists("pred_plot_rows", inherits = FALSE)) pred_plot_rows <- list()
+    pred_plot_rows[[length(pred_plot_rows) + 1]] <- data.frame(
+      month = format(m, "%Y-%m"),
+      image_key = pred_key,
+      image_gs = sprintf(
+        "gs://%s/%s/%s",
+        googleCloudStorageR::gcs_get_global_bucket(),
+        gcs_prefix, pred_key
+      ),
+      budget = round(total_budget, 2),
+      baseline = round(base_daily * days_in_m, 2),
+      incremental = round(incr, 2),
+      forecast_total = round(base_daily * days_in_m + (incr %||% 0), 2),
+      stringsAsFactors = FALSE
+    )
+  }
+  # --- end ADD ---
 
   proj_rows[[i]] <- data.frame(
     month = format(m, "%Y-%m"),
@@ -893,6 +932,15 @@ proj <- if (length(proj_rows)) {
     incremental = double(), forecast_total = double()
   )
 }
+
+# ADD: write a small index for the prediction allocator plots
+if (exists("pred_plot_rows", inherits = FALSE) && length(pred_plot_rows)) {
+  pred_idx <- dplyr::bind_rows(pred_plot_rows)
+  pred_idx_csv <- file.path(dir_path, "forecast_allocator_index.csv")
+  safe_write_csv(pred_idx, pred_idx_csv)
+  gcs_put_safe(pred_idx_csv, file.path(gcs_prefix, "forecast_allocator_index.csv"))
+}
+
 
 forecast_csv <- file.path(dir_path, "forecast_next3m.csv")
 safe_write_csv(proj, forecast_csv)
