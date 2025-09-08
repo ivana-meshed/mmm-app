@@ -151,6 +151,55 @@ safe_write_csv <- function(df, path) {
   })
 }
 
+## ---- robust reader for allocator totals + historical monthly targets ----
+get_allocator_total_response <- function(al_tbl) {
+  if (is.null(al_tbl)) {
+    return(NA_real_)
+  }
+  for (nm in c("total_response", "response_total", "total_response_pred", "response_pred", "response")) {
+    if (nm %in% names(al_tbl)) {
+      return(to_scalar(al_tbl[[nm]]))
+    }
+  }
+  NA_real_
+}
+
+compute_monthly_targets_from_history <- function(dt_input, spend_cols, horizon_months = 3,
+                                                 strategy = Sys.getenv("FORECAST_TARGET_STRATEGY", "mean_last_k"),
+                                                 k = as.integer(Sys.getenv("FORECAST_RECENT_MONTHS", "3"))) {
+  if (!length(spend_cols)) {
+    return(rep(0, horizon_months))
+  }
+  last_day <- max(dt_input$date, na.rm = TRUE)
+
+  monthly <- dt_input %>%
+    mutate(
+      month = lubridate::floor_date(date, "month"),
+      daily_total = rowSums(across(all_of(spend_cols)), na.rm = TRUE)
+    ) %>%
+    # only use full months before the current (possibly partial) one
+    dplyr::filter(month < lubridate::floor_date(last_day, "month")) %>%
+    dplyr::group_by(month) %>%
+    dplyr::summarise(total = sum(daily_total, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::arrange(month)
+
+  base_val <- if (nrow(monthly) > 0) {
+    if (tolower(strategy) == "last_full") {
+      tail(monthly$total, 1)
+    } else {
+      kk <- min(k, nrow(monthly))
+      mean(tail(monthly$total, kk), na.rm = TRUE)
+    }
+  } else {
+    # fallback: scale last 28 days to a 30-day month
+    mean(tail(rowSums(dt_input[, spend_cols, drop = FALSE], na.rm = TRUE), 28), na.rm = TRUE) * 30
+  }
+
+  base_val <- ifelse(is.finite(base_val) && base_val > 0, base_val, 0)
+  rep(base_val, horizon_months)
+}
+
+
 ## ---------- GCS AUTH ----------
 options(googleAuthR.scopes.selected = c("https://www.googleapis.com/auth/devstorage.read_write"))
 ensure_gcs_auth <- local({
@@ -282,6 +331,9 @@ build_spend_forecast <- function(dt_input, spend_cols, horizon_months = 3,
     stopifnot(length(monthly_targets) == horizon_months)
     out <- out |> mutate(month = floor_date(date, "month"))
     months_vec <- seq(start_month, by = "1 month", length.out = horizon_months)
+
+    pred_plot_rows <- list()
+
     for (i in seq_along(months_vec)) {
       m <- months_vec[i]
       idx <- which(out$month == m)
@@ -800,14 +852,20 @@ suppressPackageStartupMessages({
   library(lubridate)
 })
 
-# 0) Optional top-down monthly budget totals via env (comma/space-separated)
+# 0) Monthly budget targets: env override OR auto-derive from history
 parse_nums <- function(x) as.numeric(unlist(strsplit(x, "[,;\\s]+")))
 monthly_override <- Sys.getenv("FORECAST_MONTHLY_BUDGETS", unset = "")
-monthly_targets <- NULL
+spend_cols <- InputCollect$paid_media_spends
+
 if (nzchar(monthly_override)) {
   b <- parse_nums(monthly_override)
   monthly_targets <- if (length(b) >= 3) b[1:3] else rep(b[1], 3)
+  message("Forecast monthly targets (ENV): ", paste(round(monthly_targets, 0), collapse = ", "))
+} else {
+  monthly_targets <- compute_monthly_targets_from_history(InputCollect$dt_input, spend_cols, horizon_months = 3)
+  message("Forecast monthly targets (HIST): ", paste(round(monthly_targets, 0), collapse = ", "))
 }
+
 
 # 1) Build daily per-channel plan from historical patterns (weeks -> daily)
 spend_cols <- InputCollect$paid_media_spends
@@ -817,6 +875,20 @@ future_spend <- build_spend_forecast(
   horizon_months  = 3,
   monthly_targets = monthly_targets
 )
+# sanity check: plan totals vs targets
+plan_check <- future_spend %>%
+  mutate(month = lubridate::floor_date(date, "month")) %>%
+  group_by(month) %>%
+  summarise(plan_total = sum(rowSums(across(all_of(spend_cols)), na.rm = TRUE), na.rm = TRUE), .groups = "drop") %>%
+  arrange(month)
+
+if (nrow(plan_check)) {
+  ratios <- round(plan_check$plan_total / monthly_targets[1:nrow(plan_check)] - 1, 3)
+  message("Plan vs targets (ratio-1): ", paste(ratios, collapse = ", "))
+  if (any(abs(ratios) > 0.10, na.rm = TRUE)) {
+    message("⚠️ Plan deviates >10% from targets for some months. Check inputs or scaling.")
+  }
+}
 
 plan_path <- file.path(dir_path, "spend_plan_daily_next3m.csv")
 safe_write_csv(future_spend, plan_path)
@@ -832,6 +904,8 @@ months_vec <- sort(unique(future_spend$month))
 
 SHARE_TOL <- as.numeric(Sys.getenv("FORECAST_SHARE_TOL", "1e-4"))
 proj_rows <- list()
+
+pred_plot_rows <- list()
 
 for (i in seq_along(months_vec)) {
   m <- months_vec[i]
@@ -874,7 +948,7 @@ for (i in seq_along(months_vec)) {
   )
 
   al_tbl <- if (!inherits(al, "try-error")) al$result_allocator else NULL
-  incr <- to_scalar(if (!is.null(al_tbl)) al_tbl$total_response else NA_real_)
+  incr <- get_allocator_total_response(al_tbl)
   # --- ADD: plot + upload allocator for this forecast month ---
   if (!inherits(al, "try-error")) {
     pred_fname <- sprintf("allocator_pred_%s.png", format(m, "%Y-%m"))
