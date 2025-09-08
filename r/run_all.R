@@ -687,35 +687,6 @@ try(
   silent = TRUE
 )
 
-## ---------- UPLOAD EVERYTHING ----------
-for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
-  rel <- sub(paste0("^", normalizePath(dir_path), "/?"), "", normalizePath(f))
-  gcs_put_safe(f, file.path(gcs_prefix, rel))
-}
-
-cat(
-  "✅ Cloud Run Job completed successfully!\n",
-  "Outputs in gs://", googleCloudStorageR::gcs_get_global_bucket(), "/", gcs_prefix, "/\n",
-  "Training time: ", round(training_time, 2), " minutes using ", max_cores, " cores\n", # nolint
-  sep = ""
-)
-
-job_finished <- Sys.time()
-writeLines(
-  jsonlite::toJSON(
-    list(
-      state = "SUCCEEDED",
-      start_time = as.character(job_started),
-      end_time = as.character(job_finished),
-      duration_minutes = round(as.numeric(difftime(job_finished, job_started, units = "mins")), 2) # nolint
-    ),
-    auto_unbox = TRUE
-  ),
-  status_json
-)
-gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
-
-
 ## ---------- MONTHLY PROJECTIONS (next 3 months) ----------
 suppressPackageStartupMessages({ library(lubridate) })
 
@@ -800,3 +771,34 @@ gcs_put_safe(forecast_csv, file.path(gcs_prefix, "forecast_next3m.csv"))
 
 message("Wrote monthly projections (next 3) to: ", forecast_csv)
 print(proj)
+
+
+## ---------- UPLOAD EVERYTHING ----------
+for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
+  rel <- sub(paste0("^", normalizePath(dir_path), "/?"), "", normalizePath(f))
+  gcs_put_safe(f, file.path(gcs_prefix, rel))
+}
+
+cat(
+  "✅ Cloud Run Job completed successfully!\n",
+  "Outputs in gs://", googleCloudStorageR::gcs_get_global_bucket(), "/", gcs_prefix, "/\n",
+  "Training time: ", round(training_time, 2), " minutes using ", max_cores, " cores\n", # nolint
+  sep = ""
+)
+
+job_finished <- Sys.time()
+writeLines(
+  jsonlite::toJSON(
+    list(
+      state = "SUCCEEDED",
+      start_time = as.character(job_started),
+      end_time = as.character(job_finished),
+      duration_minutes = round(as.numeric(difftime(job_finished, job_started, units = "mins")), 2) # nolint
+    ),
+    auto_unbox = TRUE
+  ),
+  status_json
+)
+gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+
+
