@@ -572,234 +572,247 @@ with tab_single:
     st.subheader("Robyn configuration & training")
     if not st.session_state.sf_connected:
         st.warning("Please connect to Snowflake in tab 1 first.")
-        st.stop()
+    if st.session_state.sf_connected:
+        # Data selection
+        with st.expander("Data selection"):
+            table = st.text_input("Table (DB.SCHEMA.TABLE)")
+            query = st.text_area("Custom SQL (optional)")
+            if st.button("Test connection & preview 5 rows"):
+                sql_eff = effective_sql(table, query)
+                if not sql_eff:
+                    st.warning("Provide a table or a SQL query.")
+                else:
+                    try:
+                        preview_sql = f"SELECT * FROM ({sql_eff}) t LIMIT 5"
+                        df_prev = run_sql(preview_sql)
+                        st.success("Connection OK")
+                        st.dataframe(df_prev, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Preview failed: {e}")
 
-    # Data selection
-    with st.expander("Data selection"):
-        table = st.text_input("Table (DB.SCHEMA.TABLE)")
-        query = st.text_area("Custom SQL (optional)")
-        if st.button("Test connection & preview 5 rows"):
-            sql_eff = effective_sql(table, query)
-            if not sql_eff:
-                st.warning("Provide a table or a SQL query.")
-            else:
-                try:
-                    preview_sql = f"SELECT * FROM ({sql_eff}) t LIMIT 5"
-                    df_prev = run_sql(preview_sql)
-                    st.success("Connection OK")
-                    st.dataframe(df_prev, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Preview failed: {e}")
-
-    # Robyn config
-    with st.expander("Robyn configuration"):
-        country = st.text_input("Country", value="fr")
-        iterations = st.number_input("Iterations", value=200, min_value=50)
-        trials = st.number_input("Trials", value=5, min_value=1)
-        train_size = st.text_input("Train size", value="0.7,0.9")
-        revision = st.text_input("Revision tag", value="r100")
-        date_input = st.text_input("Date tag", value=time.strftime("%Y-%m-%d"))
-        dep_var = st.text_input(
-            "dep_var",
-            value="UPLOAD_VALUE",
-            help="Dependent variable column in your data (e.g., UPLOAD_VALUE)",
-        )
-        date_var = st.text_input(
-            "date_var",
-            value="date",
-            help="Date column in your data (e.g., date)",
-        )
-        adstock = st.selectbox(
-            "adstock",
-            options=["geometric", "weibull_cdf", "weibull_pdf"],
-            index=0,
-            help="Robyn adstock function",
-        )
-
-    # Variables
-    with st.expander("Variable mapping"):
-        paid_media_spends = st.text_input(
-            "paid_media_spends (comma-separated)",
-            value="GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-        )
-        paid_media_vars = st.text_input(
-            "paid_media_vars (comma-separated)",
-            value="GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-        )
-        context_vars = st.text_input(
-            "context_vars", value="IS_WEEKEND,TV_IS_ON"
-        )
-        factor_vars = st.text_input("factor_vars", value="IS_WEEKEND,TV_IS_ON")
-        organic_vars = st.text_input("organic_vars", value="ORGANIC_TRAFFIC")
-
-    # Outputs
-    with st.expander("Outputs"):
-        gcs_bucket = st.text_input(
-            "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
-        )
-        st.session_state["gcs_bucket"] = gcs_bucket
-        ann_file = st.file_uploader(
-            "Optional: enriched_annotations.csv", type=["csv"]
-        )
-
-    # =============== Single-run button ===============
-    def create_job_config_single(
-        data_gcs_path: str, timestamp: str, annotations_gcs_path: Optional[str]
-    ) -> Dict[str, Any]:
-        return build_job_config_from_params(
-            params_from_ui(
-                country,
-                iterations,
-                trials,
-                train_size,
-                revision,
-                date_input,
-                paid_media_spends,
-                paid_media_vars,
-                context_vars,
-                factor_vars,
-                organic_vars,
-                gcs_bucket,
-                table,
-                query,
-                dep_var,
-                date_var,
-                adstock,
-            ),
-            data_gcs_path,
-            timestamp,
-            annotations_gcs_path,
-        )
-
-    if st.button("🚀 Start Training Job", type="primary"):
-        if not all([PROJECT_ID, REGION, TRAINING_JOB_NAME]):
-            st.error(
-                "Missing configuration. Check environment variables on the web service."
+        # Robyn config
+        with st.expander("Robyn configuration"):
+            country = st.text_input("Country", value="fr")
+            iterations = st.number_input("Iterations", value=200, min_value=50)
+            trials = st.number_input("Trials", value=5, min_value=1)
+            train_size = st.text_input("Train size", value="0.7,0.9")
+            revision = st.text_input("Revision tag", value="r100")
+            date_input = st.text_input(
+                "Date tag", value=time.strftime("%Y-%m-%d")
             )
-            st.stop()
+            dep_var = st.text_input(
+                "dep_var",
+                value="UPLOAD_VALUE",
+                help="Dependent variable column in your data (e.g., UPLOAD_VALUE)",
+            )
+            date_var = st.text_input(
+                "date_var",
+                value="date",
+                help="Date column in your data (e.g., date)",
+            )
+            adstock = st.selectbox(
+                "adstock",
+                options=["geometric", "weibull_cdf", "weibull_pdf"],
+                index=0,
+                help="Robyn adstock function",
+            )
 
-        timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
-        gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
-        timings: List[Dict[str, float]] = []
+        # Variables
+        with st.expander("Variable mapping"):
+            paid_media_spends = st.text_input(
+                "paid_media_spends (comma-separated)",
+                value="GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
+            )
+            paid_media_vars = st.text_input(
+                "paid_media_vars (comma-separated)",
+                value="GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
+            )
+            context_vars = st.text_input(
+                "context_vars", value="IS_WEEKEND,TV_IS_ON"
+            )
+            factor_vars = st.text_input(
+                "factor_vars", value="IS_WEEKEND,TV_IS_ON"
+            )
+            organic_vars = st.text_input(
+                "organic_vars", value="ORGANIC_TRAFFIC"
+            )
 
-        try:
-            with st.spinner("Preparing and launching training job..."):
-                with tempfile.TemporaryDirectory() as td:
-                    sql_eff = effective_sql(table, query)
-                    data_gcs_path = None
-                    annotations_gcs_path = None
+        # Outputs
+        with st.expander("Outputs"):
+            gcs_bucket = st.text_input(
+                "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
+            )
+            st.session_state["gcs_bucket"] = gcs_bucket
+            ann_file = st.file_uploader(
+                "Optional: enriched_annotations.csv", type=["csv"]
+            )
 
-                    if not sql_eff:
-                        st.error(
-                            "Provide a table or SQL query to prepare training data."
-                        )
-                        st.stop()
+        # =============== Single-run button ===============
+        def create_job_config_single(
+            data_gcs_path: str,
+            timestamp: str,
+            annotations_gcs_path: Optional[str],
+        ) -> Dict[str, Any]:
+            return build_job_config_from_params(
+                params_from_ui(
+                    country,
+                    iterations,
+                    trials,
+                    train_size,
+                    revision,
+                    date_input,
+                    paid_media_spends,
+                    paid_media_vars,
+                    context_vars,
+                    factor_vars,
+                    organic_vars,
+                    gcs_bucket,
+                    table,
+                    query,
+                    dep_var,
+                    date_var,
+                    adstock,
+                ),
+                data_gcs_path,
+                timestamp,
+                annotations_gcs_path,
+            )
 
-                    # 1) Query Snowflake
-                    with timed_step("Query Snowflake", timings):
-                        df = run_sql(sql_eff)
+        if st.button("🚀 Start Training Job", type="primary"):
+            if not all([PROJECT_ID, REGION, TRAINING_JOB_NAME]):
+                st.error(
+                    "Missing configuration. Check environment variables on the web service."
+                )
+                st.stop()
 
-                    # 2) Convert to Parquet
-                    with timed_step("Convert to Parquet", timings):
-                        parquet_path = os.path.join(td, "input_data.parquet")
-                        data_processor.csv_to_parquet(df, parquet_path)
+            timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+            gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
+            timings: List[Dict[str, float]] = []
 
-                    # 3) Upload data to GCS
-                    with timed_step("Upload data to GCS", timings):
-                        data_blob = (
-                            f"training-data/{timestamp}/input_data.parquet"
-                        )
-                        data_gcs_path = upload_to_gcs(
-                            gcs_bucket, parquet_path, data_blob
-                        )
+            try:
+                with st.spinner("Preparing and launching training job..."):
+                    with tempfile.TemporaryDirectory() as td:
+                        sql_eff = effective_sql(table, query)
+                        data_gcs_path = None
+                        annotations_gcs_path = None
 
-                    if ann_file is not None:
-                        with timed_step("Upload annotations to GCS", timings):
-                            annotations_path = os.path.join(
-                                td, "enriched_annotations.csv"
+                        if not sql_eff:
+                            st.error(
+                                "Provide a table or SQL query to prepare training data."
                             )
-                            with open(annotations_path, "wb") as f:
-                                f.write(ann_file.read())
-                            annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
-                            annotations_gcs_path = upload_to_gcs(
-                                gcs_bucket, annotations_path, annotations_blob
+                            st.stop()
+
+                        # 1) Query Snowflake
+                        with timed_step("Query Snowflake", timings):
+                            df = run_sql(sql_eff)
+
+                        # 2) Convert to Parquet
+                        with timed_step("Convert to Parquet", timings):
+                            parquet_path = os.path.join(
+                                td, "input_data.parquet"
+                            )
+                            data_processor.csv_to_parquet(df, parquet_path)
+
+                        # 3) Upload data to GCS
+                        with timed_step("Upload data to GCS", timings):
+                            data_blob = (
+                                f"training-data/{timestamp}/input_data.parquet"
+                            )
+                            data_gcs_path = upload_to_gcs(
+                                gcs_bucket, parquet_path, data_blob
                             )
 
-                    # 4) Create job config
-                    with timed_step("Create job configuration", timings):
-                        job_config = create_job_config_single(
-                            data_gcs_path, timestamp, annotations_gcs_path
-                        )
-                        config_path = os.path.join(td, "job_config.json")
-                        with open(config_path, "w") as f:
-                            json.dump(job_config, f, indent=2)
-                        config_blob = (
-                            f"training-configs/{timestamp}/job_config.json"
-                        )
-                        config_gcs_path = upload_to_gcs(
-                            gcs_bucket, config_path, config_blob
-                        )
-                        _ = upload_to_gcs(
-                            gcs_bucket,
-                            config_path,
-                            "training-configs/latest/job_config.json",
-                        )
+                        if ann_file is not None:
+                            with timed_step(
+                                "Upload annotations to GCS", timings
+                            ):
+                                annotations_path = os.path.join(
+                                    td, "enriched_annotations.csv"
+                                )
+                                with open(annotations_path, "wb") as f:
+                                    f.write(ann_file.read())
+                                annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
+                                annotations_gcs_path = upload_to_gcs(
+                                    gcs_bucket,
+                                    annotations_path,
+                                    annotations_blob,
+                                )
 
-                    # 5) Launch Cloud Run Job
-                    with timed_step("Launch training job", timings):
-                        execution_name = job_manager.create_execution(
-                            TRAINING_JOB_NAME
-                        )
-                        exec_info = {
-                            "execution_name": execution_name,
-                            "timestamp": timestamp,
-                            "status": "LAUNCHED",
-                            "config_path": config_gcs_path,
-                            "data_path": data_gcs_path,
-                            "revision": revision,
-                            "country": country,
-                            "gcs_prefix": gcs_prefix,
-                            "gcs_bucket": gcs_bucket,
-                        }
-                        st.session_state.job_executions.append(exec_info)
-                        st.success("🎉 Training job launched!")
-                        st.info(
-                            f"**Execution ID**: `{execution_name.split('/')[-1]}`"
-                        )
+                        # 4) Create job config
+                        with timed_step("Create job configuration", timings):
+                            job_config = create_job_config_single(
+                                data_gcs_path, timestamp, annotations_gcs_path
+                            )
+                            config_path = os.path.join(td, "job_config.json")
+                            with open(config_path, "w") as f:
+                                json.dump(job_config, f, indent=2)
+                            config_blob = (
+                                f"training-configs/{timestamp}/job_config.json"
+                            )
+                            config_gcs_path = upload_to_gcs(
+                                gcs_bucket, config_path, config_blob
+                            )
+                            _ = upload_to_gcs(
+                                gcs_bucket,
+                                config_path,
+                                "training-configs/latest/job_config.json",
+                            )
 
-        finally:
-            if timings:
-                df_times = pd.DataFrame(timings)
-                try:
-                    client = storage.Client()
-                    dest_blob = f"{gcs_prefix}/timings.csv"
-                    blob = client.bucket(gcs_bucket).blob(dest_blob)
-                    if not blob.exists():
-                        with tempfile.NamedTemporaryFile(
-                            mode="w", suffix=".csv", delete=False
-                        ) as tmp:
-                            df_times.to_csv(tmp.name, index=False)
-                            upload_to_gcs(gcs_bucket, tmp.name, dest_blob)
-                        st.success(
-                            f"Timings CSV uploaded to gs://{gcs_bucket}/{dest_blob}"
-                        )
-                    else:
-                        st.info(
-                            "`timings.csv` already exists — job will append the R row."
-                        )
-                except Exception as e:
-                    st.warning(f"Failed to upload timings: {e}")
+                        # 5) Launch Cloud Run Job
+                        with timed_step("Launch training job", timings):
+                            execution_name = job_manager.create_execution(
+                                TRAINING_JOB_NAME
+                            )
+                            exec_info = {
+                                "execution_name": execution_name,
+                                "timestamp": timestamp,
+                                "status": "LAUNCHED",
+                                "config_path": config_gcs_path,
+                                "data_path": data_gcs_path,
+                                "revision": revision,
+                                "country": country,
+                                "gcs_prefix": gcs_prefix,
+                                "gcs_bucket": gcs_bucket,
+                            }
+                            st.session_state.job_executions.append(exec_info)
+                            st.success("🎉 Training job launched!")
+                            st.info(
+                                f"**Execution ID**: `{execution_name.split('/')[-1]}`"
+                            )
 
-            st.session_state.last_timings = {
-                "df": pd.DataFrame(timings),
-                "timestamp": timestamp,
-                "revision": revision,
-                "country": country,
-                "gcs_bucket": gcs_bucket,
-            }
+            finally:
+                if timings:
+                    df_times = pd.DataFrame(timings)
+                    try:
+                        client = storage.Client()
+                        dest_blob = f"{gcs_prefix}/timings.csv"
+                        blob = client.bucket(gcs_bucket).blob(dest_blob)
+                        if not blob.exists():
+                            with tempfile.NamedTemporaryFile(
+                                mode="w", suffix=".csv", delete=False
+                            ) as tmp:
+                                df_times.to_csv(tmp.name, index=False)
+                                upload_to_gcs(gcs_bucket, tmp.name, dest_blob)
+                            st.success(
+                                f"Timings CSV uploaded to gs://{gcs_bucket}/{dest_blob}"
+                            )
+                        else:
+                            st.info(
+                                "`timings.csv` already exists — job will append the R row."
+                            )
+                    except Exception as e:
+                        st.warning(f"Failed to upload timings: {e}")
 
-    render_jobs_ledger(key_prefix="single")
-    render_job_status_monitor(key_prefix="single")
+                st.session_state.last_timings = {
+                    "df": pd.DataFrame(timings),
+                    "timestamp": timestamp,
+                    "revision": revision,
+                    "country": country,
+                    "gcs_bucket": gcs_bucket,
+                }
+
+        render_jobs_ledger(key_prefix="single")
+        render_job_status_monitor(key_prefix="single")
 
     # ===================== BATCH QUEUE (CSV) =====================
 with tab_queue:
