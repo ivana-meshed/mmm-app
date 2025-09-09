@@ -372,6 +372,9 @@ def build_job_config_from_params(
 ) -> dict:
     return {
         "country": params["country"],
+        "dep_var": params.get("dep_var", "UPLOAD_VALUE"),
+        "date_var": params.get("date_var", "DATE"),
+        "adstock": params.get("adstock", "geometric"),
         "iterations": int(params["iterations"]),
         "trials": int(params["trials"]),
         "train_size": (
@@ -857,9 +860,8 @@ with tab_conn:
             )
             sf_role = st.text_input(
                 "Role",
-                value=(st.session_state.sf_params or {}).get(
-                    "role" or os.getenv("SF_ROLE"), ""
-                ),
+                value=(st.session_state.sf_params or {}).get("role", "")
+                or os.getenv("SF_ROLE"),
             )
             sf_password = st.text_input("Password", type="password")
 
@@ -970,6 +972,7 @@ with tab_train:
         date_input = st.text_input("Date tag", value=time.strftime("%Y-%m-%d"))
 
     # Variables
+
     with st.expander("Variable mapping"):
         paid_media_spends = st.text_input(
             "paid_media_spends (comma-separated)",
@@ -984,6 +987,15 @@ with tab_train:
         )
         factor_vars = st.text_input("factor_vars", value="IS_WEEKEND,TV_IS_ON")
         organic_vars = st.text_input("organic_vars", value="ORGANIC_TRAFFIC")
+        dep_var = st.text_input(
+            "dep_var (target/response column)", value="UPLOAD_VALUE"
+        )
+        date_var = st.text_input(
+            "date_var (date column name in data)", value="DATE"
+        )
+        adstock = st.selectbox(
+            "adstock", options=["geometric", "weibull_cdf"], index=0
+        )
 
     # Outputs
     with st.expander("Outputs"):
@@ -1266,6 +1278,136 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             mime="text/csv",
         )
 
+        st.markdown("### ➕ Add a single job to the queue")
+        with st.form(key="add_one_job"):
+            src_choice = st.radio(
+                "Data source",
+                ["table", "custom SQL"],
+                horizontal=True,
+                key="add_src_choice",
+            )
+            table_name = st.text_input(
+                "Table (e.g., ANALYTICS.MMM_DAILY)", value="", key="add_table"
+            )
+            custom_sql = st.text_area(
+                "SQL (optional; overrides table if provided)",
+                value="",
+                key="add_sql",
+            )
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                add_country = st.text_input(
+                    "Country", value=country, key="add_country"
+                )
+                add_revision = st.text_input(
+                    "Revision", value=revision, key="add_revision"
+                )
+            with c2:
+                add_iterations = st.number_input(
+                    "Iterations",
+                    value=int(iterations),
+                    min_value=1,
+                    key="add_iters",
+                )
+                add_trials = st.number_input(
+                    "Trials", value=int(trials), min_value=1, key="add_trials"
+                )
+            with c3:
+                add_train_size = st.text_input(
+                    "Train size", value=str(train_size), key="add_train_size"
+                )
+            st.caption("Variable mapping")
+            c4, c5, c6 = st.columns(3)
+            with c4:
+                add_dep_var = st.text_input(
+                    "dep_var", value=dep_var, key="add_dep_var"
+                )
+                add_date_var = st.text_input(
+                    "date_var", value=date_var, key="add_date_var"
+                )
+            with c5:
+                add_pm_spends = st.text_input(
+                    "paid_media_spends",
+                    value=str(paid_media_spends),
+                    key="add_pm_spends",
+                )
+                add_pm_vars = st.text_input(
+                    "paid_media_vars",
+                    value=str(paid_media_vars),
+                    key="add_pm_vars",
+                )
+            with c6:
+                add_context = st.text_input(
+                    "context_vars", value=str(context_vars), key="add_context"
+                )
+                add_factor = st.text_input(
+                    "factor_vars", value=str(factor_vars), key="add_factor"
+                )
+            add_org = st.text_input(
+                "organic_vars", value=str(organic_vars), key="add_org"
+            )
+            add_adstock = st.selectbox(
+                "adstock",
+                options=["geometric", "weibull_cdf"],
+                index=0 if adstock == "geometric" else 1,
+                key="add_adstock",
+            )
+            submitted = st.form_submit_button("Add to queue")
+            if submitted:
+                params = {
+                    "country": str(add_country),
+                    "revision": str(add_revision),
+                    "date_input": str(date_input),
+                    "iterations": int(add_iterations),
+                    "trials": int(add_trials),
+                    "train_size": str(add_train_size),
+                    "paid_media_spends": str(add_pm_spends),
+                    "paid_media_vars": str(add_pm_vars),
+                    "context_vars": str(add_context),
+                    "factor_vars": str(add_factor),
+                    "organic_vars": str(add_org),
+                    "dep_var": str(add_dep_var),
+                    "date_var": str(add_date_var),
+                    "adstock": str(add_adstock),
+                    "gcs_bucket": st.session_state["gcs_bucket"],
+                }
+                if src_choice == "custom SQL" and custom_sql.strip():
+                    params["query"] = custom_sql.strip()
+                    params["table"] = ""
+                else:
+                    params["table"] = table_name.strip()
+                    params["query"] = ""
+                if not (params.get("query") or params.get("table")):
+                    st.error("Provide a table or custom SQL.")
+                else:
+                    next_id = (
+                        max(
+                            [e["id"] for e in st.session_state.job_queue],
+                            default=0,
+                        )
+                        + 1
+                    )
+                    st.session_state.job_queue.append(
+                        {
+                            "id": next_id,
+                            "params": params,
+                            "status": "PENDING",
+                            "timestamp": None,
+                            "execution_name": None,
+                            "gcs_prefix": None,
+                            "message": "",
+                        }
+                    )
+                    st.session_state.queue_saved_at = save_queue_to_gcs(
+                        st.session_state.queue_name,
+                        st.session_state.job_queue,
+                        queue_running=st.session_state.queue_running,
+                    )
+                    st.success(
+                        f"Added job {next_id} to queue and saved to GCS."
+                    )
+                    st.rerun()
+
         up = st.file_uploader("Upload batch CSV", type=["csv"], key="batch_csv")
         parsed_df = None
         if up:
@@ -1284,6 +1426,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
             return {
                 "country": str(_g("country", country)),
+                "dep_var": str(_g("dep_var", dep_var)),
+                "date_var": str(_g("date_var", date_var)),
+                "adstock": str(_g("adstock", adstock)),
                 "revision": str(_g("revision", revision)),
                 "date_input": str(_g("date_input", date_input)),
                 "iterations": int(_g("iterations", iterations)),
@@ -1412,6 +1557,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
             edited = st.data_editor(
                 df_queue,
+                num_rows="dynamic",
                 key="queue_editor",  # keep widget state stable across reruns
                 hide_index=True,
                 use_container_width=True,
@@ -1461,8 +1607,54 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         f"Did not delete non-deletable entries: {sorted(blocked)}"
                     )
                 st.success("Queue updated.")
-                st.rerun()
-                # st.dataframe(df_queue, use_container_width=True)
+
+    if st.button("💾 Apply edits / add rows"):
+        # Build map from ID to entry
+        by_id = {e["id"]: e for e in st.session_state.job_queue}
+        max_id = max(by_id.keys(), default=0)
+        new_queue = []
+        for _, row in edited.iterrows():
+            rid = row.get("ID")
+            if pd.isna(rid) or rid is None:
+                max_id += 1
+                rid = max_id
+                base = {
+                    "status": "PENDING",
+                    "timestamp": None,
+                    "execution_name": None,
+                    "gcs_prefix": None,
+                    "message": "",
+                }
+                params = {}
+            else:
+                rid = int(rid)
+                base = by_id.get(rid, {})
+                params = base.get("params", {})
+            params["country"] = str(
+                row.get("Country") or params.get("country", "")
+            )
+            params["revision"] = str(
+                row.get("Revision") or params.get("revision", "")
+            )
+            new_queue.append(
+                {
+                    "id": int(rid),
+                    "params": params,
+                    "status": base.get("status", "PENDING"),
+                    "timestamp": base.get("timestamp"),
+                    "execution_name": base.get("execution_name"),
+                    "gcs_prefix": base.get("gcs_prefix"),
+                    "message": base.get("message", ""),
+                }
+            )
+        st.session_state.job_queue = new_queue
+        st.session_state.queue_saved_at = save_queue_to_gcs(
+            st.session_state.queue_name,
+            st.session_state.job_queue,
+            queue_running=st.session_state.queue_running,
+        )
+        st.success("Queue saved.")
+        st.rerun()
 
     # ─────────────────────────────
     # Queue worker (state machine)
@@ -1609,6 +1801,86 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         st.info(
             "No jobs launched yet in this session. Use single-run or batch queue above."
         )
+
+
+# ─────────────────────────────
+# Jobs Ledger (source of truth)
+# ─────────────────────────────
+st.markdown("## 🗃️ Jobs Ledger (GCS)")
+jobs_ledger_object = st.text_input(
+    "Ledger object path (inside bucket, not gs://)",
+    value=os.getenv("JOBS_LEDGER_OBJECT", "robyn-jobs/ledger.csv"),
+    key="ledger_obj",
+)
+if st.button("Load ledger"):
+    try:
+        client = storage.Client()
+        b = client.bucket(st.session_state["gcs_bucket"])
+        blob = b.blob(jobs_ledger_object)
+        if not blob.exists():
+            st.warning(
+                "Ledger file not found; it will be created on first append."
+            )
+        else:
+            data = blob.download_as_bytes()
+            import io
+
+            df_ledger = pd.read_csv(io.BytesIO(data))
+            st.session_state["df_ledger"] = df_ledger
+            st.success(f"Loaded {len(df_ledger)} rows.")
+    except Exception as e:
+        st.error(f"Ledger load failed: {e}")
+if "df_ledger" in st.session_state:
+    st.dataframe(st.session_state["df_ledger"], use_container_width=True)
+with st.expander("➕ Add PLANNED row to ledger"):
+    l_country = st.text_input(
+        "Country (ledger)", value=country, key="l_country"
+    )
+    l_revision = st.text_input(
+        "Revision (ledger)", value=revision, key="l_revision"
+    )
+    l_note = st.text_input("Note/Message", value="", key="l_note")
+    if st.button("Append to ledger as PLANNED"):
+        try:
+            client = storage.Client()
+            b = client.bucket(st.session_state["gcs_bucket"])
+            blob = b.blob(jobs_ledger_object)
+            import io
+
+            row = pd.DataFrame(
+                [
+                    {
+                        "job_id": f"PLANNED-{int(time.time())}",
+                        "state": "PLANNED",
+                        "country": l_country,
+                        "revision": l_revision,
+                        "date_input": str(date_input),
+                        "iterations": int(iterations),
+                        "trials": int(trials),
+                        "train_size": str(train_size),
+                        "dep_var": str(dep_var),
+                        "adstock": str(adstock),
+                        "start_time": datetime.utcnow().isoformat() + "Z",
+                        "end_time": "",
+                        "duration_minutes": "",
+                        "gcs_prefix": "",
+                        "bucket": st.session_state["gcs_bucket"],
+                        "message": l_note,
+                    }
+                ]
+            )
+            buf = io.BytesIO()
+            if blob.exists():
+                buf_existing = io.BytesIO(blob.download_as_bytes())
+                df_old = pd.read_csv(buf_existing)
+                df_out = pd.concat([df_old, row], ignore_index=True)
+            else:
+                df_out = row
+            df_out.to_csv(buf, index=False)
+            blob.upload_from_file(buf, rewind=True, content_type="text/csv")
+            st.success("Row appended to ledger.")
+        except Exception as e:
+            st.error(f"Append failed: {e}")
 
     # ─────────────────────────────
     # Execution timeline & timings.csv (single latest)
