@@ -685,6 +685,8 @@ with tab_single:
                 "gcs_bucket": gcs_bucket,
             }
 
+    render_jobs_ledger(key_prefix="single")
+
     # ===================== BATCH QUEUE (CSV) =====================
 with tab_queue:
     st.subheader(
@@ -1011,81 +1013,11 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     )
                 st.success("Queue updated.")
                 st.rerun()
-        render_jobs_ledger(key_prefix="queue")
+    render_jobs_ledger(key_prefix="queue")
 
     # ─────────────────────────────
     # Queue worker (state machine)
     # ─────────────────────────────
-    def _queue_tick():
-        maybe_refresh_queue_from_gcs()
-        q = st.session_state.job_queue
-        if not q:
-            return
-
-        changed = False
-
-        # 1) Update RUNNING job status (if any)
-        running = [e for e in q if e["status"] == "RUNNING"]
-        if running:
-            entry = running[0]
-            try:
-                status_info = job_manager.get_execution_status(
-                    entry["execution_name"]
-                )
-                s = status_info.get("overall_status")
-                if s in (
-                    "SUCCEEDED",
-                    "FAILED",
-                    "CANCELLED",
-                    "COMPLETED",
-                    "ERROR",
-                ):
-                    entry["status"] = (
-                        "SUCCEEDED" if s in ("SUCCEEDED", "COMPLETED") else s
-                    )
-                    entry["message"] = status_info.get("error", "") or s
-                    changed = True
-                return (
-                    save_queue_to_gcs(st.session_state.queue_name, q)
-                    if changed
-                    else None
-                )
-            except Exception as e:
-                entry["status"] = "ERROR"
-                entry["message"] = str(e)
-                changed = True
-                return save_queue_to_gcs(st.session_state.queue_name, q)
-
-        # 2) If no RUNNING job and queue_running, launch next PENDING
-        if st.session_state.queue_running:
-            pending = [e for e in q if e["status"] == "PENDING"]
-            if not pending:
-                return
-            entry = pending[0]
-            try:
-                exec_info = prepare_and_launch_job(entry["params"])
-                time.sleep(SAFE_LAG_SECONDS_AFTER_RUNNING)
-                entry["execution_name"] = exec_info["execution_name"]
-                entry["timestamp"] = exec_info["timestamp"]
-                entry["gcs_prefix"] = exec_info["gcs_prefix"]
-                entry["status"] = "RUNNING"
-                entry["message"] = "Launched"
-                st.session_state.job_executions.append(exec_info)
-                changed = True
-            except Exception as e:
-                entry["status"] = "ERROR"
-                entry["message"] = f"launch failed: {e}"
-                changed = True
-
-        if changed:
-            st.session_state.queue_saved_at = save_queue_to_gcs(
-                st.session_state.queue_name,
-                q,
-                queue_running=st.session_state.queue_running,
-            )
-
-    # Tick the queue on every rerun
-    _queue_tick()
 
     # ─────────────────────────────
     # Job Status Monitor (latest single-run)
@@ -1140,7 +1072,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         st.info(
             "No jobs launched yet in this session. Use single-run or batch queue above."
         )
-    render_jobs_ledger(key_prefix="single")
 
     # ─────────────────────────────
     # Execution timeline & timings.csv (single latest)
@@ -1162,6 +1093,79 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             st.write(
                 "**Note**: Training runs asynchronously in Cloud Run Jobs."
             )
+
+
+def _queue_tick():
+    maybe_refresh_queue_from_gcs()
+    q = st.session_state.job_queue
+    if not q:
+        return
+
+    changed = False
+
+    # 1) Update RUNNING job status (if any)
+    running = [e for e in q if e["status"] == "RUNNING"]
+    if running:
+        entry = running[0]
+        try:
+            status_info = job_manager.get_execution_status(
+                entry["execution_name"]
+            )
+            s = status_info.get("overall_status")
+            if s in (
+                "SUCCEEDED",
+                "FAILED",
+                "CANCELLED",
+                "COMPLETED",
+                "ERROR",
+            ):
+                entry["status"] = (
+                    "SUCCEEDED" if s in ("SUCCEEDED", "COMPLETED") else s
+                )
+                entry["message"] = status_info.get("error", "") or s
+                changed = True
+            return (
+                save_queue_to_gcs(st.session_state.queue_name, q)
+                if changed
+                else None
+            )
+        except Exception as e:
+            entry["status"] = "ERROR"
+            entry["message"] = str(e)
+            changed = True
+            return save_queue_to_gcs(st.session_state.queue_name, q)
+
+    # 2) If no RUNNING job and queue_running, launch next PENDING
+    if st.session_state.queue_running:
+        pending = [e for e in q if e["status"] == "PENDING"]
+        if not pending:
+            return
+        entry = pending[0]
+        try:
+            exec_info = prepare_and_launch_job(entry["params"])
+            time.sleep(SAFE_LAG_SECONDS_AFTER_RUNNING)
+            entry["execution_name"] = exec_info["execution_name"]
+            entry["timestamp"] = exec_info["timestamp"]
+            entry["gcs_prefix"] = exec_info["gcs_prefix"]
+            entry["status"] = "RUNNING"
+            entry["message"] = "Launched"
+            st.session_state.job_executions.append(exec_info)
+            changed = True
+        except Exception as e:
+            entry["status"] = "ERROR"
+            entry["message"] = f"launch failed: {e}"
+            changed = True
+
+    if changed:
+        st.session_state.queue_saved_at = save_queue_to_gcs(
+            st.session_state.queue_name,
+            q,
+            queue_running=st.session_state.queue_running,
+        )
+
+
+# Tick the queue on every rerun
+_queue_tick()
 
 # ─────────────────────────────
 # Sidebar: system info + auto-refresh
