@@ -1,26 +1,26 @@
-# app.py — Streamlit front-end for launching & monitoring Robyn training jobs on Cloud Run Jobs
-import io
+# streamlit_app.py — Streamlit front-end for launching & monitoring Robyn training jobs on Cloud Run Jobs
 import json
 import logging
 import os
-import re
 import time
 import tempfile
-from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, Any, Optional, List
 
 import pandas as pd
 import snowflake.connector as sf
 import streamlit as st
-from google.cloud import run_v2, storage
+from google.cloud import storage
 
-from data_processor import DataProcessor
 from app_shared import (
+    # Env / constants (already read from env in app_shared)
     PROJECT_ID,
     REGION,
     TRAINING_JOB_NAME,
     GCS_BUCKET,
+    DEFAULT_QUEUE_NAME,
+    SAFE_LAG_SECONDS_AFTER_RUNNING,
+    # Helpers
     timed_step,
     parse_train_size,
     effective_sql,
@@ -28,26 +28,29 @@ from app_shared import (
     ensure_sf_conn,
     run_sql,
     upload_to_gcs,
-    read_status_json,
+    read_status_json,  # (kept for parity; not used below)
     build_job_config_from_params,
-    _sanitize_queue_name,
-    _queue_blob_path,
+    _sanitize_queue_name,  # (kept for parity; not used below)
+    _queue_blob_path,  # (kept for parity; not used below)
     load_queue_from_gcs,
     save_queue_to_gcs,
     load_queue_payload,
     queue_tick_once_headless,
+    handle_queue_tick_from_query_params,
+    get_job_manager,
+    get_data_processor,
+    _fmt_secs,
+    _connect_snowflake,  # use shared connector for consistency with ensure_sf_conn
 )
-from app_shared import handle_queue_tick_from_query_params
-from app_shared import get_job_manager
 
+# Instantiate shared resources
+data_processor = get_data_processor()
 job_manager = get_job_manager()
-
 
 # ─────────────────────────────
 # Page & logging setup
 # ─────────────────────────────
 st.set_page_config(page_title="Robyn MMM Trainer", layout="wide")
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -72,29 +75,9 @@ if query_params.get("health") == "true":
         )
     st.stop()
 
-
 # ─────────────────────────────
-# Environment / constants
-# ─────────────────────────────
-PROJECT_ID = os.getenv("PROJECT_ID")
-REGION = os.getenv("REGION", "europe-west1")
-TRAINING_JOB_NAME = os.getenv("TRAINING_JOB_NAME")  # short or FQN
-GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
-
-# When queueing, wait until the current job is RUNNING before writing the next "latest" config
-SAFE_LAG_SECONDS_AFTER_RUNNING = int(
-    os.getenv("SAFE_LAG_SECONDS_AFTER_RUNNING", "5")
-)
-
-# ─────────────────────────────
-# Persistent queue in GCS
-# ─────────────────────────────
-QUEUE_ROOT = os.getenv(
-    "QUEUE_ROOT", "robyn-queues"
-)  # gs://<bucket>/robyn-queues/<name>/queue.json
-DEFAULT_QUEUE_NAME = os.getenv("DEFAULT_QUEUE_NAME", "default")
-
 # Session defaults
+# ─────────────────────────────
 st.session_state.setdefault("job_executions", [])
 st.session_state.setdefault("gcs_bucket", GCS_BUCKET)
 st.session_state.setdefault("last_timings", None)
@@ -106,69 +89,24 @@ st.session_state.setdefault("sf_connected", False)
 st.session_state.setdefault("sf_conn", None)
 
 # Batch queue state
-st.session_state.setdefault("job_queue", [])  # list of dicts (entries below)
+st.session_state.setdefault("job_queue", [])  # list of dicts
 st.session_state.setdefault("queue_running", False)
 
 # Persistent queue session vars
 st.session_state.setdefault("queue_name", DEFAULT_QUEUE_NAME)
 st.session_state.setdefault("queue_loaded_from_gcs", False)
-
-# Queue entry shape:
-# {
-#   "id": int,
-#   "params": {...},            # fields matching single-run config
-#   "status": "PENDING|RUNNING|SUCCEEDED|FAILED|CANCELLED|ERROR",
-#   "timestamp": None|str,
-#   "execution_name": None|str,
-#   "gcs_prefix": None|str,
-#   "message": str
-# }
+st.session_state.setdefault("queue_saved_at", None)
 
 
 # ─────────────────────────────
-# Small utils
+# Launcher used by queue tick
 # ─────────────────────────────
-
-
-def get_data_processor():
-    return DataProcessor()
-
-
-@st.cache_resource
-def get_job_manager():
-    return CloudRunJobManager(PROJECT_ID, REGION)
-
-
-data_processor = get_data_processor()
-job_manager = get_job_manager()
-
-
-# ─────────────────────────────
-# Snowflake connection (persistent)
-# ─────────────────────────────
-def _connect_snowflake(
-    user, password, account, warehouse, database, schema, role
-):
-    return sf.connect(
-        user=user,
-        password=password,
-        account=account,
-        warehouse=warehouse,
-        database=database,
-        schema=schema,
-        role=role if role else None,
-    )
-
-
-# --- Snowflake env-fallback (headless) ---
-
-
 def prepare_and_launch_job(params: dict) -> dict:
     """
     One complete job: query SF -> parquet -> upload -> write config (timestamped + latest) -> run Cloud Run Job.
-    Returns exec_info dict.
+    Returns exec_info dict with execution_name, timestamp, gcs_prefix, etc.
     """
-    # Required fields
+    # 0) Validate & resolve SQL
     sql_eff = params.get("query") or effective_sql(
         params.get("table", ""), params.get("query", "")
     )
@@ -179,30 +117,24 @@ def prepare_and_launch_job(params: dict) -> dict:
     timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
     gcs_prefix = f"robyn/{params['revision']}/{params['country']}/{timestamp}"
 
-    res = handle_queue_tick_from_query_params(
-        st.query_params,
-        st.session_state.get("gcs_bucket", GCS_BUCKET),
-        launcher=prepare_and_launch_job,
-    )
-    if isinstance(res, dict) and res:
-        st.json(res)  # or st.write(res)
-        st.stop()
-
     with tempfile.TemporaryDirectory() as td:
         timings: List[dict] = []
+
         # 1) Query Snowflake
         with timed_step("Query Snowflake", timings):
             df = run_sql(sql_eff)
+
         # 2) Parquet
         with timed_step("Convert to Parquet", timings):
             parquet_path = os.path.join(td, "input_data.parquet")
             data_processor.csv_to_parquet(df, parquet_path)
+
         # 3) Upload data
         with timed_step("Upload data to GCS", timings):
             data_blob = f"training-data/{timestamp}/input_data.parquet"
             data_gcs_path = upload_to_gcs(gcs_bucket, parquet_path, data_blob)
 
-        # Optional annotations: use row override if present, else uploaded file not supported in batch
+        # Optional annotations (batch: pass a gs:// in params)
         annotations_gcs_path = params.get("annotations_gcs_path") or None
 
         # 4) Create config (timestamped + latest)
@@ -218,18 +150,18 @@ def prepare_and_launch_job(params: dict) -> dict:
             config_gcs_path = upload_to_gcs(
                 gcs_bucket, config_path, config_blob
             )
-            # latest copy (the running job will read this)
+            # "latest" copy (job reads this)
             _ = upload_to_gcs(
                 gcs_bucket,
                 config_path,
                 "training-configs/latest/job_config.json",
             )
 
-        # 5) Launch job
+        # 5) Launch job (Cloud Run Jobs)
         with timed_step("Launch training job", timings):
             execution_name = job_manager.create_execution(TRAINING_JOB_NAME)
 
-        # Seed timings.csv (web-side steps)
+        # Seed timings.csv (web-side steps) if not present
         if timings:
             df_times = pd.DataFrame(timings)
             dest_blob = f"{gcs_prefix}/timings.csv"
@@ -242,7 +174,7 @@ def prepare_and_launch_job(params: dict) -> dict:
                     df_times.to_csv(tmp.name, index=False)
                     upload_to_gcs(gcs_bucket, tmp.name, dest_blob)
 
-    exec_info = {
+    return {
         "execution_name": execution_name,
         "timestamp": timestamp,
         "status": "LAUNCHED",
@@ -253,9 +185,24 @@ def prepare_and_launch_job(params: dict) -> dict:
         "gcs_prefix": gcs_prefix,
         "gcs_bucket": gcs_bucket,
     }
-    return exec_info
 
 
+# ─────────────────────────────
+# Early stateless tick endpoint (?queue_tick=1)
+# ─────────────────────────────
+res = handle_queue_tick_from_query_params(
+    st.query_params,
+    st.session_state.get("gcs_bucket", GCS_BUCKET),
+    launcher=prepare_and_launch_job,
+)
+if isinstance(res, dict) and res:
+    st.json(res)
+    st.stop()
+
+
+# ─────────────────────────────
+# Small UI helpers
+# ─────────────────────────────
 def params_from_ui(
     country,
     iterations,
@@ -293,23 +240,15 @@ def params_from_ui(
 def set_queue_running(
     queue_name: str, running: bool, bucket_name: Optional[str] = None
 ) -> None:
-    """
-    Toggle the persisted queue_running flag and update session.
-    """
-    # Load to ensure we don't clobber entries
+    """Toggle the persisted queue_running flag and update session."""
     doc = load_queue_from_gcs(queue_name, bucket_name=bucket_name)
     st.session_state.queue_running = bool(running)
-    # Save existing entries + new flag
     save_queue_to_gcs(
         queue_name,
         entries=doc.get("entries", []),
         queue_running=running,
         bucket_name=bucket_name,
     )
-
-
-# Track when we last loaded the queue
-st.session_state.setdefault("queue_saved_at", None)
 
 
 def maybe_refresh_queue_from_gcs(force: bool = False):
@@ -321,14 +260,14 @@ def maybe_refresh_queue_from_gcs(force: bool = False):
         and remote_saved_at != st.session_state.get("queue_saved_at")
     ):
         st.session_state.job_queue = payload.get("entries", [])
-        # keep UI toggle in sync too (useful when multiple sessions are open)
         st.session_state.queue_running = payload.get(
             "queue_running", st.session_state.get("queue_running", False)
         )
         st.session_state.queue_saved_at = remote_saved_at
 
 
-# UI layout: two tabs
+# ─────────────────────────────
+# UI layout
 # ─────────────────────────────
 st.title("Robyn MMM Trainer")
 tab_conn, tab_train = st.tabs(
@@ -345,7 +284,6 @@ if not st.session_state.queue_loaded_from_gcs:
         st.session_state.queue_loaded_from_gcs = True
     except Exception as e:
         st.warning(f"Could not auto-load queue from GCS: {e}")
-
 
 # ============= TAB 1: Snowflake Connection =============
 with tab_conn:
@@ -518,7 +456,7 @@ with tab_train:
             "Optional: enriched_annotations.csv", type=["csv"]
         )
 
-    # =============== Single-run button (unchanged) ===============
+    # =============== Single-run button ===============
     def create_job_config_single(
         data_gcs_path: str, timestamp: str, annotations_gcs_path: Optional[str]
     ) -> Dict[str, Any]:
@@ -553,7 +491,7 @@ with tab_train:
 
         timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
         gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
-        timings: list[dict[str, float]] = []
+        timings: List[Dict[str, float]] = []
 
         try:
             with st.spinner("Preparing and launching training job..."):
@@ -701,6 +639,7 @@ with tab_train:
                 queue_running=st.session_state.queue_running,
             )
             st.success(f"Saved queue '{st.session_state.queue_name}' to GCS")
+
         st.markdown(
             """
 Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country`, `revision`, and data source):
@@ -752,7 +691,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "organic_vars": "ORGANIC_TRAFFIC",
                     "gcs_bucket": st.session_state["gcs_bucket"],
                     "table": "MESHED_BUYCYCLE.GROWTH.TABLE_A",
-                    "query": "",  # either table or query
+                    "query": "",
                     "annotations_gcs_path": "",
                 },
                 {
@@ -830,7 +769,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         c_left, c_right = st.columns(2)
         if c_left.button("➕ Enqueue all rows", disabled=(parsed_df is None)):
             if parsed_df is not None:
-                # next id after current max
                 next_id = (
                     max(
                         [e["id"] for e in st.session_state.job_queue], default=0
@@ -873,8 +811,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             f"{sum(e['status']=='PENDING' for e in st.session_state.job_queue)} pending · "
             f"{sum(e['status']=='RUNNING' for e in st.session_state.job_queue)} running"
         )
-        # doc = load_queue_from_gcs(queue_name, bucket_name=bucket_name)
-        # st.write(f"Last saved at (GCS): {doc.get('saved_at','—')}")
+
         if st.button("🔁 Refresh from GCS"):
             _ = load_queue_from_gcs(st.session_state.queue_name)
             st.success("Refreshed from GCS.")
@@ -897,7 +834,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.session_state["gcs_bucket"],
                 launcher=prepare_and_launch_job,
             )
-
             st.toast(res.get("message", "tick"))
             maybe_refresh_queue_from_gcs(force=True)
             st.rerun()
@@ -938,7 +874,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
             edited = st.data_editor(
                 df_queue,
-                key="queue_editor",  # keep widget state stable across reruns
+                key="queue_editor",
                 hide_index=True,
                 use_container_width=True,
                 column_config={
@@ -948,7 +884,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 },
             )
 
-            # Safe read: if user or Streamlit removes the column, don't crash
             ids_to_delete = set()
             if "Delete" in edited.columns:
                 ids_to_delete = set(
@@ -967,10 +902,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                             "CANCELLED",
                             "FAILED",
                         ):
-                            # drop it
-                            continue
+                            continue  # drop it
                         else:
-                            # don't delete RUNNING/SUCCEEDED
                             blocked.append(e["id"])
                             new_q.append(e)
                     else:
@@ -988,7 +921,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     )
                 st.success("Queue updated.")
                 st.rerun()
-                # st.dataframe(df_queue, use_container_width=True)
 
     # ─────────────────────────────
     # Queue worker (state machine)
@@ -1113,24 +1045,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     )
             except Exception as e:
                 st.warning(f"Could not fetch training log: {e}")
-
-        if st.button("📋 Show All Jobs"):
-            df_jobs = pd.DataFrame(
-                [
-                    {
-                        "Timestamp": job.get("timestamp", ""),
-                        "Status": job.get("status", "UNKNOWN"),
-                        "Execution": job.get("execution_name", "").split("/")[
-                            -1
-                        ],
-                        "Last Checked": job.get("last_checked", "Never"),
-                        "Revision": job.get("revision", ""),
-                        "Country": job.get("country", ""),
-                    }
-                    for job in st.session_state.job_executions
-                ]
-            )
-            st.dataframe(df_jobs, use_container_width=True)
     else:
         st.info(
             "No jobs launched yet in this session. Use single-run or batch queue above."
@@ -1190,13 +1104,3 @@ with st.sidebar:
         key="auto_refresh",
     ):
         st.rerun()
-
-
-@st.cache_resource
-def get_data_processor():
-    return DataProcessor()
-
-
-@st.cache_resource
-def get_job_manager():
-    return CloudRunJobManager(PROJECT_ID, REGION)

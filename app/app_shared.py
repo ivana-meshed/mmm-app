@@ -1,5 +1,5 @@
 # app_shared.py — shared helpers for Robyn Streamlit app
-import os, io, json, time
+import os, io, json, time, re
 from datetime import datetime, timezone
 
 # add to the existing imports at the top of app_shared.py
@@ -26,6 +26,16 @@ DEFAULT_QUEUE_NAME = os.getenv("DEFAULT_QUEUE_NAME", "default")
 SAFE_LAG_SECONDS_AFTER_RUNNING = int(
     os.getenv("SAFE_LAG_SECONDS_AFTER_RUNNING", "5")
 )
+
+
+@st.cache_resource
+def get_data_processor():
+    return DataProcessor()
+
+
+@st.cache_resource
+def get_job_manager():
+    return CloudRunJobManager(PROJECT_ID, REGION)
 
 
 def _connect_snowflake(
