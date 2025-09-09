@@ -642,7 +642,6 @@ with tab_single:
     with tab_queue:
         st.subheader(
             "Batch queue (CSV) — queue & run multiple jobs sequentially",
-            expanded=False,
         )
         with st.expander(
             "📚 Batch queue (CSV) — queue & run multiple jobs sequentially",
