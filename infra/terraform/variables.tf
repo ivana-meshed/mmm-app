@@ -7,12 +7,30 @@ variable "web_image" { default = "europe-west1-docker.pkg.dev@datawarehouse-4225
 variable "training_image" { default = "europe-west1-docker.pkg.dev@datawarehouse-422511.iam.gserviceaccount.com" }
 variable "deployer_sa" { default = "github-deployer@datawarehouse-422511.iam.gserviceaccount.com" }
 
-variable "sf_user" { type = string }
-variable "sf_account" { type = string }
-variable "sf_warehouse" { type = string }
-variable "sf_database" { type = string }
-variable "sf_schema" { type = string }
-variable "sf_role" { type = string }
+variable "sf_user" {
+  type    = string
+  default = "IPENC"
+}
+variable "sf_account" {
+  type    = string
+  default = "AMXUZTH-AWS_BRIDGE"
+}
+variable "sf_warehouse" {
+  type    = string
+  default = "SMALL_WH"
+}
+variable "sf_database" {
+  type    = string
+  default = "MESHED_BUYCYCLE"
+}
+variable "sf_schema" {
+  type    = string
+  default = "GROWTH"
+}
+variable "sf_role" {
+  type    = string
+  default = "ACCOUNTADMIN"
+}
 
 variable "queue_name" {
   type    = string
