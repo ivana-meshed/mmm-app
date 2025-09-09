@@ -28,6 +28,93 @@ SAFE_LAG_SECONDS_AFTER_RUNNING = int(
     os.getenv("SAFE_LAG_SECONDS_AFTER_RUNNING", "5")
 )
 
+# Canonical ledger schema & normalization
+LEDGER_COLUMNS = [
+    "job_id",  # canonical id: gcs_prefix; queue id can go into 'queue_id' (optional)
+    "state",  # SUCCEEDED | FAILED | CANCELLED | ERROR
+    "country",
+    "revision",
+    "date_input",
+    "iterations",
+    "trials",
+    "train_size",
+    "dep_var",
+    "adstock",
+    "start_time",  # ISO 8601 UTC
+    "end_time",  # ISO 8601 UTC
+    "duration_minutes",
+    "gcs_prefix",
+    "bucket",
+    "exec_name",  # short execution id (last path segment)
+    "execution_name",  # full resource path (optional, for debugging)
+]
+
+
+def _short_exec_name(x: str) -> str:
+    if not isinstance(x, str) or not x:
+        return ""
+    # Accept either full resource path or already-short ids
+    if "/executions/" in x:
+        return x.split("/executions/")[-1]
+    return x.split("/")[-1]
+
+
+def _iso_utc(s) -> str:
+    # Parse any reasonable timestamp and write as UTC ISO seconds
+    import pandas as pd
+
+    ts = pd.to_datetime(s, utc=True, errors="coerce")
+    if pd.isna(ts):
+        return ""
+    return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def normalize_ledger_df(df: "pd.DataFrame"):
+    import pandas as pd
+
+    df = (df or pd.DataFrame()).copy()
+
+    # Backward compat: rename common variants
+    if "status" in df.columns and "state" not in df.columns:
+        df = df.rename(columns={"status": "state"})
+    if "gcs_bucket" in df.columns and "bucket" not in df.columns:
+        df = df.rename(columns={"gcs_bucket": "bucket"})
+
+    # Ensure all columns exist
+    for c in LEDGER_COLUMNS:
+        if c not in df.columns:
+            df[c] = pd.NA
+
+    # Normalize exec names
+    df["exec_name"] = df["exec_name"].apply(_short_exec_name)
+    df["execution_name"] = df["execution_name"].fillna("")
+
+    # Normalize times
+    df["start_time"] = df["start_time"].apply(_iso_utc)
+    df["end_time"] = df["end_time"].apply(_iso_utc)
+
+    # Prefer gcs_prefix as canonical job_id if job_id looks like a bare number
+    def _canon_job_id(row):
+        jid = str(row.get("job_id") or "")
+        gpref = row.get("gcs_prefix") or ""
+        return gpref if (jid.isdigit() and gpref) else jid or gpref
+
+    df["job_id"] = df.apply(_canon_job_id, axis=1)
+
+    # Backfill duration if possible
+    st = pd.to_datetime(df["start_time"], utc=True, errors="coerce")
+    et = pd.to_datetime(df["end_time"], utc=True, errors="coerce")
+    need = df["duration_minutes"].isna() & st.notna() & et.notna()
+    if need.any():
+        df.loc[need, "duration_minutes"] = (et - st).dt.total_seconds() / 60.0
+
+    # Reorder & sort
+    df = df[LEDGER_COLUMNS]
+    df = df.sort_values(
+        ["end_time", "start_time"], ascending=False, na_position="last"
+    ).reset_index(drop=True)
+    return df
+
 
 @st.cache_resource
 def get_data_processor():
@@ -278,71 +365,44 @@ def _get_ledger_object() -> str:
     return os.getenv("JOBS_LEDGER_OBJECT", "robyn-jobs/ledger.csv")
 
 
-def read_ledger_from_gcs(
-    bucket_name: str | None = None, object_name: str | None = None
-):
-    import io
+def read_ledger_from_gcs(bucket_name: str):
+    import pandas as pd, io
+    from google.cloud import storage
 
     client = storage.Client()
-    bucket = client.bucket(bucket_name or GCS_BUCKET)
-    key = object_name or _get_ledger_object()
-    blob = bucket.blob(key)
-    try:
-        data = blob.download_as_bytes()
-    except Exception:
-        import pandas as pd
+    blob = client.bucket(bucket_name).blob("robyn-jobs/ledger.csv")
+    if not blob.exists():
+        return pd.DataFrame(columns=LEDGER_COLUMNS)
+    data = blob.download_as_bytes()
+    df = pd.read_csv(io.BytesIO(data))
+    return normalize_ledger_df(df)
 
-        cols = [
-            "job_id",
-            "state",
-            "country",
-            "revision",
-            "date_input",
-            "iterations",
-            "trials",
-            "train_size",
-            "dep_var",
-            "adstock",
-            "start_time",
-            "end_time",
-            "duration_minutes",
-            "gcs_prefix",
-            "bucket",
-        ]
-        return pd.DataFrame(columns=cols)
+
+def save_ledger_to_gcs(df, bucket_name: str):
+    import io
+    from google.cloud import storage
+
+    df = normalize_ledger_df(df)
+    b = io.BytesIO()
+    df.to_csv(b, index=False)
+    b.seek(0)
+    client = storage.Client()
+    blob = client.bucket(bucket_name).blob("robyn-jobs_ledger.csv")
+    blob.upload_from_file(b, content_type="text/csv")
+    return True
+
+
+def append_row_to_ledger(row_dict: dict, bucket_name: str):
     import pandas as pd
 
-    return pd.read_csv(io.BytesIO(data))
-
-
-def save_ledger_to_gcs(
-    df, bucket_name: str | None = None, object_name: str | None = None
-) -> str:
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
-    try:
-        df.to_csv(tmp.name, index=False)
-        dest = object_name or _get_ledger_object()
-        return upload_to_gcs(bucket_name or GCS_BUCKET, tmp.name, dest)
-    finally:
-        try:
-            os.remove(tmp.name)
-        except Exception:
-            pass
-
-
-def append_row_to_ledger(
-    row: dict, bucket_name: str | None = None, object_name: str | None = None
-) -> str:
-    import pandas as pd
-
-    df = read_ledger_from_gcs(bucket_name=bucket_name, object_name=object_name)
-    new = pd.DataFrame([row])
-    if "job_id" in df.columns and "job_id" in new.columns:
-        df = df[df["job_id"] != new.iloc[0]["job_id"]]
-    out = pd.concat([df, new], ignore_index=True)
-    return save_ledger_to_gcs(
-        out, bucket_name=bucket_name, object_name=object_name
-    )
+    df = read_ledger_from_gcs(bucket_name)
+    # Make sure all expected keys exist
+    for c in LEDGER_COLUMNS:
+        row_dict.setdefault(c, pd.NA)
+    # Normalize single-row frame then append
+    df_new = normalize_ledger_df(pd.DataFrame([row_dict]))
+    df_all = pd.concat([df, df_new], ignore_index=True)
+    return save_ledger_to_gcs(df_all, bucket_name)
 
 
 def read_status_json(bucket_name: str, prefix: str) -> Optional[dict]:

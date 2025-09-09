@@ -20,6 +20,7 @@ from app_shared import (
     GCS_BUCKET,
     DEFAULT_QUEUE_NAME,
     SAFE_LAG_SECONDS_AFTER_RUNNING,
+    LEDGER_COLUMNS,
     # Helpers
     timed_step,
     parse_train_size,
@@ -250,29 +251,11 @@ def params_from_ui(
 
 def _empty_ledger_df() -> pd.DataFrame:
     # Matches fields written by run_all.R::append_to_ledger()
-    cols = [
-        "job_id",
-        "exec_name",
-        "state",
-        "country",
-        "revision",
-        "date_input",
-        "iterations",
-        "trials",
-        "train_size",
-        "dep_var",
-        "adstock",
-        "start_time",
-        "end_time",
-        "duration_minutes",
-        "gcs_prefix",
-        "bucket",
-    ]
+    cols = LEDGER_COLUMNS
     return pd.DataFrame(columns=cols)
 
 
 def render_jobs_ledger(key_prefix: str = "single") -> None:
-    """Render the Jobs Ledger editor/viewer (always editable, even if empty)."""
     with st.expander("📚 Jobs Ledger (from GCS)", expanded=False):
         try:
             df_ledger = read_ledger_from_gcs(
@@ -280,19 +263,30 @@ def render_jobs_ledger(key_prefix: str = "single") -> None:
             )
         except Exception as e:
             st.error(f"Failed to read ledger from GCS: {e}")
-            df_ledger = None
+            return
 
-        if df_ledger is None or df_ledger.empty:
-            st.info("Ledger is empty — add a row below and save to create it.")
-            df_ledger = _empty_ledger_df()
+        # Force canonical order/shape before editing
+        df_ledger = df_ledger.reindex(columns=LEDGER_COLUMNS)
 
         st.caption("Append rows directly and click **Save to GCS** to persist.")
         edited = st.data_editor(
             df_ledger,
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",  # Streamlit deprecation fix
             key=f"ledger_editor_{key_prefix}",
+            column_order=LEDGER_COLUMNS,
+            disabled=[
+                "job_id",
+                "bucket",
+                "gcs_prefix",
+                "exec_name",
+                "execution_name",
+                "start_time",
+                "end_time",
+                "duration_minutes",
+            ],
         )
+
         c1, c2 = st.columns(2)
         if c1.button("💾 Save ledger to GCS", key=f"save_ledger_{key_prefix}"):
             try:
@@ -302,18 +296,21 @@ def render_jobs_ledger(key_prefix: str = "single") -> None:
                 st.success("Ledger saved to GCS.")
             except Exception as e:
                 st.error(f"Failed to save ledger: {e}")
+
         if c2.button(
-            "➕ Append last row to ledger", key=f"append_ledger_{key_prefix}"
+            "🧹 Normalize & Save", key=f"normalize_ledger_{key_prefix}"
         ):
             try:
-                if not edited.empty:
-                    append_row_to_ledger(
-                        edited.iloc[-1].to_dict(),
-                        st.session_state.get("gcs_bucket", GCS_BUCKET),
-                    )
-                    st.success("Appended last row to ledger on GCS.")
+                # Re-read, normalize, save
+                from app_shared import normalize_ledger_df, save_ledger_to_gcs
+
+                save_ledger_to_gcs(
+                    normalize_ledger_df(edited),
+                    st.session_state.get("gcs_bucket", GCS_BUCKET),
+                )
+                st.success("Ledger normalized & saved.")
             except Exception as e:
-                st.error(f"Append failed: {e}")
+                st.error(f"Normalize failed: {e}")
 
 
 def render_job_status_monitor(key_prefix: str = "single") -> None:
@@ -564,7 +561,7 @@ with tab_conn:
             if st.button("Run query", key="run_adhoc"):
                 try:
                     df_prev = run_sql(adhoc_sql)
-                    st.dataframe(df_prev, use_container_width=True)
+                    st.dataframe(df_prev, width="stretch")
                 except Exception as e:
                     st.error(f"Query failed: {e}")
     else:
@@ -589,7 +586,7 @@ with tab_single:
                         preview_sql = f"SELECT * FROM ({sql_eff}) t LIMIT 5"
                         df_prev = run_sql(preview_sql)
                         st.success("Connection OK")
-                        st.dataframe(df_prev, use_container_width=True)
+                        st.dataframe(df_prev, width="stretch")
                     except Exception as e:
                         st.error(f"Preview failed: {e}")
 
@@ -953,7 +950,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             try:
                 parsed_df = pd.read_csv(up)
                 st.success(f"Loaded {len(parsed_df)} rows")
-                st.dataframe(parsed_df.head(), use_container_width=True)
+                st.dataframe(parsed_df.head(), width="stretch")
             except Exception as e:
                 st.error(f"Failed to parse CSV: {e}")
 
@@ -1098,7 +1095,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 df_queue,
                 key="queue_editor",
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
                 column_config={
                     "Delete": st.column_config.CheckboxColumn(
                         "Delete", help="Mark to remove from queue"
@@ -1161,7 +1158,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     df_times["Time (s)"] / total * 100
                 ).round(1)
             st.markdown("**Setup steps (this session)**")
-            st.dataframe(df_times, use_container_width=True)
+            st.dataframe(df_times, width="stretch")
             st.write(f"**Total setup time:** {_fmt_secs(total)}")
             st.write(
                 "**Note**: Training runs asynchronously in Cloud Run Jobs."
@@ -1195,64 +1192,51 @@ def _queue_tick():
                 entry["status"] = final_state
                 entry["message"] = status_info.get("error", "") or final_state
 
-                # build ledger row
-                now_iso = datetime.utcnow().isoformat()
                 start_iso = entry.get("start_time")
-                try:
-                    duration_minutes = (
-                        round(
-                            (
-                                datetime.fromisoformat(now_iso)
-                                - datetime.fromisoformat(start_iso)
-                            ).total_seconds()
-                            / 60.0,
-                            2,
-                        )
-                        if start_iso
-                        else None
-                    )
-                except Exception:
-                    duration_minutes = None
+                if not start_iso:
+                    # last-resort fallback to the mmdd_HHMMSS token (will be normalized later)
+                    start_iso = entry.get("timestamp")
 
-                params = entry.get("params", {})
-                row = {
-                    "job_id": entry.get("id"),
-                    "exec_name": entry.get(
-                        "execution_name", ""
-                    ),  # save exec name
-                    "state": final_state,
-                    "country": params.get("country"),
-                    "revision": params.get("revision"),
-                    "date_input": params.get("date_input"),
-                    "iterations": params.get("iterations"),
-                    "trials": params.get("trials"),
-                    "train_size": params.get("train_size"),
-                    "dep_var": params.get("dep_var"),
-                    "adstock": params.get("adstock"),
-                    "start_time": start_iso,
-                    "end_time": now_iso,
-                    "duration_minutes": duration_minutes,
-                    "gcs_prefix": entry.get("gcs_prefix"),
-                    "bucket": params.get("gcs_bucket")
-                    or st.session_state.get("gcs_bucket", GCS_BUCKET),
-                }
-
+                # Append to ledger
                 try:
+                    exec_full = entry.get("execution_name") or ""
+                    exec_short = exec_full.split("/")[-1] if exec_full else ""
                     append_row_to_ledger(
-                        row, st.session_state.get("gcs_bucket", GCS_BUCKET)
+                        {
+                            "job_id": entry.get("gcs_prefix")
+                            or entry.get("id"),
+                            "state": final_state,
+                            "country": entry["params"].get("country"),
+                            "revision": entry["params"].get("revision"),
+                            "date_input": entry["params"].get("date_input"),
+                            "iterations": entry["params"].get("iterations"),
+                            "trials": entry["params"].get("trials"),
+                            "train_size": entry["params"].get("train_size"),
+                            "dep_var": entry["params"].get("dep_var"),
+                            "adstock": entry["params"].get("adstock"),
+                            "start_time": start_iso,  # we stored UTC at launch
+                            "end_time": datetime.utcnow().isoformat(
+                                timespec="seconds"
+                            )
+                            + "Z",
+                            "gcs_prefix": entry.get("gcs_prefix"),
+                            "bucket": entry.get("gcs_bucket")
+                            or st.session_state.get("gcs_bucket", GCS_BUCKET),
+                            "exec_name": exec_short,  # short id for quick scanning
+                            "execution_name": exec_full,  # full path (optional)
+                        },
+                        st.session_state.get("gcs_bucket", GCS_BUCKET),
                     )
-                    # remove finished job from queue
-                    st.session_state.job_queue = [
-                        e
-                        for e in st.session_state.job_queue
-                        if e.get("id") != entry.get("id")
-                    ]
                 except Exception as e:
-                    # If ledger write fails, we keep it in queue but mark error.
-                    # (If you want to remove even on ledger error, delete the 'except' body.)
-                    entry["message"] = (
-                        f"{final_state}; ledger append failed: {e}"
-                    )
+                    st.warning(f"Ledger append failed: {e}")
+
+                completed_id = entry["id"]
+                st.session_state.job_queue = [
+                    e
+                    for e in st.session_state.job_queue
+                    if e["id"] != completed_id
+                ]
+                changed = True
 
                 st.session_state.queue_saved_at = save_queue_to_gcs(
                     st.session_state.queue_name,
@@ -1293,7 +1277,9 @@ def _queue_tick():
             entry["gcs_prefix"] = exec_info["gcs_prefix"]
             entry["status"] = "RUNNING"
             entry["message"] = "Launched"
-            entry["start_time"] = datetime.utcnow().isoformat()
+            entry["start_time"] = (
+                datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            )
             st.session_state.job_executions.append(exec_info)
             changed = True
         except Exception as e:
