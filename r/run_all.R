@@ -1,8 +1,11 @@
 #!/usr/bin/env Rscript
 
-## ===========================
-## run_all.R — Train Robyn + smarter 3-month forecast (no robyn_predict)
-## ===========================
+## =========================================================
+## run_all.R — Train Robyn + smarter 3-month forecast
+##  - No robyn_predict; uses allocator to simulate plan
+##  - Month-scoped allocator windows
+##  - Robust incremental extraction
+## =========================================================
 
 ## ---------- ENV ----------
 Sys.setenv(
@@ -31,7 +34,7 @@ suppressPackageStartupMessages({
   library(parallel)
 })
 
-## Optional: forecasting helpers. If not installed, we’ll fall back gracefully.
+## Optional time-series forecaster
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 
 max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
@@ -63,8 +66,7 @@ should_add_n_searches <- function(dtf, spend_cols, thr = 0.15) {
 # gs://bucket/path -> local file
 gcs_download <- function(gcs_path, local_path) {
   stopifnot(grepl("^gs://", gcs_path))
-  path_parts <- sub("^gs://", "", gcs_path)
-  bits <- strsplit(path_parts, "/", fixed = TRUE)[[1]]
+  bits <- strsplit(sub("^gs://", "", gcs_path), "/", fixed = TRUE)[[1]]
   bucket <- bits[1]
   object <- paste(bits[-1], collapse = "/")
   googleCloudStorageR::gcs_get_object(
@@ -151,7 +153,7 @@ safe_write_csv <- function(df, path) {
   })
 }
 
-## ---- robust reader for allocator totals + historical monthly targets ----
+## ---- robust incremental extraction (works across Robyn versions) ----
 get_allocator_total_response <- function(al_tbl) {
   if (is.null(al_tbl)) {
     return(NA_real_)
@@ -163,10 +165,23 @@ get_allocator_total_response <- function(al_tbl) {
   }
   NA_real_
 }
+get_allocator_total_spend <- function(al_tbl) {
+  if (is.null(al_tbl)) {
+    return(NA_real_)
+  }
+  for (nm in c("total_spend", "spend_total", "expected_spend", "spend")) {
+    if (nm %in% names(al_tbl)) {
+      return(to_scalar(al_tbl[[nm]]))
+    }
+  }
+  NA_real_
+}
 
-compute_monthly_targets_from_history <- function(dt_input, spend_cols, horizon_months = 3,
-                                                 strategy = Sys.getenv("FORECAST_TARGET_STRATEGY", "mean_last_k"),
-                                                 k = as.integer(Sys.getenv("FORECAST_RECENT_MONTHS", "3"))) {
+## ---- derive monthly targets from history when ENV override not provided ----
+compute_monthly_targets_from_history <- function(
+    dt_input, spend_cols, horizon_months = 3,
+    strategy = Sys.getenv("FORECAST_TARGET_STRATEGY", "mean_last_k"),
+    k = as.integer(Sys.getenv("FORECAST_RECENT_MONTHS", "3"))) {
   if (!length(spend_cols)) {
     return(rep(0, horizon_months))
   }
@@ -177,28 +192,24 @@ compute_monthly_targets_from_history <- function(dt_input, spend_cols, horizon_m
       month = lubridate::floor_date(date, "month"),
       daily_total = rowSums(across(all_of(spend_cols)), na.rm = TRUE)
     ) %>%
-    # only use full months before the current (possibly partial) one
-    dplyr::filter(month < lubridate::floor_date(last_day, "month")) %>%
-    dplyr::group_by(month) %>%
-    dplyr::summarise(total = sum(daily_total, na.rm = TRUE), .groups = "drop") %>%
-    dplyr::arrange(month)
+    filter(month < lubridate::floor_date(last_day, "month")) %>%
+    group_by(month) %>%
+    summarise(total = sum(daily_total, na.rm = TRUE), .groups = "drop") %>%
+    arrange(month)
 
   base_val <- if (nrow(monthly) > 0) {
     if (tolower(strategy) == "last_full") {
       tail(monthly$total, 1)
     } else {
-      kk <- min(k, nrow(monthly))
-      mean(tail(monthly$total, kk), na.rm = TRUE)
+      mean(tail(monthly$total, min(k, nrow(monthly))), na.rm = TRUE)
     }
   } else {
-    # fallback: scale last 28 days to a 30-day month
     mean(tail(rowSums(dt_input[, spend_cols, drop = FALSE], na.rm = TRUE), 28), na.rm = TRUE) * 30
   }
 
   base_val <- ifelse(is.finite(base_val) && base_val > 0, base_val, 0)
   rep(base_val, horizon_months)
 }
-
 
 ## ---------- GCS AUTH ----------
 options(googleAuthR.scopes.selected = c("https://www.googleapis.com/auth/devstorage.read_write"))
@@ -241,9 +252,7 @@ build_spend_forecast <- function(dt_input, spend_cols, horizon_months = 3,
 
   start_next <- max(hist$date, na.rm = TRUE) + 1
   start_month <- floor_date(start_next, "month")
-  if (start_month < start_next) {
-    start_month <- start_month %m+% months(1)
-  }
+  if (start_month < start_next) start_month <- start_month %m+% months(1)
   end_month <- start_month %m+% months(horizon_months) - days(1)
 
   future_days <- tibble(
@@ -288,13 +297,10 @@ build_spend_forecast <- function(dt_input, spend_cols, horizon_months = 3,
     } else {
       if (HAVE_FORECAST) {
         ts_w <- stats::ts(wk$val, frequency = 52)
-        fit <- try(suppressWarnings(forecast::auto.arima(ts_w, stepwise = FALSE, approximation = FALSE)),
-          silent = TRUE
-        )
+        fit <- try(suppressWarnings(forecast::auto.arima(ts_w, stepwise = FALSE, approximation = FALSE)), silent = TRUE)
         if (inherits(fit, "try-error")) fit <- forecast::ets(ts_w)
         weekly_future <- as.numeric(forecast::forecast(fit, h = ceiling(horizon_months * 4.5))$mean)
       } else {
-        # simple moving-average fallback
         m <- stats::filter(wk$val, rep(1 / 4, 4), sides = 1)
         weekly_future <- rep(
           tail(na.omit(as.numeric(m)), 1) %||% mean(wk$val, na.rm = TRUE),
@@ -331,9 +337,6 @@ build_spend_forecast <- function(dt_input, spend_cols, horizon_months = 3,
     stopifnot(length(monthly_targets) == horizon_months)
     out <- out |> mutate(month = floor_date(date, "month"))
     months_vec <- seq(start_month, by = "1 month", length.out = horizon_months)
-
-    pred_plot_rows <- list()
-
     for (i in seq_along(months_vec)) {
       m <- months_vec[i]
       idx <- which(out$month == m)
@@ -358,24 +361,20 @@ compute_base_daily <- function(OutputCollect, InputCollect, lookback_days = 28) 
   nm <- names(decomp)
   tolower_nms <- tolower(nm)
 
-  # prophet base components (case-insensitive)
   base_keys <- c("intercept", "trend", "season", "holiday", "weekday")
   base_cols <- nm[tolower_nms %in% base_keys]
 
   if (length(base_cols) > 0) {
     base_series <- rowSums(decomp[, base_cols, drop = FALSE], na.rm = TRUE)
   } else {
-    # fallback: dep - (all modeled drivers)
     dep_candidates <- c("dep_var", "depvar", "y", tolower(InputCollect$dep_var), InputCollect$dep_var)
     dep_col <- nm[match(tolower(dep_candidates), tolower_nms, nomatch = 0)]
     dep_col <- dep_col[dep_col != ""]
     if (!length(dep_col)) {
       return(mean(tail(InputCollect$dt_input[[InputCollect$dep_var]], lookback_days), na.rm = TRUE))
     }
-
     driver_cols <- intersect(
-      c(InputCollect$paid_media_vars, InputCollect$organic_vars, InputCollect$context_vars, InputCollect$factor_vars),
-      nm
+      c(InputCollect$paid_media_vars, InputCollect$organic_vars, InputCollect$context_vars, InputCollect$factor_vars), nm
     )
     if (!length(driver_cols)) {
       base_series <- decomp[[dep_col[1]]]
@@ -386,7 +385,7 @@ compute_base_daily <- function(OutputCollect, InputCollect, lookback_days = 28) 
   mean(tail(base_series, lookback_days), na.rm = TRUE)
 }
 
-## ---------- TIGHT SHARE CONSTRAINTS (simulate your plan via allocator) ----------
+## ---------- TIGHT SHARE CONSTRAINTS ----------
 make_share_bands <- function(shares, tol = 1e-4) {
   shares[is.na(shares)] <- 0
   lo <- pmax(0, shares - tol)
@@ -399,9 +398,7 @@ log_file <- NULL
 cleanup <- function() {
   try(sink(type = "message"), silent = TRUE)
   try(sink(), silent = TRUE)
-  if (!is.null(log_file)) {
-    try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
-  }
+  if (!is.null(log_file)) try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
 }
 
 options(error = function(e) {
@@ -431,10 +428,7 @@ gcs_prefix <- file.path("robyn", revision, country, timestamp)
 ## ---------- STATUS JSON (RUNNING) ----------
 job_started <- Sys.time()
 status_json <- file.path(dir_path, "status.json")
-writeLines(
-  jsonlite::toJSON(list(state = "RUNNING", start_time = as.character(job_started)), auto_unbox = TRUE),
-  status_json
-)
+writeLines(jsonlite::toJSON(list(state = "RUNNING", start_time = as.character(job_started)), auto_unbox = TRUE), status_json)
 gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
 
 ## ---------- START LOG ----------
@@ -453,7 +447,7 @@ print(reticulate::py_config())
 cat("-------------------------------\n")
 if (!reticulate::py_module_available("nevergrad")) stop("nevergrad not importable via reticulate.")
 
-## ---------- GCS AUTH (again to be safe) ----------
+## ---------- GCS AUTH (again) ----------
 options(googleAuthR.scopes.selected = "https://www.googleapis.com/auth/devstorage.read_write")
 if (nzchar(Sys.getenv("GOOGLE_APPLICATION_CREDENTIALS")) && file.exists(Sys.getenv("GOOGLE_APPLICATION_CREDENTIALS"))) {
   googleCloudStorageR::gcs_auth(json_file = Sys.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
@@ -490,7 +484,7 @@ if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
   stop("No data_gcs_path provided in configuration.")
 }
 
-# Optional annotations (just mirror near outputs)
+# Optional annotations (mirrored near outputs)
 if (!is.null(cfg$annotations_gcs_path) && nzchar(cfg$annotations_gcs_path)) {
   ann_local <- file.path(dir_path, "enriched_annotations.csv")
   try(gcs_download(cfg$annotations_gcs_path, ann_local), silent = TRUE)
@@ -565,7 +559,10 @@ paid_media_spends <- intersect(cfg$paid_media_spends, names(df))
 paid_media_vars <- intersect(cfg$paid_media_vars, names(df))
 stopifnot(length(paid_media_spends) == length(paid_media_vars))
 
-keep_idx <- vapply(seq_along(paid_media_spends), function(i) sum(df[[paid_media_spends[i]]], na.rm = TRUE) > 0, logical(1))
+keep_idx <- vapply(
+  seq_along(paid_media_spends),
+  function(i) sum(df[[paid_media_spends[i]]], na.rm = TRUE) > 0, logical(1)
+)
 paid_media_spends <- paid_media_spends[keep_idx]
 paid_media_vars <- paid_media_vars[keep_idx]
 
@@ -589,20 +586,20 @@ cat(
 
 ## ---------- ROBYN INPUTS ----------
 InputCollect <- robyn_inputs(
-  dt_input = df,
-  date_var = "date",
-  dep_var = "UPLOAD_VALUE",
-  dep_var_type = "revenue",
-  prophet_vars = c("trend", "season", "holiday", "weekday"),
-  prophet_country = toupper(country),
+  dt_input          = df,
+  date_var          = "date",
+  dep_var           = "UPLOAD_VALUE",
+  dep_var_type      = "revenue",
+  prophet_vars      = c("trend", "season", "holiday", "weekday"),
+  prophet_country   = toupper(country),
   paid_media_spends = paid_media_spends,
-  paid_media_vars = paid_media_vars,
-  context_vars = context_vars,
-  factor_vars = factor_vars,
-  organic_vars = organic_vars,
-  window_start = start_data_date,
-  window_end = end_data_date,
-  adstock = "geometric"
+  paid_media_vars   = paid_media_vars,
+  context_vars      = context_vars,
+  factor_vars       = factor_vars,
+  organic_vars      = organic_vars,
+  window_start      = start_data_date,
+  window_end        = end_data_date,
+  adstock           = "geometric"
 )
 
 alloc_end <- max(InputCollect$dt_input$date)
@@ -681,10 +678,8 @@ for (i in 1:5) {
   ok <- tryCatch(
     {
       googleCloudStorageR::gcs_get_object(
-        object_name = timings_obj,
-        bucket = googleCloudStorageR::gcs_get_global_bucket(),
-        saveToDisk = timings_local,
-        overwrite = TRUE
+        object_name = timings_obj, bucket = googleCloudStorageR::gcs_get_global_bucket(),
+        saveToDisk = timings_local, overwrite = TRUE
       )
       TRUE
     },
@@ -696,16 +691,16 @@ for (i in 1:5) {
   }
   Sys.sleep(2)
 }
-if (had_existing) {
+out <- if (had_existing) {
   old <- try(readr::read_csv(timings_local, show_col_types = FALSE), silent = TRUE)
-  out <- if (inherits(old, "try-error")) {
+  if (inherits(old, "try-error")) {
     r_row
   } else {
     if ("Step" %in% names(old)) old <- dplyr::filter(old, Step != "R training (robyn_run)")
     dplyr::bind_rows(old, r_row)
   }
 } else {
-  out <- r_row
+  r_row
 }
 readr::write_csv(out, timings_local, na = "")
 gcs_put_safe(timings_local, timings_obj)
@@ -736,9 +731,7 @@ gcs_put_safe(file.path(dir_path, "best_model_id.txt"), file.path(gcs_prefix, "be
 
 # onepagers for top models
 top_models <- OutputCollect$resultHypParam$solID[1:min(3, nrow(OutputCollect$resultHypParam))]
-for (m in top_models) {
-  try(robyn_onepagers(InputCollect, OutputCollect, select_model = m, export = TRUE), silent = TRUE)
-}
+for (m in top_models) try(robyn_onepagers(InputCollect, OutputCollect, select_model = m, export = TRUE), silent = TRUE)
 
 # canonical onepager (png preferred, pdf fallback)
 all_files <- list.files(dir_path, recursive = TRUE, full.names = TRUE)
@@ -756,7 +749,6 @@ if (length(cand_png)) {
   file.copy(cand_pdf[1], canonical, overwrite = TRUE)
   gcs_put_safe(canonical, file.path(gcs_prefix, paste0(best_id, ".pdf")))
 } else {
-  # last-ditch pdf name
   cand_pdf2 <- all_files[basename(all_files) == paste0(best_id, ".pdf")]
   if (length(cand_pdf2)) {
     canonical <- file.path(dir_path, paste0(best_id, ".pdf"))
@@ -776,8 +768,7 @@ AllocatorCollect <- try(
     InputCollect = InputCollect, OutputCollect = OutputCollect,
     select_model = best_id, date_range = c(alloc_start, alloc_end),
     expected_spend = NULL, scenario = "max_historical_response",
-    channel_constr_low = low_bounds0, channel_constr_up = up_bounds0,
-    export = TRUE
+    channel_constr_low = low_bounds0, channel_constr_up = up_bounds0, export = TRUE
   ),
   silent = TRUE
 )
@@ -786,8 +777,8 @@ AllocatorCollect <- try(
 best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == best_id, ]
 alloc_tbl <- if (!inherits(AllocatorCollect, "try-error")) AllocatorCollect$result_allocator else NULL
 
-total_response <- to_scalar(if (!is.null(alloc_tbl)) alloc_tbl$total_response else NA_real_)
-total_spend <- to_scalar(if (!is.null(alloc_tbl)) alloc_tbl$total_spend else NA_real_)
+total_response <- get_allocator_total_response(alloc_tbl)
+total_spend <- get_allocator_total_spend(alloc_tbl)
 
 metrics_txt <- file.path(dir_path, "allocator_metrics.txt")
 metrics_csv <- file.path(dir_path, "allocator_metrics.csv")
@@ -803,8 +794,8 @@ writeLines(c(
   paste("R2 (test):", round(best_row$rsq_test %||% NA_real_, 4)),
   paste("NRMSE (test):", round(best_row$nrmse_test %||% NA_real_, 4)),
   paste("DECOMP.RSSD (train):", round(best_row$decomp.rssd %||% NA_real_, 4)),
-  paste("Allocator Total Response:", round(total_response, 2)),
-  paste("Allocator Total Spend:", round(total_spend, 2))
+  paste("Allocator Total Response:", round(total_response %||% NA_real_, 2)),
+  paste("Allocator Total Spend:", round(total_spend %||% NA_real_, 2))
 ), con = metrics_txt)
 gcs_put_safe(metrics_txt, file.path(gcs_prefix, "allocator_metrics.txt"))
 
@@ -819,14 +810,14 @@ metrics_df <- data.frame(
   r2_test                  = round(best_row$rsq_test %||% NA_real_, 4),
   nrmse_test               = round(best_row$nrmse_test %||% NA_real_, 4),
   decomp_rssd_train        = round(best_row$decomp.rssd %||% NA_real_, 4),
-  allocator_total_response = round(total_response, 2),
-  allocator_total_spend    = round(total_spend, 2),
+  allocator_total_response = round(total_response %||% NA_real_, 2),
+  allocator_total_spend    = round(total_spend %||% NA_real_, 2),
   stringsAsFactors         = FALSE
 )
 write.csv(metrics_df, metrics_csv, row.names = FALSE)
 gcs_put_safe(metrics_csv, file.path(gcs_prefix, "allocator_metrics.csv"))
 
-# allocator plot (best-effort)
+# Allocator plot (365d overview)
 alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
 dir.create(alloc_dir, showWarnings = FALSE)
 try(
@@ -842,17 +833,12 @@ try(
   silent = TRUE
 )
 
-# ADD: separate folder for predicted-month allocator plots
+# Folder for predicted-month allocator plots
 pred_alloc_dir <- file.path(dir_path, paste0("allocator_pred_plots_", timestamp))
 dir.create(pred_alloc_dir, showWarnings = FALSE)
 
-
-## ---------- SMART MONTHLY PROJECTIONS (next 3 months; no robyn_predict) ----------
-suppressPackageStartupMessages({
-  library(lubridate)
-})
-
-# 0) Monthly budget targets: env override OR auto-derive from history
+## ---------- SMART MONTHLY PROJECTIONS (next 3 months) ----------
+# 0) Monthly budget targets: ENV override OR derive from history
 parse_nums <- function(x) as.numeric(unlist(strsplit(x, "[,;\\s]+")))
 monthly_override <- Sys.getenv("FORECAST_MONTHLY_BUDGETS", unset = "")
 spend_cols <- InputCollect$paid_media_spends
@@ -866,28 +852,24 @@ if (nzchar(monthly_override)) {
   message("Forecast monthly targets (HIST): ", paste(round(monthly_targets, 0), collapse = ", "))
 }
 
-
-# 1) Build daily per-channel plan from historical patterns (weeks -> daily)
-spend_cols <- InputCollect$paid_media_spends
+# 1) Build daily per-channel plan (weeks -> daily), scaled to targets
 future_spend <- build_spend_forecast(
   dt_input        = InputCollect$dt_input,
   spend_cols      = spend_cols,
   horizon_months  = 3,
   monthly_targets = monthly_targets
 )
-# sanity check: plan totals vs targets
+
+# Sanity check: plan totals vs targets
 plan_check <- future_spend %>%
   mutate(month = lubridate::floor_date(date, "month")) %>%
   group_by(month) %>%
   summarise(plan_total = sum(rowSums(across(all_of(spend_cols)), na.rm = TRUE), na.rm = TRUE), .groups = "drop") %>%
   arrange(month)
-
 if (nrow(plan_check)) {
   ratios <- round(plan_check$plan_total / monthly_targets[1:nrow(plan_check)] - 1, 3)
   message("Plan vs targets (ratio-1): ", paste(ratios, collapse = ", "))
-  if (any(abs(ratios) > 0.10, na.rm = TRUE)) {
-    message("⚠️ Plan deviates >10% from targets for some months. Check inputs or scaling.")
-  }
+  if (any(abs(ratios) > 0.10, na.rm = TRUE)) message("⚠️ Plan deviates >10% from targets. Check inputs or scaling.")
 }
 
 plan_path <- file.path(dir_path, "spend_plan_daily_next3m.csv")
