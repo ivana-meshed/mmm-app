@@ -273,6 +273,77 @@ def upload_to_gcs(bucket_name: str, local_path: str, dest_blob: str) -> str:
     return f"gs://{bucket_name}/{dest_blob}"
 
 
+def _get_ledger_object() -> str:
+    return os.getenv("JOBS_LEDGER_OBJECT", "robyn-jobs/ledger.csv")
+
+
+def read_ledger_from_gcs(
+    bucket_name: str | None = None, object_name: str | None = None
+):
+    import io
+
+    client = storage.Client()
+    bucket = client.bucket(bucket_name or GCS_BUCKET)
+    key = object_name or _get_ledger_object()
+    blob = bucket.blob(key)
+    try:
+        data = blob.download_as_bytes()
+    except Exception:
+        import pandas as pd
+
+        cols = [
+            "job_id",
+            "state",
+            "country",
+            "revision",
+            "date_input",
+            "iterations",
+            "trials",
+            "train_size",
+            "dep_var",
+            "adstock",
+            "start_time",
+            "end_time",
+            "duration_minutes",
+            "gcs_prefix",
+            "bucket",
+        ]
+        return pd.DataFrame(columns=cols)
+    import pandas as pd
+
+    return pd.read_csv(io.BytesIO(data))
+
+
+def save_ledger_to_gcs(
+    df, bucket_name: str | None = None, object_name: str | None = None
+) -> str:
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
+    try:
+        df.to_csv(tmp.name, index=False)
+        dest = object_name or _get_ledger_object()
+        return upload_to_gcs(bucket_name or GCS_BUCKET, tmp.name, dest)
+    finally:
+        try:
+            os.remove(tmp.name)
+        except Exception:
+            pass
+
+
+def append_row_to_ledger(
+    row: dict, bucket_name: str | None = None, object_name: str | None = None
+) -> str:
+    import pandas as pd
+
+    df = read_ledger_from_gcs(bucket_name=bucket_name, object_name=object_name)
+    new = pd.DataFrame([row])
+    if "job_id" in df.columns and "job_id" in new.columns:
+        df = df[df["job_id"] != new.iloc[0]["job_id"]]
+    out = pd.concat([df, new], ignore_index=True)
+    return save_ledger_to_gcs(
+        out, bucket_name=bucket_name, object_name=object_name
+    )
+
+
 def read_status_json(bucket_name: str, prefix: str) -> Optional[dict]:
     try:
         client = storage.Client()
@@ -336,6 +407,9 @@ def build_job_config_from_params(
             if s.strip()
         ],
         "timestamp": timestamp,
+        "dep_var": str(params.get("dep_var", "UPLOAD_VALUE")),  # NEW
+        "date_var": str(params.get("date_var", "date")),  # NEW
+        "adstock": str(params.get("adstock", "geometric")),  # NEW
         "use_parquet": True,
         "parallel_processing": True,
         "max_cores": 8,

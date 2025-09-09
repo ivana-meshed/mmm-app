@@ -41,6 +41,9 @@ from app_shared import (
     get_data_processor,
     _fmt_secs,
     _connect_snowflake,  # use shared connector for consistency with ensure_sf_conn
+    read_ledger_from_gcs,
+    save_ledger_to_gcs,
+    append_row_to_ledger,
 )
 
 # Instantiate shared resources
@@ -218,6 +221,9 @@ def params_from_ui(
     gcs_bucket,
     table,
     query,
+    dep_var,
+    date_var,
+    adstock,
 ) -> dict:
     return {
         "country": country,
@@ -234,6 +240,9 @@ def params_from_ui(
         "gcs_bucket": gcs_bucket,
         "table": table,
         "query": query,
+        "dep_var": dep_var,
+        "date_var": date_var,
+        "adstock": adstock,
     }
 
 
@@ -270,9 +279,10 @@ def maybe_refresh_queue_from_gcs(force: bool = False):
 # UI layout
 # ─────────────────────────────
 st.title("Robyn MMM Trainer")
-tab_conn, tab_train = st.tabs(
-    ["1) Snowflake Connection", "2) Configure & Train Models"]
+tab_conn, tab_single, tab_queue = st.tabs(
+    ["1) Snowflake Connection", "2) Single Job Training", "3) Queue Training"]
 )
+
 
 # Auto-load persisted queue once per session (per queue_name)
 if not st.session_state.queue_loaded_from_gcs:
@@ -398,7 +408,7 @@ with tab_conn:
         st.info("Not connected. Fill the form above and click **Connect**.")
 
 # ============= TAB 2: Configure & Train =============
-with tab_train:
+with tab_single:
     st.subheader("Robyn configuration & training")
     if not st.session_state.sf_connected:
         st.warning("Please connect to Snowflake in tab 1 first.")
@@ -429,6 +439,22 @@ with tab_train:
         train_size = st.text_input("Train size", value="0.7,0.9")
         revision = st.text_input("Revision tag", value="r100")
         date_input = st.text_input("Date tag", value=time.strftime("%Y-%m-%d"))
+        dep_var = st.text_input(
+            "dep_var",
+            value="UPLOAD_VALUE",
+            help="Dependent variable column in your data (e.g., UPLOAD_VALUE)",
+        )
+        date_var = st.text_input(
+            "date_var",
+            value="date",
+            help="Date column in your data (e.g., date)",
+        )
+        adstock = st.selectbox(
+            "adstock",
+            options=["geometric", "weibull_cdf", "weibull_pdf"],
+            index=0,
+            help="Robyn adstock function",
+        )
 
     # Variables
     with st.expander("Variable mapping"):
@@ -476,6 +502,9 @@ with tab_train:
                 gcs_bucket,
                 table,
                 query,
+                dep_var,
+                date_var,
+                adstock,
             ),
             data_gcs_path,
             timestamp,
@@ -610,47 +639,59 @@ with tab_train:
             }
 
     # ===================== BATCH QUEUE (CSV) =====================
-    with st.expander(
-        "📚 Batch queue (CSV) — queue & run multiple jobs sequentially",
-        expanded=False,
-    ):
-        maybe_refresh_queue_from_gcs()
-        # Queue name + Load/Save
-        cqn1, cqn2, cqn3 = st.columns([2, 1, 1])
-        new_qname = cqn1.text_input(
-            "Queue name",
-            value=st.session_state["queue_name"],
-            help="Persists to GCS under robyn-queues/<name>/queue.json",
+    with tab_queue:
+        st.subheader(
+            "Batch queue (CSV) — queue & run multiple jobs sequentially",
+            expanded=False,
         )
-        if new_qname != st.session_state["queue_name"]:
-            st.session_state["queue_name"] = new_qname
-
-        if cqn2.button("⬇️ Load from GCS"):
-            payload = load_queue_payload(st.session_state.queue_name)
-            st.session_state.job_queue = payload["entries"]
-            st.session_state.queue_running = payload.get("queue_running", False)
-            st.session_state.queue_saved_at = payload.get("saved_at")
-            st.success(f"Loaded queue '{st.session_state.queue_name}' from GCS")
-
-        if cqn3.button("⬆️ Save to GCS"):
-            st.session_state.queue_saved_at = save_queue_to_gcs(
-                st.session_state.queue_name,
-                st.session_state.job_queue,
-                queue_running=st.session_state.queue_running,
+        with st.expander(
+            "📚 Batch queue (CSV) — queue & run multiple jobs sequentially",
+            expanded=False,
+        ):
+            maybe_refresh_queue_from_gcs()
+            # Queue name + Load/Save
+            cqn1, cqn2, cqn3 = st.columns([2, 1, 1])
+            new_qname = cqn1.text_input(
+                "Queue name",
+                value=st.session_state["queue_name"],
+                help="Persists to GCS under robyn-queues/<name>/queue.json",
             )
-            st.success(f"Saved queue '{st.session_state.queue_name}' to GCS")
+            if new_qname != st.session_state["queue_name"]:
+                st.session_state["queue_name"] = new_qname
 
-        st.markdown(
-            """
+            if cqn2.button("⬇️ Load from GCS"):
+                payload = load_queue_payload(st.session_state.queue_name)
+                st.session_state.job_queue = payload["entries"]
+                st.session_state.queue_running = payload.get(
+                    "queue_running", False
+                )
+                st.session_state.queue_saved_at = payload.get("saved_at")
+                st.success(
+                    f"Loaded queue '{st.session_state.queue_name}' from GCS"
+                )
+
+            if cqn3.button("⬆️ Save to GCS"):
+                st.session_state.queue_saved_at = save_queue_to_gcs(
+                    st.session_state.queue_name,
+                    st.session_state.job_queue,
+                    queue_running=st.session_state.queue_running,
+                )
+                st.success(
+                    f"Saved queue '{st.session_state.queue_name}' to GCS"
+                )
+
+            st.markdown(
+                """
 Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country`, `revision`, and data source):
 
 - `country`, `revision`, `date_input`, `iterations`, `trials`, `train_size`
 - `paid_media_spends`, `paid_media_vars`, `context_vars`, `factor_vars`, `organic_vars`
+- `dep_var`, `date_var`, `adstock`
 - `gcs_bucket` (optional override per row)
 - **Data**: one of `query` **or** `table`
 - `annotations_gcs_path` (optional gs:// path)
             """
-        )
+            )
 
         # Template & Example CSVs
         template = pd.DataFrame(
@@ -692,6 +733,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "gcs_bucket": st.session_state["gcs_bucket"],
                     "table": "MESHED_BUYCYCLE.GROWTH.TABLE_A",
                     "query": "",
+                    "dep_var": "UPLOAD_VALUE",
+                    "date_var": "date",
+                    "adstock": "geometric",
                     "annotations_gcs_path": "",
                 },
                 {
@@ -709,6 +753,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "gcs_bucket": st.session_state["gcs_bucket"],
                     "table": "",
                     "query": "SELECT * FROM MESHED_BUYCYCLE.GROWTH.TABLE_B WHERE COUNTRY='DE'",
+                    "dep_var": "UPLOAD_VALUE",
+                    "date_var": "date",
+                    "adstock": "geometric",
                     "annotations_gcs_path": "",
                 },
             ]
@@ -763,6 +810,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 ),
                 "table": str(_g("table", table or "")),
                 "query": str(_g("query", query or "")),
+                "dep_var": str(_g("dep_var", dep_var)),
+                "date_var": str(_g("date_var", date_var)),
+                "adstock": str(_g("adstock", adstock)),
                 "annotations_gcs_path": str(_g("annotations_gcs_path", "")),
             }
 
@@ -921,6 +971,46 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     )
                 st.success("Queue updated.")
                 st.rerun()
+        with st.expander("📊 Jobs Ledger (from GCS)", expanded=False):
+            try:
+                df_ledger = read_ledger_from_gcs(
+                    st.session_state.get("gcs_bucket", GCS_BUCKET)
+                )
+            except Exception as e:
+                st.error(f"Failed to read ledger from GCS: {e}")
+                df_ledger = None
+
+            if df_ledger is None:
+                st.info("No ledger available yet.")
+            else:
+                st.caption(
+                    "Append rows directly and click **Save to GCS** to persist."
+                )
+                edited = st.data_editor(
+                    df_ledger,
+                    num_rows="dynamic",  # lets you add rows inline
+                    use_container_width=True,
+                )
+                c1, c2 = st.columns(2)
+                if c1.button("💾 Save ledger to GCS"):
+                    try:
+                        save_ledger_to_gcs(
+                            edited,
+                            st.session_state.get("gcs_bucket", GCS_BUCKET),
+                        )
+                        st.success("Ledger saved to GCS.")
+                    except Exception as e:
+                        st.error(f"Failed to save ledger: {e}")
+                if c2.button("➕ Append last row to ledger"):
+                    try:
+                        if not edited.empty:
+                            append_row_to_ledger(
+                                edited.iloc[-1].to_dict(),
+                                st.session_state.get("gcs_bucket", GCS_BUCKET),
+                            )
+                            st.success("Appended last row to ledger on GCS.")
+                    except Exception as e:
+                        st.error(f"Append failed: {e}")
 
     # ─────────────────────────────
     # Queue worker (state machine)
