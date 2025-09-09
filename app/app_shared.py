@@ -1,7 +1,13 @@
 # app_shared.py — shared helpers for Robyn Streamlit app
 import os, io, json, time
 from datetime import datetime, timezone
-from typing import Optional, List, Dict
+
+# add to the existing imports at the top of app_shared.py
+from typing import Optional, List, Dict, Any
+from contextlib import contextmanager
+import logging
+
+logger = logging.getLogger(__name__)
 
 import pandas as pd
 import streamlit as st
