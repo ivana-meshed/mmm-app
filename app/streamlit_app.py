@@ -50,6 +50,8 @@ from app_shared import (
 data_processor = get_data_processor()
 job_manager = get_job_manager()
 
+TERMINAL_STATES = {"SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"}
+
 # ─────────────────────────────
 # Page & logging setup
 # ─────────────────────────────
@@ -250,6 +252,7 @@ def _empty_ledger_df() -> pd.DataFrame:
     # Matches fields written by run_all.R::append_to_ledger()
     cols = [
         "job_id",
+        "exec_name",
         "state",
         "country",
         "revision",
@@ -1174,6 +1177,7 @@ def _queue_tick():
     changed = False
 
     # 1) Update RUNNING job status (if any)
+
     running = [e for e in q if e["status"] == "RUNNING"]
     if running:
         entry = running[0]
@@ -1181,29 +1185,99 @@ def _queue_tick():
             status_info = job_manager.get_execution_status(
                 entry["execution_name"]
             )
-            s = status_info.get("overall_status")
-            if s in (
-                "SUCCEEDED",
-                "FAILED",
-                "CANCELLED",
-                "COMPLETED",
-                "ERROR",
-            ):
-                entry["status"] = (
+            s = (status_info.get("overall_status") or "").upper()
+
+            if s in TERMINAL_STATES:
+                # normalize COMPLETED -> SUCCEEDED for readability
+                final_state = (
                     "SUCCEEDED" if s in ("SUCCEEDED", "COMPLETED") else s
                 )
-                entry["message"] = status_info.get("error", "") or s
-                changed = True
-            return (
-                save_queue_to_gcs(st.session_state.queue_name, q)
-                if changed
-                else None
+                entry["status"] = final_state
+                entry["message"] = status_info.get("error", "") or final_state
+
+                # build ledger row
+                now_iso = datetime.utcnow().isoformat()
+                start_iso = entry.get("start_time")
+                try:
+                    duration_minutes = (
+                        round(
+                            (
+                                datetime.fromisoformat(now_iso)
+                                - datetime.fromisoformat(start_iso)
+                            ).total_seconds()
+                            / 60.0,
+                            2,
+                        )
+                        if start_iso
+                        else None
+                    )
+                except Exception:
+                    duration_minutes = None
+
+                params = entry.get("params", {})
+                row = {
+                    "job_id": entry.get("id"),
+                    "exec_name": entry.get(
+                        "execution_name", ""
+                    ),  # save exec name
+                    "state": final_state,
+                    "country": params.get("country"),
+                    "revision": params.get("revision"),
+                    "date_input": params.get("date_input"),
+                    "iterations": params.get("iterations"),
+                    "trials": params.get("trials"),
+                    "train_size": params.get("train_size"),
+                    "dep_var": params.get("dep_var"),
+                    "adstock": params.get("adstock"),
+                    "start_time": start_iso,
+                    "end_time": now_iso,
+                    "duration_minutes": duration_minutes,
+                    "gcs_prefix": entry.get("gcs_prefix"),
+                    "bucket": params.get("gcs_bucket")
+                    or st.session_state.get("gcs_bucket", GCS_BUCKET),
+                }
+
+                try:
+                    append_row_to_ledger(
+                        row, st.session_state.get("gcs_bucket", GCS_BUCKET)
+                    )
+                    # remove finished job from queue
+                    st.session_state.job_queue = [
+                        e
+                        for e in st.session_state.job_queue
+                        if e.get("id") != entry.get("id")
+                    ]
+                except Exception as e:
+                    # If ledger write fails, we keep it in queue but mark error.
+                    # (If you want to remove even on ledger error, delete the 'except' body.)
+                    entry["message"] = (
+                        f"{final_state}; ledger append failed: {e}"
+                    )
+
+                st.session_state.queue_saved_at = save_queue_to_gcs(
+                    st.session_state.queue_name,
+                    st.session_state.job_queue,
+                    queue_running=st.session_state.queue_running,
+                )
+                return
+
+            # Not terminal yet: persist any change
+            st.session_state.queue_saved_at = save_queue_to_gcs(
+                st.session_state.queue_name,
+                q,
+                queue_running=st.session_state.queue_running,
             )
+            return
+
         except Exception as e:
             entry["status"] = "ERROR"
             entry["message"] = str(e)
-            changed = True
-            return save_queue_to_gcs(st.session_state.queue_name, q)
+            st.session_state.queue_saved_at = save_queue_to_gcs(
+                st.session_state.queue_name,
+                q,
+                queue_running=st.session_state.queue_running,
+            )
+            return
 
     # 2) If no RUNNING job and queue_running, launch next PENDING
     if st.session_state.queue_running:
@@ -1219,6 +1293,7 @@ def _queue_tick():
             entry["gcs_prefix"] = exec_info["gcs_prefix"]
             entry["status"] = "RUNNING"
             entry["message"] = "Launched"
+            entry["start_time"] = datetime.utcnow().isoformat()
             st.session_state.job_executions.append(exec_info)
             changed = True
         except Exception as e:
