@@ -246,6 +246,53 @@ def params_from_ui(
     }
 
 
+def render_jobs_ledger(key_prefix: str = "single") -> None:
+    """Render the Jobs Ledger editor/viewer.
+    key_prefix makes widget keys unique when used in multiple tabs.
+    """
+    with st.expander("📊 Jobs Ledger (from GCS)", expanded=False):
+        try:
+            df_ledger = read_ledger_from_gcs(
+                st.session_state.get("gcs_bucket", GCS_BUCKET)
+            )
+        except Exception as e:
+            st.error(f"Failed to read ledger from GCS: {e}")
+            return
+
+        if df_ledger is None or df_ledger.empty:
+            st.info("No ledger available yet.")
+            return
+
+        st.caption("Append rows directly and click **Save to GCS** to persist.")
+        edited = st.data_editor(
+            df_ledger,
+            num_rows="dynamic",
+            use_container_width=True,
+            key=f"ledger_editor_{key_prefix}",
+        )
+        c1, c2 = st.columns(2)
+        if c1.button("💾 Save ledger to GCS", key=f"save_ledger_{key_prefix}"):
+            try:
+                save_ledger_to_gcs(
+                    edited, st.session_state.get("gcs_bucket", GCS_BUCKET)
+                )
+                st.success("Ledger saved to GCS.")
+            except Exception as e:
+                st.error(f"Failed to save ledger: {e}")
+        if c2.button(
+            "➕ Append last row to ledger", key=f"append_ledger_{key_prefix}"
+        ):
+            try:
+                if not edited.empty:
+                    append_row_to_ledger(
+                        edited.iloc[-1].to_dict(),
+                        st.session_state.get("gcs_bucket", GCS_BUCKET),
+                    )
+                    st.success("Appended last row to ledger on GCS.")
+            except Exception as e:
+                st.error(f"Append failed: {e}")
+
+
 def set_queue_running(
     queue_name: str, running: bool, bucket_name: Optional[str] = None
 ) -> None:
@@ -639,48 +686,42 @@ with tab_single:
             }
 
     # ===================== BATCH QUEUE (CSV) =====================
-    with tab_queue:
-        st.subheader(
-            "Batch queue (CSV) — queue & run multiple jobs sequentially",
+with tab_queue:
+    st.subheader(
+        "Batch queue (CSV) — queue & run multiple jobs sequentially",
+    )
+    with st.expander(
+        "📚 Batch queue (CSV) — queue & run multiple jobs sequentially",
+        expanded=False,
+    ):
+        maybe_refresh_queue_from_gcs()
+        # Queue name + Load/Save
+        cqn1, cqn2, cqn3 = st.columns([2, 1, 1])
+        new_qname = cqn1.text_input(
+            "Queue name",
+            value=st.session_state["queue_name"],
+            help="Persists to GCS under robyn-queues/<name>/queue.json",
         )
-        with st.expander(
-            "📚 Batch queue (CSV) — queue & run multiple jobs sequentially",
-            expanded=False,
-        ):
-            maybe_refresh_queue_from_gcs()
-            # Queue name + Load/Save
-            cqn1, cqn2, cqn3 = st.columns([2, 1, 1])
-            new_qname = cqn1.text_input(
-                "Queue name",
-                value=st.session_state["queue_name"],
-                help="Persists to GCS under robyn-queues/<name>/queue.json",
+        if new_qname != st.session_state["queue_name"]:
+            st.session_state["queue_name"] = new_qname
+
+        if cqn2.button("⬇️ Load from GCS"):
+            payload = load_queue_payload(st.session_state.queue_name)
+            st.session_state.job_queue = payload["entries"]
+            st.session_state.queue_running = payload.get("queue_running", False)
+            st.session_state.queue_saved_at = payload.get("saved_at")
+            st.success(f"Loaded queue '{st.session_state.queue_name}' from GCS")
+
+        if cqn3.button("⬆️ Save to GCS"):
+            st.session_state.queue_saved_at = save_queue_to_gcs(
+                st.session_state.queue_name,
+                st.session_state.job_queue,
+                queue_running=st.session_state.queue_running,
             )
-            if new_qname != st.session_state["queue_name"]:
-                st.session_state["queue_name"] = new_qname
+            st.success(f"Saved queue '{st.session_state.queue_name}' to GCS")
 
-            if cqn2.button("⬇️ Load from GCS"):
-                payload = load_queue_payload(st.session_state.queue_name)
-                st.session_state.job_queue = payload["entries"]
-                st.session_state.queue_running = payload.get(
-                    "queue_running", False
-                )
-                st.session_state.queue_saved_at = payload.get("saved_at")
-                st.success(
-                    f"Loaded queue '{st.session_state.queue_name}' from GCS"
-                )
-
-            if cqn3.button("⬆️ Save to GCS"):
-                st.session_state.queue_saved_at = save_queue_to_gcs(
-                    st.session_state.queue_name,
-                    st.session_state.job_queue,
-                    queue_running=st.session_state.queue_running,
-                )
-                st.success(
-                    f"Saved queue '{st.session_state.queue_name}' to GCS"
-                )
-
-            st.markdown(
-                """
+        st.markdown(
+            """
 Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country`, `revision`, and data source):
 
 - `country`, `revision`, `date_input`, `iterations`, `trials`, `train_size`
@@ -690,7 +731,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 - **Data**: one of `query` **or** `table`
 - `annotations_gcs_path` (optional gs:// path)
             """
-            )
+        )
 
         # Template & Example CSVs
         template = pd.DataFrame(
@@ -970,46 +1011,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     )
                 st.success("Queue updated.")
                 st.rerun()
-        with st.expander("📊 Jobs Ledger (from GCS)", expanded=False):
-            try:
-                df_ledger = read_ledger_from_gcs(
-                    st.session_state.get("gcs_bucket", GCS_BUCKET)
-                )
-            except Exception as e:
-                st.error(f"Failed to read ledger from GCS: {e}")
-                df_ledger = None
-
-            if df_ledger is None:
-                st.info("No ledger available yet.")
-            else:
-                st.caption(
-                    "Append rows directly and click **Save to GCS** to persist."
-                )
-                edited = st.data_editor(
-                    df_ledger,
-                    num_rows="dynamic",  # lets you add rows inline
-                    use_container_width=True,
-                )
-                c1, c2 = st.columns(2)
-                if c1.button("💾 Save ledger to GCS"):
-                    try:
-                        save_ledger_to_gcs(
-                            edited,
-                            st.session_state.get("gcs_bucket", GCS_BUCKET),
-                        )
-                        st.success("Ledger saved to GCS.")
-                    except Exception as e:
-                        st.error(f"Failed to save ledger: {e}")
-                if c2.button("➕ Append last row to ledger"):
-                    try:
-                        if not edited.empty:
-                            append_row_to_ledger(
-                                edited.iloc[-1].to_dict(),
-                                st.session_state.get("gcs_bucket", GCS_BUCKET),
-                            )
-                            st.success("Appended last row to ledger on GCS.")
-                    except Exception as e:
-                        st.error(f"Append failed: {e}")
+        render_jobs_ledger(key_prefix="queue")
 
     # ─────────────────────────────
     # Queue worker (state machine)
@@ -1138,6 +1140,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         st.info(
             "No jobs launched yet in this session. Use single-run or batch queue above."
         )
+    render_jobs_ledger(key_prefix="single")
 
     # ─────────────────────────────
     # Execution timeline & timings.csv (single latest)
