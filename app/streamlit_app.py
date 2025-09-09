@@ -830,27 +830,36 @@ with tab_conn:
         c1, c2 = st.columns(2)
         with c1:
             sf_user = st.text_input(
-                "User", value=(st.session_state.sf_params or {}).get("user", "")
+                "User",
+                value=(st.session_state.sf_params or {}).get("user", "")
+                or os.getenv("SF_USER"),
             )
             sf_account = st.text_input(
                 "Account",
-                value=(st.session_state.sf_params or {}).get("account", ""),
+                value=(st.session_state.sf_params or {}).get("account", "")
+                or os.getenv("SF_ACCOUNT"),
             )
             sf_wh = st.text_input(
                 "Warehouse",
-                value=(st.session_state.sf_params or {}).get("warehouse", ""),
+                value=(st.session_state.sf_params or {}).get("warehouse", "")
+                or os.getenv("SF_WAREHOUSE"),
             )
             sf_db = st.text_input(
                 "Database",
-                value=(st.session_state.sf_params or {}).get("database", ""),
+                value=(st.session_state.sf_params or {}).get("database", "")
+                or os.getenv("SF_DATABASE"),
             )
         with c2:
             sf_schema = st.text_input(
                 "Schema",
-                value=(st.session_state.sf_params or {}).get("schema", ""),
+                value=(st.session_state.sf_params or {}).get("schema", "")
+                or os.getenv("SF_SCHEMA"),
             )
             sf_role = st.text_input(
-                "Role", value=(st.session_state.sf_params or {}).get("role", "")
+                "Role",
+                value=(st.session_state.sf_params or {}).get(
+                    "role" or os.getenv("SF_ROLE"), ""
+                ),
             )
             sf_password = st.text_input("Password", type="password")
 
