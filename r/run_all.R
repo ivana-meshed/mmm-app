@@ -244,6 +244,55 @@ get_cfg_from_env <- function() {
   jsonlite::fromJSON(tmp)
 }
 
+## ---------- JOBS LEDGER (GCS) ----------
+get_ledger_object <- function() {
+  # object path inside bucket (not gs://)
+  obj <- Sys.getenv("JOBS_LEDGER_OBJECT", unset = "robyn-jobs/ledger.csv")
+  if (nzchar(obj)) {
+    return(obj)
+  } else {
+    return("robyn-jobs/ledger.csv")
+  }
+}
+
+append_to_ledger <- function(row) {
+  ensure_gcs_auth()
+  ledger_obj <- get_ledger_object()
+  tmp_csv <- file.path(tempdir(), "jobs_ledger.csv")
+  had <- FALSE
+  ok <- tryCatch(
+    {
+      googleCloudStorageR::gcs_get_object(
+        object_name = ledger_obj,
+        bucket = googleCloudStorageR::gcs_get_global_bucket(),
+        saveToDisk = tmp_csv, overwrite = TRUE
+      )
+      TRUE
+    },
+    error = function(e) FALSE
+  )
+  df_old <- NULL
+  if (ok && file.exists(tmp_csv)) {
+    had <- TRUE
+    df_old <- try(readr::read_csv(tmp_csv, show_col_types = FALSE), silent = TRUE)
+    if (inherits(df_old, "try-error")) df_old <- NULL
+  }
+  df_new <- as.data.frame(row, stringsAsFactors = FALSE)
+  if (!is.null(df_old) && nrow(df_old)) {
+    if ("job_id" %in% names(df_old)) {
+      df_old <- df_old[df_old$job_id != row$job_id, , drop = FALSE]
+    }
+    out <- dplyr::bind_rows(df_old, df_new)
+  } else {
+    out <- df_new
+  }
+  if ("start_time" %in% names(out)) out <- out[order(as.POSIXct(out$start_time), decreasing = TRUE), , drop = FALSE]
+  readr::write_csv(out, tmp_csv, na = "")
+  gcs_put_safe(tmp_csv, ledger_obj)
+  invisible(TRUE)
+}
+
+
 ## ---------- SMART SPEND FORECAST (weekly -> daily) ----------
 build_spend_forecast <- function(dt_input, spend_cols, horizon_months = 3,
                                  monthly_targets = NULL) {
@@ -420,6 +469,12 @@ iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
 timestamp <- cfg$timestamp %||% format(Sys.time(), "%m%d_%H%M%S")
+## ---------- DYNAMIC VARS FROM CFG ----------
+# Make dependent variable, date column, and adstock configurable
+dep_var <- toupper(cfg$dep_var %||% "UPLOAD_VALUE")
+adstock <- tolower(cfg$adstock %||% "geometric")
+date_col_cfg <- cfg$date_var %||% "DATE"
+date_col <- toupper(date_col_cfg)
 
 dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
@@ -430,6 +485,25 @@ job_started <- Sys.time()
 status_json <- file.path(dir_path, "status.json")
 writeLines(jsonlite::toJSON(list(state = "RUNNING", start_time = as.character(job_started)), auto_unbox = TRUE), status_json)
 gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+
+# status.json (RUNNING) already written above
+try(append_to_ledger(list(
+  job_id = gcs_prefix,
+  state = "RUNNING",
+  country = country,
+  revision = revision,
+  date_input = date_input,
+  iterations = iter,
+  trials = trials,
+  train_size = paste(train_size, collapse = ","),
+  dep_var = dep_var,
+  adstock = adstock,
+  start_time = as.character(job_started),
+  end_time = NA,
+  duration_minutes = NA,
+  gcs_prefix = gcs_prefix,
+  bucket = googleCloudStorageR::gcs_get_global_bucket()
+)), silent = TRUE)
 
 ## ---------- START LOG ----------
 log_file <- file.path(dir_path, "robyn_console.log")
@@ -494,15 +568,17 @@ df <- as.data.frame(df)
 names(df) <- toupper(names(df))
 
 ## ---------- DATE & CLEAN ----------
-if ("DATE" %in% names(df)) {
-  df$date <- if (inherits(df$DATE, "POSIXt")) as.Date(df$DATE) else as.Date(as.character(df$DATE))
-  df$DATE <- NULL
-} else if ("date" %in% names(df)) {
-  df$date <- as.Date(df[["date"]])
-  df[["date"]] <- NULL
-} else {
-  stop("No DATE/date column in data")
+## ---------- DATE & CLEAN ----------
+# Normalize date column from configurable `date_col`
+if (!(date_col %in% names(df))) {
+  stop("Date column not found in data: ", date_col, " (after uppercasing names)")
 }
+if (inherits(df[[date_col]], "POSIXt")) {
+  df$date <- as.Date(df[[date_col]])
+} else {
+  df$date <- as.Date(as.character(df[[date_col]]))
+}
+if (date_col %in% names(df)) df[[date_col]] <- NULL
 
 df <- filter_by_country(df, country)
 
@@ -588,7 +664,8 @@ cat(
 InputCollect <- robyn_inputs(
   dt_input          = df,
   date_var          = "date",
-  dep_var           = "UPLOAD_VALUE",
+  dep_var           = dep_var,
+  adstock           = adstock,
   dep_var_type      = "revenue",
   prophet_vars      = c("trend", "season", "holiday", "weekday"),
   prophet_country   = toupper(country),
@@ -599,7 +676,6 @@ InputCollect <- robyn_inputs(
   organic_vars      = organic_vars,
   window_start      = start_data_date,
   window_end        = end_data_date,
-  adstock           = "geometric"
 )
 
 alloc_end <- max(InputCollect$dt_input$date)
@@ -1031,4 +1107,64 @@ writeLines(
   ),
   status_json
 )
+try(append_to_ledger(list(
+  job_id = gcs_prefix,
+  state = "SUCCEEDED",
+  country = country,
+  revision = revision,
+  date_input = date_input,
+  iterations = iter,
+  trials = trials,
+  train_size = paste(train_size, collapse = ","),
+  dep_var = dep_var,
+  adstock = adstock,
+  start_time = as.character(job_started),
+  end_time = as.character(job_finished),
+  duration_minutes = round(as.numeric(difftime(job_finished, job_started, units = "mins")), 2),
+  gcs_prefix = gcs_prefix,
+  bucket = googleCloudStorageR::gcs_get_global_bucket()
+)), silent = TRUE)
+
+options(error = function(e) {
+  traceback()
+  message("FATAL ERROR: ", conditionMessage(e))
+  # Attempt to write FAILED status + ledger
+  try(
+    {
+      job_finished <- Sys.time()
+      status_json <- status_json %||% file.path(tempdir(), "status.json")
+      writeLines(jsonlite::toJSON(list(
+        state = "FAILED",
+        start_time = as.character(job_started %||% NA),
+        end_time = as.character(job_finished),
+        error = conditionMessage(e)
+      ), auto_unbox = TRUE), status_json)
+      if (!is.null(gcs_prefix)) gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+      # Ledger FAILED
+      if (!is.null(gcs_prefix)) {
+        try(append_to_ledger(list(
+          job_id = gcs_prefix,
+          state = "FAILED",
+          country = country %||% NA,
+          revision = revision %||% NA,
+          date_input = date_input %||% NA,
+          iterations = iter %||% NA,
+          trials = trials %||% NA,
+          train_size = paste(train_size, collapse = ",") %||% NA,
+          dep_var = dep_var %||% NA,
+          adstock = adstock %||% NA,
+          start_time = as.character(job_started %||% NA),
+          end_time = as.character(job_finished),
+          duration_minutes = NA,
+          gcs_prefix = gcs_prefix %||% NA,
+          bucket = googleCloudStorageR::gcs_get_global_bucket()
+        )), silent = TRUE)
+      }
+    },
+    silent = TRUE
+  )
+  cleanup()
+  quit(status = 1)
+})
+
 gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
