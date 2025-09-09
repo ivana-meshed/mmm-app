@@ -6,12 +6,14 @@ import pandas as pd
 import streamlit as st
 from google.cloud import storage
 
-# Reuse helpers from main app
-from streamlit_app import (
+from app_shared import (
     PROJECT_ID, REGION, TRAINING_JOB_NAME,
-    data_processor, job_manager, effective_sql, timed_step,
-    upload_to_gcs, build_job_config_from_params, run_sql
+    get_data_processor, get_job_manager,
+    effective_sql, timed_step, upload_to_gcs, build_job_config_from_params, run_sql
 )
+
+data_processor = get_data_processor()
+job_manager = get_job_manager()
 
 st.set_page_config(page_title="Robyn — Single Training", layout="wide")
 st.title("🎯 Single Training Run")
