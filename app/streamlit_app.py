@@ -246,22 +246,42 @@ def params_from_ui(
     }
 
 
+def _empty_ledger_df() -> pd.DataFrame:
+    # Matches fields written by run_all.R::append_to_ledger()
+    cols = [
+        "job_id",
+        "state",
+        "country",
+        "revision",
+        "date_input",
+        "iterations",
+        "trials",
+        "train_size",
+        "dep_var",
+        "adstock",
+        "start_time",
+        "end_time",
+        "duration_minutes",
+        "gcs_prefix",
+        "bucket",
+    ]
+    return pd.DataFrame(columns=cols)
+
+
 def render_jobs_ledger(key_prefix: str = "single") -> None:
-    """Render the Jobs Ledger editor/viewer.
-    key_prefix makes widget keys unique when used in multiple tabs.
-    """
-    with st.expander("📊 Jobs Ledger (from GCS)", expanded=False):
+    """Render the Jobs Ledger editor/viewer (always editable, even if empty)."""
+    with st.expander("📚 Jobs Ledger (from GCS)", expanded=False):
         try:
             df_ledger = read_ledger_from_gcs(
                 st.session_state.get("gcs_bucket", GCS_BUCKET)
             )
         except Exception as e:
             st.error(f"Failed to read ledger from GCS: {e}")
-            return
+            df_ledger = None
 
         if df_ledger is None or df_ledger.empty:
-            st.info("No ledger available yet.")
-            return
+            st.info("Ledger is empty — add a row below and save to create it.")
+            df_ledger = _empty_ledger_df()
 
         st.caption("Append rows directly and click **Save to GCS** to persist.")
         edited = st.data_editor(
@@ -291,6 +311,99 @@ def render_jobs_ledger(key_prefix: str = "single") -> None:
                     st.success("Appended last row to ledger on GCS.")
             except Exception as e:
                 st.error(f"Append failed: {e}")
+
+
+def render_job_status_monitor(key_prefix: str = "single") -> None:
+    """Status UI usable in both tabs, even without a session job."""
+    st.subheader("📊 Job Status Monitor")
+
+    # Prefer the latest session execution if present; allow manual input always.
+    default_exec = (
+        (st.session_state.job_executions[-1]["execution_name"])
+        if st.session_state.get("job_executions")
+        else ""
+    )
+    exec_name = st.text_input(
+        "Execution resource name (paste one to check any run)",
+        value=default_exec,
+        key=f"exec_input_{key_prefix}",
+    )
+
+    if st.button("🔍 Check Status", key=f"check_status_{key_prefix}"):
+        if not exec_name:
+            st.warning("Paste an execution resource name to check.")
+        else:
+            try:
+                status_info = job_manager.get_execution_status(exec_name)
+                st.json(status_info)
+            except Exception as e:
+                st.error(f"Status check failed: {e}")
+
+    # Quick results/log viewer driven by the ledger (no execution name required)
+    with st.expander("📁 View Results (pick from ledger)", expanded=False):
+        try:
+            df_led = read_ledger_from_gcs(
+                st.session_state.get("gcs_bucket", GCS_BUCKET)
+            )
+        except Exception as e:
+            st.error(f"Failed to read ledger: {e}")
+            df_led = None
+
+        if df_led is None or df_led.empty or "gcs_prefix" not in df_led.columns:
+            st.info("No ledger entries with results yet.")
+        else:
+            df_led = df_led.copy()
+
+            # Build readable labels
+            def _label(r):
+                return f"[{r.get('state','?')}] {r.get('country','?')}/{r.get('revision','?')} · {r.get('gcs_prefix','—')}"
+
+            df_led["__label__"] = df_led.apply(_label, axis=1)
+            idx = st.selectbox(
+                "Pick a job",
+                options=list(df_led.index),
+                format_func=lambda i: df_led.loc[i, "__label__"],
+                key=f"ledger_pick_{key_prefix}",
+            )
+            row = df_led.loc[idx]
+            bucket_view = row.get(
+                "bucket", st.session_state.get("gcs_bucket", GCS_BUCKET)
+            )
+            gcs_prefix_view = row.get("gcs_prefix")
+            if gcs_prefix_view:
+                st.info(
+                    f"Results location: gs://{bucket_view}/{gcs_prefix_view}/"
+                )
+                try:
+                    client = storage.Client()
+                    bucket_obj = client.bucket(bucket_view)
+                    log_blob = bucket_obj.blob(
+                        f"{gcs_prefix_view}/robyn_console.log"
+                    )
+                    if log_blob.exists():
+                        log_bytes = log_blob.download_as_bytes()
+                        tail = (
+                            log_bytes[-2000:]
+                            if len(log_bytes) > 2000
+                            else log_bytes
+                        )
+                        st.text_area(
+                            "Training Log (last 2000 chars):",
+                            value=tail.decode("utf-8", errors="replace"),
+                            height=240,
+                            key=f"log_tail_{key_prefix}",
+                        )
+                        st.download_button(
+                            "Download full training log",
+                            data=log_bytes,
+                            file_name=f"robyn_training_{row.get('job_id','')}.log",
+                            mime="text/plain",
+                            key=f"dl_log_{key_prefix}",
+                        )
+                    else:
+                        st.info("Training log not yet available for this job.")
+                except Exception as e:
+                    st.warning(f"Could not fetch training log: {e}")
 
 
 def set_queue_running(
@@ -686,6 +799,7 @@ with tab_single:
             }
 
     render_jobs_ledger(key_prefix="single")
+    render_job_status_monitor(key_prefix="single")
 
     # ===================== BATCH QUEUE (CSV) =====================
 with tab_queue:
@@ -1014,64 +1128,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.success("Queue updated.")
                 st.rerun()
     render_jobs_ledger(key_prefix="queue")
-
-    # ─────────────────────────────
-    # Queue worker (state machine)
-    # ─────────────────────────────
-
-    # ─────────────────────────────
-    # Job Status Monitor (latest single-run)
-    # ─────────────────────────────
-    st.subheader("📊 Job Status Monitor")
-    if st.session_state.job_executions:
-        latest_job = st.session_state.job_executions[-1]
-        execution_name = latest_job["execution_name"]
-
-        if st.button("🔍 Check Status"):
-            status_info = job_manager.get_execution_status(execution_name)
-            st.json(status_info)
-            latest_job["status"] = status_info.get("overall_status", "UNKNOWN")
-            latest_job["last_checked"] = datetime.now().isoformat()
-
-        if st.button("📁 View Results"):
-            gcs_prefix_view = latest_job.get("gcs_prefix")
-            bucket_view = latest_job.get("gcs_bucket", GCS_BUCKET)
-            st.info(f"Check results at: gs://{bucket_view}/{gcs_prefix_view}/")
-            try:
-                client = storage.Client()
-                bucket_obj = client.bucket(bucket_view)
-                log_blob = bucket_obj.blob(
-                    f"{gcs_prefix_view}/robyn_console.log"
-                )
-                if log_blob.exists():
-                    log_bytes = log_blob.download_as_bytes()
-                    tail = (
-                        log_bytes[-2000:]
-                        if len(log_bytes) > 2000
-                        else log_bytes
-                    )
-                    st.text_area(
-                        "Training Log (last 2000 chars):",
-                        value=tail.decode("utf-8", errors="replace"),
-                        height=240,
-                    )
-                    st.download_button(
-                        "Download full training log",
-                        data=log_bytes,
-                        file_name=f"robyn_training_{latest_job.get('timestamp','')}.log",
-                        mime="text/plain",
-                        key=f"dl_log_{latest_job.get('timestamp','')}",
-                    )
-                else:
-                    st.info(
-                        "Training log not yet available. Check again after job completes."
-                    )
-            except Exception as e:
-                st.warning(f"Could not fetch training log: {e}")
-    else:
-        st.info(
-            "No jobs launched yet in this session. Use single-run or batch queue above."
-        )
+    render_job_status_monitor(key_prefix="queue")
 
     # ─────────────────────────────
     # Execution timeline & timings.csv (single latest)
