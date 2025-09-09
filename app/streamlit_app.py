@@ -17,12 +17,28 @@ from google.cloud import run_v2, storage
 
 from data_processor import DataProcessor
 from app_shared import (
-    PROJECT_ID, REGION, TRAINING_JOB_NAME, GCS_BUCKET,
-    timed_step, parse_train_size, effective_sql, _sf_params_from_env,
-    ensure_sf_conn, run_sql, upload_to_gcs, read_status_json,
-    build_job_config_from_params, _sanitize_queue_name, _queue_blob_path,
-    load_queue_from_gcs, save_queue_to_gcs, load_queue_payload, queue_tick_once_headless
+    PROJECT_ID,
+    REGION,
+    TRAINING_JOB_NAME,
+    GCS_BUCKET,
+    timed_step,
+    parse_train_size,
+    effective_sql,
+    _sf_params_from_env,
+    ensure_sf_conn,
+    run_sql,
+    upload_to_gcs,
+    read_status_json,
+    build_job_config_from_params,
+    _sanitize_queue_name,
+    _queue_blob_path,
+    load_queue_from_gcs,
+    save_queue_to_gcs,
+    load_queue_payload,
+    queue_tick_once_headless,
 )
+from app_shared import handle_queue_tick_from_query_params
+
 
 # ─────────────────────────────
 # Page & logging setup
@@ -111,9 +127,6 @@ st.session_state.setdefault("queue_loaded_from_gcs", False)
 # ─────────────────────────────
 
 
-
-
-
 def get_data_processor():
     return DataProcessor()
 
@@ -147,8 +160,6 @@ def _connect_snowflake(
 # --- Snowflake env-fallback (headless) ---
 
 
-
-
 def prepare_and_launch_job(params: dict) -> dict:
     """
     One complete job: query SF -> parquet -> upload -> write config (timestamped + latest) -> run Cloud Run Job.
@@ -164,7 +175,13 @@ def prepare_and_launch_job(params: dict) -> dict:
     gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
     timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
     gcs_prefix = f"robyn/{params['revision']}/{params['country']}/{timestamp}"
-
+    res = handle_queue_tick_from_query_params(
+        st.query_params, st.session_state.get("gcs_bucket", GCS_BUCKET)
+    )
+    if isinstance(res, dict) and res:
+        # Optional: only show output when the endpoint is actually used
+        st.write(res)
+        st.stop()
     with tempfile.TemporaryDirectory() as td:
         timings: List[dict] = []
         # 1) Query Snowflake
@@ -267,10 +284,6 @@ def params_from_ui(
     }
 
 
-
-
-
-
 def set_queue_running(
     queue_name: str, running: bool, bucket_name: Optional[str] = None
 ) -> None:
@@ -293,7 +306,6 @@ def set_queue_running(
 st.session_state.setdefault("queue_saved_at", None)
 
 
-
 def maybe_refresh_queue_from_gcs(force: bool = False):
     """Refresh local session state from GCS if remote changed (or force=True)."""
     payload = load_queue_payload(st.session_state.queue_name)
@@ -308,5 +320,3 @@ def maybe_refresh_queue_from_gcs(force: bool = False):
             "queue_running", st.session_state.get("queue_running", False)
         )
         st.session_state.queue_saved_at = remote_saved_at
-
-

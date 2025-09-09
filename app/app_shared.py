@@ -631,12 +631,36 @@ def queue_tick_once_headless(
 # ─────────────────────────────
 # Stateless queue tick endpoint (AFTER defs/constants)
 # ─────────────────────────────
-if query_params.get("queue_tick") == "1":
-    qname = query_params.get("name") or DEFAULT_QUEUE_NAME
-    bkt = query_params.get("bucket") or GCS_BUCKET
-    res = queue_tick_once_headless(qname, bucket_name=bkt)
-    st.json(res)
-    st.stop()
+def handle_queue_tick_from_query_params(
+    query_params: Dict[str, Any],
+    bucket_name: Optional[str] = None,
+) -> Optional[dict]:
+    """
+    If ?queue_tick=1 is present, process one headless queue tick and return the result.
+    Otherwise return None. Safe to call early in a Streamlit page.
+    """
+    if not query_params:
+        return None
+    # Streamlit's st.query_params is a Mapping; normalize to plain dict[str,str]
+    try:
+        qp = {
+            k: (v[0] if isinstance(v, list) else v)
+            for k, v in dict(query_params).items()
+        }
+    except Exception:
+        qp = dict(query_params)
+
+    if qp.get("queue_tick") != "1":
+        return None
+
+    qname = qp.get("name") or DEFAULT_QUEUE_NAME
+    bkt = bucket_name or st.session_state.get("gcs_bucket", GCS_BUCKET)
+    try:
+        return queue_tick_once_headless(qname, bkt)
+    except Exception as e:
+        logger.exception("queue_tick handler failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
 
 # ─────────────────────────────
 # UI layout: two tabs
