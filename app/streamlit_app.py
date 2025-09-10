@@ -45,6 +45,7 @@ from app_shared import (
     read_ledger_from_gcs,
     save_ledger_to_gcs,
     append_row_to_ledger,
+    _safe_tick_once,  # (kept for parity; not used below
 )
 
 # Instantiate shared resources
@@ -265,60 +266,19 @@ def render_jobs_ledger(key_prefix: str = "single") -> None:
             st.error(f"Failed to read ledger from GCS: {e}")
             return
 
-        # Force canonical order/shape before editing
+        # Force canonical order/shape
         df_ledger = df_ledger.reindex(columns=LEDGER_COLUMNS)
 
-        st.caption("Append rows directly and click **Save to GCS** to persist.")
-        locked = {
-            "job_id",
-            "bucket",
-            "gcs_prefix",
-            "exec_name",
-            "execution_name",
-            "start_time",
-            "end_time",
-            "duration_minutes",
-        }
-        col_cfg = {
-            c: st.column_config.TextColumn(disabled=True)
-            for c in locked
-            if c in df_ledger.columns
-        }
-        # If some are numeric, use NumberColumn; adjust as needed.
-
-        edited = st.data_editor(
-            df_ledger,
-            num_rows="dynamic",
-            width="stretch",
-            key=f"ledger_editor_{key_prefix}_{st.session_state.get('ledger_nonce', 0)}",
-            column_order=LEDGER_COLUMNS,
-            column_config=col_cfg,
+        st.caption(
+            "Ledger entries are view-only and auto-updated when jobs finish."
         )
-
-        c1, c2 = st.columns(2)
-        if c1.button("💾 Save ledger to GCS", key=f"save_ledger_{key_prefix}"):
-            try:
-                save_ledger_to_gcs(
-                    edited, st.session_state.get("gcs_bucket", GCS_BUCKET)
-                )
-                st.success("Ledger saved to GCS.")
-            except Exception as e:
-                st.error(f"Failed to save ledger: {e}")
-
-        if c2.button(
-            "🧹 Normalize & Save", key=f"normalize_ledger_{key_prefix}"
-        ):
-            try:
-                # Re-read, normalize, save
-                from app_shared import normalize_ledger_df, save_ledger_to_gcs
-
-                save_ledger_to_gcs(
-                    normalize_ledger_df(edited),
-                    st.session_state.get("gcs_bucket", GCS_BUCKET),
-                )
-                st.success("Ledger normalized & saved.")
-            except Exception as e:
-                st.error(f"Normalize failed: {e}")
+        st.dataframe(
+            df_ledger,
+            width="stretch",
+            use_container_width=True,
+            hide_index=True,
+            key=f"ledger_view_{key_prefix}_{st.session_state.get('ledger_nonce', 0)}",
+        )
 
 
 def render_job_status_monitor(key_prefix: str = "single") -> None:
@@ -1060,11 +1020,101 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         if b1.button(
             "Append uploaded rows to builder", disabled=(uploaded_df is None)
         ):
-            st.session_state.qb_df = pd.concat(
-                [st.session_state.qb_df, uploaded_df], ignore_index=True
-            )
-            st.success(f"Appended {len(uploaded_df)} rows to builder.")
-            st.rerun()
+            # Align uploaded to builder columns
+            need_cols = list(st.session_state.qb_df.columns)
+            up_norm = (
+                uploaded_df if uploaded_df is not None else pd.DataFrame()
+            ).copy()
+            up_norm = up_norm.reindex(columns=need_cols, fill_value="")
+
+            # Build signature sets from: current builder, current queue, and ledger (SUCCEEDED/FAILED)
+            def _sig_from_params_dict(d: dict) -> str:
+                return json.dumps(d, sort_keys=True)
+
+            # (a) existing builder rows
+            builder_sigs = set()
+            for _, r in st.session_state.qb_df.iterrows():
+                builder_sigs.add(_sig_from_params_dict(_normalize_row(r)))
+
+            # (b) existing queue
+            queue_sigs = set()
+            for e in st.session_state.job_queue:
+                try:
+                    queue_sigs.add(
+                        _sig_from_params_dict(
+                            _normalize_row(pd.Series(e.get("params", {})))
+                        )
+                    )
+                except Exception:
+                    pass
+
+            # (c) ledger SUCCEEDED/FAILED
+            try:
+                df_led = read_ledger_from_gcs(
+                    st.session_state.get("gcs_bucket", GCS_BUCKET)
+                )
+            except Exception:
+                df_led = pd.DataFrame()
+            ledger_sigs = set()
+            if not df_led.empty:
+                df_led = df_led[
+                    df_led["state"].isin(["SUCCEEDED", "FAILED"])
+                ].copy()
+                # Reconstruct params dict from ledger row using the same columns used by the builder
+                for _, r in df_led.iterrows():
+                    params_like = {
+                        c: r.get(c, "")
+                        for c in [
+                            "country",
+                            "revision",
+                            "date_input",
+                            "iterations",
+                            "trials",
+                            "train_size",
+                            "paid_media_spends",
+                            "paid_media_vars",
+                            "context_vars",
+                            "factor_vars",
+                            "organic_vars",
+                            "gcs_bucket",
+                            "table",
+                            "query",
+                            "dep_var",
+                            "date_var",
+                            "adstock",
+                            "annotations_gcs_path",
+                        ]
+                    }
+                    # Normalize numeric-ish fields
+                    params_like = _normalize_row(pd.Series(params_like))
+                    ledger_sigs.add(_sig_from_params_dict(params_like))
+
+            deny = builder_sigs | queue_sigs | ledger_sigs
+
+            # Filter uploaded rows: must have data source, and not duplicate in deny set
+            keep_rows = []
+            for _, r in up_norm.iterrows():
+                params = _normalize_row(r)
+                if not (params.get("query") or params.get("table")):
+                    continue
+                sig = _sig_from_params_dict(params)
+                if sig in deny:
+                    continue
+                keep_rows.append(r)
+
+            if not keep_rows:
+                st.info(
+                    "No new rows to append (duplicates or missing data source)."
+                )
+            else:
+                st.session_state.qb_df = pd.concat(
+                    [st.session_state.qb_df, pd.DataFrame(keep_rows)],
+                    ignore_index=True,
+                )
+                st.success(
+                    f"Appended {len(keep_rows)} unique row(s) to builder."
+                )
+                st.rerun()
 
         if b2.button("Reset builder to current GCS queue"):
             st.session_state.qb_df = seed_df.copy()
@@ -1120,12 +1170,100 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
         # Enqueue button
         c_left, c_right = st.columns(2)
+
+if c_left.button(
+    "➕ Enqueue all rows",
+    disabled=(st.session_state.qb_df is None or st.session_state.qb_df.empty),
+):
+    # Build duplicate-signature set from existing queue
+    existing_sigs = set()
+    for e in st.session_state.job_queue:
+        try:
+            norm_existing = _normalize_row(pd.Series(e.get("params", {})))
+            existing_sigs.add(json.dumps(norm_existing, sort_keys=True))
+        except Exception:
+            pass
+
+    # Add signatures from ledger for SUCCEEDED/FAILED
+    try:
+        df_led = read_ledger_from_gcs(
+            st.session_state.get("gcs_bucket", GCS_BUCKET)
+        )
+    except Exception:
+        df_led = pd.DataFrame()
+    if not df_led.empty and "state" in df_led.columns:
+        df_led = df_led[df_led["state"].isin(["SUCCEEDED", "FAILED"])].copy()
+        for _, r in df_led.iterrows():
+            params_like = {
+                c: r.get(c, "")
+                for c in [
+                    "country",
+                    "revision",
+                    "date_input",
+                    "iterations",
+                    "trials",
+                    "train_size",
+                    "paid_media_spends",
+                    "paid_media_vars",
+                    "context_vars",
+                    "factor_vars",
+                    "organic_vars",
+                    "gcs_bucket",
+                    "table",
+                    "query",
+                    "dep_var",
+                    "date_var",
+                    "adstock",
+                    "annotations_gcs_path",
+                ]
+            }
+            params_like = _normalize_row(pd.Series(params_like))
+            existing_sigs.add(json.dumps(params_like, sort_keys=True))
+
+    next_id = max([e["id"] for e in st.session_state.job_queue], default=0) + 1
+    new_entries = []
+    for _, row in st.session_state.qb_df.iterrows():
+        params = _normalize_row(row)
+        if not (params.get("query") or params.get("table")):
+            continue
+        sig = json.dumps(params, sort_keys=True)
+        if sig in existing_sigs:
+            continue
+        new_entries.append(
+            {
+                "id": next_id + len(new_entries),
+                "params": params,
+                "status": "PENDING",
+                "timestamp": None,
+                "execution_name": None,
+                "gcs_prefix": None,
+                "message": "",
+            }
+        )
+
+    if not new_entries:
+        st.info(
+            "Nothing new to enqueue (all rows are duplicates or missing data source)."
+        )
+    else:
+        st.session_state.job_queue.extend(new_entries)
+        st.session_state.queue_saved_at = save_queue_to_gcs(
+            st.session_state.queue_name,
+            st.session_state.job_queue,
+            queue_running=st.session_state.queue_running,
+        )
+        st.success(f"Enqueued {len(new_entries)} new job(s) and saved to GCS.")
+        st.rerun()
         if c_left.button(
             "➕ Enqueue all rows",
             disabled=(
                 st.session_state.qb_df is None or st.session_state.qb_df.empty
             ),
         ):
+            # Helper for consistent dedupe signatures
+            def _sig_from_params_dict(d: dict) -> str:
+                return json.dumps(d, sort_keys=True)
+
             # Build duplicate-signature set from existing queue
             existing_sigs = set()
             for e in st.session_state.job_queue:
@@ -1137,18 +1275,60 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 except Exception:
                     pass
 
+            # Add signatures from ledger for SUCCEEDED/FAILED (so we don't re-run finished jobs)
+            try:
+                df_led = read_ledger_from_gcs(
+                    st.session_state.get("gcs_bucket", GCS_BUCKET)
+                )
+            except Exception:
+                df_led = pd.DataFrame()
+            if not df_led.empty and "state" in df_led.columns:
+                df_led = df_led[
+                    df_led["state"].isin(["SUCCEEDED", "FAILED"])
+                ].copy()
+                for _, r in df_led.iterrows():
+                    params_like = {
+                        c: r.get(c, "")
+                        for c in [
+                            "country",
+                            "revision",
+                            "date_input",
+                            "iterations",
+                            "trials",
+                            "train_size",
+                            "paid_media_spends",
+                            "paid_media_vars",
+                            "context_vars",
+                            "factor_vars",
+                            "organic_vars",
+                            "gcs_bucket",
+                            "table",
+                            "query",
+                            "dep_var",
+                            "date_var",
+                            "adstock",
+                            "annotations_gcs_path",
+                        ]
+                    }
+                    params_like = _normalize_row(pd.Series(params_like))
+                    existing_sigs.add(json.dumps(params_like, sort_keys=True))
+
+            # Enqueue new rows and remember which builder rows were actually enqueued
             next_id = (
                 max([e["id"] for e in st.session_state.job_queue], default=0)
                 + 1
             )
             new_entries = []
+            enqueued_sigs = set()  # signatures of rows we truly enqueue
             for _, row in st.session_state.qb_df.iterrows():
                 params = _normalize_row(row)
+                # Require a data source
                 if not (params.get("query") or params.get("table")):
                     continue
                 sig = json.dumps(params, sort_keys=True)
                 if sig in existing_sigs:
-                    continue
+                    continue  # duplicate in queue or finished in ledger
+                # accept + record
                 new_entries.append(
                     {
                         "id": next_id + len(new_entries),
@@ -1160,20 +1340,34 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         "message": "",
                     }
                 )
+                enqueued_sigs.add(sig)
 
             if not new_entries:
                 st.info(
                     "Nothing new to enqueue (all rows are duplicates or missing data source)."
                 )
             else:
+                # Save queue
                 st.session_state.job_queue.extend(new_entries)
                 st.session_state.queue_saved_at = save_queue_to_gcs(
                     st.session_state.queue_name,
                     st.session_state.job_queue,
                     queue_running=st.session_state.queue_running,
                 )
+
+                # 🔥 Remove only the rows we actually enqueued from the builder
+                def _row_sig(r: pd.Series) -> str:
+                    return json.dumps(_normalize_row(r), sort_keys=True)
+
+                keep_mask = ~st.session_state.qb_df.apply(
+                    _row_sig, axis=1
+                ).isin(enqueued_sigs)
+                st.session_state.qb_df = st.session_state.qb_df.loc[
+                    keep_mask
+                ].reset_index(drop=True)
+
                 st.success(
-                    f"Enqueued {len(new_entries)} new job(s) and saved to GCS."
+                    f"Enqueued {len(new_entries)} new job(s), saved to GCS, and removed them from the builder."
                 )
                 st.rerun()
 
@@ -1350,22 +1544,38 @@ def _queue_tick():
                 start_iso = entry.get("start_time") or entry.get("timestamp")
 
                 # Append to ledger
+                # Append to ledger (include all builder params + queue message)
                 try:
                     exec_full = entry.get("execution_name") or ""
                     exec_short = exec_full.split("/")[-1] if exec_full else ""
+                    p = entry.get("params", {}) or {}
                     append_row_to_ledger(
                         {
                             "job_id": entry.get("gcs_prefix")
                             or entry.get("id"),
                             "state": final_state,
-                            "country": entry["params"].get("country"),
-                            "revision": entry["params"].get("revision"),
-                            "date_input": entry["params"].get("date_input"),
-                            "iterations": entry["params"].get("iterations"),
-                            "trials": entry["params"].get("trials"),
-                            "train_size": entry["params"].get("train_size"),
-                            "dep_var": entry["params"].get("dep_var"),
-                            "adstock": entry["params"].get("adstock"),
+                            # --- queue/builder params (all) ---
+                            "country": p.get("country"),
+                            "revision": p.get("revision"),
+                            "date_input": p.get("date_input"),
+                            "iterations": p.get("iterations"),
+                            "trials": p.get("trials"),
+                            "train_size": p.get("train_size"),
+                            "paid_media_spends": p.get("paid_media_spends"),
+                            "paid_media_vars": p.get("paid_media_vars"),
+                            "context_vars": p.get("context_vars"),
+                            "factor_vars": p.get("factor_vars"),
+                            "organic_vars": p.get("organic_vars"),
+                            "gcs_bucket": p.get("gcs_bucket"),
+                            "table": p.get("table"),
+                            "query": p.get("query"),
+                            "dep_var": p.get("dep_var"),
+                            "date_var": p.get("date_var"),
+                            "adstock": p.get("adstock"),
+                            "annotations_gcs_path": p.get(
+                                "annotations_gcs_path"
+                            ),
+                            # --- times/exec/outputs ---
                             "start_time": start_iso,
                             "end_time": datetime.utcnow().isoformat(
                                 timespec="seconds"
@@ -1376,10 +1586,11 @@ def _queue_tick():
                             or st.session_state.get("gcs_bucket", GCS_BUCKET),
                             "exec_name": exec_short,
                             "execution_name": exec_full,
+                            # --- queue message ---
+                            "message": entry.get("message", ""),
                         },
                         st.session_state.get("gcs_bucket", GCS_BUCKET),
                     )
-                    # bump a nonce so the ledger editor rerenders
                     st.session_state["ledger_nonce"] = (
                         st.session_state.get("ledger_nonce", 0) + 1
                     )
