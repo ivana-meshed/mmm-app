@@ -486,7 +486,7 @@ def _queue_tick():
             exec_short = exec_full.split("/")[-1] if exec_full else ""
             p = entry.get("params", {}) or {}
 
-            append_row_to_job_history(
+            append_row_to_ledger(
                 {
                     "job_id": entry.get("gcs_prefix") or entry.get("id"),
                     "state": final_state,
@@ -540,9 +540,6 @@ def _queue_tick():
         st.session_state["job_history_nonce"] = (
             st.session_state.get("job_history_nonce", 0) + 1
         )
-
-
-_queue_tick()
 
 
 # ─────────────────────────────
@@ -925,6 +922,9 @@ with tab_single:
         render_job_status_monitor(key_prefix="single")
 
     # ===================== BATCH QUEUE (CSV) =====================
+
+_queue_tick()
+
 with tab_queue:
     st.subheader(
         "Batch queue (CSV) — queue & run multiple jobs sequentially",
