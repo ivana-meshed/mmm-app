@@ -304,21 +304,19 @@ def normalize_ledger_df(df: "pd.DataFrame"):
     if "status" in df.columns and "state" not in df.columns:
         df = df.rename(columns={"status": "state"})
     if "gcs_bucket" in df.columns and "bucket" not in df.columns:
-        df = df.rename(columns={"gcs_bucket": "bucket"})
+        # do not rename; we now keep both 'gcs_bucket' (param) and 'bucket' (output)
+        pass
 
     # Ensure all expected columns exist
     for c in LEDGER_COLUMNS:
         if c not in df.columns:
             df[c] = pd.NA
 
-    # --- Exec fields present & normalized ---
+    # Exec fields present & normalized
     df["execution_name"] = df["execution_name"].fillna("").astype(str)
-
-    if "exec_name" not in df.columns:
-        df["exec_name"] = ""
     df["exec_name"] = df["exec_name"].fillna("").astype(str)
 
-    # Backfill exec_name from execution_name when missing
+    # Backfill exec_name from execution_name when missing; always short form
     mask = df["exec_name"].str.strip().eq("") & df[
         "execution_name"
     ].str.strip().ne("")
@@ -326,11 +324,9 @@ def normalize_ledger_df(df: "pd.DataFrame"):
         df.loc[mask, "exec_name"] = df.loc[mask, "execution_name"].apply(
             _short_exec_name
         )
-
-    # Normalize any non-empty exec_name to short form
     df["exec_name"] = df["exec_name"].apply(_short_exec_name)
 
-    # Normalize times to UTC ISO seconds
+    # Normalize times
     df["start_time"] = df["start_time"].apply(_iso_utc)
     df["end_time"] = df["end_time"].apply(_iso_utc)
 
@@ -360,14 +356,13 @@ def normalize_ledger_df(df: "pd.DataFrame"):
             et_ts - st_ts
         ).dt.total_seconds() / 60.0
 
-    # Reorder to canonical columns before coalescing
+    # Order & (optionally) de-dup by job_id, keeping first non-empty values
     df = df[LEDGER_COLUMNS]
 
-    # Coalesce duplicates by job_id (keep first non-null/non-empty per column)
     if "job_id" in df.columns and not df.empty:
 
-        def _first_non_empty(s):
-            for x in s:
+        def _first_non_empty(series):
+            for x in series:
                 if pd.notna(x) and (not isinstance(x, str) or x.strip() != ""):
                     return x
             return pd.NA
@@ -375,7 +370,6 @@ def normalize_ledger_df(df: "pd.DataFrame"):
         df = df.groupby("job_id", as_index=False, dropna=False).agg(
             _first_non_empty
         )
-        # Enforce column order again after groupby
         df = df[LEDGER_COLUMNS]
 
     # Final sort
