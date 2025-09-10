@@ -1180,6 +1180,370 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         # Enqueue button
         c_left, c_right = st.columns(2)
 
+        if c_left.button(
+            "➕ Enqueue all rows",
+            disabled=(
+                st.session_state.qb_df is None or st.session_state.qb_df.empty
+            ),
+        ):
+            # Build duplicate-signature set from existing queue
+            existing_sigs = set()
+            for e in st.session_state.job_queue:
+                try:
+                    norm_existing = _normalize_row(
+                        pd.Series(e.get("params", {}))
+                    )
+                    existing_sigs.add(json.dumps(norm_existing, sort_keys=True))
+                except Exception:
+                    pass
+
+            # Add signatures from job_history for SUCCEEDED/FAILED
+            try:
+                df_led = read_job_history_from_gcs(
+                    st.session_state.get("gcs_bucket", GCS_BUCKET)
+                )
+            except Exception:
+                df_led = pd.DataFrame()
+            if not df_led.empty and "state" in df_led.columns:
+                df_led = df_led[
+                    df_led["state"].isin(["SUCCEEDED", "FAILED"])
+                ].copy()
+                for _, r in df_led.iterrows():
+                    params_like = {
+                        c: r.get(c, "")
+                        for c in [
+                            "country",
+                            "revision",
+                            "date_input",
+                            "iterations",
+                            "trials",
+                            "train_size",
+                            "paid_media_spends",
+                            "paid_media_vars",
+                            "context_vars",
+                            "factor_vars",
+                            "organic_vars",
+                            "gcs_bucket",
+                            "table",
+                            "query",
+                            "dep_var",
+                            "date_var",
+                            "adstock",
+                            "annotations_gcs_path",
+                        ]
+                    }
+                    params_like = _normalize_row(pd.Series(params_like))
+                    existing_sigs.add(json.dumps(params_like, sort_keys=True))
+
+            next_id = (
+                max([e["id"] for e in st.session_state.job_queue], default=0)
+                + 1
+            )
+            new_entries = []
+            for _, row in st.session_state.qb_df.iterrows():
+                params = _normalize_row(row)
+                if not (params.get("query") or params.get("table")):
+                    continue
+                sig = json.dumps(params, sort_keys=True)
+                if sig in existing_sigs:
+                    continue
+                new_entries.append(
+                    {
+                        "id": next_id + len(new_entries),
+                        "params": params,
+                        "status": "PENDING",
+                        "timestamp": None,
+                        "execution_name": None,
+                        "gcs_prefix": None,
+                        "message": "",
+                    }
+                )
+
+            if not new_entries:
+                st.info(
+                    "Nothing new to enqueue (all rows are duplicates or missing data source)."
+                )
+            else:
+                st.session_state.job_queue.extend(new_entries)
+                st.session_state.queue_saved_at = save_queue_to_gcs(
+                    st.session_state.queue_name,
+                    st.session_state.job_queue,
+                    queue_running=st.session_state.queue_running,
+                )
+                st.success(
+                    f"Enqueued {len(new_entries)} new job(s) and saved to GCS."
+                )
+                st.rerun()
+                if c_left.button(
+                    "➕ Enqueue all rows",
+                    disabled=(
+                        st.session_state.qb_df is None
+                        or st.session_state.qb_df.empty
+                    ),
+                ):
+                    # Helper for consistent dedupe signatures
+                    def _sig_from_params_dict(d: dict) -> str:
+                        return json.dumps(d, sort_keys=True)
+
+                    # Build duplicate-signature set from existing queue
+                    existing_sigs = set()
+                    for e in st.session_state.job_queue:
+                        try:
+                            norm_existing = _normalize_row(
+                                pd.Series(e.get("params", {}))
+                            )
+                            existing_sigs.add(
+                                json.dumps(norm_existing, sort_keys=True)
+                            )
+                        except Exception:
+                            pass
+
+                    # Add signatures from job_history for SUCCEEDED/FAILED (so we don't re-run finished jobs)
+                    try:
+                        df_led = read_job_history_from_gcs(
+                            st.session_state.get("gcs_bucket", GCS_BUCKET)
+                        )
+                    except Exception:
+                        df_led = pd.DataFrame()
+                    if not df_led.empty and "state" in df_led.columns:
+                        df_led = df_led[
+                            df_led["state"].isin(["SUCCEEDED", "FAILED"])
+                        ].copy()
+                        for _, r in df_led.iterrows():
+                            params_like = {
+                                c: r.get(c, "")
+                                for c in [
+                                    "country",
+                                    "revision",
+                                    "date_input",
+                                    "iterations",
+                                    "trials",
+                                    "train_size",
+                                    "paid_media_spends",
+                                    "paid_media_vars",
+                                    "context_vars",
+                                    "factor_vars",
+                                    "organic_vars",
+                                    "gcs_bucket",
+                                    "table",
+                                    "query",
+                                    "dep_var",
+                                    "date_var",
+                                    "adstock",
+                                    "annotations_gcs_path",
+                                ]
+                            }
+                            params_like = _normalize_row(pd.Series(params_like))
+                            existing_sigs.add(
+                                json.dumps(params_like, sort_keys=True)
+                            )
+
+                    # Enqueue new rows and remember which builder rows were actually enqueued
+                    next_id = (
+                        max(
+                            [e["id"] for e in st.session_state.job_queue],
+                            default=0,
+                        )
+                        + 1
+                    )
+                    new_entries = []
+                    enqueued_sigs = set()  # signatures of rows we truly enqueue
+                    for _, row in st.session_state.qb_df.iterrows():
+                        params = _normalize_row(row)
+                        # Require a data source
+                        if not (params.get("query") or params.get("table")):
+                            continue
+                        sig = json.dumps(params, sort_keys=True)
+                        if sig in existing_sigs:
+                            continue  # duplicate in queue or finished in job_history
+                        # accept + record
+                        new_entries.append(
+                            {
+                                "id": next_id + len(new_entries),
+                                "params": params,
+                                "status": "PENDING",
+                                "timestamp": None,
+                                "execution_name": None,
+                                "gcs_prefix": None,
+                                "message": "",
+                            }
+                        )
+                        enqueued_sigs.add(sig)
+
+                    if not new_entries:
+                        st.info(
+                            "Nothing new to enqueue (all rows are duplicates or missing data source)."
+                        )
+                    else:
+                        # Save queue
+                        st.session_state.job_queue.extend(new_entries)
+                        st.session_state.queue_saved_at = save_queue_to_gcs(
+                            st.session_state.queue_name,
+                            st.session_state.job_queue,
+                            queue_running=st.session_state.queue_running,
+                        )
+
+                        # 🔥 Remove only the rows we actually enqueued from the builder
+                        def _row_sig(r: pd.Series) -> str:
+                            return json.dumps(_normalize_row(r), sort_keys=True)
+
+                        keep_mask = ~st.session_state.qb_df.apply(
+                            _row_sig, axis=1
+                        ).isin(enqueued_sigs)
+                        st.session_state.qb_df = st.session_state.qb_df.loc[
+                            keep_mask
+                        ].reset_index(drop=True)
+
+                        st.success(
+                            f"Enqueued {len(new_entries)} new job(s), saved to GCS, and removed them from the builder."
+                        )
+                        st.rerun()
+
+                if c_right.button("🧹 Clear queue"):
+                    st.session_state["job_queue"] = []
+                    st.session_state["queue_running"] = False
+                    save_queue_to_gcs(st.session_state.queue_name, [])
+                    st.success("Queue cleared & saved to GCS.")
+                    st.rerun()
+
+                # Queue controls
+                st.caption(
+                    f"Queue status: {'▶️ RUNNING' if st.session_state.queue_running else '⏸️ STOPPED'} · "
+                    f"{sum(e['status'] in ('RUNNING','LAUNCHING') for e in st.session_state.job_queue)} running"
+                )
+
+                if st.button("🔁 Refresh from GCS"):
+                    _ = load_queue_from_gcs(st.session_state.queue_name)
+                    st.success("Refreshed from GCS.")
+                    st.rerun()
+
+                qc1, qc2, qc3, qc4 = st.columns(4)
+                if qc1.button(
+                    "▶️ Start Queue",
+                    disabled=(len(st.session_state.job_queue) == 0),
+                ):
+                    set_queue_running(st.session_state.queue_name, True)
+                    st.success("Queue set to RUNNING.")
+                    st.rerun()
+                if qc2.button("⏸️ Stop Queue"):
+                    set_queue_running(st.session_state.queue_name, False)
+                    st.info("Queue paused.")
+                    st.rerun()
+                if qc3.button("⏭️ Process Next Step"):
+                    _queue_tick()
+                    st.toast("Ticked queue")
+                    st.rerun()
+
+                if qc4.button("💾 Save now"):
+                    save_queue_to_gcs(
+                        st.session_state.queue_name, st.session_state.job_queue
+                    )
+                    st.success("Queue saved to GCS.")
+
+                # Queue table
+                maybe_refresh_queue_from_gcs()
+                st.caption(
+                    f"GCS saved_at: {st.session_state.get('queue_saved_at') or '—'} · "
+                    f"{sum(e['status']=='PENDING' for e in st.session_state.job_queue)} pending · "
+                    f"{sum(e['status']=='RUNNING' for e in st.session_state.job_queue)} running · "
+                    f"Queue is {'RUNNING' if st.session_state.queue_running else 'STOPPED'}"
+                )
+
+                if st.session_state.job_queue:
+                    df_queue = pd.DataFrame(
+                        [
+                            {
+                                "ID": e["id"],
+                                "Status": e["status"],
+                                "Country": e["params"]["country"],
+                                "Revision": e["params"]["revision"],
+                                "Timestamp": e.get("timestamp", ""),
+                                "Exec": (
+                                    e.get("execution_name", "") or ""
+                                ).split("/")[-1],
+                                "Msg": e.get("message", ""),
+                            }
+                            for e in st.session_state.job_queue
+                        ]
+                    )
+                    if "Delete" not in df_queue.columns:
+                        df_queue.insert(0, "Delete", False)
+
+                    edited = st.data_editor(
+                        df_queue,
+                        key="queue_editor",
+                        hide_index=True,
+                        width="stretch",
+                        column_config={
+                            "Delete": st.column_config.CheckboxColumn(
+                                "Delete", help="Mark to remove from queue"
+                            )
+                        },
+                    )
+
+                    ids_to_delete = set()
+                    if "Delete" in edited.columns:
+                        ids_to_delete = set(
+                            edited.loc[edited["Delete"] == True, "ID"]
+                            .astype(int)
+                            .tolist()
+                        )
+
+                    if st.button("🗑 Delete selected (PENDING/ERROR only)"):
+                        new_q, blocked = [], []
+                        for e in st.session_state.job_queue:
+                            if e["id"] in ids_to_delete:
+                                if e.get("status") in (
+                                    "PENDING",
+                                    "ERROR",
+                                    "CANCELLED",
+                                    "FAILED",
+                                ):
+                                    continue  # drop it
+                                else:
+                                    blocked.append(e["id"])
+                                    new_q.append(e)
+                            else:
+                                new_q.append(e)
+
+                        st.session_state.job_queue = new_q
+                        st.session_state.queue_saved_at = save_queue_to_gcs(
+                            st.session_state.queue_name,
+                            st.session_state.job_queue,
+                            queue_running=st.session_state.queue_running,
+                        )
+                        if blocked:
+                            st.warning(
+                                f"Did not delete non-deletable entries: {sorted(blocked)}"
+                            )
+                        st.success("Queue updated.")
+                        st.rerun()
+            render_jobs_job_history(key_prefix="queue")
+            render_job_status_monitor(key_prefix="queue")
+
+            # ─────────────────────────────
+            # Execution timeline & timings.csv (single latest)
+            # ─────────────────────────────
+            if st.session_state.last_timings:
+                with st.expander("⏱️ Execution Timeline", expanded=False):
+                    df_times = st.session_state.last_timings["df"]
+                    total = (
+                        float(df_times["Time (s)"].sum())
+                        if not df_times.empty
+                        else 0.0
+                    )
+                    if total > 0:
+                        df_times = df_times.copy()
+                        df_times["% of total"] = (
+                            df_times["Time (s)"] / total * 100
+                        ).round(1)
+                    st.markdown("**Setup steps (this session)**")
+                    st.dataframe(df_times, width="stretch")
+                    st.write(f"**Total setup time:** {_fmt_secs(total)}")
+                    st.write(
+                        "**Note**: Training runs asynchronously in Cloud Run Jobs."
+                    )
+
 
 def _queue_tick():
     # Advance the queue atomically (lease/launch OR update running)
