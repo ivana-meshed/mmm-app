@@ -30,8 +30,8 @@ SAFE_LAG_SECONDS_AFTER_RUNNING = int(
     os.getenv("SAFE_LAG_SECONDS_AFTER_RUNNING", "5")
 )
 
-# Canonical ledger schema & normalization
-LEDGER_COLUMNS = [
+# Canonical job_history schema & normalization
+JOB_HISTORY_COLUMNS = [
     "job_id",  # canonical id: gcs_prefix; queue id can go into 'queue_id' (optional)
     "state",  # SUCCEEDED | FAILED | CANCELLED | ERROR
     "country",
@@ -73,8 +73,8 @@ QUEUE_PARAM_COLUMNS = [
     "annotations_gcs_path",
 ]
 
-# Canonical ledger schema (builder params + exec/info)
-LEDGER_COLUMNS = (
+# Canonical job_history schema (builder params + exec/info)
+JOB_HISTORY_COLUMNS = (
     ["job_id", "state"]
     + QUEUE_PARAM_COLUMNS
     + [
@@ -109,9 +109,9 @@ def _iso_utc(s) -> str:
     return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _empty_ledger_df() -> pd.DataFrame:
-    # Matches fields written by run_all.R::append_to_ledger()
-    cols = LEDGER_COLUMNS
+def _empty_job_history_df() -> pd.DataFrame:
+    # Matches fields written by run_all.R::append_to_job_history()
+    cols = JOB_HISTORY_COLUMNS
     return pd.DataFrame(columns=cols)
 
 
@@ -295,7 +295,7 @@ def _safe_tick_once(
     return {"ok": False, "message": "contention: retry later", "changed": False}
 
 
-def normalize_ledger_df(df: "pd.DataFrame"):
+def normalize_job_history_df(df: "pd.DataFrame"):
     import pandas as pd
 
     df = (df if isinstance(df, pd.DataFrame) else pd.DataFrame()).copy()
@@ -308,7 +308,7 @@ def normalize_ledger_df(df: "pd.DataFrame"):
         pass
 
     # Ensure all expected columns exist
-    for c in LEDGER_COLUMNS:
+    for c in JOB_HISTORY_COLUMNS:
         if c not in df.columns:
             df[c] = pd.NA
 
@@ -357,7 +357,7 @@ def normalize_ledger_df(df: "pd.DataFrame"):
         ).dt.total_seconds() / 60.0
 
     # Order & (optionally) de-dup by job_id, keeping first non-empty values
-    df = df[LEDGER_COLUMNS]
+    df = df[JOB_HISTORY_COLUMNS]
 
     if "job_id" in df.columns and not df.empty:
 
@@ -370,7 +370,7 @@ def normalize_ledger_df(df: "pd.DataFrame"):
         df = df.groupby("job_id", as_index=False, dropna=False).agg(
             _first_non_empty
         )
-        df = df[LEDGER_COLUMNS]
+        df = df[JOB_HISTORY_COLUMNS]
 
     # Final sort
     df = df.sort_values(
@@ -624,49 +624,49 @@ def upload_to_gcs(bucket_name: str, local_path: str, dest_blob: str) -> str:
     return f"gs://{bucket_name}/{dest_blob}"
 
 
-def _get_ledger_object() -> str:
-    return os.getenv("JOBS_LEDGER_OBJECT", "robyn-jobs/ledger.csv")
+def _get_job_history_object() -> str:
+    return os.getenv("JOBS_JOB_HISTORY_OBJECT", "robyn-jobs/job_history.csv")
 
 
-def read_ledger_from_gcs(bucket_name: str) -> pd.DataFrame:
+def read_job_history_from_gcs(bucket_name: str) -> pd.DataFrame:
     from google.cloud import storage
 
     client = storage.Client()
-    blob = client.bucket(bucket_name).blob("robyn-jobs/ledger.csv")
+    blob = client.bucket(bucket_name).blob("robyn-jobs/job_history.csv")
     if not blob.exists():
-        return _empty_ledger_df()  # your function with LEDGER_COLUMNS
+        return _empty_job_history_df()  # your function with JOB_HISTORY_COLUMNS
 
     raw = blob.download_as_bytes()
     if not raw:
-        return _empty_ledger_df()
+        return _empty_job_history_df()
 
     df = pd.read_csv(io.BytesIO(raw))
     if df is None or df.empty:
-        return _empty_ledger_df()
+        return _empty_job_history_df()
 
     # (optional) normalize columns/order here if you want
-    return normalize_ledger_df(df)
+    return normalize_job_history_df(df)
 
 
-def save_ledger_to_gcs(df, bucket_name: str):
+def save_job_history_to_gcs(df, bucket_name: str):
     import io
     from google.cloud import storage
 
-    df = normalize_ledger_df(df)
+    df = normalize_job_history_df(df)
     b = io.BytesIO()
     df.to_csv(b, index=False)
     b.seek(0)
     client = storage.Client()
-    blob = client.bucket(bucket_name).blob("robyn-jobs/ledger.csv")
+    blob = client.bucket(bucket_name).blob("robyn-jobs/job_history.csv")
     blob.upload_from_file(b, content_type="text/csv")
     return True
 
 
-def append_row_to_ledger(row_dict: dict, bucket_name: str):
+def append_row_to_job_history(row_dict: dict, bucket_name: str):
     import pandas as pd
 
     # Ensure all expected keys exist
-    for c in LEDGER_COLUMNS:
+    for c in JOB_HISTORY_COLUMNS:
         row_dict.setdefault(c, pd.NA)
 
     # If exec_name is missing but we have execution_name, derive it
@@ -676,12 +676,12 @@ def append_row_to_ledger(row_dict: dict, bucket_name: str):
         )
 
     # New row (normalized)
-    df_new = normalize_ledger_df(pd.DataFrame([row_dict]))
+    df_new = normalize_job_history_df(pd.DataFrame([row_dict]))
 
-    # Existing ledger (may be empty)
-    df_old = read_ledger_from_gcs(bucket_name)
+    # Existing job_history (may be empty)
+    df_old = read_job_history_from_gcs(bucket_name)
     if df_old is None or df_old.empty:
-        return save_ledger_to_gcs(df_new, bucket_name)
+        return save_job_history_to_gcs(df_new, bucket_name)
 
     # Merge by job_id: fill missing values in existing row with new values (combine_first)
     df_old = df_old.set_index("job_id")
@@ -693,8 +693,8 @@ def append_row_to_ledger(row_dict: dict, bucket_name: str):
             df_old.loc[jid] = s
 
     df_merged = df_old.reset_index()
-    df_merged = normalize_ledger_df(df_merged)
-    return save_ledger_to_gcs(df_merged, bucket_name)
+    df_merged = normalize_job_history_df(df_merged)
+    return save_job_history_to_gcs(df_merged, bucket_name)
 
 
 def read_status_json(bucket_name: str, prefix: str) -> Optional[dict]:

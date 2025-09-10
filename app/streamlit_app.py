@@ -20,7 +20,7 @@ from app_shared import (
     GCS_BUCKET,
     DEFAULT_QUEUE_NAME,
     SAFE_LAG_SECONDS_AFTER_RUNNING,
-    LEDGER_COLUMNS,
+    JOB_HISTORY_COLUMNS,
     # Helpers
     timed_step,
     parse_train_size,
@@ -42,9 +42,9 @@ from app_shared import (
     get_data_processor,
     _fmt_secs,
     _connect_snowflake,  # use shared connector for consistency with ensure_sf_conn
-    read_ledger_from_gcs,
-    save_ledger_to_gcs,
-    append_row_to_ledger,
+    read_job_history_from_gcs,
+    save_job_history_to_gcs,
+    append_row_to_job_history,
     _safe_tick_once,  # (kept for parity; not used below
 )
 
@@ -250,34 +250,34 @@ def params_from_ui(
     }
 
 
-def _empty_ledger_df() -> pd.DataFrame:
-    # Matches fields written by run_all.R::append_to_ledger()
-    cols = LEDGER_COLUMNS
+def _empty_job_history_df() -> pd.DataFrame:
+    # Matches fields written by run_all.R::append_to_job_history()
+    cols = JOB_HISTORY_COLUMNS
     return pd.DataFrame(columns=cols)
 
 
-def render_jobs_ledger(key_prefix: str = "single") -> None:
+def render_jobs_job_history(key_prefix: str = "single") -> None:
     with st.expander("📚 Jobs Ledger (from GCS)", expanded=False):
         try:
-            df_ledger = read_ledger_from_gcs(
+            df_job_history = read_job_history_from_gcs(
                 st.session_state.get("gcs_bucket", GCS_BUCKET)
             )
         except Exception as e:
-            st.error(f"Failed to read ledger from GCS: {e}")
+            st.error(f"Failed to read job_history from GCS: {e}")
             return
 
         # Force canonical order/shape
-        df_ledger = df_ledger.reindex(columns=LEDGER_COLUMNS)
+        df_job_history = df_job_history.reindex(columns=JOB_HISTORY_COLUMNS)
 
         st.caption(
             "Ledger entries are view-only and auto-updated when jobs finish."
         )
         st.dataframe(
-            df_ledger,
+            df_job_history,
             width="stretch",
             use_container_width=True,
             hide_index=True,
-            key=f"ledger_view_{key_prefix}_{st.session_state.get('ledger_nonce', 0)}",
+            key=f"job_history_view_{key_prefix}_{st.session_state.get('job_history_nonce', 0)}",
         )
 
 
@@ -307,18 +307,18 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
             except Exception as e:
                 st.error(f"Status check failed: {e}")
 
-    # Quick results/log viewer driven by the ledger (no execution name required)
-    with st.expander("📁 View Results (pick from ledger)", expanded=False):
+    # Quick results/log viewer driven by the job_history (no execution name required)
+    with st.expander("📁 View Results (pick from job_history)", expanded=False):
         try:
-            df_led = read_ledger_from_gcs(
+            df_led = read_job_history_from_gcs(
                 st.session_state.get("gcs_bucket", GCS_BUCKET)
             )
         except Exception as e:
-            st.error(f"Failed to read ledger: {e}")
+            st.error(f"Failed to read job_history: {e}")
             df_led = None
 
         if df_led is None or df_led.empty or "gcs_prefix" not in df_led.columns:
-            st.info("No ledger entries with results yet.")
+            st.info("No job_history entries with results yet.")
         else:
             df_led = df_led.copy()
 
@@ -331,7 +331,7 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                 "Pick a job",
                 options=list(df_led.index),
                 format_func=lambda i: df_led.loc[i, "__label__"],
-                key=f"ledger_pick_{key_prefix}",
+                key=f"job_history_pick_{key_prefix}",
             )
             row = df_led.loc[idx]
             bucket_view = row.get(
@@ -401,6 +401,40 @@ def maybe_refresh_queue_from_gcs(force: bool = False):
             "queue_running", st.session_state.get("queue_running", False)
         )
         st.session_state.queue_saved_at = remote_saved_at
+
+
+def _normalize_row(row: pd.Series) -> dict:
+    def _g(v, default):
+        return row.get(v) if (v in row and pd.notna(row[v])) else default
+
+    return {
+        "country": str(_g("country", country)),
+        "revision": str(_g("revision", revision)),
+        "date_input": str(_g("date_input", date_input)),
+        "iterations": (
+            int(float(_g("iterations", iterations)))
+            if str(_g("iterations", iterations)).strip()
+            else int(iterations)
+        ),
+        "trials": (
+            int(float(_g("trials", trials)))
+            if str(_g("trials", trials)).strip()
+            else int(trials)
+        ),
+        "train_size": str(_g("train_size", train_size)),
+        "paid_media_spends": str(_g("paid_media_spends", paid_media_spends)),
+        "paid_media_vars": str(_g("paid_media_vars", paid_media_vars)),
+        "context_vars": str(_g("context_vars", context_vars)),
+        "factor_vars": str(_g("factor_vars", factor_vars)),
+        "organic_vars": str(_g("organic_vars", organic_vars)),
+        "gcs_bucket": str(_g("gcs_bucket", st.session_state["gcs_bucket"])),
+        "table": str(_g("table", table or "")),
+        "query": str(_g("query", query or "")),
+        "dep_var": str(_g("dep_var", dep_var)),
+        "date_var": str(_g("date_var", date_var)),
+        "adstock": str(_g("adstock", adstock)),
+        "annotations_gcs_path": str(_g("annotations_gcs_path", "")),
+    }
 
 
 # ─────────────────────────────
@@ -779,7 +813,7 @@ with tab_single:
                     "gcs_bucket": gcs_bucket,
                 }
 
-        render_jobs_ledger(key_prefix="single")
+        render_jobs_job_history(key_prefix="single")
         render_job_status_monitor(key_prefix="single")
 
     # ===================== BATCH QUEUE (CSV) =====================
@@ -1027,7 +1061,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             ).copy()
             up_norm = up_norm.reindex(columns=need_cols, fill_value="")
 
-            # Build signature sets from: current builder, current queue, and ledger (SUCCEEDED/FAILED)
+            # Build signature sets from: current builder, current queue, and job_history (SUCCEEDED/FAILED)
             def _sig_from_params_dict(d: dict) -> str:
                 return json.dumps(d, sort_keys=True)
 
@@ -1048,19 +1082,19 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 except Exception:
                     pass
 
-            # (c) ledger SUCCEEDED/FAILED
+            # (c) job_history SUCCEEDED/FAILED
             try:
-                df_led = read_ledger_from_gcs(
+                df_led = read_job_history_from_gcs(
                     st.session_state.get("gcs_bucket", GCS_BUCKET)
                 )
             except Exception:
                 df_led = pd.DataFrame()
-            ledger_sigs = set()
+            job_history_sigs = set()
             if not df_led.empty:
                 df_led = df_led[
                     df_led["state"].isin(["SUCCEEDED", "FAILED"])
                 ].copy()
-                # Reconstruct params dict from ledger row using the same columns used by the builder
+                # Reconstruct params dict from job_history row using the same columns used by the builder
                 for _, r in df_led.iterrows():
                     params_like = {
                         c: r.get(c, "")
@@ -1087,9 +1121,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     }
                     # Normalize numeric-ish fields
                     params_like = _normalize_row(pd.Series(params_like))
-                    ledger_sigs.add(_sig_from_params_dict(params_like))
+                    job_history_sigs.add(_sig_from_params_dict(params_like))
 
-            deny = builder_sigs | queue_sigs | ledger_sigs
+            deny = builder_sigs | queue_sigs | job_history_sigs
 
             # Filter uploaded rows: must have data source, and not duplicate in deny set
             keep_rows = []
@@ -1129,44 +1163,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             st.rerun()
 
         # Normalizer reused for each row
-        def _normalize_row(row: pd.Series) -> dict:
-            def _g(v, default):
-                return (
-                    row.get(v) if (v in row and pd.notna(row[v])) else default
-                )
-
-            return {
-                "country": str(_g("country", country)),
-                "revision": str(_g("revision", revision)),
-                "date_input": str(_g("date_input", date_input)),
-                "iterations": (
-                    int(float(_g("iterations", iterations)))
-                    if str(_g("iterations", iterations)).strip()
-                    else int(iterations)
-                ),
-                "trials": (
-                    int(float(_g("trials", trials)))
-                    if str(_g("trials", trials)).strip()
-                    else int(trials)
-                ),
-                "train_size": str(_g("train_size", train_size)),
-                "paid_media_spends": str(
-                    _g("paid_media_spends", paid_media_spends)
-                ),
-                "paid_media_vars": str(_g("paid_media_vars", paid_media_vars)),
-                "context_vars": str(_g("context_vars", context_vars)),
-                "factor_vars": str(_g("factor_vars", factor_vars)),
-                "organic_vars": str(_g("organic_vars", organic_vars)),
-                "gcs_bucket": str(
-                    _g("gcs_bucket", st.session_state["gcs_bucket"])
-                ),
-                "table": str(_g("table", table or "")),
-                "query": str(_g("query", query or "")),
-                "dep_var": str(_g("dep_var", dep_var)),
-                "date_var": str(_g("date_var", date_var)),
-                "adstock": str(_g("adstock", adstock)),
-                "annotations_gcs_path": str(_g("annotations_gcs_path", "")),
-            }
 
         # Enqueue button
         c_left, c_right = st.columns(2)
@@ -1184,9 +1180,9 @@ if c_left.button(
         except Exception:
             pass
 
-    # Add signatures from ledger for SUCCEEDED/FAILED
+    # Add signatures from job_history for SUCCEEDED/FAILED
     try:
-        df_led = read_ledger_from_gcs(
+        df_led = read_job_history_from_gcs(
             st.session_state.get("gcs_bucket", GCS_BUCKET)
         )
     except Exception:
@@ -1275,9 +1271,9 @@ if c_left.button(
                 except Exception:
                     pass
 
-            # Add signatures from ledger for SUCCEEDED/FAILED (so we don't re-run finished jobs)
+            # Add signatures from job_history for SUCCEEDED/FAILED (so we don't re-run finished jobs)
             try:
-                df_led = read_ledger_from_gcs(
+                df_led = read_job_history_from_gcs(
                     st.session_state.get("gcs_bucket", GCS_BUCKET)
                 )
             except Exception:
@@ -1327,7 +1323,7 @@ if c_left.button(
                     continue
                 sig = json.dumps(params, sort_keys=True)
                 if sig in existing_sigs:
-                    continue  # duplicate in queue or finished in ledger
+                    continue  # duplicate in queue or finished in job_history
                 # accept + record
                 new_entries.append(
                     {
@@ -1493,7 +1489,7 @@ if c_left.button(
                     )
                 st.success("Queue updated.")
                 st.rerun()
-    render_jobs_ledger(key_prefix="queue")
+    render_jobs_job_history(key_prefix="queue")
     render_job_status_monitor(key_prefix="queue")
 
     # ─────────────────────────────
@@ -1543,13 +1539,13 @@ def _queue_tick():
 
                 start_iso = entry.get("start_time") or entry.get("timestamp")
 
-                # Append to ledger
-                # Append to ledger (include all builder params + queue message)
+                # Append to job_history
+                # Append to job_history (include all builder params + queue message)
                 try:
                     exec_full = entry.get("execution_name") or ""
                     exec_short = exec_full.split("/")[-1] if exec_full else ""
                     p = entry.get("params", {}) or {}
-                    append_row_to_ledger(
+                    append_row_to_job_history(
                         {
                             "job_id": entry.get("gcs_prefix")
                             or entry.get("id"),
@@ -1591,8 +1587,8 @@ def _queue_tick():
                         },
                         st.session_state.get("gcs_bucket", GCS_BUCKET),
                     )
-                    st.session_state["ledger_nonce"] = (
-                        st.session_state.get("ledger_nonce", 0) + 1
+                    st.session_state["job_history_nonce"] = (
+                        st.session_state.get("job_history_nonce", 0) + 1
                     )
                 except Exception as e:
                     st.warning(f"Ledger append failed: {e}")
