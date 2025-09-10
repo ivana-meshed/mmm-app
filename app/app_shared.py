@@ -69,6 +69,12 @@ def _iso_utc(s) -> str:
     return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _empty_ledger_df() -> pd.DataFrame:
+    # Matches fields written by run_all.R::append_to_ledger()
+    cols = LEDGER_COLUMNS
+    return pd.DataFrame(columns=cols)
+
+
 def normalize_ledger_df(df: "pd.DataFrame"):
     import pandas as pd
 
@@ -365,16 +371,23 @@ def _get_ledger_object() -> str:
     return os.getenv("JOBS_LEDGER_OBJECT", "robyn-jobs/ledger.csv")
 
 
-def read_ledger_from_gcs(bucket_name: str):
-    import pandas as pd, io
+def read_ledger_from_gcs(bucket_name: str) -> pd.DataFrame:
     from google.cloud import storage
 
     client = storage.Client()
     blob = client.bucket(bucket_name).blob("robyn-jobs/ledger.csv")
     if not blob.exists():
-        return pd.DataFrame(columns=LEDGER_COLUMNS)
-    data = blob.download_as_bytes()
-    df = pd.read_csv(io.BytesIO(data))
+        return _empty_ledger_df()  # your function with LEDGER_COLUMNS
+
+    raw = blob.download_as_bytes()
+    if not raw:
+        return _empty_ledger_df()
+
+    df = pd.read_csv(io.BytesIO(raw))
+    if df is None or df.empty:
+        return _empty_ledger_df()
+
+    # (optional) normalize columns/order here if you want
     return normalize_ledger_df(df)
 
 
@@ -387,7 +400,7 @@ def save_ledger_to_gcs(df, bucket_name: str):
     df.to_csv(b, index=False)
     b.seek(0)
     client = storage.Client()
-    blob = client.bucket(bucket_name).blob("robyn-jobs_ledger.csv")
+    blob = client.bucket(bucket_name).blob("robyn-jobs/ledger.csv")
     blob.upload_from_file(b, content_type="text/csv")
     return True
 
