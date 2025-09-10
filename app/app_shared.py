@@ -16,6 +16,8 @@ import snowflake.connector as sf
 from google.cloud import storage, run_v2
 
 from data_processor import DataProcessor
+from uuid import uuid4
+from google.api_core.exceptions import PreconditionFailed
 
 # Environment constants
 PROJECT_ID = os.getenv("PROJECT_ID")
@@ -49,6 +51,44 @@ LEDGER_COLUMNS = [
     "execution_name",  # full resource path (optional, for debugging)
 ]
 
+# Columns that come from the Queue Builder / params
+QUEUE_PARAM_COLUMNS = [
+    "country",
+    "revision",
+    "date_input",
+    "iterations",
+    "trials",
+    "train_size",
+    "paid_media_spends",
+    "paid_media_vars",
+    "context_vars",
+    "factor_vars",
+    "organic_vars",
+    "gcs_bucket",  # param override bucket
+    "table",
+    "query",
+    "dep_var",
+    "date_var",
+    "adstock",
+    "annotations_gcs_path",
+]
+
+# Canonical ledger schema (builder params + exec/info)
+LEDGER_COLUMNS = (
+    ["job_id", "state"]
+    + QUEUE_PARAM_COLUMNS
+    + [
+        "start_time",  # ISO 8601 UTC
+        "end_time",  # ISO 8601 UTC
+        "duration_minutes",
+        "gcs_prefix",
+        "bucket",  # output bucket actually used
+        "exec_name",  # short execution id
+        "execution_name",  # full execution resource
+        "message",  # <- Msg from queue
+    ]
+)
+
 
 def _short_exec_name(x: str) -> str:
     if not isinstance(x, str) or not x:
@@ -75,6 +115,186 @@ def _empty_ledger_df() -> pd.DataFrame:
     return pd.DataFrame(columns=cols)
 
 
+def _safe_tick_once(
+    queue_name: str,
+    bucket_name: Optional[str] = None,
+    launcher: Optional[callable] = None,
+    max_retries: int = 3,
+) -> dict:
+    """
+    Single safe tick with optimistic concurrency on GCS:
+    - If a RUNNING/LAUNCHING job exists: update its status (or promote LAUNCHING→RUNNING) and persist guarded.
+    - Else lease the first PENDING job by writing LAUNCHING with an if_generation_match precondition,
+      then launch outside the critical section, and persist the RUNNING/ERROR result with another guarded write.
+    Returns {ok, message, changed}.
+    """
+    bucket_name = bucket_name or GCS_BUCKET
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(_queue_blob_path(queue_name))
+
+    def _init_doc() -> dict:
+        return {
+            "version": 1,
+            "saved_at": datetime.utcnow().isoformat() + "Z",
+            "entries": [],
+            "queue_running": True,
+        }
+
+    for _ in range(max_retries):
+        # Ensure the blob exists, then load doc + current generation
+        if not blob.exists():
+            try:
+                blob.upload_from_string(
+                    json.dumps(_init_doc(), indent=2),
+                    content_type="application/json",
+                    if_generation_match=0,  # create-if-not-exists
+                )
+            except PreconditionFailed:
+                # Someone created it concurrently; continue to normal path
+                pass
+
+        blob.reload()  # get current generation
+        gen = int(blob.generation)
+        try:
+            doc = json.loads(blob.download_as_text())
+        except Exception:
+            doc = _init_doc()
+
+        q = doc.get("entries", [])
+        running_flag = doc.get("queue_running", True)
+
+        if not q:
+            return {"ok": True, "message": "empty queue", "changed": False}
+        if not running_flag:
+            return {"ok": True, "message": "queue is paused", "changed": False}
+
+        jm = CloudRunJobManager(PROJECT_ID, REGION)
+
+        # 1) Update RUNNING/LAUNCHING job if any
+        run_idx = next(
+            (
+                i
+                for i, e in enumerate(q)
+                if e.get("status") in ("RUNNING", "LAUNCHING")
+            ),
+            None,
+        )
+        if run_idx is not None:
+            entry = q[run_idx]
+            changed = False
+            message = "tick"
+
+            try:
+                status_info = jm.get_execution_status(
+                    entry.get("execution_name", "")
+                )
+                s = (status_info.get("overall_status") or "").upper()
+                if s in (
+                    "SUCCEEDED",
+                    "FAILED",
+                    "CANCELLED",
+                    "COMPLETED",
+                    "ERROR",
+                ):
+                    final_state = (
+                        "SUCCEEDED" if s in ("SUCCEEDED", "COMPLETED") else s
+                    )
+                    entry["status"] = final_state
+                    entry["message"] = (
+                        status_info.get("error", "") or final_state
+                    )
+                    message = entry["message"]
+                    changed = True
+                elif entry.get("status") == "LAUNCHING":
+                    # Visible execution, promote to RUNNING
+                    entry["status"] = "RUNNING"
+                    message = "running"
+                    changed = True
+            except Exception as e:
+                entry["status"] = "ERROR"
+                entry["message"] = str(e)
+                message = entry["message"]
+                changed = True
+
+            if changed:
+                doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
+                try:
+                    blob.upload_from_string(
+                        json.dumps(doc, indent=2),
+                        content_type="application/json",
+                        if_generation_match=gen,  # guarded write
+                    )
+                    return {"ok": True, "message": message, "changed": True}
+                except PreconditionFailed:
+                    # Lost the race; retry with fresh doc/generation
+                    continue
+
+            return {"ok": True, "message": "no change", "changed": False}
+
+        # 2) Lease & launch next PENDING
+        pend_idx = next(
+            (i for i, e in enumerate(q) if e.get("status") == "PENDING"), None
+        )
+        if pend_idx is None:
+            return {"ok": True, "message": "no pending", "changed": False}
+        if not launcher:
+            return {
+                "ok": False,
+                "message": "launcher not provided",
+                "changed": False,
+            }
+
+        entry = q[pend_idx]
+
+        # --- Critical section: lease it (LAUNCHING) guarded by generation match ---
+        entry["status"] = "LAUNCHING"
+        entry["message"] = "Launching..."
+        doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
+        try:
+            blob.upload_from_string(
+                json.dumps(doc, indent=2),
+                content_type="application/json",
+                if_generation_match=gen,  # only one process can acquire the lease
+            )
+        except PreconditionFailed:
+            # Another process leased it; retry from the top
+            continue
+
+        # --- Outside critical section: perform the actual launch ---
+        message = "Launched"
+        try:
+            exec_info = launcher(entry["params"])
+            time.sleep(SAFE_LAG_SECONDS_AFTER_RUNNING)
+            entry["execution_name"] = exec_info.get("execution_name")
+            entry["timestamp"] = exec_info.get("timestamp")
+            entry["gcs_prefix"] = exec_info.get("gcs_prefix")
+            entry["status"] = "RUNNING"
+            entry["message"] = "Launched"
+        except Exception as e:
+            entry["status"] = "ERROR"
+            entry["message"] = f"launch failed: {e}"
+            message = entry["message"]
+
+        # Persist the post-launch state with another guarded write
+        blob.reload()
+        gen2 = int(blob.generation)
+        doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
+        try:
+            blob.upload_from_string(
+                json.dumps(doc, indent=2),
+                content_type="application/json",
+                if_generation_match=gen2,
+            )
+            return {"ok": True, "message": message, "changed": True}
+        except PreconditionFailed:
+            # A concurrent status update happened (e.g., another tick promoted LAUNCHING→RUNNING).
+            # Retry loop merges on next pass.
+            continue
+
+    return {"ok": False, "message": "contention: retry later", "changed": False}
+
+
 def normalize_ledger_df(df: "pd.DataFrame"):
     import pandas as pd
 
@@ -84,25 +304,29 @@ def normalize_ledger_df(df: "pd.DataFrame"):
     if "status" in df.columns and "state" not in df.columns:
         df = df.rename(columns={"status": "state"})
     if "gcs_bucket" in df.columns and "bucket" not in df.columns:
-        df = df.rename(columns={"gcs_bucket": "bucket"})
+        # do not rename; we now keep both 'gcs_bucket' (param) and 'bucket' (output)
+        pass
 
     # Ensure all expected columns exist
     for c in LEDGER_COLUMNS:
         if c not in df.columns:
             df[c] = pd.NA
 
-    # --- Exec fields must be present & normalized ---
-    if "execution_name" not in df.columns:
-        df["execution_name"] = ""
+    # Exec fields present & normalized
     df["execution_name"] = df["execution_name"].fillna("").astype(str)
+    df["exec_name"] = df["exec_name"].fillna("").astype(str)
 
-    if "exec_name" not in df.columns:
-        df["exec_name"] = ""
-    df["exec_name"] = (
-        df["exec_name"].fillna("").astype(str).apply(_short_exec_name)
-    )
+    # Backfill exec_name from execution_name when missing; always short form
+    mask = df["exec_name"].str.strip().eq("") & df[
+        "execution_name"
+    ].str.strip().ne("")
+    if mask.any():
+        df.loc[mask, "exec_name"] = df.loc[mask, "execution_name"].apply(
+            _short_exec_name
+        )
+    df["exec_name"] = df["exec_name"].apply(_short_exec_name)
 
-    # Normalize times to UTC ISO seconds
+    # Normalize times
     df["start_time"] = df["start_time"].apply(_iso_utc)
     df["end_time"] = df["end_time"].apply(_iso_utc)
 
@@ -114,15 +338,41 @@ def normalize_ledger_df(df: "pd.DataFrame"):
 
     df["job_id"] = df.apply(_canon_job_id, axis=1)
 
-    # Backfill duration
-    st = pd.to_datetime(df["start_time"], utc=True, errors="coerce")
-    et = pd.to_datetime(df["end_time"], utc=True, errors="coerce")
-    need = df["duration_minutes"].isna() & st.notna() & et.notna()
-    if need.any():
-        df.loc[need, "duration_minutes"] = (et - st).dt.total_seconds() / 60.0
+    # Coerce builder/param columns to string, with nice CSV-ish join for lists
+    def _csvish(x):
+        if isinstance(x, (list, tuple)):
+            return ", ".join(str(v) for v in x if str(v).strip())
+        return "" if (x is pd.NA or x is None) else str(x)
 
-    # Order & sort
+    for c in QUEUE_PARAM_COLUMNS:
+        df[c] = df[c].apply(_csvish)
+
+    # Backfill duration
+    st_ts = pd.to_datetime(df["start_time"], utc=True, errors="coerce")
+    et_ts = pd.to_datetime(df["end_time"], utc=True, errors="coerce")
+    need = df["duration_minutes"].isna() & st_ts.notna() & et_ts.notna()
+    if need.any():
+        df.loc[need, "duration_minutes"] = (
+            et_ts - st_ts
+        ).dt.total_seconds() / 60.0
+
+    # Order & (optionally) de-dup by job_id, keeping first non-empty values
     df = df[LEDGER_COLUMNS]
+
+    if "job_id" in df.columns and not df.empty:
+
+        def _first_non_empty(series):
+            for x in series:
+                if pd.notna(x) and (not isinstance(x, str) or x.strip() != ""):
+                    return x
+            return pd.NA
+
+        df = df.groupby("job_id", as_index=False, dropna=False).agg(
+            _first_non_empty
+        )
+        df = df[LEDGER_COLUMNS]
+
+    # Final sort
     df = df.sort_values(
         ["end_time", "start_time"], ascending=False, na_position="last"
     ).reset_index(drop=True)
@@ -415,14 +665,36 @@ def save_ledger_to_gcs(df, bucket_name: str):
 def append_row_to_ledger(row_dict: dict, bucket_name: str):
     import pandas as pd
 
-    df = read_ledger_from_gcs(bucket_name)
-    # Make sure all expected keys exist
+    # Ensure all expected keys exist
     for c in LEDGER_COLUMNS:
         row_dict.setdefault(c, pd.NA)
-    # Normalize single-row frame then append
+
+    # If exec_name is missing but we have execution_name, derive it
+    if (not row_dict.get("exec_name")) and row_dict.get("execution_name"):
+        row_dict["exec_name"] = _short_exec_name(
+            str(row_dict["execution_name"])
+        )
+
+    # New row (normalized)
     df_new = normalize_ledger_df(pd.DataFrame([row_dict]))
-    df_all = pd.concat([df, df_new], ignore_index=True)
-    return save_ledger_to_gcs(df_all, bucket_name)
+
+    # Existing ledger (may be empty)
+    df_old = read_ledger_from_gcs(bucket_name)
+    if df_old is None or df_old.empty:
+        return save_ledger_to_gcs(df_new, bucket_name)
+
+    # Merge by job_id: fill missing values in existing row with new values (combine_first)
+    df_old = df_old.set_index("job_id")
+    df_new = df_new.set_index("job_id")
+    for jid, s in df_new.iterrows():
+        if jid in df_old.index:
+            df_old.loc[jid] = df_old.loc[jid].combine_first(s)
+        else:
+            df_old.loc[jid] = s
+
+    df_merged = df_old.reset_index()
+    df_merged = normalize_ledger_df(df_merged)
+    return save_ledger_to_gcs(df_merged, bucket_name)
 
 
 def read_status_json(bucket_name: str, prefix: str) -> Optional[dict]:
@@ -639,113 +911,7 @@ def queue_tick_once_headless(
     bucket_name: Optional[str] = None,
     launcher: Optional[callable] = None,
 ) -> dict:
-    """
-    Advance the queue by at most one transition; safe to call from Scheduler/webhook.
-    Adds a LAUNCHING lease before starting jobs to prevent double launches.
-    """
-    bucket_name = bucket_name or GCS_BUCKET
-    doc = load_queue_from_gcs(queue_name, bucket_name=bucket_name)
-    q = doc.get("entries", [])
-    running_flag = doc.get("queue_running", True)
-
-    if not q:
-        return {"ok": True, "message": "empty queue", "changed": False}
-
-    if not running_flag:
-        return {"ok": True, "message": "queue is paused", "changed": False}
-
-    changed = False
-    jm = CloudRunJobManager(PROJECT_ID, REGION)
-
-    # 1) Update RUNNING/LAUNCHING job if any
-    run_idx = next(
-        (
-            i
-            for i, e in enumerate(q)
-            if e.get("status") in ("RUNNING", "LAUNCHING")
-        ),
-        None,
-    )
-    if run_idx is not None:
-        entry = q[run_idx]
-        try:
-            status_info = jm.get_execution_status(entry["execution_name"])
-            s = (status_info.get("overall_status") or "").upper()
-            if s in ("SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"):
-                final_state = (
-                    "SUCCEEDED" if s in ("SUCCEEDED", "COMPLETED") else s
-                )
-                entry["status"] = final_state
-                entry["message"] = status_info.get("error", "") or final_state
-                changed = True
-            elif entry.get("status") == "LAUNCHING":
-                # Promote to RUNNING once an execution is visible/started
-                entry["status"] = "RUNNING"
-                changed = True
-        except Exception as e:
-            entry["status"] = "ERROR"
-            entry["message"] = str(e)
-            changed = True
-
-        if changed:
-            save_queue_to_gcs(
-                queue_name,
-                entries=q,
-                queue_running=running_flag,
-                bucket_name=bucket_name,
-            )
-            return {"ok": True, "message": "updated running", "changed": True}
-
-    # 2) Launch next PENDING if none running/launching
-    pend_idx = next(
-        (i for i, e in enumerate(q) if e.get("status") == "PENDING"), None
-    )
-    if pend_idx is None:
-        return {"ok": True, "message": "no pending", "changed": False}
-
-    if not launcher:
-        return {
-            "ok": False,
-            "message": "launcher not provided",
-            "changed": False,
-        }
-
-    entry = q[pend_idx]
-
-    try:
-        # --- Lease: mark as LAUNCHING and persist immediately ---
-        entry["status"] = "LAUNCHING"
-        entry["message"] = "Launching..."
-        save_queue_to_gcs(
-            queue_name,
-            entries=q,
-            queue_running=running_flag,
-            bucket_name=bucket_name,
-        )
-
-        # Launch
-        exec_info = launcher(entry["params"])
-        time.sleep(SAFE_LAG_SECONDS_AFTER_RUNNING)
-
-        entry["execution_name"] = exec_info["execution_name"]
-        entry["timestamp"] = exec_info["timestamp"]
-        entry["gcs_prefix"] = exec_info["gcs_prefix"]
-        entry["status"] = "RUNNING"
-        entry["message"] = "Launched"
-        changed = True
-    except Exception as e:
-        entry["status"] = "ERROR"
-        entry["message"] = f"launch failed: {e}"
-        changed = True
-
-    if changed:
-        save_queue_to_gcs(
-            queue_name,
-            entries=q,
-            queue_running=running_flag,
-            bucket_name=bucket_name,
-        )
-    return {"ok": True, "message": entry["message"], "changed": True}
+    return _safe_tick_once(queue_name, bucket_name, launcher)
 
 
 # ─────────────────────────────
