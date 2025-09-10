@@ -78,45 +78,50 @@ def _empty_ledger_df() -> pd.DataFrame:
 def normalize_ledger_df(df: "pd.DataFrame"):
     import pandas as pd
 
-    if df is None:
-        df = pd.DataFrame()
-    else:
-        df = df.copy()
-    # Backward compat: rename common variants
+    df = (df if isinstance(df, pd.DataFrame) else pd.DataFrame()).copy()
+
+    # Backward compat renames
     if "status" in df.columns and "state" not in df.columns:
         df = df.rename(columns={"status": "state"})
     if "gcs_bucket" in df.columns and "bucket" not in df.columns:
         df = df.rename(columns={"gcs_bucket": "bucket"})
 
-    # Ensure all columns exist
+    # Ensure all expected columns exist
     for c in LEDGER_COLUMNS:
         if c not in df.columns:
             df[c] = pd.NA
 
-    # Normalize exec names
-    df["exec_name"] = df["exec_name"].apply(_short_exec_name)
-    df["execution_name"] = df["execution_name"].fillna("")
+    # --- Exec fields must be present & normalized ---
+    if "execution_name" not in df.columns:
+        df["execution_name"] = ""
+    df["execution_name"] = df["execution_name"].fillna("").astype(str)
 
-    # Normalize times
+    if "exec_name" not in df.columns:
+        df["exec_name"] = ""
+    df["exec_name"] = (
+        df["exec_name"].fillna("").astype(str).apply(_short_exec_name)
+    )
+
+    # Normalize times to UTC ISO seconds
     df["start_time"] = df["start_time"].apply(_iso_utc)
     df["end_time"] = df["end_time"].apply(_iso_utc)
 
-    # Prefer gcs_prefix as canonical job_id if job_id looks like a bare number
+    # Canonical job_id
     def _canon_job_id(row):
         jid = str(row.get("job_id") or "")
         gpref = row.get("gcs_prefix") or ""
-        return gpref if (jid.isdigit() and gpref) else jid or gpref
+        return gpref if (jid.isdigit() and gpref) else (jid or gpref)
 
     df["job_id"] = df.apply(_canon_job_id, axis=1)
 
-    # Backfill duration if possible
+    # Backfill duration
     st = pd.to_datetime(df["start_time"], utc=True, errors="coerce")
     et = pd.to_datetime(df["end_time"], utc=True, errors="coerce")
     need = df["duration_minutes"].isna() & st.notna() & et.notna()
     if need.any():
         df.loc[need, "duration_minutes"] = (et - st).dt.total_seconds() / 60.0
 
-    # Reorder & sort
+    # Order & sort
     df = df[LEDGER_COLUMNS]
     df = df.sort_values(
         ["end_time", "start_time"], ascending=False, na_position="last"
@@ -636,8 +641,7 @@ def queue_tick_once_headless(
 ) -> dict:
     """
     Advance the queue by at most one transition; safe to call from Scheduler/webhook.
-    Uses only GCS state (stateless). If `launcher` is provided, it will be used to
-    launch the next PENDING job; otherwise the function will only update RUNNING status.
+    Adds a LAUNCHING lease before starting jobs to prevent double launches.
     """
     bucket_name = bucket_name or GCS_BUCKET
     doc = load_queue_from_gcs(queue_name, bucket_name=bucket_name)
@@ -653,20 +657,30 @@ def queue_tick_once_headless(
     changed = False
     jm = CloudRunJobManager(PROJECT_ID, REGION)
 
-    # 1) Update RUNNING job if any
+    # 1) Update RUNNING/LAUNCHING job if any
     run_idx = next(
-        (i for i, e in enumerate(q) if e.get("status") == "RUNNING"), None
+        (
+            i
+            for i, e in enumerate(q)
+            if e.get("status") in ("RUNNING", "LAUNCHING")
+        ),
+        None,
     )
     if run_idx is not None:
         entry = q[run_idx]
         try:
             status_info = jm.get_execution_status(entry["execution_name"])
-            s = status_info.get("overall_status")
+            s = (status_info.get("overall_status") or "").upper()
             if s in ("SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"):
-                entry["status"] = (
+                final_state = (
                     "SUCCEEDED" if s in ("SUCCEEDED", "COMPLETED") else s
                 )
-                entry["message"] = status_info.get("error", "") or s
+                entry["status"] = final_state
+                entry["message"] = status_info.get("error", "") or final_state
+                changed = True
+            elif entry.get("status") == "LAUNCHING":
+                # Promote to RUNNING once an execution is visible/started
+                entry["status"] = "RUNNING"
                 changed = True
         except Exception as e:
             entry["status"] = "ERROR"
@@ -682,7 +696,7 @@ def queue_tick_once_headless(
             )
             return {"ok": True, "message": "updated running", "changed": True}
 
-    # 2) Launch next PENDING if none running
+    # 2) Launch next PENDING if none running/launching
     pend_idx = next(
         (i for i, e in enumerate(q) if e.get("status") == "PENDING"), None
     )
@@ -697,9 +711,22 @@ def queue_tick_once_headless(
         }
 
     entry = q[pend_idx]
+
     try:
+        # --- Lease: mark as LAUNCHING and persist immediately ---
+        entry["status"] = "LAUNCHING"
+        entry["message"] = "Launching..."
+        save_queue_to_gcs(
+            queue_name,
+            entries=q,
+            queue_running=running_flag,
+            bucket_name=bucket_name,
+        )
+
+        # Launch
         exec_info = launcher(entry["params"])
         time.sleep(SAFE_LAG_SECONDS_AFTER_RUNNING)
+
         entry["execution_name"] = exec_info["execution_name"]
         entry["timestamp"] = exec_info["timestamp"]
         entry["gcs_prefix"] = exec_info["gcs_prefix"]
