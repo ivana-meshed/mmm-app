@@ -989,7 +989,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 "context_vars": _as_csv(p.get("context_vars", "")),
                 "factor_vars": _as_csv(p.get("factor_vars", "")),
                 "organic_vars": _as_csv(p.get("organic_vars", "")),
-                "gcs_bucket": p.get("gcs_bucket", st.session_state["gcs_bucket"]),
+                "gcs_bucket": p.get(
+                    "gcs_bucket", st.session_state["gcs_bucket"]
+                ),
                 "table": p.get("table", ""),
                 "query": p.get("query", ""),
                 "dep_var": p.get("dep_var", ""),
@@ -999,7 +1001,11 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             }
 
         # Seed builder with params from the current queue in GCS (readable/editable copy)
-        seed_df = pd.DataFrame([_entry_to_row(e) for e in existing_entries]) if existing_entries else template.iloc[0:0].copy()
+        seed_df = (
+            pd.DataFrame([_entry_to_row(e) for e in existing_entries])
+            if existing_entries
+            else template.iloc[0:0].copy()
+        )
 
         # Keep an editable builder in session so users can add rows manually
         st.session_state.setdefault("queue_builder_df", None)
@@ -1009,12 +1015,15 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         # If a CSV was uploaded this run, append its rows into the builder
         if parsed_df is not None and not parsed_df.empty:
             st.session_state["queue_builder_df"] = pd.concat(
-                [st.session_state["queue_builder_df"], parsed_df], ignore_index=True
+                [st.session_state["queue_builder_df"], parsed_df],
+                ignore_index=True,
             )
 
         st.markdown("#### ✏️ Queue Builder (editable)")
-        st.caption("This starts with the current queue (params only). Add rows below or upload a CSV to append. "
-                "Click **Enqueue all rows** to add any new rows to the queue on GCS (duplicates are skipped).")
+        st.caption(
+            "This starts with the current queue (params only). Add rows below or upload a CSV to append. "
+            "Click **Enqueue all rows** to add any new rows to the queue on GCS (duplicates are skipped)."
+        )
 
         builder_edited = st.data_editor(
             st.session_state["queue_builder_df"],
@@ -1028,7 +1037,10 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         # ---------- Normalizer reused for each row ----------
         def _normalize_row(row: pd.Series) -> dict:
             def _g(v, default):
-                return (row.get(v) if (v in row and pd.notna(row[v])) else default)
+                return (
+                    row.get(v) if (v in row and pd.notna(row[v])) else default
+                )
+
             return {
                 "country": str(_g("country", country)),
                 "revision": str(_g("revision", revision)),
@@ -1036,12 +1048,16 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 "iterations": int(_g("iterations", iterations)),
                 "trials": int(_g("trials", trials)),
                 "train_size": str(_g("train_size", train_size)),
-                "paid_media_spends": str(_g("paid_media_spends", paid_media_spends)),
+                "paid_media_spends": str(
+                    _g("paid_media_spends", paid_media_spends)
+                ),
                 "paid_media_vars": str(_g("paid_media_vars", paid_media_vars)),
                 "context_vars": str(_g("context_vars", context_vars)),
                 "factor_vars": str(_g("factor_vars", factor_vars)),
                 "organic_vars": str(_g("organic_vars", organic_vars)),
-                "gcs_bucket": str(_g("gcs_bucket", st.session_state["gcs_bucket"])),
+                "gcs_bucket": str(
+                    _g("gcs_bucket", st.session_state["gcs_bucket"])
+                ),
                 "table": str(_g("table", table or "")),
                 "query": str(_g("query", query or "")),
                 "dep_var": str(_g("dep_var", dep_var)),
@@ -1052,18 +1068,26 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
         # ---------- Enqueue buttons ----------
         c_left, c_right = st.columns(2)
-        if c_left.button("➕ Enqueue all rows", disabled=(builder_edited is None or builder_edited.empty)):
+        if c_left.button(
+            "➕ Enqueue all rows",
+            disabled=(builder_edited is None or builder_edited.empty),
+        ):
             # Build a signature set of existing queue params (normalized) to avoid duplicates
             existing_sigs = set()
             for e in st.session_state.job_queue:
                 try:
-                    norm_existing = _normalize_row(pd.Series(e.get("params", {})))
+                    norm_existing = _normalize_row(
+                        pd.Series(e.get("params", {}))
+                    )
                     existing_sigs.add(json.dumps(norm_existing, sort_keys=True))
                 except Exception:
                     pass
 
             # Normalize builder rows and enqueue only new ones
-            next_id = (max([e["id"] for e in st.session_state.job_queue], default=0) + 1)
+            next_id = (
+                max([e["id"] for e in st.session_state.job_queue], default=0)
+                + 1
+            )
             new_entries = []
             for i, row in builder_edited.iterrows():
                 params = _normalize_row(row)
@@ -1073,18 +1097,22 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 sig = json.dumps(params, sort_keys=True)
                 if sig in existing_sigs:
                     continue  # skip duplicates already in queue
-                new_entries.append({
-                    "id": next_id + len(new_entries),
-                    "params": params,
-                    "status": "PENDING",
-                    "timestamp": None,
-                    "execution_name": None,
-                    "gcs_prefix": None,
-                    "message": "",
-                })
+                new_entries.append(
+                    {
+                        "id": next_id + len(new_entries),
+                        "params": params,
+                        "status": "PENDING",
+                        "timestamp": None,
+                        "execution_name": None,
+                        "gcs_prefix": None,
+                        "message": "",
+                    }
+                )
 
             if not new_entries:
-                st.info("Nothing new to enqueue (all rows are duplicates or missing data source).")
+                st.info(
+                    "Nothing new to enqueue (all rows are duplicates or missing data source)."
+                )
             else:
                 st.session_state.job_queue.extend(new_entries)
                 st.session_state.queue_saved_at = save_queue_to_gcs(
@@ -1092,46 +1120,15 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     st.session_state.job_queue,
                     queue_running=st.session_state.queue_running,
                 )
-                st.success(f"Enqueued {len(new_entries)} new job(s) and saved to GCS.")
+                st.success(
+                    f"Enqueued {len(new_entries)} new job(s) and saved to GCS."
+                )
 
         if c_right.button("🧹 Clear builder (local)"):
             st.session_state["queue_builder_df"] = seed_df.copy()
             st.info("Builder cleared to current GCS queue (params only).")
 
-                c_left, c_right = st.columns(2)
-                if c_left.button("➕ Enqueue all rows", disabled=(parsed_df is None)):
-                    if parsed_df is not None:
-                        next_id = (
-                            max(
-                                [e["id"] for e in st.session_state.job_queue], default=0
-                            )
-                            + 1
-                        )
-                        new_entries = []
-                        for i, row in parsed_df.iterrows():
-                            params = _normalize_row(row)
-                            if not (params.get("query") or params.get("table")):
-                                continue
-                            new_entries.append(
-                                {
-                                    "id": next_id + i,
-                                    "params": params,
-                                    "status": "PENDING",
-                                    "timestamp": None,
-                                    "execution_name": None,
-                                    "gcs_prefix": None,
-                                    "message": "",
-                                }
-                            )
-                        st.session_state.job_queue.extend(new_entries)
-                        save_queue_to_gcs(
-                            st.session_state.queue_name, st.session_state.job_queue
-                        )
-                        st.success(
-                            f"Enqueued {len(new_entries)} job(s) and saved to GCS."
-                        )
-
-        if c_right.button("🧹 Clear queue"):
+        if st.button("🧹 Clear queue"):
             st.session_state["job_queue"] = []
             st.session_state["queue_running"] = False
             save_queue_to_gcs(st.session_state.queue_name, [])
