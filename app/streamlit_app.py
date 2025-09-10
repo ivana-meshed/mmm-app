@@ -1057,20 +1057,62 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             mime="text/csv",
         )
 
-        # --- CSV upload (unchanged) ---
-        # --- CSV upload (view only; append is explicit) ---
+        # --- CSV upload (editable) ---
         up = st.file_uploader("Upload batch CSV", type=["csv"], key="batch_csv")
-        uploaded_df = None
-        if up:
+
+        # Keep uploaded df in session so it persists across reruns and can be edited
+        if "uploaded_df" not in st.session_state:
+            st.session_state.uploaded_df = pd.DataFrame()
+
+        if up is not None:
             try:
-                uploaded_df = pd.read_csv(up)
-                st.success(f"Loaded {len(uploaded_df)} rows from CSV")
-                st.dataframe(uploaded_df.head(), width="stretch")
+                st.session_state.uploaded_df = pd.read_csv(up)
+                st.success(
+                    f"Loaded {len(st.session_state.uploaded_df)} rows from CSV"
+                )
             except Exception as e:
                 st.error(f"Failed to parse CSV: {e}")
 
+        # Show editable grid with a Delete column
+        if not st.session_state.uploaded_df.empty:
+            uploaded_view = st.session_state.uploaded_df.copy()
+            if "Delete" not in uploaded_view.columns:
+                uploaded_view.insert(0, "Delete", False)
+
+            uploaded_edited = st.data_editor(
+                uploaded_view,
+                key="uploaded_editor",
+                num_rows="dynamic",
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Delete": st.column_config.CheckboxColumn(
+                        "Delete", help="Mark to remove from uploaded table"
+                    )
+                },
+            )
+
+            uu1, uu2 = st.columns(2)
+            if uu1.button(
+                "🗑 Delete selected uploaded rows", key="delete_uploaded_rows"
+            ):
+                keep_mask = ~uploaded_edited["Delete"].fillna(False)
+                st.session_state.uploaded_df = (
+                    uploaded_edited.loc[keep_mask]
+                    .drop(columns="Delete", errors="ignore")
+                    .reset_index(drop=True)
+                )
+                st.rerun()
+
+            if uu2.button("🧹 Clear uploaded table", key="clear_uploaded_rows"):
+                st.session_state.uploaded_df = pd.DataFrame()
+                st.rerun()
+        else:
+            st.caption("No uploaded CSV yet (or it has 0 rows).")
+
         # ===== Queue Builder (parameters only, editable) =====
         # Seed once from current GCS queue (do NOT re-seed on every rerun)
+        # ===== Queue Builder (parameters only, editable) =====
         payload = load_queue_payload(st.session_state.queue_name)
         existing_entries = payload.get("entries", [])
 
@@ -1105,7 +1147,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             }
 
         seed_df = pd.DataFrame([_entry_to_row(e) for e in existing_entries])
-        # If absolutely empty, start with a single blank row so the user can type without the UI "blinking"
         if seed_df.empty:
             seed_df = seed_df.reindex(
                 columns=[
@@ -1131,7 +1172,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             )
             seed_df.loc[0] = [""] * len(seed_df.columns)
 
-        # Initialize the builder ONCE per session; do NOT reseed on reruns
         if "qb_df" not in st.session_state:
             st.session_state.qb_df = seed_df.copy()
 
@@ -1139,41 +1179,94 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         st.caption(
             "Starts with your current GCS queue (params only). "
             "Edit cells, add rows, or append from the uploaded CSV. "
-            "Click **Enqueue all rows** to add new rows to the GCS queue (duplicates are skipped)."
+            "Use the buttons below; edits are committed on submit."
         )
 
-        # Builder editor — edits persist in session
-        builder_edited = st.data_editor(
-            st.session_state.qb_df,
-            num_rows="dynamic",
-            width="stretch",
-            key="queue_builder_editor",  # stable key
-        )
-        st.session_state.qb_df = builder_edited
+        # Use a FORM so editor commits the last active cell before any button logic
+        with st.form("queue_builder_form"):
+            builder_edited = st.data_editor(
+                st.session_state.qb_df,
+                num_rows="dynamic",
+                width="stretch",
+                key="queue_builder_editor",
+                hide_index=True,
+            )
 
-        # Buttons for builder
-        b1, b2, b3 = st.columns(3)
+            # Keep the latest edited builder in session
+            st.session_state.qb_df = builder_edited
 
-        if b1.button(
-            "Append uploaded rows to builder", disabled=(uploaded_df is None)
-        ):
-            # Align uploaded to builder columns
-            need_cols = list(st.session_state.qb_df.columns)
+            # Row 1: actions affecting only the builder table
+            bb1, bb2, bb3 = st.columns(3)
+            append_uploaded_clicked = bb1.form_submit_button(
+                "Append uploaded rows to builder",
+                disabled=(
+                    "uploaded_df" not in st.session_state
+                    or st.session_state.uploaded_df is None
+                    or st.session_state.uploaded_df.empty
+                ),
+            )
+            reset_clicked = bb2.form_submit_button(
+                "Reset builder to current GCS queue"
+            )
+            clear_builder_clicked = bb3.form_submit_button(
+                "Clear builder (empty table)"
+            )
+
+            # Row 2: enqueue & queue clear
+            bc1, bc2 = st.columns(2)
+            enqueue_clicked = bc1.form_submit_button(
+                "➕ Enqueue all rows",
+                disabled=(
+                    st.session_state.qb_df is None
+                    or st.session_state.qb_df.empty
+                ),
+            )
+            # Keep Clear queue OUTSIDE the form if you prefer; having it here is fine too:
+            clear_queue_clicked = bc2.form_submit_button("🧹 Clear queue")
+
+        # ----- Handle form actions (after form so we have latest editor state) -----
+
+        if reset_clicked:
+            st.session_state.qb_df = seed_df.copy()
+            st.info("Builder reset to current GCS queue.")
+            st.rerun()
+
+        if clear_builder_clicked:
+            st.session_state.qb_df = seed_df.iloc[0:0].copy()
+            st.info("Builder cleared.")
+            st.rerun()
+
+        if clear_queue_clicked:
+            st.session_state["job_queue"] = []
+            st.session_state["queue_running"] = False
+            save_queue_to_gcs(st.session_state.queue_name, [])
+            st.success("Queue cleared & saved to GCS.")
+            st.rerun()
+
+        # Build helper here so it’s shared by both append & enqueue
+        def _sig_from_params_dict(d: dict) -> str:
+            return json.dumps(d, sort_keys=True)
+
+        need_cols = list(st.session_state.qb_df.columns)
+
+        if append_uploaded_clicked:
+            # Align uploaded (edited) to builder columns
             up_norm = (
-                uploaded_df if uploaded_df is not None else pd.DataFrame()
-            ).copy()
+                st.session_state.uploaded_df.copy()
+                if (
+                    "uploaded_df" in st.session_state
+                    and not st.session_state.uploaded_df.empty
+                )
+                else pd.DataFrame(columns=need_cols)
+            )
             up_norm = up_norm.reindex(columns=need_cols, fill_value="")
 
-            # Build signature sets from: current builder, current queue, and ledger (SUCCEEDED/FAILED)
-            def _sig_from_params_dict(d: dict) -> str:
-                return json.dumps(d, sort_keys=True)
+            # Build signature sets from: builder, queue, and ledger (SUCCEEDED/FAILED)
+            builder_sigs = {
+                _sig_from_params_dict(_normalize_row(r))
+                for _, r in st.session_state.qb_df.iterrows()
+            }
 
-            # (a) existing builder rows
-            builder_sigs = set()
-            for _, r in st.session_state.qb_df.iterrows():
-                builder_sigs.add(_sig_from_params_dict(_normalize_row(r)))
-
-            # (b) existing queue
             queue_sigs = set()
             for e in st.session_state.job_queue:
                 try:
@@ -1185,50 +1278,28 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 except Exception:
                     pass
 
-            # (c) ledger SUCCEEDED/FAILED
             try:
                 df_led = read_ledger_from_gcs(
                     st.session_state.get("gcs_bucket", GCS_BUCKET)
                 )
             except Exception:
                 df_led = pd.DataFrame()
+
             ledger_sigs = set()
             if not df_led.empty:
                 df_led = df_led[
                     df_led["state"].isin(["SUCCEEDED", "FAILED"])
                 ].copy()
-                # Reconstruct params dict from ledger row using the same columns used by the builder
                 for _, r in df_led.iterrows():
                     params_like = {
                         c: r.get(c, "")
-                        for c in [
-                            "country",
-                            "revision",
-                            "date_input",
-                            "iterations",
-                            "trials",
-                            "train_size",
-                            "paid_media_spends",
-                            "paid_media_vars",
-                            "context_vars",
-                            "factor_vars",
-                            "organic_vars",
-                            "gcs_bucket",
-                            "table",
-                            "query",
-                            "dep_var",
-                            "date_var",
-                            "adstock",
-                            "annotations_gcs_path",
-                        ]
+                        for c in need_cols  # same set used by builder
                     }
-                    # Normalize numeric-ish fields
                     params_like = _normalize_row(pd.Series(params_like))
                     ledger_sigs.add(_sig_from_params_dict(params_like))
 
             deny = builder_sigs | queue_sigs | ledger_sigs
 
-            # Filter uploaded rows: must have data source, and not duplicate in deny set
             keep_rows = []
             for _, r in up_norm.iterrows():
                 params = _normalize_row(r)
@@ -1253,17 +1324,85 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 )
                 st.rerun()
 
-        if b2.button("Reset builder to current GCS queue"):
-            st.session_state.qb_df = seed_df.copy()
-            st.session_state.qb_initialized = True
-            st.info("Builder reset to current GCS queue.")
-            st.rerun()
+        if enqueue_clicked:
+            # Duplicate-signature set from existing queue + ledger(S/F)
+            existing_sigs = set()
+            for e in st.session_state.job_queue:
+                try:
+                    norm_existing = _normalize_row(
+                        pd.Series(e.get("params", {}))
+                    )
+                    existing_sigs.add(json.dumps(norm_existing, sort_keys=True))
+                except Exception:
+                    pass
 
-        if b3.button("Clear builder (empty table)"):
-            st.session_state.qb_df = seed_df.iloc[0:0].copy()
-            st.session_state.qb_initialized = True
-            st.info("Builder cleared.")
-            st.rerun()
+            try:
+                df_led = read_ledger_from_gcs(
+                    st.session_state.get("gcs_bucket", GCS_BUCKET)
+                )
+            except Exception:
+                df_led = pd.DataFrame()
+            if not df_led.empty and "state" in df_led.columns:
+                df_led = df_led[
+                    df_led["state"].isin(["SUCCEEDED", "FAILED"])
+                ].copy()
+                for _, r in df_led.iterrows():
+                    params_like = {c: r.get(c, "") for c in need_cols}
+                    params_like = _normalize_row(pd.Series(params_like))
+                    existing_sigs.add(json.dumps(params_like, sort_keys=True))
+
+            next_id = (
+                max([e["id"] for e in st.session_state.job_queue], default=0)
+                + 1
+            )
+            new_entries, enqueued_sigs = [], set()
+            for _, row in st.session_state.qb_df.iterrows():
+                params = _normalize_row(row)
+                if not (params.get("query") or params.get("table")):
+                    continue
+                sig = json.dumps(params, sort_keys=True)
+                if sig in existing_sigs:
+                    continue
+                new_entries.append(
+                    {
+                        "id": next_id + len(new_entries),
+                        "params": params,
+                        "status": "PENDING",
+                        "timestamp": None,
+                        "execution_name": None,
+                        "gcs_prefix": None,
+                        "message": "",
+                    }
+                )
+                enqueued_sigs.add(sig)
+
+            if not new_entries:
+                st.info(
+                    "Nothing new to enqueue (all rows are duplicates or missing data source)."
+                )
+            else:
+                st.session_state.job_queue.extend(new_entries)
+                st.session_state.queue_saved_at = save_queue_to_gcs(
+                    st.session_state.queue_name,
+                    st.session_state.job_queue,
+                    queue_running=st.session_state.queue_running,
+                )
+
+                # Remove only the rows that were enqueued from the builder
+                def _row_sig(r: pd.Series) -> str:
+                    return json.dumps(_normalize_row(r), sort_keys=True)
+
+                keep_mask = ~st.session_state.qb_df.apply(
+                    _row_sig, axis=1
+                ).isin(enqueued_sigs)
+                st.session_state.qb_df = st.session_state.qb_df.loc[
+                    keep_mask
+                ].reset_index(drop=True)
+
+                st.success(
+                    f"Enqueued {len(new_entries)} new job(s), saved to GCS, and removed them from the builder."
+                )
+                st.rerun()
 
         # Enqueue button
         c_left, c_right = st.columns(2)
