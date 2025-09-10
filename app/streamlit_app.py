@@ -207,93 +207,6 @@ if isinstance(res, dict) and res:
     st.stop()
 
 
-def _queue_tick():
-    # Advance the queue atomically (lease/launch OR update running)
-    res = queue_tick_once_headless(
-        st.session_state.queue_name,
-        st.session_state.get("gcs_bucket", GCS_BUCKET),
-        launcher=prepare_and_launch_job,
-    )
-
-    # Always refresh local from GCS after a tick
-    maybe_refresh_queue_from_gcs(force=True)
-
-    # Sweep finished jobs into history and remove them from queue
-    q = st.session_state.job_queue or []
-    if not q:
-        return
-
-    remaining = []
-    moved = 0
-    for entry in q:
-        status = (entry.get("status") or "").upper()
-        if status in {"SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"}:
-            final_state = (
-                "SUCCEEDED" if status in {"SUCCEEDED", "COMPLETED"} else status
-            )
-            exec_full = entry.get("execution_name") or ""
-            exec_short = exec_full.split("/")[-1] if exec_full else ""
-            p = entry.get("params", {}) or {}
-
-            append_row_to_job_history(
-                {
-                    "job_id": entry.get("gcs_prefix") or entry.get("id"),
-                    "state": final_state,
-                    # All queue/builder params:
-                    "country": p.get("country"),
-                    "revision": p.get("revision"),
-                    "date_input": p.get("date_input"),
-                    "iterations": p.get("iterations"),
-                    "trials": p.get("trials"),
-                    "train_size": p.get("train_size"),
-                    "paid_media_spends": p.get("paid_media_spends"),
-                    "paid_media_vars": p.get("paid_media_vars"),
-                    "context_vars": p.get("context_vars"),
-                    "factor_vars": p.get("factor_vars"),
-                    "organic_vars": p.get("organic_vars"),
-                    "gcs_bucket": p.get("gcs_bucket"),
-                    "table": p.get("table"),
-                    "query": p.get("query"),
-                    "dep_var": p.get("dep_var"),
-                    "date_var": p.get("date_var"),
-                    "adstock": p.get("adstock"),
-                    "annotations_gcs_path": p.get("annotations_gcs_path"),
-                    # Exec/times
-                    "start_time": entry.get("start_time")
-                    or entry.get("timestamp"),
-                    "end_time": datetime.utcnow().isoformat(timespec="seconds")
-                    + "Z",
-                    "gcs_prefix": entry.get("gcs_prefix"),
-                    "bucket": entry.get("gcs_bucket")
-                    or st.session_state.get("gcs_bucket", GCS_BUCKET),
-                    "exec_name": exec_short,
-                    "execution_name": exec_full,
-                    # Queue message
-                    "message": entry.get("message", ""),
-                },
-                st.session_state.get("gcs_bucket", GCS_BUCKET),
-            )
-            moved += 1
-        else:
-            remaining.append(entry)
-
-    if moved:
-        # Persist trimmed queue
-        st.session_state.job_queue = remaining
-        st.session_state.queue_saved_at = save_queue_to_gcs(
-            st.session_state.queue_name,
-            st.session_state.job_queue,
-            queue_running=st.session_state.queue_running,
-        )
-        # bump nonce so job history table re-renders
-        st.session_state["job_history_nonce"] = (
-            st.session_state.get("job_history_nonce", 0) + 1
-        )
-
-
-_queue_tick()
-
-
 # ─────────────────────────────
 # Small UI helpers
 # ─────────────────────────────
@@ -543,6 +456,94 @@ def _make_normalizer(defaults: dict):
 
 
 _normalize_row = _make_normalizer(_builder_defaults)
+
+
+def _queue_tick():
+    # Advance the queue atomically (lease/launch OR update running)
+    res = queue_tick_once_headless(
+        st.session_state.queue_name,
+        st.session_state.get("gcs_bucket", GCS_BUCKET),
+        launcher=prepare_and_launch_job,
+    )
+
+    # Always refresh local from GCS after a tick
+    maybe_refresh_queue_from_gcs(force=True)
+
+    # Sweep finished jobs into history and remove them from queue
+    q = st.session_state.job_queue or []
+    if not q:
+        return
+
+    remaining = []
+    moved = 0
+    for entry in q:
+        status = (entry.get("status") or "").upper()
+        if status in {"SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"}:
+            final_state = (
+                "SUCCEEDED" if status in {"SUCCEEDED", "COMPLETED"} else status
+            )
+            exec_full = entry.get("execution_name") or ""
+            exec_short = exec_full.split("/")[-1] if exec_full else ""
+            p = entry.get("params", {}) or {}
+
+            append_row_to_job_history(
+                {
+                    "job_id": entry.get("gcs_prefix") or entry.get("id"),
+                    "state": final_state,
+                    # All queue/builder params:
+                    "country": p.get("country"),
+                    "revision": p.get("revision"),
+                    "date_input": p.get("date_input"),
+                    "iterations": p.get("iterations"),
+                    "trials": p.get("trials"),
+                    "train_size": p.get("train_size"),
+                    "paid_media_spends": p.get("paid_media_spends"),
+                    "paid_media_vars": p.get("paid_media_vars"),
+                    "context_vars": p.get("context_vars"),
+                    "factor_vars": p.get("factor_vars"),
+                    "organic_vars": p.get("organic_vars"),
+                    "gcs_bucket": p.get("gcs_bucket"),
+                    "table": p.get("table"),
+                    "query": p.get("query"),
+                    "dep_var": p.get("dep_var"),
+                    "date_var": p.get("date_var"),
+                    "adstock": p.get("adstock"),
+                    "annotations_gcs_path": p.get("annotations_gcs_path"),
+                    # Exec/times
+                    "start_time": entry.get("start_time")
+                    or entry.get("timestamp"),
+                    "end_time": datetime.utcnow().isoformat(timespec="seconds")
+                    + "Z",
+                    "gcs_prefix": entry.get("gcs_prefix"),
+                    "bucket": entry.get("gcs_bucket")
+                    or st.session_state.get("gcs_bucket", GCS_BUCKET),
+                    "exec_name": exec_short,
+                    "execution_name": exec_full,
+                    # Queue message
+                    "message": entry.get("message", ""),
+                },
+                st.session_state.get("gcs_bucket", GCS_BUCKET),
+            )
+            moved += 1
+        else:
+            remaining.append(entry)
+
+    if moved:
+        # Persist trimmed queue
+        st.session_state.job_queue = remaining
+        st.session_state.queue_saved_at = save_queue_to_gcs(
+            st.session_state.queue_name,
+            st.session_state.job_queue,
+            queue_running=st.session_state.queue_running,
+        )
+        # bump nonce so job history table re-renders
+        st.session_state["job_history_nonce"] = (
+            st.session_state.get("job_history_nonce", 0) + 1
+        )
+
+
+_queue_tick()
+
 
 # ─────────────────────────────
 # UI layout
