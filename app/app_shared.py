@@ -332,9 +332,17 @@ def normalize_ledger_df(df: "pd.DataFrame"):
 
     # Canonical job_id
     def _canon_job_id(row):
-        jid = str(row.get("job_id") or "")
-        gpref = row.get("gcs_prefix") or ""
-        return gpref if (jid.isdigit() and gpref) else (jid or gpref)
+        jid_raw = row.get("job_id")
+        gpref_raw = row.get("gcs_prefix")
+
+        # Treat pd.NA/NaN/None as empty strings, then cast
+        jid = "" if pd.isna(jid_raw) else str(jid_raw)
+        gpref = "" if pd.isna(gpref_raw) else str(gpref_raw)
+
+        # Prefer gcs_prefix when job_id is a numeric queue id
+        if jid.isdigit() and gpref:
+            return gpref
+        return jid if jid else gpref
 
     df["job_id"] = df.apply(_canon_job_id, axis=1)
 

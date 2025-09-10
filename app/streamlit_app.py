@@ -537,8 +537,8 @@ def _queue_tick():
             queue_running=st.session_state.queue_running,
         )
         # bump nonce so job history table re-renders
-        st.session_state["job_history_nonce"] = (
-            st.session_state.get("job_history_nonce", 0) + 1
+        st.session_state["ledger_nonce"] = (
+            st.session_state.get("ledger_nonce", 0) + 1
         )
 
 
