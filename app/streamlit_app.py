@@ -403,6 +403,60 @@ def maybe_refresh_queue_from_gcs(force: bool = False):
         st.session_state.queue_saved_at = remote_saved_at
 
 
+# ---- Builder defaults independent of Tab 2 ----
+_builder_defaults = dict(
+    country="fr",
+    iterations=200,
+    trials=5,
+    train_size="0.7,0.9",
+    revision="r100",
+    date_input=time.strftime("%Y-%m-%d"),
+    dep_var="UPLOAD_VALUE",
+    date_var="date",
+    adstock="geometric",
+    gcs_bucket=st.session_state.get("gcs_bucket", GCS_BUCKET),
+)
+
+
+def _make_normalizer(defaults: dict):
+    def _normalize_row(row: pd.Series) -> dict:
+        def _g(v, default):
+            return row.get(v) if (v in row and pd.notna(row[v])) else default
+
+        return {
+            "country": str(_g("country", defaults["country"])),
+            "revision": str(_g("revision", defaults["revision"])),
+            "date_input": str(_g("date_input", defaults["date_input"])),
+            "iterations": (
+                int(float(_g("iterations", defaults["iterations"])))
+                if str(_g("iterations", defaults["iterations"])).strip()
+                else int(defaults["iterations"])
+            ),
+            "trials": (
+                int(float(_g("trials", defaults["trials"])))
+                if str(_g("trials", defaults["trials"])).strip()
+                else int(defaults["trials"])
+            ),
+            "train_size": str(_g("train_size", defaults["train_size"])),
+            "paid_media_spends": str(_g("paid_media_spends", "")),
+            "paid_media_vars": str(_g("paid_media_vars", "")),
+            "context_vars": str(_g("context_vars", "")),
+            "factor_vars": str(_g("factor_vars", "")),
+            "organic_vars": str(_g("organic_vars", "")),
+            "gcs_bucket": str(_g("gcs_bucket", defaults["gcs_bucket"])),
+            "table": str(_g("table", "")),
+            "query": str(_g("query", "")),
+            "dep_var": str(_g("dep_var", defaults["dep_var"])),
+            "date_var": str(_g("date_var", defaults["date_var"])),
+            "adstock": str(_g("adstock", defaults["adstock"])),
+            "annotations_gcs_path": str(_g("annotations_gcs_path", "")),
+        }
+
+    return _normalize_row
+
+
+_normalize_row = _make_normalizer(_builder_defaults)
+
 # ─────────────────────────────
 # UI layout
 # ─────────────────────────────
@@ -1128,46 +1182,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             st.session_state.qb_initialized = True
             st.info("Builder cleared.")
             st.rerun()
-
-        # Normalizer reused for each row
-        def _normalize_row(row: pd.Series) -> dict:
-            def _g(v, default):
-                return (
-                    row.get(v) if (v in row and pd.notna(row[v])) else default
-                )
-
-            return {
-                "country": str(_g("country", country)),
-                "revision": str(_g("revision", revision)),
-                "date_input": str(_g("date_input", date_input)),
-                "iterations": (
-                    int(float(_g("iterations", iterations)))
-                    if str(_g("iterations", iterations)).strip()
-                    else int(iterations)
-                ),
-                "trials": (
-                    int(float(_g("trials", trials)))
-                    if str(_g("trials", trials)).strip()
-                    else int(trials)
-                ),
-                "train_size": str(_g("train_size", train_size)),
-                "paid_media_spends": str(
-                    _g("paid_media_spends", paid_media_spends)
-                ),
-                "paid_media_vars": str(_g("paid_media_vars", paid_media_vars)),
-                "context_vars": str(_g("context_vars", context_vars)),
-                "factor_vars": str(_g("factor_vars", factor_vars)),
-                "organic_vars": str(_g("organic_vars", organic_vars)),
-                "gcs_bucket": str(
-                    _g("gcs_bucket", st.session_state["gcs_bucket"])
-                ),
-                "table": str(_g("table", table or "")),
-                "query": str(_g("query", query or "")),
-                "dep_var": str(_g("dep_var", dep_var)),
-                "date_var": str(_g("date_var", date_var)),
-                "adstock": str(_g("adstock", adstock)),
-                "annotations_gcs_path": str(_g("annotations_gcs_path", "")),
-            }
 
         # Enqueue button
         c_left, c_right = st.columns(2)
