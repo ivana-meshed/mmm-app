@@ -269,22 +269,30 @@ def render_jobs_ledger(key_prefix: str = "single") -> None:
         df_ledger = df_ledger.reindex(columns=LEDGER_COLUMNS)
 
         st.caption("Append rows directly and click **Save to GCS** to persist.")
+        locked = {
+            "job_id",
+            "bucket",
+            "gcs_prefix",
+            "exec_name",
+            "execution_name",
+            "start_time",
+            "end_time",
+            "duration_minutes",
+        }
+        col_cfg = {
+            c: st.column_config.TextColumn(disabled=True)
+            for c in locked
+            if c in df_ledger.columns
+        }
+        # If some are numeric, use NumberColumn; adjust as needed.
+
         edited = st.data_editor(
             df_ledger,
             num_rows="dynamic",
-            width="stretch",  # Streamlit deprecation fix
+            width="stretch",
             key=f"ledger_editor_{key_prefix}",
             column_order=LEDGER_COLUMNS,
-            disabled=[
-                "job_id",
-                "bucket",
-                "gcs_prefix",
-                "exec_name",
-                "execution_name",
-                "start_time",
-                "end_time",
-                "duration_minutes",
-            ],
+            column_config=col_cfg,
         )
 
         c1, c2 = st.columns(2)
@@ -1278,7 +1286,7 @@ def _queue_tick():
             entry["status"] = "RUNNING"
             entry["message"] = "Launched"
             entry["start_time"] = (
-                datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                datetime.utcnow().isoformat(timespec="seconds") + "Z"
             )
             st.session_state.job_executions.append(exec_info)
             changed = True
