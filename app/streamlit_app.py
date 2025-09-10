@@ -888,6 +888,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "gcs_bucket": st.session_state["gcs_bucket"],
                     "table": "",
                     "query": "SELECT * FROM MESHED_BUYCYCLE.GROWTH.SOME_TABLE",
+                    "dep_var": "UPLOAD_VALUE",
+                    "date_var": "date",
+                    "adstock": "geometric",
                     "annotations_gcs_path": "",
                 }
             ]
@@ -900,7 +903,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "revision": "r101",
                     "date_input": time.strftime("%Y-%m-%d"),
                     "iterations": 300,
-                    "trials": 6,
+                    "trials": 3,
                     "train_size": "0.7,0.9",
                     "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, META_DEMAND_COST, TV_COST",
                     "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, META_DEMAND_COST, TV_COST",
@@ -908,7 +911,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "factor_vars": "IS_WEEKEND,TV_IS_ON",
                     "organic_vars": "ORGANIC_TRAFFIC",
                     "gcs_bucket": st.session_state["gcs_bucket"],
-                    "table": "MESHED_BUYCYCLE.GROWTH.TABLE_A",
+                    "table": "MESHED_BUYCYCLE.GROWTH.MMM_RAW",
                     "query": "",
                     "dep_var": "UPLOAD_VALUE",
                     "date_var": "date",
