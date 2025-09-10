@@ -78,8 +78,10 @@ def _empty_ledger_df() -> pd.DataFrame:
 def normalize_ledger_df(df: "pd.DataFrame"):
     import pandas as pd
 
-    df = (df or pd.DataFrame()).copy()
-
+    if df is None:
+        df = pd.DataFrame()
+    else:
+        df = df.copy()
     # Backward compat: rename common variants
     if "status" in df.columns and "state" not in df.columns:
         df = df.rename(columns={"status": "state"})
