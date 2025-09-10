@@ -207,6 +207,93 @@ if isinstance(res, dict) and res:
     st.stop()
 
 
+def _queue_tick():
+    # Advance the queue atomically (lease/launch OR update running)
+    res = queue_tick_once_headless(
+        st.session_state.queue_name,
+        st.session_state.get("gcs_bucket", GCS_BUCKET),
+        launcher=prepare_and_launch_job,
+    )
+
+    # Always refresh local from GCS after a tick
+    maybe_refresh_queue_from_gcs(force=True)
+
+    # Sweep finished jobs into history and remove them from queue
+    q = st.session_state.job_queue or []
+    if not q:
+        return
+
+    remaining = []
+    moved = 0
+    for entry in q:
+        status = (entry.get("status") or "").upper()
+        if status in {"SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"}:
+            final_state = (
+                "SUCCEEDED" if status in {"SUCCEEDED", "COMPLETED"} else status
+            )
+            exec_full = entry.get("execution_name") or ""
+            exec_short = exec_full.split("/")[-1] if exec_full else ""
+            p = entry.get("params", {}) or {}
+
+            append_row_to_job_history(
+                {
+                    "job_id": entry.get("gcs_prefix") or entry.get("id"),
+                    "state": final_state,
+                    # All queue/builder params:
+                    "country": p.get("country"),
+                    "revision": p.get("revision"),
+                    "date_input": p.get("date_input"),
+                    "iterations": p.get("iterations"),
+                    "trials": p.get("trials"),
+                    "train_size": p.get("train_size"),
+                    "paid_media_spends": p.get("paid_media_spends"),
+                    "paid_media_vars": p.get("paid_media_vars"),
+                    "context_vars": p.get("context_vars"),
+                    "factor_vars": p.get("factor_vars"),
+                    "organic_vars": p.get("organic_vars"),
+                    "gcs_bucket": p.get("gcs_bucket"),
+                    "table": p.get("table"),
+                    "query": p.get("query"),
+                    "dep_var": p.get("dep_var"),
+                    "date_var": p.get("date_var"),
+                    "adstock": p.get("adstock"),
+                    "annotations_gcs_path": p.get("annotations_gcs_path"),
+                    # Exec/times
+                    "start_time": entry.get("start_time")
+                    or entry.get("timestamp"),
+                    "end_time": datetime.utcnow().isoformat(timespec="seconds")
+                    + "Z",
+                    "gcs_prefix": entry.get("gcs_prefix"),
+                    "bucket": entry.get("gcs_bucket")
+                    or st.session_state.get("gcs_bucket", GCS_BUCKET),
+                    "exec_name": exec_short,
+                    "execution_name": exec_full,
+                    # Queue message
+                    "message": entry.get("message", ""),
+                },
+                st.session_state.get("gcs_bucket", GCS_BUCKET),
+            )
+            moved += 1
+        else:
+            remaining.append(entry)
+
+    if moved:
+        # Persist trimmed queue
+        st.session_state.job_queue = remaining
+        st.session_state.queue_saved_at = save_queue_to_gcs(
+            st.session_state.queue_name,
+            st.session_state.job_queue,
+            queue_running=st.session_state.queue_running,
+        )
+        # bump nonce so job history table re-renders
+        st.session_state["job_history_nonce"] = (
+            st.session_state.get("job_history_nonce", 0) + 1
+        )
+
+
+_queue_tick()
+
+
 # ─────────────────────────────
 # Small UI helpers
 # ─────────────────────────────
@@ -1043,15 +1130,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             )
             seed_df.loc[0] = [""] * len(seed_df.columns)
 
-        st.session_state.setdefault("qb_df", None)
-        st.session_state.setdefault("qb_initialized", False)
-
-        if (
-            not st.session_state.qb_initialized
-            or st.session_state.qb_df is None
-        ):
+        # Initialize the builder ONCE per session; do NOT reseed on reruns
+        if "qb_df" not in st.session_state:
             st.session_state.qb_df = seed_df.copy()
-            st.session_state.qb_initialized = True
 
         st.markdown("#### ✏️ Queue Builder (editable)")
         st.caption(
@@ -1065,7 +1146,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             st.session_state.qb_df,
             num_rows="dynamic",
             width="stretch",
-            key="queue_builder_editor",
+            key="queue_builder_editor",  # stable key
         )
         st.session_state.qb_df = builder_edited
 
@@ -1333,14 +1414,10 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             st.info("Queue paused.")
             st.rerun()
         if qc3.button("⏭️ Process Next Step"):
-            res = queue_tick_once_headless(
-                st.session_state.queue_name,
-                st.session_state["gcs_bucket"],
-                launcher=prepare_and_launch_job,
-            )
-            st.toast(res.get("message", "tick"))
-            maybe_refresh_queue_from_gcs(force=True)
+            _queue_tick()
+            st.toast("Ticked queue")
             st.rerun()
+
         if qc4.button("💾 Save now"):
             save_queue_to_gcs(
                 st.session_state.queue_name, st.session_state.job_queue
@@ -1449,170 +1526,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 "**Note**: Training runs asynchronously in Cloud Run Jobs."
             )
 
-
-def _queue_tick():
-    maybe_refresh_queue_from_gcs()
-    q = st.session_state.job_queue
-    if not q:
-        return
-
-    # 1) Update RUNNING/LAUNCHING job status (if any)
-    running = [e for e in q if e["status"] in ("RUNNING", "LAUNCHING")]
-    if running:
-        entry = running[0]
-        try:
-            status_info = job_manager.get_execution_status(
-                entry["execution_name"]
-            )
-            s = (status_info.get("overall_status") or "").upper()
-
-            if s in TERMINAL_STATES:
-                final_state = (
-                    "SUCCEEDED" if s in ("SUCCEEDED", "COMPLETED") else s
-                )
-                entry["status"] = final_state
-                entry["message"] = status_info.get("error", "") or final_state
-
-                start_iso = entry.get("start_time") or entry.get("timestamp")
-
-                # Append to ledger
-                # Append to ledger (include all builder params + queue message)
-                try:
-                    exec_full = entry.get("execution_name") or ""
-                    exec_short = exec_full.split("/")[-1] if exec_full else ""
-                    p = entry.get("params", {}) or {}
-                    append_row_to_ledger(
-                        {
-                            "job_id": entry.get("gcs_prefix")
-                            or entry.get("id"),
-                            "state": final_state,
-                            # --- queue/builder params (all) ---
-                            "country": p.get("country"),
-                            "revision": p.get("revision"),
-                            "date_input": p.get("date_input"),
-                            "iterations": p.get("iterations"),
-                            "trials": p.get("trials"),
-                            "train_size": p.get("train_size"),
-                            "paid_media_spends": p.get("paid_media_spends"),
-                            "paid_media_vars": p.get("paid_media_vars"),
-                            "context_vars": p.get("context_vars"),
-                            "factor_vars": p.get("factor_vars"),
-                            "organic_vars": p.get("organic_vars"),
-                            "gcs_bucket": p.get("gcs_bucket"),
-                            "table": p.get("table"),
-                            "query": p.get("query"),
-                            "dep_var": p.get("dep_var"),
-                            "date_var": p.get("date_var"),
-                            "adstock": p.get("adstock"),
-                            "annotations_gcs_path": p.get(
-                                "annotations_gcs_path"
-                            ),
-                            # --- times/exec/outputs ---
-                            "start_time": start_iso,
-                            "end_time": datetime.utcnow().isoformat(
-                                timespec="seconds"
-                            )
-                            + "Z",
-                            "gcs_prefix": entry.get("gcs_prefix"),
-                            "bucket": entry.get("gcs_bucket")
-                            or st.session_state.get("gcs_bucket", GCS_BUCKET),
-                            "exec_name": exec_short,
-                            "execution_name": exec_full,
-                            # --- queue message ---
-                            "message": entry.get("message", ""),
-                        },
-                        st.session_state.get("gcs_bucket", GCS_BUCKET),
-                    )
-                    st.session_state["ledger_nonce"] = (
-                        st.session_state.get("ledger_nonce", 0) + 1
-                    )
-                except Exception as e:
-                    st.warning(f"Ledger append failed: {e}")
-
-                # Remove completed from queue
-                completed_id = entry["id"]
-                st.session_state.job_queue = [
-                    e
-                    for e in st.session_state.job_queue
-                    if e["id"] != completed_id
-                ]
-                st.session_state.queue_saved_at = save_queue_to_gcs(
-                    st.session_state.queue_name,
-                    st.session_state.job_queue,
-                    queue_running=st.session_state.queue_running,
-                )
-                st.rerun()
-                return
-
-            # Promote LAUNCHING -> RUNNING if we see progress
-            if entry["status"] == "LAUNCHING" and s in ("RUNNING", "PENDING"):
-                entry["status"] = "RUNNING"
-
-            st.session_state.queue_saved_at = save_queue_to_gcs(
-                st.session_state.queue_name,
-                q,
-                queue_running=st.session_state.queue_running,
-            )
-            return
-
-        except Exception as e:
-            entry["status"] = "ERROR"
-            entry["message"] = str(e)
-            st.session_state.queue_saved_at = save_queue_to_gcs(
-                st.session_state.queue_name,
-                q,
-                queue_running=st.session_state.queue_running,
-            )
-            st.rerun()
-            return
-
-    # 2) If none running and queue_running, launch next PENDING with a lease
-    if st.session_state.queue_running:
-        pending = [e for e in q if e["status"] == "PENDING"]
-        if not pending:
-            return
-        entry = pending[0]
-        try:
-            # Lease first
-            entry["status"] = "LAUNCHING"
-            entry["message"] = "Launching..."
-            st.session_state.queue_saved_at = save_queue_to_gcs(
-                st.session_state.queue_name,
-                q,
-                queue_running=st.session_state.queue_running,
-            )
-
-            exec_info = prepare_and_launch_job(entry["params"])
-            time.sleep(SAFE_LAG_SECONDS_AFTER_RUNNING)
-            entry["execution_name"] = exec_info["execution_name"]
-            entry["timestamp"] = exec_info["timestamp"]
-            entry["gcs_prefix"] = exec_info["gcs_prefix"]
-            entry["status"] = "RUNNING"
-            entry["message"] = "Launched"
-            entry["start_time"] = (
-                datetime.utcnow().isoformat(timespec="seconds") + "Z"
-            )
-            st.session_state.job_executions.append(exec_info)
-
-            st.session_state.queue_saved_at = save_queue_to_gcs(
-                st.session_state.queue_name,
-                q,
-                queue_running=st.session_state.queue_running,
-            )
-            st.rerun()
-        except Exception as e:
-            entry["status"] = "ERROR"
-            entry["message"] = f"launch failed: {e}"
-            st.session_state.queue_saved_at = save_queue_to_gcs(
-                st.session_state.queue_name,
-                q,
-                queue_running=st.session_state.queue_running,
-            )
-            st.rerun()
-
-
-# Tick the queue on every rerun
-_queue_tick()
 
 # ─────────────────────────────
 # Sidebar: system info + auto-refresh
