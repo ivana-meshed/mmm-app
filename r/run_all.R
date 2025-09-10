@@ -244,26 +244,26 @@ get_cfg_from_env <- function() {
   jsonlite::fromJSON(tmp)
 }
 
-## ---------- JOBS JOB_HISTORY (GCS) ----------
-get_job_history_object <- function() {
+## ---------- JOBS LEDGER (GCS) ----------
+get_ledger_object <- function() {
   # object path inside bucket (not gs://)
-  obj <- Sys.getenv("JOBS_JOB_HISTORY_OBJECT", unset = "robyn-jobs/job_history.csv")
+  obj <- Sys.getenv("JOBS_LEDGER_OBJECT", unset = "robyn-jobs/ledger.csv")
   if (nzchar(obj)) {
     return(obj)
   } else {
-    return("robyn-jobs/job_history.csv")
+    return("robyn-jobs/ledger.csv")
   }
 }
 
-append_to_job_history <- function(row) {
+append_to_ledger <- function(row) {
   ensure_gcs_auth()
-  job_history_obj <- get_job_history_object()
-  tmp_csv <- file.path(tempdir(), "jobs_job_history.csv")
+  ledger_obj <- get_ledger_object()
+  tmp_csv <- file.path(tempdir(), "jobs_ledger.csv")
   had <- FALSE
   ok <- tryCatch(
     {
       googleCloudStorageR::gcs_get_object(
-        object_name = job_history_obj,
+        object_name = ledger_obj,
         bucket = googleCloudStorageR::gcs_get_global_bucket(),
         saveToDisk = tmp_csv, overwrite = TRUE
       )
@@ -288,7 +288,7 @@ append_to_job_history <- function(row) {
   }
   if ("start_time" %in% names(out)) out <- out[order(as.POSIXct(out$start_time), decreasing = TRUE), , drop = FALSE]
   readr::write_csv(out, tmp_csv, na = "")
-  gcs_put_safe(tmp_csv, job_history_obj)
+  gcs_put_safe(tmp_csv, ledger_obj)
   invisible(TRUE)
 }
 
@@ -487,7 +487,7 @@ writeLines(jsonlite::toJSON(list(state = "RUNNING", start_time = as.character(jo
 gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
 
 # status.json (RUNNING) already written above
-try(append_to_job_history(list(
+try(append_to_ledger(list(
   job_id = gcs_prefix,
   state = "RUNNING",
   country = country,
@@ -1107,7 +1107,7 @@ writeLines(
   ),
   status_json
 )
-try(append_to_job_history(list(
+try(append_to_ledger(list(
   job_id = gcs_prefix,
   state = "SUCCEEDED",
   country = country,
@@ -1128,7 +1128,7 @@ try(append_to_job_history(list(
 options(error = function(e) {
   traceback()
   message("FATAL ERROR: ", conditionMessage(e))
-  # Attempt to write FAILED status + job_history
+  # Attempt to write FAILED status + ledger
   try(
     {
       job_finished <- Sys.time()
@@ -1142,7 +1142,7 @@ options(error = function(e) {
       if (!is.null(gcs_prefix)) gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
       # Ledger FAILED
       if (!is.null(gcs_prefix)) {
-        try(append_to_job_history(list(
+        try(append_to_ledger(list(
           job_id = gcs_prefix,
           state = "FAILED",
           country = country %||% NA,
