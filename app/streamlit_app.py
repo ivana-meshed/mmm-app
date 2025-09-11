@@ -1301,12 +1301,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 )
 
             # ---- Handle CSV form actions ----
-            if save_uploaded_clicked:
-                st.session_state.uploaded_df = uploaded_edited.drop(
-                    columns="Delete", errors="ignore"
-                ).reset_index(drop=True)
-                st.success("Saved uploaded CSV edits.")
-                st.rerun()
 
             if delete_uploaded_clicked:
                 keep_mask = (
