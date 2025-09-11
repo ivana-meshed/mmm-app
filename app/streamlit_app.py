@@ -538,6 +538,37 @@ def _toast_dupe_summary(stage: str, reasons: dict, added_count: int = 0):
         )
 
 
+def _hydrate_times_from_status(entry: dict) -> dict:
+    """
+    Returns dict possibly containing start_time, end_time, duration_minutes
+    by reading <gcs_prefix>/status.json. Empty dict if unavailable.
+    """
+    try:
+        bucket = entry.get("gcs_bucket") or st.session_state.get(
+            "gcs_bucket", GCS_BUCKET
+        )
+        gcs_prefix = entry.get("gcs_prefix")
+        if not bucket or not gcs_prefix:
+            return {}
+        client = storage.Client()
+        blob = client.bucket(bucket).blob(f"{gcs_prefix}/status.json")
+        if not blob.exists():
+            return {}
+        data = json.loads(blob.download_as_bytes())
+        out = {}
+        if isinstance(data, dict):
+            if data.get("start_time"):
+                out["start_time"] = data.get("start_time")
+            if data.get("end_time"):
+                out["end_time"] = data.get("end_time")
+            if data.get("duration_minutes") is not None:
+                out["duration_minutes"] = data.get("duration_minutes")
+        return out
+    except Exception:
+        # Swallow errors; we’ll just use fallbacks below.
+        return {}
+
+
 def _queue_tick():
     # Advance the queue atomically (lease/launch OR update running)
     res = queue_tick_once_headless(
@@ -566,6 +597,20 @@ def _queue_tick():
             exec_short = exec_full.split("/")[-1] if exec_full else ""
             p = entry.get("params", {}) or {}
 
+            times = _hydrate_times_from_status(entry)
+            start_time = (
+                entry.get("start_time")
+                or times.get("start_time")
+                or entry.get(
+                    "timestamp"
+                )  # fallback to launch timestamp if that’s all we have
+            )
+            end_time = (
+                times.get("end_time")
+                or datetime.utcnow().isoformat(timespec="seconds") + "Z"
+            )
+            duration_minutes = times.get("duration_minutes")
+
             append_row_to_ledger(
                 {
                     "job_id": entry.get("gcs_prefix") or entry.get("id"),
@@ -588,12 +633,10 @@ def _queue_tick():
                     "dep_var": p.get("dep_var"),
                     "date_var": p.get("date_var"),
                     "adstock": p.get("adstock"),
-                    "annotations_gcs_path": p.get("annotations_gcs_path"),
-                    # Exec/times
-                    "start_time": entry.get("start_time")
-                    or entry.get("timestamp"),
-                    "end_time": datetime.utcnow().isoformat(timespec="seconds")
-                    + "Z",
+                    # Exec/times (hydrated)
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "duration_minutes": duration_minutes,
                     "gcs_prefix": entry.get("gcs_prefix"),
                     "bucket": entry.get("gcs_bucket")
                     or st.session_state.get("gcs_bucket", GCS_BUCKET),
