@@ -469,6 +469,30 @@ def _make_normalizer(defaults: dict):
 _normalize_row = _make_normalizer(_builder_defaults)
 
 
+def _toast_dupe_summary(stage: str, reasons: dict, added_count: int = 0):
+    """
+    stage: short label like 'Append to builder' or 'Enqueue'
+    reasons: dict of { key: [row_indexes...] }
+    added_count: how many rows were actually added in this action
+    """
+    name_map = {
+        "in_builder": "already in builder",
+        "in_queue": "already in queue",
+        "in_ledger": "already finished (ledger)",
+        "missing_data_source": "missing table/query",
+    }
+    total_skipped = sum(len(v) for v in reasons.values())
+    if total_skipped:
+        parts = [f"{len(v)} {name_map[k]}" for k, v in reasons.items() if v]
+        st.toast(
+            f"⚠️ {stage}: skipped {total_skipped} row(s) — " + ", ".join(parts)
+        )
+    if added_count == 0:
+        st.info(
+            f"No new rows to {stage.lower()} (duplicates or missing data source)."
+        )
+
+
 def _queue_tick():
     # Advance the queue atomically (lease/launch OR update running)
     res = queue_tick_once_headless(
@@ -1169,7 +1193,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
             if append_uploaded_clicked:
                 # Use the edited frame from this form (so we have the latest edits)
-                # 1) Align to builder columns
                 need_cols = (
                     list(st.session_state.qb_df.columns)
                     if "qb_df" in st.session_state
@@ -1181,7 +1204,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 if need_cols:
                     up_norm = up_norm.reindex(columns=need_cols, fill_value="")
 
-                # 2) Duplicate-signature helpers
+                # Helpers
                 def _sig_from_params_dict(d: dict) -> str:
                     return json.dumps(d, sort_keys=True)
 
@@ -1228,23 +1251,39 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         params_like = _normalize_row(pd.Series(params_like))
                         ledger_sigs.add(_sig_from_params_dict(params_like))
 
-                deny = builder_sigs | queue_sigs | ledger_sigs
-
-                # 3) Filter unique, valid rows
+                # Decide keep vs skip and track skip reasons with row numbers (1-based)
+                dup = {
+                    "in_builder": [],
+                    "in_queue": [],
+                    "in_ledger": [],
+                    "missing_data_source": [],
+                }
                 keep_rows = []
-                for _, r in up_norm.iterrows():
+                for i, r in up_norm.iterrows():
                     params = _normalize_row(r)
                     if not (params.get("query") or params.get("table")):
+                        dup["missing_data_source"].append(i + 1)
                         continue
                     sig = _sig_from_params_dict(params)
-                    if sig in deny:
+                    if sig in builder_sigs:
+                        dup["in_builder"].append(i + 1)
+                        continue
+                    if sig in queue_sigs:
+                        dup["in_queue"].append(i + 1)
+                        continue
+                    if sig in ledger_sigs:
+                        dup["in_ledger"].append(i + 1)
                         continue
                     keep_rows.append(r)
 
+                # Toaster (and zero-add info if applicable)
+                _toast_dupe_summary(
+                    "Append to builder", dup, added_count=len(keep_rows)
+                )
+
                 if not keep_rows:
-                    st.info(
-                        "No new rows to append (duplicates or missing data source)."
-                    )
+                    # nothing to add
+                    pass
                 else:
                     to_append = pd.DataFrame(keep_rows)
                     # Append to builder
@@ -1401,14 +1440,16 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         need_cols = list(st.session_state.qb_df.columns)
 
         if enqueue_clicked:
-            # Duplicate-signature set from existing queue + ledger(S/F)
-            existing_sigs = set()
+            # Build separate sets so we can categorize reasons
+            queue_sigs_existing = set()
             for e in st.session_state.job_queue:
                 try:
                     norm_existing = _normalize_row(
                         pd.Series(e.get("params", {}))
                     )
-                    existing_sigs.add(json.dumps(norm_existing, sort_keys=True))
+                    queue_sigs_existing.add(
+                        json.dumps(norm_existing, sort_keys=True)
+                    )
                 except Exception:
                     pass
 
@@ -1418,6 +1459,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 )
             except Exception:
                 df_led = pd.DataFrame()
+
+            ledger_sigs_existing = set()
             if not df_led.empty and "state" in df_led.columns:
                 df_led = df_led[
                     df_led["state"].isin(["SUCCEEDED", "FAILED"])
@@ -1425,20 +1468,31 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 for _, r in df_led.iterrows():
                     params_like = {c: r.get(c, "") for c in need_cols}
                     params_like = _normalize_row(pd.Series(params_like))
-                    existing_sigs.add(json.dumps(params_like, sort_keys=True))
+                    ledger_sigs_existing.add(
+                        json.dumps(params_like, sort_keys=True)
+                    )
 
             next_id = (
                 max([e["id"] for e in st.session_state.job_queue], default=0)
                 + 1
             )
+
             new_entries, enqueued_sigs = [], set()
-            for _, row in st.session_state.qb_df.iterrows():
+            dup = {"in_queue": [], "in_ledger": [], "missing_data_source": []}
+
+            for i, row in st.session_state.qb_df.iterrows():
                 params = _normalize_row(row)
                 if not (params.get("query") or params.get("table")):
+                    dup["missing_data_source"].append(i + 1)
                     continue
                 sig = json.dumps(params, sort_keys=True)
-                if sig in existing_sigs:
+                if sig in queue_sigs_existing:
+                    dup["in_queue"].append(i + 1)
                     continue
+                if sig in ledger_sigs_existing:
+                    dup["in_ledger"].append(i + 1)
+                    continue
+
                 new_entries.append(
                     {
                         "id": next_id + len(new_entries),
@@ -1452,10 +1506,12 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 )
                 enqueued_sigs.add(sig)
 
+            # Toaster (and zero-add info if applicable)
+            _toast_dupe_summary("Enqueue", dup, added_count=len(new_entries))
+
             if not new_entries:
-                st.info(
-                    "Nothing new to enqueue (all rows are duplicates or missing data source)."
-                )
+                # nothing to enqueue
+                pass
             else:
                 st.session_state.job_queue.extend(new_entries)
                 st.session_state.queue_saved_at = save_queue_to_gcs(
@@ -1489,28 +1545,31 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.session_state.qb_df is None or st.session_state.qb_df.empty
             ),
         ):
-            # Helper for consistent dedupe signatures
+
             def _sig_from_params_dict(d: dict) -> str:
                 return json.dumps(d, sort_keys=True)
 
-            # Build duplicate-signature set from existing queue
-            existing_sigs = set()
+            # Existing queue vs ledger (separate for reasons)
+            queue_sigs_existing = set()
             for e in st.session_state.job_queue:
                 try:
                     norm_existing = _normalize_row(
                         pd.Series(e.get("params", {}))
                     )
-                    existing_sigs.add(json.dumps(norm_existing, sort_keys=True))
+                    queue_sigs_existing.add(
+                        json.dumps(norm_existing, sort_keys=True)
+                    )
                 except Exception:
                     pass
 
-            # Add signatures from ledger for SUCCEEDED/FAILED (so we don't re-run finished jobs)
             try:
                 df_led = read_ledger_from_gcs(
                     st.session_state.get("gcs_bucket", GCS_BUCKET)
                 )
             except Exception:
                 df_led = pd.DataFrame()
+
+            ledger_sigs_existing = set()
             if not df_led.empty and "state" in df_led.columns:
                 df_led = df_led[
                     df_led["state"].isin(["SUCCEEDED", "FAILED"])
@@ -1540,24 +1599,29 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         ]
                     }
                     params_like = _normalize_row(pd.Series(params_like))
-                    existing_sigs.add(json.dumps(params_like, sort_keys=True))
+                    ledger_sigs_existing.add(
+                        json.dumps(params_like, sort_keys=True)
+                    )
 
-            # Enqueue new rows and remember which builder rows were actually enqueued
             next_id = (
                 max([e["id"] for e in st.session_state.job_queue], default=0)
                 + 1
             )
-            new_entries = []
-            enqueued_sigs = set()  # signatures of rows we truly enqueue
-            for _, row in st.session_state.qb_df.iterrows():
+            new_entries, enqueued_sigs = [], set()
+            dup = {"in_queue": [], "in_ledger": [], "missing_data_source": []}
+
+            for i, row in st.session_state.qb_df.iterrows():
                 params = _normalize_row(row)
-                # Require a data source
                 if not (params.get("query") or params.get("table")):
+                    dup["missing_data_source"].append(i + 1)
                     continue
                 sig = json.dumps(params, sort_keys=True)
-                if sig in existing_sigs:
-                    continue  # duplicate in queue or finished in ledger
-                # accept + record
+                if sig in queue_sigs_existing:
+                    dup["in_queue"].append(i + 1)
+                    continue
+                if sig in ledger_sigs_existing:
+                    dup["in_ledger"].append(i + 1)
+                    continue
                 new_entries.append(
                     {
                         "id": next_id + len(new_entries),
@@ -1571,12 +1635,13 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 )
                 enqueued_sigs.add(sig)
 
+            # Toaster (and zero-add info if applicable)
+            _toast_dupe_summary("Enqueue", dup, added_count=len(new_entries))
+
             if not new_entries:
-                st.info(
-                    "Nothing new to enqueue (all rows are duplicates or missing data source)."
-                )
+                # nothing to enqueue
+                pass
             else:
-                # Save queue
                 st.session_state.job_queue.extend(new_entries)
                 st.session_state.queue_saved_at = save_queue_to_gcs(
                     st.session_state.queue_name,
@@ -1584,7 +1649,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     queue_running=st.session_state.queue_running,
                 )
 
-                # 🔥 Remove only the rows we actually enqueued from the builder
                 def _row_sig(r: pd.Series) -> str:
                     return json.dumps(_normalize_row(r), sort_keys=True)
 
