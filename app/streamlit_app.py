@@ -333,12 +333,22 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                 format_func=lambda i: df_led.loc[i, "__label__"],
                 key=f"ledger_pick_{key_prefix}",
             )
+
+            # ...
             row = df_led.loc[idx]
+
+            # Sanitize bucket and prefix values to avoid pd.NA truthiness
             bucket_view = row.get(
                 "bucket", st.session_state.get("gcs_bucket", GCS_BUCKET)
             )
+            if pd.isna(bucket_view) or not str(bucket_view).strip():
+                bucket_view = st.session_state.get("gcs_bucket", GCS_BUCKET)
+
             gcs_prefix_view = row.get("gcs_prefix")
-            if gcs_prefix_view:
+            if pd.isna(gcs_prefix_view) or not str(gcs_prefix_view).strip():
+                gcs_prefix_view = None
+
+            if gcs_prefix_view is not None:
                 st.info(
                     f"Results location: gs://{bucket_view}/{gcs_prefix_view}/"
                 )
@@ -372,6 +382,7 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                         st.info("Training log not yet available for this job.")
                 except Exception as e:
                     st.warning(f"Could not fetch training log: {e}")
+            # ...
 
 
 def set_queue_running(
@@ -1057,8 +1068,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             mime="text/csv",
         )
 
-        # --- CSV upload (editable) ---
-
         # --- CSV upload (editable, persistent, deletable) ---
         up = st.file_uploader("Upload batch CSV", type=["csv"], key="batch_csv")
 
@@ -1084,35 +1093,61 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 except Exception as e:
                     st.error(f"Failed to parse CSV: {e}")
 
-        # Editable grid with a Delete checkbox column (like queue builder)
-        if not st.session_state.uploaded_df.empty:
-            uploaded_view = st.session_state.uploaded_df.copy()
-            if "Delete" not in uploaded_view.columns:
-                uploaded_view.insert(0, "Delete", False)
+        # ===== Uploaded CSV (FORM) =====
+        st.markdown("#### 📥 Uploaded CSV (editable)")
+        st.caption(
+            "Edits in this table are committed when you press a button below. "
+            "Use **Append uploaded rows to builder** here to move unique rows into the builder."
+        )
 
-            uploaded_edited = st.data_editor(
-                uploaded_view,
-                key="uploaded_editor",
-                num_rows="dynamic",
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "Delete": st.column_config.CheckboxColumn(
-                        "Delete", help="Mark to remove from uploaded table"
-                    )
-                },
-            )
+        if st.session_state.uploaded_df.empty:
+            st.caption("No uploaded CSV yet (or it has 0 rows).")
+        else:
+            with st.form("uploaded_csv_form"):
+                # Show editable grid with a Delete column (like queue builder)
+                uploaded_view = st.session_state.uploaded_df.copy()
+                if "Delete" not in uploaded_view.columns:
+                    uploaded_view.insert(0, "Delete", False)
 
-            # Always persist *all* edits (including added rows) back to session (drop the helper column)
-            st.session_state.uploaded_df = uploaded_edited.drop(
-                columns="Delete", errors="ignore"
-            ).reset_index(drop=True)
+                uploaded_edited = st.data_editor(
+                    uploaded_view,
+                    key="uploaded_editor",
+                    num_rows="dynamic",
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "Delete": st.column_config.CheckboxColumn(
+                            "Delete", help="Mark to remove from uploaded table"
+                        )
+                    },
+                )
 
-            uu1, uu2 = st.columns(2)
-            if uu1.button(
-                "🗑 Delete selected uploaded rows", key="delete_uploaded_rows"
-            ):
-                # Use the edited frame to respect the latest checkbox values
+                u1, u2, u3, u4 = st.columns([1, 1, 1, 2])
+                save_uploaded_clicked = u1.form_submit_button(
+                    "💾 Save uploaded edits"
+                )
+                delete_uploaded_clicked = u2.form_submit_button(
+                    "🗑 Delete selected"
+                )
+                clear_uploaded_clicked = u3.form_submit_button(
+                    "🧹 Clear uploaded table"
+                )
+                append_uploaded_clicked = u4.form_submit_button(
+                    "Append uploaded rows to builder",
+                    disabled=uploaded_edited.drop(
+                        columns="Delete", errors="ignore"
+                    ).empty,
+                )
+
+            # ---- Handle CSV form actions ----
+            if save_uploaded_clicked:
+                st.session_state.uploaded_df = uploaded_edited.drop(
+                    columns="Delete", errors="ignore"
+                ).reset_index(drop=True)
+                st.success("Saved uploaded CSV edits.")
+                st.rerun()
+
+            if delete_uploaded_clicked:
                 keep_mask = (
                     ~uploaded_edited.get("Delete", False)
                     .fillna(False)
@@ -1123,15 +1158,120 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     .drop(columns="Delete", errors="ignore")
                     .reset_index(drop=True)
                 )
-                st.toast("Deleted selected uploaded rows.")
+                st.success("Deleted selected uploaded rows.")
                 st.rerun()
 
-            if uu2.button("🧹 Clear uploaded table", key="clear_uploaded_rows"):
+            if clear_uploaded_clicked:
                 st.session_state.uploaded_df = pd.DataFrame()
                 st.session_state.uploaded_fingerprint = None
+                st.success("Cleared uploaded table.")
                 st.rerun()
-        else:
-            st.caption("No uploaded CSV yet (or it has 0 rows).")
+
+            if append_uploaded_clicked:
+                # Use the edited frame from this form (so we have the latest edits)
+                # 1) Align to builder columns
+                need_cols = (
+                    list(st.session_state.qb_df.columns)
+                    if "qb_df" in st.session_state
+                    else []
+                )
+                up_norm = uploaded_edited.drop(
+                    columns="Delete", errors="ignore"
+                ).copy()
+                if need_cols:
+                    up_norm = up_norm.reindex(columns=need_cols, fill_value="")
+
+                # 2) Duplicate-signature helpers
+                def _sig_from_params_dict(d: dict) -> str:
+                    return json.dumps(d, sort_keys=True)
+
+                # Builder sigs
+                builder_sigs = {
+                    _sig_from_params_dict(_normalize_row(r))
+                    for _, r in (
+                        st.session_state.qb_df
+                        if "qb_df" in st.session_state
+                        else pd.DataFrame()
+                    ).iterrows()
+                }
+
+                # Queue sigs
+                queue_sigs = set()
+                for e in st.session_state.job_queue:
+                    try:
+                        queue_sigs.add(
+                            _sig_from_params_dict(
+                                _normalize_row(pd.Series(e.get("params", {})))
+                            )
+                        )
+                    except Exception:
+                        pass
+
+                # Ledger sigs (SUCCEEDED/FAILED)
+                try:
+                    df_led = read_ledger_from_gcs(
+                        st.session_state.get("gcs_bucket", GCS_BUCKET)
+                    )
+                except Exception:
+                    df_led = pd.DataFrame()
+
+                ledger_sigs = set()
+                if not df_led.empty and "state" in df_led.columns:
+                    df_led = df_led[
+                        df_led["state"].isin(["SUCCEEDED", "FAILED"])
+                    ].copy()
+                    for _, r in df_led.iterrows():
+                        params_like = {
+                            c: r.get(c, "")
+                            for c in (need_cols or df_led.columns)
+                        }
+                        params_like = _normalize_row(pd.Series(params_like))
+                        ledger_sigs.add(_sig_from_params_dict(params_like))
+
+                deny = builder_sigs | queue_sigs | ledger_sigs
+
+                # 3) Filter unique, valid rows
+                keep_rows = []
+                for _, r in up_norm.iterrows():
+                    params = _normalize_row(r)
+                    if not (params.get("query") or params.get("table")):
+                        continue
+                    sig = _sig_from_params_dict(params)
+                    if sig in deny:
+                        continue
+                    keep_rows.append(r)
+
+                if not keep_rows:
+                    st.info(
+                        "No new rows to append (duplicates or missing data source)."
+                    )
+                else:
+                    to_append = pd.DataFrame(keep_rows)
+                    # Append to builder
+                    st.session_state.qb_df = pd.concat(
+                        [st.session_state.qb_df, to_append],
+                        ignore_index=True,
+                    )
+
+                    # 🔥 Remove appended rows from the uploaded table
+                    appended_sigs = {
+                        _sig_from_params_dict(_normalize_row(r))
+                        for _, r in to_append.iterrows()
+                    }
+                    cur_up = up_norm.copy()
+                    cur_up_sigs = cur_up.apply(
+                        lambda r: _sig_from_params_dict(_normalize_row(r)),
+                        axis=1,
+                    )
+                    keep_mask_up = ~cur_up_sigs.isin(appended_sigs)
+                    st.session_state.uploaded_df = cur_up.loc[
+                        keep_mask_up
+                    ].reset_index(drop=True)
+
+                    st.success(
+                        f"Appended {len(keep_rows)} unique row(s) to builder and removed them from the uploaded table."
+                    )
+                    st.rerun()
 
         # Seed once from current GCS queue (do NOT re-seed on every rerun)
         # ===== Queue Builder (parameters only, editable) =====
@@ -1213,28 +1353,18 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 key="queue_builder_editor",
                 hide_index=True,
             )
-
-            # Keep the latest edited builder in session
             st.session_state.qb_df = builder_edited
 
-            # Row 1: actions affecting only the builder table
-            bb1, bb2, bb3 = st.columns(3)
-            append_uploaded_clicked = bb1.form_submit_button(
-                "Append uploaded rows to builder",
-                disabled=(
-                    "uploaded_df" not in st.session_state
-                    or st.session_state.uploaded_df is None
-                    or st.session_state.uploaded_df.empty
-                ),
-            )
-            reset_clicked = bb2.form_submit_button(
+            # Actions for the builder table only
+            bb1, bb2 = st.columns(2)
+            reset_clicked = bb1.form_submit_button(
                 "Reset builder to current GCS queue"
             )
-            clear_builder_clicked = bb3.form_submit_button(
+            clear_builder_clicked = bb2.form_submit_button(
                 "Clear builder (empty table)"
             )
 
-            # Row 2: enqueue & queue clear
+            # Enqueue & clear queue
             bc1, bc2 = st.columns(2)
             enqueue_clicked = bc1.form_submit_button(
                 "➕ Enqueue all rows",
@@ -1243,7 +1373,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     or st.session_state.qb_df.empty
                 ),
             )
-            # Keep Clear queue OUTSIDE the form if you prefer; having it here is fine too:
             clear_queue_clicked = bc2.form_submit_button("🧹 Clear queue")
 
         # ----- Handle form actions (after form so we have latest editor state) -----
@@ -1270,103 +1399,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             return json.dumps(d, sort_keys=True)
 
         need_cols = list(st.session_state.qb_df.columns)
-
-        if append_uploaded_clicked:
-            # Align uploaded (edited) to builder columns
-            up_norm = (
-                st.session_state.uploaded_df.copy()
-                if (
-                    "uploaded_df" in st.session_state
-                    and not st.session_state.uploaded_df.empty
-                )
-                else pd.DataFrame(columns=need_cols)
-            )
-            up_norm = up_norm.reindex(columns=need_cols, fill_value="")
-
-            # Build signature sets from: builder, queue, and ledger (SUCCEEDED/FAILED)
-            builder_sigs = {
-                _sig_from_params_dict(_normalize_row(r))
-                for _, r in st.session_state.qb_df.iterrows()
-            }
-
-            queue_sigs = set()
-            for e in st.session_state.job_queue:
-                try:
-                    queue_sigs.add(
-                        _sig_from_params_dict(
-                            _normalize_row(pd.Series(e.get("params", {})))
-                        )
-                    )
-                except Exception:
-                    pass
-
-            try:
-                df_led = read_ledger_from_gcs(
-                    st.session_state.get("gcs_bucket", GCS_BUCKET)
-                )
-            except Exception:
-                df_led = pd.DataFrame()
-
-            ledger_sigs = set()
-            if not df_led.empty:
-                df_led = df_led[
-                    df_led["state"].isin(["SUCCEEDED", "FAILED"])
-                ].copy()
-                for _, r in df_led.iterrows():
-                    params_like = {
-                        c: r.get(c, "")
-                        for c in need_cols  # same set used by builder
-                    }
-                    params_like = _normalize_row(pd.Series(params_like))
-                    ledger_sigs.add(_sig_from_params_dict(params_like))
-
-            deny = builder_sigs | queue_sigs | ledger_sigs
-
-            keep_rows = []
-            for _, r in up_norm.iterrows():
-                params = _normalize_row(r)
-                if not (params.get("query") or params.get("table")):
-                    continue
-                sig = _sig_from_params_dict(params)
-                if sig in deny:
-                    continue
-                keep_rows.append(r)
-
-            if not keep_rows:
-                st.info(
-                    "No new rows to append (duplicates or missing data source)."
-                )
-            else:
-                # Append to builder
-                to_append = pd.DataFrame(keep_rows)
-                st.session_state.qb_df = pd.concat(
-                    [st.session_state.qb_df, to_append],
-                    ignore_index=True,
-                )
-                st.success(
-                    f"Appended {len(keep_rows)} unique row(s) to builder."
-                )
-
-                # 🔥 Remove *appended* rows from the uploaded table
-                # Build signature set for appended rows (normalized)
-                appended_sigs = {
-                    _sig_from_params_dict(_normalize_row(r))
-                    for _, r in to_append.iterrows()
-                }
-
-                # Align current uploaded_df to builder columns and compute sigs, then filter
-                cur_up = st.session_state.uploaded_df.reindex(
-                    columns=need_cols, fill_value=""
-                )
-                cur_up_sigs = cur_up.apply(
-                    lambda r: _sig_from_params_dict(_normalize_row(r)), axis=1
-                )
-                keep_mask_up = ~cur_up_sigs.isin(appended_sigs)
-                st.session_state.uploaded_df = cur_up.loc[
-                    keep_mask_up
-                ].reset_index(drop=True)
-
-                st.rerun()
 
         if enqueue_clicked:
             # Duplicate-signature set from existing queue + ledger(S/F)
