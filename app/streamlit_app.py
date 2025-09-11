@@ -671,8 +671,8 @@ def _sorted_with_controls(
     df: pd.DataFrame, prefix: str, exclude_cols=("Delete",)
 ):
     """
-    Render sorting controls and return (sorted_df, nonce).
-    We bump a nonce when sort parameters change so st.data_editor re-renders.
+    Render sorting controls (outside forms), return (sorted_df, nonce).
+    Bumps a nonce when sort params change so st.data_editor re-renders.
     """
     cols = [c for c in df.columns if c not in exclude_cols]
     if not cols:
@@ -683,22 +683,19 @@ def _sorted_with_controls(
     prev_key = f"{prefix}_sort_prev"
     nonce_key = f"{prefix}_sort_nonce"
 
-    # Initialize defaults safely
-    if (
-        sort_col_key not in st.session_state
-        or st.session_state[sort_col_key] not in cols
-    ):
+    # Initialize only if not present
+    st.session_state.setdefault(sort_col_key, cols[0])
+    if st.session_state[sort_col_key] not in cols:
         st.session_state[sort_col_key] = cols[0]
-    if sort_asc_key not in st.session_state:
-        st.session_state[sort_asc_key] = True
+    st.session_state.setdefault(sort_asc_key, True)
 
     c1, c2 = st.columns([3, 1])
     with c1:
-        col = st.selectbox("Sort by", options=cols, key=sort_col_key)
+        col = st.selectbox(
+            "Sort by", options=cols, key=sort_col_key
+        )  # no index/value
     with c2:
-        asc = st.toggle(
-            "Ascending", value=st.session_state[sort_asc_key], key=sort_asc_key
-        )
+        asc = st.toggle("Ascending", key=sort_asc_key)  # no value=
 
     prev = st.session_state.get(prev_key)
     cur = (col, asc)
@@ -1264,17 +1261,16 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         if st.session_state.uploaded_df.empty:
             st.caption("No uploaded CSV yet (or it has 0 rows).")
         else:
+            uploaded_view = st.session_state.uploaded_df.copy()
+            if "Delete" not in uploaded_view.columns:
+                uploaded_view.insert(0, "Delete", False)
+
+            uploaded_view, up_nonce = _sorted_with_controls(
+                uploaded_view, prefix="uploaded"
+            )
+
             with st.form("uploaded_csv_form"):
                 # Show editable grid with a Delete column (like queue builder)
-                # Upload sorting controls
-                uploaded_view = st.session_state.uploaded_df.copy()
-                if "Delete" not in uploaded_view.columns:
-                    uploaded_view.insert(0, "Delete", False)
-
-                # Sorting + nonce
-                uploaded_view, up_nonce = _sorted_with_controls(
-                    uploaded_view, prefix="uploaded"
-                )
 
                 uploaded_edited = st.data_editor(
                     uploaded_view,
@@ -1289,21 +1285,19 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     },
                 )
 
-                u1, u2, u3, u4 = st.columns([1, 1, 1, 2])
-                save_uploaded_clicked = u1.form_submit_button(
-                    "💾 Save uploaded edits"
+                u1, u2, u3 = st.columns([1, 1, 1])
+
+                append_uploaded_clicked = u1.form_submit_button(
+                    "Append uploaded rows to builder",
+                    disabled=uploaded_edited.drop(
+                        columns="Delete", errors="ignore"
+                    ).empty,
                 )
                 delete_uploaded_clicked = u2.form_submit_button(
                     "🗑 Delete selected"
                 )
                 clear_uploaded_clicked = u3.form_submit_button(
                     "🧹 Clear uploaded table"
-                )
-                append_uploaded_clicked = u4.form_submit_button(
-                    "Append uploaded rows to builder",
-                    disabled=uploaded_edited.drop(
-                        columns="Delete", errors="ignore"
-                    ).empty,
                 )
 
             # ---- Handle CSV form actions ----
@@ -1524,12 +1518,11 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         )
 
         # Use a FORM so editor commits the last active cell before any button logic
+        builder_src = st.session_state.qb_df.copy()
+        builder_src, qb_nonce = _sorted_with_controls(builder_src, prefix="qb")
+
         with st.form("queue_builder_form"):
             # Builder sorting controls
-            builder_src = st.session_state.qb_df.copy()
-            builder_src, qb_nonce = _sorted_with_controls(
-                builder_src, prefix="qb"
-            )
 
             builder_edited = st.data_editor(
                 builder_src,
