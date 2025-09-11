@@ -1513,28 +1513,40 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
         # Use a FORM so editor commits the last active cell before any button logic
         builder_src = st.session_state.qb_df.copy()
+
+        # Add Delete checkbox column (not persisted) and enable sorting/nonce
+        if "Delete" not in builder_src.columns:
+            builder_src.insert(0, "Delete", False)
+
         builder_src, qb_nonce = _sorted_with_controls(builder_src, prefix="qb")
 
         with st.form("queue_builder_form"):
-            # Builder sorting controls
-
+            # Editable builder (params), plus a Delete column just for selection
             builder_edited = st.data_editor(
                 builder_src,
                 num_rows="dynamic",
                 width="stretch",
                 key=f"queue_builder_editor_{qb_nonce}",  # <= bump key when sort changes
                 hide_index=True,
+                column_config={
+                    "Delete": st.column_config.CheckboxColumn(
+                        "Delete", help="Mark to remove from builder"
+                    )
+                },
             )
 
-            # Persist edits back to session (keep the shown order)
-            st.session_state.qb_df = builder_edited.reset_index(drop=True)
+            # Persist edits to builder params (drop Delete column)
+            st.session_state.qb_df = builder_edited.drop(
+                columns="Delete", errors="ignore"
+            ).reset_index(drop=True)
 
-            # Actions for the builder table only
-            bb1, bb2 = st.columns(2)
-            reset_clicked = bb1.form_submit_button(
+            # Actions for the builder table only – now includes Delete selected
+            bb1, bb2, bb3 = st.columns(3)
+            delete_builder_clicked = bb1.form_submit_button("🗑 Delete selected")
+            reset_clicked = bb2.form_submit_button(
                 "Reset builder to current GCS queue"
             )
-            clear_builder_clicked = bb2.form_submit_button(
+            clear_builder_clicked = bb3.form_submit_button(
                 "Clear builder (empty table)"
             )
 
@@ -1550,6 +1562,19 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             clear_queue_clicked = bc2.form_submit_button("🧹 Clear queue")
 
         # ----- Handle form actions (after form so we have latest editor state) -----
+        if delete_builder_clicked:
+            keep_mask = (
+                (~builder_edited.get("Delete", False))
+                .fillna(False)
+                .astype(bool)
+            )
+            st.session_state.qb_df = (
+                builder_edited.loc[keep_mask]
+                .drop(columns="Delete", errors="ignore")
+                .reset_index(drop=True)
+            )
+            st.success("Deleted selected builder rows.")
+            st.rerun()
 
         if reset_clicked:
             st.session_state.qb_df = seed_df.copy()
@@ -1734,21 +1759,42 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     for e in st.session_state.job_queue
                 ]
             )
+
+            # Add Delete checkbox column (not persisted) and enable sorting/nonce
             if "Delete" not in df_queue.columns:
                 df_queue.insert(0, "Delete", False)
 
-            edited = st.data_editor(
-                df_queue,
-                key="queue_editor",
-                hide_index=True,
-                width="stretch",
-                column_config={
-                    "Delete": st.column_config.CheckboxColumn(
-                        "Delete", help="Mark to remove from queue"
-                    )
-                },
+            df_queue_view, q_nonce = _sorted_with_controls(
+                df_queue, prefix="queue"
             )
 
+            # Build per-column config so everything is read-only EXCEPT Delete
+            q_cfg = {}
+            for c in df_queue_view.columns:
+                if c == "Delete":
+                    q_cfg[c] = st.column_config.CheckboxColumn(
+                        "Delete", help="Mark to remove from queue"
+                    )
+                elif c in ("ID",):
+                    q_cfg[c] = st.column_config.NumberColumn(c, disabled=True)
+                else:
+                    q_cfg[c] = st.column_config.TextColumn(c, disabled=True)
+
+            # Form so the checkbox state is committed before deleting
+            with st.form("queue_table_form"):
+                edited = st.data_editor(
+                    df_queue_view,
+                    key=f"queue_editor_{q_nonce}",  # <= bump key when sort changes
+                    hide_index=True,
+                    width="stretch",
+                    column_config=q_cfg,
+                )
+
+                delete_queue_clicked = st.form_submit_button(
+                    "🗑 Delete selected (PENDING/ERROR only)"
+                )
+
+            # Deletion logic identical to before, but reading from the form-edited frame
             ids_to_delete = set()
             if "Delete" in edited.columns:
                 ids_to_delete = set(
@@ -1757,7 +1803,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     .tolist()
                 )
 
-            if st.button("🗑 Delete selected (PENDING/ERROR only)"):
+            if delete_queue_clicked:
                 new_q, blocked = [], []
                 for e in st.session_state.job_queue:
                     if e["id"] in ids_to_delete:
@@ -1786,6 +1832,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     )
                 st.success("Queue updated.")
                 st.rerun()
+
     render_jobs_job_history(key_prefix="queue")
     render_job_status_monitor(key_prefix="queue")
 
