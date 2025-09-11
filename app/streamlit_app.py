@@ -258,6 +258,14 @@ def _empty_ledger_df() -> pd.DataFrame:
 
 def render_jobs_ledger(key_prefix: str = "single") -> None:
     with st.expander("📚 Jobs Ledger (from GCS)", expanded=False):
+        # Refresh control first (button triggers a rerun)
+        if st.button("🔁 Refresh ledger", key=f"refresh_ledger_{key_prefix}"):
+            # bump a nonce so the dataframe widget key changes and re-renders
+            st.session_state["ledger_nonce"] = (
+                st.session_state.get("ledger_nonce", 0) + 1
+            )
+            st.rerun()
+
         try:
             df_ledger = read_ledger_from_gcs(
                 st.session_state.get("gcs_bucket", GCS_BUCKET)
@@ -266,7 +274,6 @@ def render_jobs_ledger(key_prefix: str = "single") -> None:
             st.error(f"Failed to read ledger from GCS: {e}")
             return
 
-        # Force canonical order/shape
         df_ledger = df_ledger.reindex(columns=LEDGER_COLUMNS)
 
         st.caption(
@@ -469,11 +476,43 @@ def _make_normalizer(defaults: dict):
 _normalize_row = _make_normalizer(_builder_defaults)
 
 
+# ── Flash helpers: show a persistent banner for N seconds (until dismissed)
+def _set_flash(slot: str, msg: str, kind: str = "warning", ttl_sec: int = 5):
+    st.session_state.setdefault("_flash_store", {})
+    st.session_state["_flash_store"][slot] = {
+        "msg": msg,
+        "kind": kind,
+        "expires": time.time() + ttl_sec,
+    }
+
+
+def _render_flash(slot: str):
+    store = st.session_state.get("_flash_store", {})
+    info = store.get(slot)
+    if not info:
+        return
+    if time.time() > info["expires"]:
+        store.pop(slot, None)
+        return
+    fn = {
+        "info": st.info,
+        "warning": st.warning,
+        "success": st.success,
+        "error": st.error,
+    }.get(info["kind"], st.info)
+    c1, c2 = st.columns([0.97, 0.03])
+    with c1:
+        fn(info["msg"])
+    with c2:
+        if st.button("✕", key=f"dismiss_{slot}"):
+            store.pop(slot, None)
+            st.rerun()
+
+
 def _toast_dupe_summary(stage: str, reasons: dict, added_count: int = 0):
     """
-    stage: short label like 'Append to builder' or 'Enqueue'
-    reasons: dict of { key: [row_indexes...] }
-    added_count: how many rows were actually added in this action
+    stage: 'Append to builder' | 'Enqueue'
+    reasons: { key: [row_indexes...] }
     """
     name_map = {
         "in_builder": "already in builder",
@@ -484,9 +523,15 @@ def _toast_dupe_summary(stage: str, reasons: dict, added_count: int = 0):
     total_skipped = sum(len(v) for v in reasons.values())
     if total_skipped:
         parts = [f"{len(v)} {name_map[k]}" for k, v in reasons.items() if v]
-        st.toast(
-            f"⚠️ {stage}: skipped {total_skipped} row(s) — " + ", ".join(parts)
+        msg = (
+            f"{stage}: added {added_count} new, skipped {total_skipped} — "
+            + ", ".join(parts)
         )
+        st.toast(f"⚠️ {msg}")
+        # Persist longer only for the mix case (some added AND some skipped)
+        if added_count > 0:
+            _set_flash("batch_dupes", f"⚠️ {msg}", kind="warning", ttl_sec=20)
+
     if added_count == 0:
         st.info(
             f"No new rows to {stage.lower()} (duplicates or missing data source)."
@@ -968,6 +1013,7 @@ with tab_queue:
         "📚 Batch queue (CSV) — queue & run multiple jobs sequentially",
         expanded=False,
     ):
+        _render_flash("batch_dupes")
         maybe_refresh_queue_from_gcs()
         # Queue name + Load/Save
         cqn1, cqn2, cqn3 = st.columns([2, 1, 1])
