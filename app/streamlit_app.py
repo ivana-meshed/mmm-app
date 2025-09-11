@@ -1220,9 +1220,41 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         else:
             with st.form("uploaded_csv_form"):
                 # Show editable grid with a Delete column (like queue builder)
+                # Upload sorting controls
                 uploaded_view = st.session_state.uploaded_df.copy()
                 if "Delete" not in uploaded_view.columns:
                     uploaded_view.insert(0, "Delete", False)
+
+                upload_sortable_cols = [
+                    c for c in uploaded_view.columns if c != "Delete"
+                ]
+                if upload_sortable_cols:
+                    c_sort1, c_sort2 = st.columns([3, 1])
+                    with c_sort1:
+                        up_sort_col = st.selectbox(
+                            "Sort upload by",
+                            options=upload_sortable_cols,
+                            index=upload_sortable_cols.index(
+                                st.session_state.get(
+                                    "uploaded_sort_col", upload_sortable_cols[0]
+                                )
+                            ),
+                            key="uploaded_sort_col",
+                        )
+                    with c_sort2:
+                        up_sort_asc = st.toggle(
+                            "Ascending",
+                            value=st.session_state.get(
+                                "uploaded_sort_asc", True
+                            ),
+                            key="uploaded_sort_asc",
+                        )
+                    uploaded_view = uploaded_view.sort_values(
+                        by=up_sort_col,
+                        ascending=up_sort_asc,
+                        na_position="last",
+                        kind="mergesort",
+                    )
 
                 uploaded_edited = st.data_editor(
                     uploaded_view,
@@ -1236,7 +1268,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         )
                     },
                 )
-
                 u1, u2, u3, u4 = st.columns([1, 1, 1, 2])
                 save_uploaded_clicked = u1.form_submit_button(
                     "💾 Save uploaded edits"
@@ -1283,23 +1314,25 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.rerun()
 
             if append_uploaded_clicked:
-                # Use the edited frame from this form (so we have the latest edits)
+                # Canonical, edited upload table as seen in the UI (including any user sorting)
+                up_base = (
+                    uploaded_edited.drop(columns="Delete", errors="ignore")
+                    .copy()
+                    .reset_index(drop=True)
+                )
+
+                # Columns the builder expects (preserve your existing behavior)
                 need_cols = (
                     list(st.session_state.qb_df.columns)
                     if "qb_df" in st.session_state
                     else []
                 )
-                up_norm = uploaded_edited.drop(
-                    columns="Delete", errors="ignore"
-                ).copy()
-                if need_cols:
-                    up_norm = up_norm.reindex(columns=need_cols, fill_value="")
 
                 # Helpers
                 def _sig_from_params_dict(d: dict) -> str:
                     return json.dumps(d, sort_keys=True)
 
-                # Builder sigs
+                # Build signature sets against which we dedupe
                 builder_sigs = {
                     _sig_from_params_dict(_normalize_row(r))
                     for _, r in (
@@ -1309,7 +1342,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     ).iterrows()
                 }
 
-                # Queue sigs
                 queue_sigs = set()
                 for e in st.session_state.job_queue:
                     try:
@@ -1334,115 +1366,70 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     df_led = df_led[
                         df_led["state"].isin(["SUCCEEDED", "FAILED"])
                     ].copy()
+                    cols_like = need_cols or df_led.columns
                     for _, r in df_led.iterrows():
-                        params_like = {
-                            c: r.get(c, "")
-                            for c in (need_cols or df_led.columns)
-                        }
+                        params_like = {c: r.get(c, "") for c in cols_like}
                         params_like = _normalize_row(pd.Series(params_like))
                         job_history_sigs.add(_sig_from_params_dict(params_like))
 
-                # Decide keep vs skip and track skip reasons with row numbers (1-based)
+                # Decide row-by-row whether to append (True) or keep in upload (False)
                 dup = {
                     "in_builder": [],
                     "in_queue": [],
                     "in_job_history": [],
                     "missing_data_source": [],
                 }
-                keep_rows = []
-                for i, r in up_norm.iterrows():
+                to_append_mask = []
+
+                for i, r in up_base.iterrows():
                     params = _normalize_row(r)
                     if not (params.get("query") or params.get("table")):
                         dup["missing_data_source"].append(i + 1)
+                        to_append_mask.append(False)
                         continue
                     sig = _sig_from_params_dict(params)
                     if sig in builder_sigs:
                         dup["in_builder"].append(i + 1)
+                        to_append_mask.append(False)
                         continue
                     if sig in queue_sigs:
                         dup["in_queue"].append(i + 1)
+                        to_append_mask.append(False)
                         continue
                     if sig in job_history_sigs:
                         dup["in_job_history"].append(i + 1)
+                        to_append_mask.append(False)
                         continue
-                    keep_rows.append(r)
+                    to_append_mask.append(True)
 
-                # Toaster (and zero-add info if applicable)
+                to_append_mask = pd.Series(to_append_mask, index=up_base.index)
+                added_count = int(to_append_mask.sum())
+
                 _toast_dupe_summary(
-                    "Append to builder", dup, added_count=len(keep_rows)
+                    "Append to builder", dup, added_count=added_count
                 )
 
-                if not keep_rows:
-                    # nothing to add
-                    pass
-                else:
-                    to_append = pd.DataFrame(keep_rows)
-                    # Append to builder
+                if added_count > 0:
+                    # Append to builder (use builder schema)
+                    to_append = up_base.loc[to_append_mask]
+                    if need_cols:
+                        to_append = to_append.reindex(
+                            columns=need_cols, fill_value=""
+                        )
                     st.session_state.qb_df = pd.concat(
-                        [st.session_state.qb_df, to_append],
-                        ignore_index=True,
+                        [st.session_state.qb_df, to_append], ignore_index=True
                     )
 
-                    # 🔥 Remove appended rows from the uploaded table (index-based, robust)
-                    # Work from the *original* edited upload (no reindexing), so we keep all columns.
-                    up_base = (
-                        uploaded_edited.drop(columns="Delete", errors="ignore")
-                        .copy()
-                        .reset_index(drop=True)
+                    # Keep only rows NOT appended in the upload table (i.e., the duplicates / invalid ones)
+                    st.session_state.uploaded_df = up_base.loc[
+                        ~to_append_mask
+                    ].reset_index(drop=True)
+
+                    st.success(
+                        f"Appended {added_count} row(s) to the builder. "
+                        f"Remaining in upload: {len(st.session_state.uploaded_df)} duplicate/invalid row(s)."
                     )
-
-                    # Build keep indices while we build keep_rows (collect these in the loop below)
-                    keep_rows = []
-                    keep_idx = []
-
-                    for i, r in up_norm.iterrows():
-                        params = _normalize_row(r)
-                        if not (params.get("query") or params.get("table")):
-                            dup["missing_data_source"].append(i + 1)
-                            continue
-                        sig = _sig_from_params_dict(params)
-                        if sig in builder_sigs:
-                            dup["in_builder"].append(i + 1)
-                            continue
-                        if sig in queue_sigs:
-                            dup["in_queue"].append(i + 1)
-                            continue
-                        if sig in job_history_sigs:
-                            dup["in_job_history"].append(i + 1)
-                            continue
-                        keep_rows.append(r)
-                        keep_idx.append(
-                            i
-                        )  # <— remember original row position in the upload table
-
-                    # ... (unchanged toaster + early return)
-
-                    if keep_rows:
-                        to_append = pd.DataFrame(keep_rows)
-
-                        # Ensure the builder exists before concatenation
-                        if (
-                            "qb_df" not in st.session_state
-                            or st.session_state.qb_df is None
-                        ):
-                            st.session_state.qb_df = pd.DataFrame(
-                                columns=to_append.columns
-                            )
-
-                        st.session_state.qb_df = pd.concat(
-                            [st.session_state.qb_df, to_append],
-                            ignore_index=True,
-                        )
-
-                        # Drop by position from the original upload table (keeps all original columns)
-                        st.session_state.uploaded_df = up_base.drop(
-                            index=keep_idx
-                        ).reset_index(drop=True)
-
-                        st.success(
-                            f"Appended {len(keep_rows)} unique row(s) to builder and removed them from the uploaded table."
-                        )
-                        st.rerun()
+                    st.rerun()
 
         # Seed once from current GCS queue (do NOT re-seed on every rerun)
         # ===== Queue Builder (parameters only, editable) =====
@@ -1517,14 +1504,44 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
         # Use a FORM so editor commits the last active cell before any button logic
         with st.form("queue_builder_form"):
+            # Builder sorting controls
+            builder_src = st.session_state.qb_df.copy()
+            qb_cols = list(builder_src.columns)
+            if qb_cols:
+                b_sort1, b_sort2 = st.columns([3, 1])
+                with b_sort1:
+                    qb_sort_col = st.selectbox(
+                        "Sort builder by",
+                        options=qb_cols,
+                        index=qb_cols.index(
+                            st.session_state.get("qb_sort_col", qb_cols[0])
+                        ),
+                        key="qb_sort_col",
+                    )
+                with b_sort2:
+                    qb_sort_asc = st.toggle(
+                        "Ascending",
+                        value=st.session_state.get("qb_sort_asc", True),
+                        key="qb_sort_asc",
+                    )
+                builder_src = builder_src.sort_values(
+                    by=qb_sort_col,
+                    ascending=qb_sort_asc,
+                    na_position="last",
+                    kind="mergesort",
+                )
+            else:
+                builder_src = st.session_state.qb_df
+
+            # Use the (possibly) sorted frame in the editor
             builder_edited = st.data_editor(
-                st.session_state.qb_df,
+                builder_src,
                 num_rows="dynamic",
                 width="stretch",
                 key="queue_builder_editor",
                 hide_index=True,
             )
-            st.session_state.qb_df = builder_edited
+            st.session_state.qb_df = builder_edited.reset_index(drop=True)
 
             # Actions for the builder table only
             bb1, bb2 = st.columns(2)
