@@ -397,12 +397,11 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
 def set_queue_running(
     queue_name: str, running: bool, bucket_name: Optional[str] = None
 ) -> None:
-    """Toggle the persisted queue_running flag and update session."""
-    doc = load_queue_from_gcs(queue_name, bucket_name=bucket_name)
+    """Toggle the persisted queue_running flag and update session without dropping entries."""
     st.session_state.queue_running = bool(running)
-    save_queue_to_gcs(
+    st.session_state.queue_saved_at = save_queue_to_gcs(
         queue_name,
-        entries=doc.get("entries", []),
+        entries=st.session_state.get("job_queue", []),
         queue_running=running,
         bucket_name=bucket_name,
     )
@@ -1090,7 +1089,7 @@ with tab_single:
 
     # ===================== BATCH QUEUE (CSV) =====================
 
-_queue_tick()
+# _queue_tick()
 
 with tab_queue:
     st.subheader(
@@ -1707,7 +1706,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         )
 
         if st.button("🔁 Refresh from GCS"):
-            _ = load_queue_from_gcs(st.session_state.queue_name)
+            maybe_refresh_queue_from_gcs(force=True)
             st.success("Refreshed from GCS.")
             st.rerun()
 
