@@ -919,7 +919,7 @@ with tab_single:
                 }
 
         render_jobs_ledger(key_prefix="single")
-        render_job_status_monitor(key_prefix="single")
+        # render_job_status_monitor(key_prefix="single")
 
     # ===================== BATCH QUEUE (CSV) =====================
 
@@ -1058,22 +1058,33 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         )
 
         # --- CSV upload (editable) ---
+
+        # --- CSV upload (editable, persistent, deletable) ---
         up = st.file_uploader("Upload batch CSV", type=["csv"], key="batch_csv")
 
-        # Keep uploaded df in session so it persists across reruns and can be edited
+        # Session scaffolding
         if "uploaded_df" not in st.session_state:
             st.session_state.uploaded_df = pd.DataFrame()
+        if "uploaded_fingerprint" not in st.session_state:
+            st.session_state.uploaded_fingerprint = None
 
+        # Load only when the *file changes*, so we don't clobber edits on reruns
         if up is not None:
-            try:
-                st.session_state.uploaded_df = pd.read_csv(up)
-                st.success(
-                    f"Loaded {len(st.session_state.uploaded_df)} rows from CSV"
-                )
-            except Exception as e:
-                st.error(f"Failed to parse CSV: {e}")
+            fingerprint = f"{getattr(up, 'name', '')}:{getattr(up, 'size', '')}"
+            if (
+                st.session_state.uploaded_fingerprint != fingerprint
+                or st.session_state.uploaded_df.empty
+            ):
+                try:
+                    st.session_state.uploaded_df = pd.read_csv(up)
+                    st.session_state.uploaded_fingerprint = fingerprint
+                    st.success(
+                        f"Loaded {len(st.session_state.uploaded_df)} rows from CSV"
+                    )
+                except Exception as e:
+                    st.error(f"Failed to parse CSV: {e}")
 
-        # Show editable grid with a Delete column
+        # Editable grid with a Delete checkbox column (like queue builder)
         if not st.session_state.uploaded_df.empty:
             uploaded_view = st.session_state.uploaded_df.copy()
             if "Delete" not in uploaded_view.columns:
@@ -1092,25 +1103,36 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 },
             )
 
+            # Always persist *all* edits (including added rows) back to session (drop the helper column)
+            st.session_state.uploaded_df = uploaded_edited.drop(
+                columns="Delete", errors="ignore"
+            ).reset_index(drop=True)
+
             uu1, uu2 = st.columns(2)
             if uu1.button(
                 "🗑 Delete selected uploaded rows", key="delete_uploaded_rows"
             ):
-                keep_mask = ~uploaded_edited["Delete"].fillna(False)
+                # Use the edited frame to respect the latest checkbox values
+                keep_mask = (
+                    ~uploaded_edited.get("Delete", False)
+                    .fillna(False)
+                    .astype(bool)
+                )
                 st.session_state.uploaded_df = (
                     uploaded_edited.loc[keep_mask]
                     .drop(columns="Delete", errors="ignore")
                     .reset_index(drop=True)
                 )
+                st.toast("Deleted selected uploaded rows.")
                 st.rerun()
 
             if uu2.button("🧹 Clear uploaded table", key="clear_uploaded_rows"):
                 st.session_state.uploaded_df = pd.DataFrame()
+                st.session_state.uploaded_fingerprint = None
                 st.rerun()
         else:
             st.caption("No uploaded CSV yet (or it has 0 rows).")
 
-        # ===== Queue Builder (parameters only, editable) =====
         # Seed once from current GCS queue (do NOT re-seed on every rerun)
         # ===== Queue Builder (parameters only, editable) =====
         payload = load_queue_payload(st.session_state.queue_name)
@@ -1315,13 +1337,35 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "No new rows to append (duplicates or missing data source)."
                 )
             else:
+                # Append to builder
+                to_append = pd.DataFrame(keep_rows)
                 st.session_state.qb_df = pd.concat(
-                    [st.session_state.qb_df, pd.DataFrame(keep_rows)],
+                    [st.session_state.qb_df, to_append],
                     ignore_index=True,
                 )
                 st.success(
                     f"Appended {len(keep_rows)} unique row(s) to builder."
                 )
+
+                # 🔥 Remove *appended* rows from the uploaded table
+                # Build signature set for appended rows (normalized)
+                appended_sigs = {
+                    _sig_from_params_dict(_normalize_row(r))
+                    for _, r in to_append.iterrows()
+                }
+
+                # Align current uploaded_df to builder columns and compute sigs, then filter
+                cur_up = st.session_state.uploaded_df.reindex(
+                    columns=need_cols, fill_value=""
+                )
+                cur_up_sigs = cur_up.apply(
+                    lambda r: _sig_from_params_dict(_normalize_row(r)), axis=1
+                )
+                keep_mask_up = ~cur_up_sigs.isin(appended_sigs)
+                st.session_state.uploaded_df = cur_up.loc[
+                    keep_mask_up
+                ].reset_index(drop=True)
+
                 st.rerun()
 
         if enqueue_clicked:
