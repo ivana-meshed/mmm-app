@@ -20,7 +20,7 @@ from app_shared import (
     GCS_BUCKET,
     DEFAULT_QUEUE_NAME,
     SAFE_LAG_SECONDS_AFTER_RUNNING,
-    LEDGER_COLUMNS,
+    JOB_HISTORY_COLUMNS,
     # Helpers
     timed_step,
     parse_train_size,
@@ -42,9 +42,9 @@ from app_shared import (
     get_data_processor,
     _fmt_secs,
     _connect_snowflake,  # use shared connector for consistency with ensure_sf_conn
-    read_ledger_from_gcs,
-    save_ledger_to_gcs,
-    append_row_to_ledger,
+    read_job_history_from_gcs,
+    save_job_history_to_gcs,
+    append_row_to_job_history,
     _safe_tick_once,  # (kept for parity; not used below
 )
 
@@ -250,41 +250,43 @@ def params_from_ui(
     }
 
 
-def _empty_ledger_df() -> pd.DataFrame:
-    # Matches fields written by run_all.R::append_to_ledger()
-    cols = LEDGER_COLUMNS
+def _empty_job_history_df() -> pd.DataFrame:
+    # Matches fields written by run_all.R::append_to_job_history()
+    cols = JOB_HISTORY_COLUMNS
     return pd.DataFrame(columns=cols)
 
 
-def render_jobs_ledger(key_prefix: str = "single") -> None:
-    with st.expander("📚 Jobs Ledger (from GCS)", expanded=False):
+def render_jobs_job_history(key_prefix: str = "single") -> None:
+    with st.expander("📚 Jobs JOB_HISTORY (from GCS)", expanded=False):
         # Refresh control first (button triggers a rerun)
-        if st.button("🔁 Refresh ledger", key=f"refresh_ledger_{key_prefix}"):
+        if st.button(
+            "🔁 Refresh job_history", key=f"refresh_job_history_{key_prefix}"
+        ):
             # bump a nonce so the dataframe widget key changes and re-renders
-            st.session_state["ledger_nonce"] = (
-                st.session_state.get("ledger_nonce", 0) + 1
+            st.session_state["job_history_nonce"] = (
+                st.session_state.get("job_history_nonce", 0) + 1
             )
             st.rerun()
 
         try:
-            df_ledger = read_ledger_from_gcs(
+            df_job_history = read_job_history_from_gcs(
                 st.session_state.get("gcs_bucket", GCS_BUCKET)
             )
         except Exception as e:
-            st.error(f"Failed to read ledger from GCS: {e}")
+            st.error(f"Failed to read job_history from GCS: {e}")
             return
 
-        df_ledger = df_ledger.reindex(columns=LEDGER_COLUMNS)
+        df_job_history = df_job_history.reindex(columns=JOB_HISTORY_COLUMNS)
 
         st.caption(
-            "Ledger entries are view-only and auto-updated when jobs finish."
+            "JOB_HISTORY entries are view-only and auto-updated when jobs finish."
         )
         st.dataframe(
-            df_ledger,
+            df_job_history,
             width="stretch",
             use_container_width=True,
             hide_index=True,
-            key=f"ledger_view_{key_prefix}_{st.session_state.get('ledger_nonce', 0)}",
+            key=f"job_history_view_{key_prefix}_{st.session_state.get('job_history_nonce', 0)}",
         )
 
 
@@ -314,18 +316,18 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
             except Exception as e:
                 st.error(f"Status check failed: {e}")
 
-    # Quick results/log viewer driven by the ledger (no execution name required)
-    with st.expander("📁 View Results (pick from ledger)", expanded=False):
+    # Quick results/log viewer driven by the job_history (no execution name required)
+    with st.expander("📁 View Results (pick from job_history)", expanded=False):
         try:
-            df_led = read_ledger_from_gcs(
+            df_led = read_job_history_from_gcs(
                 st.session_state.get("gcs_bucket", GCS_BUCKET)
             )
         except Exception as e:
-            st.error(f"Failed to read ledger: {e}")
+            st.error(f"Failed to read job_history: {e}")
             df_led = None
 
         if df_led is None or df_led.empty or "gcs_prefix" not in df_led.columns:
-            st.info("No ledger entries with results yet.")
+            st.info("No job_history entries with results yet.")
         else:
             df_led = df_led.copy()
 
@@ -338,7 +340,7 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                 "Pick a job",
                 options=list(df_led.index),
                 format_func=lambda i: df_led.loc[i, "__label__"],
-                key=f"ledger_pick_{key_prefix}",
+                key=f"job_history_pick_{key_prefix}",
             )
 
             # ...
@@ -517,7 +519,7 @@ def _toast_dupe_summary(stage: str, reasons: dict, added_count: int = 0):
     name_map = {
         "in_builder": "already in builder",
         "in_queue": "already in queue",
-        "in_ledger": "already finished (ledger)",
+        "in_job_history": "already finished (job_history)",
         "missing_data_source": "missing table/query",
     }
     total_skipped = sum(len(v) for v in reasons.values())
@@ -611,7 +613,7 @@ def _queue_tick():
             )
             duration_minutes = times.get("duration_minutes")
 
-            append_row_to_ledger(
+            append_row_to_job_history(
                 {
                     "job_id": entry.get("gcs_prefix") or entry.get("id"),
                     "state": final_state,
@@ -660,8 +662,8 @@ def _queue_tick():
             queue_running=st.session_state.queue_running,
         )
         # bump nonce so job history table re-renders
-        st.session_state["ledger_nonce"] = (
-            st.session_state.get("ledger_nonce", 0) + 1
+        st.session_state["job_history_nonce"] = (
+            st.session_state.get("job_history_nonce", 0) + 1
         )
 
 
@@ -1041,7 +1043,7 @@ with tab_single:
                     "gcs_bucket": gcs_bucket,
                 }
 
-        render_jobs_ledger(key_prefix="single")
+        render_jobs_job_history(key_prefix="single")
         # render_job_status_monitor(key_prefix="single")
 
     # ===================== BATCH QUEUE (CSV) =====================
@@ -1319,15 +1321,15 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     except Exception:
                         pass
 
-                # Ledger sigs (SUCCEEDED/FAILED)
+                # JOB_HISTORY sigs (SUCCEEDED/FAILED)
                 try:
-                    df_led = read_ledger_from_gcs(
+                    df_led = read_job_history_from_gcs(
                         st.session_state.get("gcs_bucket", GCS_BUCKET)
                     )
                 except Exception:
                     df_led = pd.DataFrame()
 
-                ledger_sigs = set()
+                job_history_sigs = set()
                 if not df_led.empty and "state" in df_led.columns:
                     df_led = df_led[
                         df_led["state"].isin(["SUCCEEDED", "FAILED"])
@@ -1338,13 +1340,13 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                             for c in (need_cols or df_led.columns)
                         }
                         params_like = _normalize_row(pd.Series(params_like))
-                        ledger_sigs.add(_sig_from_params_dict(params_like))
+                        job_history_sigs.add(_sig_from_params_dict(params_like))
 
                 # Decide keep vs skip and track skip reasons with row numbers (1-based)
                 dup = {
                     "in_builder": [],
                     "in_queue": [],
-                    "in_ledger": [],
+                    "in_job_history": [],
                     "missing_data_source": [],
                 }
                 keep_rows = []
@@ -1360,8 +1362,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     if sig in queue_sigs:
                         dup["in_queue"].append(i + 1)
                         continue
-                    if sig in ledger_sigs:
-                        dup["in_ledger"].append(i + 1)
+                    if sig in job_history_sigs:
+                        dup["in_job_history"].append(i + 1)
                         continue
                     keep_rows.append(r)
 
@@ -1543,13 +1545,13 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     pass
 
             try:
-                df_led = read_ledger_from_gcs(
+                df_led = read_job_history_from_gcs(
                     st.session_state.get("gcs_bucket", GCS_BUCKET)
                 )
             except Exception:
                 df_led = pd.DataFrame()
 
-            ledger_sigs_existing = set()
+            job_history_sigs_existing = set()
             if not df_led.empty and "state" in df_led.columns:
                 df_led = df_led[
                     df_led["state"].isin(["SUCCEEDED", "FAILED"])
@@ -1557,7 +1559,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 for _, r in df_led.iterrows():
                     params_like = {c: r.get(c, "") for c in need_cols}
                     params_like = _normalize_row(pd.Series(params_like))
-                    ledger_sigs_existing.add(
+                    job_history_sigs_existing.add(
                         json.dumps(params_like, sort_keys=True)
                     )
 
@@ -1567,7 +1569,11 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             )
 
             new_entries, enqueued_sigs = [], set()
-            dup = {"in_queue": [], "in_ledger": [], "missing_data_source": []}
+            dup = {
+                "in_queue": [],
+                "in_job_history": [],
+                "missing_data_source": [],
+            }
 
             for i, row in st.session_state.qb_df.iterrows():
                 params = _normalize_row(row)
@@ -1578,8 +1584,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 if sig in queue_sigs_existing:
                     dup["in_queue"].append(i + 1)
                     continue
-                if sig in ledger_sigs_existing:
-                    dup["in_ledger"].append(i + 1)
+                if sig in job_history_sigs_existing:
+                    dup["in_job_history"].append(i + 1)
                     continue
 
                 new_entries.append(
@@ -1736,7 +1742,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     )
                 st.success("Queue updated.")
                 st.rerun()
-    render_jobs_ledger(key_prefix="queue")
+    render_jobs_job_history(key_prefix="queue")
     render_job_status_monitor(key_prefix="queue")
 
     # ─────────────────────────────
