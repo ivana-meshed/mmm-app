@@ -667,6 +667,51 @@ def _queue_tick():
         )
 
 
+def _sorted_with_controls(
+    df: pd.DataFrame, prefix: str, exclude_cols=("Delete",)
+):
+    """
+    Render sorting controls and return (sorted_df, nonce).
+    We bump a nonce when sort parameters change so st.data_editor re-renders.
+    """
+    cols = [c for c in df.columns if c not in exclude_cols]
+    if not cols:
+        return df, 0
+
+    sort_col_key = f"{prefix}_sort_col"
+    sort_asc_key = f"{prefix}_sort_asc"
+    prev_key = f"{prefix}_sort_prev"
+    nonce_key = f"{prefix}_sort_nonce"
+
+    # Initialize defaults safely
+    if (
+        sort_col_key not in st.session_state
+        or st.session_state[sort_col_key] not in cols
+    ):
+        st.session_state[sort_col_key] = cols[0]
+    if sort_asc_key not in st.session_state:
+        st.session_state[sort_asc_key] = True
+
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        col = st.selectbox("Sort by", options=cols, key=sort_col_key)
+    with c2:
+        asc = st.toggle(
+            "Ascending", value=st.session_state[sort_asc_key], key=sort_asc_key
+        )
+
+    prev = st.session_state.get(prev_key)
+    cur = (col, asc)
+    if prev != cur:
+        st.session_state[prev_key] = cur
+        st.session_state[nonce_key] = st.session_state.get(nonce_key, 0) + 1
+
+    sorted_df = df.sort_values(
+        by=col, ascending=asc, na_position="last", kind="mergesort"
+    )
+    return sorted_df, st.session_state.get(nonce_key, 0)
+
+
 # ─────────────────────────────
 # UI layout
 # ─────────────────────────────
@@ -1193,12 +1238,10 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             st.session_state.uploaded_fingerprint = None
 
         # Load only when the *file changes*, so we don't clobber edits on reruns
+        # Load only when the *file changes* (never reload just because the table is empty)
         if up is not None:
             fingerprint = f"{getattr(up, 'name', '')}:{getattr(up, 'size', '')}"
-            if (
-                st.session_state.uploaded_fingerprint != fingerprint
-                or st.session_state.uploaded_df.empty
-            ):
+            if st.session_state.uploaded_fingerprint != fingerprint:
                 try:
                     st.session_state.uploaded_df = pd.read_csv(up)
                     st.session_state.uploaded_fingerprint = fingerprint
@@ -1207,6 +1250,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     )
                 except Exception as e:
                     st.error(f"Failed to parse CSV: {e}")
+        else:
+            # If user clears the file input, allow re-uploading the same file later
+            st.session_state.uploaded_fingerprint = None
 
         # ===== Uploaded CSV (FORM) =====
         st.markdown("#### 📥 Uploaded CSV (editable)")
@@ -1225,40 +1271,14 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 if "Delete" not in uploaded_view.columns:
                     uploaded_view.insert(0, "Delete", False)
 
-                upload_sortable_cols = [
-                    c for c in uploaded_view.columns if c != "Delete"
-                ]
-                if upload_sortable_cols:
-                    c_sort1, c_sort2 = st.columns([3, 1])
-                    with c_sort1:
-                        up_sort_col = st.selectbox(
-                            "Sort upload by",
-                            options=upload_sortable_cols,
-                            index=upload_sortable_cols.index(
-                                st.session_state.get(
-                                    "uploaded_sort_col", upload_sortable_cols[0]
-                                )
-                            ),
-                            key="uploaded_sort_col",
-                        )
-                    with c_sort2:
-                        up_sort_asc = st.toggle(
-                            "Ascending",
-                            value=st.session_state.get(
-                                "uploaded_sort_asc", True
-                            ),
-                            key="uploaded_sort_asc",
-                        )
-                    uploaded_view = uploaded_view.sort_values(
-                        by=up_sort_col,
-                        ascending=up_sort_asc,
-                        na_position="last",
-                        kind="mergesort",
-                    )
+                # Sorting + nonce
+                uploaded_view, up_nonce = _sorted_with_controls(
+                    uploaded_view, prefix="uploaded"
+                )
 
                 uploaded_edited = st.data_editor(
                     uploaded_view,
-                    key="uploaded_editor",
+                    key=f"uploaded_editor_{up_nonce}",  # <= bump key when sort changes
                     num_rows="dynamic",
                     width="stretch",
                     hide_index=True,
@@ -1268,6 +1288,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         )
                     },
                 )
+
                 u1, u2, u3, u4 = st.columns([1, 1, 1, 2])
                 save_uploaded_clicked = u1.form_submit_button(
                     "💾 Save uploaded edits"
@@ -1506,41 +1527,19 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         with st.form("queue_builder_form"):
             # Builder sorting controls
             builder_src = st.session_state.qb_df.copy()
-            qb_cols = list(builder_src.columns)
-            if qb_cols:
-                b_sort1, b_sort2 = st.columns([3, 1])
-                with b_sort1:
-                    qb_sort_col = st.selectbox(
-                        "Sort builder by",
-                        options=qb_cols,
-                        index=qb_cols.index(
-                            st.session_state.get("qb_sort_col", qb_cols[0])
-                        ),
-                        key="qb_sort_col",
-                    )
-                with b_sort2:
-                    qb_sort_asc = st.toggle(
-                        "Ascending",
-                        value=st.session_state.get("qb_sort_asc", True),
-                        key="qb_sort_asc",
-                    )
-                builder_src = builder_src.sort_values(
-                    by=qb_sort_col,
-                    ascending=qb_sort_asc,
-                    na_position="last",
-                    kind="mergesort",
-                )
-            else:
-                builder_src = st.session_state.qb_df
+            builder_src, qb_nonce = _sorted_with_controls(
+                builder_src, prefix="qb"
+            )
 
-            # Use the (possibly) sorted frame in the editor
             builder_edited = st.data_editor(
                 builder_src,
                 num_rows="dynamic",
                 width="stretch",
-                key="queue_builder_editor",
+                key=f"queue_builder_editor_{qb_nonce}",  # <= bump key when sort changes
                 hide_index=True,
             )
+
+            # Persist edits back to session (keep the shown order)
             st.session_state.qb_df = builder_edited.reset_index(drop=True)
 
             # Actions for the builder table only
