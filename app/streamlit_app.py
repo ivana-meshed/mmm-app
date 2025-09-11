@@ -1089,7 +1089,7 @@ with tab_single:
 
     # ===================== BATCH QUEUE (CSV) =====================
 
- _queue_tick()
+_queue_tick()
 
 with tab_queue:
     st.subheader(
