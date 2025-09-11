@@ -479,7 +479,7 @@ _normalize_row = _make_normalizer(_builder_defaults)
 
 
 # ── Flash helpers: show a persistent banner for N seconds (until dismissed)
-def _set_flash(slot: str, msg: str, kind: str = "warning", ttl_sec: int = 5):
+def _set_flash(slot: str, msg: str, kind: str = "warning", ttl_sec: int = 10):
     st.session_state.setdefault("_flash_store", {})
     st.session_state["_flash_store"][slot] = {
         "msg": msg,
@@ -1383,25 +1383,66 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         ignore_index=True,
                     )
 
-                    # 🔥 Remove appended rows from the uploaded table
-                    appended_sigs = {
-                        _sig_from_params_dict(_normalize_row(r))
-                        for _, r in to_append.iterrows()
-                    }
-                    cur_up = up_norm.copy()
-                    cur_up_sigs = cur_up.apply(
-                        lambda r: _sig_from_params_dict(_normalize_row(r)),
-                        axis=1,
+                    # 🔥 Remove appended rows from the uploaded table (index-based, robust)
+                    # Work from the *original* edited upload (no reindexing), so we keep all columns.
+                    up_base = (
+                        uploaded_edited.drop(columns="Delete", errors="ignore")
+                        .copy()
+                        .reset_index(drop=True)
                     )
-                    keep_mask_up = ~cur_up_sigs.isin(appended_sigs)
-                    st.session_state.uploaded_df = cur_up.loc[
-                        keep_mask_up
-                    ].reset_index(drop=True)
 
-                    st.success(
-                        f"Appended {len(keep_rows)} unique row(s) to builder and removed them from the uploaded table."
-                    )
-                    st.rerun()
+                    # Build keep indices while we build keep_rows (collect these in the loop below)
+                    keep_rows = []
+                    keep_idx = []
+
+                    for i, r in up_norm.iterrows():
+                        params = _normalize_row(r)
+                        if not (params.get("query") or params.get("table")):
+                            dup["missing_data_source"].append(i + 1)
+                            continue
+                        sig = _sig_from_params_dict(params)
+                        if sig in builder_sigs:
+                            dup["in_builder"].append(i + 1)
+                            continue
+                        if sig in queue_sigs:
+                            dup["in_queue"].append(i + 1)
+                            continue
+                        if sig in job_history_sigs:
+                            dup["in_job_history"].append(i + 1)
+                            continue
+                        keep_rows.append(r)
+                        keep_idx.append(
+                            i
+                        )  # <— remember original row position in the upload table
+
+                    # ... (unchanged toaster + early return)
+
+                    if keep_rows:
+                        to_append = pd.DataFrame(keep_rows)
+
+                        # Ensure the builder exists before concatenation
+                        if (
+                            "qb_df" not in st.session_state
+                            or st.session_state.qb_df is None
+                        ):
+                            st.session_state.qb_df = pd.DataFrame(
+                                columns=to_append.columns
+                            )
+
+                        st.session_state.qb_df = pd.concat(
+                            [st.session_state.qb_df, to_append],
+                            ignore_index=True,
+                        )
+
+                        # Drop by position from the original upload table (keeps all original columns)
+                        st.session_state.uploaded_df = up_base.drop(
+                            index=keep_idx
+                        ).reset_index(drop=True)
+
+                        st.success(
+                            f"Appended {len(keep_rows)} unique row(s) to builder and removed them from the uploaded table."
+                        )
+                        st.rerun()
 
         # Seed once from current GCS queue (do NOT re-seed on every rerun)
         # ===== Queue Builder (parameters only, editable) =====
