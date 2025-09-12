@@ -1233,7 +1233,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         if "uploaded_fingerprint" not in st.session_state:
             st.session_state.uploaded_fingerprint = None
 
-        # Load only when the *file changes*, so we don't clobber edits on reruns
         # Load only when the *file changes* (never reload just because the table is empty)
         if up is not None:
             fingerprint = f"{getattr(up, 'name', '')}:{getattr(up, 'size', '')}"
@@ -1540,7 +1539,12 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             ).reset_index(drop=True)
 
             # Actions for the builder table only – now includes Delete selected
-            bb1, bb2, bb3 = st.columns(3)
+            bb0, bb1, bb2, bb3 = st.columns(4)
+
+            save_builder_clicked = bb0.form_submit_button(
+                "💾 Save builder edits"
+            )
+
             delete_builder_clicked = bb1.form_submit_button("🗑 Delete selected")
             reset_clicked = bb2.form_submit_button(
                 "Reset builder to current GCS queue"
@@ -1551,13 +1555,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
             # Enqueue & clear queue
             bc1, bc2 = st.columns(2)
-            enqueue_clicked = bc1.form_submit_button(
-                "➕ Enqueue all rows",
-                disabled=(
-                    st.session_state.qb_df is None
-                    or st.session_state.qb_df.empty
-                ),
-            )
+            enqueue_clicked = bc1.form_submit_button("➕ Enqueue all rows")
+
             clear_queue_clicked = bc2.form_submit_button("🧹 Clear queue")
 
         # ----- Handle form actions (after form so we have latest editor state) -----
@@ -1600,104 +1599,113 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
         if enqueue_clicked:
             # Build separate sets so we can categorize reasons
-            queue_sigs_existing = set()
-            for e in st.session_state.job_queue:
+            if st.session_state.qb_df.dropna(how="all").empty:
+                st.warning(
+                    "No rows to enqueue. Add at least one non-empty row."
+                )
+            else:
+                queue_sigs_existing = set()
+                for e in st.session_state.job_queue:
+                    try:
+                        norm_existing = _normalize_row(
+                            pd.Series(e.get("params", {}))
+                        )
+                        queue_sigs_existing.add(
+                            json.dumps(norm_existing, sort_keys=True)
+                        )
+                    except Exception:
+                        pass
+
                 try:
-                    norm_existing = _normalize_row(
-                        pd.Series(e.get("params", {}))
-                    )
-                    queue_sigs_existing.add(
-                        json.dumps(norm_existing, sort_keys=True)
+                    df_led = read_job_history_from_gcs(
+                        st.session_state.get("gcs_bucket", GCS_BUCKET)
                     )
                 except Exception:
-                    pass
+                    df_led = pd.DataFrame()
 
-            try:
-                df_led = read_job_history_from_gcs(
-                    st.session_state.get("gcs_bucket", GCS_BUCKET)
+                job_history_sigs_existing = set()
+                if not df_led.empty and "state" in df_led.columns:
+                    df_led = df_led[
+                        df_led["state"].isin(["SUCCEEDED", "FAILED"])
+                    ].copy()
+                    for _, r in df_led.iterrows():
+                        params_like = {c: r.get(c, "") for c in need_cols}
+                        params_like = _normalize_row(pd.Series(params_like))
+                        job_history_sigs_existing.add(
+                            json.dumps(params_like, sort_keys=True)
+                        )
+
+                next_id = (
+                    max(
+                        [e["id"] for e in st.session_state.job_queue], default=0
+                    )
+                    + 1
                 )
-            except Exception:
-                df_led = pd.DataFrame()
 
-            job_history_sigs_existing = set()
-            if not df_led.empty and "state" in df_led.columns:
-                df_led = df_led[
-                    df_led["state"].isin(["SUCCEEDED", "FAILED"])
-                ].copy()
-                for _, r in df_led.iterrows():
-                    params_like = {c: r.get(c, "") for c in need_cols}
-                    params_like = _normalize_row(pd.Series(params_like))
-                    job_history_sigs_existing.add(
-                        json.dumps(params_like, sort_keys=True)
+                new_entries, enqueued_sigs = [], set()
+                dup = {
+                    "in_queue": [],
+                    "in_job_history": [],
+                    "missing_data_source": [],
+                }
+
+                for i, row in st.session_state.qb_df.iterrows():
+                    params = _normalize_row(row)
+                    if not (params.get("query") or params.get("table")):
+                        dup["missing_data_source"].append(i + 1)
+                        continue
+                    sig = json.dumps(params, sort_keys=True)
+                    if sig in queue_sigs_existing:
+                        dup["in_queue"].append(i + 1)
+                        continue
+                    if sig in job_history_sigs_existing:
+                        dup["in_job_history"].append(i + 1)
+                        continue
+
+                    new_entries.append(
+                        {
+                            "id": next_id + len(new_entries),
+                            "params": params,
+                            "status": "PENDING",
+                            "timestamp": None,
+                            "execution_name": None,
+                            "gcs_prefix": None,
+                            "message": "",
+                        }
+                    )
+                    enqueued_sigs.add(sig)
+
+                # Toaster (and zero-add info if applicable)
+                _toast_dupe_summary(
+                    "Enqueue", dup, added_count=len(new_entries)
+                )
+
+                if not new_entries:
+                    # nothing to enqueue
+                    pass
+                else:
+                    st.session_state.job_queue.extend(new_entries)
+                    st.session_state.queue_saved_at = save_queue_to_gcs(
+                        st.session_state.queue_name,
+                        st.session_state.job_queue,
+                        queue_running=st.session_state.queue_running,
                     )
 
-            next_id = (
-                max([e["id"] for e in st.session_state.job_queue], default=0)
-                + 1
-            )
+                    # Remove only the rows that were enqueued from the builder
+                    def _row_sig(r: pd.Series) -> str:
+                        return json.dumps(_normalize_row(r), sort_keys=True)
 
-            new_entries, enqueued_sigs = [], set()
-            dup = {
-                "in_queue": [],
-                "in_job_history": [],
-                "missing_data_source": [],
-            }
+                    keep_mask = ~st.session_state.qb_df.apply(
+                        _row_sig, axis=1
+                    ).isin(enqueued_sigs)
+                    st.session_state.qb_df = st.session_state.qb_df.loc[
+                        keep_mask
+                    ].reset_index(drop=True)
 
-            for i, row in st.session_state.qb_df.iterrows():
-                params = _normalize_row(row)
-                if not (params.get("query") or params.get("table")):
-                    dup["missing_data_source"].append(i + 1)
-                    continue
-                sig = json.dumps(params, sort_keys=True)
-                if sig in queue_sigs_existing:
-                    dup["in_queue"].append(i + 1)
-                    continue
-                if sig in job_history_sigs_existing:
-                    dup["in_job_history"].append(i + 1)
-                    continue
-
-                new_entries.append(
-                    {
-                        "id": next_id + len(new_entries),
-                        "params": params,
-                        "status": "PENDING",
-                        "timestamp": None,
-                        "execution_name": None,
-                        "gcs_prefix": None,
-                        "message": "",
-                    }
-                )
-                enqueued_sigs.add(sig)
-
-            # Toaster (and zero-add info if applicable)
-            _toast_dupe_summary("Enqueue", dup, added_count=len(new_entries))
-
-            if not new_entries:
-                # nothing to enqueue
-                pass
-            else:
-                st.session_state.job_queue.extend(new_entries)
-                st.session_state.queue_saved_at = save_queue_to_gcs(
-                    st.session_state.queue_name,
-                    st.session_state.job_queue,
-                    queue_running=st.session_state.queue_running,
-                )
-
-                # Remove only the rows that were enqueued from the builder
-                def _row_sig(r: pd.Series) -> str:
-                    return json.dumps(_normalize_row(r), sort_keys=True)
-
-                keep_mask = ~st.session_state.qb_df.apply(
-                    _row_sig, axis=1
-                ).isin(enqueued_sigs)
-                st.session_state.qb_df = st.session_state.qb_df.loc[
-                    keep_mask
-                ].reset_index(drop=True)
-
-                st.success(
-                    f"Enqueued {len(new_entries)} new job(s), saved to GCS, and removed them from the builder."
-                )
-                st.rerun()
+                    st.success(
+                        f"Enqueued {len(new_entries)} new job(s), saved to GCS, and removed them from the builder."
+                    )
+                    st.rerun()
 
         # Queue controls
         st.caption(
