@@ -1574,6 +1574,14 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             st.success("Deleted selected builder rows.")
             st.rerun()
 
+        if save_builder_clicked:
+            # Persist ONLY when explicitly saving (or do this in “any submit” branches)
+            st.session_state.qb_df = builder_edited.drop(
+                columns="Delete", errors="ignore"
+            ).reset_index(drop=True)
+            st.success("Builder saved.")
+            st.rerun()
+
         if reset_clicked:
             st.session_state.qb_df = seed_df.copy()
             st.info("Builder reset to current GCS queue.")
