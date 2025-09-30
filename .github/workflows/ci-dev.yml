@@ -131,6 +131,11 @@ jobs:
           terraform state show google_service_account.web_service_sa >/dev/null 2>&1 || \
           terraform import google_service_account.web_service_sa "projects/${PROJECT_ID}/serviceAccounts/${WEB_RUNTIME_SA}" || true
 
+          # Import scheduler SA if it exists
+          terraform state show google_service_account.scheduler >/dev/null 2>&1 || \
+          terraform import google_service_account.scheduler \
+            "projects/${PROJECT_ID}/serviceAccounts/robyn-queue-scheduler@${PROJECT_ID}.iam.gserviceaccount.com" || true
+
           # Import training job SA if it exists
           terraform state show google_service_account.training_job_sa >/dev/null 2>&1 || \
           terraform import google_service_account.training_job_sa "projects/${PROJECT_ID}/serviceAccounts/${TRAINING_RUNTIME_SA}" || true
