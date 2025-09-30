@@ -11,7 +11,7 @@ provider "google-beta" {
 # Service Accounts
 ##############################################################
 resource "google_service_account" "web_service_sa" {
-  account_id   = "mmm-web-service-sa"
+  account_id   = "mmm-web-dev-service-sa"
   display_name = "Service Account for MMM Web Service"
 }
 
@@ -192,7 +192,7 @@ resource "google_project_service" "secretmanager" {
 # Cloud Run Service (Streamlit Web Interface)
 ##############################################################
 resource "google_cloud_run_service" "web_service" {
-  name     = "${var.service_name}-web"
+  name     = "${var.service_name}-web-dev"
   location = var.region
 
   template {

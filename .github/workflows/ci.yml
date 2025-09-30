@@ -4,7 +4,7 @@ on:
   #pull_request:
   #  branches: [ main ]
   push:
-    branches: [ analysis]
+    branches: [ web-dev]
 
 permissions:
   id-token: write
@@ -18,14 +18,14 @@ jobs:
       PROJECT_NUMBER: "321233323695"
       REGION: europe-west1
       ARTIFACT_REPO: mmm-repo
-      WEB_IMAGE: mmm-web
+      WEB_IMAGE: mmm-web-dev-dev
       TRAINING_IMAGE: mmm-training
       SERVICE_NAME: mmm-app
       BUCKET: mmm-app-output
       WIF_POOL: github-pool
       WIF_PROVIDER: github-oidc
       SA_EMAIL: github-deployer@datawarehouse-422511.iam.gserviceaccount.com
-      WEB_RUNTIME_SA: mmm-web-service-sa@datawarehouse-422511.iam.gserviceaccount.com
+      WEB_RUNTIME_SA: mmm-web-dev-service-sa@datawarehouse-422511.iam.gserviceaccount.com
       TRAINING_RUNTIME_SA: mmm-training-job-sa@datawarehouse-422511.iam.gserviceaccount.com
       REPOSITORY: ivana-meshed/mmm-app
       TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
@@ -74,8 +74,8 @@ jobs:
           tags: |
             ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
             ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:latest
-          cache-from: type=gha,scope=mmm-web
-          cache-to: type=gha,mode=max,scope=mmm-web
+          cache-from: type=gha,scope=mmm-web-dev
+          cache-to: type=gha,mode=max,scope=mmm-web-dev
 
       - name: Build & Push training job image
         uses: docker/build-push-action@v6
@@ -149,7 +149,7 @@ jobs:
 
           # Disable deletion protection on web service
           echo "Disabling Cloud Run deletion protection..."
-          gcloud run services update "${SERVICE_NAME}-web" \
+          gcloud run services update "${SERVICE_NAME}-web-dev" \
             --region="$REGION" \
             --no-deletion-protection || true
 
@@ -167,7 +167,7 @@ jobs:
             # Re-import web service
             terraform state rm google_cloud_run_service.web_service || true
             terraform import google_cloud_run_service.web_service \
-              "projects/${PROJECT_ID}/locations/${REGION}/services/${SERVICE_NAME}-web" || true
+              "projects/${PROJECT_ID}/locations/${REGION}/services/${SERVICE_NAME}-web-dev" || true
 
             # Re-import training job
             terraform state rm google_cloud_run_v2_job.training_job || true
