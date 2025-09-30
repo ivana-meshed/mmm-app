@@ -13,7 +13,6 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     env:
-      env:
       PROJECT_ID: datawarehouse-422511
       PROJECT_NUMBER: "321233323695"
       REGION: europe-west1
@@ -118,7 +117,7 @@ jobs:
           TF_IN_AUTOMATION: "true"
         run: |
           terraform -version
-          terraform init -input=false -reconfigure -backend-config="prefix=envs/dev
+          terraform init -input=false -reconfigure -backend-config="prefix=envs/dev"
           terraform fmt -check
           terraform validate
 
