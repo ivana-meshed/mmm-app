@@ -195,8 +195,8 @@ jobs:
             -var "deployer_sa=$SA_EMAIL" \
             -var "web_image=$WEB_IMAGE_URL" \
             -var "training_image=$TRAINING_IMAGE_URL" \
-            -var "scheduler_job_name=robyn-queue-tick-dev" \
-            -var "queue_name=default-dev" \
+            -var "scheduler_job_name=robyn-queue-tick" \
+            -var "queue_name=default" \
             -out=tfplan
 
       - name: Terraform apply
