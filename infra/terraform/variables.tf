@@ -32,6 +32,11 @@ variable "sf_role" {
   default = "ACCOUNTADMIN"
 }
 
+variable "scheduler_job_name" {
+  type    = string
+  default = "robyn-queue-tick"
+} # dev: "robyn-queue-tick-dev"
+
 variable "queue_name" {
   type    = string
   default = "default"

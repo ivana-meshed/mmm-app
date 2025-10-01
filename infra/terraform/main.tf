@@ -401,7 +401,7 @@ resource "google_cloud_run_v2_job_iam_member" "training_job_runner" {
 ###############################################################
 
 resource "google_cloud_scheduler_job" "robyn_queue_tick" {
-  name             = "robyn-queue-tick"
+  name             = var.scheduler_job_name
   description      = "Advance Robyn training queue (headless)"
   schedule         = "*/1 * * * *" # every minute
   time_zone        = "Etc/UTC"
