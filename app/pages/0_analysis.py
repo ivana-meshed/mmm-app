@@ -359,70 +359,266 @@ else:
     st.info("Pick a date column to see time series.")
 
 # ------------------ 6) Redundancy: collinearity, VIF, PCA ------------------
+# ------------------ 5) Redundancy checks ------------------
 st.subheader("5) Redundancy checks")
-col2 = work[channels]
-
-# High-correlation pairs
-Cabs = col2.corr(method=corr_method).abs().fillna(0.0)
-upper = Cabs.where(np.triu(np.ones(Cabs.shape), k=1).astype(bool))
-pairs = [
-    (col2.columns[i], col2.columns[j], float(upper.iloc[i, j]))
-    for i in range(len(col2.columns))
-    for j in range(i + 1, len(col2.columns))
-    if upper.iloc[i, j] >= corr_thresh
-]
-if pairs:
-    st.warning(
-        "Highly correlated pairs (|ρ| ≥ threshold): "
-        + ", ".join([f"{a}–{b} ({v:.2f})" for a, b, v in pairs[:15]])
+with st.container(border=True):
+    st.caption(
+        "Identify collinearity, low-variation features, strong correlations, PCA structure, and potential interactions."
     )
-else:
-    st.success("No pairs above the high-correlation threshold.")
 
-# VIF (if available)
-if _HAS_SM and col2.shape[1] >= 2:
-    X = col2.to_numpy()
-    vif = []
-    for i, name in enumerate(col2.columns):
-        try:
-            vif_val = variance_inflation_factor(X, i)
-        except Exception:
-            vif_val = np.nan
-        vif.append({"feature": name, "VIF": float(vif_val)})
-    vif_df = pd.DataFrame(vif).sort_values("VIF", ascending=False)
-    st.caption("Variance Inflation Factor (VIF)")
-    st.dataframe(vif_df, use_container_width=True, hide_index=True)
-else:
-    st.caption("VIF requires `statsmodels`; install if you want this table.")
+    # --- Controls just for this section (no global reruns until submit) ---
+    with st.form("redundancy_controls"):
+        c1, c2, c3, c4 = st.columns(4)
+        corr_thr = c1.slider("Corr |X| >=", 0.60, 0.99, 0.85, 0.01)
+        cv_thr = c2.slider("Low variation: CoefVar <", 0.00, 0.50, 0.05, 0.01)
+        max_pcs = c3.slider(
+            "Max PCs",
+            2,
+            max(2, min(12, len(channels))),
+            min(6, len(channels)),
+            1,
+        )
+        top_inter = c4.slider(
+            "Top interactions (by |corr with target|)", 5, 100, 20, 5
+        )
+        run_redundancy = st.form_submit_button("Run checks")
 
-# PCA quick look
-try:
-    if _HAS_SK:
-        k = min(len(channels), 8)
-        pca = PCA(n_components=k).fit(col2.to_numpy())
-        exp = pd.DataFrame(
-            {
-                "component": [f"PC{i+1}" for i in range(k)],
-                "explained_var": pca.explained_variance_ratio_,
-            }
+    if run_redundancy:
+        import numpy as np
+        import altair as alt
+
+        # ---- Prepare data once
+        X = work[channels].astype(float).copy()
+
+        # A) Low variation (Coefficient of Variation)
+        means = X.mean()
+        stds = X.std(ddof=0).replace(0, np.nan)
+        cv = (stds / means.abs()).rename("coef_var")
+        low_var = cv[cv < cv_thr].sort_values()
+
+        # B) High correlation pairs
+        CM = _safe_corr(X, method=corr_method)  # your existing helper
+        pairs = []
+        for i in range(len(channels)):
+            for j in range(i + 1, len(channels)):
+                r = CM.iat[i, j]
+                if pd.notna(r) and abs(r) >= corr_thr:
+                    pairs.append(
+                        {
+                            "feature_1": channels[i],
+                            "feature_2": channels[j],
+                            "corr": r,
+                            "|corr|": abs(r),
+                        }
+                    )
+        corr_pairs_df = pd.DataFrame(pairs).sort_values(
+            "|corr|", ascending=False
         )
-    else:
-        # NumPy fallback: SVD
-        X = col2.to_numpy() - col2.to_numpy().mean(axis=0)
-        U, S, Vt = np.linalg.svd(X, full_matrices=False)
-        var = (S**2) / (X.shape[0] - 1) if X.shape[0] > 1 else S**2
-        ratio = var / var.sum() if var.sum() > 0 else np.zeros_like(var)
-        k = min(len(ratio), 8)
-        exp = pd.DataFrame(
-            {
-                "component": [f"PC{i+1}" for i in range(k)],
-                "explained_var": ratio[:k],
-            }
+
+        # C) VIF (no extra deps): regress each feature on the others
+        def _vif_series(Xv: pd.DataFrame) -> pd.Series:
+            arr = Xv.to_numpy()
+            out = []
+            for j in range(arr.shape[1]):
+                yj = arr[:, j]
+                Xj = np.delete(arr, j, axis=1)
+                Xj = np.column_stack([np.ones(len(Xj)), Xj])
+                beta, *_ = np.linalg.lstsq(Xj, yj, rcond=None)
+                yhat = Xj @ beta
+                rss = np.sum((yj - yhat) ** 2)
+                tss = np.sum((yj - yj.mean()) ** 2)
+                r2 = 0.0 if tss == 0 else 1 - rss / tss
+                vif = np.inf if (1 - r2) == 0 else 1 / (1 - r2)
+                out.append(vif)
+            return pd.Series(out, index=Xv.columns, name="VIF")
+
+        vif = _vif_series(X)
+
+        # D) PCA (NumPy SVD on standardized X)
+        Xz = (X - X.mean()) / X.std(ddof=0).replace(0, np.nan)
+        Xz = Xz.fillna(0).to_numpy()
+        U, S, VT = np.linalg.svd(Xz, full_matrices=False)
+        expl = (S**2) / np.sum(S**2)
+        pcs = pd.DataFrame(
+            {"PC": [f"PC{i+1}" for i in range(len(expl))], "ExplainedVar": expl}
         )
-    st.caption("Explained variance (PCA)")
-    st.bar_chart(exp.set_index("component"))
-except Exception as e:
-    st.info(f"PCA step skipped ({e}).")
+        loadings = pd.DataFrame(
+            VT.T,
+            index=channels,
+            columns=[f"PC{i+1}" for i in range(VT.shape[0])],
+        )
+
+        # E) Simple interaction discovery (corr of Xi*Xj with target)
+        interactions_df = pd.DataFrame()
+        if dep_var:
+            y = work[dep_var].astype(float).to_numpy()
+            rows = []
+            for i in range(len(channels)):
+                xi = work[channels[i]].astype(float).to_numpy()
+                for j in range(i + 1, len(channels)):
+                    xj = work[channels[j]].astype(float).to_numpy()
+                    prod = xi * xj
+                    if np.nanstd(prod) == 0 or np.nanstd(y) == 0:
+                        corr = np.nan
+                    else:
+                        corr = np.corrcoef(
+                            np.nan_to_num(prod), np.nan_to_num(y)
+                        )[0, 1]
+                    rows.append(
+                        {
+                            "interaction": f"{channels[i]} × {channels[j]}",
+                            "corr_with_target": corr,
+                            "|corr|": abs(corr) if pd.notna(corr) else np.nan,
+                        }
+                    )
+            interactions_df = (
+                pd.DataFrame(rows)
+                .dropna()
+                .sort_values("|corr|", ascending=False)
+                .head(top_inter)
+                .drop(columns="|corr|")
+            )
+
+        # ---- Nicely formatted tabs & visuals
+        t1, t2, t3, t4, t5 = st.tabs(
+            ["High correlation", "Low variation", "VIF", "PCA", "Interactions"]
+        )
+
+        with t1:
+            st.caption(f"Pairs with |corr| ≥ **{corr_thr:.2f}**")
+            if corr_pairs_df.empty:
+                st.success("No pairs exceed the threshold.")
+            else:
+                st.dataframe(
+                    corr_pairs_df.drop(columns="|corr|"),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                keep = sorted(
+                    set(corr_pairs_df["feature_1"]).union(
+                        corr_pairs_df["feature_2"]
+                    )
+                )
+                if keep:
+                    sub = CM.loc[keep, keep]
+                    n = len(keep)
+                    cell = 28
+                    W, H = max(600, cell * n), max(600, cell * n)
+                    m = sub.reset_index().melt(
+                        "index", var_name="var2", value_name="corr"
+                    )
+                    heat = (
+                        alt.Chart(m)
+                        .mark_rect()
+                        .encode(
+                            x=alt.X(
+                                "index:N",
+                                axis=alt.Axis(labelAngle=-45, labelLimit=0),
+                            ),
+                            y=alt.Y("var2:N", axis=alt.Axis(labelLimit=0)),
+                            color=alt.Color(
+                                "corr:Q",
+                                scale=alt.Scale(
+                                    scheme="redblue", domain=(-1, 1)
+                                ),
+                            ),
+                            tooltip=[
+                                "index",
+                                "var2",
+                                alt.Tooltip("corr:Q", format=".2f"),
+                            ],
+                        )
+                        .properties(width=W, height=H)
+                    )
+                    st.altair_chart(heat, use_container_width=True)
+
+        with t2:
+            st.caption(
+                f"Features flagged with **coef_var < {cv_thr:.2f}** (std/|mean|)."
+            )
+            if low_var.empty:
+                st.success("No low-variation features.")
+            else:
+                st.dataframe(
+                    low_var.reset_index().rename(columns={"index": "feature"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        with t3:
+            st.caption(
+                "Variance Inflation Factor (rule-of-thumb: >5 or >10 indicates strong multicollinearity)."
+            )
+            st.dataframe(
+                vif.sort_values(ascending=False)
+                .reset_index()
+                .rename(columns={"index": "feature", 0: "VIF"}),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        with t4:
+            st.caption("PCA on standardized features")
+            # Scree (bigger)
+            scree = (
+                alt.Chart(pcs.iloc[:max_pcs])
+                .mark_bar()
+                .encode(
+                    x=alt.X("PC:N", sort=None),
+                    y=alt.Y("ExplainedVar:Q", axis=alt.Axis(format="%")),
+                    tooltip=[alt.Tooltip("ExplainedVar:Q", format=".2%")],
+                )
+                .properties(height=320)
+            )
+            st.altair_chart(scree, use_container_width=True)
+
+            # Loadings heatmap (bigger)
+            pcs_to_show = [
+                f"PC{i+1}" for i in range(min(max_pcs, loadings.shape[1]))
+            ]
+            L = (
+                loadings[pcs_to_show]
+                .reset_index()
+                .melt("index", var_name="PC", value_name="loading")
+                .rename(columns={"index": "feature"})
+            )
+            n_r = len(channels)
+            n_c = len(pcs_to_show)
+            cell = 26
+            W, H = max(700, cell * n_c), max(520, cell * n_r)
+            load_heat = (
+                alt.Chart(L)
+                .mark_rect()
+                .encode(
+                    x=alt.X("PC:N", sort=None),
+                    y=alt.Y(
+                        "feature:N", sort=None, axis=alt.Axis(labelLimit=0)
+                    ),
+                    color=alt.Color(
+                        "loading:Q",
+                        scale=alt.Scale(scheme="blueorange", domain=(-1, 1)),
+                    ),
+                    tooltip=[
+                        "feature",
+                        "PC",
+                        alt.Tooltip("loading:Q", format=".2f"),
+                    ],
+                )
+                .properties(width=W, height=H)
+            )
+            st.altair_chart(load_heat, use_container_width=True)
+
+        with t5:
+            if not dep_var:
+                st.info("Provide a dependent variable to score interactions.")
+            else:
+                st.caption(
+                    "Top interactions by absolute correlation with the target (using Xi × Xj)."
+                )
+                st.dataframe(
+                    interactions_df, use_container_width=True, hide_index=True
+                )
+
 
 # ------------------ 7) Interaction discovery (pairwise products) ------------------
 st.subheader("6) Interaction discovery (pairwise products ranked by R²)")
