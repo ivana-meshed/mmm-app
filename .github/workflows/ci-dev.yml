@@ -1,10 +1,8 @@
-name: CI
+name: CI (dev)
 
 on:
-  #pull_request:
-  #  branches: [ main ]
   push:
-    branches: [ opt]
+    branches: [ analysis]
 
 permissions:
   id-token: write
@@ -21,14 +19,13 @@ jobs:
       ARTIFACT_REPO: mmm-repo
       WEB_IMAGE: mmm-web
       TRAINING_IMAGE: mmm-training
-      SERVICE_NAME: mmm-app
+      SERVICE_NAME: mmm-app-dev
       BUCKET: mmm-app-output
       WIF_POOL: github-pool
       WIF_PROVIDER: github-oidc
       SA_EMAIL: github-deployer@datawarehouse-422511.iam.gserviceaccount.com
       WEB_RUNTIME_SA: mmm-web-service-sa@datawarehouse-422511.iam.gserviceaccount.com
       TRAINING_RUNTIME_SA: mmm-training-job-sa@datawarehouse-422511.iam.gserviceaccount.com
-      REPOSITORY: ivana-meshed/mmm-app
       TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
 
     steps:
@@ -120,7 +117,7 @@ jobs:
           TF_IN_AUTOMATION: "true"
         run: |
           terraform -version
-          terraform init -input=false -upgrade
+          terraform init -input=false -reconfigure -backend-config="prefix=envs/dev"
           terraform fmt -check
           terraform validate
 
@@ -133,6 +130,11 @@ jobs:
           # Import web service SA if it exists
           terraform state show google_service_account.web_service_sa >/dev/null 2>&1 || \
           terraform import google_service_account.web_service_sa "projects/${PROJECT_ID}/serviceAccounts/${WEB_RUNTIME_SA}" || true
+
+          # Import scheduler SA if it exists
+          terraform state show google_service_account.scheduler >/dev/null 2>&1 || \
+          terraform import google_service_account.scheduler \
+            "projects/${PROJECT_ID}/serviceAccounts/robyn-queue-scheduler@${PROJECT_ID}.iam.gserviceaccount.com" || true
 
           # Import training job SA if it exists
           terraform state show google_service_account.training_job_sa >/dev/null 2>&1 || \
@@ -195,8 +197,8 @@ jobs:
             -var "deployer_sa=$SA_EMAIL" \
             -var "web_image=$WEB_IMAGE_URL" \
             -var "training_image=$TRAINING_IMAGE_URL" \
-            -var "scheduler_job_name=robyn-queue-tick" \
-            -var "queue_name=default" \
+            -var "scheduler_job_name=robyn-queue-tick-dev" \
+            -var "queue_name=default-dev" \
             -out=tfplan
 
       - name: Terraform apply
