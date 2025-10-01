@@ -90,6 +90,34 @@ def _high_corr_pairs(
     return out
 
 
+def _corr_pairs_df(
+    CM: pd.DataFrame, cols: list[str], thr: float
+) -> pd.DataFrame:
+    rows = []
+    for i in range(len(cols)):
+        for j in range(i + 1, len(cols)):
+            a, b = cols[i], cols[j]
+            r = float(CM.loc[a, b])
+            if pd.notna(r) and abs(r) >= thr:
+                rows.append(
+                    {
+                        "feature_1": a,
+                        "feature_2": b,
+                        "corr": r,
+                        "abs_corr": abs(r),
+                    }
+                )
+    df = pd.DataFrame(rows)
+    if df.empty:
+        # return an empty frame with expected columns so downstream code is happy
+        return pd.DataFrame(
+            columns=["feature_1", "feature_2", "corr", "abs_corr"]
+        )
+    return df.sort_values(
+        "abs_corr", ascending=False, kind="mergesort"
+    ).reset_index(drop=True)
+
+
 # Try optional deps
 try:
     from sklearn.decomposition import PCA
@@ -353,62 +381,73 @@ stats_df = pd.DataFrame(stats_rows).sort_values(
 )
 st.dataframe(stats_df, use_container_width=True, hide_index=True)
 
-# ------------------ 5) Time series on drivers ------------------
-# ------------------ 5) Time series on drivers ------------------
+# ------------------ 4) Time series on drivers (FIXED) ------------------
 st.subheader("4) Time series on drivers")
+
 if date_col:
-    ts_df = (
-        work[[date_col] + channels + ([dep_var] if dep_var else [])]
-        .copy()
-        .sort_values(date_col)
-    )
+    # Keep only the columns we actually need
+    cols_needed = [date_col] + channels + ([dep_var] if dep_var else [])
+    ts_df = work[cols_needed].copy().sort_values(date_col)
+
+    # Optional resample AFTER subsetting to avoid pulling non-selected cols
     if resample != "None":
         rule = "W" if resample.startswith("W") else "M"
         ts_df = (
             ts_df.set_index(date_col)
             .resample(rule)
-            .sum(numeric_only=True)
+            .sum(
+                numeric_only=True
+            )  # sums are typical for spend/sales; switch to .mean if needed
             .reset_index()
         )
 
-    # Which drivers to plot (target is optional overlay; not normalized)
-    drivers_to_plot = plot_drivers if plot_drivers else channels
+    # Only plot drivers that are still in the filtered channel set
+    drivers_to_plot = [d for d in (plot_drivers or channels) if d in channels]
+    if not drivers_to_plot:
+        st.info(
+            "No drivers selected to plot (after variance/correlation filtering)."
+        )
+    else:
+        # Build plotting frame with just date, the selected drivers, and (optionally) the target
+        plot_df = ts_df[
+            [date_col] + drivers_to_plot + ([dep_var] if dep_var else [])
+        ].copy()
 
-    # Normalize & smooth drivers *only*
-    plot_df = ts_df.copy()
-    plot_df[drivers_to_plot] = _normalize_cols(
-        plot_df[drivers_to_plot], norm_mode
-    )
-    if smooth_k > 1:
-        plot_df[drivers_to_plot] = (
-            plot_df[drivers_to_plot].rolling(smooth_k, min_periods=1).mean()
+        # Normalize & smooth drivers *only* (do not touch the target)
+        plot_df[drivers_to_plot] = _normalize_cols(
+            plot_df[drivers_to_plot], norm_mode
+        )
+        if smooth_k > 1:
+            plot_df[drivers_to_plot] = (
+                plot_df[drivers_to_plot].rolling(smooth_k, min_periods=1).mean()
+            )
+
+        long = plot_df.melt(
+            id_vars=[date_col], var_name="series", value_name="value"
         )
 
-    plot_cols = drivers_to_plot + ([dep_var] if dep_var else [])
-    long = plot_df[[date_col] + plot_cols].melt(
-        id_vars=[date_col], var_name="series", value_name="value"
-    )
-
-    # Bigger chart height
-    base_height = 420  # bump this if you want even taller
-    line = (
-        alt.Chart(long)
-        .mark_line()
-        .encode(
-            x=alt.X(f"{date_col}:T", title="Date"),
-            y=alt.Y("value:Q", title=""),
-            color=alt.Color("series:N", legend=alt.Legend(columns=1)),
-            tooltip=[date_col, "series", alt.Tooltip("value:Q", format=".2f")],
+        # Bigger chart so legends/lines are readable
+        line = (
+            alt.Chart(long)
+            .mark_line()
+            .encode(
+                x=alt.X(f"{date_col}:T", title="Date"),
+                y=alt.Y("value:Q", title=""),
+                color=alt.Color("series:N", legend=alt.Legend(columns=1)),
+                tooltip=[
+                    date_col,
+                    "series",
+                    alt.Tooltip("value:Q", format=".2f"),
+                ],
+            )
+            .properties(height=480)
+            .interactive()
         )
-        .properties(height=base_height)
-        .interactive()
-    )
-    st.altair_chart(line, use_container_width=True)
+        st.altair_chart(line, use_container_width=True)
 else:
     st.info("Pick a date column to see time series.")
 
 # ------------------ 6) Redundancy: collinearity, VIF, PCA ------------------
-# ------------------ 5) Redundancy checks ------------------
 st.subheader("5) Redundancy checks")
 with st.container(border=True):
     st.caption(
@@ -433,9 +472,6 @@ with st.container(border=True):
         run_redundancy = st.form_submit_button("Run checks")
 
     if run_redundancy:
-        import numpy as np
-        import altair as alt
-
         # ---- Prepare data once
         X = work[channels].astype(float).copy()
 
@@ -445,24 +481,9 @@ with st.container(border=True):
         cv = (stds / means.abs()).rename("coef_var")
         low_var = cv[cv < cv_thr].sort_values()
 
-        # B) High correlation pairs
-        CM = _safe_corr(X, method=corr_method)  # your existing helper
-        pairs = []
-        for i in range(len(channels)):
-            for j in range(i + 1, len(channels)):
-                r = CM.iat[i, j]
-                if pd.notna(r) and abs(r) >= corr_thr:
-                    pairs.append(
-                        {
-                            "feature_1": channels[i],
-                            "feature_2": channels[j],
-                            "corr": r,
-                            "|corr|": abs(r),
-                        }
-                    )
-        corr_pairs_df = pd.DataFrame(pairs).sort_values(
-            "|corr|", ascending=False
-        )
+        # B) High correlation pairs (safe, no KeyError when empty)
+        CM = _safe_corr(X, method=corr_method)
+        corr_pairs_df = _corr_pairs_df(CM, channels, corr_thr)
 
         # C) VIF (no extra deps): regress each feature on the others
         def _vif_series(Xv: pd.DataFrame) -> pd.Series:
@@ -497,7 +518,7 @@ with st.container(border=True):
             columns=[f"PC{i+1}" for i in range(VT.shape[0])],
         )
 
-        # E) Simple interaction discovery (corr of Xi*Xj with target)
+        # E) Simple interaction discovery (corr of Xi*Xj with target) — robust to empty
         interactions_df = pd.DataFrame()
         if dep_var:
             y = work[dep_var].astype(float).to_numpy()
@@ -517,16 +538,17 @@ with st.container(border=True):
                         {
                             "interaction": f"{channels[i]} × {channels[j]}",
                             "corr_with_target": corr,
-                            "|corr|": abs(corr) if pd.notna(corr) else np.nan,
+                            "abs_corr": abs(corr) if pd.notna(corr) else np.nan,
                         }
                     )
-            interactions_df = (
-                pd.DataFrame(rows)
-                .dropna()
-                .sort_values("|corr|", ascending=False)
-                .head(top_inter)
-                .drop(columns="|corr|")
-            )
+            tmp = pd.DataFrame(rows)
+            if not tmp.empty:
+                interactions_df = (
+                    tmp.dropna()
+                    .sort_values("abs_corr", ascending=False)
+                    .head(top_inter)
+                    .drop(columns="abs_corr", errors="ignore")
+                )
 
         # ---- Nicely formatted tabs & visuals
         t1, t2, t3, t4, t5 = st.tabs(
@@ -539,7 +561,7 @@ with st.container(border=True):
                 st.success("No pairs exceed the threshold.")
             else:
                 st.dataframe(
-                    corr_pairs_df.drop(columns="|corr|"),
+                    corr_pairs_df.drop(columns=["abs_corr"], errors="ignore"),
                     use_container_width=True,
                     hide_index=True,
                 )
@@ -598,13 +620,12 @@ with st.container(border=True):
             st.caption(
                 "Variance Inflation Factor (rule-of-thumb: >5 or >10 indicates strong multicollinearity)."
             )
-            st.dataframe(
+            vif_df = (
                 vif.sort_values(ascending=False)
-                .reset_index()
-                .rename(columns={"index": "feature", 0: "VIF"}),
-                use_container_width=True,
-                hide_index=True,
+                .rename_axis("feature")
+                .reset_index(name="VIF")
             )
+            st.dataframe(vif_df, use_container_width=True, hide_index=True)
 
         with t4:
             st.caption("PCA on standardized features")
@@ -660,6 +681,10 @@ with st.container(border=True):
         with t5:
             if not dep_var:
                 st.info("Provide a dependent variable to score interactions.")
+            elif interactions_df.empty:
+                st.info(
+                    "No interactions surfaced (increase Top interactions or check data)."
+                )
             else:
                 st.caption(
                     "Top interactions by absolute correlation with the target (using Xi × Xj)."
