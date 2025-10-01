@@ -173,7 +173,7 @@ jobs:
             # Re-import training job
             terraform state rm google_cloud_run_v2_job.training_job || true
             terraform import google_cloud_run_v2_job.training_job \
-              "projects/${PROJECT_ID}/locations/${REGION}/jobs/${SERVICE_NAME}-training" || true
+              "projects/${PROJECT_ID}/locations/${REGION}/jobs/mmm-app-training" || true
           fi
 
       - name: Terraform plan
