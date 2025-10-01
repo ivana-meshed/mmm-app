@@ -624,12 +624,26 @@ def run_sql(sql: str) -> pd.DataFrame:
 # ─────────────────────────────
 
 
+# app_shared.py
+
+import re
+
+
+def _norm_blob_path(p: str) -> str:
+    # remove any leading slashes and collapse multiple slashes
+    p = (p or "").strip()
+    p = re.sub(r"^/+", "", p)  # strip leading /
+    p = re.sub(r"/{2,}", "/", p)  # collapse // -> /
+    return p
+
+
 def upload_to_gcs(bucket_name: str, local_path: str, dest_blob: str) -> str:
     client = storage.Client()
     bucket = client.bucket(bucket_name)
-    blob = bucket.blob(dest_blob)
+    blob_path = _norm_blob_path(dest_blob)  # <-- normalize here
+    blob = bucket.blob(blob_path)
     blob.upload_from_filename(local_path)
-    return f"gs://{bucket_name}/{dest_blob}"
+    return f"gs://{bucket_name}/{blob_path}"
 
 
 def _get_job_history_object() -> str:
@@ -720,6 +734,26 @@ def read_status_json(bucket_name: str, prefix: str) -> Optional[dict]:
 # ─────────────────────────────
 # Data processor & job manager
 # ─────────────────────────────
+
+# app_shared.py
+
+
+def _normalize_gs_uri(uri: str) -> str:
+    import re
+
+    s = (uri or "").strip()
+    if not s.startswith("gs://"):
+        return s
+    # split into bucket + object and normalize the object part
+    s2 = s[5:]
+    if "/" not in s2:
+        return s  # bucket only
+    bucket, obj = s2.split("/", 1)
+    obj = re.sub(r"^/+", "", obj)
+    obj = re.sub(r"/{2,}", "/", obj)
+    return f"gs://{bucket}/{obj}"
+
+
 @st.cache_resource
 def build_job_config_from_params(
     params: dict,
@@ -740,8 +774,8 @@ def build_job_config_from_params(
         "date_input": params.get("date_input") or time.strftime("%Y-%m-%d"),
         "gcs_bucket": params.get("gcs_bucket")
         or st.session_state["gcs_bucket"],
-        "data_gcs_path": data_gcs_path,
-        "annotations_gcs_path": annotations_gcs_path,
+        "data_gcs_path": _normalize_gs_uri(data_gcs_path),
+        "annotations_gcs_path": _normalize_gs_uri(annotations_gcs_path),
         "paid_media_spends": [
             s.strip()
             for s in str(params["paid_media_spends"]).split(",")
