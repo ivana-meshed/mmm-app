@@ -1027,12 +1027,12 @@ with tab_single:
                         with timed_step("Query Snowflake", timings):
                             df = run_sql(sql_eff)
                         # NEW: optional resample (single job)
-                        with timed_step(
-                            "Optional resample (single job)", timings
-                        ):
-                            df = _maybe_resample_df(
-                                df, date_var, resample_freq, resample_agg
-                            )
+                        # with timed_step(
+                        #    "Optional resample (single job)", timings
+                        # ):
+                        #    df = _maybe_resample_df(
+                        #        df, date_var, resample_freq, resample_agg
+                        #    )
                         # 2) Convert to Parquet
                         with timed_step("Convert to Parquet", timings):
                             parquet_path = os.path.join(
