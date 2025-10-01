@@ -46,6 +46,7 @@ from app_shared import (
     save_job_history_to_gcs,
     append_row_to_job_history,
     _safe_tick_once,  # (kept for parity; not used below
+    _maybe_resample_df,
 )
 
 # Instantiate shared resources
@@ -130,6 +131,13 @@ def prepare_and_launch_job(params: dict) -> dict:
         # 1) Query Snowflake
         with timed_step("Query Snowflake", timings):
             df = run_sql(sql_eff)
+        with timed_step("Optional resample (queue job)", timings):
+            df = _maybe_resample_df(
+                df,
+                params.get("date_var"),
+                params.get("resample_freq", "none"),
+                params.get("resample_agg", "sum"),
+            )
 
         # 2) Parquet
         with timed_step("Convert to Parquet", timings):
@@ -228,6 +236,8 @@ def params_from_ui(
     dep_var,
     date_var,
     adstock,
+    resample_freq,  # NEW
+    resample_agg,  # NEW
 ) -> dict:
     return {
         "country": country,
@@ -247,6 +257,8 @@ def params_from_ui(
         "dep_var": dep_var,
         "date_var": date_var,
         "adstock": adstock,
+        "resample_freq": resample_freq,  # NEW
+        "resample_agg": resample_agg,  # NEW
     }
 
 
@@ -433,6 +445,8 @@ _builder_defaults = dict(
     dep_var="UPLOAD_VALUE",
     date_var="date",
     adstock="geometric",
+    resample_freq="none",
+    resample_agg="sum",  # NEW
     gcs_bucket=st.session_state.get("gcs_bucket", GCS_BUCKET),
 )
 
@@ -468,6 +482,12 @@ def _make_normalizer(defaults: dict):
             "dep_var": str(_g("dep_var", defaults["dep_var"])),
             "date_var": str(_g("date_var", defaults["date_var"])),
             "adstock": str(_g("adstock", defaults["adstock"])),
+            "resample_freq": _normalize_resample_freq(
+                str(_g("resample_freq", defaults["resample_freq"]))
+            ),
+            "resample_agg": _normalize_resample_agg(
+                str(_g("resample_agg", defaults["resample_agg"]))
+            ),
             "annotations_gcs_path": str(_g("annotations_gcs_path", "")),
         }
 
@@ -890,6 +910,32 @@ with tab_single:
                 help="Robyn adstock function",
             )
 
+            # NEW: optional resampling
+            c_rs1, c_rs2 = st.columns([1, 1])
+            resample_freq_label = c_rs1.selectbox(
+                "Resample input data (optional)",
+                ["None", "Weekly (W)", "Monthly (M)"],
+                index=0,
+                help="Aggregates the input before training.",
+            )
+            resample_freq = {
+                "None": "none",
+                "Weekly (W)": "W",
+                "Monthly (M)": "M",
+            }[resample_freq_label]
+            resample_agg_label = c_rs2.selectbox(
+                "Aggregation for metrics (when resampling)",
+                ["sum", "avg (mean)", "max", "min"],
+                index=0,
+                help="Applied to numeric columns during resample.",
+            )
+            resample_agg = {
+                "sum": "sum",
+                "avg (mean)": "mean",
+                "max": "max",
+                "min": "min",
+            }[resample_agg_label]
+
         # Variables
         with st.expander("Variable mapping"):
             paid_media_spends = st.text_input(
@@ -945,6 +991,8 @@ with tab_single:
                     dep_var,
                     date_var,
                     adstock,
+                    resample_freq,  # NEW
+                    resample_agg,  # NEW
                 ),
                 data_gcs_path,
                 timestamp,
@@ -978,7 +1026,13 @@ with tab_single:
                         # 1) Query Snowflake
                         with timed_step("Query Snowflake", timings):
                             df = run_sql(sql_eff)
-
+                        # NEW: optional resample (single job)
+                        with timed_step(
+                            "Optional resample (single job)", timings
+                        ):
+                            df = _maybe_resample_df(
+                                df, date_var, resample_freq, resample_agg
+                            )
                         # 2) Convert to Parquet
                         with timed_step("Convert to Parquet", timings):
                             parquet_path = os.path.join(
@@ -1133,6 +1187,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 - `country`, `revision`, `date_input`, `iterations`, `trials`, `train_size`
 - `paid_media_spends`, `paid_media_vars`, `context_vars`, `factor_vars`, `organic_vars`
 - `dep_var`, `date_var`, `adstock`
+- `resample_freq` (none|W|M)
+- `resample_agg` (sum|mean|max|min) – used when resampling
 - `gcs_bucket` (optional override per row)
 - **Data**: one of `query` **or** `table`
 - `annotations_gcs_path` (optional gs:// path)
@@ -1160,6 +1216,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "dep_var": "UPLOAD_VALUE",
                     "date_var": "date",
                     "adstock": "geometric",
+                    "resample_freq": "none",
+                    "resample_agg": "sum",
                     "annotations_gcs_path": "",
                 }
             ]
@@ -1185,6 +1243,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "dep_var": "UPLOAD_VALUE",
                     "date_var": "date",
                     "adstock": "geometric",
+                    "resample_freq": "none",
+                    "resample_agg": "sum",
                     "annotations_gcs_path": "",
                 },
                 {
@@ -1205,6 +1265,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "dep_var": "UPLOAD_VALUE",
                     "date_var": "date",
                     "adstock": "geometric",
+                    "resample_freq": "none",
+                    "resample_agg": "sum",
                     "annotations_gcs_path": "",
                 },
             ]
@@ -1470,6 +1532,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 "dep_var": p.get("dep_var", ""),
                 "date_var": p.get("date_var", ""),
                 "adstock": p.get("adstock", ""),
+                "resample_freq": p.get("resample_freq", "none"),
+                "resample_agg": p.get("resample_agg", "sum"),
                 "annotations_gcs_path": p.get("annotations_gcs_path", ""),
             }
 
@@ -1494,6 +1558,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "dep_var",
                     "date_var",
                     "adstock",
+                    "resample_freq",
+                    "resample_agg",
                     "annotations_gcs_path",
                 ]
             )

@@ -959,3 +959,186 @@ def handle_queue_tick_from_query_params(
 
 
 # ─────────────────────────────
+# Resampling helpers
+# ─────────────────────────────
+
+
+def _normalize_resample_freq(freq: str) -> str:
+    f = (freq or "").strip().lower()
+    if f in ("none", "", "no"):
+        return "none"
+    if f.startswith("w"):
+        return "W"  # weekly
+    if f.startswith("m"):
+        return "M"  # monthly
+    return "none"
+
+
+def _normalize_resample_agg(agg: str) -> str:
+    a = (agg or "").strip().lower()
+    return {
+        "sum": "sum",
+        "mean": "mean",
+        "avg": "mean",
+        "max": "max",
+        "min": "min",
+    }.get(a, "sum")
+
+
+def _is_bool_like(series: pd.Series) -> bool:
+    """Detect 0/1-like numeric columns robustly."""
+    s = series.dropna()
+    if s.empty:
+        return False
+    try:
+        u = pd.unique(s.astype(float).round(0))
+        return set(map(float, u)).issubset({0.0, 1.0})
+    except Exception:
+        return False
+
+
+def _maybe_resample_df(
+    df: pd.DataFrame,
+    date_col: str | None,
+    freq: str,  # 'none' | 'W' | 'M'
+    agg: str,  # 'sum' | 'mean' | 'max' | 'min'
+    cat_strategy: str = "auto",  # 'auto' | 'mean' | 'sum' | 'max' | 'mode'
+    topk_for_nominal: int = 8,
+) -> pd.DataFrame:
+    """
+    - Numeric non-binary: aggregated with `agg`.
+    - Binary 0/1 numeric: aggregated using `cat_strategy` (default 'mean' → share).
+    - Nominal categoricals (object/category): one-hot per level (Top-K), then
+      aggregate one-hot with:
+        auto/mean → mean (share) | sum → count | max → any
+      If cat_strategy == 'mode', add an extra '{col}_mode' label column
+      and still use mean on the one-hots (shares) for numeric modeling.
+    - Ordinal categoricals (ordered pd.Categorical): average of codes ('*_mean_code').
+    """
+    freq = _normalize_resample_freq(freq)
+    agg = _normalize_resample_agg(agg)
+    if freq == "none" or not date_col or date_col not in df.columns:
+        return df
+
+    data = df.copy()
+    data[date_col] = pd.to_datetime(data[date_col], errors="coerce")
+    data = data.dropna(subset=[date_col])
+    if data.empty:
+        return df
+
+    rule = "W" if freq == "W" else "M"
+
+    # Split columns
+    num_cols = data.select_dtypes(include="number").columns.tolist()
+    bool_like = [c for c in num_cols if _is_bool_like(data[c])]
+    num_non_bool = [c for c in num_cols if c not in bool_like]
+
+    cat_cols = data.select_dtypes(
+        include=["object", "category", "bool"]
+    ).columns.tolist()
+    cat_cols = [c for c in cat_cols if c != date_col]
+
+    # 1) Numeric, non-binary via global numeric aggregator
+    res_parts = []
+    if num_non_bool:
+        res_num = data.set_index(date_col)[num_non_bool].resample(rule).agg(agg)
+        res_parts.append(res_num)
+
+    # 2) Binary (0/1) numeric via cat_strategy (overwrites original column names)
+    if bool_like:
+        if cat_strategy in ("auto", "mean"):
+            res_bool = data.set_index(date_col)[bool_like].resample(rule).mean()
+        elif cat_strategy == "sum":
+            res_bool = data.set_index(date_col)[bool_like].resample(rule).sum()
+        elif cat_strategy == "max":
+            res_bool = data.set_index(date_col)[bool_like].resample(rule).max()
+        elif cat_strategy == "mode":
+            # Majority value per period (0/1). Keep it numeric.
+            res_bool = (
+                data.set_index(date_col)[bool_like]
+                .resample(rule)
+                .apply(
+                    lambda s: (
+                        s.dropna().astype(float).round(0).mode().iloc[0]
+                        if len(s.dropna())
+                        else np.nan
+                    )
+                )
+            )
+        else:
+            res_bool = data.set_index(date_col)[bool_like].resample(rule).mean()
+        res_parts.append(res_bool)
+
+    # 3) Categorical columns
+    for c in cat_cols:
+        s = data[[date_col, c]].dropna()
+        if s.empty:
+            continue
+
+        # Ordinal category → mean code
+        if str(s[c].dtype).startswith("category") and getattr(
+            s[c].dtype, "ordered", False
+        ):
+            codes = s.copy()
+            codes[c] = s[c].cat.codes.replace(-1, np.nan)
+            res_ord = (
+                codes.set_index(date_col)[c]
+                .resample(rule)
+                .mean()
+                .to_frame(name=f"{c}_mean_code")
+            )
+            res_parts.append(res_ord)
+        else:
+            # Nominal → one-hot Top-K + aggregate
+            top_levels = (
+                s[c].value_counts().head(topk_for_nominal).index.tolist()
+            )
+            oh = pd.get_dummies(s[c], prefix=c)
+            keep_cols = [
+                col for col in oh.columns if col.split("_", 1)[-1] in top_levels
+            ]
+            if keep_cols:
+                oh_df = pd.concat(
+                    [
+                        s[[date_col]].reset_index(drop=True),
+                        oh[keep_cols].reset_index(drop=True),
+                    ],
+                    axis=1,
+                )
+                # Decide aggregation for one-hot
+                oh_agg = {
+                    "auto": "mean",
+                    "mean": "mean",
+                    "sum": "sum",
+                    "max": "max",
+                    "mode": "mean",  # still produce shares for modeling
+                }.get(cat_strategy, "mean")
+                res_oh = (
+                    oh_df.set_index(date_col)[keep_cols]
+                    .resample(rule)
+                    .agg(oh_agg)
+                )
+                res_parts.append(res_oh)
+
+            # If user explicitly chose 'mode', also emit a label column
+            if cat_strategy == "mode":
+                res_mode = (
+                    s.set_index(date_col)[c]
+                    .resample(rule)
+                    .agg(lambda x: x.mode().iloc[0] if len(x) else np.nan)
+                    .to_frame(name=f"{c}_mode")
+                )
+                res_parts.append(res_mode)
+
+    # Merge all parts
+    if not res_parts:
+        return df
+
+    res = res_parts[0]
+    for p in res_parts[1:]:
+        res = res.join(p, how="outer")
+
+    out = res.reset_index()
+    if out.columns[0] != date_col:
+        out.rename(columns={out.columns[0]: date_col}, inplace=True)
+    return out
