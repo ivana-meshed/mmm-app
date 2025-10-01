@@ -183,6 +183,13 @@ with st.form("analysis_controls"):
         "Channel/driver columns", options=num_cols, default=default_channels
     )
 
+    plot_drivers = st.multiselect(
+        "Drivers to plot (time-series)",
+        options=channels,
+        default=channels,  # default = all selected channels
+        help="This only affects the time-series chart; calculations still use the selected channels above.",
+    )
+
     c1, c2, c3, c4 = st.columns(4)
     resample = c1.selectbox(
         "Resample", ["None", "W (weekly)", "M (monthly)"], index=0
@@ -239,6 +246,13 @@ st.subheader("3) Correlations, R² (univariate), and spend variation")
 
 corr_cols = channels + ([dep_var] if dep_var else [])
 corrM = _safe_corr(work[corr_cols], method=corr_method)
+
+# === Bigger, readable heatmap: dynamic width/height, no label truncation ===
+n = len(corr_cols)
+cell = 30  # cell size (px). Increase if you want even larger squares.
+heat_width = max(600, cell * n)
+heat_height = max(600, cell * n)
+
 corr_long = corrM.reset_index().melt(
     "index", var_name="col2", value_name="corr"
 )
@@ -246,14 +260,25 @@ heat = (
     alt.Chart(corr_long)
     .mark_rect()
     .encode(
-        x=alt.X("index:N", title=""),
-        y=alt.Y("col2:N", title=""),
+        x=alt.X(
+            "index:N",
+            title="",
+            sort=None,
+            axis=alt.Axis(labelAngle=-45, labelLimit=0, labelFontSize=12),
+        ),
+        y=alt.Y(
+            "col2:N",
+            title="",
+            sort=None,
+            axis=alt.Axis(labelLimit=0, labelFontSize=12),
+        ),
         color=alt.Color(
             "corr:Q", scale=alt.Scale(scheme="redblue", domain=(-1, 1))
         ),
         tooltip=["index", "col2", alt.Tooltip("corr:Q", format=".2f")],
     )
-    .properties(height=300)
+    .properties(width=heat_width, height=heat_height)
+    .configure_axis(labelLimit=0)
 )
 st.altair_chart(heat, use_container_width=True)
 st.download_button(
@@ -280,6 +305,7 @@ stats_df = pd.DataFrame(stats_rows).sort_values(
 st.dataframe(stats_df, use_container_width=True, hide_index=True)
 
 # ------------------ 5) Time series on drivers ------------------
+# ------------------ 5) Time series on drivers ------------------
 st.subheader("4) Time series on drivers")
 if date_col:
     ts_df = (
@@ -296,28 +322,36 @@ if date_col:
             .reset_index()
         )
 
-    # normalization (drivers only for clarity)
-    plot_df = ts_df.copy()
-    plot_df[channels] = _normalize_cols(plot_df[channels], norm_mode)
+    # Which drivers to plot (target is optional overlay; not normalized)
+    drivers_to_plot = plot_drivers if plot_drivers else channels
 
+    # Normalize & smooth drivers *only*
+    plot_df = ts_df.copy()
+    plot_df[drivers_to_plot] = _normalize_cols(
+        plot_df[drivers_to_plot], norm_mode
+    )
     if smooth_k > 1:
-        plot_df[channels] = (
-            plot_df[channels].rolling(smooth_k, min_periods=1).mean()
+        plot_df[drivers_to_plot] = (
+            plot_df[drivers_to_plot].rolling(smooth_k, min_periods=1).mean()
         )
 
-    long = plot_df.melt(
+    plot_cols = drivers_to_plot + ([dep_var] if dep_var else [])
+    long = plot_df[[date_col] + plot_cols].melt(
         id_vars=[date_col], var_name="series", value_name="value"
     )
+
+    # Bigger chart height
+    base_height = 420  # bump this if you want even taller
     line = (
         alt.Chart(long)
         .mark_line()
         .encode(
             x=alt.X(f"{date_col}:T", title="Date"),
             y=alt.Y("value:Q", title=""),
-            color="series:N",
+            color=alt.Color("series:N", legend=alt.Legend(columns=1)),
             tooltip=[date_col, "series", alt.Tooltip("value:Q", format=".2f")],
         )
-        .properties(height=280)
+        .properties(height=base_height)
         .interactive()
     )
     st.altair_chart(line, use_container_width=True)
