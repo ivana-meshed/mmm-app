@@ -131,13 +131,13 @@ def prepare_and_launch_job(params: dict) -> dict:
         # 1) Query Snowflake
         with timed_step("Query Snowflake", timings):
             df = run_sql(sql_eff)
-        with timed_step("Optional resample (queue job)", timings):
+        """with timed_step("Optional resample (queue job)", timings):
             df = _maybe_resample_df(
                 df,
                 params.get("date_var"),
                 params.get("resample_freq", "none"),
                 params.get("resample_agg", "sum"),
-            )
+            )"""
 
         # 2) Parquet
         with timed_step("Convert to Parquet", timings):
