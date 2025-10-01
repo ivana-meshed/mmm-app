@@ -77,6 +77,19 @@ def _normalize_cols(df: pd.DataFrame, how: str) -> pd.DataFrame:
     return out
 
 
+def _high_corr_pairs(
+    corrM: pd.DataFrame, cols: list[str], thr: float
+) -> list[tuple[str, str, float]]:
+    out = []
+    for i in range(len(cols)):
+        for j in range(i + 1, len(cols)):
+            a, b = cols[i], cols[j]
+            r = float(corrM.loc[a, b])
+            if abs(r) >= thr:
+                out.append((a, b, r))
+    return out
+
+
 # Try optional deps
 try:
     from sklearn.decomposition import PCA
@@ -206,8 +219,41 @@ with st.form("analysis_controls"):
 
     run_btn = st.form_submit_button("▶️ Run analysis")
 
-if not run_btn:
-    st.stop()
+# Persist controls once; reuse on future reruns (e.g., when 5) Run checks is clicked)
+if run_btn:
+    st.session_state["an_cfg"] = dict(
+        date_col=date_col,
+        dep_var=dep_var,
+        corr_method=corr_method,
+        var_thresh=float(var_thresh),
+        corr_thresh=float(corr_thresh),
+        max_feats_for_interactions=int(max_feats_for_interactions),
+        channels=channels,
+        plot_drivers=plot_drivers,
+        resample=resample,
+        smooth_k=int(smooth_k),
+        norm_mode=norm_mode,
+        topN_inter=int(topN_inter),
+    )
+
+cfg = st.session_state.get("an_cfg")
+if not cfg:
+    st.stop()  # require one initial run of the main form
+
+# Rebind locals from persisted config so other forms can rerun safely
+date_col = cfg["date_col"]
+dep_var = cfg["dep_var"]
+corr_method = cfg["corr_method"]
+var_thresh = cfg["var_thresh"]
+corr_thresh = cfg["corr_thresh"]
+max_feats_for_interactions = cfg["max_feats_for_interactions"]
+channels = cfg["channels"]
+plot_drivers = cfg["plot_drivers"]
+resample = cfg["resample"]
+smooth_k = cfg["smooth_k"]
+norm_mode = cfg["norm_mode"]
+topN_inter = cfg["topN_inter"]
+
 
 # ------------------ 3) Prepare working frame ------------------
 work = df.copy()
@@ -246,6 +292,9 @@ st.subheader("3) Correlations, R² (univariate), and spend variation")
 
 corr_cols = channels + ([dep_var] if dep_var else [])
 corrM = _safe_corr(work[corr_cols], method=corr_method)
+high_corr_pairs = _high_corr_pairs(
+    corrM.loc[channels, channels], channels, corr_thresh
+)
 
 # === Bigger, readable heatmap: dynamic width/height, no label truncation ===
 n = len(corr_cols)
@@ -663,7 +712,7 @@ export = {
     "dropped_low_variance": (
         dropped_low_var if "dropped_low_var" in locals() else []
     ),
-    "high_corr_pairs": [(a, b, round(v, 3)) for a, b, v in pairs],
+    "high_corr_pairs": [(a, b, round(v, 3)) for a, b, v in high_corr_pairs],
     "suggested_interactions_topN": (
         inter_df["interaction"].tolist()
         if dep_var and topN_inter > 0 and "inter_df" in locals()
