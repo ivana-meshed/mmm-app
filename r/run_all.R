@@ -566,6 +566,8 @@ if (!is.null(cfg$annotations_gcs_path) && nzchar(cfg$annotations_gcs_path)) {
 
 df <- as.data.frame(df)
 names(df) <- toupper(names(df))
+summary(df$UPLOAD_VALUE)
+length(unique(na.omit(df$UPLOAD_VALUE)))
 
 ## ---------- DATE & CLEAN ----------
 ## ---------- DATE & CLEAN ----------
@@ -659,7 +661,9 @@ cat(
   "  factor_vars      :", paste(factor_vars, collapse = ", "), "\n",
   "  organic_vars     :", paste(organic_vars, collapse = ", "), "\n"
 )
-
+summary(df$UPLOAD_VALUE)
+length(unique(na.omit(df$UPLOAD_VALUE)))
+summary(df)
 ## ---------- ROBYN INPUTS ----------
 InputCollect <- robyn_inputs(
   dt_input          = df,
