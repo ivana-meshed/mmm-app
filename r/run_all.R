@@ -646,6 +646,13 @@ paid_media_vars <- paid_media_vars[keep_idx]
 
 context_vars <- intersect(cfg$context_vars %||% character(0), names(df))
 factor_vars <- intersect(cfg$factor_vars %||% character(0), names(df))
+# remove overlaps between context & factor (same var in both is harmful)
+overlap_cf <- intersect(context_vars, factor_vars)
+if (length(overlap_cf)) {
+  message("⚠️ Dropping overlaps from factor_vars: ", paste(overlap_cf, collapse = ", "))
+  factor_vars <- setdiff(factor_vars, overlap_cf)
+}
+
 org_base <- intersect(cfg$organic_vars %||% "ORGANIC_TRAFFIC", names(df))
 organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES" %in% names(df)) {
   unique(c(org_base, "N_SEARCHES"))
@@ -743,6 +750,27 @@ OutputModels <- robyn_run(
   add_penalty_factor = TRUE,
   cores = max_cores
 )
+# --- pick best model robustly ---
+sel <- tryCatch(
+  robyn_select(InputCollect, OutputModels),
+  error = function(e) {
+    message("robyn_select failed: ", conditionMessage(e))
+    NULL
+  }
+)
+
+best_id <- NA_character_
+if (!is.null(sel) && !is.null(sel$best)) {
+  best_id <- tryCatch(
+    if (!is.null(sel$best$solID)) sel$best$solID else sel$best$id,
+    error = function(e) NA_character_
+  )
+}
+
+if (is.na(best_id) || best_id == "") {
+  message("No best model id available (no valid candidates?).")
+}
+
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
 
@@ -792,13 +820,31 @@ gcs_put_safe(file.path(dir_path, "OutputModels.RDS"), file.path(gcs_prefix, "Out
 gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "InputCollect.RDS"))
 
 ## ---------- OUTPUTS & ONEPAGERS ----------
-OutputCollect <- robyn_outputs(
-  InputCollect, OutputModels,
-  pareto_fronts = 2, csv_out = "pareto",
-  min_candidates = 5, clusters = FALSE,
-  export = TRUE, plot_folder = dir_path,
-  plot_pareto = FALSE, cores = NULL
+# --- outputs are helpful but optional; don't let them crash the run ---
+OutputCollect <- tryCatch(
+  robyn_outputs(
+    InputCollect, OutputModels,
+    select_model  = if (!is.na(best_id) && best_id != "") best_id else NULL,
+    pareto_fronts = 2, csv_out = "pareto",
+    min_candidates = 1, # be lenient
+    clusters = FALSE,
+    export = TRUE, plot_folder = dir_path,
+    plot_pareto = FALSE, cores = NULL
+  ),
+  error = function(e) {
+    message("robyn_outputs failed: ", conditionMessage(e))
+    NULL
+  }
 )
+
+# ensure best_id if still missing but outputs succeeded
+if ((is.na(best_id) || best_id == "") && !is.null(OutputCollect)) {
+  rh <- tryCatch(OutputCollect$resultHypParam, error = function(e) NULL)
+  if (!is.null(rh) && nrow(rh)) {
+    best_id <- suppressWarnings(na.omit(rh$solID)[1])
+  }
+}
+
 saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
 
