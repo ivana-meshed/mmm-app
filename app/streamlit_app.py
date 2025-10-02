@@ -48,6 +48,7 @@ from app_shared import (
     _safe_tick_once,  # (kept for parity; not used below
     _maybe_resample_df,
     _normalize_resample_freq,
+    _normalize_resample_agg,
 )
 
 # Instantiate shared resources
