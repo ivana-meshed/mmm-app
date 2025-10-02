@@ -692,41 +692,40 @@ InputCollect <- robyn_inputs(
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
-## ---------- HYPERPARAMETERS ----------
-# Always derive names from InputCollect so they match exactly
-media_vars <- InputCollect$all_mediaVar # paid_media_vars Robyn kept
-org_vars <- InputCollect$all_orgVar # organic vars Robyn kept
-hyper_vars <- c(media_vars, org_vars)
+## ---------- HYPERPARAMETERS (name-aligned, parallel-safe) ----------
+# Use canonical fields that exist in all Robyn versions
+hyper_vars <- unique(c(InputCollect$paid_media_vars, InputCollect$organic_vars))
+if (!length(hyper_vars)) stop("No media/organic vars present in InputCollect; cannot set hyperparameters.")
 
-if (length(hyper_vars) == 0) {
-  stop("No media/organic vars present in InputCollect; cannot set hyperparameters.")
-}
-
-hyperparameters <- list()
-for (v in hyper_vars) {
+hp_for_var <- function(v) {
   if (v == "ORGANIC_TRAFFIC") {
-    hyperparameters[[paste0(v, "_alphas")]] <- c(0.5, 2.0)
-    hyperparameters[[paste0(v, "_gammas")]] <- c(0.3, 0.7)
-    hyperparameters[[paste0(v, "_thetas")]] <- c(0.9, 0.99)
+    list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
   } else if (v == "TV_COST") {
-    hyperparameters[[paste0(v, "_alphas")]] <- c(0.8, 2.2)
-    hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.99)
-    hyperparameters[[paste0(v, "_thetas")]] <- c(0.7, 0.95)
+    list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
   } else if (v == "PARTNERSHIP_COSTS") {
-    hyperparameters[[paste0(v, "_alphas")]] <- c(0.65, 2.25)
-    hyperparameters[[paste0(v, "_gammas")]] <- c(0.45, 0.875)
-    hyperparameters[[paste0(v, "_thetas")]] <- c(0.3, 0.625)
+    list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
   } else {
-    hyperparameters[[paste0(v, "_alphas")]] <- c(1.0, 3.0)
-    hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.9)
-    hyperparameters[[paste0(v, "_thetas")]] <- c(0.1, 0.4)
+    list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
   }
 }
 
-# Train-size belongs in the hyperparameters list for Robyn
+# Build ranges (parallel if many vars)
+if (length(hyper_vars) > 10) {
+  hp_list <- future_lapply(hyper_vars, hp_for_var, future.seed = TRUE)
+  names(hp_list) <- hyper_vars
+} else {
+  hp_list <- setNames(lapply(hyper_vars, hp_for_var), hyper_vars)
+}
+
+hyperparameters <- list()
+for (v in names(hp_list)) {
+  hyperparameters[[paste0(v, "_alphas")]] <- hp_list[[v]]$alphas
+  hyperparameters[[paste0(v, "_gammas")]] <- hp_list[[v]]$gammas
+  hyperparameters[[paste0(v, "_thetas")]] <- hp_list[[v]]$thetas
+}
 hyperparameters[["train_size"]] <- as.numeric(train_size)
 
-# Validate before attaching (helps catch any mismatch immediately)
+# Validate before attaching (fail fast if a key is missing)
 expected <- as.vector(rbind(
   paste0(hyper_vars, "_alphas"),
   paste0(hyper_vars, "_gammas"),
@@ -742,16 +741,13 @@ if (length(missing)) {
 
 # Attach to InputCollect
 InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
+
+# Sanity log
 cat(
-  "HP keys attached (sample):\n",
-  paste(head(sort(names(InputCollect$hyperparameters)), 12), collapse = "\n"), "\n"
+  "HP keys attached (sample):\n  ",
+  paste(head(setdiff(names(InputCollect$hyperparameters), "train_size"), 10), collapse = ", "),
+  "\n"
 )
-
-
-# Guard: fail fast if Robyn ignored the list
-if (is.null(InputCollect$hyperparameters) || !length(InputCollect$hyperparameters)) {
-  stop("Robyn did not accept hyperparameters. Check name alignment with InputCollect$all_mediaVar/all_orgVar.")
-}
 
 ## ---------- TRAIN ----------
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
