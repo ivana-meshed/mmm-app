@@ -693,51 +693,65 @@ alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
 ## ---------- HYPERPARAMETERS ----------
-hyper_vars <- c(paid_media_vars, organic_vars)
-hyperparameters <- list()
+# Always derive names from InputCollect so they match exactly
+media_vars <- InputCollect$all_mediaVar # paid_media_vars Robyn kept
+org_vars <- InputCollect$all_orgVar # organic vars Robyn kept
+hyper_vars <- c(media_vars, org_vars)
 
-message("→ Setting up hyperparameters (", length(hyper_vars), " vars) with ", max_cores, " cores...")
-if (length(hyper_vars) > 10) {
-  hp <- future_lapply(hyper_vars, function(v) {
-    if (v == "ORGANIC_TRAFFIC") {
-      list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
-    } else if (v == "TV_COST") {
-      list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
-    } else if (v == "PARTNERSHIP_COSTS") {
-      list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
-    } else {
-      list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
-    }
-  }, future.seed = TRUE)
-  names(hp) <- hyper_vars
-  for (v in names(hp)) {
-    hyperparameters[[paste0(v, "_alphas")]] <- hp[[v]]$alphas
-    hyperparameters[[paste0(v, "_gammas")]] <- hp[[v]]$gammas
-    hyperparameters[[paste0(v, "_thetas")]] <- hp[[v]]$thetas
-  }
-} else {
-  for (v in hyper_vars) {
-    if (v == "ORGANIC_TRAFFIC") {
-      hyperparameters[[paste0(v, "_alphas")]] <- c(0.5, 2.0)
-      hyperparameters[[paste0(v, "_gammas")]] <- c(0.3, 0.7)
-      hyperparameters[[paste0(v, "_thetas")]] <- c(0.9, 0.99)
-    } else if (v == "TV_COST") {
-      hyperparameters[[paste0(v, "_alphas")]] <- c(0.8, 2.2)
-      hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.99)
-      hyperparameters[[paste0(v, "_thetas")]] <- c(0.7, 0.95)
-    } else if (v == "PARTNERSHIP_COSTS") {
-      hyperparameters[[paste0(v, "_alphas")]] <- c(0.65, 2.25)
-      hyperparameters[[paste0(v, "_gammas")]] <- c(0.45, 0.875)
-      hyperparameters[[paste0(v, "_thetas")]] <- c(0.3, 0.625)
-    } else {
-      hyperparameters[[paste0(v, "_alphas")]] <- c(1.0, 3.0)
-      hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.9)
-      hyperparameters[[paste0(v, "_thetas")]] <- c(0.1, 0.4)
-    }
+if (length(hyper_vars) == 0) {
+  stop("No media/organic vars present in InputCollect; cannot set hyperparameters.")
+}
+
+hyperparameters <- list()
+for (v in hyper_vars) {
+  if (v == "ORGANIC_TRAFFIC") {
+    hyperparameters[[paste0(v, "_alphas")]] <- c(0.5, 2.0)
+    hyperparameters[[paste0(v, "_gammas")]] <- c(0.3, 0.7)
+    hyperparameters[[paste0(v, "_thetas")]] <- c(0.9, 0.99)
+  } else if (v == "TV_COST") {
+    hyperparameters[[paste0(v, "_alphas")]] <- c(0.8, 2.2)
+    hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.99)
+    hyperparameters[[paste0(v, "_thetas")]] <- c(0.7, 0.95)
+  } else if (v == "PARTNERSHIP_COSTS") {
+    hyperparameters[[paste0(v, "_alphas")]] <- c(0.65, 2.25)
+    hyperparameters[[paste0(v, "_gammas")]] <- c(0.45, 0.875)
+    hyperparameters[[paste0(v, "_thetas")]] <- c(0.3, 0.625)
+  } else {
+    hyperparameters[[paste0(v, "_alphas")]] <- c(1.0, 3.0)
+    hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.9)
+    hyperparameters[[paste0(v, "_thetas")]] <- c(0.1, 0.4)
   }
 }
-hyperparameters[["train_size"]] <- train_size
+
+# Train-size belongs in the hyperparameters list for Robyn
+hyperparameters[["train_size"]] <- as.numeric(train_size)
+
+# Validate before attaching (helps catch any mismatch immediately)
+expected <- as.vector(rbind(
+  paste0(hyper_vars, "_alphas"),
+  paste0(hyper_vars, "_gammas"),
+  paste0(hyper_vars, "_thetas")
+))
+missing <- setdiff(expected, names(hyperparameters))
+if (length(missing)) {
+  stop(
+    "Missing hyperparameter keys for: ",
+    paste(unique(sub("_(alphas|gammas|thetas)$", "", missing)), collapse = ", ")
+  )
+}
+
+# Attach to InputCollect
 InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
+cat(
+  "HP keys attached (sample):\n",
+  paste(head(sort(names(InputCollect$hyperparameters)), 12), collapse = "\n"), "\n"
+)
+
+
+# Guard: fail fast if Robyn ignored the list
+if (is.null(InputCollect$hyperparameters) || !length(InputCollect$hyperparameters)) {
+  stop("Robyn did not accept hyperparameters. Check name alignment with InputCollect$all_mediaVar/all_orgVar.")
+}
 
 ## ---------- TRAIN ----------
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
@@ -818,6 +832,9 @@ saveRDS(OutputModels, file.path(dir_path, "OutputModels.RDS"))
 saveRDS(InputCollect, file.path(dir_path, "InputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputModels.RDS"), file.path(gcs_prefix, "OutputModels.RDS"))
 gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "InputCollect.RDS"))
+
+message(sprintf("Local InputCollect HP count: %s", length(InputCollect$hyperparameters)))
+
 
 ## ---------- OUTPUTS & ONEPAGERS ----------
 # --- outputs are helpful but optional; don't let them crash the run ---
