@@ -2,10 +2,11 @@
 
 ## =========================================================
 ## run_all.R — Train Robyn + smarter 3-month forecast
-##  - No robyn_predict; uses allocator to simulate plan
+##  - Allocator-based forward plan (no robyn_predict)
 ##  - Month-scoped allocator windows
-##  - Robust incremental extraction
+##  - Timeboxed heavy calls + heartbeats
 ##  - Solid logging + error handling + GCS mirroring
+##  - Graceful worker shutdown to avoid "RUNNING forever"
 ## =========================================================
 
 ## ---------- ENV ----------
@@ -37,7 +38,16 @@ suppressPackageStartupMessages({
   library(parallelly)
   library(tibble)
   library(tidyselect)
+  library(R.utils)
 })
+
+## ---------- GLOBAL VERBOSITY / WARNINGS (debug-friendly) ----------
+if (nzchar(Sys.getenv("FAIL_ON_WARNING", "0")) && Sys.getenv("FAIL_ON_WARNING") == "1") {
+  ow <- getOption("warn")
+  on.exit(options(warn = ow), add = TRUE)
+  options(warn = 2)
+}
+options(googleAuthR.verbose = 2, googleCloudStorageR.verbose = 2)
 
 ## simple logger section header
 log_section <- function(txt) cat("\n==== ", txt, " ====\n", sep = "")
@@ -64,6 +74,71 @@ plan(multisession, workers = max_cores)
   a
 }
 
+## ---------- DEBUG HELPERS ----------
+log_file <- NULL
+gcs_prefix <- NULL
+
+log_resources <- function(tag = "") {
+  read_num <- function(p) suppressWarnings(as.numeric(readLines(p, warn = FALSE)[1]))
+  mem_lim <- read_num("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+  mem_cur <- read_num("/sys/fs/cgroup/memory/memory.usage_in_bytes")
+  if (is.na(mem_lim)) mem_lim <- read_num("/sys/fs/cgroup/memory.max")
+  if (is.na(mem_cur)) mem_cur <- read_num("/sys/fs/cgroup/memory.current")
+  cpu_max <- suppressWarnings(readLines("/sys/fs/cgroup/cpu.max", warn = FALSE)[1])
+  message(sprintf(
+    "[RES] %s mem_cur=%.2fGi mem_lim=%.2fGi cpu=%s",
+    tag,
+    ifelse(is.na(mem_cur), NA, mem_cur / (1024^3)),
+    ifelse(is.na(mem_lim), NA, mem_lim / (1024^3)),
+    cpu_max %||% "NA"
+  ))
+  flush.console()
+}
+
+upload_log_now <- function(reason = "") {
+  try(
+    {
+      flush.console()
+      if (!is.null(log_file) && file.exists(log_file) && !is.null(gcs_prefix)) {
+        message("↥ pushing console log to GCS (", reason, ")")
+        gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log"))
+      }
+    },
+    silent = TRUE
+  )
+}
+
+## timeboxed executor
+with_timeout <- function(expr, sec, where = "unknown") {
+  R.utils::withTimeout(expr, timeout = sec, onTimeout = "error")
+}
+
+## headless-safe plotting
+cap_png <- function(path, expr) {
+  try(
+    {
+      png(path, width = 1200, height = 800, type = "cairo")
+      force(expr)
+      dev.off()
+    },
+    silent = TRUE
+  )
+}
+
+## stop all future/PSOCK workers
+safely_stop_workers <- function(tag = "") {
+  message("Stopping future plan/workers... (", tag, ")")
+  try(future::plan(sequential), silent = TRUE) # replaces multisession and stops PSOCK cluster
+  # best-effort stop any registry clusters
+  try(
+    {
+      reg <- get("ClusterRegistry", envir = asNamespace("future"))
+      reg("stop")
+    },
+    silent = TRUE
+  )
+}
+
 ## ---------- HELPERS ----------
 should_add_n_searches <- function(dtf, spend_cols, thr = 0.15) {
   if (!"N_SEARCHES" %in% names(dtf) || length(spend_cols) == 0) {
@@ -88,8 +163,6 @@ gcs_download <- function(gcs_path, local_path) {
   message("Downloaded: ", gcs_path, " -> ", local_path)
 }
 
-# --- REPLACE the existing gcs_put / gcs_put_safe with this block ---
-
 gcs_put <- function(local_file, object_path, upload_type = NULL, max_retries = 5) {
   lf <- normalizePath(local_file, mustWork = FALSE)
   if (!file.exists(lf)) stop("Local file does not exist: ", lf)
@@ -97,29 +170,21 @@ gcs_put <- function(local_file, object_path, upload_type = NULL, max_retries = 5
   bkt <- googleCloudStorageR::gcs_get_global_bucket()
   if (is.null(bkt) || bkt == "") stop("No bucket set: call gcs_global_bucket(...)")
 
-  # choose upload mode by size; force resumable for > 5MB (and by default)
   sz <- file.info(lf)$size %||% 0
-  if (is.null(upload_type)) {
-    upload_type <- if (is.finite(sz) && sz > 5e6) "resumable" else "resumable"
-  }
-
+  if (is.null(upload_type)) upload_type <- "resumable"
   typ <- mime::guess_type(lf)
   if (is.na(typ) || typ == "") typ <- "application/octet-stream"
 
-  # retry w/ exponential backoff
   attempt <- 0L
   repeat {
     attempt <- attempt + 1L
     res <- tryCatch(
-      {
-        googleCloudStorageR::gcs_upload(
-          file = lf, name = object_path, bucket = bkt, type = typ,
-          upload_type = upload_type, predefinedAcl = "bucketLevel"
-        )
-      },
+      googleCloudStorageR::gcs_upload(
+        file = lf, name = object_path, bucket = bkt, type = typ,
+        upload_type = upload_type, predefinedAcl = "bucketLevel"
+      ),
       error = function(e) e
     )
-
     if (!inherits(res, "error")) {
       message(sprintf(
         "✅ Uploaded (%s): %s -> gs://%s/%s  [size=%.2f MB]",
@@ -127,7 +192,6 @@ gcs_put <- function(local_file, object_path, upload_type = NULL, max_retries = 5
       ))
       return(invisible(TRUE))
     }
-
     if (attempt >= max_retries) {
       stop(sprintf(
         "❌ GCS upload failed after %d attempts for %s -> gs://%s/%s : %s",
@@ -142,7 +206,6 @@ gcs_put <- function(local_file, object_path, upload_type = NULL, max_retries = 5
     Sys.sleep(wait)
   }
 }
-
 gcs_put_safe <- function(...) {
   tryCatch(gcs_put(...), error = function(e) {
     message("❌ GCS upload failed (non-fatal): ", conditionMessage(e))
@@ -258,7 +321,6 @@ compute_monthly_targets_from_history <- function(
   } else {
     mean(tail(rowSums(dt_input[, spend_cols, drop = FALSE], na.rm = TRUE), 28), na.rm = TRUE) * 30
   }
-
   base_val <- ifelse(is.finite(base_val) && base_val > 0, base_val, 0)
   rep(base_val, horizon_months)
 }
@@ -301,25 +363,18 @@ get_job_history_object <- function() {
   obj <- Sys.getenv("JOBS_JOB_HISTORY_OBJECT", unset = "robyn-jobs/job_history.csv")
   if (nzchar(obj)) obj else "robyn-jobs/job_history.csv"
 }
-
 append_to_job_history <- function(row) {
   ensure_gcs_auth()
   job_history_obj <- get_job_history_object()
   tmp_csv <- file.path(tempdir(), "jobs_job_history.csv")
-  ok <- tryCatch(
-    {
-      googleCloudStorageR::gcs_get_object(
-        object_name = job_history_obj,
-        bucket = googleCloudStorageR::gcs_get_global_bucket(),
-        saveToDisk = tmp_csv, overwrite = TRUE
-      )
-      TRUE
-    },
-    error = function(e) FALSE
-  )
+  ok <- tryCatch(googleCloudStorageR::gcs_get_object(
+    object_name = job_history_obj,
+    bucket = googleCloudStorageR::gcs_get_global_bucket(),
+    saveToDisk = tmp_csv, overwrite = TRUE
+  ), error = function(e) FALSE)
 
   df_old <- NULL
-  if (ok && file.exists(tmp_csv)) {
+  if (isTRUE(ok) && file.exists(tmp_csv)) {
     df_old <- try(readr::read_csv(tmp_csv, show_col_types = FALSE), silent = TRUE)
     if (inherits(df_old, "try-error")) df_old <- NULL
   }
@@ -434,7 +489,6 @@ build_spend_forecast <- function(dt_input, spend_cols, horizon_months = 3, month
     }
     out <- dplyr::select(out, -month)
   }
-
   out
 }
 
@@ -479,18 +533,26 @@ make_share_bands <- function(shares, tol = 1e-4) {
 }
 
 ## ---------- LOGGING / ERROR HANDLING ----------
-log_file <- NULL
 log_con_out <- NULL
 log_con_err <- NULL
 .__handling_error <- FALSE
-gcs_prefix <- NULL
 status_json <- NULL
 job_started <- Sys.time()
 
 cleanup <- function() {
+  # upload a final log snapshot first
+  upload_log_now("cleanup-begin")
+  # close sinks
   while (sink.number(type = "message") > 0) sink(type = "message")
   while (sink.number() > 0) sink()
   for (con in list(log_con_out, log_con_err)) if (!is.null(con)) try(close(con), silent = TRUE)
+  # final log push
+  upload_log_now("cleanup-end")
+  # stop workers so Job can exit
+  safely_stop_workers("cleanup")
+  # final log push after stopping workers
+  upload_log_now("after-stop-workers")
+  # mirror console log to canonical path too
   if (!is.null(log_file) && file.exists(log_file) && !is.null(gcs_prefix)) {
     try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
   }
@@ -541,6 +603,9 @@ options(error = function(e) {
   quit(status = 1)
 })
 
+## Ensure we always dismantle workers on normal exit too
+on.exit(cleanup(), add = TRUE)
+
 ## ---------- LOAD CFG ----------
 message("Loading configuration from Cloud Run Jobs environment...")
 ensure_gcs_auth()
@@ -549,8 +614,8 @@ early_bucket <- Sys.getenv("GCS_BUCKET", "mmm-app-output")
 if (nzchar(early_bucket)) googleCloudStorageR::gcs_global_bucket(early_bucket)
 options(
   googleCloudStorageR.predefinedAcl = "bucketLevel",
-  googleCloudStorageR.gzip = FALSE, # don’t re-compress binaries
-  googleCloudStorageR.parallel = FALSE # avoid race conditions on uploads
+  googleCloudStorageR.gzip = FALSE,
+  googleCloudStorageR.parallel = FALSE
 )
 
 cfg <- get_cfg_from_env()
@@ -574,7 +639,7 @@ adstock <- tolower(cfg$adstock %||% "geometric")
 date_col_cfg <- cfg$date_var %||% "DATE"
 date_col <- toupper(date_col_cfg)
 
-## Local work dir (use tempdir to avoid permission issues)
+## Local work dir
 base_dir <- file.path(tempdir(), "robyn", revision, country, timestamp)
 dir.create(base_dir, recursive = TRUE, showWarnings = FALSE)
 dir_path <- base_dir
@@ -602,7 +667,9 @@ log_con_out <- file(log_file, open = "wt")
 log_con_err <- file(log_file, open = "at")
 sink(log_con_out, split = TRUE)
 sink(log_con_err, type = "message")
-on.exit(cleanup(), add = TRUE)
+
+log_resources("post-config")
+upload_log_now("post-config")
 
 ## ---------- PYTHON / NEVERGRAD ----------
 reticulate::use_python("/usr/bin/python3", required = TRUE)
@@ -652,6 +719,8 @@ log_section("DATA LOADED")
 cat("Rows x Cols:", nrow(df), "x", ncol(df), "\n")
 cat("First 20 columns:", paste(head(names(df), 20), collapse = ", "), "\n")
 cat("Approx df size:", format(object.size(df), units = "MB"), "\n")
+upload_log_now("post-data-load")
+log_resources("post-data-load")
 
 # Optional annotations
 if (!is.null(cfg$annotations_gcs_path) && nzchar(cfg$annotations_gcs_path)) {
@@ -702,14 +771,14 @@ if (!"TV_IS_ON" %in% names(df)) df$TV_IS_ON <- 0
 
 ## ---------- FEATURE ENGINEERING ----------
 df <- df %>% mutate(
-  GA_OTHER_COST = rowSums(
-    select(., tidyselect::matches("^GA_.*_COST$"), -any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))),
-    na.rm = TRUE
-  ),
-  GA_OTHER_IMPRESSIONS = rowSums(
-    select(., tidyselect::matches("^GA_.*_IMPRESSIONS$"), -any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))),
-    na.rm = TRUE
-  ),
+  GA_OTHER_COST = rowSums(select(
+    ., tidyselect::matches("^GA_.*_COST$"),
+    -any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))
+  ), na.rm = TRUE),
+  GA_OTHER_IMPRESSIONS = rowSums(select(
+    ., tidyselect::matches("^GA_.*_IMPRESSIONS$"),
+    -any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))
+  ), na.rm = TRUE),
   BING_TOTAL_COST = rowSums(select(., tidyselect::matches("^BING_.*_COST$")), na.rm = TRUE),
   META_TOTAL_COST = rowSums(select(., tidyselect::matches("^META_.*_COST$")), na.rm = TRUE),
   ORGANIC_TRAFFIC = rowSums(select(., any_of(c(
@@ -740,6 +809,8 @@ df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
 log_section("TRAIN WINDOW")
 cat("Train window:", as.character(start_data_date), "→", as.character(end_data_date), "  rows:", nrow(df), "\n")
+upload_log_now("pre-drivers")
+log_resources("pre-drivers")
 
 ## ---------- DRIVERS ----------
 cfg_paid_spends <- toupper(cfg$paid_media_spends %||% character(0))
@@ -765,7 +836,11 @@ if (length(overlap_cf)) {
 }
 
 org_base <- intersect(toupper(cfg$organic_vars %||% "ORGANIC_TRAFFIC"), names(df))
-organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES" %in% names(df)) unique(c(org_base, "N_SEARCHES")) else org_base
+organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES" %in% names(df)) {
+  unique(c(org_base, "N_SEARCHES"))
+} else {
+  org_base
+}
 
 log_section("DRIVERS SELECTED")
 cat("paid_media_spends:", paste(paid_media_spends, collapse = ", "), "\n")
@@ -783,6 +858,8 @@ if (length(paid_media_spends)) {
   cat("Paid totals (last 90d):\n")
   print(round(tot_90, 2))
 }
+upload_log_now("post-drivers")
+log_resources("post-drivers")
 
 ## ---------- ADSTOCK ----------
 ad_type <- tolower(adstock %||% "geometric")
@@ -892,18 +969,27 @@ if (length(missing_hp)) cat("Vars with no HP coverage:", paste(missing_hp, colla
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
-## ---------- TRAIN ----------
+upload_log_now("pre-robyn_run")
+log_resources("pre-robyn_run")
+
+## ---------- TRAIN (TIMEBOXED) ----------
 log_section("TRAINING START")
 t0 <- Sys.time()
 cat("iterations:", iter, " trials:", trials, " cores:", max_cores, "\n")
 
-OutputModels <- robyn_run(
-  InputCollect = InputCollect,
-  iterations = iter,
-  trials = trials,
-  ts_validation = TRUE,
-  add_penalty_factor = TRUE,
-  cores = max_cores
+OutputModels <- with_timeout(
+  {
+    robyn_run(
+      InputCollect = InputCollect,
+      iterations = iter,
+      trials = trials,
+      ts_validation = TRUE,
+      add_penalty_factor = TRUE,
+      cores = max_cores
+    )
+  },
+  sec = as.numeric(Sys.getenv("TIMEOUT_ROBYN_RUN", "3600")),
+  where = "robyn_run"
 )
 
 sel <- tryCatch(robyn_select(InputCollect, OutputModels), error = function(e) {
@@ -913,14 +999,15 @@ sel <- tryCatch(robyn_select(InputCollect, OutputModels), error = function(e) {
 
 best_id <- NA_character_
 if (!is.null(sel) && !is.null(sel$best)) {
-  best_id <- tryCatch(if (!is.null(sel$best$solID)) sel$best$solID else sel$best$id,
-    error = function(e) NA_character_
-  )
+  best_id <- tryCatch(if (!is.null(sel$best$solID)) sel$best$solID else sel$best$id, error = function(e) NA_character_)
 }
 if (is.na(best_id) || best_id == "") message("No best model id available (no valid candidates?).")
 
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
+
+upload_log_now("post-robyn_run")
+log_resources("post-robyn_run")
 
 ## ---------- timings.csv APPEND ----------
 ensure_gcs_auth()
@@ -930,16 +1017,10 @@ message("Appending training time to: gs://", googleCloudStorageR::gcs_get_global
 r_row <- data.frame(Step = "R training (robyn_run)", `Time (s)` = round(training_time * 60, 2), check.names = FALSE)
 had_existing <- FALSE
 for (i in 1:5) {
-  ok <- tryCatch(
-    {
-      googleCloudStorageR::gcs_get_object(
-        object_name = timings_obj, bucket = googleCloudStorageR::gcs_get_global_bucket(),
-        saveToDisk = timings_local, overwrite = TRUE
-      )
-      TRUE
-    },
-    error = function(e) FALSE
-  )
+  ok <- tryCatch(googleCloudStorageR::gcs_get_object(
+    object_name = timings_obj, bucket = googleCloudStorageR::gcs_get_global_bucket(),
+    saveToDisk = timings_local, overwrite = TRUE
+  ), error = function(e) FALSE)
   if (ok && file.exists(timings_local)) {
     had_existing <- TRUE
     break
@@ -963,20 +1044,26 @@ gcs_put_safe(timings_local, timings_obj)
 ## ---------- SAVE CORE RDS ----------
 saveRDS(OutputModels, file.path(dir_path, "OutputModels.RDS"))
 saveRDS(InputCollect, file.path(dir_path, "InputCollect.RDS"))
-# After saveRDS(...)
 gcs_put_safe(file.path(dir_path, "OutputModels.RDS"), file.path(gcs_prefix, "OutputModels.RDS"))
 gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "InputCollect.RDS"))
-
 message(sprintf("Local InputCollect HP count: %s", length(InputCollect$hyperparameters)))
 
-## ---------- OUTPUTS & ONEPAGERS ----------
+upload_log_now("post-rds")
+
+## ---------- OUTPUTS & ONEPAGERS (TIMEBOXED) ----------
 OutputCollect <- tryCatch(
-  robyn_outputs(
-    InputCollect, OutputModels,
-    select_model = if (!is.na(best_id) && nzchar(best_id)) best_id else NULL,
-    pareto_fronts = 2, csv_out = "pareto",
-    min_candidates = 1, clusters = FALSE,
-    export = TRUE, plot_folder = dir_path, plot_pareto = FALSE, cores = NULL
+  with_timeout(
+    {
+      robyn_outputs(
+        InputCollect, OutputModels,
+        select_model = if (!is.na(best_id) && nzchar(best_id)) best_id else NULL,
+        pareto_fronts = 2, csv_out = "pareto",
+        min_candidates = 1, clusters = FALSE,
+        export = TRUE, plot_folder = dir_path, plot_pareto = FALSE, cores = NULL
+      )
+    },
+    sec = as.numeric(Sys.getenv("TIMEOUT_ROBYN_OUTPUTS", "1200")),
+    where = "robyn_outputs"
   ),
   error = function(e) {
     message("robyn_outputs failed: ", conditionMessage(e))
@@ -987,20 +1074,16 @@ OutputCollect <- tryCatch(
 if (is.null(OutputCollect)) {
   message("⚠️ No outputs produced; skipping onepagers/allocator/forecast but still uploading logs & status.")
 } else {
-  # ensure best_id if missing
   if ((is.na(best_id) || best_id == "") && !is.null(OutputCollect$resultHypParam) && nrow(OutputCollect$resultHypParam)) {
     best_id <- suppressWarnings(na.omit(OutputCollect$resultHypParam$solID)[1])
   }
-
   saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
   gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
 
-  # onepagers for top models
   if (!is.null(OutputCollect$resultHypParam) && nrow(OutputCollect$resultHypParam)) {
     top_models <- OutputCollect$resultHypParam$solID[1:min(3, nrow(OutputCollect$resultHypParam))]
     for (m in top_models) try(robyn_onepagers(InputCollect, OutputCollect, select_model = m, export = TRUE), silent = TRUE)
 
-    # canonical onepager for best_id
     all_files <- list.files(dir_path, recursive = TRUE, full.names = TRUE)
     if (!is.na(best_id) && nzchar(best_id)) {
       escaped_id <- gsub("\\.", "\\\\.", best_id)
@@ -1029,7 +1112,7 @@ if (is.null(OutputCollect)) {
     }
   }
 
-  ## ---------- ALLOCATOR (overview) ----------
+  ## ---------- ALLOCATOR (overview, TIMEBOXED) ----------
   is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
   low_bounds0 <- ifelse(is_brand, 0, 0.3)
   up_bounds0 <- ifelse(is_brand, 0, 4)
@@ -1038,16 +1121,22 @@ if (is.null(OutputCollect)) {
   cat("scenario: max_historical_response\n")
 
   AllocatorCollect <- try(
-    robyn_allocator(
-      InputCollect = InputCollect, OutputCollect = OutputCollect,
-      select_model = best_id, date_range = c(alloc_start, alloc_end),
-      expected_spend = NULL, scenario = "max_historical_response",
-      channel_constr_low = low_bounds0, channel_constr_up = up_bounds0, export = TRUE
+    with_timeout(
+      {
+        robyn_allocator(
+          InputCollect = InputCollect, OutputCollect = OutputCollect,
+          select_model = best_id, date_range = c(alloc_start, alloc_end),
+          expected_spend = NULL, scenario = "max_historical_response",
+          channel_constr_low = low_bounds0, channel_constr_up = up_bounds0, export = TRUE
+        )
+      },
+      sec = as.numeric(Sys.getenv("TIMEOUT_ALLOCATOR", "600")),
+      where = "robyn_allocator_overview"
     ),
     silent = TRUE
   )
   if (inherits(AllocatorCollect, "try-error")) {
-    cat("allocator failed:", conditionMessage(attr(AllocatorCollect, "condition")), "\n")
+    cat("allocator overview failed:", conditionMessage(attr(AllocatorCollect, "condition")), "\n")
   } else {
     cat("allocator ok: rows=", nrow(AllocatorCollect$result_allocator %||% data.frame()), "\n")
   }
@@ -1098,18 +1187,15 @@ if (is.null(OutputCollect)) {
 
   alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
   dir.create(alloc_dir, showWarnings = FALSE)
-  try(
-    {
-      png(file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")), width = 1200, height = 800)
-      if (!inherits(AllocatorCollect, "try-error")) plot(AllocatorCollect)
-      dev.off()
-      gcs_put_safe(
-        file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")),
-        file.path(gcs_prefix, paste0("allocator_plots_", timestamp, "/allocator_", best_id, "_365d.png"))
-      )
-    },
-    silent = TRUE
+  cap_png(file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")), {
+    if (!inherits(AllocatorCollect, "try-error")) plot(AllocatorCollect)
+  })
+  gcs_put_safe(
+    file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")),
+    file.path(gcs_prefix, paste0("allocator_plots_", timestamp, "/allocator_", best_id, "_365d.png"))
   )
+
+  upload_log_now("post-allocator-overview")
 
   ## ---------- SMART MONTHLY PROJECTIONS (next 3 months) ----------
   pred_alloc_dir <- file.path(dir_path, paste0("allocator_pred_plots_", timestamp))
@@ -1222,16 +1308,22 @@ if (is.null(OutputCollect)) {
       bands <- make_share_bands(shares, tol = SHARE_TOL)
 
       al <- try(
-        robyn_allocator(
-          InputCollect = InputCollect,
-          OutputCollect = OutputCollect,
-          select_model = best_id,
-          date_range = c(alloc_start, alloc_end),
-          expected_spend = total_budget,
-          scenario = "max_historical_response",
-          channel_constr_low = as.numeric(bands$low),
-          channel_constr_up = as.numeric(bands$up),
-          export = TRUE
+        with_timeout(
+          {
+            robyn_allocator(
+              InputCollect = InputCollect,
+              OutputCollect = OutputCollect,
+              select_model = best_id,
+              date_range = c(alloc_start, alloc_end),
+              expected_spend = total_budget,
+              scenario = "max_historical_response",
+              channel_constr_low = as.numeric(bands$low),
+              channel_constr_up = as.numeric(bands$up),
+              export = TRUE
+            )
+          },
+          sec = as.numeric(Sys.getenv("TIMEOUT_ALLOCATOR", "600")),
+          where = sprintf("robyn_allocator_%s", format(m, "%Y-%m"))
         ),
         silent = TRUE
       )
@@ -1243,15 +1335,10 @@ if (is.null(OutputCollect)) {
         pred_fname <- sprintf("allocator_pred_%s.png", format(m, "%Y-%m"))
         pred_local <- file.path(pred_alloc_dir, pred_fname)
         pred_key <- file.path(paste0("allocator_pred_plots_", timestamp), pred_fname)
-        try(
-          {
-            png(pred_local, width = 1200, height = 800)
-            plot(al)
-            dev.off()
-            gcs_put_safe(pred_local, file.path(gcs_prefix, pred_key))
-          },
-          silent = TRUE
-        )
+        cap_png(pred_local, {
+          plot(al)
+        })
+        gcs_put_safe(pred_local, file.path(gcs_prefix, pred_key))
 
         pred_plot_rows[[length(pred_plot_rows) + 1]] <- data.frame(
           month = format(m, "%Y-%m"),
@@ -1276,6 +1363,10 @@ if (is.null(OutputCollect)) {
         forecast_total = round(base_daily * days_in_m + (incr %||% 0), 2),
         stringsAsFactors = FALSE
       )
+
+      # heartbeat after each month
+      upload_log_now(paste0("allocator-", format(m, "%Y-%m")))
+      log_resources(paste0("allocator-", format(m, "%Y-%m")))
     }
 
     proj <- if (length(proj_rows)) {
@@ -1310,6 +1401,12 @@ cat("gcs prefix:", gcs_prefix, "\n")
 cat("Output files (local):\n")
 print(head(list.files(dir_path, recursive = TRUE), 50))
 
+# Dump full local tree for debugging & upload it
+tree_txt <- file.path(dir_path, "local_tree.txt")
+writeLines(capture.output(list.files(dir_path, recursive = TRUE, full.names = TRUE)), tree_txt)
+gcs_put_safe(tree_txt, file.path(gcs_prefix, "local_tree.txt"))
+upload_log_now("after-local-tree")
+
 # --- MIRROR UPLOAD with manifest ---
 manifest <- list()
 local_files <- list.files(dir_path, recursive = TRUE, full.names = TRUE)
@@ -1317,17 +1414,13 @@ for (f in local_files) {
   rel <- sub(paste0("^", normalizePath(dir_path), "/?"), "", normalizePath(f))
   key <- file.path(gcs_prefix, rel)
   sz <- as.numeric(file.info(f)$size %||% 0)
-  ok <- isTRUE(gcs_put_safe(f, key)) # resumable under the hood
-  manifest[[length(manifest) + 1L]] <- list(
-    local = f, key = key, size_bytes = sz, uploaded = isTRUE(ok)
-  )
+  ok <- isTRUE(gcs_put_safe(f, key))
+  manifest[[length(manifest) + 1L]] <- list(local = f, key = key, size_bytes = sz, uploaded = isTRUE(ok))
 }
-
-# write manifest
 man_path <- file.path(dir_path, "artifact_manifest.json")
 writeLines(jsonlite::toJSON(manifest, auto_unbox = TRUE, pretty = TRUE), man_path)
 gcs_put_safe(man_path, file.path(gcs_prefix, "artifact_manifest.json"))
-
+upload_log_now("post-manifest")
 
 cat(
   "✅ Cloud Run Job completed successfully!\n",
@@ -1369,3 +1462,7 @@ try(append_to_job_history(list(
 )), silent = TRUE)
 
 gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+
+## ---------- FINAL TEARDOWN ----------
+safely_stop_workers("end-of-script")
+upload_log_now("final")
