@@ -35,6 +35,8 @@ suppressPackageStartupMessages({
   library(tibble)
 })
 
+source("helpers.R")
+
 ## Optional time-series forecaster
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 
@@ -509,6 +511,12 @@ options(error = function(e) {
 ## ---------- LOAD CFG ----------
 message("Loading configuration from Cloud Run Jobs environment...")
 ensure_gcs_auth()
+# set a default bucket early so the error handler can use it
+early_bucket <- Sys.getenv("GCS_BUCKET", "mmm-app-output")
+if (nzchar(early_bucket)) {
+  googleCloudStorageR::gcs_global_bucket(early_bucket)
+}
+
 cfg <- get_cfg_from_env()
 
 country <- cfg$country
