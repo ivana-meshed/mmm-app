@@ -38,7 +38,7 @@ suppressPackageStartupMessages({
   library(parallelly)
   library(tibble)
   library(tidyselect)
-  library(R.utils)
+  # library(R.utils)
 })
 
 ## ---------- GLOBAL VERBOSITY / WARNINGS (debug-friendly) ----------
@@ -72,6 +72,25 @@ plan(multisession, workers = max_cores)
     return(b)
   }
   a
+}
+
+## --- timeout helper that works with or without R.utils ---
+.have_Rutils <- requireNamespace("R.utils", quietly = TRUE)
+
+with_timeout <- function(expr, sec, where = "unknown") {
+  if (isTRUE(.have_Rutils)) {
+    return(R.utils::withTimeout(expr, timeout = sec, onTimeout = "error"))
+  }
+  # Fallback: base::setTimeLimit (won’t interrupt long-running C calls, but helps for pure R)
+  old <- getOption("expressions")
+  on.exit(
+    {
+      try(setTimeLimit(cpu = Inf, elapsed = Inf, transient = TRUE), silent = TRUE)
+    },
+    add = TRUE
+  )
+  setTimeLimit(elapsed = as.numeric(sec), transient = TRUE)
+  eval.parent(substitute(expr))
 }
 
 ## ---------- DEBUG HELPERS ----------
