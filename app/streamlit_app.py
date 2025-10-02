@@ -47,6 +47,7 @@ from app_shared import (
     append_row_to_job_history,
     _safe_tick_once,  # (kept for parity; not used below
     _maybe_resample_df,
+    _normalize_resample_freq,
 )
 
 # Instantiate shared resources

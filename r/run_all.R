@@ -936,21 +936,31 @@ message(sprintf("Local InputCollect HP count: %s", length(InputCollect$hyperpara
 
 ## ---------- OUTPUTS & ONEPAGERS ----------
 # --- outputs are helpful but optional; don't let them crash the run ---
+sel <- tryCatch(robyn_select(InputCollect, OutputModels), error = function(e) {
+  message("robyn_select failed: ", conditionMessage(e))
+  NULL
+})
+best_id <- if (!is.null(sel) && !is.null(sel$best)) {
+  if (!is.null(sel$best$solID)) sel$best$solID else sel$best$id
+} else {
+  NA_character_
+}
+
 OutputCollect <- tryCatch(
   robyn_outputs(
     InputCollect, OutputModels,
-    select_model  = if (!is.na(best_id) && best_id != "") best_id else NULL,
+    select_model = if (!is.na(best_id) && nzchar(best_id)) best_id else NULL,
     pareto_fronts = 2, csv_out = "pareto",
-    min_candidates = 1, # be lenient
-    clusters = FALSE,
-    export = TRUE, plot_folder = dir_path,
-    plot_pareto = FALSE, cores = NULL
+    min_candidates = 1, clusters = FALSE,
+    export = TRUE, plot_folder = dir_path, plot_pareto = FALSE, cores = NULL
   ),
   error = function(e) {
     message("robyn_outputs failed: ", conditionMessage(e))
     NULL
   }
 )
+
+if (is.null(OutputCollect)) stop("robyn_outputs returned NULL — no valid candidates or export/plot error.")
 
 # ensure best_id if still missing but outputs succeeded
 if ((is.na(best_id) || best_id == "") && !is.null(OutputCollect)) {
