@@ -35,7 +35,10 @@ suppressPackageStartupMessages({
   library(tibble)
 })
 
-source("helpers.R")
+# simple logger section header
+log_section <- function(txt) {
+  cat("\n==== ", txt, " ====\n", sep = "")
+}
 
 ## Optional time-series forecaster
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
