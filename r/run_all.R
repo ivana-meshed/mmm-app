@@ -616,7 +616,7 @@ df <- df %>% mutate(
     "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS"
   ))), na.rm = TRUE),
   BRAND_HEALTH = coalesce(DIRECT_DAILY_SESSIONS, 0) + coalesce(SEO_DAILY_SESSIONS, 0),
-  ORGxTV = BRAND_HEALTH * coalesce(TV_COST, 0),
+  ORGxTV = BRAND_HEALTH * coalesce(TV_COST, TV_COSTS, 0),
   GA_OTHER_IMPRESSIONS = rowSums(select(., tidyselect::matches("^GA_.*_IMPRESSIONS$") &
     !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
   BING_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE),
@@ -632,99 +632,31 @@ df <- df %>% filter(date >= start_data_date, date <= end_data_date)
 df$DOW <- wday(df$date, label = TRUE)
 df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
-## ---------- DRIVERS ----------
-paid_media_spends <- intersect(cfg$paid_media_spends, names(df))
-paid_media_vars <- intersect(cfg$paid_media_vars, names(df))
-stopifnot(length(paid_media_spends) == length(paid_media_vars))
 
-keep_idx <- vapply(
-  seq_along(paid_media_spends),
-  function(i) sum(df[[paid_media_spends[i]]], na.rm = TRUE) > 0, logical(1)
-)
-paid_media_spends <- paid_media_spends[keep_idx]
-paid_media_vars <- paid_media_vars[keep_idx]
-
-context_vars <- intersect(cfg$context_vars %||% character(0), names(df))
-factor_vars <- intersect(cfg$factor_vars %||% character(0), names(df))
-# remove overlaps between context & factor (same var in both is harmful)
-overlap_cf <- intersect(context_vars, factor_vars)
-if (length(overlap_cf)) {
-  message("⚠️ Dropping overlaps from factor_vars: ", paste(overlap_cf, collapse = ", "))
-  factor_vars <- setdiff(factor_vars, overlap_cf)
-}
-
-org_base <- intersect(cfg$organic_vars %||% "ORGANIC_TRAFFIC", names(df))
-organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES" %in% names(df)) {
-  unique(c(org_base, "N_SEARCHES"))
-} else {
-  org_base
-}
-
-cat(
-  "✅ Drivers\n",
-  "  paid_media_spends:", paste(paid_media_spends, collapse = ", "), "\n",
-  "  paid_media_vars  :", paste(paid_media_vars, collapse = ", "), "\n",
-  "  context_vars     :", paste(context_vars, collapse = ", "), "\n",
-  "  factor_vars      :", paste(factor_vars, collapse = ", "), "\n",
-  "  organic_vars     :", paste(organic_vars, collapse = ", "), "\n"
-)
-summary(df$UPLOAD_VALUE)
-length(unique(na.omit(df$UPLOAD_VALUE)))
-summary(df)
-## ---------- ROBYN INPUTS ----------
-InputCollect <- robyn_inputs(
-  dt_input          = df,
-  date_var          = "date",
-  dep_var           = dep_var,
-  adstock           = adstock,
-  dep_var_type      = "revenue",
-  prophet_vars      = c("trend", "season", "holiday", "weekday"),
-  prophet_country   = toupper(country),
-  paid_media_spends = paid_media_spends,
-  paid_media_vars   = paid_media_vars,
-  context_vars      = context_vars,
-  factor_vars       = factor_vars,
-  organic_vars      = organic_vars,
-  window_start      = start_data_date,
-  window_end        = end_data_date,
-)
-
-alloc_end <- max(InputCollect$dt_input$date)
-alloc_start <- alloc_end - 364
-
-## ---------- DRIVERS (robust to config mismatches) ----------
-# Uppercase config lists to match df colnames
+## ---------- DRIVERS (robust, single source of truth) ----------
 cfg_paid_spends <- toupper(cfg$paid_media_spends %||% character(0))
 cfg_paid_vars <- toupper(cfg$paid_media_vars %||% character(0))
 
-# Intersect with df; fallback to autodetect if mismatch or too short
 paid_media_spends <- intersect(cfg_paid_spends, names(df))
 paid_media_vars <- intersect(cfg_paid_vars, names(df))
-
 if (!length(paid_media_spends) || length(paid_media_spends) != length(paid_media_vars)) {
   message("⚠️ Config paid_media_* mismatch. Falling back to autodetect *_COST(S).")
   paid_media_spends <- grep("(_COSTS?)$", names(df), value = TRUE)
   paid_media_vars <- paid_media_spends
 }
-
-# Keep channels with non-zero historical spend
 keep_idx <- vapply(paid_media_spends, function(s) sum(df[[s]], na.rm = TRUE) > 0, logical(1))
 paid_media_spends <- paid_media_spends[keep_idx]
 paid_media_vars <- paid_media_vars[keep_idx]
-
 if (!length(paid_media_spends)) stop("No paid-media channels found with non-zero spend.")
 
 context_vars <- intersect(toupper(cfg$context_vars %||% character(0)), names(df))
 factor_vars <- intersect(toupper(cfg$factor_vars %||% character(0)), names(df))
-
-# Remove overlaps between context & factor
 overlap_cf <- intersect(context_vars, factor_vars)
 if (length(overlap_cf)) {
   message("⚠️ Dropping overlaps from factor_vars: ", paste(overlap_cf, collapse = ", "))
   factor_vars <- setdiff(factor_vars, overlap_cf)
 }
 
-# Organic: keep your existing logic
 org_base <- intersect(toupper(cfg$organic_vars %||% "ORGANIC_TRAFFIC"), names(df))
 organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES" %in% names(df)) {
   unique(c(org_base, "N_SEARCHES"))
@@ -741,44 +673,32 @@ cat(
   "  organic_vars     :", paste(organic_vars, collapse = ", "), "\n"
 )
 
-## ---------- ROBYN INPUTS (base) ----------
-InputCollect <- robyn_inputs(
-  dt_input          = df,
-  date_var          = "date",
-  dep_var           = dep_var,
-  adstock           = adstock, # "geometric" or "weibull_*"
-  dep_var_type      = "revenue",
-  prophet_vars      = c("trend", "season", "holiday", "weekday"),
-  prophet_country   = toupper(country),
-  paid_media_spends = paid_media_spends,
-  paid_media_vars   = paid_media_vars,
-  context_vars      = context_vars,
-  factor_vars       = factor_vars,
-  organic_vars      = organic_vars,
-  window_start      = start_data_date,
-  window_end        = end_data_date
-)
-
-## ---------- HYPERPARAMETERS (adstock-aware, validated) ----------
-media_hp_vars <- unique(InputCollect$paid_media_vars) # HPs MUST at least cover paid-media
-maybe_org <- intersect(organic_vars, names(df)) # optional, only if you want HPs on organics (your old run had them)
-hyper_vars <- unique(c(media_hp_vars, maybe_org))
-
-if (!length(hyper_vars)) stop("No variables available for HP ranges.")
-
-ad_type <- tolower(InputCollect$adstock %||% adstock %||% "geometric")
+## ---------- ADSTOCK DETECTION ----------
+ad_type <- tolower(adstock %||% "geometric")
+if (!nzchar(ad_type) || ad_type == "none") {
+  message("⚠️ adstock was 'none' or empty. Forcing 'geometric' so HPs make sense.")
+  ad_type <- "geometric"
+}
 use_weibull <- grepl("^weibull", ad_type)
 
+## Handy alias so both TV_COST / TV_COSTS are covered
+TV_NAME <- if ("TV_COST" %in% paid_media_vars) "TV_COST" else if ("TV_COSTS" %in% paid_media_vars) "TV_COSTS" else NA
+
+## ---------- HYPERPARAMETERS (build once, attach once) ----------
+media_hp_vars <- unique(paid_media_vars)
+maybe_org <- intersect(organic_vars, names(df)) # optional
+hyper_vars <- unique(c(media_hp_vars, maybe_org))
+if (!length(hyper_vars)) stop("No variables available for HP ranges.")
+
 hp_for_var <- function(v) {
-  # Saturation (alphas/gammas) always defined
+  # Base saturation
   sat <- list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9))
   if (v == "ORGANIC_TRAFFIC") sat <- list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7))
-  if (v == "TV_COST") sat <- list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99))
+  if (!is.na(TV_NAME) && v == TV_NAME) sat <- list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99))
   if (v == "PARTNERSHIP_COSTS") sat <- list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875))
 
   if (!use_weibull) {
-    # geometric → thetas
-    ad <- if (v == "TV_COST") {
+    ad <- if (!is.na(TV_NAME) && v == TV_NAME) {
       list(thetas = c(0.7, 0.95))
     } else if (v == "PARTNERSHIP_COSTS") {
       list(thetas = c(0.3, 0.625))
@@ -789,8 +709,7 @@ hp_for_var <- function(v) {
     }
     c(sat, ad)
   } else {
-    # weibull_* → shapes & scales
-    ad <- if (v == "TV_COST") {
+    ad <- if (!is.na(TV_NAME) && v == TV_NAME) {
       list(shapes = c(0.5, 2.5), scales = c(0.5, 0.99))
     } else if (v == "PARTNERSHIP_COSTS") {
       list(shapes = c(0.3, 2.0), scales = c(0.3, 0.9))
@@ -805,51 +724,81 @@ hp_for_var <- function(v) {
 
 hp_list <- setNames(lapply(hyper_vars, hp_for_var), hyper_vars)
 
-hyperparameters <- list()
+# Build with plural AND singular synonyms for cross-version safety
+hyperparameters <- list(train_size = as.numeric(train_size))
 for (v in names(hp_list)) {
+  h <- hp_list[[v]]
+
   # saturation
-  hyperparameters[[paste0(v, "_alphas")]] <- hp_list[[v]]$alphas
-  hyperparameters[[paste0(v, "_gammas")]] <- hp_list[[v]]$gammas
-  # adstock
+  hyperparameters[[paste0(v, "_alphas")]] <- h$alphas
+  hyperparameters[[paste0(v, "_gammas")]] <- h$gammas
+  hyperparameters[[paste0(v, "_alpha")]] <- h$alphas
+  hyperparameters[[paste0(v, "_gamma")]] <- h$gammas
+
   if (!use_weibull) {
-    hyperparameters[[paste0(v, "_thetas")]] <- hp_list[[v]]$thetas
+    hyperparameters[[paste0(v, "_thetas")]] <- h$thetas
+    hyperparameters[[paste0(v, "_theta")]] <- h$thetas
   } else {
-    hyperparameters[[paste0(v, "_shapes")]] <- hp_list[[v]]$shapes
-    hyperparameters[[paste0(v, "_scales")]] <- hp_list[[v]]$scales
+    hyperparameters[[paste0(v, "_shapes")]] <- h$shapes
+    hyperparameters[[paste0(v, "_scales")]] <- h$scales
+    hyperparameters[[paste0(v, "_shape")]] <- h$shapes
+    hyperparameters[[paste0(v, "_scale")]] <- h$scales
   }
 }
-hyperparameters[["train_size"]] <- as.numeric(train_size)
 
-# Validate keys before attaching
+# Validate before attach (against paid media only)
 core_expected <- unlist(lapply(media_hp_vars, function(v) {
-  c(
-    paste0(v, "_alphas"), paste0(v, "_gammas"),
-    if (!use_weibull) paste0(v, "_thetas") else c(paste0(v, "_shapes"), paste0(v, "_scales"))
-  )
+  if (!use_weibull) {
+    c(
+      paste0(v, "_alphas"), paste0(v, "_gammas"), paste0(v, "_thetas"),
+      paste0(v, "_alpha"), paste0(v, "_gamma"), paste0(v, "_theta")
+    )
+  } else {
+    c(
+      paste0(v, "_alphas"), paste0(v, "_gammas"), paste0(v, "_shapes"), paste0(v, "_scales"),
+      paste0(v, "_alpha"), paste0(v, "_gamma"), paste0(v, "_shape"), paste0(v, "_scale")
+    )
+  }
 }))
-missing <- setdiff(core_expected, names(hyperparameters))
-if (length(missing)) {
-  stop(
-    "Missing HP keys for: ",
-    paste(unique(sub("_(alphas|gammas|thetas|shapes|scales)$", "", missing)), collapse = ", ")
-  )
-}
+if (!length(core_expected)) stop("No paid-media variables to validate HPs against.")
 
-# Attach to InputCollect & verify Robyn kept them
-InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
+## ---------- ROBYN INPUTS (single call; attach HP here) ----------
+InputCollect <- robyn_inputs(
+  dt_input          = df,
+  date_var          = "date",
+  dep_var           = dep_var,
+  adstock           = ad_type,
+  dep_var_type      = "revenue",
+  prophet_vars      = c("trend", "season", "holiday", "weekday"),
+  prophet_country   = toupper(country),
+  paid_media_spends = paid_media_spends,
+  paid_media_vars   = paid_media_vars,
+  context_vars      = context_vars,
+  factor_vars       = factor_vars,
+  organic_vars      = organic_vars,
+  window_start      = start_data_date,
+  window_end        = end_data_date,
+  hyperparameters   = hyperparameters # <-- attach here
+)
 
-hp_names <- setdiff(names(InputCollect$hyperparameters), "train_size")
+hp_names <- setdiff(names(InputCollect$hyperparameters %||% list()), "train_size")
+cat("adstock detected: ", InputCollect$adstock, "\n", sep = "")
 cat("HP keys attached (count=", length(hp_names), "): ",
   paste(head(hp_names, 20), collapse = ", "), "\n",
   sep = ""
 )
+
 if (!length(hp_names)) {
   stop(
-    "Robyn did not keep any HP keys. Check adstock type (", ad_type,
-    ") and variable names. Paid-media in InputCollect: ",
-    paste(InputCollect$paid_media_vars, collapse = ", ")
+    "Robyn kept 0 HP keys. Check adstock ('", InputCollect$adstock,
+    "'), paid_media_vars (", paste(InputCollect$paid_media_vars, collapse = ", "),
+    "), and key spellings (alphas/gammas/thetas vs singular; shapes/scales)."
   )
 }
+
+alloc_end <- max(InputCollect$dt_input$date)
+alloc_start <- alloc_end - 364
+
 
 ## ---------- TRAIN ----------
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
