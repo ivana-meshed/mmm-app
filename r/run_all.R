@@ -692,62 +692,164 @@ InputCollect <- robyn_inputs(
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
-## ---------- HYPERPARAMETERS (name-aligned, parallel-safe) ----------
-# Use canonical fields that exist in all Robyn versions
-hyper_vars <- unique(c(InputCollect$paid_media_vars, InputCollect$organic_vars))
-if (!length(hyper_vars)) stop("No media/organic vars present in InputCollect; cannot set hyperparameters.")
+## ---------- DRIVERS (robust to config mismatches) ----------
+# Uppercase config lists to match df colnames
+cfg_paid_spends <- toupper(cfg$paid_media_spends %||% character(0))
+cfg_paid_vars <- toupper(cfg$paid_media_vars %||% character(0))
+
+# Intersect with df; fallback to autodetect if mismatch or too short
+paid_media_spends <- intersect(cfg_paid_spends, names(df))
+paid_media_vars <- intersect(cfg_paid_vars, names(df))
+
+if (!length(paid_media_spends) || length(paid_media_spends) != length(paid_media_vars)) {
+  message("⚠️ Config paid_media_* mismatch. Falling back to autodetect *_COST(S).")
+  paid_media_spends <- grep("(_COSTS?)$", names(df), value = TRUE)
+  paid_media_vars <- paid_media_spends
+}
+
+# Keep channels with non-zero historical spend
+keep_idx <- vapply(paid_media_spends, function(s) sum(df[[s]], na.rm = TRUE) > 0, logical(1))
+paid_media_spends <- paid_media_spends[keep_idx]
+paid_media_vars <- paid_media_vars[keep_idx]
+
+if (!length(paid_media_spends)) stop("No paid-media channels found with non-zero spend.")
+
+context_vars <- intersect(toupper(cfg$context_vars %||% character(0)), names(df))
+factor_vars <- intersect(toupper(cfg$factor_vars %||% character(0)), names(df))
+
+# Remove overlaps between context & factor
+overlap_cf <- intersect(context_vars, factor_vars)
+if (length(overlap_cf)) {
+  message("⚠️ Dropping overlaps from factor_vars: ", paste(overlap_cf, collapse = ", "))
+  factor_vars <- setdiff(factor_vars, overlap_cf)
+}
+
+# Organic: keep your existing logic
+org_base <- intersect(toupper(cfg$organic_vars %||% "ORGANIC_TRAFFIC"), names(df))
+organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES" %in% names(df)) {
+  unique(c(org_base, "N_SEARCHES"))
+} else {
+  org_base
+}
+
+cat(
+  "✅ Drivers\n",
+  "  paid_media_spends:", paste(paid_media_spends, collapse = ", "), "\n",
+  "  paid_media_vars  :", paste(paid_media_vars, collapse = ", "), "\n",
+  "  context_vars     :", paste(context_vars, collapse = ", "), "\n",
+  "  factor_vars      :", paste(factor_vars, collapse = ", "), "\n",
+  "  organic_vars     :", paste(organic_vars, collapse = ", "), "\n"
+)
+
+## ---------- ROBYN INPUTS (base) ----------
+InputCollect <- robyn_inputs(
+  dt_input          = df,
+  date_var          = "date",
+  dep_var           = dep_var,
+  adstock           = adstock, # "geometric" or "weibull_*"
+  dep_var_type      = "revenue",
+  prophet_vars      = c("trend", "season", "holiday", "weekday"),
+  prophet_country   = toupper(country),
+  paid_media_spends = paid_media_spends,
+  paid_media_vars   = paid_media_vars,
+  context_vars      = context_vars,
+  factor_vars       = factor_vars,
+  organic_vars      = organic_vars,
+  window_start      = start_data_date,
+  window_end        = end_data_date
+)
+
+## ---------- HYPERPARAMETERS (adstock-aware, validated) ----------
+media_hp_vars <- unique(InputCollect$paid_media_vars) # HPs MUST at least cover paid-media
+maybe_org <- intersect(organic_vars, names(df)) # optional, only if you want HPs on organics (your old run had them)
+hyper_vars <- unique(c(media_hp_vars, maybe_org))
+
+if (!length(hyper_vars)) stop("No variables available for HP ranges.")
+
+ad_type <- tolower(InputCollect$adstock %||% adstock %||% "geometric")
+use_weibull <- grepl("^weibull", ad_type)
 
 hp_for_var <- function(v) {
-  if (v == "ORGANIC_TRAFFIC") {
-    list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
-  } else if (v == "TV_COST") {
-    list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
-  } else if (v == "PARTNERSHIP_COSTS") {
-    list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
+  # Saturation (alphas/gammas) always defined
+  sat <- list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9))
+  if (v == "ORGANIC_TRAFFIC") sat <- list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7))
+  if (v == "TV_COST") sat <- list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99))
+  if (v == "PARTNERSHIP_COSTS") sat <- list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875))
+
+  if (!use_weibull) {
+    # geometric → thetas
+    ad <- if (v == "TV_COST") {
+      list(thetas = c(0.7, 0.95))
+    } else if (v == "PARTNERSHIP_COSTS") {
+      list(thetas = c(0.3, 0.625))
+    } else if (v == "ORGANIC_TRAFFIC") {
+      list(thetas = c(0.9, 0.99))
+    } else {
+      list(thetas = c(0.1, 0.4))
+    }
+    c(sat, ad)
   } else {
-    list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
+    # weibull_* → shapes & scales
+    ad <- if (v == "TV_COST") {
+      list(shapes = c(0.5, 2.5), scales = c(0.5, 0.99))
+    } else if (v == "PARTNERSHIP_COSTS") {
+      list(shapes = c(0.3, 2.0), scales = c(0.3, 0.9))
+    } else if (v == "ORGANIC_TRAFFIC") {
+      list(shapes = c(0.2, 1.5), scales = c(0.8, 0.999))
+    } else {
+      list(shapes = c(0.2, 2.5), scales = c(0.2, 0.9))
+    }
+    c(sat, ad)
   }
 }
 
-# Build ranges (parallel if many vars)
-if (length(hyper_vars) > 10) {
-  hp_list <- future_lapply(hyper_vars, hp_for_var, future.seed = TRUE)
-  names(hp_list) <- hyper_vars
-} else {
-  hp_list <- setNames(lapply(hyper_vars, hp_for_var), hyper_vars)
-}
+hp_list <- setNames(lapply(hyper_vars, hp_for_var), hyper_vars)
 
 hyperparameters <- list()
 for (v in names(hp_list)) {
+  # saturation
   hyperparameters[[paste0(v, "_alphas")]] <- hp_list[[v]]$alphas
   hyperparameters[[paste0(v, "_gammas")]] <- hp_list[[v]]$gammas
-  hyperparameters[[paste0(v, "_thetas")]] <- hp_list[[v]]$thetas
+  # adstock
+  if (!use_weibull) {
+    hyperparameters[[paste0(v, "_thetas")]] <- hp_list[[v]]$thetas
+  } else {
+    hyperparameters[[paste0(v, "_shapes")]] <- hp_list[[v]]$shapes
+    hyperparameters[[paste0(v, "_scales")]] <- hp_list[[v]]$scales
+  }
 }
 hyperparameters[["train_size"]] <- as.numeric(train_size)
 
-# Validate before attaching (fail fast if a key is missing)
-expected <- as.vector(rbind(
-  paste0(hyper_vars, "_alphas"),
-  paste0(hyper_vars, "_gammas"),
-  paste0(hyper_vars, "_thetas")
-))
-missing <- setdiff(expected, names(hyperparameters))
+# Validate keys before attaching
+core_expected <- unlist(lapply(media_hp_vars, function(v) {
+  c(
+    paste0(v, "_alphas"), paste0(v, "_gammas"),
+    if (!use_weibull) paste0(v, "_thetas") else c(paste0(v, "_shapes"), paste0(v, "_scales"))
+  )
+}))
+missing <- setdiff(core_expected, names(hyperparameters))
 if (length(missing)) {
   stop(
-    "Missing hyperparameter keys for: ",
-    paste(unique(sub("_(alphas|gammas|thetas)$", "", missing)), collapse = ", ")
+    "Missing HP keys for: ",
+    paste(unique(sub("_(alphas|gammas|thetas|shapes|scales)$", "", missing)), collapse = ", ")
   )
 }
 
-# Attach to InputCollect
+# Attach to InputCollect & verify Robyn kept them
 InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
 
-# Sanity log
-cat(
-  "HP keys attached (sample):\n  ",
-  paste(head(setdiff(names(InputCollect$hyperparameters), "train_size"), 10), collapse = ", "),
-  "\n"
+hp_names <- setdiff(names(InputCollect$hyperparameters), "train_size")
+cat("HP keys attached (count=", length(hp_names), "): ",
+  paste(head(hp_names, 20), collapse = ", "), "\n",
+  sep = ""
 )
+if (!length(hp_names)) {
+  stop(
+    "Robyn did not keep any HP keys. Check adstock type (", ad_type,
+    ") and variable names. Paid-media in InputCollect: ",
+    paste(InputCollect$paid_media_vars, collapse = ", ")
+  )
+}
 
 ## ---------- TRAIN ----------
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
