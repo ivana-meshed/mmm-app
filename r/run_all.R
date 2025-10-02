@@ -32,6 +32,7 @@ suppressPackageStartupMessages({
   library(future)
   library(future.apply)
   library(parallel)
+  library(tibble)
 })
 
 ## Optional time-series forecaster
@@ -443,19 +444,67 @@ make_share_bands <- function(shares, tol = 1e-4) {
 }
 
 ## ---------- LOGGING / ERROR HANDLING ----------
+## ---------- LOGGING / ERROR HANDLING ----------
 log_file <- NULL
+log_con_out <- NULL
+log_con_err <- NULL
+.__handling_error <- FALSE
+
 cleanup <- function() {
-  try(sink(type = "message"), silent = TRUE)
-  try(sink(), silent = TRUE)
-  if (!is.null(log_file)) try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+  # Unwind all sinks
+  while (sink.number(type = "message") > 0) sink(type = "message")
+  while (sink.number() > 0) sink()
+  # Close connections so buffers flush
+  for (con in list(log_con_out, log_con_err)) {
+    if (!is.null(con)) try(close(con), silent = TRUE)
+  }
+  # Upload log last
+  if (!is.null(log_file) && file.exists(log_file)) {
+    try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+  }
 }
 
 options(error = function(e) {
+  if (.__handling_error) { # prevent recursive handler bombs
+    try(cleanup(), silent = TRUE)
+    quit(status = 1)
+  }
+  .__handling_error <<- TRUE
   traceback()
   message("FATAL ERROR: ", conditionMessage(e))
+  # Attempt to write FAILED status + job_history
+  try(
+    {
+      job_finished <- Sys.time()
+      status_json2 <- status_json %||% file.path(tempdir(), "status.json")
+      writeLines(jsonlite::toJSON(list(
+        state = "FAILED",
+        start_time = as.character(job_started %||% NA),
+        end_time = as.character(job_finished),
+        error = conditionMessage(e)
+      ), auto_unbox = TRUE), status_json2)
+      if (!is.null(gcs_prefix)) gcs_put_safe(status_json2, file.path(gcs_prefix, "status.json"))
+      if (!is.null(gcs_prefix)) {
+        append_to_job_history(list(
+          job_id = gcs_prefix, state = "FAILED",
+          country = country %||% NA, revision = revision %||% NA,
+          date_input = date_input %||% NA,
+          iterations = iter %||% NA, trials = trials %||% NA,
+          train_size = paste(train_size, collapse = ",") %||% NA,
+          dep_var = dep_var %||% NA, adstock = adstock %||% NA,
+          start_time = as.character(job_started %||% NA),
+          end_time = as.character(job_finished),
+          duration_minutes = NA, gcs_prefix = gcs_prefix %||% NA,
+          bucket = googleCloudStorageR::gcs_get_global_bucket()
+        ))
+      }
+    },
+    silent = TRUE
+  )
   cleanup()
   quit(status = 1)
 })
+
 
 ## ---------- LOAD CFG ----------
 message("Loading configuration from Cloud Run Jobs environment...")
@@ -513,6 +562,7 @@ log_con_err <- file(log_file, open = "at")
 sink(log_con_out, split = TRUE)
 sink(log_con_err, type = "message")
 on.exit(cleanup(), add = TRUE)
+
 
 ## ---------- PYTHON / NEVERGRAD ----------
 reticulate::use_python("/usr/bin/python3", required = TRUE)
@@ -607,8 +657,17 @@ if (!"TV_IS_ON" %in% names(df)) df$TV_IS_ON <- 0
 
 ## ---------- FEATURE ENGINEERING ----------
 df <- df %>% mutate(
-  GA_OTHER_COST = rowSums(select(., tidyselect::matches("^GA_.*_COST$") &
-    !any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE),
+  # GA_OTHER_COST
+  GA_OTHER_COST = rowSums(
+    select(., tidyselect::matches("^GA_.*_COST$"), -any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))),
+    na.rm = TRUE
+  ),
+
+  # GA_OTHER_IMPRESSIONS
+  GA_OTHER_IMPRESSIONS = rowSums(
+    select(., tidyselect::matches("^GA_.*_IMPRESSIONS$"), -any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))),
+    na.rm = TRUE
+  ),
   BING_TOTAL_COST = rowSums(select(., tidyselect::matches("^BING_.*_COST$")), na.rm = TRUE),
   META_TOTAL_COST = rowSums(select(., tidyselect::matches("^META_.*_COST$")), na.rm = TRUE),
   ORGANIC_TRAFFIC = rowSums(select(., any_of(c(
@@ -616,9 +675,8 @@ df <- df %>% mutate(
     "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS"
   ))), na.rm = TRUE),
   BRAND_HEALTH = coalesce(DIRECT_DAILY_SESSIONS, 0) + coalesce(SEO_DAILY_SESSIONS, 0),
-  ORGxTV = BRAND_HEALTH * coalesce(TV_COST, TV_COSTS, 0),
-  GA_OTHER_IMPRESSIONS = rowSums(select(., tidyselect::matches("^GA_.*_IMPRESSIONS$") &
-    !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
+  TV_ANY = rowSums(select(., any_of(c("TV_COST", "TV_COSTS"))), na.rm = TRUE),
+  ORGxTV = BRAND_HEALTH * TV_ANY,
   BING_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE),
   META_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE),
   BING_TOTAL_CLICKS = rowSums(select(., tidyselect::matches("^BING_.*_CLICKS$")), na.rm = TRUE),
@@ -909,7 +967,9 @@ OutputCollect <- tryCatch(
   }
 )
 
-if (is.null(OutputCollect)) stop("robyn_outputs returned NULL — no valid candidates or export/plot error.")
+if (is.null(OutputCollect) || (is.list(OutputCollect) && !length(OutputCollect))) {
+  stop("robyn_outputs returned empty — no valid candidates or export/plot error.")
+}
 
 # ensure best_id if still missing but outputs succeeded
 if ((is.na(best_id) || best_id == "") && !is.null(OutputCollect)) {
@@ -1060,18 +1120,15 @@ future_spend <- build_spend_forecast(
   monthly_targets = monthly_targets
 )
 
-# Sanity check: plan totals vs targets
-plan_check <- future_spend %>%
-  mutate(month = lubridate::floor_date(date, "month")) %>%
-  group_by(month) %>%
-  summarise(plan_total = sum(rowSums(across(all_of(spend_cols)), na.rm = TRUE), na.rm = TRUE), .groups = "drop") %>%
-  arrange(month)
-if (nrow(plan_check)) {
-  ratios <- round(plan_check$plan_total / monthly_targets[1:nrow(plan_check)] - 1, 3)
-  message("Plan vs targets (ratio-1): ", paste(ratios, collapse = ", "))
-  if (any(abs(ratios) > 0.10, na.rm = TRUE)) message("⚠️ Plan deviates >10% from targets. Check inputs or scaling.")
-}
+# Debug info about the plan we just built
+rng <- try(range(future_spend$date), silent = TRUE)
+message(
+  "future_spend rows=", nrow(future_spend),
+  "; date range=", if (!inherits(rng, "try-error")) paste(rng, collapse = " to ") else "NA",
+  "; spend_cols=", paste(spend_cols, collapse = ", ")
+)
 
+# Persist the daily plan even if empty (useful for debugging)
 plan_path <- file.path(dir_path, "spend_plan_daily_next3m.csv")
 safe_write_csv(future_spend, plan_path)
 gcs_put_safe(plan_path, file.path(gcs_prefix, "spend_plan_daily_next3m.csv"))
@@ -1080,83 +1137,132 @@ gcs_put_safe(plan_path, file.path(gcs_prefix, "spend_plan_daily_next3m.csv"))
 BASE_LOOKBACK <- as.integer(Sys.getenv("FORECAST_BASE_LOOKBACK_DAYS", "28"))
 base_daily <- compute_base_daily(OutputCollect, InputCollect, lookback_days = BASE_LOOKBACK)
 
-# 3) Aggregate to months & evaluate plan via allocator with tight share bands
-future_spend <- future_spend %>% mutate(month = floor_date(date, "month"))
-months_vec <- sort(unique(future_spend$month))
+# If the plan is empty, write a baseline-only forecast so downstream doesn’t crash
+if (!nrow(future_spend)) {
+  start_next <- floor_date(max(InputCollect$dt_input$date, na.rm = TRUE) + 1, "month")
+  months_vec_fb <- seq(start_next, by = "1 month", length.out = 3)
+  days_vec_fb <- as.integer((months_vec_fb %m+% months(1) - days(1)) - months_vec_fb + 1)
 
-SHARE_TOL <- as.numeric(Sys.getenv("FORECAST_SHARE_TOL", "1e-4"))
-proj_rows <- list()
+  proj <- data.frame(
+    month = format(months_vec_fb, "%Y-%m"),
+    start = as.Date(months_vec_fb),
+    end = as.Date(months_vec_fb %m+% months(1) - days(1)),
+    days = days_vec_fb,
+    budget = 0,
+    baseline = round(base_daily * days_vec_fb, 2),
+    incremental = 0,
+    forecast_total = round(base_daily * days_vec_fb, 2),
+    stringsAsFactors = FALSE
+  )
 
-pred_plot_rows <- list()
+  forecast_csv <- file.path(dir_path, "forecast_next3m.csv")
+  safe_write_csv(proj, forecast_csv)
+  gcs_put_safe(forecast_csv, file.path(gcs_prefix, "forecast_next3m.csv"))
+  message("⚠️ future_spend was empty; wrote baseline-only forecast.")
+  print(proj)
+} else {
+  # 3) Sanity check: plan totals vs targets
+  plan_check <- future_spend %>%
+    mutate(month = lubridate::floor_date(date, "month")) %>%
+    group_by(month) %>%
+    summarise(plan_total = sum(rowSums(across(all_of(spend_cols)), na.rm = TRUE), na.rm = TRUE), .groups = "drop") %>%
+    arrange(month)
 
-for (i in seq_along(months_vec)) {
-  m <- months_vec[i]
-  seg <- future_spend %>% filter(month == m)
-  days_in_m <- nrow(seg)
-  monthly_per_channel <- colSums(seg[, spend_cols, drop = FALSE], na.rm = TRUE)
-  total_budget <- sum(monthly_per_channel, na.rm = TRUE)
+  if (nrow(plan_check)) {
+    ratios <- round(plan_check$plan_total / monthly_targets[1:nrow(plan_check)] - 1, 3)
+    message("Plan vs targets (ratio-1): ", paste(ratios, collapse = ", "))
+    if (any(abs(ratios) > 0.10, na.rm = TRUE)) {
+      message("⚠️ Plan deviates >10% from targets. Check inputs or scaling.")
+    }
+  }
 
-  if (!is.finite(total_budget) || total_budget <= 0) {
+  # 4) Aggregate to months & evaluate plan via allocator with tight share bands
+  future_spend <- future_spend %>% mutate(month = floor_date(date, "month"))
+  months_vec <- sort(unique(future_spend$month))
+
+  SHARE_TOL <- as.numeric(Sys.getenv("FORECAST_SHARE_TOL", "1e-4"))
+  proj_rows <- list()
+  pred_plot_rows <- list()
+
+  # Ensure folder exists (in case earlier creation was skipped)
+  if (!dir.exists(pred_alloc_dir)) dir.create(pred_alloc_dir, showWarnings = FALSE, recursive = TRUE)
+
+  for (i in seq_along(months_vec)) {
+    m <- months_vec[i]
+    seg <- future_spend %>% filter(month == m)
+    days_in_m <- nrow(seg)
+    monthly_per_channel <- colSums(seg[, spend_cols, drop = FALSE], na.rm = TRUE)
+    total_budget <- sum(monthly_per_channel, na.rm = TRUE)
+
+    if (!is.finite(total_budget) || total_budget <= 0) {
+      proj_rows[[i]] <- data.frame(
+        month = format(m, "%Y-%m"),
+        start = as.Date(m),
+        end = as.Date((m %m+% months(1)) - days(1)),
+        days = days_in_m,
+        budget = 0,
+        baseline = round(base_daily * days_in_m, 2),
+        incremental = 0,
+        forecast_total = round(base_daily * days_in_m, 2),
+        stringsAsFactors = FALSE
+      )
+      next
+    }
+
+    shares <- monthly_per_channel / total_budget
+    bands <- make_share_bands(shares, tol = SHARE_TOL)
+
+    al <- try(
+      robyn_allocator(
+        InputCollect = InputCollect,
+        OutputCollect = OutputCollect,
+        select_model = best_id,
+        date_range = c(alloc_start, alloc_end), # use trained window; allocator uses model params
+        expected_spend = total_budget,
+        scenario = "max_historical_response",
+        channel_constr_low = as.numeric(bands$low),
+        channel_constr_up = as.numeric(bands$up),
+        export = TRUE
+      ),
+      silent = TRUE
+    )
+
+    al_tbl <- if (!inherits(al, "try-error")) al$result_allocator else NULL
+    incr <- get_allocator_total_response(al_tbl)
+
+    # Plot & upload allocator for this forecast month
+    if (!inherits(al, "try-error")) {
+      pred_fname <- sprintf("allocator_pred_%s.png", format(m, "%Y-%m"))
+      pred_local <- file.path(pred_alloc_dir, pred_fname)
+      pred_key <- file.path(paste0("allocator_pred_plots_", timestamp), pred_fname)
+
+      try(
+        {
+          png(pred_local, width = 1200, height = 800)
+          plot(al) # Robyn's allocator plot
+          dev.off()
+          gcs_put_safe(pred_local, file.path(gcs_prefix, pred_key))
+        },
+        silent = TRUE
+      )
+
+      pred_plot_rows[[length(pred_plot_rows) + 1]] <- data.frame(
+        month = format(m, "%Y-%m"),
+        image_key = pred_key,
+        image_gs = sprintf("gs://%s/%s/%s", googleCloudStorageR::gcs_get_global_bucket(), gcs_prefix, pred_key),
+        budget = round(total_budget, 2),
+        baseline = round(base_daily * days_in_m, 2),
+        incremental = round(incr, 2),
+        forecast_total = round(base_daily * days_in_m + (incr %||% 0), 2),
+        stringsAsFactors = FALSE
+      )
+    }
+
     proj_rows[[i]] <- data.frame(
       month = format(m, "%Y-%m"),
       start = as.Date(m),
       end = as.Date((m %m+% months(1)) - days(1)),
       days = days_in_m,
-      budget = 0,
-      baseline = round(base_daily * days_in_m, 2),
-      incremental = 0,
-      forecast_total = round(base_daily * days_in_m, 2),
-      stringsAsFactors = FALSE
-    )
-    next
-  }
-
-  shares <- monthly_per_channel / total_budget
-  bands <- make_share_bands(shares, tol = SHARE_TOL)
-
-  al <- try(
-    robyn_allocator(
-      InputCollect = InputCollect,
-      OutputCollect = OutputCollect,
-      select_model = best_id,
-      date_range = c(alloc_start, alloc_end), # use trained window; allocator uses model params
-      expected_spend = total_budget,
-      scenario = "max_historical_response",
-      channel_constr_low = as.numeric(bands$low),
-      channel_constr_up = as.numeric(bands$up),
-      export = TRUE
-    ),
-    silent = TRUE
-  )
-
-  al_tbl <- if (!inherits(al, "try-error")) al$result_allocator else NULL
-  incr <- get_allocator_total_response(al_tbl)
-  # --- ADD: plot + upload allocator for this forecast month ---
-  if (!inherits(al, "try-error")) {
-    pred_fname <- sprintf("allocator_pred_%s.png", format(m, "%Y-%m"))
-    pred_local <- file.path(pred_alloc_dir, pred_fname)
-    pred_key <- file.path(paste0("allocator_pred_plots_", timestamp), pred_fname)
-
-    try(
-      {
-        png(pred_local, width = 1200, height = 800)
-        plot(al) # Robyn's allocator plot
-        dev.off()
-        gcs_put_safe(pred_local, file.path(gcs_prefix, pred_key))
-      },
-      silent = TRUE
-    )
-
-    # (optional) stash a small row to build an index CSV later
-    if (!exists("pred_plot_rows", inherits = FALSE)) pred_plot_rows <- list()
-    pred_plot_rows[[length(pred_plot_rows) + 1]] <- data.frame(
-      month = format(m, "%Y-%m"),
-      image_key = pred_key,
-      image_gs = sprintf(
-        "gs://%s/%s/%s",
-        googleCloudStorageR::gcs_get_global_bucket(),
-        gcs_prefix, pred_key
-      ),
       budget = round(total_budget, 2),
       baseline = round(base_daily * days_in_m, 2),
       incremental = round(incr, 2),
@@ -1164,45 +1270,33 @@ for (i in seq_along(months_vec)) {
       stringsAsFactors = FALSE
     )
   }
-  # --- end ADD ---
 
-  proj_rows[[i]] <- data.frame(
-    month = format(m, "%Y-%m"),
-    start = as.Date(m),
-    end = as.Date((m %m+% months(1)) - days(1)),
-    days = days_in_m,
-    budget = round(total_budget, 2),
-    baseline = round(base_daily * days_in_m, 2),
-    incremental = round(incr, 2),
-    forecast_total = round(base_daily * days_in_m + (incr %||% 0), 2),
-    stringsAsFactors = FALSE
-  )
+  proj <- if (length(proj_rows)) {
+    dplyr::bind_rows(proj_rows)
+  } else {
+    data.frame(
+      month = character(), start = as.Date(character()), end = as.Date(character()),
+      days = integer(), budget = double(), baseline = double(),
+      incremental = double(), forecast_total = double()
+    )
+  }
+
+  # Index for prediction allocator plots (optional)
+  if (length(pred_plot_rows)) {
+    pred_idx <- dplyr::bind_rows(pred_plot_rows)
+    pred_idx_csv <- file.path(dir_path, "forecast_allocator_index.csv")
+    safe_write_csv(pred_idx, pred_idx_csv)
+    gcs_put_safe(pred_idx_csv, file.path(gcs_prefix, "forecast_allocator_index.csv"))
+  }
+
+  # Persist forecast
+  forecast_csv <- file.path(dir_path, "forecast_next3m.csv")
+  safe_write_csv(proj, forecast_csv)
+  gcs_put_safe(forecast_csv, file.path(gcs_prefix, "forecast_next3m.csv"))
+  message("Wrote monthly projections (next 3) to: ", forecast_csv)
+  print(proj)
 }
 
-proj <- if (length(proj_rows)) {
-  dplyr::bind_rows(proj_rows)
-} else {
-  data.frame(
-    month = character(), start = as.Date(character()), end = as.Date(character()),
-    days = integer(), budget = double(), baseline = double(),
-    incremental = double(), forecast_total = double()
-  )
-}
-
-# ADD: write a small index for the prediction allocator plots
-if (exists("pred_plot_rows", inherits = FALSE) && length(pred_plot_rows)) {
-  pred_idx <- dplyr::bind_rows(pred_plot_rows)
-  pred_idx_csv <- file.path(dir_path, "forecast_allocator_index.csv")
-  safe_write_csv(pred_idx, pred_idx_csv)
-  gcs_put_safe(pred_idx_csv, file.path(gcs_prefix, "forecast_allocator_index.csv"))
-}
-
-
-forecast_csv <- file.path(dir_path, "forecast_next3m.csv")
-safe_write_csv(proj, forecast_csv)
-gcs_put_safe(forecast_csv, file.path(gcs_prefix, "forecast_next3m.csv"))
-message("Wrote monthly projections (next 3) to: ", forecast_csv)
-print(proj)
 
 ## ---------- UPLOAD EVERYTHING (mirror local dir) ----------
 for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
@@ -1249,46 +1343,5 @@ try(append_to_job_history(list(
   bucket = googleCloudStorageR::gcs_get_global_bucket()
 )), silent = TRUE)
 
-options(error = function(e) {
-  traceback()
-  message("FATAL ERROR: ", conditionMessage(e))
-  # Attempt to write FAILED status + job_history
-  try(
-    {
-      job_finished <- Sys.time()
-      status_json <- status_json %||% file.path(tempdir(), "status.json")
-      writeLines(jsonlite::toJSON(list(
-        state = "FAILED",
-        start_time = as.character(job_started %||% NA),
-        end_time = as.character(job_finished),
-        error = conditionMessage(e)
-      ), auto_unbox = TRUE), status_json)
-      if (!is.null(gcs_prefix)) gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
-      # JOB_HISTORY FAILED
-      if (!is.null(gcs_prefix)) {
-        try(append_to_job_history(list(
-          job_id = gcs_prefix,
-          state = "FAILED",
-          country = country %||% NA,
-          revision = revision %||% NA,
-          date_input = date_input %||% NA,
-          iterations = iter %||% NA,
-          trials = trials %||% NA,
-          train_size = paste(train_size, collapse = ",") %||% NA,
-          dep_var = dep_var %||% NA,
-          adstock = adstock %||% NA,
-          start_time = as.character(job_started %||% NA),
-          end_time = as.character(job_finished),
-          duration_minutes = NA,
-          gcs_prefix = gcs_prefix %||% NA,
-          bucket = googleCloudStorageR::gcs_get_global_bucket()
-        )), silent = TRUE)
-      }
-    },
-    silent = TRUE
-  )
-  cleanup()
-  quit(status = 1)
-})
 
 gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
