@@ -36,6 +36,7 @@ suppressPackageStartupMessages({
   library(parallel)
   library(parallelly)
   library(tibble)
+  library(tidyselect)
 })
 
 ## simple logger section header
@@ -87,23 +88,65 @@ gcs_download <- function(gcs_path, local_path) {
   message("Downloaded: ", gcs_path, " -> ", local_path)
 }
 
-gcs_put <- function(local_file, object_path, upload_type = c("simple", "resumable")) {
-  upload_type <- match.arg(upload_type)
+# --- REPLACE the existing gcs_put / gcs_put_safe with this block ---
+
+gcs_put <- function(local_file, object_path, upload_type = NULL, max_retries = 5) {
   lf <- normalizePath(local_file, mustWork = FALSE)
   if (!file.exists(lf)) stop("Local file does not exist: ", lf)
   if (grepl("^gs://", object_path)) stop("object_path must be a key, not gs://")
-  bkt <- gcs_get_global_bucket()
+  bkt <- googleCloudStorageR::gcs_get_global_bucket()
   if (is.null(bkt) || bkt == "") stop("No bucket set: call gcs_global_bucket(...)")
+
+  # choose upload mode by size; force resumable for > 5MB (and by default)
+  sz <- file.info(lf)$size %||% 0
+  if (is.null(upload_type)) {
+    upload_type <- if (is.finite(sz) && sz > 5e6) "resumable" else "resumable"
+  }
+
   typ <- mime::guess_type(lf)
   if (is.na(typ) || typ == "") typ <- "application/octet-stream"
-  googleCloudStorageR::gcs_upload(
-    file = lf, name = object_path, bucket = bkt, type = typ,
-    upload_type = upload_type, predefinedAcl = "bucketLevel"
-  )
+
+  # retry w/ exponential backoff
+  attempt <- 0L
+  repeat {
+    attempt <- attempt + 1L
+    res <- tryCatch(
+      {
+        googleCloudStorageR::gcs_upload(
+          file = lf, name = object_path, bucket = bkt, type = typ,
+          upload_type = upload_type, predefinedAcl = "bucketLevel"
+        )
+      },
+      error = function(e) e
+    )
+
+    if (!inherits(res, "error")) {
+      message(sprintf(
+        "✅ Uploaded (%s): %s -> gs://%s/%s  [size=%.2f MB]",
+        upload_type, lf, bkt, object_path, as.numeric(sz) / 1024 / 1024
+      ))
+      return(invisible(TRUE))
+    }
+
+    if (attempt >= max_retries) {
+      stop(sprintf(
+        "❌ GCS upload failed after %d attempts for %s -> gs://%s/%s : %s",
+        attempt, lf, bkt, object_path, conditionMessage(res)
+      ))
+    }
+    wait <- min(60, 2^attempt)
+    message(sprintf(
+      "⚠️ Upload attempt %d failed for %s: %s — retrying in %ss",
+      attempt, basename(lf), conditionMessage(res), wait
+    ))
+    Sys.sleep(wait)
+  }
 }
+
 gcs_put_safe <- function(...) {
   tryCatch(gcs_put(...), error = function(e) {
-    message("GCS upload failed (non-fatal): ", conditionMessage(e))
+    message("❌ GCS upload failed (non-fatal): ", conditionMessage(e))
+    FALSE
   })
 }
 
@@ -504,6 +547,11 @@ ensure_gcs_auth()
 # set a default bucket early so error handler can use it
 early_bucket <- Sys.getenv("GCS_BUCKET", "mmm-app-output")
 if (nzchar(early_bucket)) googleCloudStorageR::gcs_global_bucket(early_bucket)
+options(
+  googleCloudStorageR.predefinedAcl = "bucketLevel",
+  googleCloudStorageR.gzip = FALSE, # don’t re-compress binaries
+  googleCloudStorageR.parallel = FALSE # avoid race conditions on uploads
+)
 
 cfg <- get_cfg_from_env()
 
@@ -915,8 +963,10 @@ gcs_put_safe(timings_local, timings_obj)
 ## ---------- SAVE CORE RDS ----------
 saveRDS(OutputModels, file.path(dir_path, "OutputModels.RDS"))
 saveRDS(InputCollect, file.path(dir_path, "InputCollect.RDS"))
+# After saveRDS(...)
 gcs_put_safe(file.path(dir_path, "OutputModels.RDS"), file.path(gcs_prefix, "OutputModels.RDS"))
 gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "InputCollect.RDS"))
+
 message(sprintf("Local InputCollect HP count: %s", length(InputCollect$hyperparameters)))
 
 ## ---------- OUTPUTS & ONEPAGERS ----------
@@ -1260,11 +1310,24 @@ cat("gcs prefix:", gcs_prefix, "\n")
 cat("Output files (local):\n")
 print(head(list.files(dir_path, recursive = TRUE), 50))
 
-## ---------- MIRROR UPLOAD ----------
-for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
+# --- MIRROR UPLOAD with manifest ---
+manifest <- list()
+local_files <- list.files(dir_path, recursive = TRUE, full.names = TRUE)
+for (f in local_files) {
   rel <- sub(paste0("^", normalizePath(dir_path), "/?"), "", normalizePath(f))
-  gcs_put_safe(f, file.path(gcs_prefix, rel))
+  key <- file.path(gcs_prefix, rel)
+  sz <- as.numeric(file.info(f)$size %||% 0)
+  ok <- isTRUE(gcs_put_safe(f, key)) # resumable under the hood
+  manifest[[length(manifest) + 1L]] <- list(
+    local = f, key = key, size_bytes = sz, uploaded = isTRUE(ok)
+  )
 }
+
+# write manifest
+man_path <- file.path(dir_path, "artifact_manifest.json")
+writeLines(jsonlite::toJSON(manifest, auto_unbox = TRUE, pretty = TRUE), man_path)
+gcs_put_safe(man_path, file.path(gcs_prefix, "artifact_manifest.json"))
+
 
 cat(
   "✅ Cloud Run Job completed successfully!\n",
