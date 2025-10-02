@@ -892,6 +892,8 @@ for (v in names(hp_list)) {
   }
 }
 
+cat("Hyperparameters")
+print(hyperparameters)
 ## ---------- ROBYN INPUTS ----------
 log_section("ROBYN INPUTS & HPs")
 InputCollect <- with_timeout(
