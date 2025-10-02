@@ -518,6 +518,12 @@ iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
 timestamp <- cfg$timestamp %||% format(Sys.time(), "%m%d_%H%M%S")
+
+log_section("CONFIG")
+print(str(cfg, max.level = 1))
+cat("country:", country, " revision:", revision, " date_input:", date_input, "\n")
+cat("iterations:", iter, " trials:", trials, " train_size:", paste(train_size, collapse = ","), "\n")
+
 ## ---------- DYNAMIC VARS FROM CFG ----------
 # Make dependent variable, date column, and adstock configurable
 dep_var <- toupper(cfg$dep_var %||% "UPLOAD_VALUE")
@@ -608,6 +614,12 @@ if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
   stop("No data_gcs_path provided in configuration.")
 }
 
+log_section("DATA LOADED")
+cat("Rows x Cols:", nrow(df), "x", ncol(df), "\n")
+cat("First 20 columns:", paste(head(names(df), 20), collapse = ", "), "\n")
+# Size
+cat("Approx df size:", format(object.size(df), units = "MB"), "\n")
+
 # Optional annotations (mirrored near outputs)
 if (!is.null(cfg$annotations_gcs_path) && nzchar(cfg$annotations_gcs_path)) {
   ann_local <- file.path(dir_path, "enriched_annotations.csv")
@@ -616,10 +628,22 @@ if (!is.null(cfg$annotations_gcs_path) && nzchar(cfg$annotations_gcs_path)) {
 
 df <- as.data.frame(df)
 names(df) <- toupper(names(df))
-summary(df$UPLOAD_VALUE)
+
+log_section("KEY COLUMNS CHECK")
+names(df) <- toupper(names(df))
+if (!dep_var %in% names(df)) stop("dep_var missing: ", dep_var, " in names(df)")
+if (!(date_col %in% names(df))) stop("date column missing: ", date_col)
+cat("dep_var:", dep_var, "  date_col:", date_col, "\n")
+
+# Quick NA & distribution check
+cat("dep_var NA%:", round(mean(is.na(df[[dep_var]])) * 100, 2), "%\n")
+s <- summary(df[[dep_var]])
+cat("dep_var summary:", paste(capture.output(print(s)), collapse = " "), "\n")
+
+if (!dep_var %in% names(df)) stop("dep_var not in data: ", dep_var)
+summary(df[[dep_var]])
 length(unique(na.omit(df$UPLOAD_VALUE)))
 
-## ---------- DATE & CLEAN ----------
 ## ---------- DATE & CLEAN ----------
 # Normalize date column from configurable `date_col`
 if (!(date_col %in% names(df))) {
@@ -631,6 +655,11 @@ if (inherits(df[[date_col]], "POSIXt")) {
   df$date <- as.Date(as.character(df[[date_col]]))
 }
 if (date_col %in% names(df)) df[[date_col]] <- NULL
+
+log_section("DATES & DUPLICATES")
+cat("date range (raw):", as.character(min(df$date, na.rm = TRUE)), "→", as.character(max(df$date, na.rm = TRUE)), "\n")
+ddup <- sum(duplicated(df$date))
+cat("duplicated dates:", ddup, "\n")
 
 df <- filter_by_country(df, country)
 
@@ -683,6 +712,12 @@ df <- df %>% mutate(
   META_TOTAL_CLICKS = rowSums(select(., tidyselect::matches("^META_.*_CLICKS$")), na.rm = TRUE)
 )
 
+log_section("POST-CLEAN FEATURES")
+cat("Columns after cleaning:", ncol(df), "\n")
+have <- function(x) x %in% names(df)
+cat("TV_COST present?", have("TV_COST"), "  TV_COSTS present?", have("TV_COSTS"), "\n")
+cat("ORGANIC_TRAFFIC present?", have("ORGANIC_TRAFFIC"), "\n")
+
 ## ---------- WINDOW / FLAGS ----------
 end_data_date <- max(df$date, na.rm = TRUE)
 start_data_date <- as.Date("2024-01-01")
@@ -690,6 +725,11 @@ df <- df %>% filter(date >= start_data_date, date <= end_data_date)
 df$DOW <- wday(df$date, label = TRUE)
 df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
+log_section("TRAIN WINDOW")
+cat(
+  "Train window:", as.character(start_data_date), "→", as.character(end_data_date),
+  "  rows:", nrow(df), "\n"
+)
 
 ## ---------- DRIVERS (robust, single source of truth) ----------
 cfg_paid_spends <- toupper(cfg$paid_media_spends %||% character(0))
@@ -722,14 +762,24 @@ organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES"
   org_base
 }
 
-cat(
-  "✅ Drivers\n",
-  "  paid_media_spends:", paste(paid_media_spends, collapse = ", "), "\n",
-  "  paid_media_vars  :", paste(paid_media_vars, collapse = ", "), "\n",
-  "  context_vars     :", paste(context_vars, collapse = ", "), "\n",
-  "  factor_vars      :", paste(factor_vars, collapse = ", "), "\n",
-  "  organic_vars     :", paste(organic_vars, collapse = ", "), "\n"
-)
+log_section("DRIVERS SELECTED")
+cat("paid_media_spends:", paste(paid_media_spends, collapse = ", "), "\n")
+cat("paid_media_vars :", paste(paid_media_vars, collapse = ", "), "\n")
+cat("context_vars    :", paste(context_vars, collapse = ", "), "\n")
+cat("factor_vars     :", paste(factor_vars, collapse = ", "), "\n")
+cat("organic_vars    :", paste(organic_vars, collapse = ", "), "\n")
+
+# Totals over the train window and last 90d
+if (length(paid_media_spends)) {
+  last90 <- df$date >= (max(df$date) - 89)
+  tot_train <- sort(colSums(df[, paid_media_spends, drop = FALSE], na.rm = TRUE), decreasing = TRUE)
+  tot_90 <- sort(colSums(df[last90, paid_media_spends, drop = FALSE], na.rm = TRUE), decreasing = TRUE)
+  cat("Paid totals (train):\n")
+  print(round(tot_train, 2))
+  cat("Paid totals (last 90d):\n")
+  print(round(tot_90, 2))
+}
+
 
 ## ---------- ADSTOCK DETECTION ----------
 ad_type <- tolower(adstock %||% "geometric")
@@ -839,6 +889,16 @@ InputCollect <- robyn_inputs(
   hyperparameters   = hyperparameters # <-- attach here
 )
 
+log_section("ROBYYN INPUTS & HPs")
+cat("adstock:", InputCollect$adstock, "\n")
+hp_keys <- setdiff(names(InputCollect$hyperparameters %||% list()), "train_size")
+cat("HP keys kept (n=", length(hp_keys), "): ", paste(head(hp_keys, 25), collapse = ", "), "\n", sep = "")
+if (!length(hp_keys)) {
+  cat("!!! No HP keys retained. Check adstock type and var spellings.\n")
+}
+missing_hp <- setdiff(InputCollect$paid_media_vars, unique(gsub("_(alpha|gamma|theta|shape|scale)s?$", "", hp_keys)))
+if (length(missing_hp)) cat("Vars with no HP coverage:", paste(missing_hp, collapse = ", "), "\n")
+
 hp_names <- setdiff(names(InputCollect$hyperparameters %||% list()), "train_size")
 cat("adstock detected: ", InputCollect$adstock, "\n", sep = "")
 cat("HP keys attached (count=", length(hp_names), "): ",
@@ -859,6 +919,41 @@ alloc_start <- alloc_end - 364
 
 
 ## ---------- TRAIN ----------
+
+log_section("TRAINING START")
+t0 <- Sys.time()
+cat("iterations:", iter, " trials:", trials, " cores:", max_cores, "\n")
+
+OutputModels <- robyn_run(...)
+
+cat("Training finished in", round(difftime(Sys.time(), t0, units = "mins"), 2), "min\n")
+
+# Selection
+log_section("MODEL SELECTION")
+sel <- tryCatch(robyn_select(InputCollect, OutputModels), error = function(e) e)
+if (inherits(sel, "error")) {
+  cat("robyn_select error:", conditionMessage(sel), "\n")
+} else {
+  # print top candidates briefly
+  try(
+    {
+      rh <- sel$pareto$hyper_parameters %||% sel$resultHypParam %||% NULL
+      if (!is.null(rh)) {
+        cat("Top candidates:", nrow(rh), "\n")
+        print(head(rh[, c("solID", "rsq_train", "nrmse_train", "rsq_val", "nrmse_val")], 5))
+      }
+    },
+    silent = TRUE
+  )
+}
+
+# Outputs
+log_section("ROBYYN OUTPUTS")
+OutputCollect <- tryCatch(robyn_outputs(...), error = function(e) e)
+if (inherits(OutputCollect, "error")) {
+  cat("robyn_outputs error:", conditionMessage(OutputCollect), "\n")
+}
+
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
 t0 <- Sys.time()
 OutputModels <- robyn_run(
@@ -967,6 +1062,43 @@ OutputCollect <- tryCatch(
   }
 )
 
+log_section("TRAINING START")
+t0 <- Sys.time()
+cat("iterations:", iter, " trials:", trials, " cores:", max_cores, "\n")
+
+OutputModels <- robyn_run(...)
+
+cat("Training finished in", round(difftime(Sys.time(), t0, units = "mins"), 2), "min\n")
+
+# Selection
+log_section("MODEL SELECTION")
+sel <- tryCatch(robyn_select(InputCollect, OutputModels), error = function(e) e)
+if (inherits(sel, "error")) {
+  cat("robyn_select error:", conditionMessage(sel), "\n")
+} else {
+  # print top candidates briefly
+  try(
+    {
+      rh <- sel$pareto$hyper_parameters %||% sel$resultHypParam %||% NULL
+      if (!is.null(rh)) {
+        cat("Top candidates:", nrow(rh), "\n")
+        print(head(rh[, c("solID", "rsq_train", "nrmse_train", "rsq_val", "nrmse_val")], 5))
+      }
+    },
+    silent = TRUE
+  )
+}
+
+# Outputs
+log_section("ROBYYN OUTPUTS")
+OutputCollect <- tryCatch(robyn_outputs(...), error = function(e) e)
+if (inherits(OutputCollect, "error")) {
+  cat("robyn_outputs error:", conditionMessage(OutputCollect), "\n")
+}
+
+stopifnot(!is.null(OutputCollect$resultHypParam), nrow(OutputCollect$resultHypParam) > 0)
+# best_id <- OutputCollect$resultHypParam$solID[[1]]
+
 if (is.null(OutputCollect) || (is.list(OutputCollect) && !length(OutputCollect))) {
   stop("robyn_outputs returned empty — no valid candidates or export/plot error.")
 }
@@ -982,7 +1114,7 @@ if ((is.na(best_id) || best_id == "") && !is.null(OutputCollect)) {
 saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
 
-best_id <- OutputCollect$resultHypParam$solID[1]
+# best_id <- OutputCollect$resultHypParam$solID[1]
 writeLines(
   c(best_id, paste("Iterations:", iter), paste("Trials:", trials), paste("Training time (mins):", round(training_time, 2))),
   con = file.path(dir_path, "best_model_id.txt")
@@ -1023,6 +1155,16 @@ if (length(cand_png)) {
 is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
 low_bounds0 <- ifelse(is_brand, 0, 0.3)
 up_bounds0 <- ifelse(is_brand, 0, 4)
+log_section("ALLOCATOR OVERVIEW")
+cat("date_range:", as.character(alloc_start), "→", as.character(alloc_end), "\n")
+cat("scenario: max_historical_response\n")
+AllocatorCollect <- try(robyn_allocator(...), silent = TRUE)
+if (inherits(AllocatorCollect, "try-error")) {
+  cat("allocator failed:", conditionMessage(attr(AllocatorCollect, "condition")), "\n")
+} else {
+  cat("allocator ok: rows=", nrow(AllocatorCollect$result_allocator %||% data.frame()), "\n")
+}
+
 AllocatorCollect <- try(
   robyn_allocator(
     InputCollect = InputCollect, OutputCollect = OutputCollect,
@@ -1032,6 +1174,16 @@ AllocatorCollect <- try(
   ),
   silent = TRUE
 )
+log_section("ALLOCATOR OVERVIEW")
+cat("date_range:", as.character(alloc_start), "→", as.character(alloc_end), "\n")
+cat("scenario: max_historical_response\n")
+AllocatorCollect <- try(robyn_allocator(...), silent = TRUE)
+if (inherits(AllocatorCollect, "try-error")) {
+  cat("allocator failed:", conditionMessage(attr(AllocatorCollect, "condition")), "\n")
+} else {
+  cat("allocator ok: rows=", nrow(AllocatorCollect$result_allocator %||% data.frame()), "\n")
+}
+
 
 ## ---------- METRICS + PLOT ----------
 best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == best_id, ]
@@ -1175,6 +1327,13 @@ if (!nrow(future_spend)) {
       message("⚠️ Plan deviates >10% from targets. Check inputs or scaling.")
     }
   }
+  log_section("FORECAST PLAN")
+  rng <- range(future_spend$date)
+  cat("future_spend dates:", as.character(rng[1]), "→", as.character(rng[2]), " rows:", nrow(future_spend), "\n")
+  if (exists("plan_check") && nrow(plan_check)) {
+    cat("Plan vs targets ratio-1:", paste(round(plan_check$plan_total / monthly_targets[seq_len(nrow(plan_check))] - 1, 3), collapse = ", "), "\n")
+  }
+
 
   # 4) Aggregate to months & evaluate plan via allocator with tight share bands
   future_spend <- future_spend %>% mutate(month = floor_date(date, "month"))
@@ -1211,6 +1370,7 @@ if (!nrow(future_spend)) {
 
     shares <- monthly_per_channel / total_budget
     bands <- make_share_bands(shares, tol = SHARE_TOL)
+
 
     al <- try(
       robyn_allocator(
@@ -1297,6 +1457,11 @@ if (!nrow(future_spend)) {
   print(proj)
 }
 
+log_section("ARTIFACTS")
+cat("gcs bucket:", googleCloudStorageR::gcs_get_global_bucket(), "\n")
+cat("gcs prefix:", gcs_prefix, "\n")
+cat("Output files (local):\n")
+print(head(list.files(dir_path, recursive = TRUE), 50))
 
 ## ---------- UPLOAD EVERYTHING (mirror local dir) ----------
 for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
