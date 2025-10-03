@@ -830,13 +830,16 @@ if (length(paid_media_spends)) {
 write_status("drivers_ready")
 
 ## ---------- ADSTOCK & HPs ----------
-ad_type <- tolower(adstock %||% "geometric")
+# ad_type <- tolower(adstock %||% "geometric")
+ad_type <- "geometric"
+
 if (!nzchar(ad_type) || ad_type == "none") {
   message("⚠️ adstock was 'none'. Forcing 'geometric'.")
   ad_type <- "geometric"
 }
 use_weibull <- grepl("^weibull", ad_type)
 TV_NAME <- if ("TV_COST" %in% paid_media_vars) "TV_COST" else if ("TV_COSTS" %in% paid_media_vars) "TV_COSTS" else NA
+ad_type <- "geometric"
 
 media_hp_vars <- unique(paid_media_vars)
 maybe_org <- intersect(organic_vars, names(df))
@@ -879,18 +882,9 @@ for (v in names(hp_list)) {
   h <- hp_list[[v]]
   hyperparameters[[paste0(v, "_alphas")]] <- h$alphas
   hyperparameters[[paste0(v, "_gammas")]] <- h$gammas
-  # hyperparameters[[paste0(v, "_alpha")]] <- h$alphas
-  # hyperparameters[[paste0(v, "_gamma")]] <- h$gammas
-  if (!use_weibull) {
-    hyperparameters[[paste0(v, "_thetas")]] <- h$thetas
-    # hyperparameters[[paste0(v, "_theta")]] <- h$thetas
-  } else {
-    hyperparameters[[paste0(v, "_shapes")]] <- h$shapes
-    hyperparameters[[paste0(v, "_scales")]] <- h$scales
-    # hyperparameters[[paste0(v, "_shape")]] <- h$shapes
-    # hyperparameters[[paste0(v, "_scale")]] <- h$scales
-  }
+  hyperparameters[[paste0(v, "_thetas")]] <- h$thetas # geometric only
 }
+
 
 cat("Hyperparameters")
 print(hyperparameters)
