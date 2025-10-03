@@ -437,7 +437,11 @@ if (length(hyper_vars) > 10) {
   }
 }
 hyperparameters[["train_size"]] <- train_size
+message("Hyperparams ", hyperparameters)
+message("InputCollect ", InputCollect)
+
 InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
+message("InputCollect ", InputCollect)
 
 ## ---------- TRAIN ----------
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
