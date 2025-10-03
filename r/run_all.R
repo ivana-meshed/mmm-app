@@ -436,12 +436,23 @@ if (length(hyper_vars) > 10) {
     }
   }
 }
-hyperparameters[["train_size"]] <- train_size
+# hyperparameters[["train_size"]] <- train_size
 cat("Hyperparams:\n")
 utils::str(hyperparameters, max.level = 1)
 cat("InputCollect summary:\n")
 utils::str(InputCollect, max.level = 1)
 cat("MaxCores:", max_cores, "\n")
+
+expect_keys <- as.vector(outer(
+  c(paid_media_vars, organic_vars),
+  c("_alphas", "_gammas", "_thetas"),
+  paste0
+))
+missing <- setdiff(expect_keys, names(hyperparameters))
+extra <- setdiff(names(hyperparameters), expect_keys)
+
+if (length(missing)) stop("Missing HP keys: ", paste(missing, collapse = ", "))
+if (length(extra)) stop("Extra HP keys (remove them): ", paste(extra, collapse = ", "))
 
 # InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
 # cat("InputCollect summary:\n")
@@ -450,18 +461,39 @@ cat("MaxCores:", max_cores, "\n")
 ## ---------- TRAIN ----------
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
 t0 <- Sys.time()
-OutputModels <- robyn_run(
-  InputCollect = InputCollect,
-  hyperparameters = hyperparameters,
-  train_size = train_size,
-  iterations = iter,
-  trials = trials,
-  ts_validation = TRUE,
-  add_penalty_factor = TRUE,
-  cores = max_cores
+run_err <- NULL
+OutputModels <- tryCatch(
+  robyn_run(
+    InputCollect = InputCollect,
+    hyperparameters = hyperparameters,
+    train_size = train_size,
+    iterations = iter,
+    trials = trials,
+    ts_validation = TRUE,
+    add_penalty_factor = TRUE,
+    cores = max_cores
+  ),
+  error = function(e) {
+    run_err <<- e
+    NULL
+  },
+  warning = function(w) {
+    message("robyn_run warning: ", conditionMessage(w))
+    invokeRestart("muffleWarning")
+  }
 )
+if (!is.null(run_err)) {
+  message("❌ robyn_run error: ", conditionMessage(run_err))
+  # dump some fast context:
+  message("paid_media_vars: ", paste(paid_media_vars, collapse = ", "))
+  message("organic_vars   : ", paste(organic_vars, collapse = ", "))
+  message("HP names       : ", paste(names(hyperparameters), collapse = ", "))
+  stop(run_err) # make the job fail so you can see it in Logs Explorer
+}
+
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
+if (!is.null(OutputModels$hyperparameters)) utils::str(OutputModels$hyperparameters, max.level = 1)
 
 ## ---------- APPEND R TRAINING TIME TO timings.csv --
 
