@@ -477,25 +477,41 @@ cat(
   "Window:", as.character(InputCollect$window_start), "→", as.character(InputCollect$window_end), "\n"
 )
 
+
+OutputModels <- NULL
+warnings_collected <- character(0)
+
+options(warn = 2) # TURN WARNINGS INTO ERRORS to catch Robyn validations
+on.exit(options(warn = 0), add = TRUE)
+
 OutputModels <- tryCatch(
-  robyn_run(
-    InputCollect = InputCollect,
-    # hyperparameters = hyperparameters,
-    train_size = 0.8,
-    iterations = iter,
-    trials = trials,
-    ts_validation = TRUE,
-    add_penalty_factor = TRUE,
-    cores = max_cores
+  withCallingHandlers(
+    robyn_run(
+      InputCollect       = InputCollect,
+      iterations         = iter,
+      trials             = trials,
+      train_size         = train_size_scalar,
+      ts_validation      = TRUE,
+      add_penalty_factor = TRUE,
+      cores              = max_cores
+    ),
+    warning = function(w) {
+      warnings_collected <<- c(warnings_collected, conditionMessage(w))
+      invokeRestart("muffleWarning") # we already captured it; warn=2 will error otherwise
+    }
   ),
   error = function(e) {
-    run_err <<- e
-    NULL
-  },
-  warning = function(w) {
-    message("robyn_run warning: ", conditionMessage(w))
+    message("robyn_run ERROR: ", conditionMessage(e))
+    if (length(warnings_collected)) {
+      message("robyn_run WARNINGS captured:\n- ", paste(unique(warnings_collected), collapse = "\n- "))
+    }
+    stop(e)
   }
 )
+
+if (is.null(OutputModels)) {
+  stop("robyn_run returned NULL (see captured warnings above).")
+}
 if (!is.null(run_err)) {
   message("❌ robyn_run error: ", conditionMessage(run_err))
   # dump some fast context:
