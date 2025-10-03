@@ -63,7 +63,7 @@ HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 cores_cgroup <- parallelly::availableCores() # respects cpuquota
 cores_cap <- as.integer(Sys.getenv("R_MAX_CORES", "32"))
 max_cores <- max(1L, min(cores_cgroup, cores_cap))
-plan(multisession, workers = max_cores)
+# plan(multisession, workers = max_cores)
 
 ## --- timeouts & heartbeat ---
 .have_Rutils <- requireNamespace("R.utils", quietly = TRUE)
@@ -904,7 +904,8 @@ InputCollect <- with_timeout(
       dep_var           = dep_var,
       adstock           = ad_type,
       dep_var_type      = "revenue",
-      prophet_vars      = c("trend", "season", "holiday", "weekday"),
+      # prophet_vars      = c("trend", "season", "holiday", "weekday"),
+      prophet_vars      = c("trend", "season", "holiday"),
       prophet_country   = toupper(country),
       paid_media_spends = paid_media_spends,
       paid_media_vars   = paid_media_vars,
@@ -930,7 +931,16 @@ if (length(missing_hp)) cat("Vars with no HP coverage:", paste(missing_hp, colla
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
+saveRDS(InputCollect, file.path(dir_path, "InputCollect.RDS"))
+gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "InputCollect.RDS"))
+message(">> entering robyn_run")
+flush.console()
+message(sprintf("Local InputCollect HP count: %s", length(InputCollect$hyperparameters)))
+
 ## ---------- TRAIN ----------
+Sys.setenv(OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1", MKL_NUM_THREADS = "1")
+plan(sequential)
+
 log_section("TRAINING START")
 t0 <- Sys.time()
 cat("iterations:", iter, " trials:", trials, " cores:", max_cores, "\n")
@@ -942,7 +952,7 @@ OutputModels <- with_timeout(
       trials = trials,
       ts_validation = TRUE,
       add_penalty_factor = TRUE,
-      cores = max_cores
+      cores = min(max_cores, 4)
     )
   },
   TO_RUN,
@@ -1011,10 +1021,7 @@ gcs_put_safe(timings_local, timings_obj)
 
 ## ---------- SAVE CORE RDS ----------
 saveRDS(OutputModels, file.path(dir_path, "OutputModels.RDS"))
-saveRDS(InputCollect, file.path(dir_path, "InputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputModels.RDS"), file.path(gcs_prefix, "OutputModels.RDS"))
-gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "InputCollect.RDS"))
-message(sprintf("Local InputCollect HP count: %s", length(InputCollect$hyperparameters)))
 
 ## ---------- OUTPUTS & ONEPAGERS ----------
 OutputCollect <- with_timeout(
