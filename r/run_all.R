@@ -450,6 +450,8 @@ expect_keys <- as.vector(outer(
 ))
 missing <- setdiff(expect_keys, names(hyperparameters))
 extra <- setdiff(names(hyperparameters), expect_keys)
+utils::str(missing, max.level = 1)
+utils::str(extra, max.level = 1)
 
 if (length(missing)) stop("Missing HP keys: ", paste(missing, collapse = ", "))
 if (length(extra)) stop("Extra HP keys (remove them): ", paste(extra, collapse = ", "))
