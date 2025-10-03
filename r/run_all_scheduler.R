@@ -443,17 +443,15 @@ cat("InputCollect summary:\n")
 utils::str(InputCollect, max.level = 1)
 cat("MaxCores:", max_cores, "\n")
 
-# InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
-# cat("InputCollect summary:\n")
-# utils::str(InputCollect, max.level = 1)
+InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
+cat("InputCollect summary:\n")
+utils::str(InputCollect, max.level = 1)
 
 ## ---------- TRAIN ----------
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
 t0 <- Sys.time()
 OutputModels <- robyn_run(
   InputCollect = InputCollect,
-  hyperparameters = hyperparameters,
-  train_size = train_size,
   iterations = iter,
   trials = trials,
   ts_validation = TRUE,
