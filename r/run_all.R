@@ -101,13 +101,25 @@ push_log <- function() {
   try(
     {
       flush.console()
-      if (exists("log_file", inherits = FALSE) && file.exists(log_file) && exists("gcs_prefix", inherits = FALSE)) {
-        gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log"))
+      if (exists("log_file", inherits = TRUE) &&
+        exists("gcs_prefix", inherits = TRUE)) {
+        lf <- get("log_file", inherits = TRUE)
+        gp <- get("gcs_prefix", inherits = TRUE)
+        if (is.character(lf) && nzchar(lf) && file.exists(lf) &&
+          is.character(gp) && nzchar(gp)) {
+          logf("Log       | uploading robyn_console.log …")
+          gcs_put_safe(lf, file.path(gp, "robyn_console.log"))
+        } else {
+          logf("Log       | skip upload (log_file or gcs_prefix missing/empty)")
+        }
+      } else {
+        logf("Log       | skip upload (symbols not found)")
       }
     },
     silent = TRUE
   )
 }
+
 
 ## ---------- GCS helpers ----------
 gcs_download <- function(gcs_path, local_path) {
@@ -687,7 +699,10 @@ for (v in hyper_vars) {
   hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
 }
 hyperparameters[["train_size"]] <- train_size
-expect_keys <- as.vector(outer(c(paid_media_vars, organic_vars), c("_alphas", "_gammas", "_thetas"), paste0))
+expect_keys <- c(
+  as.vector(outer(c(paid_media_vars, organic_vars), c("_alphas", "_gammas", "_thetas"), paste0)),
+  "train_size"
+)
 missing <- setdiff(expect_keys, names(hyperparameters))
 extra <- setdiff(names(hyperparameters), expect_keys)
 logf("HP        | vars=", length(hyper_vars), " keys=", length(names(hyperparameters)), " missing=", length(missing), " extra=", length(extra))
@@ -707,6 +722,21 @@ logf("Train     | start cores=", max_cores, " iter=", iter, " trials=", trials)
 prev_plan <- future::plan()
 on.exit(future::plan(prev_plan), add = TRUE)
 future::plan(sequential)
+
+# Debug the dependent variable quality
+dv <- df[[dep_var]]
+logf(
+  "DV Stats  | dep_var=", dep_var,
+  " n=", length(dv),
+  " mean=", round(mean(dv, na.rm = TRUE), 4),
+  " sd=", round(sd(dv, na.rm = TRUE), 4),
+  " min=", round(min(dv, na.rm = TRUE), 4),
+  " max=", round(max(dv, na.rm = TRUE), 4)
+)
+if (all(is.na(dv)) || sd(dv, na.rm = TRUE) == 0) {
+  stop("Dependent variable has zero variance or all NA after windowing; cannot train.")
+}
+
 t0 <- Sys.time()
 OutputModels <- robyn_run(
   InputCollect       = InputCollect,
@@ -716,6 +746,28 @@ OutputModels <- robyn_run(
   add_penalty_factor = TRUE,
   cores              = max_cores
 )
+
+ok_models <- !is.null(OutputModels) &&
+  is.list(OutputModels) &&
+  length(OutputModels) > 0 &&
+  !is.null(OutputModels$resultHypParam) &&
+  nrow(OutputModels$resultHypParam) > 0
+
+if (!ok_models) {
+  logf("Train     | no valid models produced by robyn_run()")
+  # persist a clear diagnostic for you
+  diag_txt <- file.path(dir_path, "robyn_train_diagnostics.txt")
+  writeLines(c(
+    "robyn_run produced no models.",
+    paste("DV sd:", round(sd(dv, na.rm = TRUE), 6)),
+    paste("Paid media spends kept:", paste(paid_media_spends, collapse = ", ")),
+    paste("Hyperparameter keys:", paste(names(hyperparameters), collapse = ", "))
+  ), diag_txt)
+  gcs_put_safe(diag_txt, file.path(gcs_prefix, "robyn_train_diagnostics.txt"))
+  push_log()
+  stop("robyn_run returned empty results (see robyn_train_diagnostics.txt).")
+}
+
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 logf("Train     | completed in ", round(training_time, 2), " minutes")
 push_log()
