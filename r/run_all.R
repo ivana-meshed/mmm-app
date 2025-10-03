@@ -33,6 +33,7 @@ suppressPackageStartupMessages({
   library(future)
   library(future.apply)
   library(parallel)
+  library(tidyselect)
 })
 
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
@@ -86,7 +87,6 @@ ensure_gcs_auth <- local({
   }
 })
 
-# must exist before any gcs_put
 ensure_bucket <- function(pref = NULL) {
   ensure_gcs_auth()
   b <- pref %||% Sys.getenv("GCS_BUCKET", "mmm-app-output")
@@ -202,13 +202,11 @@ synthesize_date <- function(d, end_date = NULL) {
 }
 choose_or_make_date <- function(d, preferred, end_date_hint) {
   upref <- toupper(preferred)
-  # preferred available?
   if (upref %in% names(d)) {
     if (inherits(d[[upref]], "POSIXt")) d$date <- as.Date(d[[upref]]) else d$date <- as.Date(as.character(d[[upref]]))
     d[[upref]] <- NULL
     return(d)
   }
-  # any Date/POSIXT column?
   is_dateish <- vapply(d, function(x) inherits(x, "Date") || inherits(x, "POSIXt"), logical(1))
   cand <- names(d)[is_dateish]
   if (length(cand) == 1L) {
@@ -216,7 +214,6 @@ choose_or_make_date <- function(d, preferred, end_date_hint) {
     d[[cand]] <- NULL
     return(d)
   }
-  # common names
   for (nm in c("DATE", "DT", "DAY", "DS")) {
     if (nm %in% names(d)) {
       if (inherits(d[[nm]], "POSIXt")) d$date <- as.Date(d[[nm]]) else d$date <- as.Date(as.character(d[[nm]]))
@@ -224,7 +221,6 @@ choose_or_make_date <- function(d, preferred, end_date_hint) {
       return(d)
     }
   }
-  # synthesize
   logf("Date      | no date-like column found; synthesizing…")
   synthesize_date(d, end_date = end_date_hint)
 }
@@ -236,7 +232,7 @@ filter_by_country <- function(dx, country) {
       vals <- unique(toupper(dx[[col]]))
       if (cn %in% vals) {
         logf("Filter    | ", col, " == ", cn, " (", sum(toupper(dx[[col]]) == cn), " rows)")
-        dx <- dx[toupper(dx[[col]]) == cn, , drop = FALSE]
+        dx <- dx[toupper(dx[[col]]) == cn, , drop = FALSE] ## <-- fixed bracket placement
         break
       }
     }
@@ -275,24 +271,184 @@ append_to_ledger <- function(row) {
   logf("Ledger    | upserted job row")
 }
 
-## ---------- Forecast helpers (unchanged from your version, with logs inside) ----------
-# ... (omitted here for brevity—same as last version you approved; I kept all logging)
+## ---------- Forecast helpers ----------
+get_allocator_total_response <- function(al_tbl) {
+  if (is.null(al_tbl)) {
+    return(NA_real_)
+  }
+  for (nm in c("total_response", "response_total", "total_response_pred", "response_pred", "response")) {
+    if (nm %in% names(al_tbl)) {
+      return(to_scalar(al_tbl[[nm]]))
+    }
+  }
+  NA_real_
+}
+get_allocator_total_spend <- function(al_tbl) {
+  if (is.null(al_tbl)) {
+    return(NA_real_)
+  }
+  for (nm in c("total_spend", "spend_total", "expected_spend", "spend")) {
+    if (nm %in% names(al_tbl)) {
+      return(to_scalar(al_tbl[[nm]]))
+    }
+  }
+  NA_real_
+}
+compute_monthly_targets_from_history <- function(
+    dt_input, spend_cols, horizon_months = 3,
+    strategy = Sys.getenv("FORECAST_TARGET_STRATEGY", "mean_last_k"),
+    k = as.integer(Sys.getenv("FORECAST_RECENT_MONTHS", "3"))) {
+  if (!length(spend_cols)) {
+    return(rep(0, horizon_months))
+  }
+  last_day <- max(dt_input$date, na.rm = TRUE)
+  monthly <- dt_input %>%
+    mutate(
+      month = floor_date(date, "month"),
+      daily_total = rowSums(across(all_of(spend_cols)), na.rm = TRUE)
+    ) %>%
+    filter(month < floor_date(last_day, "month")) %>%
+    group_by(month) %>%
+    summarise(total = sum(daily_total, na.rm = TRUE), .groups = "drop") %>%
+    arrange(month)
+  base_val <- if (nrow(monthly) > 0) {
+    if (tolower(strategy) == "last_full") {
+      tail(monthly$total, 1)
+    } else {
+      mean(tail(monthly$total, min(k, nrow(monthly))), na.rm = TRUE)
+    }
+  } else {
+    mean(tail(rowSums(dt_input[, spend_cols, drop = FALSE], na.rm = TRUE), 28), na.rm = TRUE) * 30
+  }
+  base_val <- ifelse(is.finite(base_val) && base_val > 0, base_val, 0)
+  rep(base_val, horizon_months)
+}
+weekday_profile <- function(vals, dates) {
+  n <- length(vals)
+  k <- min(n, 8 * 7)
+  tail_vals <- tail(vals, k)
+  tail_dates <- tail(dates, k)
+  df <- tibble(dow = wday(tail_dates, label = TRUE, week_start = 1), val = pmax(tail_vals, 0))
+  props <- df |>
+    group_by(dow) |>
+    summarise(s = sum(val, na.rm = TRUE), .groups = "drop")
+  if (sum(props$s) <= 0) props$w <- 1 / 7 else props$w <- props$s / sum(props$s)
+  structure(props$w, names = as.character(props$dow))
+}
+build_spend_forecast <- function(dt_input, spend_cols, horizon_months = 3, monthly_targets = NULL) {
+  stopifnot("date" %in% names(dt_input))
+  hist <- dt_input %>% arrange(date)
+  start_next <- max(hist$date, na.rm = TRUE) + 1
+  start_month <- floor_date(start_next, "month")
+  if (start_month < start_next) start_month <- start_month %m+% months(1)
+  end_month <- start_month %m+% months(horizon_months) - days(1)
+  future_days <- tibble(
+    date = seq(start_month, end_month, by = "day"),
+    dow = wday(date, label = TRUE, week_start = 1)
+  )
+
+  fc_list <- list()
+  for (v in spend_cols) {
+    x <- hist[[v]]
+    x[is.na(x)] <- 0
+    wk <- hist |>
+      mutate(year = isoyear(date), week = isoweek(date)) |>
+      group_by(year, week) |>
+      summarise(val = sum(.data[[v]], na.rm = TRUE), .groups = "drop") |>
+      arrange(year, week)
+    if (nrow(wk) < 8) {
+      weekly_future <- rep(mean(tail(wk$val, min(4, nrow(wk))), na.rm = TRUE), ceiling(horizon_months * 4.5))
+    } else {
+      if (HAVE_FORECAST) {
+        ts_w <- stats::ts(wk$val, frequency = 52)
+        fit <- try(suppressWarnings(forecast::auto.arima(ts_w, stepwise = FALSE, approximation = FALSE)), silent = TRUE)
+        if (inherits(fit, "try-error")) fit <- forecast::ets(ts_w)
+        weekly_future <- as.numeric(forecast::forecast(fit, h = ceiling(horizon_months * 4.5))$mean)
+      } else {
+        m <- stats::filter(wk$val, rep(1 / 4, 4), sides = 1)
+        weekly_future <- rep(tail(na.omit(as.numeric(m)), 1) %||% mean(wk$val, na.rm = TRUE), ceiling(horizon_months * 4.5))
+      }
+      weekly_future[weekly_future < 0] <- 0
+    }
+    prof <- weekday_profile(x, hist$date)
+    weeks_seq <- future_days |>
+      mutate(year = isoyear(date), week = isoweek(date)) |>
+      distinct(year, week) |>
+      mutate(fc = head(weekly_future, n = n()))
+    per_day <- future_days |>
+      mutate(year = isoyear(date), week = isoweek(date)) |>
+      left_join(weeks_seq, by = c("year", "week")) |>
+      mutate(
+        p = as.numeric(prof[as.character(dow)]),
+        !!v := (fc %||% 0) * (p %||% (1 / 7))
+      ) |>
+      select(date, !!v)
+    fc_list[[v]] <- per_day
+  }
+  out <- Reduce(function(a, b) full_join(a, b, by = "date"), fc_list)
+  out[is.na(out)] <- 0
+  if (!is.null(monthly_targets)) {
+    stopifnot(length(monthly_targets) == horizon_months)
+    out <- out |> mutate(month = floor_date(date, "month"))
+    months_vec <- seq(floor_date(min(out$date), "month"), by = "1 month", length.out = horizon_months)
+    for (i in seq_along(months_vec)) {
+      m <- months_vec[i]
+      idx <- which(out$month == m)
+      cur <- sum(as.matrix(out[idx, spend_cols, drop = FALSE]), na.rm = TRUE)
+      tgt <- monthly_targets[i]
+      if (is.finite(tgt) && tgt > 0 && is.finite(cur) && cur > 0) out[idx, spend_cols] <- out[idx, spend_cols] * (tgt / cur)
+    }
+    out <- dplyr::select(out, -month)
+  }
+  out
+}
+compute_base_daily <- function(OutputCollect, InputCollect, lookback_days = 28) {
+  decomp <- try(OutputCollect$resultDecomp, silent = TRUE)
+  if (inherits(decomp, "try-error") || is.null(decomp)) {
+    return(mean(tail(InputCollect$dt_input[[InputCollect$dep_var]], lookback_days), na.rm = TRUE))
+  }
+  nm <- names(decomp)
+  tolower_nms <- tolower(nm)
+  base_keys <- c("intercept", "trend", "season", "holiday", "weekday")
+  base_cols <- nm[tolower_nms %in% base_keys]
+  if (length(base_cols) > 0) {
+    base_series <- rowSums(decomp[, base_cols, drop = FALSE], na.rm = TRUE)
+  } else {
+    dep_candidates <- c("dep_var", "depvar", "y", tolower(InputCollect$dep_var), InputCollect$dep_var)
+    dep_col <- nm[match(tolower(dep_candidates), tolower_nms, nomatch = 0)]
+    dep_col <- dep_col[dep_col != ""]
+    if (!length(dep_col)) {
+      return(mean(tail(InputCollect$dt_input[[InputCollect$dep_var]], lookback_days), na.rm = TRUE))
+    }
+    driver_cols <- intersect(c(InputCollect$paid_media_vars, InputCollect$organic_vars, InputCollect$context_vars, InputCollect$factor_vars), nm)
+    if (!length(driver_cols)) {
+      base_series <- decomp[[dep_col[1]]]
+    } else {
+      base_series <- decomp[[dep_col[1]]] - rowSums(decomp[, driver_cols, drop = FALSE], na.rm = TRUE)
+    }
+  }
+  mean(tail(base_series, lookback_days), na.rm = TRUE)
+}
+make_share_bands <- function(shares, tol = 1e-4) {
+  shares[is.na(shares)] <- 0
+  lo <- pmax(0, shares - tol)
+  up <- pmin(1, shares + tol)
+  list(low = lo, up = up)
+}
 
 ## ========== RUN ==========
 logf("Stage     | Auth & early bucket")
 ensure_gcs_auth()
-# Set bucket EARLY from env (cfg not read yet)
 early_bucket <- ensure_bucket()
 
-## Paths that need prefix early
 revision <- "unknown"
 country <- "xx"
-timestamp <- format(Sys.time(), "%m%d_%H%M%S") # temp; will overwrite after cfg
+timestamp <- format(Sys.time(), "%m%d_%H%M%S")
 dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
-gcs_prefix <- file.path("robyn", revision, country, timestamp) # temp; will overwrite after cfg
+gcs_prefix <- file.path("robyn", revision, country, timestamp)
 
-## Start log file ASAP so we can push it even if we crash early
+## Start log file ASAP
 log_file <- file.path(dir_path, "robyn_console.log")
 dir.create(dirname(log_file), recursive = TRUE, showWarnings = FALSE)
 log_con_out <- file(log_file, open = "wt")
@@ -311,7 +467,7 @@ on.exit(
   add = TRUE
 )
 
-## Error handler writes FAILED status & pushes log
+## Error handler
 job_started <- Sys.time()
 status_json <- file.path(dir_path, "status.json")
 options(error = function(e) {
@@ -330,7 +486,7 @@ options(error = function(e) {
   quit(status = 1)
 })
 
-## Write RUNNING status (now bucket is set)
+## Write RUNNING status
 writeLines(jsonlite::toJSON(list(state = "RUNNING", start_time = as.character(job_started)), auto_unbox = TRUE), status_json)
 gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
 push_log()
@@ -344,7 +500,7 @@ tmp_cfg <- tempfile(fileext = ".json")
 gcs_download(cfg_path, tmp_cfg)
 cfg <- jsonlite::fromJSON(tmp_cfg)
 
-## Now update proper identifiers & paths
+## Update identifiers/paths
 country <- cfg$country
 revision <- cfg$revision
 timestamp <- cfg$timestamp %||% timestamp
@@ -352,7 +508,7 @@ dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timest
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
 gcs_prefix <- file.path("robyn", revision, country, timestamp)
 
-## If cfg specifies bucket, switch to it (after RUNNING status already uploaded to early bucket)
+## Switch bucket if cfg says so
 if (!is.null(cfg$gcs_bucket) && nzchar(cfg$gcs_bucket) && cfg$gcs_bucket != googleCloudStorageR::gcs_get_global_bucket()) {
   logf("Bucket    | switching to cfg$gcs_bucket=", cfg$gcs_bucket)
   ensure_bucket(cfg$gcs_bucket)
@@ -366,7 +522,7 @@ train_size <- as.numeric(cfg$train_size)
 date_input <- cfg$date_input
 dep_var <- toupper(cfg$dep_var %||% "UPLOAD_VALUE")
 adstock <- tolower(cfg$adstock %||% "geometric")
-date_col_in <- cfg$date_var %||% "DATE"
+date_col_in <- toupper(cfg$date_var %||% "DATE")
 
 logf("Params    |")
 log_kv(list(
@@ -432,17 +588,17 @@ if (!"TV_IS_ON" %in% names(df)) {
 }
 
 df <- df %>% mutate(
-  GA_OTHER_COST          = rowSums(select(., tidyselect::matches("^GA_.*_COST$") & !any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE),
-  BING_TOTAL_COST        = rowSums(select(., tidyselect::matches("^BING_.*_COST$")), na.rm = TRUE),
-  META_TOTAL_COST        = rowSums(select(., tidyselect::matches("^META_.*_COST$")), na.rm = TRUE),
+  GA_OTHER_COST          = rowSums(select(., matches("^GA_.*_COST$") & !any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE),
+  BING_TOTAL_COST        = rowSums(select(., matches("^BING_.*_COST$")), na.rm = TRUE),
+  META_TOTAL_COST        = rowSums(select(., matches("^META_.*_COST$")), na.rm = TRUE),
   ORGANIC_TRAFFIC        = rowSums(select(., any_of(c("NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS", "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS"))), na.rm = TRUE),
   BRAND_HEALTH           = coalesce(DIRECT_DAILY_SESSIONS, 0) + coalesce(SEO_DAILY_SESSIONS, 0),
   ORGxTV                 = BRAND_HEALTH * coalesce(TV_COST, 0),
-  GA_OTHER_IMPRESSIONS   = rowSums(select(., tidyselect::matches("^GA_.*_IMPRESSIONS$") & !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
-  BING_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE),
-  META_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE),
-  BING_TOTAL_CLICKS      = rowSums(select(., tidyselect::matches("^BING_.*_CLICKS$")), na.rm = TRUE),
-  META_TOTAL_CLICKS      = rowSums(select(., tidyselect::matches("^META_.*_CLICKS$")), na.rm = TRUE)
+  GA_OTHER_IMPRESSIONS   = rowSums(select(., matches("^GA_.*_IMPRESSIONS$") & !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
+  BING_TOTAL_IMPRESSIONS = rowSums(select(., matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE),
+  META_TOTAL_IMPRESSIONS = rowSums(select(., matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE),
+  BING_TOTAL_CLICKS      = rowSums(select(., matches("^BING_.*_CLICKS$")), na.rm = TRUE),
+  META_TOTAL_CLICKS      = rowSums(select(., matches("^META_.*_CLICKS$")), na.rm = TRUE)
 )
 logf("Feature   | engineered columns added")
 push_log()
@@ -478,10 +634,10 @@ organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES"
 logf("Drivers   |")
 log_kv(list(
   paid_media_spends = paste(paid_media_spends, collapse = ", "),
-  paid_media_vars = paste(paid_media_vars, collapse = ", "),
-  context_vars = paste(context_vars, collapse = ", "),
-  factor_vars = paste(factor_vars, collapse = ", "),
-  organic_vars = paste(organic_vars, collapse = ", ")
+  paid_media_vars   = paste(paid_media_vars, collapse = ", "),
+  context_vars      = paste(context_vars, collapse = ", "),
+  factor_vars       = paste(factor_vars, collapse = ", "),
+  organic_vars      = paste(organic_vars, collapse = ", ")
 ))
 push_log()
 
@@ -510,7 +666,7 @@ alloc_start <- alloc_end - 364
 logf("AllocWin  | ", as.character(alloc_start), " → ", as.character(alloc_end))
 push_log()
 
-## ---------- Hyperparameters (same logic, with checks) ----------
+## ---------- Hyperparameters ----------
 hyper_vars <- c(paid_media_vars, organic_vars)
 hyperparameters <- list()
 mk_hp <- function(v) {
@@ -547,7 +703,6 @@ cat("---- reticulate::py_config() ----\n")
 print(reticulate::py_config())
 cat("-------------------------------\n")
 if (!reticulate::py_module_available("nevergrad")) stop("nevergrad not importable via reticulate.")
-
 logf("Train     | start cores=", max_cores, " iter=", iter, " trials=", trials)
 prev_plan <- future::plan()
 on.exit(future::plan(prev_plan), add = TRUE)
@@ -620,7 +775,6 @@ writeLines(c(best_id, paste("Iterations:", iter), paste("Trials:", trials), past
 )
 gcs_put_safe(file.path(dir_path, "best_model_id.txt"), file.path(gcs_prefix, "best_model_id.txt"))
 
-# Onepagers
 top_models <- OutputCollect$resultHypParam$solID[1:min(3, nrow(OutputCollect$resultHypParam))]
 for (m in top_models) try(robyn_onepagers(InputCollect, OutputCollect, select_model = m, export = TRUE), silent = TRUE)
 
@@ -653,8 +807,8 @@ AllocatorCollect <- try(robyn_allocator(
 
 best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == best_id, ]
 alloc_tbl <- if (!inherits(AllocatorCollect, "try-error")) AllocatorCollect$result_allocator else NULL
-total_response <- to_scalar(if (!is.null(alloc_tbl)) get(c("total_response", "response_total", "total_response_pred", "response_pred", "response")[match(TRUE, c("total_response", "response_total", "total_response_pred", "response_pred", "response") %in% names(alloc_tbl))], alloc_tbl, inherits = FALSE) else NA_real_)
-total_spend <- to_scalar(if (!is.null(alloc_tbl)) get(c("total_spend", "spend_total", "expected_spend", "spend")[match(TRUE, c("total_spend", "spend_total", "expected_spend", "spend") %in% names(alloc_tbl))], alloc_tbl, inherits = FALSE) else NA_real_)
+total_response <- get_allocator_total_response(alloc_tbl)
+total_spend <- get_allocator_total_spend(alloc_tbl)
 
 metrics_txt <- file.path(dir_path, "allocator_metrics.txt")
 metrics_csv <- file.path(dir_path, "allocator_metrics.csv")
@@ -675,22 +829,21 @@ writeLines(c(
 gcs_put_safe(metrics_txt, file.path(gcs_prefix, "allocator_metrics.txt"))
 
 write.csv(data.frame(
-  model_id = best_id,
-  training_time_mins = round(training_time, 2),
-  max_cores_used = max_cores,
-  r2_train = round(best_row$rsq_train %||% NA_real_, 4),
-  nrmse_train = round(best_row$nrmse_train %||% NA_real_, 4),
-  r2_val = round(best_row$rsq_val %||% NA_real_, 4),
-  nrmse_val = round(best_row$nrmse_val %||% NA_real_, 4),
-  r2_test = round(best_row$rsq_test %||% NA_real_, 4),
-  nrmse_test = round(best_row$nrmse_test %||% NA_real_, 4),
-  decomp_rssd_train = round(best_row$decomp.rssd %||% NA_real_, 4),
+  model_id                 = best_id,
+  training_time_mins       = round(training_time, 2),
+  max_cores_used           = max_cores,
+  r2_train                 = round(best_row$rsq_train %||% NA_real_, 4),
+  nrmse_train              = round(best_row$nrmse_train %||% NA_real_, 4),
+  r2_val                   = round(best_row$rsq_val %||% NA_real_, 4),
+  nrmse_val                = round(best_row$nrmse_val %||% NA_real_, 4),
+  r2_test                  = round(best_row$rsq_test %||% NA_real_, 4),
+  nrmse_test               = round(best_row$nrmse_test %||% NA_real_, 4),
+  decomp_rssd_train        = round(best_row$decomp.rssd %||% NA_real_, 4),
   allocator_total_response = round(total_response %||% NA_real_, 2),
-  allocator_total_spend = round(total_spend %||% NA_real_, 2)
+  allocator_total_spend    = round(total_spend %||% NA_real_, 2)
 ), metrics_csv, row.names = FALSE)
 gcs_put_safe(metrics_csv, file.path(gcs_prefix, "allocator_metrics.csv"))
 
-# overview plot
 alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
 dir.create(alloc_dir, showWarnings = FALSE)
 try(
@@ -707,9 +860,153 @@ try(
 )
 push_log()
 
-## ---------- 3-month forecast (unchanged, already logged extensively) ----------
-# (Use same forecast/build_spend_forecast/compute_base_daily/make_share_bands code from the previous message.)
-# ... keep the entire forecasting block you approved previously, with push_log() after writing CSVs.
+## ---------- SMART 3-month forecast ----------
+# Monthly targets: ENV override or derive from history
+parse_nums <- function(x) as.numeric(unlist(strsplit(x, "[,;\\s]+")))
+spend_cols <- InputCollect$paid_media_spends
+monthly_override <- Sys.getenv("FORECAST_MONTHLY_BUDGETS", unset = "")
+if (nzchar(monthly_override)) {
+  b <- parse_nums(monthly_override)
+  monthly_targets <- if (length(b) >= 3) b[1:3] else rep(b[1], 3)
+  logf("Forecast  | monthly targets (ENV): ", paste(round(monthly_targets, 0), collapse = ", "))
+} else {
+  monthly_targets <- compute_monthly_targets_from_history(InputCollect$dt_input, spend_cols, horizon_months = 3)
+  logf("Forecast  | monthly targets (HIST): ", paste(round(monthly_targets, 0), collapse = ", "))
+}
+
+# Build daily per-channel plan
+future_spend <- build_spend_forecast(
+  dt_input        = InputCollect$dt_input,
+  spend_cols      = spend_cols,
+  horizon_months  = 3,
+  monthly_targets = monthly_targets
+)
+plan_path <- file.path(dir_path, "spend_plan_daily_next3m.csv")
+safe_write_csv(future_spend, plan_path)
+gcs_put_safe(plan_path, file.path(gcs_prefix, "spend_plan_daily_next3m.csv"))
+
+# Sanity check plan totals vs targets
+plan_check <- future_spend %>%
+  mutate(month = floor_date(date, "month")) %>%
+  group_by(month) %>%
+  summarise(plan_total = sum(rowSums(across(all_of(spend_cols)), na.rm = TRUE), na.rm = TRUE), .groups = "drop") %>%
+  arrange(month)
+if (nrow(plan_check)) {
+  ratios <- round(plan_check$plan_total / monthly_targets[1:nrow(plan_check)] - 1, 3)
+  logf("Forecast  | plan vs targets (ratio-1): ", paste(ratios, collapse = ", "))
+  if (any(abs(ratios) > 0.10, na.rm = TRUE)) logf("⚠ Forecast | Plan deviates >10% from targets.")
+}
+
+# Baseline from decomp
+BASE_LOOKBACK <- as.integer(Sys.getenv("FORECAST_BASE_LOOKBACK_DAYS", "28"))
+base_daily <- compute_base_daily(OutputCollect, InputCollect, lookback_days = BASE_LOOKBACK)
+
+# Evaluate each month via allocator with tight share bands
+future_spend <- future_spend %>% mutate(month = floor_date(date, "month"))
+months_vec <- sort(unique(future_spend$month))
+SHARE_TOL <- as.numeric(Sys.getenv("FORECAST_SHARE_TOL", "1e-4"))
+proj_rows <- list()
+pred_alloc_dir <- file.path(dir_path, paste0("allocator_pred_plots_", timestamp))
+dir.create(pred_alloc_dir, showWarnings = FALSE)
+pred_plot_rows <- list()
+
+for (i in seq_along(months_vec)) {
+  m <- months_vec[i]
+  seg <- future_spend %>% filter(month == m)
+  days_in_m <- nrow(seg)
+  monthly_per_channel <- colSums(seg[, spend_cols, drop = FALSE], na.rm = TRUE)
+  total_budget <- sum(monthly_per_channel, na.rm = TRUE)
+
+  if (!is.finite(total_budget) || total_budget <= 0) {
+    proj_rows[[i]] <- data.frame(
+      month = format(m, "%Y-%m"),
+      start = as.Date(m),
+      end = as.Date((m %m+% months(1)) - days(1)),
+      days = days_in_m,
+      budget = 0,
+      baseline = round(base_daily * days_in_m, 2),
+      incremental = 0,
+      forecast_total = round(base_daily * days_in_m, 2),
+      stringsAsFactors = FALSE
+    )
+    next
+  }
+
+  shares <- monthly_per_channel / total_budget
+  bands <- make_share_bands(shares, tol = SHARE_TOL)
+
+  al <- try(robyn_allocator(
+    InputCollect = InputCollect,
+    OutputCollect = OutputCollect,
+    select_model = best_id,
+    date_range = c(alloc_start, alloc_end),
+    expected_spend = total_budget,
+    scenario = "max_historical_response",
+    channel_constr_low = as.numeric(bands$low),
+    channel_constr_up = as.numeric(bands$up),
+    export = TRUE
+  ), silent = TRUE)
+
+  al_tbl <- if (!inherits(al, "try-error")) al$result_allocator else NULL
+  incr <- get_allocator_total_response(al_tbl)
+
+  if (!inherits(al, "try-error")) {
+    pred_fname <- sprintf("allocator_pred_%s.png", format(m, "%Y-%m"))
+    pred_local <- file.path(pred_alloc_dir, pred_fname)
+    pred_key <- file.path(paste0("allocator_pred_plots_", timestamp), pred_fname)
+    try(
+      {
+        png(pred_local, width = 1200, height = 800)
+        plot(al)
+        dev.off()
+        gcs_put_safe(pred_local, file.path(gcs_prefix, pred_key))
+      },
+      silent = TRUE
+    )
+    pred_plot_rows[[length(pred_plot_rows) + 1]] <- data.frame(
+      month = format(m, "%Y-%m"),
+      image_key = pred_key,
+      image_gs = sprintf("gs://%s/%s/%s", googleCloudStorageR::gcs_get_global_bucket(), gcs_prefix, pred_key),
+      budget = round(total_budget, 2),
+      baseline = round(base_daily * days_in_m, 2),
+      incremental = round(incr %||% 0, 2),
+      forecast_total = round(base_daily * days_in_m + (incr %||% 0), 2),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  proj_rows[[i]] <- data.frame(
+    month = format(m, "%Y-%m"),
+    start = as.Date(m),
+    end = as.Date((m %m+% months(1)) - days(1)),
+    days = days_in_m,
+    budget = round(total_budget, 2),
+    baseline = round(base_daily * days_in_m, 2),
+    incremental = round(incr %||% 0, 2),
+    forecast_total = round(base_daily * days_in_m + (incr %||% 0), 2),
+    stringsAsFactors = FALSE
+  )
+}
+proj <- if (length(proj_rows)) {
+  dplyr::bind_rows(proj_rows)
+} else {
+  data.frame(
+    month = character(), start = as.Date(character()), end = as.Date(character()),
+    days = integer(), budget = double(), baseline = double(), incremental = double(), forecast_total = double()
+  )
+}
+
+if (length(pred_plot_rows)) {
+  pred_idx <- dplyr::bind_rows(pred_plot_rows)
+  pred_idx_csv <- file.path(dir_path, "forecast_allocator_index.csv")
+  safe_write_csv(pred_idx, pred_idx_csv)
+  gcs_put_safe(pred_idx_csv, file.path(gcs_prefix, "forecast_allocator_index.csv"))
+}
+forecast_csv <- file.path(dir_path, "forecast_next3m.csv")
+safe_write_csv(proj, forecast_csv)
+gcs_put_safe(forecast_csv, file.path(gcs_prefix, "forecast_next3m.csv"))
+logf("Forecast  | wrote monthly projections: ", forecast_csv)
+push_log()
 
 ## ---------- Mirror local dir ----------
 for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
