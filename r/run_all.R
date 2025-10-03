@@ -1,13 +1,17 @@
 #!/usr/bin/env Rscript
 
+## ============================ BOOT ============================
+SCRIPT_REV <- "robyn-train r100 :: 2025-10-03T16:06Z :: rev-05"
+cat(">>> SCRIPT_REV:", SCRIPT_REV, "\n")
+
 ## ---------- ENV ----------
 Sys.setenv(
-  RETICULATE_PYTHON = "/usr/bin/python3",
+  RETICULATE_PYTHON        = "/usr/bin/python3",
   RETICULATE_AUTOCONFIGURE = "0",
-  TZ = "Europe/Berlin",
-  R_MAX_CORES = Sys.getenv("R_MAX_CORES", "32"),
-  OMP_NUM_THREADS = Sys.getenv("OMP_NUM_THREADS", "32"),
-  OPENBLAS_NUM_THREADS = Sys.getenv("OPENBLAS_NUM_THREADS", "32")
+  TZ                       = "Europe/Berlin",
+  R_MAX_CORES              = Sys.getenv("R_MAX_CORES", "32"),
+  OMP_NUM_THREADS          = Sys.getenv("OMP_NUM_THREADS", "32"),
+  OPENBLAS_NUM_THREADS     = Sys.getenv("OPENBLAS_NUM_THREADS", "32")
 )
 
 suppressPackageStartupMessages({
@@ -27,9 +31,6 @@ suppressPackageStartupMessages({
   library(parallel)
 })
 
-max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
-# plan(multisession, workers = max_cores)
-
 `%||%` <- function(a, b) {
   if (is.null(a) || length(a) == 0) {
     return(b)
@@ -43,17 +44,40 @@ max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
   a
 }
 
-## ---------- HELPERS ----------
-should_add_n_searches <- function(dtf, spend_cols, thr = 0.15) {
-  if (!"N_SEARCHES" %in% names(dtf) || length(spend_cols) == 0) {
-    return(FALSE)
+to_scalar <- function(x) {
+  x <- suppressWarnings(as.numeric(x))
+  if (length(x) == 0) {
+    return(NA_real_)
   }
-  ts <- rowSums(dtf[, spend_cols, drop = FALSE], na.rm = TRUE)
-  cval <- suppressWarnings(abs(cor(dtf$N_SEARCHES, ts, use = "complete.obs")))
-  isTRUE(!is.na(cval) && cval < thr)
+  if (length(x) > 1) {
+    return(sum(x, na.rm = TRUE))
+  }
+  x
 }
 
-# Download gs://bucket/path -> local_path
+max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
+
+## ======================== HELPERS/GCS =========================
+options(googleAuthR.scopes.selected = "https://www.googleapis.com/auth/devstorage.read_write")
+
+ensure_gcs_auth <- local({
+  authed <- FALSE
+  function() {
+    if (authed) {
+      return(invisible(TRUE))
+    }
+    creds <- Sys.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if (nzchar(creds) && file.exists(creds)) {
+      googleCloudStorageR::gcs_auth(json_file = creds)
+    } else {
+      googleAuthR::gar_gce_auth(scopes = "https://www.googleapis.com/auth/devstorage.read_write")
+      googleCloudStorageR::gcs_auth(token = googleAuthR::gar_token())
+    }
+    authed <<- TRUE
+    invisible(TRUE)
+  }
+})
+
 gcs_download <- function(gcs_path, local_path) {
   stopifnot(grepl("^gs://", gcs_path))
   path_parts <- sub("^gs://", "", gcs_path)
@@ -61,10 +85,8 @@ gcs_download <- function(gcs_path, local_path) {
   bucket <- bits[1]
   object <- paste(bits[-1], collapse = "/")
   googleCloudStorageR::gcs_get_object(
-    object_name = object,
-    bucket = bucket,
-    saveToDisk = local_path,
-    overwrite = TRUE
+    object_name = object, bucket = bucket,
+    saveToDisk = local_path, overwrite = TRUE
   )
   if (!file.exists(local_path)) stop("Failed to download: ", gcs_path)
   message("Downloaded: ", gcs_path, " -> ", local_path)
@@ -84,12 +106,14 @@ gcs_put <- function(local_file, object_path, upload_type = c("simple", "resumabl
     upload_type = upload_type, predefinedAcl = "bucketLevel"
   )
 }
+
 gcs_put_safe <- function(...) {
   tryCatch(gcs_put(...), error = function(e) {
     message("GCS upload failed (non-fatal): ", conditionMessage(e))
   })
 }
 
+## ======================= DATA HELPERS =========================
 filter_by_country <- function(dx, country) {
   cn <- toupper(country)
   for (col in c("COUNTRY", "COUNTRY_CODE", "MARKET", "COUNTRY_ISO", "LOCALE")) {
@@ -129,41 +153,22 @@ safe_parse_numbers <- function(df, cols) {
   df
 }
 
-## ---------- GCS AUTH (must happen before any gcs_* calls) ----------
-options(
-  googleAuthR.scopes.selected = c(
-    "https://www.googleapis.com/auth/devstorage.read_write"
-  )
-)
-
-ensure_gcs_auth <- local({
-  authed <- FALSE
-  function() {
-    if (authed) {
-      return(invisible(TRUE))
-    }
-
-    # 1) Use a JSON key if provided (local dev / CI)
-    creds <- Sys.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if (nzchar(creds) && file.exists(creds)) {
-      googleCloudStorageR::gcs_auth(json_file = creds)
-    } else {
-      # 2) Cloud Run default service account via metadata server
-      googleAuthR::gar_gce_auth(
-        scopes = "https://www.googleapis.com/auth/devstorage.read_write"
-      )
-      googleCloudStorageR::gcs_auth(token = googleAuthR::gar_token())
-    }
-    authed <<- TRUE
-    invisible(TRUE)
+should_add_n_searches <- function(dtf, spend_cols, thr = 0.15) {
+  if (!"N_SEARCHES" %in% names(dtf) || length(spend_cols) == 0) {
+    return(FALSE)
   }
-})
+  ts <- rowSums(dtf[, spend_cols, drop = FALSE], na.rm = TRUE)
+  cval <- suppressWarnings(abs(cor(dtf$N_SEARCHES, ts, use = "complete.obs")))
+  isTRUE(!is.na(cval) && cval < thr)
+}
 
+## ================== CONFIG/LOGGING/STARTUP ====================
+message("Loading configuration from Cloud Run Jobs environment...")
+ensure_gcs_auth()
 
 get_cfg_from_env <- function() {
   cfg_path <- Sys.getenv("JOB_CONFIG_GCS_PATH", unset = "")
   if (cfg_path == "") {
-    # Fallback when Python client didn’t pass overrides
     bucket <- Sys.getenv("GCS_BUCKET", unset = "mmm-app-output")
     cfg_path <- sprintf("gs://%s/training-configs/latest/job_config.json", bucket)
     message("JOB_CONFIG_GCS_PATH not set; falling back to ", cfg_path)
@@ -174,20 +179,6 @@ get_cfg_from_env <- function() {
   jsonlite::fromJSON(tmp)
 }
 
-to_scalar <- function(x) {
-  x <- suppressWarnings(as.numeric(x))
-  if (length(x) == 0) {
-    return(NA_real_)
-  }
-  if (length(x) > 1) {
-    return(sum(x, na.rm = TRUE))
-  }
-  x
-}
-
-## ---------- LOAD CFG ----------
-message("Loading configuration from Cloud Run Jobs environment...")
-ensure_gcs_auth()
 cfg <- get_cfg_from_env()
 
 country <- cfg$country
@@ -195,27 +186,30 @@ revision <- cfg$revision
 date_input <- cfg$date_input
 iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
-train_size <- as.numeric(cfg$train_size)
+train_vec <- suppressWarnings(as.numeric(cfg$train_size))
 timestamp <- cfg$timestamp %||% format(Sys.time(), "%m%d_%H%M%S")
 
+# pick a scalar train_size deterministically
+train_size_scalar <- if (length(train_vec) >= 1 && is.finite(train_vec[1]) && train_vec[1] > 0 && train_vec[1] < 1) {
+  train_vec[1]
+} else if (length(train_vec) >= 2 && all(is.finite(train_vec))) {
+  pmin(0.95, pmax(0.5, mean(train_vec, na.rm = TRUE)))
+} else {
+  0.8
+}
+
+# workspace & GCS
 dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
 gcs_prefix <- file.path("robyn", revision, country, timestamp)
 
-# after you set: dir_path, gcs_prefix
+# status
 job_started <- Sys.time()
 status_json <- file.path(dir_path, "status.json")
-writeLines(
-  jsonlite::toJSON(
-    list(state = "RUNNING", start_time = as.character(job_started)),
-    auto_unbox = TRUE
-  ),
-  status_json
-)
+writeLines(jsonlite::toJSON(list(state = "RUNNING", start_time = as.character(job_started)), auto_unbox = TRUE), status_json)
 gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
 
-
-## ---------- LOGGING ----------
+# logs (capture both stdout and messages), plus immediate upload helper
 log_file <- file.path(dir_path, "robyn_console.log")
 dir.create(dirname(log_file), recursive = TRUE, showWarnings = FALSE)
 log_con_out <- file(log_file, open = "wt")
@@ -223,42 +217,38 @@ log_con_err <- file(log_file, open = "at")
 sink(log_con_out, split = TRUE)
 sink(log_con_err, type = "message")
 
-cleanup <- function() {
+flush_side_log <- function() {
   try(sink(type = "message"), silent = TRUE)
   try(sink(), silent = TRUE)
   try(close(log_con_err), silent = TRUE)
   try(close(log_con_out), silent = TRUE)
   try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
 }
+
+cleanup <- function() {
+  flush_side_log()
+}
+
 options(error = function(e) {
-  traceback()
   message("FATAL ERROR: ", conditionMessage(e))
   cleanup()
   quit(status = 1)
 })
 on.exit(cleanup(), add = TRUE)
 
-## ---------- PYTHON / NEVERGRAD ----------
+## =================== PYTHON/RETICULATE ========================
 reticulate::use_python("/usr/bin/python3", required = TRUE)
 cat("---- reticulate::py_config() ----\n")
 print(reticulate::py_config())
 cat("-------------------------------\n")
 if (!reticulate::py_module_available("nevergrad")) stop("nevergrad not importable via reticulate.")
 
-## ---------- GCS AUTH ----------
-options(googleAuthR.scopes.selected = "https://www.googleapis.com/auth/devstorage.read_write")
-if (nzchar(Sys.getenv("GOOGLE_APPLICATION_CREDENTIALS")) &&
-  file.exists(Sys.getenv("GOOGLE_APPLICATION_CREDENTIALS"))) {
-  googleCloudStorageR::gcs_auth(json_file = Sys.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-} else {
-  token <- googleAuthR::gar_gce_auth(scopes = "https://www.googleapis.com/auth/devstorage.read_write")
-  googleCloudStorageR::gcs_auth(token = googleAuthR::gar_token())
-}
-googleCloudStorageR::gcs_global_bucket(cfg$gcs_bucket %||% "mmm-app-output")
+## ======================= GCS DEFAULTS ========================
 options(googleCloudStorageR.predefinedAcl = "bucketLevel")
+googleCloudStorageR::gcs_global_bucket(cfg$gcs_bucket %||% "mmm-app-output")
 message("Using GCS bucket: ", googleCloudStorageR::gcs_get_global_bucket())
 
-## ---------- PARAMS ECHO ----------
+## ================== PARAMS ECHO (CLEAR) ======================
 cat(
   "✅ Cloud Run Job Parameters\n",
   "  iter       :", iter, "\n",
@@ -266,15 +256,15 @@ cat(
   "  country    :", country, "\n",
   "  revision   :", revision, "\n",
   "  date_input :", date_input, "\n",
-  "  train_size :", paste(train_size, collapse = ","), "\n",
+  "  train_size (cfg):", paste(train_vec, collapse = ","), "\n",
+  "  train_size (used):", train_size_scalar, "\n",
   "  max_cores  :", max_cores, "\n"
 )
 
-## ---------- LOAD DATA ----------
+## ========================= LOAD DATA =========================
 if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
   message("→ Downloading training data from GCS: ", cfg$data_gcs_path)
   temp_data <- tempfile(fileext = ".parquet")
-
   ensure_gcs_auth()
   gcs_download(cfg$data_gcs_path, temp_data)
   df <- arrow::read_parquet(temp_data, as_data_frame = TRUE)
@@ -284,7 +274,7 @@ if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
   stop("No data_gcs_path provided in configuration.")
 }
 
-# (Optional) annotations — download if present so they’re next to outputs
+# Optional annotations
 if (!is.null(cfg$annotations_gcs_path) && nzchar(cfg$annotations_gcs_path)) {
   ann_local <- file.path(dir_path, "enriched_annotations.csv")
   try(gcs_download(cfg$annotations_gcs_path, ann_local), silent = TRUE)
@@ -293,7 +283,7 @@ if (!is.null(cfg$annotations_gcs_path) && nzchar(cfg$annotations_gcs_path)) {
 df <- as.data.frame(df)
 names(df) <- toupper(names(df))
 
-## ---------- DATE & CLEAN ----------
+## ================== DATE/CLEAN/FEATURES ======================
 if ("DATE" %in% names(df)) {
   df$date <- if (inherits(df$DATE, "POSIXt")) as.Date(df$DATE) else as.Date(as.character(df$DATE))
   df$DATE <- NULL
@@ -301,7 +291,7 @@ if ("DATE" %in% names(df)) {
   df$date <- as.Date(df[["date"]])
   df[["date"]] <- NULL
 } else {
-  stop("No DATE/date column in data")
+  stop("No DATE/date column in data.")
 }
 
 df <- filter_by_country(df, country)
@@ -310,8 +300,8 @@ if (anyDuplicated(df$date)) {
   message("→ Collapsing duplicated dates: ", sum(duplicated(df$date)))
   sum_or_first <- function(x) if (is.numeric(x)) sum(x, na.rm = TRUE) else dplyr::first(x)
   df <- df %>%
-    dplyr::group_by(date) %>%
-    dplyr::summarise(dplyr::across(!dplyr::all_of("date"), sum_or_first), .groups = "drop")
+    group_by(date) %>%
+    summarise(across(!all_of("date"), sum_or_first), .groups = "drop")
 }
 
 df <- fill_day(df)
@@ -327,27 +317,25 @@ if (length(zero_var)) {
 }
 if (!"TV_IS_ON" %in% names(df)) df$TV_IS_ON <- 0
 
-## ---------- FEATURE ENGINEERING ----------
 df <- df %>% mutate(
-  GA_OTHER_COST = rowSums(select(., tidyselect::matches("^GA_.*_COST$") & !any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE),
-  BING_TOTAL_COST = rowSums(select(., tidyselect::matches("^BING_.*_COST$")), na.rm = TRUE),
-  META_TOTAL_COST = rowSums(select(., tidyselect::matches("^META_.*_COST$")), na.rm = TRUE),
-  ORGANIC_TRAFFIC = rowSums(select(., any_of(c("NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS", "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS"))), na.rm = TRUE),
-  BRAND_HEALTH = coalesce(DIRECT_DAILY_SESSIONS, 0) + coalesce(SEO_DAILY_SESSIONS, 0),
-  ORGxTV = BRAND_HEALTH * coalesce(TV_COST, 0),
-  GA_OTHER_IMPRESSIONS = rowSums(select(., tidyselect::matches("^GA_.*_IMPRESSIONS$") & !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
+  GA_OTHER_COST          = rowSums(select(., tidyselect::matches("^GA_.*_COST$") & !any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE),
+  BING_TOTAL_COST        = rowSums(select(., tidyselect::matches("^BING_.*_COST$")), na.rm = TRUE),
+  META_TOTAL_COST        = rowSums(select(., tidyselect::matches("^META_.*_COST$")), na.rm = TRUE),
+  ORGANIC_TRAFFIC        = rowSums(select(., any_of(c("NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS", "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS"))), na.rm = TRUE),
+  BRAND_HEALTH           = coalesce(DIRECT_DAILY_SESSIONS, 0) + coalesce(SEO_DAILY_SESSIONS, 0),
+  ORGxTV                 = BRAND_HEALTH * coalesce(TV_COST, 0),
+  GA_OTHER_IMPRESSIONS   = rowSums(select(., tidyselect::matches("^GA_.*_IMPRESSIONS$") & !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
   BING_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE),
   META_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE)
 )
 
-## ---------- WINDOW / FLAGS ----------
 end_data_date <- max(df$date, na.rm = TRUE)
 start_data_date <- as.Date("2024-01-01")
 df <- df %>% filter(date >= start_data_date, date <= end_data_date)
 df$DOW <- wday(df$date, label = TRUE)
 df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
-## ---------- DRIVERS ----------
+## ========================= DRIVERS ===========================
 paid_media_spends <- intersect(cfg$paid_media_spends, names(df))
 paid_media_vars <- intersect(cfg$paid_media_vars, names(df))
 stopifnot(length(paid_media_spends) == length(paid_media_vars))
@@ -370,7 +358,7 @@ cat(
   "  organic_vars     :", paste(organic_vars, collapse = ", "), "\n"
 )
 
-## ---------- ROBYN INPUTS ----------
+## ====================== ROBYN INPUTS =========================
 InputCollect <- robyn_inputs(
   dt_input = df,
   date_var = "date",
@@ -391,24 +379,25 @@ InputCollect <- robyn_inputs(
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
-## ---------- HYPERPARAMETERS ----------
+## =================== HYPERPARAMETERS =========================
 hyper_vars <- c(paid_media_vars, organic_vars)
 hyperparameters <- list()
-
 message("→ Setting up hyperparameters (", length(hyper_vars), " vars) with ", max_cores, " cores...")
 
+mk_hp <- function(v) {
+  if (v == "ORGANIC_TRAFFIC") {
+    list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
+  } else if (v == "TV_COST") {
+    list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
+  } else if (v == "PARTNERSHIP_COSTS") {
+    list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
+  } else {
+    list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
+  }
+}
+
 if (length(hyper_vars) > 10) {
-  hp <- future_lapply(hyper_vars, function(v) {
-    if (v == "ORGANIC_TRAFFIC") {
-      list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
-    } else if (v == "TV_COST") {
-      list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
-    } else if (v == "PARTNERSHIP_COSTS") {
-      list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
-    } else {
-      list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
-    }
-  }, future.seed = TRUE)
+  hp <- future_lapply(hyper_vars, mk_hp, future.seed = TRUE)
   names(hp) <- hyper_vars
   for (v in names(hp)) {
     hyperparameters[[paste0(v, "_alphas")]] <- hp[[v]]$alphas
@@ -417,71 +406,42 @@ if (length(hyper_vars) > 10) {
   }
 } else {
   for (v in hyper_vars) {
-    if (v == "ORGANIC_TRAFFIC") {
-      hyperparameters[[paste0(v, "_alphas")]] <- c(0.5, 2.0)
-      hyperparameters[[paste0(v, "_gammas")]] <- c(0.3, 0.7)
-      hyperparameters[[paste0(v, "_thetas")]] <- c(0.9, 0.99)
-    } else if (v == "TV_COST") {
-      hyperparameters[[paste0(v, "_alphas")]] <- c(0.8, 2.2)
-      hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.99)
-      hyperparameters[[paste0(v, "_thetas")]] <- c(0.7, 0.95)
-    } else if (v == "PARTNERSHIP_COSTS") {
-      hyperparameters[[paste0(v, "_alphas")]] <- c(0.65, 2.25)
-      hyperparameters[[paste0(v, "_gammas")]] <- c(0.45, 0.875)
-      hyperparameters[[paste0(v, "_thetas")]] <- c(0.3, 0.625)
-    } else {
-      hyperparameters[[paste0(v, "_alphas")]] <- c(1.0, 3.0)
-      hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.9)
-      hyperparameters[[paste0(v, "_thetas")]] <- c(0.1, 0.4)
-    }
+    spec <- mk_hp(v)
+    hyperparameters[[paste0(v, "_alphas")]] <- spec$alphas
+    hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
+    hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
   }
 }
-# hyperparameters[["train_size"]] <- train_size
+
 cat("Hyperparams:\n")
 utils::str(hyperparameters, max.level = 1)
 cat("InputCollect summary:\n")
 utils::str(InputCollect, max.level = 1)
 cat("MaxCores:", max_cores, "\n")
 
-expect_keys <- as.vector(outer(
-  c(paid_media_vars, organic_vars),
-  c("_alphas", "_gammas", "_thetas"),
-  paste0
-))
+expect_keys <- as.vector(outer(c(paid_media_vars, organic_vars), c("_alphas", "_gammas", "_thetas"), paste0))
 missing <- setdiff(expect_keys, names(hyperparameters))
 extra <- setdiff(names(hyperparameters), expect_keys)
 utils::str(missing, max.level = 1)
 utils::str(extra, max.level = 1)
-
 if (length(missing)) stop("Missing HP keys: ", paste(missing, collapse = ", "))
 if (length(extra)) stop("Extra HP keys (remove them): ", paste(extra, collapse = ", "))
 
 InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
-if (is.null(InputCollect$hyperparameters)) {
-  stop("Robyn did not accept hyperparameters; check names/ranges & var names.")
-}
-# cat("InputCollect summary:\n")
-# utils::str(InputCollect, max.level = 1)
+if (is.null(InputCollect$hyperparameters)) stop("Robyn did not accept hyperparameters; check names/ranges & var names.")
 
-## ---------- TRAIN ----------
+## ========================= TRAIN =============================
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
-t0 <- Sys.time()
-run_err <- NULL
 prev_plan <- future::plan()
 on.exit(future::plan(prev_plan), add = TRUE)
 future::plan(sequential)
 
-cat(
-  "Rows:", nrow(InputCollect$dt_input),
-  "Window:", as.character(InputCollect$window_start), "→", as.character(InputCollect$window_end), "\n"
-)
+cat(">>> train_size (used): ", train_size_scalar, "\n")
+cat("Rows:", nrow(InputCollect$dt_input), "Window:", as.character(InputCollect$window_start), "→", as.character(InputCollect$window_end), "\n")
 
-
-OutputModels <- NULL
+t0 <- Sys.time()
 warnings_collected <- character(0)
-
-options(warn = 2) # TURN WARNINGS INTO ERRORS to catch Robyn validations
-on.exit(options(warn = 0), add = TRUE)
+options(warn = 2) # warnings -> errors
 
 OutputModels <- tryCatch(
   withCallingHandlers(
@@ -489,66 +449,60 @@ OutputModels <- tryCatch(
       InputCollect       = InputCollect,
       iterations         = iter,
       trials             = trials,
-      train_size         = 0.8,
+      train_size         = train_size_scalar,
       ts_validation      = TRUE,
       add_penalty_factor = TRUE,
       cores              = max_cores
     ),
     warning = function(w) {
+      # capture, but DO NOT muffle; warn=2 will escalate
       warnings_collected <<- c(warnings_collected, conditionMessage(w))
-      invokeRestart("muffleWarning") # we already captured it; warn=2 will error otherwise
     }
   ),
   error = function(e) {
-    message("robyn_run ERROR: ", conditionMessage(e))
     if (length(warnings_collected)) {
       message("robyn_run WARNINGS captured:\n- ", paste(unique(warnings_collected), collapse = "\n- "))
     }
+    # push side log before aborting
+    try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
     stop(e)
   }
 )
 
-if (is.null(OutputModels)) {
-  stop("robyn_run returned NULL (see captured warnings above).")
+elapsed_sec <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+if (is.null(OutputModels) || !is.list(OutputModels) || !length(OutputModels)) {
+  try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+  stop("Training produced no models (OutputModels is NULL/empty).")
 }
-if (!is.null(run_err)) {
-  message("❌ robyn_run error: ", conditionMessage(run_err))
-  # dump some fast context:
-  message("paid_media_vars: ", paste(paid_media_vars, collapse = ", "))
-  message("organic_vars   : ", paste(organic_vars, collapse = ", "))
-  message("HP names       : ", paste(names(hyperparameters), collapse = ", "))
-  stop(run_err) # make the job fail so you can see it in Logs Explorer
+if (elapsed_sec < 5) {
+  try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+  stop("Training returned in <", 5, "s — likely validation short-circuit. Aborting.")
 }
 
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
 if (!is.null(OutputModels$hyperparameters)) utils::str(OutputModels$hyperparameters, max.level = 1)
 
-## ---------- APPEND R TRAINING TIME TO timings.csv --
+# upload side log immediately (even on success)
+try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
 
-ensure_gcs_auth() # <--- add this line
-
-## ---------- APPEND R TRAINING TIME TO timings.csv ----------
+## ====== timings.csv (append) – robust but best-effort ========
+ensure_gcs_auth()
 timings_obj <- file.path(gcs_prefix, "timings.csv")
 timings_local <- file.path(tempdir(), "timings.csv")
 message("Appending training time to: gs://", googleCloudStorageR::gcs_get_global_bucket(), "/", timings_obj)
 
-r_row <- data.frame(
-  Step = "R training (robyn_run)",
-  `Time (s)` = round(training_time * 60, 2),
-  check.names = FALSE
-)
+r_row <- data.frame(Step = "R training (robyn_run)", `Time (s)` = round(training_time * 60, 2), check.names = FALSE)
 
-# Small retry loop in case timings.csv hasn’t been uploaded yet
 had_existing <- FALSE
 for (i in 1:5) {
   ok <- tryCatch(
     {
       googleCloudStorageR::gcs_get_object(
         object_name = timings_obj,
-        bucket = googleCloudStorageR::gcs_get_global_bucket(),
-        saveToDisk = timings_local,
-        overwrite = TRUE
+        bucket      = googleCloudStorageR::gcs_get_global_bucket(),
+        saveToDisk  = timings_local,
+        overwrite   = TRUE
       )
       TRUE
     },
@@ -558,16 +512,16 @@ for (i in 1:5) {
     had_existing <- TRUE
     break
   }
-  Sys.sleep(2) # wait a bit then try again
+  Sys.sleep(2)
 }
 
 if (had_existing) {
   old <- try(readr::read_csv(timings_local, show_col_types = FALSE), silent = TRUE)
-  if (inherits(old, "try-error")) {
-    out <- r_row
+  out <- if (inherits(old, "try-error")) {
+    r_row
   } else {
     if ("Step" %in% names(old)) old <- dplyr::filter(old, Step != "R training (robyn_run)")
-    out <- dplyr::bind_rows(old, r_row)
+    dplyr::bind_rows(old, r_row)
   }
 } else {
   out <- r_row
@@ -576,35 +530,21 @@ if (had_existing) {
 readr::write_csv(out, timings_local, na = "")
 gcs_put_safe(timings_local, timings_obj)
 
-# Verify for the logs (best-effort)
-try(
-  {
-    ver_local <- tempfile(fileext = ".csv")
-    googleCloudStorageR::gcs_get_object(
-      object_name = timings_obj,
-      bucket = googleCloudStorageR::gcs_get_global_bucket(),
-      saveToDisk = ver_local,
-      overwrite = TRUE
-    )
-    ver <- readr::read_csv(ver_local, show_col_types = FALSE)
-    message(
-      "timings.csv now has ", nrow(ver), " rows: ",
-      paste(ver$Step, collapse = " | ")
-    )
-  },
-  silent = TRUE
-)
+## ============ SAVE MODELS (with tiny RDS protection) =========
+tmp_out_rds <- tempfile(fileext = ".rds")
+saveRDS(OutputModels, tmp_out_rds)
+sz <- file.info(tmp_out_rds)$size
+if (!is.finite(sz) || sz < 1000) {
+  try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+  stop("OutputModels.RDS is suspiciously small (", sz, " bytes). Aborting.")
+}
+file.copy(tmp_out_rds, file.path(dir_path, "OutputModels.RDS"), overwrite = TRUE)
 
-
-readr::write_csv(out, timings_local)
-gcs_put_safe(timings_local, timings_obj)
-
-saveRDS(OutputModels, file.path(dir_path, "OutputModels.RDS"))
 saveRDS(InputCollect, file.path(dir_path, "InputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputModels.RDS"), file.path(gcs_prefix, "OutputModels.RDS"))
 gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "InputCollect.RDS"))
 
-## ---------- OUTPUTS & ONEPAGERS ----------
+## ================= OUTPUTS & ONEPAGERS =======================
 OutputCollect <- robyn_outputs(
   InputCollect, OutputModels,
   pareto_fronts = 2, csv_out = "pareto",
@@ -616,42 +556,27 @@ saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
 
 best_id <- OutputCollect$resultHypParam$solID[1]
-writeLines(
-  c(
-    best_id,
-    paste("Iterations:", iter),
-    paste("Trials:", trials),
-    paste("Training time (mins):", round(training_time, 2))
-  ),
-  con = file.path(dir_path, "best_model_id.txt")
-)
+writeLines(c(
+  best_id,
+  paste("Iterations:", iter),
+  paste("Trials:", trials),
+  paste("Training time (mins):", round(training_time, 2))
+), con = file.path(dir_path, "best_model_id.txt"))
 gcs_put_safe(file.path(dir_path, "best_model_id.txt"), file.path(gcs_prefix, "best_model_id.txt"))
 
-# onepagers for top models
-top_models <- OutputCollect$resultHypParam$solID[
-  1:min(3, nrow(OutputCollect$resultHypParam))
-]
+# onepagers
+top_models <- OutputCollect$resultHypParam$solID[1:min(3, nrow(OutputCollect$resultHypParam))]
 for (m in top_models) {
-  try(
-    robyn_onepagers(
-      InputCollect,
-      OutputCollect,
-      select_model = m,
-      export = TRUE
-    ),
-    silent = TRUE
-  )
+  try(robyn_onepagers(InputCollect, OutputCollect, select_model = m, export = TRUE), silent = TRUE)
 }
 
-# Onepagers: try PNG first, then PDF (restored fallback)
+# promote onepager (PNG preferred, else PDF)
 all_files <- list.files(dir_path, recursive = TRUE, full.names = TRUE)
 escaped_id <- gsub("\\.", "\\\\.", best_id)
 png_pat <- paste0("(?i)(onepager).*", escaped_id, ".*\\.png$")
 pdf_pat <- paste0("(?i)(onepager).*", escaped_id, ".*\\.pdf$")
-
 cand_png <- all_files[grepl(png_pat, all_files, perl = TRUE)]
 cand_pdf <- all_files[grepl(pdf_pat, all_files, perl = TRUE)]
-
 if (length(cand_png)) {
   canonical <- file.path(dir_path, paste0(best_id, ".png"))
   file.copy(cand_png[1], canonical, overwrite = TRUE)
@@ -661,27 +586,17 @@ if (length(cand_png)) {
   file.copy(cand_pdf[1], canonical, overwrite = TRUE)
   gcs_put_safe(canonical, file.path(gcs_prefix, paste0(best_id, ".pdf")))
 } else {
-  pdf_pat <- paste0("(?i)(onepager).*", escaped_id, ".*\\.pdf$")
-  cand_pdf <- all_files[
-    grepl(pdf_pat, all_files, perl = TRUE)
-  ]
-  if (!length(cand_pdf)) {
-    cand_pdf <- all_files[basename(all_files) == paste0(best_id, ".pdf")]
-  }
-  if (length(cand_pdf)) {
+  alt_pdf <- all_files[basename(all_files) == paste0(best_id, ".pdf")]
+  if (length(alt_pdf)) {
     canonical <- file.path(dir_path, paste0(best_id, ".pdf"))
-    file.copy(cand_pdf[1], canonical, overwrite = TRUE)
-    gcs_put_safe(
-      canonical,
-      file.path(gcs_prefix, paste0(best_id, ".pdf"))
-    )
+    file.copy(alt_pdf[1], canonical, overwrite = TRUE)
+    gcs_put_safe(canonical, file.path(gcs_prefix, paste0(best_id, ".pdf")))
   } else {
     message("No onepager image/pdf found for best_id=", best_id)
   }
 }
 
-
-## ---------- ALLOCATOR ----------
+## ========================= ALLOCATOR =========================
 is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
 low_bounds <- ifelse(is_brand, 0, 0.3)
 up_bounds <- ifelse(is_brand, 0, 4)
@@ -696,10 +611,9 @@ AllocatorCollect <- try(
   silent = TRUE
 )
 
-## ---------- METRICS + PLOT ----------
+## ====================== METRICS & PLOTS ======================
 best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == best_id, ]
 alloc_tbl <- if (!inherits(AllocatorCollect, "try-error")) AllocatorCollect$result_allocator else NULL
-
 total_response <- to_scalar(if (!is.null(alloc_tbl)) alloc_tbl$total_response else NA_real_)
 total_spend <- to_scalar(if (!is.null(alloc_tbl)) alloc_tbl$total_spend else NA_real_)
 
@@ -740,7 +654,7 @@ metrics_df <- data.frame(
 write.csv(metrics_df, metrics_csv, row.names = FALSE)
 gcs_put_safe(metrics_csv, file.path(gcs_prefix, "allocator_metrics.csv"))
 
-# Allocator plot (restored)
+# Allocator plot (best-effort)
 alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
 dir.create(alloc_dir, showWarnings = FALSE)
 try(
@@ -756,7 +670,7 @@ try(
   silent = TRUE
 )
 
-## ---------- UPLOAD EVERYTHING ----------
+## ===================== FINAL UPLOAD SWEEP ====================
 for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
   rel <- sub(paste0("^", normalizePath(dir_path), "/?"), "", normalizePath(f))
   gcs_put_safe(f, file.path(gcs_prefix, rel))
@@ -765,21 +679,15 @@ for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
 cat(
   "✅ Cloud Run Job completed successfully!\n",
   "Outputs in gs://", googleCloudStorageR::gcs_get_global_bucket(), "/", gcs_prefix, "/\n",
-  "Training time: ", round(training_time, 2), " minutes using ", max_cores, " cores\n", # nolint
+  "Training time: ", round(training_time, 2), " minutes using ", max_cores, " cores\n",
   sep = ""
 )
 
 job_finished <- Sys.time()
-writeLines(
-  jsonlite::toJSON(
-    list(
-      state = "SUCCEEDED",
-      start_time = as.character(job_started),
-      end_time = as.character(job_finished),
-      duration_minutes = round(as.numeric(difftime(job_finished, job_started, units = "mins")), 2) # nolint
-    ),
-    auto_unbox = TRUE
-  ),
-  status_json
-)
+writeLines(jsonlite::toJSON(list(
+  state = "SUCCEEDED",
+  start_time = as.character(job_started),
+  end_time = as.character(job_finished),
+  duration_minutes = round(as.numeric(difftime(job_finished, job_started, units = "mins")), 2)
+), auto_unbox = TRUE), status_json)
 gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
