@@ -879,16 +879,16 @@ for (v in names(hp_list)) {
   h <- hp_list[[v]]
   hyperparameters[[paste0(v, "_alphas")]] <- h$alphas
   hyperparameters[[paste0(v, "_gammas")]] <- h$gammas
-  hyperparameters[[paste0(v, "_alpha")]] <- h$alphas
-  hyperparameters[[paste0(v, "_gamma")]] <- h$gammas
+  # hyperparameters[[paste0(v, "_alpha")]] <- h$alphas
+  # hyperparameters[[paste0(v, "_gamma")]] <- h$gammas
   if (!use_weibull) {
     hyperparameters[[paste0(v, "_thetas")]] <- h$thetas
-    hyperparameters[[paste0(v, "_theta")]] <- h$thetas
+    # hyperparameters[[paste0(v, "_theta")]] <- h$thetas
   } else {
     hyperparameters[[paste0(v, "_shapes")]] <- h$shapes
     hyperparameters[[paste0(v, "_scales")]] <- h$scales
-    hyperparameters[[paste0(v, "_shape")]] <- h$shapes
-    hyperparameters[[paste0(v, "_scale")]] <- h$scales
+    # hyperparameters[[paste0(v, "_shape")]] <- h$shapes
+    # hyperparameters[[paste0(v, "_scale")]] <- h$scales
   }
 }
 
