@@ -490,7 +490,7 @@ OutputModels <- tryCatch(
       InputCollect       = InputCollect,
       iterations         = iter,
       trials             = trials,
-      train_size         = train_size_scalar,
+      train_size         = 0.8,
       ts_validation      = TRUE,
       add_penalty_factor = TRUE,
       cores              = max_cores
