@@ -829,92 +829,75 @@ if (length(paid_media_spends)) {
 }
 write_status("drivers_ready")
 
-## ---------- ADSTOCK & HPs ----------
-# ad_type <- tolower(adstock %||% "geometric")
-ad_type <- "geometric"
+## ---------- ROBYN INPUTS ----------
+InputCollect <- robyn_inputs(
+  dt_input = df,
+  date_var = "date",
+  dep_var = "UPLOAD_VALUE",
+  dep_var_type = "revenue",
+  prophet_vars = c("trend", "season", "holiday", "weekday"),
+  prophet_country = toupper(country),
+  paid_media_spends = paid_media_spends,
+  paid_media_vars = paid_media_vars,
+  context_vars = context_vars,
+  factor_vars = factor_vars,
+  organic_vars = organic_vars,
+  window_start = start_data_date,
+  window_end = end_data_date,
+  adstock = "geometric"
+)
 
-if (!nzchar(ad_type) || ad_type == "none") {
-  message("⚠️ adstock was 'none'. Forcing 'geometric'.")
-  ad_type <- "geometric"
-}
-use_weibull <- grepl("^weibull", ad_type)
-TV_NAME <- if ("TV_COST" %in% paid_media_vars) "TV_COST" else if ("TV_COSTS" %in% paid_media_vars) "TV_COSTS" else NA
-ad_type <- "geometric"
+alloc_end <- max(InputCollect$dt_input$date)
+alloc_start <- alloc_end - 364
 
-media_hp_vars <- unique(paid_media_vars)
-maybe_org <- intersect(organic_vars, names(df))
-hyper_vars <- unique(c(media_hp_vars, maybe_org))
-if (!length(hyper_vars)) stop("No variables available for HP ranges.")
+## ---------- HYPERPARAMETERS ----------
+hyper_vars <- c(paid_media_vars, organic_vars)
+hyperparameters <- list()
 
-hp_for_var <- function(v) {
-  sat <- list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9))
-  if (v == "ORGANIC_TRAFFIC") sat <- list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7))
-  if (!is.na(TV_NAME) && v == TV_NAME) sat <- list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99))
-  if (v == "PARTNERSHIP_COSTS") sat <- list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875))
-  if (!use_weibull) {
-    ad <- if (!is.na(TV_NAME) && v == TV_NAME) {
-      list(thetas = c(0.7, 0.95))
+message("→ Setting up hyperparameters (", length(hyper_vars), " vars) with ", max_cores, " cores...")
+
+if (length(hyper_vars) > 10) {
+  hp <- future_lapply(hyper_vars, function(v) {
+    if (v == "ORGANIC_TRAFFIC") {
+      list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
+    } else if (v == "TV_COST") {
+      list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
     } else if (v == "PARTNERSHIP_COSTS") {
-      list(thetas = c(0.3, 0.625))
-    } else if (v == "ORGANIC_TRAFFIC") {
-      list(thetas = c(0.9, 0.99))
+      list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
     } else {
-      list(thetas = c(0.1, 0.4))
+      list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
     }
-    c(sat, ad)
-  } else {
-    ad <- if (!is.na(TV_NAME) && v == TV_NAME) {
-      list(shapes = c(0.5, 2.5), scales = c(0.5, 0.99))
+  }, future.seed = TRUE)
+  names(hp) <- hyper_vars
+  for (v in names(hp)) {
+    hyperparameters[[paste0(v, "_alphas")]] <- hp[[v]]$alphas
+    hyperparameters[[paste0(v, "_gammas")]] <- hp[[v]]$gammas
+    hyperparameters[[paste0(v, "_thetas")]] <- hp[[v]]$thetas
+  }
+} else {
+  for (v in hyper_vars) {
+    if (v == "ORGANIC_TRAFFIC") {
+      hyperparameters[[paste0(v, "_alphas")]] <- c(0.5, 2.0)
+      hyperparameters[[paste0(v, "_gammas")]] <- c(0.3, 0.7)
+      hyperparameters[[paste0(v, "_thetas")]] <- c(0.9, 0.99)
+    } else if (v == "TV_COST") {
+      hyperparameters[[paste0(v, "_alphas")]] <- c(0.8, 2.2)
+      hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.99)
+      hyperparameters[[paste0(v, "_thetas")]] <- c(0.7, 0.95)
     } else if (v == "PARTNERSHIP_COSTS") {
-      list(shapes = c(0.3, 2.0), scales = c(0.3, 0.9))
-    } else if (v == "ORGANIC_TRAFFIC") {
-      list(shapes = c(0.2, 1.5), scales = c(0.8, 0.999))
+      hyperparameters[[paste0(v, "_alphas")]] <- c(0.65, 2.25)
+      hyperparameters[[paste0(v, "_gammas")]] <- c(0.45, 0.875)
+      hyperparameters[[paste0(v, "_thetas")]] <- c(0.3, 0.625)
     } else {
-      list(shapes = c(0.2, 2.5), scales = c(0.2, 0.9))
+      hyperparameters[[paste0(v, "_alphas")]] <- c(1.0, 3.0)
+      hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.9)
+      hyperparameters[[paste0(v, "_thetas")]] <- c(0.1, 0.4)
     }
-    c(sat, ad)
   }
 }
-hp_list <- setNames(lapply(hyper_vars, hp_for_var), hyper_vars)
+hyperparameters[["train_size"]] <- train_size
+InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
 
-hyperparameters <- list(train_size = as.numeric(train_size))
-for (v in names(hp_list)) {
-  h <- hp_list[[v]]
-  hyperparameters[[paste0(v, "_alphas")]] <- h$alphas
-  hyperparameters[[paste0(v, "_gammas")]] <- h$gammas
-  hyperparameters[[paste0(v, "_thetas")]] <- h$thetas # geometric only
-}
-
-
-cat("Hyperparameters")
-print(hyperparameters)
-## ---------- ROBYN INPUTS ----------
-log_section("ROBYN INPUTS & HPs")
-InputCollect <- with_timeout(
-  {
-    robyn_inputs(
-      dt_input          = df,
-      date_var          = "date",
-      dep_var           = dep_var,
-      adstock           = ad_type,
-      dep_var_type      = "revenue",
-      # prophet_vars      = c("trend", "season", "holiday", "weekday"),
-      prophet_vars      = c("trend", "season", "holiday"),
-      prophet_country   = toupper(country),
-      paid_media_spends = paid_media_spends,
-      paid_media_vars   = paid_media_vars,
-      context_vars      = context_vars,
-      factor_vars       = factor_vars,
-      organic_vars      = organic_vars,
-      window_start      = start_data_date,
-      window_end        = end_data_date,
-      hyperparameters   = hyperparameters
-    )
-  },
-  TO_INPUTS,
-  "robyn_inputs"
-)
-if (is.null(InputCollect)) stop("robyn_inputs returned NULL")
 write_status("inputs_built")
 cat("adstock:", InputCollect$adstock, "\n")
 hp_keys <- setdiff(names(InputCollect$hyperparameters %||% list()), "train_size")
