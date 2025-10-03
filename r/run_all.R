@@ -28,7 +28,7 @@ suppressPackageStartupMessages({
 })
 
 max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
-plan(multisession, workers = max_cores)
+# plan(multisession, workers = max_cores)
 
 `%||%` <- function(a, b) {
   if (is.null(a) || length(a) == 0) {
@@ -456,7 +456,10 @@ utils::str(extra, max.level = 1)
 if (length(missing)) stop("Missing HP keys: ", paste(missing, collapse = ", "))
 if (length(extra)) stop("Extra HP keys (remove them): ", paste(extra, collapse = ", "))
 
-# InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
+InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
+if (is.null(InputCollect$hyperparameters)) {
+  stop("Robyn did not accept hyperparameters; check names/ranges & var names.")
+}
 # cat("InputCollect summary:\n")
 # utils::str(InputCollect, max.level = 1)
 
@@ -467,10 +470,17 @@ run_err <- NULL
 prev_plan <- future::plan()
 on.exit(future::plan(prev_plan), add = TRUE)
 future::plan(sequential)
+
+cat("Train size:", train_size, "\n")
+cat(
+  "Rows:", nrow(InputCollect$dt_input),
+  "Window:", as.character(InputCollect$window_start), "→", as.character(InputCollect$window_end), "\n"
+)
+
 OutputModels <- tryCatch(
   robyn_run(
     InputCollect = InputCollect,
-    hyperparameters = hyperparameters,
+    # hyperparameters = hyperparameters,
     train_size = 0.8,
     iterations = iter,
     trials = trials,
@@ -484,7 +494,6 @@ OutputModels <- tryCatch(
   },
   warning = function(w) {
     message("robyn_run warning: ", conditionMessage(w))
-    invokeRestart("muffleWarning")
   }
 )
 if (!is.null(run_err)) {
