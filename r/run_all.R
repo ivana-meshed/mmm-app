@@ -464,11 +464,14 @@ if (length(extra)) stop("Extra HP keys (remove them): ", paste(extra, collapse =
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
 t0 <- Sys.time()
 run_err <- NULL
+prev_plan <- future::plan()
+on.exit(future::plan(prev_plan), add = TRUE)
+future::plan(sequential)
 OutputModels <- tryCatch(
   robyn_run(
     InputCollect = InputCollect,
     hyperparameters = hyperparameters,
-    train_size = train_size,
+    train_size = 0.8,
     iterations = iter,
     trials = trials,
     ts_validation = TRUE,
