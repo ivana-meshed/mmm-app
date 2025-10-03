@@ -471,7 +471,6 @@ prev_plan <- future::plan()
 on.exit(future::plan(prev_plan), add = TRUE)
 future::plan(sequential)
 
-cat("Train size:", train_size, "\n")
 cat(
   "Rows:", nrow(InputCollect$dt_input),
   "Window:", as.character(InputCollect$window_start), "→", as.character(InputCollect$window_end), "\n"
