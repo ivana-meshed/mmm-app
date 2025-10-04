@@ -8,6 +8,7 @@
 ##  - Preserved all original features
 ##  - OPTION A: Manually attach HPs to InputCollect$hyperparameters
 ##  - Also probes robyn_inputs() to capture exact validation errors
+##  - Adds sanitizing + factor diagnostics/fixes for dt_input
 ## =========================================================
 
 ## ---------- ENV ----------
@@ -654,30 +655,130 @@ log_kv(list(
 ))
 push_log()
 
+## === SANITIZE/FACTOR DIAGNOSTICS ===
+# Helpers to detect & fix invalid factor codes (0, <0, >nlevels)
+check_factor <- function(x) {
+  if (!is.factor(x)) {
+    return(list(is_bad = FALSE, reason = NA_character_))
+  }
+  ix <- suppressWarnings(as.integer(x))
+  bad_codes <- ix[!is.na(ix) & (ix <= 0L | ix > nlevels(x))]
+  if (length(bad_codes)) {
+    list(
+      is_bad = TRUE,
+      reason = sprintf(
+        "codes outside [1,%d], e.g. %s",
+        nlevels(x),
+        paste(utils::head(unique(bad_codes), 5), collapse = ",")
+      )
+    )
+  } else {
+    list(is_bad = FALSE, reason = NA_character_)
+  }
+}
+scan_invalid_factors <- function(df) {
+  res <- lapply(df, check_factor)
+  bad <- names(df)[vapply(res, `[[`, logical(1), "is_bad")]
+  list(bad_cols = bad, meta = res)
+}
+relevel_safe <- function(x) {
+  if (!is.factor(x)) {
+    return(x)
+  }
+  factor(as.character(x), levels = sort(unique(as.character(x))), ordered = is.ordered(x))
+}
+fix_invalid_factors <- function(df, keep_as_factor = character(0)) {
+  # Rebuild declared factor_vars as factors; turn all other factors into character (Robyn OHEs internally)
+  df[] <- lapply(seq_along(df), function(i) {
+    nm <- names(df)[i]
+    col <- df[[i]]
+    if (is.factor(col)) {
+      if (nm %in% keep_as_factor) {
+        return(relevel_safe(col))
+      }
+      return(as.character(col))
+    }
+    col
+  })
+  df
+}
+sanitize_for_robyn <- function(df_full, dep_var, paid_media_spends, paid_media_vars, context_vars, factor_vars, organic_vars) {
+  vars_keep <- unique(c(
+    "date", dep_var,
+    paid_media_spends, paid_media_vars,
+    context_vars, factor_vars,
+    organic_vars
+  ))
+  vars_keep <- intersect(vars_keep, names(df_full))
+  d <- df_full[, vars_keep, drop = FALSE]
+
+  # Prefer character over factor (except declared factor_vars, which we rebuild)
+  d <- fix_invalid_factors(d, keep_as_factor = factor_vars)
+
+  # One extra pass: check bad factors remain?
+  sc <- scan_invalid_factors(d)
+  if (length(sc$bad_cols)) {
+    for (bc in sc$bad_cols) logf("Integrity | BAD factor '", bc, "' → ", sc$meta[[bc]]$reason)
+    stop("Invalid factor codes remain after sanitization in columns: ", paste(sc$bad_cols, collapse = ", "))
+  }
+  d
+}
+
 ## ---------- Inputs (BASE, no HPs) ----------
 if (!(dep_var %in% names(df))) stop("Dependent variable '", dep_var, "' not found in data.")
-# before calling robyn_inputs(...)
 prophet_vars_used <- c("trend", "season", "holiday", "weekday")
 if (!requireNamespace("prophet", quietly = TRUE)) {
   logf("Prophet    | package not available → disabling prophet_vars")
   prophet_vars_used <- NULL
 }
+
+# SANITIZE before robyn_inputs() and keep all declared features
+df_for_robyn <- sanitize_for_robyn(
+  df_full = df,
+  dep_var = dep_var,
+  paid_media_spends = paid_media_spends,
+  paid_media_vars = paid_media_vars,
+  context_vars = context_vars,
+  factor_vars = factor_vars,
+  organic_vars = organic_vars
+)
+logf("Integrity | dt_input columns: ", paste(names(df_for_robyn), collapse = ", "))
+
 InputCollect_base <- robyn_inputs(
-  dt_input = df,
+  dt_input = df_for_robyn,
   date_var = "date",
   dep_var = dep_var,
   dep_var_type = "revenue",
   adstock = adstock,
-  prophet_vars = prophet_vars_used, # <- use the guarded value
+  prophet_vars = prophet_vars_used,
   prophet_country = toupper(country),
   paid_media_spends = paid_media_spends,
   paid_media_vars = paid_media_vars,
   context_vars = context_vars,
   factor_vars = factor_vars,
   organic_vars = organic_vars,
-  window_start = min(df$date),
-  window_end = max(df$date)
+  window_start = min(df_for_robyn$date),
+  window_end = max(df_for_robyn$date)
 )
+
+# Post-creation integrity check on InputCollect$dt_input
+logf("Integrity | scanning InputCollect$dt_input for invalid factors")
+ic_scan <- scan_invalid_factors(InputCollect_base$dt_input)
+if (length(ic_scan$bad_cols)) {
+  for (bc in ic_scan$bad_cols) {
+    logf("Integrity | BAD factor inside InputCollect$dt_input '", bc, "' → ", ic_scan$meta[[bc]]$reason)
+  }
+  # Hard fail with clear info
+  ex <- utils::capture.output(str(InputCollect_base$dt_input[ic_scan$bad_cols], give.attr = FALSE, strict.width = "cut"))
+  stop(paste0(
+    "Invalid factor codes detected in InputCollect$dt_input: ",
+    paste(ic_scan$bad_cols, collapse = ", "),
+    "\nThese columns have factor codes outside their levels. They were sanitized prior to robyn_inputs(), ",
+    "so this likely comes from upstream corruption. Inspect the printed structure below:\n",
+    paste(ex, collapse = "\n")
+  ))
+}
+
 logf("Inputs    | dep_var=", InputCollect_base$dep_var, " adstock=", InputCollect_base$adstock, " rows=", nrow(InputCollect_base$dt_input))
 logf("Inputs    | window ", as.character(InputCollect_base$window_start), " → ", as.character(InputCollect_base$window_end))
 alloc_end <- max(InputCollect_base$dt_input$date)
@@ -744,7 +845,6 @@ write_diag <- function(extra = NULL) {
   push_log()
 }
 
-## Compare with Robyn's template for this InputCollect
 hp_template <- try(robyn_hyper_params(InputCollect_base), silent = TRUE)
 templ_names <- if (!inherits(hp_template, "try-error")) names(hp_template) else character(0)
 your_names <- names(hyperparameters)
@@ -773,7 +873,6 @@ write_diag(c(
   paste0("Bad ranges/order: ", if (length(bad_ranges)) paste(bad_ranges, collapse = "; ") else "<none>")
 ))
 
-## PROBE CALL: robyn_inputs(InputCollect=..., hyperparameters=...) just to capture TRUE validation errors
 invisible(withCallingHandlers(
   tryCatch(
     robyn_inputs(InputCollect = InputCollect_base, hyperparameters = hyperparameters),
@@ -784,7 +883,7 @@ invisible(withCallingHandlers(
         "Traceback:",
         utils::capture.output(traceback(max.lines = 50L))
       ))
-      stop(e) # fail loudly, so the job status becomes FAILED with exact message
+      stop(e)
     }
   ),
   message = function(m) append_msg(conditionMessage(m)),
@@ -794,7 +893,6 @@ invisible(withCallingHandlers(
   }
 ))
 
-## SUCCESS marker for the probe
 write_diag(c(
   "== SUCCESS ==",
   "robyn_inputs() accepted the provided hyperparameters (probe).",
@@ -851,9 +949,15 @@ if (!is.numeric(InputCollect$hyperparameters$train_size) || any(is.na(InputColle
   stop("train_size is missing/NA inside hyperparameters. Aborting to avoid empty models.")
 }
 
+if (!is.null(InputCollect$prophet_vars) && is.null(InputCollect$dt_prophet)) {
+  stop(
+    "Prophet vars requested (", paste(InputCollect$prophet_vars, collapse = ","),
+    ") but InputCollect$dt_prophet is NULL. Install 'prophet' or set prophet_vars=NULL."
+  )
+}
+
 logf("Train     | start cores=", max_cores, " iter=", iter, " trials=", trials)
 t0 <- Sys.time()
-run_err <- NULL
 run_err <- NULL
 run_tb <- NULL
 
@@ -894,11 +998,9 @@ if (is.null(OutputModels) || is.null(OutputModels$resultHypParam) || !NROW(Outpu
   stop("robyn_run returned empty results (see robyn_train_diagnostics.txt).")
 }
 
-
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 logf("Train     | completed in ", round(training_time, 2), " minutes")
 
-# Did we get models?
 ok_models <- !is.null(OutputModels) &&
   is.list(OutputModels) &&
   !is.null(OutputModels$resultHypParam) &&
@@ -984,6 +1086,7 @@ writeLines(c(best_id, paste("Iterations:", iter), paste("Trials:", trials), past
   con = file.path(dir_path, "best_model_id.txt")
 )
 gcs_put_safe(file.path(dir_path, "best_model_id.txt"), file.path(gcs_prefix, "best_model_id.txt"))
+
 
 top_models <- OutputCollect$resultHypParam$solID[1:min(3, nrow(OutputCollect$resultHypParam))]
 for (m in top_models) try(robyn_onepagers(InputCollect, OutputCollect, select_model = m, export = TRUE), silent = TRUE)
