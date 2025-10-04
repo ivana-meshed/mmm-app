@@ -732,6 +732,8 @@ if (!requireNamespace("prophet", quietly = TRUE)) {
   prophet_vars_used <- NULL
 }
 
+prophet_vars_used <- NULL # TEMP: avoid prophet merge branch while we debug
+
 # SANITIZE before robyn_inputs() and keep all declared features
 df_for_robyn <- sanitize_for_robyn(
   df_full = df,
@@ -760,6 +762,11 @@ InputCollect_base <- robyn_inputs(
   window_start = min(df_for_robyn$date),
   window_end = max(df_for_robyn$date)
 )
+# Pick a safe single train_size that guarantees >= 28 validation days
+ser_len <- nrow(InputCollect_base$dt_input)
+safe_train <- min(0.90, (ser_len - 28) / ser_len - 1e-6)
+safe_train <- max(0.70, safe_train) # clamp to [0.70, 0.90]
+InputCollect_base$hyperparameters$train_size <- c(safe_train, safe_train)
 
 # Post-creation integrity check on InputCollect$dt_input
 logf("Integrity | scanning InputCollect$dt_input for invalid factors")
@@ -1013,6 +1020,8 @@ logf("Train     | start cores=", max_cores, " iter=", iter, " trials=", trials)
 
 
 # ==== ROBYN RUN WITH TARGETED DIAGNOSTICS ====
+OutputModels <- NULL # ensure symbol exists no matter what
+
 run_once <- function(do_validation = TRUE) {
   withCallingHandlers(
     tryCatch(
@@ -1040,36 +1049,27 @@ OutputModels <- tryCatch(
   run_once(do_validation = TRUE),
   error = function(e) {
     run_err <<- conditionMessage(e)
-    # backtrace (if available)
     bt <- tryCatch(capture.output(print(attr(e, "backtrace"))), error = function(.) NULL)
     run_tb <<- bt %||% utils::capture.output(traceback(max.lines = 50L))
-    if (grepl("no applicable method for 'select' applied to an object of class \"NULL\"", run_err, fixed = TRUE)) {
-      # Write a rich diagnostic before retry
-      diag_txt <- file.path(dir_path, "robyn_train_diagnostics.txt")
-      writeLines(c(
-        "robyn_run failed on validation path with a 'select(NULL, ...)' error.",
-        "This strongly suggests an issue in rolling-window ts_validation or prophet merge.",
-        paste0("Condition: ", run_err),
-        "---- rlang::trace_back() ----",
-        run_tb %||% "<none>",
-        "---- Input snapshot keys ----",
-        paste("dep_var:", dep_var),
-        paste("paid_media_vars:", paste(InputCollect$paid_media_vars, collapse = ", ")),
-        paste("organic_vars:", paste(InputCollect$organic_vars %||% character(0), collapse = ", ")),
-        paste("context_vars:", paste(InputCollect$context_vars %||% character(0), collapse = ", ")),
-        paste("factor_vars:", paste(InputCollect$factor_vars %||% character(0), collapse = ", ")),
-        paste("train_size:", paste(InputCollect$hyperparameters$train_size, collapse = ", ")),
-        paste("window_days:", nrow(InputCollect$dt_input))
-      ), diag_txt)
-      gcs_put_safe(diag_txt, file.path(gcs_prefix, "robyn_train_diagnostics.txt"))
-      logf("Train     | retrying with ts_validation=FALSE (diagnostic fallback)")
-      return(run_once(do_validation = FALSE)) # <-- retry without validation
-    } else {
+
+    # Write diag then retry without validation
+    diag_txt <- file.path(dir_path, "robyn_train_diagnostics.txt")
+    writeLines(c(
+      "robyn_run failed on validation path with a 'select(NULL, ...)' error or similar.",
+      paste0("Condition: ", run_err),
+      "---- rlang::trace_back() ----",
+      run_tb %||% "<none>"
+    ), diag_txt)
+    gcs_put_safe(diag_txt, file.path(gcs_prefix, "robyn_train_diagnostics.txt"))
+    logf("Train     | retrying with ts_validation=FALSE (diagnostic fallback)")
+
+    # Retry without validation
+    tryCatch(run_once(do_validation = FALSE), error = function(e2) {
+      run_err <<- paste0(run_err, " | retry error: ", conditionMessage(e2))
       NULL
-    }
+    })
   }
 )
-
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 
 if (is.null(OutputModels) || is.null(OutputModels$resultHypParam) || !NROW(OutputModels$resultHypParam)) {
@@ -1150,9 +1150,40 @@ gcs_put_safe(timings_local, timings_obj)
 push_log()
 
 ## ---------- Save core RDS ----------
+
+
 om_path <- file.path(dir_path, "OutputModels.RDS")
 ic_path <- file.path(dir_path, "InputCollect.RDS")
 oc_path <- file.path(dir_path, "OutputCollect.RDS")
+
+ok_models <- !is.null(OutputModels) &&
+  is.list(OutputModels) &&
+  !is.null(OutputModels$resultHypParam) &&
+  NROW(OutputModels$resultHypParam) > 0
+
+if (!ok_models) {
+  diag_txt <- file.path(dir_path, "robyn_train_diagnostics.txt")
+  add <- c(
+    "robyn_run produced no models after retry.",
+    paste("DV sd:", round(sd(df[[dep_var]], na.rm = TRUE), 6)),
+    paste("Train window days:", as.integer(max(df$date) - min(df$date) + 1)),
+    paste("train_size:", paste(InputCollect$hyperparameters$train_size, collapse = ",")),
+    paste("Paid media spends kept:", paste(InputCollect$paid_media_spends, collapse = ", "))
+  )
+  cat(paste(add, collapse = "\n"), file = diag_txt, sep = "\n", append = TRUE)
+  gcs_put_safe(diag_txt, file.path(gcs_prefix, "robyn_train_diagnostics.txt"))
+
+  # Mark job as FAILED and stop before outputs/allocator/forecast that need models
+  writeLines(jsonlite::toJSON(list(
+    state = "FAILED", start_time = as.character(job_started),
+    end_time = as.character(Sys.time()),
+    error = "robyn_run returned empty results (see robyn_train_diagnostics.txt)"
+  ), auto_unbox = TRUE), status_json)
+  gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+  push_log()
+  stop("No models returned; aborted before outputs.")
+}
+
 
 tryCatch(saveRDS(OutputModels, om_path), error = function(e) logf("Save      | FAILED OutputModels.RDS: ", e$message))
 tryCatch(saveRDS(InputCollect, ic_path), error = function(e) logf("Save      | FAILED InputCollect.RDS: ", e$message))
