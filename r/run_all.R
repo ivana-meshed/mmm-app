@@ -656,21 +656,27 @@ push_log()
 
 ## ---------- Inputs (BASE, no HPs) ----------
 if (!(dep_var %in% names(df))) stop("Dependent variable '", dep_var, "' not found in data.")
+# before calling robyn_inputs(...)
+prophet_vars_used <- c("trend", "season", "holiday", "weekday")
+if (!requireNamespace("prophet", quietly = TRUE)) {
+  logf("Prophet    | package not available → disabling prophet_vars")
+  prophet_vars_used <- NULL
+}
 InputCollect_base <- robyn_inputs(
-  dt_input          = df,
-  date_var          = "date",
-  dep_var           = dep_var,
-  dep_var_type      = "revenue",
-  adstock           = adstock,
-  prophet_vars      = c("trend", "season", "holiday", "weekday"),
-  prophet_country   = toupper(country),
+  dt_input = df,
+  date_var = "date",
+  dep_var = dep_var,
+  dep_var_type = "revenue",
+  adstock = adstock,
+  prophet_vars = prophet_vars_used, # <- use the guarded value
+  prophet_country = toupper(country),
   paid_media_spends = paid_media_spends,
-  paid_media_vars   = paid_media_vars,
-  context_vars      = context_vars,
-  factor_vars       = factor_vars,
-  organic_vars      = organic_vars,
-  window_start      = min(df$date),
-  window_end        = max(df$date)
+  paid_media_vars = paid_media_vars,
+  context_vars = context_vars,
+  factor_vars = factor_vars,
+  organic_vars = organic_vars,
+  window_start = min(df$date),
+  window_end = max(df$date)
 )
 logf("Inputs    | dep_var=", InputCollect_base$dep_var, " adstock=", InputCollect_base$adstock, " rows=", nrow(InputCollect_base$dt_input))
 logf("Inputs    | window ", as.character(InputCollect_base$window_start), " → ", as.character(InputCollect_base$window_end))
@@ -848,20 +854,46 @@ if (!is.numeric(InputCollect$hyperparameters$train_size) || any(is.na(InputColle
 logf("Train     | start cores=", max_cores, " iter=", iter, " trials=", trials)
 t0 <- Sys.time()
 run_err <- NULL
-OutputModels <- tryCatch(
-  robyn_run(
-    InputCollect       = InputCollect,
-    iterations         = iter,
-    trials             = trials,
-    ts_validation      = TRUE,
-    add_penalty_factor = TRUE,
-    cores              = max_cores
+run_err <- NULL
+run_tb <- NULL
+
+OutputModels <- withCallingHandlers(
+  tryCatch(
+    robyn_run(
+      InputCollect       = InputCollect,
+      iterations         = iter,
+      trials             = trials,
+      ts_validation      = TRUE,
+      add_penalty_factor = TRUE,
+      cores              = max_cores
+    ),
+    error = function(e) {
+      run_err <<- conditionMessage(e)
+      run_tb <<- utils::capture.output(traceback(max.lines = 50L))
+      return(NULL)
+    }
   ),
-  error = function(e) {
-    run_err <<- e$message
-    NULL
-  }
+  warning = function(w) invokeRestart("muffleWarning")
 )
+
+if (is.null(OutputModels) || is.null(OutputModels$resultHypParam) || !NROW(OutputModels$resultHypParam)) {
+  diag_txt <- file.path(dir_path, "robyn_train_diagnostics.txt")
+  writeLines(c(
+    "robyn_run produced no models.",
+    paste0("robyn_run error: ", run_err %||% "<none>"),
+    "Traceback:",
+    run_tb %||% "<none>",
+    paste("DV sd:", round(sd(df[[dep_var]], na.rm = TRUE), 6)),
+    paste("Train window days:", as.integer(max(df$date) - min(df$date) + 1)),
+    paste("train_size:", paste(InputCollect$hyperparameters$train_size, collapse = ",")),
+    paste("Nonzero spend totals:", paste(sprintf("%s=%.2f", names(nz_spend), nz_spend), collapse = "; ")),
+    paste("Paid media spends kept:", paste(paid_media_spends, collapse = ", ")),
+    paste("Hyperparameter keys:", paste(names(hyperparameters), collapse = ", "))
+  ), diag_txt)
+  gcs_put_safe(diag_txt, file.path(gcs_prefix, "robyn_train_diagnostics.txt"))
+  stop("robyn_run returned empty results (see robyn_train_diagnostics.txt).")
+}
+
 
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 logf("Train     | completed in ", round(training_time, 2), " minutes")
