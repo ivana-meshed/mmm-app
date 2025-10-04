@@ -715,6 +715,17 @@ fix_invalid_factors <- function(df, keep_as_factor = character(0)) {
   })
   df
 }
+
+# Ensure dep var and all *_COST, *_SESSIONS, *_CLICKS, *_IMPRESSIONS are numeric
+force_numeric <- function(x) suppressWarnings(readr::parse_number(as.character(x)))
+num_like <- unique(c(
+  dep_var,
+  grep("(_COSTS?$|_SESSIONS$|_CLICKS$|_IMPRESSIONS$)", names(df), value = TRUE)
+))
+for (nm in intersect(num_like, names(df))) {
+  if (!is.numeric(df[[nm]])) df[[nm]] <- force_numeric(df[[nm]])
+}
+
 sanitize_for_robyn <- function(df_full, dep_var, paid_media_spends, paid_media_vars, context_vars, factor_vars, organic_vars) {
   vars_keep <- unique(c(
     "date", dep_var,
@@ -769,8 +780,8 @@ InputCollect_base <- robyn_inputs(
   dep_var = dep_var,
   dep_var_type = "revenue",
   adstock = adstock,
-  prophet_vars = prophet_vars_used,
-  prophet_country = toupper(country),
+  prophet_vars = NULL, # prophet_vars_used,
+  prophet_country = NULL, # toupper(country),
   paid_media_spends = paid_media_spends,
   paid_media_vars = paid_media_vars,
   context_vars = context_vars,
@@ -779,6 +790,37 @@ InputCollect_base <- robyn_inputs(
   window_start = min(df_for_robyn$date),
   window_end = max(df_for_robyn$date)
 )
+
+# ---- dt_mod sanity right after robyn_inputs ----
+if (is.null(InputCollect_base$dt_mod)) {
+  stop("robyn_inputs returned dt_mod = NULL (internal build failed).")
+}
+if (NROW(InputCollect_base$dt_mod) == 0 || NCOL(InputCollect_base$dt_mod) == 0) {
+  # Dump why we think it happened
+  dbg <- file.path(dir_path, "dt_mod_empty_debug.txt")
+  culprit_cols <- unique(na.omit(c(
+    "date", dep_var,
+    paid_media_vars %||% character(0),
+    context_vars %||% character(0),
+    factor_vars %||% character(0),
+    organic_vars %||% character(0)
+  )))
+  miss_dt_mod <- setdiff(culprit_cols, names(InputCollect_base$dt_mod))
+  miss_dt_in <- setdiff(culprit_cols, names(InputCollect_base$dt_input))
+  writeLines(c(
+    "dt_mod is empty after robyn_inputs().",
+    paste0("dt_input dim: ", NROW(InputCollect_base$dt_input), " x ", NCOL(InputCollect_base$dt_input)),
+    paste0("dt_mod   dim: ", NROW(InputCollect_base$dt_mod), " x ", NCOL(InputCollect_base$dt_mod)),
+    paste0("Missing in dt_mod: ", if (length(miss_dt_mod)) paste(miss_dt_mod, collapse = ", ") else "<none>"),
+    paste0("Missing in dt_input: ", if (length(miss_dt_in)) paste(miss_dt_in, collapse = ", ") else "<none>")
+  ), dbg)
+  gcs_put_safe(dbg, file.path(gcs_prefix, "dt_mod_empty_debug.txt"))
+
+  # ---- LAST-RESORT PATCH: rebuild dt_mod from dt_input so training can proceed
+  InputCollect_base$dt_mod <- as.data.frame(InputCollect_base$dt_input)
+  message("Patched: dt_mod rebuilt from dt_input to unblock training (investigate dt_mod_empty_debug.txt).")
+}
+
 # Pick a safe single train_size that guarantees >= 28 validation days
 ser_len <- nrow(InputCollect_base$dt_input)
 safe_train <- min(0.90, (ser_len - 28) / ser_len - 1e-6)
@@ -1081,8 +1123,14 @@ if (inherits(sel_test, "try-error")) {
 dump_path <- file.path(dir_path, "dt_mod_glimpse.txt")
 capture.output(
   {
-    cat("dt_mod dim: ", NROW(InputCollect$dt_mod), " x ", NCOL(InputCollect$dt_mod), "\n", sep = "")
-    print(utils::head(InputCollect$dt_mod[sel_cols], 3))
+    cat(sprintf("dt_mod dim: %d x %d\n", NROW(InputCollect_base$dt_mod), NCOL(InputCollect_base$dt_mod)))
+    show_cols <- intersect(sel_cols, names(InputCollect_base$dt_mod))
+    if (length(show_cols)) {
+      print(utils::head(InputCollect_base$dt_mod[show_cols], 3))
+    } else {
+      cat("No overlap between sel_cols and dt_mod names.\n")
+      print(utils::head(InputCollect_base$dt_mod, 3))
+    }
   },
   file = dump_path
 )
@@ -1108,6 +1156,21 @@ missing_in_dt_mod <- setdiff(sel_cols, names(InputCollect$dt_mod))
 if (length(missing_in_dt_mod)) {
   stop("Preflight: columns missing from InputCollect$dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
 }
+
+# ---- Preflight select() on dt_mod to prove it’s usable ----
+sel_cols <- unique(na.omit(c(
+  "date", InputCollect_base$dep_var,
+  InputCollect_base$paid_media_vars %||% character(0),
+  InputCollect_base$context_vars %||% character(0),
+  InputCollect_base$factor_vars %||% character(0),
+  InputCollect_base$organic_vars %||% character(0)
+)))
+missing_in_dt_mod <- setdiff(sel_cols, names(InputCollect_base$dt_mod))
+if (length(missing_in_dt_mod)) {
+  stop("Preflight: columns missing from dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
+}
+invisible(dplyr::select(InputCollect_base$dt_mod, dplyr::all_of(sel_cols))) # will error here if broken
+
 
 logf(sprintf("Assert    | dt_mod OK: rows=%s cols=%s", NROW(InputCollect$dt_mod), NCOL(InputCollect$dt_mod)))
 
