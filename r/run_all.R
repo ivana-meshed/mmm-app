@@ -741,7 +741,7 @@ df_for_robyn <- sanitize_for_robyn(
   paid_media_spends = paid_media_spends,
   paid_media_vars = paid_media_vars,
   context_vars = context_vars,
-  factor_vars = factor_vars,
+  # factor_vars = factor_vars,
   organic_vars = organic_vars
 )
 logf("Integrity | dt_input columns: ", paste(names(df_for_robyn), collapse = ", "))
@@ -757,7 +757,7 @@ InputCollect_base <- robyn_inputs(
   paid_media_spends = paid_media_spends,
   paid_media_vars = paid_media_vars,
   context_vars = context_vars,
-  factor_vars = factor_vars,
+  # factor_vars = factor_vars,
   organic_vars = organic_vars,
   window_start = min(df_for_robyn$date),
   window_end = max(df_for_robyn$date)
@@ -959,7 +959,7 @@ saveRDS(list(
   paid_media_vars = InputCollect$paid_media_vars,
   organic_vars = InputCollect$organic_vars,
   context_vars = InputCollect$context_vars,
-  factor_vars = InputCollect$factor_vars,
+  # factor_vars = InputCollect$factor_vars,
   window = c(start = min(InputCollect$dt_input$date), end = max(InputCollect$dt_input$date))
 ), snap_path)
 gcs_put_safe(snap_path, file.path(gcs_prefix, "pre_run_snapshot.rds"))
