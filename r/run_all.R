@@ -654,8 +654,8 @@ keep_idx <- vapply(seq_along(paid_media_spends), function(i) sum(df[[paid_media_
 if (any(!keep_idx)) logf("Drivers   | dropping zero-spend: ", paste(paid_media_spends[!keep_idx], collapse = ", "))
 paid_media_spends <- paid_media_spends[keep_idx]
 paid_media_vars <- paid_media_vars[keep_idx]
-context_vars <- intersect(cfg$context_vars %||% character(0), names(df))
-factor_vars <- intersect(cfg$factor_vars %||% character(0), names(df))
+# context_vars <- intersect(cfg$context_vars %||% character(0), names(df))
+# factor_vars <- intersect(cfg$factor_vars %||% character(0), names(df))
 org_base <- intersect(cfg$organic_vars %||% "ORGANIC_TRAFFIC", names(df))
 organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES" %in% names(df)) unique(c(org_base, "N_SEARCHES")) else org_base
 logf("Drivers   |")
@@ -1044,16 +1044,29 @@ OutputModels <- NULL # ensure symbol exists no matter what
 run_once <- function(do_validation = TRUE) {
   withCallingHandlers(
     tryCatch(
-      robyn_run(
-        InputCollect       = InputCollect,
-        iterations         = iter,
-        trials             = trials,
-        ts_validation      = FALSE, # do_validation,
-        add_penalty_factor = TRUE,
-        cores              = max_cores
-      ),
+      {
+        out <- robyn_run(
+          InputCollect       = InputCollect,
+          iterations         = iter,
+          trials             = trials,
+          ts_validation      = do_validation,
+          add_penalty_factor = TRUE,
+          cores              = max_cores
+        )
+        out
+      },
       error = function(e) {
-        attr(e, "backtrace") <- tryCatch(rlang::trace_back(), error = function(.) NULL)
+        # write a detailed traceback
+        tb1 <- tryCatch(utils::capture.output(traceback(max.lines = 50L)), error = function(.) "<no base traceback>")
+        tb2 <- tryCatch(utils::capture.output(rlang::last_trace()), error = function(.) "<no rlang trace>")
+        writeLines(
+          c("== robyn_run ERROR ==", conditionMessage(e), "", tb1, "", tb2),
+          file.path(dir_path, "robyn_run_last_trace.txt")
+        )
+        gcs_put_safe(
+          file.path(dir_path, "robyn_run_last_trace.txt"),
+          file.path(gcs_prefix, "robyn_run_last_trace.txt")
+        )
         stop(e)
       }
     ),
