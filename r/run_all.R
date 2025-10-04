@@ -709,7 +709,128 @@ logf("HP        | vars=", length(hyper_vars), " keys=", length(names(hyperparame
 if (length(missing)) stop("Missing HP keys: ", paste(missing, collapse = ", "))
 if (length(extra)) stop("Extra HP keys (remove them): ", paste(extra, collapse = ", "))
 
-InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
+
+## ==== Hyperparameter validation probe ====
+hp_diag_path <- file.path(dir_path, "robyn_hp_diagnostics.txt")
+
+capture_msgs <- character()
+capture_warn <- character()
+append_msg <- function(x) capture_msgs <<- c(capture_msgs, x)
+append_warn <- function(x) capture_warn <<- c(capture_warn, x)
+
+write_diag <- function(extra = NULL) {
+  lines <- c(
+    "=== ROBYN HP DIAGNOSTICS ===",
+    paste0("Time: ", as.character(Sys.time())),
+    "",
+    "-- Your hyperparameters (names):",
+    paste0("  ", paste(sort(names(hyperparameters)), collapse = ", ")),
+    "",
+    "-- Paid media vars: ",
+    paste0("  ", paste(paid_media_vars, collapse = ", ")),
+    "-- Organic vars: ",
+    paste0("  ", paste(organic_vars, collapse = ", ")),
+    "",
+    "-- Messages from robyn_inputs():",
+    if (length(capture_msgs)) paste0("  ", capture_msgs) else "  <none>",
+    "",
+    "-- Warnings from robyn_inputs():",
+    if (length(capture_warn)) paste0("  ", capture_warn) else "  <none>",
+    "",
+    extra %||% character(0)
+  )
+  writeLines(lines, hp_diag_path)
+  gcs_put_safe(hp_diag_path, file.path(gcs_prefix, "robyn_hp_diagnostics.txt"))
+  push_log()
+}
+
+## 1) Build a baseline InputCollect WITHOUT HPs (so we can query Robyn’s template)
+InputCollect_base <- robyn_inputs(
+  dt_input          = df,
+  date_var          = "date",
+  dep_var           = dep_var,
+  dep_var_type      = "revenue",
+  adstock           = adstock,
+  prophet_vars      = c("trend", "season", "holiday", "weekday"),
+  prophet_country   = toupper(country),
+  paid_media_spends = paid_media_spends,
+  paid_media_vars   = paid_media_vars,
+  context_vars      = context_vars,
+  factor_vars       = factor_vars,
+  organic_vars      = organic_vars,
+  window_start      = min(df$date),
+  window_end        = max(df$date)
+)
+
+## 2) Ask Robyn for the official HP template for these inputs
+hp_template <- try(robyn_hyper_params(InputCollect_base), silent = TRUE)
+
+## 3) Do a strict diff before calling robyn_inputs with your HPs
+templ_names <- if (!inherits(hp_template, "try-error")) names(hp_template) else character(0)
+your_names <- names(hyperparameters)
+
+missing_in_yours <- setdiff(templ_names, your_names)
+extra_in_yours <- setdiff(your_names, templ_names)
+
+bad_shapes <- c()
+bad_ranges <- c()
+check_pair <- function(k, v) {
+  if (!is.numeric(v) || length(v) != 2L || any(is.na(v))) {
+    bad_shapes <<- c(bad_shapes, sprintf("%s (need numeric length-2)", k))
+    return()
+  }
+  if (grepl("_alphas$", k)) {
+    if (any(v <= 0)) bad_ranges <<- c(bad_ranges, sprintf("%s <= 0", k))
+  }
+  if (grepl("_gammas$|_thetas$", k)) {
+    if (any(v < 0 | v > 1)) bad_ranges <<- c(bad_ranges, sprintf("%s out of [0,1]", k))
+  }
+  if (v[1] > v[2]) bad_ranges <<- c(bad_ranges, sprintf("%s min>max (%.3f>%.3f)", k, v[1], v[2]))
+}
+invisible(lapply(names(hyperparameters), function(k) check_pair(k, hyperparameters[[k]])))
+
+## 4) Log the preflight diff
+pre_extra <- c(
+  "== Preflight diff vs. Robyn template ==",
+  paste0("Missing in your HPs: ", if (length(missing_in_yours)) paste(missing_in_yours, collapse = ", ") else "<none>"),
+  paste0("Extra keys you provided: ", if (length(extra_in_yours)) paste(extra_in_yours, collapse = ", ") else "<none>"),
+  paste0("Bad shapes: ", if (length(bad_shapes)) paste(bad_shapes, collapse = "; ") else "<none>"),
+  paste0("Bad ranges/order: ", if (length(bad_ranges)) paste(bad_ranges, collapse = "; ") else "<none>")
+)
+write_diag(pre_extra)
+
+## 5) Now call robyn_inputs WITH HPs but capture every message/warning/error
+InputCollect <- withCallingHandlers(
+  tryCatch(
+    robyn_inputs(InputCollect = InputCollect_base, hyperparameters = hyperparameters),
+    error = function(e) {
+      write_diag(c(
+        "== ERROR ==",
+        paste0("Condition: ", conditionMessage(e)),
+        "",
+        "Traceback:",
+        utils::capture.output(traceback(max.lines = 50L))
+      ))
+      stop(e) # rethrow so the job fails loudly
+    }
+  ),
+  message = function(m) append_msg(conditionMessage(m)),
+  warning = function(w) {
+    append_warn(conditionMessage(w))
+    invokeRestart("muffleWarning")
+  }
+)
+
+## 6) Success path: confirm applied train_size and HP count
+write_diag(c(
+  "== SUCCESS ==",
+  paste0("Applied train_size: ", paste(InputCollect$hyperparameters$train_size, collapse = ",")),
+  paste0("Total HP keys applied: ", length(names(InputCollect$hyperparameters)))
+))
+logf("HP        | diagnostics written to ", hp_diag_path)
+## ==== end probe ====
+
+# InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
 
 # --- Sanity: log the train_size Robyn will actually use
 ts_used <- InputCollect$hyperparameters$train_size
