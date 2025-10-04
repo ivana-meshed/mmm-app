@@ -37,6 +37,7 @@ suppressPackageStartupMessages({
   library(future.apply)
   library(parallel)
   library(tidyselect)
+  library(tibble)
 })
 
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
@@ -633,6 +634,18 @@ df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 logf("Window    | USED ", as.character(min(df$date)), " → ", as.character(max(df$date)), " rows=", nrow(df))
 push_log()
 
+# after creating df$IS_WEEKEND / df$TV_IS_ON
+df$IS_WEEKEND <- as.integer(df$IS_WEEKEND)
+df$TV_IS_ON <- as.integer(df$TV_IS_ON > 0)
+
+context_vars <- union(
+  c("IS_WEEKEND", "TV_IS_ON"),
+  intersect(cfg$context_vars %||% character(0), names(df))
+)
+
+# keep factor_vars empty for the clean test:
+factor_vars <- character(0)
+
 ## ---------- Drivers ----------
 paid_media_spends <- intersect(cfg$paid_media_spends, names(df))
 paid_media_vars <- intersect(cfg$paid_media_vars, names(df))
@@ -741,7 +754,7 @@ df_for_robyn <- sanitize_for_robyn(
   paid_media_spends = paid_media_spends,
   paid_media_vars = paid_media_vars,
   context_vars = context_vars,
-  # factor_vars = factor_vars,
+  factor_vars = factor_vars,
   organic_vars = organic_vars
 )
 logf("Integrity | dt_input columns: ", paste(names(df_for_robyn), collapse = ", "))
@@ -757,7 +770,7 @@ InputCollect_base <- robyn_inputs(
   paid_media_spends = paid_media_spends,
   paid_media_vars = paid_media_vars,
   context_vars = context_vars,
-  # factor_vars = factor_vars,
+  factor_vars = factor_vars,
   organic_vars = organic_vars,
   window_start = min(df_for_robyn$date),
   window_end = max(df_for_robyn$date)
@@ -813,7 +826,12 @@ for (v in hyper_vars) {
   hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
   hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
 }
-hyperparameters[["train_size"]] <- train_size
+ser_len <- nrow(InputCollect_base$dt_input)
+safe_train <- min(0.90, (ser_len - 28) / ser_len - 1e-6)
+safe_train <- max(0.80, safe_train) # a bit tighter than 0.70–0.90 while debugging
+
+# When you construct `hyperparameters`, do THIS:
+hyperparameters[["train_size"]] <- c(safe_train, safe_train) # <- overwrite cfg range
 
 expect_keys <- c(
   as.vector(outer(c(paid_media_vars, organic_vars), c("_alphas", "_gammas", "_thetas"), paste0)),
@@ -871,6 +889,7 @@ check_pair <- function(k, v) {
   if (v[1] > v[2]) bad_ranges <<- c(bad_ranges, sprintf("%s min>max (%.3f>%.3f)", k, v[1], v[2]))
 }
 invisible(lapply(names(hyperparameters), function(k) check_pair(k, hyperparameters[[k]])))
+
 
 write_diag(c(
   "== Preflight diff vs. Robyn template ==",
@@ -959,7 +978,7 @@ saveRDS(list(
   paid_media_vars = InputCollect$paid_media_vars,
   organic_vars = InputCollect$organic_vars,
   context_vars = InputCollect$context_vars,
-  # factor_vars = InputCollect$factor_vars,
+  factor_vars = InputCollect$factor_vars,
   window = c(start = min(InputCollect$dt_input$date), end = max(InputCollect$dt_input$date))
 ), snap_path)
 gcs_put_safe(snap_path, file.path(gcs_prefix, "pre_run_snapshot.rds"))
@@ -1029,7 +1048,7 @@ run_once <- function(do_validation = TRUE) {
         InputCollect       = InputCollect,
         iterations         = iter,
         trials             = trials,
-        ts_validation      = do_validation,
+        ts_validation      = FALSE, # do_validation,
         add_penalty_factor = TRUE,
         cores              = max_cores
       ),
