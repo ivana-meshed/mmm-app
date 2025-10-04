@@ -942,6 +942,59 @@ if (all(is.na(dv)) || sd(dv, na.rm = TRUE) == 0) {
   stop("Dependent variable has zero variance or all NA after windowing; cannot train.")
 }
 
+
+# ==== EXTRA VALIDATION & SNAPSHOT BEFORE robyn_run ====
+snap_path <- file.path(dir_path, "pre_run_snapshot.rds")
+saveRDS(list(
+  InputCollect = InputCollect,
+  dep_var = dep_var,
+  paid_media_spends = InputCollect$paid_media_spends,
+  paid_media_vars = InputCollect$paid_media_vars,
+  organic_vars = InputCollect$organic_vars,
+  context_vars = InputCollect$context_vars,
+  factor_vars = InputCollect$factor_vars,
+  window = c(start = min(InputCollect$dt_input$date), end = max(InputCollect$dt_input$date))
+), snap_path)
+gcs_put_safe(snap_path, file.path(gcs_prefix, "pre_run_snapshot.rds"))
+
+# Columns Robyn will try to select during run
+sel_cols <- unique(na.omit(c(
+  "date", dep_var,
+  InputCollect$paid_media_vars,
+  InputCollect$context_vars,
+  InputCollect$factor_vars,
+  InputCollect$organic_vars
+)))
+missing_cols <- setdiff(sel_cols, names(InputCollect$dt_input))
+if (length(missing_cols)) {
+  stop(
+    "Pre-flight: columns missing from InputCollect$dt_input that robyn_run will select: ",
+    paste(missing_cols, collapse = ", ")
+  )
+}
+
+# Make sure each set is length > 0 (some Robyn paths assume non-empty)
+if (!length(InputCollect$paid_media_vars)) stop("Pre-flight: paid_media_vars is empty")
+if (!length(InputCollect$paid_media_spends)) stop("Pre-flight: paid_media_spends is empty")
+# organic/context/factor can be empty, but log it
+logf(
+  "Preflight  | media_vars=", paste(InputCollect$paid_media_vars, collapse = ", "),
+  " | org_vars=", paste(InputCollect$organic_vars %||% character(0), collapse = ", "),
+  " | ctx_vars=", paste(InputCollect$context_vars %||% character(0), collapse = ", "),
+  " | fac_vars=", paste(InputCollect$factor_vars %||% character(0), collapse = ", ")
+)
+
+# Train-size sanity vs. window (guards rolling windows)
+ser_len <- nrow(InputCollect$dt_input)
+tsz <- InputCollect$hyperparameters$train_size
+if (any(tsz <= 0 | tsz >= 1)) stop("Pre-flight: train_size elements must be in (0,1), got: ", paste(tsz, collapse = ","))
+if (ser_len < 180 && diff(range(tsz)) > 0.25) {
+  logf(
+    "⚠ Preflight | Very short series (", ser_len, " days) w/ wide train_size range (",
+    paste(tsz, collapse = ","), ") may break rolling windows."
+  )
+}
+
 # Pre-flight window
 win_days <- as.integer(max(df$date) - min(df$date) + 1)
 if (win_days < 90) stop("Training window too short: ", win_days, " days.")
@@ -957,28 +1010,67 @@ if (!is.null(InputCollect$prophet_vars) && is.null(InputCollect$dt_prophet)) {
 }
 
 logf("Train     | start cores=", max_cores, " iter=", iter, " trials=", trials)
-t0 <- Sys.time()
+
+
+# ==== ROBYN RUN WITH TARGETED DIAGNOSTICS ====
+run_once <- function(do_validation = TRUE) {
+  withCallingHandlers(
+    tryCatch(
+      robyn_run(
+        InputCollect       = InputCollect,
+        iterations         = iter,
+        trials             = trials,
+        ts_validation      = do_validation,
+        add_penalty_factor = TRUE,
+        cores              = max_cores
+      ),
+      error = function(e) {
+        attr(e, "backtrace") <- tryCatch(rlang::trace_back(), error = function(.) NULL)
+        stop(e)
+      }
+    ),
+    warning = function(w) invokeRestart("muffleWarning")
+  )
+}
+
 run_err <- NULL
 run_tb <- NULL
-
-OutputModels <- withCallingHandlers(
-  tryCatch(
-    robyn_run(
-      InputCollect       = InputCollect,
-      iterations         = iter,
-      trials             = trials,
-      ts_validation      = TRUE,
-      add_penalty_factor = TRUE,
-      cores              = max_cores
-    ),
-    error = function(e) {
-      run_err <<- conditionMessage(e)
-      run_tb <<- utils::capture.output(traceback(max.lines = 50L))
-      return(NULL)
+t0 <- Sys.time()
+OutputModels <- tryCatch(
+  run_once(do_validation = TRUE),
+  error = function(e) {
+    run_err <<- conditionMessage(e)
+    # backtrace (if available)
+    bt <- tryCatch(capture.output(print(attr(e, "backtrace"))), error = function(.) NULL)
+    run_tb <<- bt %||% utils::capture.output(traceback(max.lines = 50L))
+    if (grepl("no applicable method for 'select' applied to an object of class \"NULL\"", run_err, fixed = TRUE)) {
+      # Write a rich diagnostic before retry
+      diag_txt <- file.path(dir_path, "robyn_train_diagnostics.txt")
+      writeLines(c(
+        "robyn_run failed on validation path with a 'select(NULL, ...)' error.",
+        "This strongly suggests an issue in rolling-window ts_validation or prophet merge.",
+        paste0("Condition: ", run_err),
+        "---- rlang::trace_back() ----",
+        run_tb %||% "<none>",
+        "---- Input snapshot keys ----",
+        paste("dep_var:", dep_var),
+        paste("paid_media_vars:", paste(InputCollect$paid_media_vars, collapse = ", ")),
+        paste("organic_vars:", paste(InputCollect$organic_vars %||% character(0), collapse = ", ")),
+        paste("context_vars:", paste(InputCollect$context_vars %||% character(0), collapse = ", ")),
+        paste("factor_vars:", paste(InputCollect$factor_vars %||% character(0), collapse = ", ")),
+        paste("train_size:", paste(InputCollect$hyperparameters$train_size, collapse = ", ")),
+        paste("window_days:", nrow(InputCollect$dt_input))
+      ), diag_txt)
+      gcs_put_safe(diag_txt, file.path(gcs_prefix, "robyn_train_diagnostics.txt"))
+      logf("Train     | retrying with ts_validation=FALSE (diagnostic fallback)")
+      return(run_once(do_validation = FALSE)) # <-- retry without validation
+    } else {
+      NULL
     }
-  ),
-  warning = function(w) invokeRestart("muffleWarning")
+  }
 )
+
+training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 
 if (is.null(OutputModels) || is.null(OutputModels$resultHypParam) || !NROW(OutputModels$resultHypParam)) {
   diag_txt <- file.path(dir_path, "robyn_train_diagnostics.txt")
