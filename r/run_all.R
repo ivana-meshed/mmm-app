@@ -1041,6 +1041,46 @@ logf("Train     | start cores=", max_cores, " iter=", iter, " trials=", trials)
 # ==== ROBYN RUN WITH TARGETED DIAGNOSTICS ====
 OutputModels <- NULL # ensure symbol exists no matter what
 
+
+# ---- HARD ASSERTS BEFORE robyn_run ----
+must_exist <- function(x, nm) if (is.null(x)) stop("Preflight: ", nm, " is NULL")
+must_df <- function(x, nm) if (!is.null(x) && !inherits(x, c("data.frame", "tbl", "tbl_df"))) stop("Preflight: ", nm, " not a data.frame (", class(x)[1], ")")
+
+# Core slots Robyn expects to be non-NULL or data frames after robyn_inputs()
+must_exist(InputCollect$dt_input, "InputCollect$dt_input")
+must_df(InputCollect$dt_input, "InputCollect$dt_input")
+# dt_mod should already be prepared by robyn_inputs()
+must_exist(InputCollect$dt_mod, "InputCollect$dt_mod")
+must_df(InputCollect$dt_mod, "InputCollect$dt_mod")
+
+# Prophet must be fully off
+if (!is.null(InputCollect$prophet_vars) || !is.null(InputCollect$dt_prophet)) {
+  stop(
+    "Preflight: prophet appears enabled: vars=", paste(InputCollect$prophet_vars %||% "<NULL>", collapse = ","),
+    " dt_prophet is ", if (is.null(InputCollect$dt_prophet)) "NULL" else "non-NULL"
+  )
+}
+
+# Sanity: the columns robyn_run will select are actually present in dt_mod
+sel_cols <- unique(na.omit(c(
+  "date", InputCollect$dep_var,
+  InputCollect$paid_media_vars %||% character(0),
+  InputCollect$context_vars %||% character(0),
+  InputCollect$factor_vars %||% character(0),
+  InputCollect$organic_vars %||% character(0)
+)))
+missing_in_dt_mod <- setdiff(sel_cols, names(InputCollect$dt_mod))
+if (length(missing_in_dt_mod)) {
+  stop("Preflight: columns missing from InputCollect$dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
+}
+
+logf("Assert    | dt_mod OK: rows=", nrow(InputCollect$dt_mod), " cols=", ncol(InputCollect$dt_mod))
+
+options(
+  rlang_trace_top_env = current_env(),
+  rlang_backtrace_on_error = "full"
+)
+
 run_once <- function(do_validation = TRUE) {
   withCallingHandlers(
     tryCatch(
@@ -1049,7 +1089,7 @@ run_once <- function(do_validation = TRUE) {
           InputCollect       = InputCollect,
           iterations         = iter,
           trials             = trials,
-          ts_validation      = do_validation,
+          ts_validation      = FALSE, # do_validation,
           add_penalty_factor = TRUE,
           cores              = max_cores
         )
@@ -1057,6 +1097,14 @@ run_once <- function(do_validation = TRUE) {
       },
       error = function(e) {
         # write a detailed traceback
+        bt <- tryCatch(rlang::last_trace(), error = function(e) NULL)
+        if (!is.null(bt)) {
+          sink(file.path(dir_path, "robyn_last_trace_verbose.txt"))
+          print(bt)
+          sink()
+          gcs_put_safe(file.path(dir_path, "robyn_last_trace_verbose.txt"), file.path(gcs_prefix, "robyn_last_trace_verbose.txt"))
+        }
+
         tb1 <- tryCatch(utils::capture.output(traceback(max.lines = 50L)), error = function(.) "<no base traceback>")
         tb2 <- tryCatch(utils::capture.output(rlang::last_trace()), error = function(.) "<no rlang trace>")
         writeLines(
@@ -1073,6 +1121,26 @@ run_once <- function(do_validation = TRUE) {
     warning = function(w) invokeRestart("muffleWarning")
   )
 }
+
+
+# ---- TEMP WRAPPER AROUND dplyr::select TO CATCH NULL INPUT ----
+.select_orig <- dplyr::select
+select <- function(.data, ...) {
+  if (is.null(.data)) {
+    msg <- c(
+      "== dplyr::select received NULL ==",
+      paste("dots:", paste(utils::capture.output(str(list(...))), collapse = " ")),
+      "---- sys.calls() tail ----",
+      utils::capture.output(tail(sys.calls(), 20))
+    )
+    pth <- file.path(dir_path, "select_on_NULL.txt")
+    writeLines(msg, pth)
+    gcs_put_safe(pth, file.path(gcs_prefix, "select_on_NULL.txt"))
+    stop("select(NULL, ...) – see select_on_NULL.txt")
+  }
+  .select_orig(.data, ...)
+}
+
 
 run_err <- NULL
 run_tb <- NULL
