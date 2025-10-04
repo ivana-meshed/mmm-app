@@ -5,7 +5,9 @@
 ##  - Sets GCS bucket BEFORE any upload
 ##  - Synthesizes date if missing (daily index)
 ##  - Uploads robyn_console.log at checkpoints
-##  - Preserves all original features
+##  - Preserved all original features
+##  - OPTION A: Manually attach HPs to InputCollect$hyperparameters
+##  - Also probes robyn_inputs() to capture exact validation errors
 ## =========================================================
 
 ## ---------- ENV ----------
@@ -119,7 +121,6 @@ push_log <- function() {
     silent = TRUE
   )
 }
-
 
 ## ---------- GCS helpers ----------
 gcs_download <- function(gcs_path, local_path) {
@@ -244,7 +245,7 @@ filter_by_country <- function(dx, country) {
       vals <- unique(toupper(dx[[col]]))
       if (cn %in% vals) {
         logf("Filter    | ", col, " == ", cn, " (", sum(toupper(dx[[col]]) == cn), " rows)")
-        dx <- dx[toupper(dx[[col]]) == cn, , drop = FALSE] ## <-- fixed bracket placement
+        dx <- dx[toupper(dx[[col]]) == cn, , drop = FALSE]
         break
       }
     }
@@ -653,9 +654,9 @@ log_kv(list(
 ))
 push_log()
 
-## ---------- Inputs ----------
+## ---------- Inputs (BASE, no HPs) ----------
 if (!(dep_var %in% names(df))) stop("Dependent variable '", dep_var, "' not found in data.")
-InputCollect <- robyn_inputs(
+InputCollect_base <- robyn_inputs(
   dt_input          = df,
   date_var          = "date",
   dep_var           = dep_var,
@@ -671,14 +672,14 @@ InputCollect <- robyn_inputs(
   window_start      = min(df$date),
   window_end        = max(df$date)
 )
-logf("Inputs    | dep_var=", InputCollect$dep_var, " adstock=", InputCollect$adstock, " rows=", nrow(InputCollect$dt_input))
-logf("Inputs    | window ", as.character(InputCollect$window_start), " → ", as.character(InputCollect$window_end))
-alloc_end <- max(InputCollect$dt_input$date)
+logf("Inputs    | dep_var=", InputCollect_base$dep_var, " adstock=", InputCollect_base$adstock, " rows=", nrow(InputCollect_base$dt_input))
+logf("Inputs    | window ", as.character(InputCollect_base$window_start), " → ", as.character(InputCollect_base$window_end))
+alloc_end <- max(InputCollect_base$dt_input$date)
 alloc_start <- alloc_end - 364
 logf("AllocWin  | ", as.character(alloc_start), " → ", as.character(alloc_end))
 push_log()
 
-## ---------- Hyperparameters ----------
+## ---------- Hyperparameters (build) ----------
 hyper_vars <- c(paid_media_vars, organic_vars)
 hyperparameters <- list()
 mk_hp <- function(v) {
@@ -699,6 +700,7 @@ for (v in hyper_vars) {
   hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
 }
 hyperparameters[["train_size"]] <- train_size
+
 expect_keys <- c(
   as.vector(outer(c(paid_media_vars, organic_vars), c("_alphas", "_gammas", "_thetas"), paste0)),
   "train_size"
@@ -709,34 +711,26 @@ logf("HP        | vars=", length(hyper_vars), " keys=", length(names(hyperparame
 if (length(missing)) stop("Missing HP keys: ", paste(missing, collapse = ", "))
 if (length(extra)) stop("Extra HP keys (remove them): ", paste(extra, collapse = ", "))
 
-
-## ==== Hyperparameter validation probe ====
+## ---------- HP diagnostics + robyn_inputs() PROBE (to catch real error) ----------
 hp_diag_path <- file.path(dir_path, "robyn_hp_diagnostics.txt")
-
 capture_msgs <- character()
 capture_warn <- character()
 append_msg <- function(x) capture_msgs <<- c(capture_msgs, x)
 append_warn <- function(x) capture_warn <<- c(capture_warn, x)
-
 write_diag <- function(extra = NULL) {
   lines <- c(
     "=== ROBYN HP DIAGNOSTICS ===",
-    paste0("Time: ", as.character(Sys.time())),
-    "",
+    paste0("Time: ", as.character(Sys.time())), "",
     "-- Your hyperparameters (names):",
-    paste0("  ", paste(sort(names(hyperparameters)), collapse = ", ")),
-    "",
+    paste0("  ", paste(sort(names(hyperparameters)), collapse = ", ")), "",
     "-- Paid media vars: ",
     paste0("  ", paste(paid_media_vars, collapse = ", ")),
     "-- Organic vars: ",
-    paste0("  ", paste(organic_vars, collapse = ", ")),
-    "",
+    paste0("  ", paste(organic_vars, collapse = ", ")), "",
     "-- Messages from robyn_inputs():",
-    if (length(capture_msgs)) paste0("  ", capture_msgs) else "  <none>",
-    "",
+    if (length(capture_msgs)) paste0("  ", capture_msgs) else "  <none>", "",
     "-- Warnings from robyn_inputs():",
-    if (length(capture_warn)) paste0("  ", capture_warn) else "  <none>",
-    "",
+    if (length(capture_warn)) paste0("  ", capture_warn) else "  <none>", "",
     extra %||% character(0)
   )
   writeLines(lines, hp_diag_path)
@@ -744,28 +738,8 @@ write_diag <- function(extra = NULL) {
   push_log()
 }
 
-## 1) Build a baseline InputCollect WITHOUT HPs (so we can query Robyn’s template)
-InputCollect_base <- robyn_inputs(
-  dt_input          = df,
-  date_var          = "date",
-  dep_var           = dep_var,
-  dep_var_type      = "revenue",
-  adstock           = adstock,
-  prophet_vars      = c("trend", "season", "holiday", "weekday"),
-  prophet_country   = toupper(country),
-  paid_media_spends = paid_media_spends,
-  paid_media_vars   = paid_media_vars,
-  context_vars      = context_vars,
-  factor_vars       = factor_vars,
-  organic_vars      = organic_vars,
-  window_start      = min(df$date),
-  window_end        = max(df$date)
-)
-
-## 2) Ask Robyn for the official HP template for these inputs
+## Compare with Robyn's template for this InputCollect
 hp_template <- try(robyn_hyper_params(InputCollect_base), silent = TRUE)
-
-## 3) Do a strict diff before calling robyn_inputs with your HPs
 templ_names <- if (!inherits(hp_template, "try-error")) names(hp_template) else character(0)
 your_names <- names(hyperparameters)
 
@@ -779,39 +753,32 @@ check_pair <- function(k, v) {
     bad_shapes <<- c(bad_shapes, sprintf("%s (need numeric length-2)", k))
     return()
   }
-  if (grepl("_alphas$", k)) {
-    if (any(v <= 0)) bad_ranges <<- c(bad_ranges, sprintf("%s <= 0", k))
-  }
-  if (grepl("_gammas$|_thetas$", k)) {
-    if (any(v < 0 | v > 1)) bad_ranges <<- c(bad_ranges, sprintf("%s out of [0,1]", k))
-  }
+  if (grepl("_alphas$", k) && any(v <= 0)) bad_ranges <<- c(bad_ranges, sprintf("%s <= 0", k))
+  if (grepl("_gammas$|_thetas$", k) && any(v < 0 | v > 1)) bad_ranges <<- c(bad_ranges, sprintf("%s out of [0,1]", k))
   if (v[1] > v[2]) bad_ranges <<- c(bad_ranges, sprintf("%s min>max (%.3f>%.3f)", k, v[1], v[2]))
 }
 invisible(lapply(names(hyperparameters), function(k) check_pair(k, hyperparameters[[k]])))
 
-## 4) Log the preflight diff
-pre_extra <- c(
+write_diag(c(
   "== Preflight diff vs. Robyn template ==",
   paste0("Missing in your HPs: ", if (length(missing_in_yours)) paste(missing_in_yours, collapse = ", ") else "<none>"),
   paste0("Extra keys you provided: ", if (length(extra_in_yours)) paste(extra_in_yours, collapse = ", ") else "<none>"),
   paste0("Bad shapes: ", if (length(bad_shapes)) paste(bad_shapes, collapse = "; ") else "<none>"),
   paste0("Bad ranges/order: ", if (length(bad_ranges)) paste(bad_ranges, collapse = "; ") else "<none>")
-)
-write_diag(pre_extra)
+))
 
-## 5) Now call robyn_inputs WITH HPs but capture every message/warning/error
-InputCollect <- withCallingHandlers(
+## PROBE CALL: robyn_inputs(InputCollect=..., hyperparameters=...) just to capture TRUE validation errors
+invisible(withCallingHandlers(
   tryCatch(
     robyn_inputs(InputCollect = InputCollect_base, hyperparameters = hyperparameters),
     error = function(e) {
       write_diag(c(
         "== ERROR ==",
-        paste0("Condition: ", conditionMessage(e)),
-        "",
+        paste0("Condition: ", conditionMessage(e)), "",
         "Traceback:",
         utils::capture.output(traceback(max.lines = 50L))
       ))
-      stop(e) # rethrow so the job fails loudly
+      stop(e) # fail loudly, so the job status becomes FAILED with exact message
     }
   ),
   message = function(m) append_msg(conditionMessage(m)),
@@ -819,28 +786,31 @@ InputCollect <- withCallingHandlers(
     append_warn(conditionMessage(w))
     invokeRestart("muffleWarning")
   }
-)
+))
 
-## 6) Success path: confirm applied train_size and HP count
+## SUCCESS marker for the probe
 write_diag(c(
   "== SUCCESS ==",
-  paste0("Applied train_size: ", paste(InputCollect$hyperparameters$train_size, collapse = ",")),
-  paste0("Total HP keys applied: ", length(names(InputCollect$hyperparameters)))
+  "robyn_inputs() accepted the provided hyperparameters (probe).",
+  "Proceeding with OPTION A (manual attach to InputCollect$hyperparameters)."
 ))
 logf("HP        | diagnostics written to ", hp_diag_path)
-## ==== end probe ====
 
-# InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
+## ---------- OPTION A: Manually attach HPs to InputCollect and proceed ----------
+InputCollect <- InputCollect_base
+stopifnot(is.list(hyperparameters), length(hyperparameters) > 0)
+InputCollect$hyperparameters <- hyperparameters
 
-# --- Sanity: log the train_size Robyn will actually use
+## Train-size sanity
 ts_used <- InputCollect$hyperparameters$train_size
+if (!is.numeric(ts_used) || length(ts_used) != 2L || any(is.na(ts_used))) {
+  stop("train_size malformed inside hyperparameters; need numeric length-2.")
+}
 logf("HP        | train_size used: ", paste(ts_used, collapse = ","))
 
-# --- Sanity: nonzero spends per driver (helps catch “all ~0” channels quickly)
+## Nonzero spends
 nz_spend <- sapply(paid_media_spends, function(c) sum(InputCollect$dt_input[[c]], na.rm = TRUE))
 logf("HP        | nonzero spend totals: ", paste(sprintf("%s=%.2f", names(nz_spend), nz_spend), collapse = "; "))
-
-logf("HP        | train_size used: ", paste(InputCollect$hyperparameters$train_size, collapse = ","))
 push_log()
 
 ## ---------- Train ----------
@@ -854,7 +824,7 @@ prev_plan <- future::plan()
 on.exit(future::plan(prev_plan), add = TRUE)
 future::plan(sequential)
 
-# Debug the dependent variable quality
+# DV stats
 dv <- df[[dep_var]]
 logf(
   "DV Stats  | dep_var=", dep_var,
@@ -868,19 +838,15 @@ if (all(is.na(dv)) || sd(dv, na.rm = TRUE) == 0) {
   stop("Dependent variable has zero variance or all NA after windowing; cannot train.")
 }
 
-
-# --- Pre-flight feasibility checks
+# Pre-flight window
 win_days <- as.integer(max(df$date) - min(df$date) + 1)
 if (win_days < 90) stop("Training window too short: ", win_days, " days.")
-
-if (!is.numeric(InputCollect$hyperparameters$train_size) ||
-  any(is.na(InputCollect$hyperparameters$train_size))) {
+if (!is.numeric(InputCollect$hyperparameters$train_size) || any(is.na(InputCollect$hyperparameters$train_size))) {
   stop("train_size is missing/NA inside hyperparameters. Aborting to avoid empty models.")
 }
 
 logf("Train     | start cores=", max_cores, " iter=", iter, " trials=", trials)
 t0 <- Sys.time()
-
 run_err <- NULL
 OutputModels <- tryCatch(
   robyn_run(
@@ -900,7 +866,7 @@ OutputModels <- tryCatch(
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 logf("Train     | completed in ", round(training_time, 2), " minutes")
 
-# --- Did Robyn return any candidates?
+# Did we get models?
 ok_models <- !is.null(OutputModels) &&
   is.list(OutputModels) &&
   !is.null(OutputModels$resultHypParam) &&
@@ -923,7 +889,6 @@ if (!ok_models) {
   push_log()
   stop("robyn_run returned empty results (see robyn_train_diagnostics.txt).")
 }
-
 
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 logf("Train     | completed in ", round(training_time, 2), " minutes")
@@ -959,7 +924,6 @@ gcs_put_safe(timings_local, timings_obj)
 push_log()
 
 ## ---------- Save core RDS ----------
-# Save core RDS (defensive)
 om_path <- file.path(dir_path, "OutputModels.RDS")
 ic_path <- file.path(dir_path, "InputCollect.RDS")
 oc_path <- file.path(dir_path, "OutputCollect.RDS")
@@ -1075,7 +1039,6 @@ try(
 push_log()
 
 ## ---------- SMART 3-month forecast ----------
-# Monthly targets: ENV override or derive from history
 parse_nums <- function(x) as.numeric(unlist(strsplit(x, "[,;\\s]+")))
 spend_cols <- InputCollect$paid_media_spends
 monthly_override <- Sys.getenv("FORECAST_MONTHLY_BUDGETS", unset = "")
@@ -1088,7 +1051,6 @@ if (nzchar(monthly_override)) {
   logf("Forecast  | monthly targets (HIST): ", paste(round(monthly_targets, 0), collapse = ", "))
 }
 
-# Build daily per-channel plan
 future_spend <- build_spend_forecast(
   dt_input        = InputCollect$dt_input,
   spend_cols      = spend_cols,
@@ -1099,7 +1061,6 @@ plan_path <- file.path(dir_path, "spend_plan_daily_next3m.csv")
 safe_write_csv(future_spend, plan_path)
 gcs_put_safe(plan_path, file.path(gcs_prefix, "spend_plan_daily_next3m.csv"))
 
-# Sanity check plan totals vs targets
 plan_check <- future_spend %>%
   mutate(month = floor_date(date, "month")) %>%
   group_by(month) %>%
@@ -1111,11 +1072,9 @@ if (nrow(plan_check)) {
   if (any(abs(ratios) > 0.10, na.rm = TRUE)) logf("⚠ Forecast | Plan deviates >10% from targets.")
 }
 
-# Baseline from decomp
 BASE_LOOKBACK <- as.integer(Sys.getenv("FORECAST_BASE_LOOKBACK_DAYS", "28"))
 base_daily <- compute_base_daily(OutputCollect, InputCollect, lookback_days = BASE_LOOKBACK)
 
-# Evaluate each month via allocator with tight share bands
 future_spend <- future_spend %>% mutate(month = floor_date(date, "month"))
 months_vec <- sort(unique(future_spend$month))
 SHARE_TOL <- as.numeric(Sys.getenv("FORECAST_SHARE_TOL", "1e-4"))
