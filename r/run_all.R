@@ -708,7 +708,17 @@ extra <- setdiff(names(hyperparameters), expect_keys)
 logf("HP        | vars=", length(hyper_vars), " keys=", length(names(hyperparameters)), " missing=", length(missing), " extra=", length(extra))
 if (length(missing)) stop("Missing HP keys: ", paste(missing, collapse = ", "))
 if (length(extra)) stop("Extra HP keys (remove them): ", paste(extra, collapse = ", "))
+
 InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
+
+# --- Sanity: log the train_size Robyn will actually use
+ts_used <- InputCollect$hyperparameters$train_size
+logf("HP        | train_size used: ", paste(ts_used, collapse = ","))
+
+# --- Sanity: nonzero spends per driver (helps catch “all ~0” channels quickly)
+nz_spend <- sapply(paid_media_spends, function(c) sum(InputCollect$dt_input[[c]], na.rm = TRUE))
+logf("HP        | nonzero spend totals: ", paste(sprintf("%s=%.2f", names(nz_spend), nz_spend), collapse = "; "))
+
 logf("HP        | train_size used: ", paste(InputCollect$hyperparameters$train_size, collapse = ","))
 push_log()
 
@@ -737,36 +747,62 @@ if (all(is.na(dv)) || sd(dv, na.rm = TRUE) == 0) {
   stop("Dependent variable has zero variance or all NA after windowing; cannot train.")
 }
 
+
+# --- Pre-flight feasibility checks
+win_days <- as.integer(max(df$date) - min(df$date) + 1)
+if (win_days < 90) stop("Training window too short: ", win_days, " days.")
+
+if (!is.numeric(InputCollect$hyperparameters$train_size) ||
+  any(is.na(InputCollect$hyperparameters$train_size))) {
+  stop("train_size is missing/NA inside hyperparameters. Aborting to avoid empty models.")
+}
+
+logf("Train     | start cores=", max_cores, " iter=", iter, " trials=", trials)
 t0 <- Sys.time()
-OutputModels <- robyn_run(
-  InputCollect       = InputCollect,
-  iterations         = iter,
-  trials             = trials,
-  ts_validation      = TRUE,
-  add_penalty_factor = TRUE,
-  cores              = max_cores
+
+run_err <- NULL
+OutputModels <- tryCatch(
+  robyn_run(
+    InputCollect       = InputCollect,
+    iterations         = iter,
+    trials             = trials,
+    ts_validation      = TRUE,
+    add_penalty_factor = TRUE,
+    cores              = max_cores
+  ),
+  error = function(e) {
+    run_err <<- e$message
+    NULL
+  }
 )
 
+training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
+logf("Train     | completed in ", round(training_time, 2), " minutes")
+
+# --- Did Robyn return any candidates?
 ok_models <- !is.null(OutputModels) &&
   is.list(OutputModels) &&
-  length(OutputModels) > 0 &&
   !is.null(OutputModels$resultHypParam) &&
-  nrow(OutputModels$resultHypParam) > 0
+  NROW(OutputModels$resultHypParam) > 0
 
 if (!ok_models) {
-  logf("Train     | no valid models produced by robyn_run()")
-  # persist a clear diagnostic for you
   diag_txt <- file.path(dir_path, "robyn_train_diagnostics.txt")
-  writeLines(c(
+  lines <- c(
     "robyn_run produced no models.",
-    paste("DV sd:", round(sd(dv, na.rm = TRUE), 6)),
+    if (!is.null(run_err)) paste0("robyn_run error: ", run_err) else "robyn_run error: <none>",
+    paste("DV sd:", round(sd(df[[dep_var]], na.rm = TRUE), 6)),
+    paste("Train window days:", win_days),
+    paste("train_size:", paste(InputCollect$hyperparameters$train_size, collapse = ",")),
+    paste("Nonzero spend totals:", paste(sprintf("%s=%.2f", names(nz_spend), nz_spend), collapse = "; ")),
     paste("Paid media spends kept:", paste(paid_media_spends, collapse = ", ")),
     paste("Hyperparameter keys:", paste(names(hyperparameters), collapse = ", "))
-  ), diag_txt)
+  )
+  writeLines(lines, diag_txt)
   gcs_put_safe(diag_txt, file.path(gcs_prefix, "robyn_train_diagnostics.txt"))
   push_log()
   stop("robyn_run returned empty results (see robyn_train_diagnostics.txt).")
 }
+
 
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 logf("Train     | completed in ", round(training_time, 2), " minutes")
@@ -802,11 +838,16 @@ gcs_put_safe(timings_local, timings_obj)
 push_log()
 
 ## ---------- Save core RDS ----------
-saveRDS(OutputModels, file.path(dir_path, "OutputModels.RDS"))
-saveRDS(InputCollect, file.path(dir_path, "InputCollect.RDS"))
-gcs_put_safe(file.path(dir_path, "OutputModels.RDS"), file.path(gcs_prefix, "OutputModels.RDS"))
-gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "InputCollect.RDS"))
-logf("Save      | OutputModels.RDS & InputCollect.RDS uploaded")
+# Save core RDS (defensive)
+om_path <- file.path(dir_path, "OutputModels.RDS")
+ic_path <- file.path(dir_path, "InputCollect.RDS")
+oc_path <- file.path(dir_path, "OutputCollect.RDS")
+
+tryCatch(saveRDS(OutputModels, om_path), error = function(e) logf("Save      | FAILED OutputModels.RDS: ", e$message))
+tryCatch(saveRDS(InputCollect, ic_path), error = function(e) logf("Save      | FAILED InputCollect.RDS: ", e$message))
+
+if (file.exists(om_path)) gcs_put_safe(om_path, file.path(gcs_prefix, "OutputModels.RDS")) else logf("Save      | MISSING ", om_path)
+if (file.exists(ic_path)) gcs_put_safe(ic_path, file.path(gcs_prefix, "InputCollect.RDS")) else logf("Save      | MISSING ", ic_path)
 push_log()
 
 ## ---------- Outputs & onepagers ----------
