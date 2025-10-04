@@ -747,6 +747,10 @@ if (!requireNamespace("prophet", quietly = TRUE)) {
 
 prophet_vars_used <- NULL # TEMP: avoid prophet merge branch while we debug
 
+# ---- guard against duplicate column names (causes weird selects later) ----
+dups <- names(df)[duplicated(names(df))]
+if (length(dups)) stop("Preflight: duplicated column names in df: ", paste(dups, collapse = ", "))
+
 # SANITIZE before robyn_inputs() and keep all declared features
 df_for_robyn <- sanitize_for_robyn(
   df_full = df,
@@ -1053,6 +1057,37 @@ must_df(InputCollect$dt_input, "InputCollect$dt_input")
 must_exist(InputCollect$dt_mod, "InputCollect$dt_mod")
 must_df(InputCollect$dt_mod, "InputCollect$dt_mod")
 
+# ---- SNAPSHOT dt_mod + prove we can select the columns Robyn will use ----
+sel_cols <- unique(na.omit(c(
+  "date", InputCollect$dep_var,
+  InputCollect$paid_media_vars %||% character(0),
+  InputCollect$context_vars %||% character(0),
+  InputCollect$factor_vars %||% character(0),
+  InputCollect$organic_vars %||% character(0)
+)))
+missing_in_dt_mod <- setdiff(sel_cols, names(InputCollect$dt_mod))
+if (length(missing_in_dt_mod)) {
+  stop("Preflight: columns missing from InputCollect$dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
+}
+
+# Force a real select() now; if this fails, we fail here with details
+sel_test <- try(dplyr::select(InputCollect$dt_mod, dplyr::all_of(sel_cols)), silent = TRUE)
+if (inherits(sel_test, "try-error")) {
+  err <- conditionMessage(attr(sel_test, "condition"))
+  stop("Preflight: dplyr::select failed on dt_mod before robyn_run: ", err)
+}
+
+# Dump a small, inspectable snapshot
+dump_path <- file.path(dir_path, "dt_mod_glimpse.txt")
+capture.output(
+  {
+    cat("dt_mod dim: ", NROW(InputCollect$dt_mod), " x ", NCOL(InputCollect$dt_mod), "\n", sep = "")
+    print(utils::head(InputCollect$dt_mod[sel_cols], 3))
+  },
+  file = dump_path
+)
+gcs_put_safe(dump_path, file.path(gcs_prefix, "dt_mod_glimpse.txt"))
+
 # Prophet must be fully off
 if (!is.null(InputCollect$prophet_vars) || !is.null(InputCollect$dt_prophet)) {
   stop(
@@ -1074,7 +1109,7 @@ if (length(missing_in_dt_mod)) {
   stop("Preflight: columns missing from InputCollect$dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
 }
 
-logf("Assert    | dt_mod OK: rows=", nrow(InputCollect$dt_mod), " cols=", ncol(InputCollect$dt_mod))
+logf(sprintf("Assert    | dt_mod OK: rows=%s cols=%s", NROW(InputCollect$dt_mod), NCOL(InputCollect$dt_mod)))
 
 options(
   rlang_trace_top_env = current_env(),
@@ -1097,13 +1132,14 @@ run_once <- function(do_validation = TRUE) {
       },
       error = function(e) {
         # write a detailed traceback
-        bt <- tryCatch(rlang::last_trace(), error = function(e) NULL)
-        if (!is.null(bt)) {
-          sink(file.path(dir_path, "robyn_last_trace_verbose.txt"))
-          print(bt)
-          sink()
-          gcs_put_safe(file.path(dir_path, "robyn_last_trace_verbose.txt"), file.path(gcs_prefix, "robyn_last_trace_verbose.txt"))
+        # Also try to persist last_trace() in all cases
+        bt_verbose <- tryCatch(rlang::last_trace(), error = function(e) NULL)
+        if (!is.null(bt_verbose)) {
+          p1 <- file.path(dir_path, "robyn_last_trace_verbose.txt")
+          capture.output(print(bt_verbose), file = p1)
+          gcs_put_safe(p1, file.path(gcs_prefix, "robyn_last_trace_verbose.txt"))
         }
+
 
         tb1 <- tryCatch(utils::capture.output(traceback(max.lines = 50L)), error = function(.) "<no base traceback>")
         tb2 <- tryCatch(utils::capture.output(rlang::last_trace()), error = function(.) "<no rlang trace>")
@@ -1123,23 +1159,38 @@ run_once <- function(do_validation = TRUE) {
 }
 
 
-# ---- TEMP WRAPPER AROUND dplyr::select TO CATCH NULL INPUT ----
-.select_orig <- dplyr::select
-select <- function(.data, ...) {
-  if (is.null(.data)) {
-    msg <- c(
-      "== dplyr::select received NULL ==",
-      paste("dots:", paste(utils::capture.output(str(list(...))), collapse = " ")),
-      "---- sys.calls() tail ----",
-      utils::capture.output(tail(sys.calls(), 20))
-    )
-    pth <- file.path(dir_path, "select_on_NULL.txt")
-    writeLines(msg, pth)
-    gcs_put_safe(pth, file.path(gcs_prefix, "select_on_NULL.txt"))
-    stop("select(NULL, ...) – see select_on_NULL.txt")
+## ---- TRACE dplyr::select METHODS TO CATCH NULL INPUT ----
+# This hooks the actual S3 methods Robyn will hit, even from inside the dplyr namespace.
+trace_select_on_null <- local({
+  installed <- FALSE
+  function() {
+    if (installed) {
+      return(invisible(TRUE))
+    }
+    tracer <- quote({
+      if (is.null(.data)) {
+        pth <- file.path(dir_path, "select_on_NULL.txt")
+        msg <- c(
+          "=== dplyr::select called with .data = NULL ===",
+          "Args (dots):",
+          capture.output(str(list(...))),
+          "",
+          "---- tail(sys.calls()) ----",
+          capture.output(tail(sys.calls(), 25))
+        )
+        writeLines(msg, pth)
+        try(gcs_put_safe(pth, file.path(gcs_prefix, "select_on_NULL.txt")), silent = TRUE)
+        stop("select(NULL, …) – see select_on_NULL.txt")
+      }
+    })
+    suppressMessages(trace(dplyr:::select.data.frame, tracer = tracer, print = FALSE))
+    suppressMessages(trace(dplyr:::select.tbl_df, tracer = tracer, print = FALSE))
+    installed <<- TRUE
+    invisible(TRUE)
   }
-  .select_orig(.data, ...)
-}
+})
+trace_select_on_null()
+
 
 
 run_err <- NULL
