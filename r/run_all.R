@@ -40,6 +40,14 @@ suppressPackageStartupMessages({
     library(tibble)
 })
 if (requireNamespace("ggplot2", quietly = TRUE)) {
+    suppressWarnings(ggplot2::theme_set(ggplot2::theme_gray()))
+    # Force text family to a safe value for all geoms/themes Robyn touches.
+    try(ggplot2::theme_update(text = ggplot2::element_text(family = NULL)), silent = TRUE)
+    # Belt & suspenders: default for text geom too.
+    try(ggplot2::update_geom_defaults("text", list(family = NULL)), silent = TRUE)
+}
+
+if (requireNamespace("ggplot2", quietly = TRUE)) {
     # Force a safe base family; avoid boolean/invalid family
     suppressWarnings(ggplot2::theme_set(ggplot2::theme_gray(base_family = "")))
 }
@@ -993,6 +1001,17 @@ InputCollect <- withCallingHandlers(
     }
 )
 
+logf(
+    "Post-inputs | spend sums: ",
+    paste(
+        sprintf(
+            "%s=%.2f", InputCollect$paid_media_spends,
+            sapply(InputCollect$paid_media_spends, function(c) sum(InputCollect$dt_input[[c]], na.rm = TRUE))
+        ),
+        collapse = "; "
+    )
+)
+
 # Always write the diagnostics file once, whether success or failure.
 hp_diag_lines <- c(
     "=== ROBYN HP DIAGNOSTICS ===",
@@ -1020,12 +1039,15 @@ if (is.null(InputCollect) || !is.list(InputCollect) || is.null(InputCollect$dt_i
         error = paste("robyn_inputs() failed:", inp_err %||% "unknown")
     ), auto_unbox = TRUE), status_json)
     gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
-    stop("robyn_inputs() failed — see robyn_hp_diagnostics.txt for details.")
+    push_log()
+    quit(status = 1) # <-- use quit to truly end the script
 }
+
 
 # --- Harden InputCollect after robyn_inputs() ---
 # Ensure Robyn sees the same knobs we built
 InputCollect$hyperparameters <- hyperparameters
+InputCollect$adstock <- adstock # <-- add this line
 
 # If robyn_inputs() blanked any vectors, restore them
 if (!length(InputCollect$paid_media_spends)) InputCollect$paid_media_spends <- paid_media_spends
@@ -1493,6 +1515,15 @@ if (is.null(OutputCollect) || is.null(OutputCollect$resultHypParam) ||
 
 saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
+
+ok_outputs <- !is.null(OutputCollect) &&
+    !is.null(OutputCollect$resultHypParam) &&
+    NROW(OutputCollect$resultHypParam) > 0
+
+if (!ok_outputs) {
+    stop("robyn_outputs() failed to produce candidates; cannot proceed.")
+}
+
 
 best_id <- OutputCollect$resultHypParam$solID[1]
 writeLines(c(best_id, paste("Iterations:", iter), paste("Trials:", trials), paste("Training time (mins):", round(training_time, 2))),
