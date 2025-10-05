@@ -818,6 +818,14 @@ mini <- df %>%
 df_for_robyn$date <- as.Date(df_for_robyn$date)
 mini$date <- as.Date(mini$date)
 
+na_map <- sapply(df_for_robyn[used_cols], function(z) sum(is.na(z) | !is.finite(z)))
+if (any(na_map > 0)) {
+  stop(
+    "Preflight: NA/Inf detected in used columns: ",
+    paste(names(na_map)[na_map > 0], na_map[na_map > 0], sep = "=", collapse = ", ")
+  )
+}
+
 IC_mini <- robyn_inputs(
   dt_input = mini,
   date_var = "date",
@@ -891,12 +899,49 @@ apply(sub[, num_cols, drop = FALSE], 2, function(x) dplyr::n_distinct(x, na.rm =
 
 sub <- df[, intersect(used, names(df)), drop = FALSE]
 num_cols <- vapply(sub, is.numeric, logical(1))
-colSums(!is.finite(as.matrix(sub[, num_cols, drop = FALSE])))
+colSums(!is.finite(as.matrix(sub[, num_cols, drop = FALSE])) | is.na(as.matrix(sub[, num_cols, drop = FALSE])))
 
 stopifnot(length(paid_media_spends) == length(paid_media_vars))
 stopifnot(all(paid_media_spends %in% names(df_for_robyn)))
 stopifnot(all(paid_media_vars %in% names(df_for_robyn)))
 stopifnot(all(c("IS_WEEKEND", "TV_IS_ON", "ORGANIC_TRAFFIC") %in% names(df_for_robyn)))
+
+
+# Columns Robyn will actually use
+used_cols <- unique(c(
+  "date", dep_var, paid_media_spends, paid_media_vars, context_vars, organic_vars
+))
+used_cols <- intersect(used_cols, names(df_for_robyn))
+
+# 2a) Dep var: drop NA/Inf/NaN rows
+bad_dep <- !is.finite(df_for_robyn[[dep_var]]) | is.na(df_for_robyn[[dep_var]])
+if (any(bad_dep)) {
+  logf("Clean     | dropping ", sum(bad_dep), " rows with NA/Inf in dep_var=", dep_var)
+  df_for_robyn <- df_for_robyn[!bad_dep, , drop = FALSE]
+}
+
+# 2b) Drivers & context: replace NA/Inf/NaN with 0 (Robyn accepts zeros)
+drv_ctx <- setdiff(used_cols, c("date", dep_var))
+for (nm in drv_ctx) {
+  if (is.numeric(df_for_robyn[[nm]])) {
+    x <- df_for_robyn[[nm]]
+    x[!is.finite(x) | is.na(x)] <- 0
+    df_for_robyn[[nm]] <- x
+  }
+}
+
+# 2c) Final guard: if any used column is still non-numeric (except date), coerce safely
+for (nm in setdiff(used_cols, "date")) {
+  if (!is.numeric(df_for_robyn[[nm]])) {
+    df_for_robyn[[nm]] <- readr::parse_number(as.character(df_for_robyn[[nm]]))
+    df_for_robyn[[nm]][is.na(df_for_robyn[[nm]])] <- 0
+  }
+}
+
+# 2d) Log remaining NA counts (should be zero now except date)
+rem_na <- sapply(df_for_robyn[used_cols], function(x) if (is.numeric(x)) sum(is.na(x) | !is.finite(x)) else 0)
+logf("Clean     | remaining NA/non-finite across used cols: ", paste(names(rem_na), rem_na, sep = "=", collapse = ", "))
+
 
 InputCollect_base <- robyn_inputs(
   dt_input = df_for_robyn,
@@ -927,16 +972,20 @@ if (is.null(InputCollect_base$dt_mod) || nrow(InputCollect_base$dt_mod) == 0L ||
     print(sapply(InputCollect_base$dt_input[culprits], function(x) {
       if (is.numeric(x)) dplyr::n_distinct(x, na.rm = TRUE) else length(unique(x))
     }))
-    cat("\nNon-finite counts (numeric only):\n")
+    cat("\nNA & non-finite counts (numeric only):\n")
     nf <- sapply(InputCollect_base$dt_input[culprits], function(x) {
-      if (is.numeric(x)) sum(!is.finite(x)) else NA_integer_
+      if (!is.numeric(x)) {
+        return(NA_integer_)
+      }
+      sum(is.na(x) | !is.finite(x))
     })
-    print(nf[!is.na(nf)])
+    print(nf)
   })
   writeLines(ss, file.path(dir_path, "dt_mod_empty_debug.txt"))
   gcs_put_safe(file.path(dir_path, "dt_mod_empty_debug.txt"), file.path(gcs_prefix, "dt_mod_empty_debug.txt"))
-  stop("robyn_inputs built an empty dt_mod. See dt_mod_empty_debug.txt")
+  stop("robyn_inputs built an empty dt_mod. See dt_mod_empty_debug.txt", call. = FALSE)
 }
+
 
 
 # Pick a safe single train_size that guarantees >= 28 validation days
@@ -1296,6 +1345,9 @@ options(
   rlang_trace_top_env = current_env(),
   rlang_backtrace_on_error = "full"
 )
+
+trace_select_on_null()
+
 
 run_once <- function(do_validation = TRUE) {
   withCallingHandlers(
