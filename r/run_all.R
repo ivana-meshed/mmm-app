@@ -471,6 +471,30 @@ logf("Stage     | Auth & early bucket")
 ensure_gcs_auth()
 early_bucket <- ensure_bucket()
 
+
+# Optional: clean up on exit so future runs aren't double-traced
+on.exit(
+    {
+        for (w in c("select", "select.data.frame", "select.tbl_df")) {
+            try(untrace(what = w, where = asNamespace("dplyr")), silent = TRUE)
+        }
+    },
+    add = TRUE
+)
+
+
+
+
+
+## ---------- Load cfg ----------
+logf("Stage     | Load configuration")
+cfg_path <- Sys.getenv("JOB_CONFIG_GCS_PATH", "")
+if (!nzchar(cfg_path)) cfg_path <- sprintf("gs://%s/training-configs/latest/job_config.json", googleCloudStorageR::gcs_get_global_bucket())
+logf("CFG       | JOB_CONFIG_GCS_PATH=", cfg_path)
+tmp_cfg <- tempfile(fileext = ".json")
+gcs_download(cfg_path, tmp_cfg)
+cfg <- jsonlite::fromJSON(tmp_cfg)
+
 ## Update identifiers/paths
 country <- cfg$country
 revision <- cfg$revision
@@ -491,19 +515,6 @@ options(warn = 1)
 logf("Logging   | file=", log_file, " (split=TRUE)")
 flush.console()
 
-
-
-
-# Optional: clean up on exit so future runs aren't double-traced
-on.exit(
-    {
-        for (w in c("select", "select.data.frame", "select.tbl_df")) {
-            try(untrace(what = w, where = asNamespace("dplyr")), silent = TRUE)
-        }
-    },
-    add = TRUE
-)
-
 on.exit(
     {
         try(sink(type = "message"), silent = TRUE)
@@ -514,7 +525,6 @@ on.exit(
     },
     add = TRUE
 )
-
 ## Error handler
 job_started <- Sys.time()
 status_json <- file.path(dir_path, "status.json")
@@ -538,17 +548,6 @@ options(error = function(e) {
 writeLines(jsonlite::toJSON(list(state = "RUNNING", start_time = as.character(job_started)), auto_unbox = TRUE), status_json)
 gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
 push_log()
-
-## ---------- Load cfg ----------
-logf("Stage     | Load configuration")
-cfg_path <- Sys.getenv("JOB_CONFIG_GCS_PATH", "")
-if (!nzchar(cfg_path)) cfg_path <- sprintf("gs://%s/training-configs/latest/job_config.json", googleCloudStorageR::gcs_get_global_bucket())
-logf("CFG       | JOB_CONFIG_GCS_PATH=", cfg_path)
-tmp_cfg <- tempfile(fileext = ".json")
-gcs_download(cfg_path, tmp_cfg)
-cfg <- jsonlite::fromJSON(tmp_cfg)
-
-
 ## Switch bucket if cfg says so
 if (!is.null(cfg$gcs_bucket) && nzchar(cfg$gcs_bucket) && cfg$gcs_bucket != googleCloudStorageR::gcs_get_global_bucket()) {
     logf("Bucket    | switching to cfg$gcs_bucket=", cfg$gcs_bucket)
