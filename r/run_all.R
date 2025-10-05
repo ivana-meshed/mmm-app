@@ -899,7 +899,7 @@ for (v in hyper_vars) {
 }
 
 # When you construct `hyperparameters`, do THIS:
-hyperparameters[["train_size"]] <- c(safe_train, safe_train) # <- overwrite cfg range
+hyperparameters[["train_size"]] <- train_size # <- overwrite cfg range
 
 expect_keys <- c(
     as.vector(outer(c(paid_media_vars, organic_vars), c("_alphas", "_gammas", "_thetas"), paste0)),
@@ -938,12 +938,7 @@ write_diag <- function(extra = NULL) {
     push_log()
 }
 
-hp_template <- try(robyn_hyper_params(InputCollect_base), silent = TRUE)
-templ_names <- if (!inherits(hp_template, "try-error")) names(hp_template) else character(0)
-your_names <- names(hyperparameters)
 
-missing_in_yours <- setdiff(templ_names, your_names)
-extra_in_yours <- setdiff(your_names, templ_names)
 
 bad_shapes <- c()
 bad_ranges <- c()
@@ -1018,7 +1013,7 @@ invisible(withCallingHandlers(
     }
 ))
 
-alloc_end <- max(InputCollect_base$dt_input$date)
+alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
 write_diag(c(
@@ -1044,6 +1039,13 @@ logf("HP        | train_size used: ", paste(ts_used, collapse = ","))
 nz_spend <- sapply(paid_media_spends, function(c) sum(InputCollect$dt_input[[c]], na.rm = TRUE))
 logf("HP        | nonzero spend totals: ", paste(sprintf("%s=%.2f", names(nz_spend), nz_spend), collapse = "; "))
 push_log()
+
+hp_template <- try(robyn_hyper_params(InputCollect), silent = TRUE)
+templ_names <- if (!inherits(hp_template, "try-error")) names(hp_template) else character(0)
+your_names <- names(hyperparameters)
+
+missing_in_yours <- setdiff(templ_names, your_names)
+extra_in_yours <- setdiff(your_names, templ_names)
 
 ## ---------- Train ----------
 reticulate::use_python("/usr/bin/python3", required = TRUE)
