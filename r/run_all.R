@@ -796,10 +796,27 @@ df_for_robyn <- sanitize_for_robyn(
   factor_vars = factor_vars,
   organic_vars = organic_vars
 )
+df_expo <- df_for_robyn %>%
+  dplyr::mutate(
+    GA_SUPPLY_EXP     = GA_SUPPLY_COST,
+    GA_DEMAND_EXP     = GA_DEMAND_COST,
+    BING_DEMAND_EXP   = BING_DEMAND_COST,
+    META_DEMAND_EXP   = META_DEMAND_COST,
+    TV_EXP            = TV_COST,
+    PARTNERSHIP_EXP   = PARTNERSHIP_COSTS
+  )
+
+paid_media_spends_expo <- c("GA_SUPPLY_COST", "GA_DEMAND_COST", "BING_DEMAND_COST", "META_DEMAND_COST", "TV_COST", "PARTNERSHIP_COSTS")
+paid_media_vars_expo <- c("GA_SUPPLY_EXP", "GA_DEMAND_EXP", "BING_DEMAND_EXP", "META_DEMAND_EXP", "TV_EXP", "PARTNERSHIP_EXP")
+
+
 logf("Integrity | dt_input columns: ", paste(names(df_for_robyn), collapse = ", "))
 mini <- df %>%
   select(date, UPLOAD_VALUE, GA_SUPPLY_COST) %>%
   mutate(across(-date, ~ as.numeric(.)), .keep = "all")
+
+df_for_robyn$date <- as.Date(df_for_robyn$date)
+mini$date <- as.Date(mini$date)
 
 IC_mini <- robyn_inputs(
   dt_input = mini,
@@ -813,6 +830,41 @@ IC_mini <- robyn_inputs(
   window_start = min(mini$date),
   window_end = max(mini$date)
 )
+
+IC_probe <- robyn_inputs(
+  dt_input = df_expo,
+  date_var = "date",
+  dep_var = "UPLOAD_VALUE",
+  dep_var_type = "revenue",
+  adstock = "none", # <- probe
+  prophet_vars = NULL,
+  paid_media_spends = paid_media_spends_expo,
+  paid_media_vars = paid_media_vars_expo,
+  context_vars = c("IS_WEEKEND", "TV_IS_ON"),
+  organic_vars = "ORGANIC_TRAFFIC",
+  window_start = min(df_expo$date),
+  window_end = max(df_expo$date)
+)
+
+mini2 <- df_expo %>% dplyr::select(date, UPLOAD_VALUE, GA_SUPPLY_COST, GA_SUPPLY_EXP)
+IC_mini2 <- robyn_inputs(
+  dt_input = mini2,
+  date_var = "date",
+  dep_var = "UPLOAD_VALUE",
+  dep_var_type = "revenue",
+  adstock = "none",
+  prophet_vars = NULL,
+  paid_media_spends = "GA_SUPPLY_COST",
+  paid_media_vars = "GA_SUPPLY_EXP",
+  window_start = min(mini2$date),
+  window_end = max(mini2$date)
+)
+dim(IC_mini2$dt_mod)
+
+dim(IC_probe$dt_input)
+dim(IC_probe$dt_mod)
+names(IC_probe$dt_mod)
+
 
 dim(IC_mini$dt_input)
 dim(IC_mini$dt_mod)
@@ -830,7 +882,13 @@ chk <- within(df[intersect(used, names(df))], {
 colSums(!is.finite(as.matrix(chk[sapply(chk, is.numeric)])), na.rm = FALSE)
 
 win <- df %>% filter(date >= as.Date("2024-01-01"), date <= max(date))
-apply(win[intersect(used, names(win))][sapply(win, is.numeric)], 2, function(x) dplyr::n_distinct(x, na.rm = TRUE))
+sub <- win[, intersect(used, names(win)), drop = FALSE]
+num_cols <- vapply(sub, is.numeric, logical(1))
+apply(sub[, num_cols, drop = FALSE], 2, function(x) dplyr::n_distinct(x, na.rm = TRUE))
+
+sub <- df[, intersect(used, names(df)), drop = FALSE]
+num_cols <- vapply(sub, is.numeric, logical(1))
+colSums(!is.finite(as.matrix(sub[, num_cols, drop = FALSE])))
 
 stopifnot(length(paid_media_spends) == length(paid_media_vars))
 stopifnot(all(paid_media_spends %in% names(df_for_robyn)))
