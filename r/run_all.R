@@ -471,6 +471,10 @@ log_con_err <- file(log_file, open = "at")
 sink(log_con_out, split = TRUE)
 sink(log_con_err, type = "message")
 
+options(warn = 1)
+logf("Logging   | file=", log_file, " (split=TRUE)")
+flush.console()
+
 
 ## ---- TRACE dplyr::select to catch select(NULL, ...) anywhere ----
 install_select_tracers <- local({
@@ -547,7 +551,9 @@ install_select_tracers <- local({
 })
 
 # Install the hooks NOW (before any Robyn calls)
-install_select_tracers()
+tryCatch(install_select_tracers(),
+  error = function(e) logf("Trace     | FAILED to install: ", conditionMessage(e))
+)
 
 # Optional: clean up on exit so future runs aren't double-traced
 on.exit(
@@ -1360,51 +1366,7 @@ trace_select_on_null <- local({
     invisible(TRUE)
   }
 })
-trace_select_on_null()
 
-# ---- ADDITIONAL TRACE: hook the generic dplyr::select itself ----
-try(
-  {
-    suppressMessages(trace(
-      what = dplyr::select,
-      tracer = quote({
-        # Capture .data argument (first arg)
-        .data_arg <- if (length(match.call()) >= 2) ..1 else NULL
-        if (is.null(.data_arg)) {
-          pth <- file.path(dir_path, "select_on_NULL_generic.txt")
-          msg <- c(
-            "=== dplyr::select(NULL, ...) caught at generic ===",
-            paste("call:", deparse(sys.call(-1))),
-            "",
-            "---- tail(sys.calls()) ----",
-            capture.output(tail(sys.calls(), 25))
-          )
-          writeLines(msg, pth)
-          try(gcs_put_safe(pth, file.path(gcs_prefix, "select_on_NULL_generic.txt")), silent = TRUE)
-          stop("select(NULL, …) – see select_on_NULL_generic.txt")
-        }
-      }),
-      print = FALSE
-    ))
-    logf("Trace     | installed generic select(NULL, …) hook")
-  },
-  silent = TRUE
-)
-trace_select_on_null()
-# ---- ADDITIONAL TRACE: hook the generic dplyr::select itself ----
-try(
-  {
-    suppressMessages(trace(
-      what = dplyr::select,
-      tracer = quote({
-        ...
-      }),
-      print = FALSE
-    ))
-    logf("Trace     | installed generic select(NULL, …) hook")
-  },
-  silent = TRUE
-)
 
 
 
