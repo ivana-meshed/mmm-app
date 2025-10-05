@@ -875,82 +875,6 @@ for (nm in setdiff(used_cols, "date")) {
 # 2d) Log remaining NA counts (should be zero now except date)
 rem_na <- sapply(df_for_robyn[used_cols], function(x) if (is.numeric(x)) sum(is.na(x) | !is.finite(x)) else 0)
 logf("Clean     | remaining NA/non-finite across used cols: ", paste(names(rem_na), rem_na, sep = "=", collapse = ", "))
-
-
-InputCollect_base <- robyn_inputs(
-    dt_input = df_for_robyn,
-    date_var = "date",
-    dep_var = dep_var,
-    dep_var_type = "revenue",
-    adstock = adstock,
-    prophet_vars = NULL, # prophet_vars_used,
-    prophet_country = NULL, # toupper(country),
-    paid_media_spends = paid_media_spends,
-    paid_media_vars = paid_media_vars,
-    context_vars = context_vars,
-    factor_vars = factor_vars,
-    organic_vars = organic_vars,
-    window_start = min(df_for_robyn$date),
-    window_end = max(df_for_robyn$date)
-)
-
-
-if (is.null(InputCollect_base$dt_mod) || nrow(InputCollect_base$dt_mod) == 0L || ncol(InputCollect_base$dt_mod) == 0L) {
-    # Augment the debug with finiteness & distinct counts for ONLY the used columns:
-    culprits <- unique(c("date", dep_var, paid_media_spends, paid_media_vars, context_vars, organic_vars))
-    culprits <- intersect(culprits, names(InputCollect_base$dt_input))
-    ss <- capture.output({
-        cat("Used cols:\n")
-        print(culprits)
-        cat("\nDistinct counts:\n")
-        print(sapply(InputCollect_base$dt_input[culprits], function(x) {
-            if (is.numeric(x)) dplyr::n_distinct(x, na.rm = TRUE) else length(unique(x))
-        }))
-        cat("\nNA & non-finite counts (numeric only):\n")
-        nf <- sapply(InputCollect_base$dt_input[culprits], function(x) {
-            if (!is.numeric(x)) {
-                return(NA_integer_)
-            }
-            sum(is.na(x) | !is.finite(x))
-        })
-        print(nf)
-    })
-    writeLines(ss, file.path(dir_path, "dt_mod_empty_debug.txt"))
-    gcs_put_safe(file.path(dir_path, "dt_mod_empty_debug.txt"), file.path(gcs_prefix, "dt_mod_empty_debug.txt"))
-    stop("robyn_inputs built an empty dt_mod. See dt_mod_empty_debug.txt", call. = FALSE)
-}
-
-
-
-# Pick a safe single train_size that guarantees >= 28 validation days
-ser_len <- nrow(InputCollect_base$dt_input)
-# safe_train <- min(0.90, (ser_len - 28) / ser_len - 1e-6)
-# safe_train <- max(0.70, safe_train) # clamp to [0.70, 0.90]
-# InputCollect_base$hyperparameters$train_size <- c(safe_train, safe_train)
-
-# Post-creation integrity check on InputCollect$dt_input
-logf("Integrity | scanning InputCollect$dt_input for invalid factors")
-ic_scan <- scan_invalid_factors(InputCollect_base$dt_input)
-if (length(ic_scan$bad_cols)) {
-    for (bc in ic_scan$bad_cols) {
-        logf("Integrity | BAD factor inside InputCollect$dt_input '", bc, "' → ", ic_scan$meta[[bc]]$reason)
-    }
-    # Hard fail with clear info
-    ex <- utils::capture.output(str(InputCollect_base$dt_input[ic_scan$bad_cols], give.attr = FALSE, strict.width = "cut"))
-    stop(paste0(
-        "Invalid factor codes detected in InputCollect$dt_input: ",
-        paste(ic_scan$bad_cols, collapse = ", "),
-        "\nThese columns have factor codes outside their levels. They were sanitized prior to robyn_inputs(), ",
-        "so this likely comes from upstream corruption. Inspect the printed structure below:\n",
-        paste(ex, collapse = "\n")
-    ))
-}
-
-logf("Inputs    | dep_var=", InputCollect_base$dep_var, " adstock=", InputCollect_base$adstock, " rows=", nrow(InputCollect_base$dt_input))
-logf("Inputs    | window ", as.character(InputCollect_base$window_start), " → ", as.character(InputCollect_base$window_end))
-alloc_end <- max(InputCollect_base$dt_input$date)
-alloc_start <- alloc_end - 364
-logf("AllocWin  | ", as.character(alloc_start), " → ", as.character(alloc_end))
 push_log()
 
 ## ---------- Hyperparameters (build) ----------
@@ -973,9 +897,6 @@ for (v in hyper_vars) {
     hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
     hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
 }
-ser_len <- nrow(InputCollect_base$dt_input)
-safe_train <- min(0.90, (ser_len - 28) / ser_len - 1e-6)
-safe_train <- max(0.80, safe_train) # a bit tighter than 0.70–0.90 while debugging
 
 # When you construct `hyperparameters`, do THIS:
 hyperparameters[["train_size"]] <- c(safe_train, safe_train) # <- overwrite cfg range
@@ -1046,6 +967,22 @@ write_diag(c(
     paste0("Bad ranges/order: ", if (length(bad_ranges)) paste(bad_ranges, collapse = "; ") else "<none>")
 ))
 
+InputCollect <- robyn_inputs(
+    dt_input = df_for_robyn,
+    date_var = "date",
+    dep_var = dep_var,
+    dep_var_type = "revenue",
+    adstock = adstock,
+    prophet_vars = NULL,
+    paid_media_spends = paid_media_spends,
+    paid_media_vars = paid_media_vars,
+    context_vars = context_vars,
+    factor_vars = factor_vars,
+    organic_vars = organic_vars,
+    window_start = min(df_for_robyn$date),
+    window_end = max(df_for_robyn$date),
+    hyperparameters = hyperparameters # <-- Add this
+)
 invisible(withCallingHandlers(
     tryCatch(
         InputCollect <- robyn_inputs(
@@ -1080,6 +1017,9 @@ invisible(withCallingHandlers(
         invokeRestart("muffleWarning")
     }
 ))
+
+alloc_end <- max(InputCollect_base$dt_input$date)
+alloc_start <- alloc_end - 364
 
 write_diag(c(
     "== SUCCESS ==",
@@ -1240,22 +1180,6 @@ sel_cols <- unique(na.omit(c(
 #    stop("Preflight: dplyr::select failed on dt_mod before robyn_run: ", err)
 # }
 
-# Dump a small, inspectable snapshot
-dump_path <- file.path(dir_path, "dt_mod_glimpse.txt")
-capture.output(
-    {
-        cat(sprintf("dt_mod dim: %d x %d\n", NROW(InputCollect_base$dt_mod), NCOL(InputCollect_base$dt_mod)))
-        show_cols <- intersect(sel_cols, names(InputCollect_base$dt_mod))
-        if (length(show_cols)) {
-            print(utils::head(InputCollect_base$dt_mod[show_cols], 3))
-        } else {
-            cat("No overlap between sel_cols and dt_mod names.\n")
-            print(utils::head(InputCollect_base$dt_mod, 3))
-        }
-    },
-    file = dump_path
-)
-gcs_put_safe(dump_path, file.path(gcs_prefix, "dt_mod_glimpse.txt"))
 
 # Prophet must be fully off
 if (!is.null(InputCollect$prophet_vars) || !is.null(InputCollect$dt_prophet)) {
@@ -1278,19 +1202,6 @@ sel_cols <- unique(na.omit(c(
 #    stop("Preflight: columns missing from InputCollect$dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
 # }
 
-# ---- Preflight select() on dt_mod to prove it’s usable ----
-sel_cols <- unique(na.omit(c(
-    "date", InputCollect_base$dep_var,
-    InputCollect_base$paid_media_vars %||% character(0),
-    InputCollect_base$context_vars %||% character(0),
-    InputCollect_base$factor_vars %||% character(0),
-    InputCollect_base$organic_vars %||% character(0)
-)))
-missing_in_dt_mod <- setdiff(sel_cols, names(InputCollect_base$dt_mod))
-if (length(missing_in_dt_mod)) {
-    stop("Preflight: columns missing from dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
-}
-invisible(dplyr::select(InputCollect_base$dt_mod, dplyr::all_of(sel_cols))) # will error here if broken
 
 # ---- FINAL GUARD on dt_mod just before robyn_run ----
 
