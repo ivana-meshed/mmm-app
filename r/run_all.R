@@ -911,35 +911,6 @@ logf("HP        | vars=", length(hyper_vars), " keys=", length(names(hyperparame
 if (length(missing)) stop("Missing HP keys: ", paste(missing, collapse = ", "))
 if (length(extra)) stop("Extra HP keys (remove them): ", paste(extra, collapse = ", "))
 
-## ---------- HP diagnostics + robyn_inputs() PROBE (to catch real error) ----------
-hp_diag_path <- file.path(dir_path, "robyn_hp_diagnostics.txt")
-capture_msgs <- character()
-capture_warn <- character()
-append_msg <- function(x) capture_msgs <<- c(capture_msgs, x)
-append_warn <- function(x) capture_warn <<- c(capture_warn, x)
-write_diag <- function(extra = NULL) {
-    lines <- c(
-        "=== ROBYN HP DIAGNOSTICS ===",
-        paste0("Time: ", as.character(Sys.time())), "",
-        "-- Your hyperparameters (names):",
-        paste0("  ", paste(sort(names(hyperparameters)), collapse = ", ")), "",
-        "-- Paid media vars: ",
-        paste0("  ", paste(paid_media_vars, collapse = ", ")),
-        "-- Organic vars: ",
-        paste0("  ", paste(organic_vars, collapse = ", ")), "",
-        "-- Messages from robyn_inputs():",
-        if (length(capture_msgs)) paste0("  ", capture_msgs) else "  <none>", "",
-        "-- Warnings from robyn_inputs():",
-        if (length(capture_warn)) paste0("  ", capture_warn) else "  <none>", "",
-        extra %||% character(0)
-    )
-    writeLines(lines, hp_diag_path)
-    gcs_put_safe(hp_diag_path, file.path(gcs_prefix, "robyn_hp_diagnostics.txt"))
-    push_log()
-}
-
-
-
 ## ---------- HP diagnostics + robyn_inputs() PROBE ----------
 hp_diag_path <- file.path(dir_path, "robyn_hp_diagnostics.txt")
 capture_msgs <- character()
@@ -1018,12 +989,6 @@ InputCollect <- withCallingHandlers(
     }
 )
 
-stopifnot(!is.null(InputCollect), is.list(InputCollect), !is.null(InputCollect$dt_input))
-
-# Save + upload InputCollect EARLY
-ic_path <- file.path(dir_path, "InputCollect.RDS")
-saveRDS(InputCollect, ic_path)
-gcs_put_safe(ic_path, file.path(gcs_prefix, "InputCollect.RDS"))
 
 # (2) Now that InputCollect exists, compare HP keys to the template and append a second diag
 hp_template <- try(robyn_hyper_params(InputCollect), silent = TRUE)
@@ -1052,12 +1017,10 @@ logf("HP        | diagnostics written to ", hp_diag_path)
 
 stopifnot(!is.null(InputCollect), is.list(InputCollect), !is.null(InputCollect$dt_input))
 
-# Save + upload now (early)
 ic_path <- file.path(dir_path, "InputCollect.RDS")
 saveRDS(InputCollect, ic_path)
 gcs_put_safe(ic_path, file.path(gcs_prefix, "InputCollect.RDS"))
 
-# Optional: tiny CSV snapshot of dt_input header to help future debugging
 hdr_csv <- file.path(dir_path, "dt_input_head.csv")
 readr::write_csv(utils::head(InputCollect$dt_input, 10), hdr_csv, na = "")
 gcs_put_safe(hdr_csv, file.path(gcs_prefix, "dt_input_head.csv"))
@@ -1372,8 +1335,9 @@ run_once <- function(InputCollect, iter = 200, trials = 1, ts_validation = TRUE,
 ## ---- TRACE dplyr::select METHODS TO CATCH NULL INPUT ----
 # This hooks the actual S3 methods Robyn will hit, even from inside the dplyr namespace.
 
-
-
+if (!exists("InputCollect", inherits = TRUE) || !is.list(InputCollect)) {
+    stop("Pre-flight: InputCollect is missing or not a list. Aborting before robyn_run.")
+}
 
 run_err <- NULL
 run_tb <- NULL
