@@ -685,6 +685,10 @@ log_kv(list(
 ))
 push_log()
 
+# Use spends-only (no exposures)
+paid_media_vars <- NULL
+# paid_media_spends <- intersect(cfg$paid_media_spends, names(df))
+
 ## === SANITIZE/FACTOR DIAGNOSTICS ===
 # Helpers to detect & fix invalid factor codes (0, <0, >nlevels)
 check_factor <- function(x) {
@@ -735,7 +739,6 @@ fix_invalid_factors <- function(df, keep_as_factor = character(0)) {
 
 
 
-paid_media_vars <- paid_media_spends
 
 force_numeric <- function(x) suppressWarnings(readr::parse_number(as.character(x)))
 num_like <- unique(c(
@@ -1086,9 +1089,9 @@ write_diag(c(
 logf("HP        | diagnostics written to ", hp_diag_path)
 
 ## ---------- OPTION A: Manually attach HPs to InputCollect and proceed ----------
-InputCollect <- InputCollect_base
-stopifnot(is.list(hyperparameters), length(hyperparameters) > 0)
-InputCollect$hyperparameters <- hyperparameters
+# InputCollect <- InputCollect_base
+# stopifnot(is.list(hyperparameters), length(hyperparameters) > 0)
+# InputCollect$hyperparameters <- hyperparameters
 
 ## Train-size sanity
 ts_used <- InputCollect$hyperparameters$train_size
@@ -1158,6 +1161,11 @@ if (length(missing_cols)) {
     )
 }
 
+tmpl <- robyn_hyper_params(InputCollect)
+setdiff(names(tmpl), names(InputCollect$hyperparameters)) # missing
+setdiff(names(InputCollect$hyperparameters), names(tmpl)) # extra
+
+
 # Make sure each set is length > 0 (some Robyn paths assume non-empty)
 if (!length(InputCollect$paid_media_vars)) stop("Pre-flight: paid_media_vars is empty")
 if (!length(InputCollect$paid_media_spends)) stop("Pre-flight: paid_media_spends is empty")
@@ -1209,8 +1217,8 @@ must_df <- function(x, nm) if (!is.null(x) && !inherits(x, c("data.frame", "tbl"
 must_exist(InputCollect$dt_input, "InputCollect$dt_input")
 must_df(InputCollect$dt_input, "InputCollect$dt_input")
 # dt_mod should already be prepared by robyn_inputs()
-must_exist(InputCollect$dt_mod, "InputCollect$dt_mod")
-must_df(InputCollect$dt_mod, "InputCollect$dt_mod")
+# must_exist(InputCollect$dt_mod, "InputCollect$dt_mod")
+# must_df(InputCollect$dt_mod, "InputCollect$dt_mod")
 
 # ---- SNAPSHOT dt_mod + prove we can select the columns Robyn will use ----
 sel_cols <- unique(na.omit(c(
@@ -1220,17 +1228,17 @@ sel_cols <- unique(na.omit(c(
     InputCollect$factor_vars %||% character(0),
     InputCollect$organic_vars %||% character(0)
 )))
-missing_in_dt_mod <- setdiff(sel_cols, names(InputCollect$dt_mod))
-if (length(missing_in_dt_mod)) {
-    stop("Preflight: columns missing from InputCollect$dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
-}
+# missing_in_dt_mod <- setdiff(sel_cols, names(InputCollect$dt_mod))
+# if (length(missing_in_dt_mod)) {
+#    stop("Preflight: columns missing from InputCollect$dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
+# }
 
 # Force a real select() now; if this fails, we fail here with details
-sel_test <- try(dplyr::select(InputCollect$dt_mod, dplyr::all_of(sel_cols)), silent = TRUE)
-if (inherits(sel_test, "try-error")) {
-    err <- conditionMessage(attr(sel_test, "condition"))
-    stop("Preflight: dplyr::select failed on dt_mod before robyn_run: ", err)
-}
+# sel_test <- try(dplyr::select(InputCollect$dt_mod, dplyr::all_of(sel_cols)), silent = TRUE)
+# if (inherits(sel_test, "try-error")) {
+#    err <- conditionMessage(attr(sel_test, "condition"))
+#    stop("Preflight: dplyr::select failed on dt_mod before robyn_run: ", err)
+# }
 
 # Dump a small, inspectable snapshot
 dump_path <- file.path(dir_path, "dt_mod_glimpse.txt")
@@ -1265,10 +1273,10 @@ sel_cols <- unique(na.omit(c(
     InputCollect$factor_vars %||% character(0),
     InputCollect$organic_vars %||% character(0)
 )))
-missing_in_dt_mod <- setdiff(sel_cols, names(InputCollect$dt_mod))
-if (length(missing_in_dt_mod)) {
-    stop("Preflight: columns missing from InputCollect$dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
-}
+# missing_in_dt_mod <- setdiff(sel_cols, names(InputCollect$dt_mod))
+# if (length(missing_in_dt_mod)) {
+#    stop("Preflight: columns missing from InputCollect$dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
+# }
 
 # ---- Preflight select() on dt_mod to prove it’s usable ----
 sel_cols <- unique(na.omit(c(
@@ -1285,24 +1293,7 @@ if (length(missing_in_dt_mod)) {
 invisible(dplyr::select(InputCollect_base$dt_mod, dplyr::all_of(sel_cols))) # will error here if broken
 
 # ---- FINAL GUARD on dt_mod just before robyn_run ----
-if (is.null(InputCollect$dt_mod) || !NROW(InputCollect$dt_mod)) {
-    dump_path <- file.path(dir_path, "dt_mod_glimpse.txt")
-    capture.output(
-        {
-            cat(sprintf(
-                "dt_mod dim: %d x %d\n", NROW(InputCollect$dt_mod %||% data.frame()),
-                NCOL(InputCollect$dt_mod %||% data.frame())
-            ))
-            print(utils::str(InputCollect$dt_mod, list.len = 30))
-            cat("\nHead of dt_input used cols:\n")
-            show_cols <- intersect(used_cols, names(InputCollect$dt_input))
-            print(utils::head(InputCollect$dt_input[show_cols], 3))
-        },
-        file = dump_path
-    )
-    gcs_put_safe(dump_path, file.path(gcs_prefix, "dt_mod_glimpse.txt"))
-    stop("Aborting: InputCollect$dt_mod is empty (0 rows). See dt_mod_glimpse.txt for details.")
-}
+
 
 
 options(
@@ -1371,54 +1362,59 @@ trace_select_on_null <- local({
 
 trace_select_on_null()
 
+capture_to <- function(path, txt) {
+    try(writeLines(txt, path), silent = TRUE)
+    invisible(path)
+}
 
-run_once <- function(do_validation = TRUE) {
-    withCallingHandlers(
+run_once <- function(InputCollect, iter = 200, trials = 1, ts_validation = TRUE, out_dir = tempdir()) {
+    err_msg <- NULL
+    out <- withCallingHandlers(
         tryCatch(
             {
-                out <- robyn_run(
+                robyn_run(
                     InputCollect       = InputCollect,
                     iterations         = iter,
                     trials             = trials,
-                    ts_validation      = FALSE, # do_validation,
+                    ts_validation      = ts_validation,
                     add_penalty_factor = TRUE,
-                    cores              = max_cores
+                    cores              = parallel::detectCores()
                 )
-                out
             },
             error = function(e) {
-                # write a detailed traceback
-                # Also try to persist last_trace() in all cases
-                bt_verbose <- tryCatch(rlang::last_trace(), error = function(e) NULL)
-                p1 <- file.path(dir_path, "robyn_last_trace_verbose.txt")
-                if (is.null(bt_verbose)) {
-                    writeLines(c(
-                        "No rlang::last_trace() available (likely a base error).",
-                        "See robyn_run_last_trace.txt for base traceback."
-                    ), p1)
-                } else {
-                    capture.output(print(bt_verbose), file = p1)
-                }
-                gcs_put_safe(p1, file.path(gcs_prefix, "robyn_last_trace_verbose.txt"))
+                err_msg <<- conditionMessage(e)
 
+                # 1) Base traceback
+                tb_base <- try(utils::capture.output(traceback(max.lines = 50L)), silent = TRUE)
+                tb_base <- if (inherits(tb_base, "try-error")) "<no base traceback>" else tb_base
 
+                # 2) rlang backtrace (most helpful)
+                tb_rlang <- try(utils::capture.output(rlang::last_trace()), silent = TRUE)
+                tb_rlang <- if (inherits(tb_rlang, "try-error")) "<no rlang trace>" else tb_rlang
 
-                tb1 <- tryCatch(utils::capture.output(traceback(max.lines = 50L)), error = function(.) "<no base traceback>")
-                tb2 <- tryCatch(utils::capture.output(rlang::last_trace()), error = function(.) "<no rlang trace>")
-                writeLines(
-                    c("== robyn_run ERROR ==", conditionMessage(e), "", tb1, "", tb2),
-                    file.path(dir_path, "robyn_run_last_trace.txt")
+                # 3) Write to disk
+                capture_to(
+                    file.path(out_dir, "robyn_run_error.txt"),
+                    c(
+                        "== robyn_run ERROR ==",
+                        err_msg, "",
+                        "---- BASE TRACEBACK ----",
+                        tb_base, "",
+                        "---- RLANG LAST TRACE ----",
+                        tb_rlang
+                    )
                 )
-                gcs_put_safe(
-                    file.path(dir_path, "robyn_run_last_trace.txt"),
-                    file.path(gcs_prefix, "robyn_run_last_trace.txt")
-                )
+
+                # rethrow so caller can decide to retry or stop
                 stop(e)
             }
         ),
-        warning = function(w) invokeRestart("muffleWarning")
+        warning = function(w) invokeRestart("muffleWarning"),
+        message = function(m) invokeRestart("muffleMessage")
     )
+    out
 }
+
 
 
 ## ---- TRACE dplyr::select METHODS TO CATCH NULL INPUT ----
@@ -1430,6 +1426,15 @@ run_once <- function(do_validation = TRUE) {
 run_err <- NULL
 run_tb <- NULL
 t0 <- Sys.time()
+
+out_dir <- "/your/debug/folder" # or dir_path you already use
+OutputModels <- try(run_once(InputCollect, iter = 200, trials = 1, ts_validation = TRUE, out_dir = dir_path), silent = TRUE)
+
+if (inherits(OutputModels, "try-error")) {
+    message("Retrying with ts_validation = FALSE …")
+    OutputModels <- run_once(InputCollect, iter = 200, trials = 1, ts_validation = FALSE, out_dir = dir_path)
+}
+
 OutputModels <- tryCatch(
     run_once(do_validation = TRUE),
     error = function(e) {
