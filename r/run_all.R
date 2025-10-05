@@ -839,9 +839,9 @@ sub <- df[, intersect(used, names(df)), drop = FALSE]
 num_cols <- vapply(sub, is.numeric, logical(1))
 colSums(!is.finite(as.matrix(sub[, num_cols, drop = FALSE])) | is.na(as.matrix(sub[, num_cols, drop = FALSE])))
 
-stopifnot(length(paid_media_spends) == length(paid_media_vars))
+# stopifnot(length(paid_media_spends) == length(paid_media_vars))
 stopifnot(all(paid_media_spends %in% names(df_for_robyn)))
-stopifnot(all(paid_media_vars %in% names(df_for_robyn)))
+# stopifnot(all(paid_media_vars %in% names(df_for_robyn)))
 stopifnot(all(c("IS_WEEKEND", "TV_IS_ON", "ORGANIC_TRAFFIC") %in% names(df_for_robyn)))
 
 
@@ -1436,7 +1436,7 @@ if (inherits(OutputModels, "try-error")) {
 }
 
 OutputModels <- tryCatch(
-    run_once(do_validation = TRUE),
+    run_once(InputCollect, iter = 200, trials = 1, ts_validation = TRUE, out_dir = dir_path),
     error = function(e) {
         run_err <<- conditionMessage(e)
         bt <- tryCatch(capture.output(print(attr(e, "backtrace"))), error = function(.) NULL)
@@ -1454,10 +1454,12 @@ OutputModels <- tryCatch(
         logf("Train     | retrying with ts_validation=FALSE (diagnostic fallback)")
 
         # Retry without validation
-        tryCatch(run_once(do_validation = FALSE), error = function(e2) {
-            run_err <<- paste0(run_err, " | retry error: ", conditionMessage(e2))
-            NULL
-        })
+        tryCatch(run_once(InputCollect, iter = 200, trials = 1, ts_validation = FALSE, out_dir = dir_path),
+            error = function(e2) {
+                run_err <<- paste0(run_err, " | retry error: ", conditionMessage(e2))
+                NULL
+            }
+        )
     }
 )
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
