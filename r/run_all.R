@@ -812,7 +812,7 @@ df_for_robyn <- sanitize_for_robyn(
     paid_media_spends = paid_media_spends,
     paid_media_vars = paid_media_vars,
     context_vars = context_vars,
-    # factor_vars = context_vars,
+    factor_vars = context_vars,
     organic_vars = organic_vars
 )
 
