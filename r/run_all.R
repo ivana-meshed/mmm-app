@@ -796,6 +796,19 @@ df_for_robyn <- sanitize_for_robyn(
   factor_vars = factor_vars,
   organic_vars = organic_vars
 )
+
+used_cols <- unique(c(
+  "date", dep_var, paid_media_spends, paid_media_vars, context_vars, organic_vars
+))
+used_cols <- intersect(used_cols, names(df_for_robyn))
+
+na_map <- sapply(df_for_robyn[used_cols], function(z) sum(is.na(z) | !is.finite(z)))
+if (any(na_map > 0)) {
+  stop(
+    "Preflight: NA/Inf detected in used columns: ",
+    paste(names(na_map)[na_map > 0], na_map[na_map > 0], sep = "=", collapse = ", ")
+  )
+}
 df_expo <- df_for_robyn %>%
   dplyr::mutate(
     GA_SUPPLY_EXP     = GA_SUPPLY_COST,
@@ -818,13 +831,7 @@ mini <- df %>%
 df_for_robyn$date <- as.Date(df_for_robyn$date)
 mini$date <- as.Date(mini$date)
 
-na_map <- sapply(df_for_robyn[used_cols], function(z) sum(is.na(z) | !is.finite(z)))
-if (any(na_map > 0)) {
-  stop(
-    "Preflight: NA/Inf detected in used columns: ",
-    paste(names(na_map)[na_map > 0], na_map[na_map > 0], sep = "=", collapse = ", ")
-  )
-}
+
 
 IC_mini <- robyn_inputs(
   dt_input = mini,
@@ -908,10 +915,6 @@ stopifnot(all(c("IS_WEEKEND", "TV_IS_ON", "ORGANIC_TRAFFIC") %in% names(df_for_r
 
 
 # Columns Robyn will actually use
-used_cols <- unique(c(
-  "date", dep_var, paid_media_spends, paid_media_vars, context_vars, organic_vars
-))
-used_cols <- intersect(used_cols, names(df_for_robyn))
 
 # 2a) Dep var: drop NA/Inf/NaN rows
 bad_dep <- !is.finite(df_for_robyn[[dep_var]]) | is.na(df_for_robyn[[dep_var]])
@@ -1338,68 +1341,31 @@ if (length(missing_in_dt_mod)) {
 }
 invisible(dplyr::select(InputCollect_base$dt_mod, dplyr::all_of(sel_cols))) # will error here if broken
 
-
-logf(sprintf("Assert    | dt_mod OK: rows=%s cols=%s", NROW(InputCollect$dt_mod), NCOL(InputCollect$dt_mod)))
-
-options(
-  rlang_trace_top_env = current_env(),
-  rlang_backtrace_on_error = "full"
-)
-
-trace_select_on_null()
-
-
-run_once <- function(do_validation = TRUE) {
-  withCallingHandlers(
-    tryCatch(
-      {
-        out <- robyn_run(
-          InputCollect       = InputCollect,
-          iterations         = iter,
-          trials             = trials,
-          ts_validation      = FALSE, # do_validation,
-          add_penalty_factor = TRUE,
-          cores              = max_cores
-        )
-        out
-      },
-      error = function(e) {
-        # write a detailed traceback
-        # Also try to persist last_trace() in all cases
-        bt_verbose <- tryCatch(rlang::last_trace(), error = function(e) NULL)
-        p1 <- file.path(dir_path, "robyn_last_trace_verbose.txt")
-        if (is.null(bt_verbose)) {
-          writeLines(c(
-            "No rlang::last_trace() available (likely a base error).",
-            "See robyn_run_last_trace.txt for base traceback."
-          ), p1)
-        } else {
-          capture.output(print(bt_verbose), file = p1)
-        }
-        gcs_put_safe(p1, file.path(gcs_prefix, "robyn_last_trace_verbose.txt"))
-
-
-
-        tb1 <- tryCatch(utils::capture.output(traceback(max.lines = 50L)), error = function(.) "<no base traceback>")
-        tb2 <- tryCatch(utils::capture.output(rlang::last_trace()), error = function(.) "<no rlang trace>")
-        writeLines(
-          c("== robyn_run ERROR ==", conditionMessage(e), "", tb1, "", tb2),
-          file.path(dir_path, "robyn_run_last_trace.txt")
-        )
-        gcs_put_safe(
-          file.path(dir_path, "robyn_run_last_trace.txt"),
-          file.path(gcs_prefix, "robyn_run_last_trace.txt")
-        )
-        stop(e)
-      }
-    ),
-    warning = function(w) invokeRestart("muffleWarning")
+# ---- FINAL GUARD on dt_mod just before robyn_run ----
+if (is.null(InputCollect$dt_mod) || !NROW(InputCollect$dt_mod)) {
+  dump_path <- file.path(dir_path, "dt_mod_glimpse.txt")
+  capture.output(
+    {
+      cat(sprintf(
+        "dt_mod dim: %d x %d\n", NROW(InputCollect$dt_mod %||% data.frame()),
+        NCOL(InputCollect$dt_mod %||% data.frame())
+      ))
+      print(utils::str(InputCollect$dt_mod, list.len = 30))
+      cat("\nHead of dt_input used cols:\n")
+      show_cols <- intersect(used_cols, names(InputCollect$dt_input))
+      print(utils::head(InputCollect$dt_input[show_cols], 3))
+    },
+    file = dump_path
   )
+  gcs_put_safe(dump_path, file.path(gcs_prefix, "dt_mod_glimpse.txt"))
+  stop("Aborting: InputCollect$dt_mod is empty (0 rows). See dt_mod_glimpse.txt for details.")
 }
 
 
-## ---- TRACE dplyr::select METHODS TO CATCH NULL INPUT ----
-# This hooks the actual S3 methods Robyn will hit, even from inside the dplyr namespace.
+options(
+  rlang_trace_top_env = rlang::current_env(),
+  rlang_backtrace_on_error = "full"
+)
 trace_select_on_null <- local({
   installed <- FALSE
   function() {
@@ -1459,6 +1425,61 @@ trace_select_on_null <- local({
     invisible(TRUE)
   }
 })
+
+trace_select_on_null()
+
+
+run_once <- function(do_validation = TRUE) {
+  withCallingHandlers(
+    tryCatch(
+      {
+        out <- robyn_run(
+          InputCollect       = InputCollect,
+          iterations         = iter,
+          trials             = trials,
+          ts_validation      = FALSE, # do_validation,
+          add_penalty_factor = TRUE,
+          cores              = max_cores
+        )
+        out
+      },
+      error = function(e) {
+        # write a detailed traceback
+        # Also try to persist last_trace() in all cases
+        bt_verbose <- tryCatch(rlang::last_trace(), error = function(e) NULL)
+        p1 <- file.path(dir_path, "robyn_last_trace_verbose.txt")
+        if (is.null(bt_verbose)) {
+          writeLines(c(
+            "No rlang::last_trace() available (likely a base error).",
+            "See robyn_run_last_trace.txt for base traceback."
+          ), p1)
+        } else {
+          capture.output(print(bt_verbose), file = p1)
+        }
+        gcs_put_safe(p1, file.path(gcs_prefix, "robyn_last_trace_verbose.txt"))
+
+
+
+        tb1 <- tryCatch(utils::capture.output(traceback(max.lines = 50L)), error = function(.) "<no base traceback>")
+        tb2 <- tryCatch(utils::capture.output(rlang::last_trace()), error = function(.) "<no rlang trace>")
+        writeLines(
+          c("== robyn_run ERROR ==", conditionMessage(e), "", tb1, "", tb2),
+          file.path(dir_path, "robyn_run_last_trace.txt")
+        )
+        gcs_put_safe(
+          file.path(dir_path, "robyn_run_last_trace.txt"),
+          file.path(gcs_prefix, "robyn_run_last_trace.txt")
+        )
+        stop(e)
+      }
+    ),
+    warning = function(w) invokeRestart("muffleWarning")
+  )
+}
+
+
+## ---- TRACE dplyr::select METHODS TO CATCH NULL INPUT ----
+# This hooks the actual S3 methods Robyn will hit, even from inside the dplyr namespace.
 
 
 
