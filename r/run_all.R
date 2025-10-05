@@ -686,7 +686,7 @@ log_kv(list(
 push_log()
 
 # Use spends-only (no exposures)
-paid_media_vars <- NULL
+paid_media_vars <- paid_media_spends
 # paid_media_spends <- intersect(cfg$paid_media_spends, names(df))
 
 ## === SANITIZE/FACTOR DIAGNOSTICS ===
