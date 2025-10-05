@@ -589,8 +589,8 @@ df <- fill_day(df)
 push_log()
 
 ## ---------- Types / zero-var / features ----------
-cost_cols <- union(grep("_COST$", names(df), value = TRUE), grep("_COSTS$", names(df), value = TRUE))
-df <- safe_parse_numbers(df, cost_cols)
+# cost_cols <- union(grep("_COST$", names(df), value = TRUE), grep("_COSTS$", names(df), value = TRUE))
+# df <- safe_parse_numbers(df, cost_cols)
 num_cols <- setdiff(names(df), "date")
 zero_var <- num_cols[sapply(df[num_cols], function(x) is.numeric(x) && dplyr::n_distinct(x, na.rm = TRUE) <= 1)]
 if (length(zero_var)) {
@@ -603,13 +603,13 @@ if (!"TV_IS_ON" %in% names(df)) {
 }
 
 df <- df %>% mutate(
-  GA_OTHER_COST          = rowSums(select(., matches("^GA_.*_COST$") & !any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE),
+  GA_OTHER_COST          = rowSums(select(., matches("^GA_.*_COST$"), -any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE),
   BING_TOTAL_COST        = rowSums(select(., matches("^BING_.*_COST$")), na.rm = TRUE),
   META_TOTAL_COST        = rowSums(select(., matches("^META_.*_COST$")), na.rm = TRUE),
   ORGANIC_TRAFFIC        = rowSums(select(., any_of(c("NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS", "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS"))), na.rm = TRUE),
   BRAND_HEALTH           = coalesce(DIRECT_DAILY_SESSIONS, 0) + coalesce(SEO_DAILY_SESSIONS, 0),
   ORGxTV                 = BRAND_HEALTH * coalesce(TV_COST, 0),
-  GA_OTHER_IMPRESSIONS   = rowSums(select(., matches("^GA_.*_IMPRESSIONS$") & !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
+  GA_OTHER_IMPRESSIONS   = rowSums(select(., matches("^GA_.*_IMPRESSIONS$"), -any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
   BING_TOTAL_IMPRESSIONS = rowSums(select(., matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE),
   META_TOTAL_IMPRESSIONS = rowSums(select(., matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE),
   BING_TOTAL_CLICKS      = rowSums(select(., matches("^BING_.*_CLICKS$")), na.rm = TRUE),
@@ -716,15 +716,32 @@ fix_invalid_factors <- function(df, keep_as_factor = character(0)) {
   df
 }
 
-# Ensure dep var and all *_COST, *_SESSIONS, *_CLICKS, *_IMPRESSIONS are numeric
+
+
+# --- Ensure media "vars" names differ from spend names
+if (all(paid_media_spends == paid_media_vars)) {
+  new_vars <- paste0(paid_media_vars, "_X") # e.g. GA_SUPPLY_COST -> GA_SUPPLY_COST_X
+  # create cloned exposure columns equal to the spends for now
+  for (i in seq_along(paid_media_vars)) {
+    v_old <- paid_media_vars[i]
+    v_new <- new_vars[i]
+    df[[v_new]] <- df[[v_old]]
+  }
+  paid_media_vars <- new_vars
+}
+
 force_numeric <- function(x) suppressWarnings(readr::parse_number(as.character(x)))
 num_like <- unique(c(
   dep_var,
-  grep("(_COSTS?$|_SESSIONS$|_CLICKS$|_IMPRESSIONS$)", names(df), value = TRUE)
+  grep("(_COSTS?$|_SESSIONS$|_CLICKS$|_IMPRESSIONS$)", names(df), value = TRUE),
+  paid_media_vars, paid_media_spends, organic_vars, context_vars
 ))
 for (nm in intersect(num_like, names(df))) {
   if (!is.numeric(df[[nm]])) df[[nm]] <- force_numeric(df[[nm]])
 }
+
+
+
 
 sanitize_for_robyn <- function(df_full, dep_var, paid_media_spends, paid_media_vars, context_vars, factor_vars, organic_vars) {
   vars_keep <- unique(c(
@@ -817,15 +834,15 @@ if (NROW(InputCollect_base$dt_mod) == 0 || NCOL(InputCollect_base$dt_mod) == 0) 
   gcs_put_safe(dbg, file.path(gcs_prefix, "dt_mod_empty_debug.txt"))
 
   # ---- LAST-RESORT PATCH: rebuild dt_mod from dt_input so training can proceed
-  InputCollect_base$dt_mod <- as.data.frame(InputCollect_base$dt_input)
-  message("Patched: dt_mod rebuilt from dt_input to unblock training (investigate dt_mod_empty_debug.txt).")
+  # InputCollect_base$dt_mod <- as.data.frame(InputCollect_base$dt_input)
+  # message("Patched: dt_mod rebuilt from dt_input to unblock training (investigate dt_mod_empty_debug.txt).")
 }
 
 # Pick a safe single train_size that guarantees >= 28 validation days
 ser_len <- nrow(InputCollect_base$dt_input)
-safe_train <- min(0.90, (ser_len - 28) / ser_len - 1e-6)
-safe_train <- max(0.70, safe_train) # clamp to [0.70, 0.90]
-InputCollect_base$hyperparameters$train_size <- c(safe_train, safe_train)
+# safe_train <- min(0.90, (ser_len - 28) / ser_len - 1e-6)
+# safe_train <- max(0.70, safe_train) # clamp to [0.70, 0.90]
+# InputCollect_base$hyperparameters$train_size <- c(safe_train, safe_train)
 
 # Post-creation integrity check on InputCollect$dt_input
 logf("Integrity | scanning InputCollect$dt_input for invalid factors")
@@ -1246,8 +1263,14 @@ trace_select_on_null <- local({
         stop("select(NULL, …) – see select_on_NULL.txt")
       }
     })
-    suppressMessages(trace(dplyr:::select.data.frame, tracer = tracer, print = FALSE))
-    suppressMessages(trace(dplyr:::select.tbl_df, tracer = tracer, print = FALSE))
+    ns <- asNamespace("dplyr")
+    if (exists("select.data.frame", ns, inherits = FALSE)) {
+      suppressMessages(trace(dplyr:::select.data.frame, tracer = tracer, print = FALSE))
+    }
+    if (exists("select.tbl_df", ns, inherits = FALSE)) {
+      suppressMessages(trace(dplyr:::select.tbl_df, tracer = tracer, print = FALSE))
+    }
+
     installed <<- TRUE
     invisible(TRUE)
   }
