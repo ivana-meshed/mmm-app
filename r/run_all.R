@@ -879,10 +879,6 @@ for (nm in setdiff(used_cols, "date")) {
     }
 }
 
-# 2d) Log remaining NA counts (should be zero now except date)
-rem_na <- sapply(df_for_robyn[used_cols], function(x) if (is.numeric(x)) sum(is.na(x) | !is.finite(x)) else 0)
-logf("Clean     | remaining NA/non-finite across used cols: ", paste(names(rem_na), rem_na, sep = "=", collapse = ", "))
-push_log()
 
 ## ---------- Hyperparameters (build) ----------
 hyper_vars <- c(paid_media_vars, organic_vars)
