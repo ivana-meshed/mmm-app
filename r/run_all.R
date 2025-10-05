@@ -471,6 +471,94 @@ log_con_err <- file(log_file, open = "at")
 sink(log_con_out, split = TRUE)
 sink(log_con_err, type = "message")
 
+
+## ---- TRACE dplyr::select to catch select(NULL, ...) anywhere ----
+install_select_tracers <- local({
+  installed <- FALSE
+  function() {
+    if (installed) {
+      return(invisible(TRUE))
+    }
+
+    # Method-level tracer (data.frame / tibble)
+    method_tracer <- quote({
+      if (is.null(.data)) {
+        pth <- file.path(dir_path, "select_on_NULL.txt")
+        msg <- c(
+          "=== dplyr::select called with .data = NULL (method) ===",
+          "Args (dots):",
+          capture.output(str(list(...))),
+          "",
+          "---- tail(sys.calls()) ----",
+          capture.output(tail(sys.calls(), 25))
+        )
+        writeLines(msg, pth)
+        try(gcs_put_safe(pth, file.path(gcs_prefix, "select_on_NULL.txt")), silent = TRUE)
+        stop("select(NULL, …) – see select_on_NULL.txt")
+      }
+    })
+
+    ns <- asNamespace("dplyr")
+    if (exists("select.data.frame", ns, inherits = FALSE)) {
+      suppressMessages(trace(get("select.data.frame", ns),
+        tracer = method_tracer, print = FALSE
+      ))
+    }
+    if (exists("select.tbl_df", ns, inherits = FALSE)) {
+      suppressMessages(trace(get("select.tbl_df", ns),
+        tracer = method_tracer, print = FALSE
+      ))
+    }
+
+    # Generic-level tracer (exported symbol), must set where=
+    generic_tracer <- quote({
+      mc <- match.call()
+      # Evaluate first arg (.data) in the caller frame if present
+      df <- tryCatch(
+        if (length(mc) >= 2L) eval(mc[[2L]], parent.frame()) else NULL,
+        error = function(e) NULL
+      )
+      if (is.null(df)) {
+        pth <- file.path(dir_path, "select_on_NULL_generic.txt")
+        msg <- c(
+          "=== dplyr::select(NULL, ...) caught at generic ===",
+          paste("call:", deparse(mc)),
+          "",
+          "---- tail(sys.calls()) ----",
+          capture.output(tail(sys.calls(), 25))
+        )
+        writeLines(msg, pth)
+        try(gcs_put_safe(pth, file.path(gcs_prefix, "select_on_NULL_generic.txt")), silent = TRUE)
+        stop("select(NULL, …) – see select_on_NULL_generic.txt")
+      }
+    })
+
+    suppressMessages(
+      trace(
+        what = "select", where = asNamespace("dplyr"),
+        tracer = generic_tracer, print = FALSE
+      )
+    )
+
+    installed <<- TRUE
+    logf("Trace     | installed select(NULL, …) hooks (generic & methods)")
+    invisible(TRUE)
+  }
+})
+
+# Install the hooks NOW (before any Robyn calls)
+install_select_tracers()
+
+# Optional: clean up on exit so future runs aren't double-traced
+on.exit(
+  {
+    for (w in c("select", "select.data.frame", "select.tbl_df")) {
+      try(untrace(what = w, where = asNamespace("dplyr")), silent = TRUE)
+    }
+  },
+  add = TRUE
+)
+
 on.exit(
   {
     try(sink(type = "message"), silent = TRUE)
@@ -718,17 +806,7 @@ fix_invalid_factors <- function(df, keep_as_factor = character(0)) {
 
 
 
-# --- Ensure media "vars" names differ from spend names
-if (all(paid_media_spends == paid_media_vars)) {
-  new_vars <- paste0(paid_media_vars, "_X") # e.g. GA_SUPPLY_COST -> GA_SUPPLY_COST_X
-  # create cloned exposure columns equal to the spends for now
-  for (i in seq_along(paid_media_vars)) {
-    v_old <- paid_media_vars[i]
-    v_new <- new_vars[i]
-    df[[v_new]] <- df[[v_old]]
-  }
-  paid_media_vars <- new_vars
-}
+paid_media_vars <- paid_media_spends
 
 force_numeric <- function(x) suppressWarnings(readr::parse_number(as.character(x)))
 num_like <- unique(c(
@@ -832,6 +910,7 @@ if (NROW(InputCollect_base$dt_mod) == 0 || NCOL(InputCollect_base$dt_mod) == 0) 
     paste0("Missing in dt_input: ", if (length(miss_dt_in)) paste(miss_dt_in, collapse = ", ") else "<none>")
   ), dbg)
   gcs_put_safe(dbg, file.path(gcs_prefix, "dt_mod_empty_debug.txt"))
+  stop("robyn_inputs built an empty dt_mod. See dt_mod_empty_debug.txt")
 
   # ---- LAST-RESORT PATCH: rebuild dt_mod from dt_input so training can proceed
   # InputCollect_base$dt_mod <- as.data.frame(InputCollect_base$dt_input)
@@ -1214,11 +1293,17 @@ run_once <- function(do_validation = TRUE) {
         # write a detailed traceback
         # Also try to persist last_trace() in all cases
         bt_verbose <- tryCatch(rlang::last_trace(), error = function(e) NULL)
-        if (!is.null(bt_verbose)) {
-          p1 <- file.path(dir_path, "robyn_last_trace_verbose.txt")
+        p1 <- file.path(dir_path, "robyn_last_trace_verbose.txt")
+        if (is.null(bt_verbose)) {
+          writeLines(c(
+            "No rlang::last_trace() available (likely a base error).",
+            "See robyn_run_last_trace.txt for base traceback."
+          ), p1)
+        } else {
           capture.output(print(bt_verbose), file = p1)
-          gcs_put_safe(p1, file.path(gcs_prefix, "robyn_last_trace_verbose.txt"))
         }
+        gcs_put_safe(p1, file.path(gcs_prefix, "robyn_last_trace_verbose.txt"))
+
 
 
         tb1 <- tryCatch(utils::capture.output(traceback(max.lines = 50L)), error = function(.) "<no base traceback>")
@@ -1276,6 +1361,50 @@ trace_select_on_null <- local({
   }
 })
 trace_select_on_null()
+
+# ---- ADDITIONAL TRACE: hook the generic dplyr::select itself ----
+try(
+  {
+    suppressMessages(trace(
+      what = dplyr::select,
+      tracer = quote({
+        # Capture .data argument (first arg)
+        .data_arg <- if (length(match.call()) >= 2) ..1 else NULL
+        if (is.null(.data_arg)) {
+          pth <- file.path(dir_path, "select_on_NULL_generic.txt")
+          msg <- c(
+            "=== dplyr::select(NULL, ...) caught at generic ===",
+            paste("call:", deparse(sys.call(-1))),
+            "",
+            "---- tail(sys.calls()) ----",
+            capture.output(tail(sys.calls(), 25))
+          )
+          writeLines(msg, pth)
+          try(gcs_put_safe(pth, file.path(gcs_prefix, "select_on_NULL_generic.txt")), silent = TRUE)
+          stop("select(NULL, …) – see select_on_NULL_generic.txt")
+        }
+      }),
+      print = FALSE
+    ))
+    logf("Trace     | installed generic select(NULL, …) hook")
+  },
+  silent = TRUE
+)
+trace_select_on_null()
+# ---- ADDITIONAL TRACE: hook the generic dplyr::select itself ----
+try(
+  {
+    suppressMessages(trace(
+      what = dplyr::select,
+      tracer = quote({
+        ...
+      }),
+      print = FALSE
+    ))
+    logf("Trace     | installed generic select(NULL, …) hook")
+  },
+  silent = TRUE
+)
 
 
 
