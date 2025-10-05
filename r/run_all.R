@@ -42,18 +42,22 @@ suppressPackageStartupMessages({
 
 
 ## ---- Neutralize Robyn/plot font settings (must be character, not logical)
+## --- Force safe font config for Robyn + ggplot2 ---
+# Make sure Robyn options are character or NULL (never logical)
 options(
-    robyn.plot.font = "", # if package checks this, make it character
-    robyn.plot.font.family = "", # common alt naming
-    robyn_font_family = "" # another common alt
+    robyn.plot.font        = NULL, # let Robyn fall back
+    robyn.plot.font.family = NULL,
+    robyn_font_family      = NULL
 )
 
+# Tell ggplot2 to use a generic built-in font family
 if (requireNamespace("ggplot2", quietly = TRUE)) {
-    suppressWarnings(ggplot2::theme_set(ggplot2::theme_gray(base_family = "")))
-    # Make sure all text geoms default to a character family
-    try(ggplot2::theme_update(text = ggplot2::element_text(family = "")), silent = TRUE)
-    try(ggplot2::update_geom_defaults("text", list(family = "")), silent = TRUE)
+    ggplot2::theme_set(ggplot2::theme_gray(base_family = NULL)) # NULL is safe
+    # Ensure all text geoms default to a character (not logical)
+    try(ggplot2::theme_update(text = ggplot2::element_text(family = "sans")), silent = TRUE)
+    try(ggplot2::update_geom_defaults("text", list(family = "sans")), silent = TRUE)
 }
+
 
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
