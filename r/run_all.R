@@ -940,6 +940,13 @@ write_diag <- function(extra = NULL) {
 
 
 
+## ---------- HP diagnostics + robyn_inputs() PROBE ----------
+hp_diag_path <- file.path(dir_path, "robyn_hp_diagnostics.txt")
+capture_msgs <- character()
+capture_warn <- character()
+append_msg <- function(x) capture_msgs <<- c(capture_msgs, x)
+append_warn <- function(x) capture_warn <<- c(capture_warn, x)
+
 bad_shapes <- c()
 bad_ranges <- c()
 check_pair <- function(k, v) {
@@ -953,19 +960,28 @@ check_pair <- function(k, v) {
 }
 invisible(lapply(names(hyperparameters), function(k) check_pair(k, hyperparameters[[k]])))
 
+write_diag <- function(extra = NULL) {
+    lines <- c(
+        "=== ROBYN HP DIAGNOSTICS ===",
+        paste0("Time: ", as.character(Sys.time())), "",
+        "-- Your hyperparameters (names):",
+        paste0("  ", paste(sort(names(hyperparameters)), collapse = ", ")), "",
+        "-- Paid media vars: ",
+        paste0("  ", paste(paid_media_vars, collapse = ", ")),
+        "-- Organic vars: ",
+        paste0("  ", paste(organic_vars, collapse = ", ")), "",
+        "-- Messages from robyn_inputs():",
+        if (length(capture_msgs)) paste0("  ", capture_msgs) else "  <none>", "",
+        "-- Warnings from robyn_inputs():",
+        if (length(capture_warn)) paste0("  ", capture_warn) else "  <none>", "",
+        extra %||% character(0)
+    )
+    writeLines(lines, hp_diag_path)
+    gcs_put_safe(hp_diag_path, file.path(gcs_prefix, "robyn_hp_diagnostics.txt"))
+    push_log()
+}
 
-write_diag(c(
-    "== Preflight diff vs. Robyn template ==",
-    paste0("Missing in your HPs: ", if (length(missing_in_yours)) paste(missing_in_yours, collapse = ", ") else "<none>"),
-    paste0("Extra keys you provided: ", if (length(extra_in_yours)) paste(extra_in_yours, collapse = ", ") else "<none>"),
-    paste0("Bad shapes: ", if (length(bad_shapes)) paste(bad_shapes, collapse = "; ") else "<none>"),
-    paste0("Bad ranges/order: ", if (length(bad_ranges)) paste(bad_ranges, collapse = "; ") else "<none>")
-))
-
-InputCollect <- NULL
-capture_msgs <- character()
-capture_warn <- character()
-
+# (1) First, probe robyn_inputs() and upload InputCollect immediately if it works
 InputCollect <- withCallingHandlers(
     tryCatch(
         robyn_inputs(
@@ -986,23 +1002,43 @@ InputCollect <- withCallingHandlers(
         ),
         error = function(e) {
             write_diag(c(
-                "== ERROR ==",
-                paste0("Condition: ", conditionMessage(e)), "",
-                "Traceback:",
-                utils::capture.output(traceback(max.lines = 50L))
+                "== ERROR ==", paste0("Condition: ", conditionMessage(e)), "",
+                "Traceback:", utils::capture.output(traceback(max.lines = 50L))
             ))
             stop(e)
         }
     ),
     message = function(m) {
-        capture_msgs <<- c(capture_msgs, conditionMessage(m))
+        append_msg(conditionMessage(m))
         invokeRestart("muffleMessage")
     },
     warning = function(w) {
-        capture_warn <<- c(capture_warn, conditionMessage(w))
+        append_warn(conditionMessage(w))
         invokeRestart("muffleWarning")
     }
 )
+
+stopifnot(!is.null(InputCollect), is.list(InputCollect), !is.null(InputCollect$dt_input))
+
+# Save + upload InputCollect EARLY
+ic_path <- file.path(dir_path, "InputCollect.RDS")
+saveRDS(InputCollect, ic_path)
+gcs_put_safe(ic_path, file.path(gcs_prefix, "InputCollect.RDS"))
+
+# (2) Now that InputCollect exists, compare HP keys to the template and append a second diag
+hp_template <- try(robyn_hyper_params(InputCollect), silent = TRUE)
+templ_names <- if (!inherits(hp_template, "try-error")) names(hp_template) else character(0)
+missing_in_yours <- setdiff(templ_names, names(hyperparameters))
+extra_in_yours <- setdiff(names(hyperparameters), templ_names)
+
+write_diag(c(
+    "== Preflight diff vs. Robyn template ==",
+    paste0("Missing in your HPs: ", if (length(missing_in_yours)) paste(missing_in_yours, collapse = ", ") else "<none>"),
+    paste0("Extra keys you provided: ", if (length(extra_in_yours)) paste(extra_in_yours, collapse = ", ") else "<none>"),
+    paste0("Bad shapes: ", if (length(bad_shapes)) paste(bad_shapes, collapse = "; ") else "<none>"),
+    paste0("Bad ranges/order: ", if (length(bad_ranges)) paste(bad_ranges, collapse = "; ") else "<none>")
+))
+
 
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
