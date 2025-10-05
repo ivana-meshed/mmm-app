@@ -476,84 +476,7 @@ logf("Logging   | file=", log_file, " (split=TRUE)")
 flush.console()
 
 
-## ---- TRACE dplyr::select to catch select(NULL, ...) anywhere ----
-install_select_tracers <- local({
-  installed <- FALSE
-  function() {
-    if (installed) {
-      return(invisible(TRUE))
-    }
 
-    # Method-level tracer (data.frame / tibble)
-    method_tracer <- quote({
-      if (is.null(.data)) {
-        pth <- file.path(dir_path, "select_on_NULL.txt")
-        msg <- c(
-          "=== dplyr::select called with .data = NULL (method) ===",
-          "Args (dots):",
-          capture.output(str(list(...))),
-          "",
-          "---- tail(sys.calls()) ----",
-          capture.output(tail(sys.calls(), 25))
-        )
-        writeLines(msg, pth)
-        try(gcs_put_safe(pth, file.path(gcs_prefix, "select_on_NULL.txt")), silent = TRUE)
-        stop("select(NULL, …) – see select_on_NULL.txt")
-      }
-    })
-
-    ns <- asNamespace("dplyr")
-    if (exists("select.data.frame", ns, inherits = FALSE)) {
-      suppressMessages(trace(get("select.data.frame", ns),
-        tracer = method_tracer, print = FALSE
-      ))
-    }
-    if (exists("select.tbl_df", ns, inherits = FALSE)) {
-      suppressMessages(trace(get("select.tbl_df", ns),
-        tracer = method_tracer, print = FALSE
-      ))
-    }
-
-    # Generic-level tracer (exported symbol), must set where=
-    generic_tracer <- quote({
-      mc <- match.call()
-      # Evaluate first arg (.data) in the caller frame if present
-      df <- tryCatch(
-        if (length(mc) >= 2L) eval(mc[[2L]], parent.frame()) else NULL,
-        error = function(e) NULL
-      )
-      if (is.null(df)) {
-        pth <- file.path(dir_path, "select_on_NULL_generic.txt")
-        msg <- c(
-          "=== dplyr::select(NULL, ...) caught at generic ===",
-          paste("call:", deparse(mc)),
-          "",
-          "---- tail(sys.calls()) ----",
-          capture.output(tail(sys.calls(), 25))
-        )
-        writeLines(msg, pth)
-        try(gcs_put_safe(pth, file.path(gcs_prefix, "select_on_NULL_generic.txt")), silent = TRUE)
-        stop("select(NULL, …) – see select_on_NULL_generic.txt")
-      }
-    })
-
-    suppressMessages(
-      trace(
-        what = "select", where = asNamespace("dplyr"),
-        tracer = generic_tracer, print = FALSE
-      )
-    )
-
-    installed <<- TRUE
-    logf("Trace     | installed select(NULL, …) hooks (generic & methods)")
-    invisible(TRUE)
-  }
-})
-
-# Install the hooks NOW (before any Robyn calls)
-tryCatch(install_select_tracers(),
-  error = function(e) logf("Trace     | FAILED to install: ", conditionMessage(e))
-)
 
 # Optional: clean up on exit so future runs aren't double-traced
 on.exit(
@@ -874,6 +797,45 @@ df_for_robyn <- sanitize_for_robyn(
   organic_vars = organic_vars
 )
 logf("Integrity | dt_input columns: ", paste(names(df_for_robyn), collapse = ", "))
+mini <- df %>%
+  select(date, UPLOAD_VALUE, GA_SUPPLY_COST) %>%
+  mutate(across(-date, ~ as.numeric(.)), .keep = "all")
+
+IC_mini <- robyn_inputs(
+  dt_input = mini,
+  date_var = "date",
+  dep_var = "UPLOAD_VALUE",
+  dep_var_type = "revenue",
+  adstock = "geometric",
+  prophet_vars = NULL,
+  paid_media_spends = "GA_SUPPLY_COST",
+  paid_media_vars = "GA_SUPPLY_COST",
+  window_start = min(mini$date),
+  window_end = max(mini$date)
+)
+
+dim(IC_mini$dt_input)
+dim(IC_mini$dt_mod)
+names(IC_mini$dt_mod)
+
+used <- unique(c(
+  "date", "UPLOAD_VALUE",
+  "GA_SUPPLY_COST", "GA_DEMAND_COST", "BING_DEMAND_COST", "META_DEMAND_COST", "TV_COST", "PARTNERSHIP_COSTS",
+  "IS_WEEKEND", "TV_IS_ON", "ORGANIC_TRAFFIC"
+))
+
+chk <- within(df[intersect(used, names(df))], {
+  across(where(is.numeric), ~ replace(., !is.finite(.), NA_real_))
+})
+colSums(!is.finite(as.matrix(chk[sapply(chk, is.numeric)])), na.rm = FALSE)
+
+win <- df %>% filter(date >= as.Date("2024-01-01"), date <= max(date))
+apply(win[intersect(used, names(win))][sapply(win, is.numeric)], 2, function(x) dplyr::n_distinct(x, na.rm = TRUE))
+
+stopifnot(length(paid_media_spends) == length(paid_media_vars))
+stopifnot(all(paid_media_spends %in% names(df_for_robyn)))
+stopifnot(all(paid_media_vars %in% names(df_for_robyn)))
+stopifnot(all(c("IS_WEEKEND", "TV_IS_ON", "ORGANIC_TRAFFIC") %in% names(df_for_robyn)))
 
 InputCollect_base <- robyn_inputs(
   dt_input = df_for_robyn,
@@ -892,36 +854,29 @@ InputCollect_base <- robyn_inputs(
   window_end = max(df_for_robyn$date)
 )
 
-# ---- dt_mod sanity right after robyn_inputs ----
-if (is.null(InputCollect_base$dt_mod)) {
-  stop("robyn_inputs returned dt_mod = NULL (internal build failed).")
-}
-if (NROW(InputCollect_base$dt_mod) == 0 || NCOL(InputCollect_base$dt_mod) == 0) {
-  # Dump why we think it happened
-  dbg <- file.path(dir_path, "dt_mod_empty_debug.txt")
-  culprit_cols <- unique(na.omit(c(
-    "date", dep_var,
-    paid_media_vars %||% character(0),
-    context_vars %||% character(0),
-    factor_vars %||% character(0),
-    organic_vars %||% character(0)
-  )))
-  miss_dt_mod <- setdiff(culprit_cols, names(InputCollect_base$dt_mod))
-  miss_dt_in <- setdiff(culprit_cols, names(InputCollect_base$dt_input))
-  writeLines(c(
-    "dt_mod is empty after robyn_inputs().",
-    paste0("dt_input dim: ", NROW(InputCollect_base$dt_input), " x ", NCOL(InputCollect_base$dt_input)),
-    paste0("dt_mod   dim: ", NROW(InputCollect_base$dt_mod), " x ", NCOL(InputCollect_base$dt_mod)),
-    paste0("Missing in dt_mod: ", if (length(miss_dt_mod)) paste(miss_dt_mod, collapse = ", ") else "<none>"),
-    paste0("Missing in dt_input: ", if (length(miss_dt_in)) paste(miss_dt_in, collapse = ", ") else "<none>")
-  ), dbg)
-  gcs_put_safe(dbg, file.path(gcs_prefix, "dt_mod_empty_debug.txt"))
-  stop("robyn_inputs built an empty dt_mod. See dt_mod_empty_debug.txt")
 
-  # ---- LAST-RESORT PATCH: rebuild dt_mod from dt_input so training can proceed
-  # InputCollect_base$dt_mod <- as.data.frame(InputCollect_base$dt_input)
-  # message("Patched: dt_mod rebuilt from dt_input to unblock training (investigate dt_mod_empty_debug.txt).")
+if (is.null(InputCollect_base$dt_mod) || nrow(InputCollect_base$dt_mod) == 0L || ncol(InputCollect_base$dt_mod) == 0L) {
+  # Augment the debug with finiteness & distinct counts for ONLY the used columns:
+  culprits <- unique(c("date", dep_var, paid_media_spends, paid_media_vars, context_vars, organic_vars))
+  culprits <- intersect(culprits, names(InputCollect_base$dt_input))
+  ss <- capture.output({
+    cat("Used cols:\n")
+    print(culprits)
+    cat("\nDistinct counts:\n")
+    print(sapply(InputCollect_base$dt_input[culprits], function(x) {
+      if (is.numeric(x)) dplyr::n_distinct(x, na.rm = TRUE) else length(unique(x))
+    }))
+    cat("\nNon-finite counts (numeric only):\n")
+    nf <- sapply(InputCollect_base$dt_input[culprits], function(x) {
+      if (is.numeric(x)) sum(!is.finite(x)) else NA_integer_
+    })
+    print(nf[!is.na(nf)])
+  })
+  writeLines(ss, file.path(dir_path, "dt_mod_empty_debug.txt"))
+  gcs_put_safe(file.path(dir_path, "dt_mod_empty_debug.txt"), file.path(gcs_prefix, "dt_mod_empty_debug.txt"))
+  stop("robyn_inputs built an empty dt_mod. See dt_mod_empty_debug.txt")
 }
+
 
 # Pick a safe single train_size that guarantees >= 28 validation days
 ser_len <- nrow(InputCollect_base$dt_input)
@@ -1355,12 +1310,37 @@ trace_select_on_null <- local({
       }
     })
     ns <- asNamespace("dplyr")
-    if (exists("select.data.frame", ns, inherits = FALSE)) {
-      suppressMessages(trace(dplyr:::select.data.frame, tracer = tracer, print = FALSE))
+    if (exists("select.data.frame", envir = ns, inherits = FALSE)) {
+      suppressMessages(
+        trace("select.data.frame",
+          where = ns,
+          tracer = quote({
+            if (is.null(.data)) {
+              pth <- file.path(dir_path, "select_on_NULL_method.txt")
+              writeLines(c("dplyr::select.data.frame called with .data=NULL"), pth)
+              try(gcs_put_safe(pth, file.path(gcs_prefix, "select_on_NULL_method.txt")), silent = TRUE)
+            }
+          }),
+          print = FALSE
+        )
+      )
     }
-    if (exists("select.tbl_df", ns, inherits = FALSE)) {
-      suppressMessages(trace(dplyr:::select.tbl_df, tracer = tracer, print = FALSE))
+    if (exists("select.tbl_df", envir = ns, inherits = FALSE)) {
+      suppressMessages(
+        trace("select.tbl_df",
+          where = ns,
+          tracer = quote({
+            if (is.null(.data)) {
+              pth <- file.path(dir_path, "select_on_NULL_tbl_df.txt")
+              writeLines(c("dplyr::select.tbl_df called with .data=NULL"), pth)
+              try(gcs_put_safe(pth, file.path(gcs_prefix, "select_on_NULL_tbl_df.txt")), silent = TRUE)
+            }
+          }),
+          print = FALSE
+        )
+      )
     }
+
 
     installed <<- TRUE
     invisible(TRUE)
