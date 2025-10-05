@@ -39,19 +39,21 @@ suppressPackageStartupMessages({
     library(tidyselect)
     library(tibble)
 })
-if (requireNamespace("ggplot2", quietly = TRUE)) {
-    suppressWarnings(ggplot2::theme_set(ggplot2::theme_gray()))
-    # Force text family to a safe value for all geoms/themes Robyn touches.
-    try(ggplot2::theme_update(text = ggplot2::element_text(family = NULL)), silent = TRUE)
-    # Belt & suspenders: default for text geom too.
-    try(ggplot2::update_geom_defaults("text", list(family = NULL)), silent = TRUE)
-}
+
+
+## ---- Neutralize Robyn/plot font settings (must be character, not logical)
+options(
+    robyn.plot.font = "", # if package checks this, make it character
+    robyn.plot.font.family = "", # common alt naming
+    robyn_font_family = "" # another common alt
+)
 
 if (requireNamespace("ggplot2", quietly = TRUE)) {
-    # Force a safe base family; avoid boolean/invalid family
     suppressWarnings(ggplot2::theme_set(ggplot2::theme_gray(base_family = "")))
+    # Make sure all text geoms default to a character family
+    try(ggplot2::theme_update(text = ggplot2::element_text(family = "")), silent = TRUE)
+    try(ggplot2::update_geom_defaults("text", list(family = "")), silent = TRUE)
 }
-Sys.setenv("ROBUST_PLOT_FONT" = "") # harmless env knob for future use
 
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
