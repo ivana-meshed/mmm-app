@@ -962,25 +962,13 @@ write_diag(c(
     paste0("Bad ranges/order: ", if (length(bad_ranges)) paste(bad_ranges, collapse = "; ") else "<none>")
 ))
 
-InputCollect <- robyn_inputs(
-    dt_input = df_for_robyn,
-    date_var = "date",
-    dep_var = dep_var,
-    dep_var_type = "revenue",
-    adstock = adstock,
-    prophet_vars = NULL,
-    paid_media_spends = paid_media_spends,
-    paid_media_vars = paid_media_vars,
-    context_vars = context_vars,
-    factor_vars = factor_vars,
-    organic_vars = organic_vars,
-    window_start = min(df_for_robyn$date),
-    window_end = max(df_for_robyn$date),
-    hyperparameters = hyperparameters # <-- Add this
-)
-invisible(withCallingHandlers(
+InputCollect <- NULL
+capture_msgs <- character()
+capture_warn <- character()
+
+InputCollect <- withCallingHandlers(
     tryCatch(
-        InputCollect <- robyn_inputs(
+        robyn_inputs(
             dt_input = df_for_robyn,
             date_var = "date",
             dep_var = dep_var,
@@ -994,7 +982,7 @@ invisible(withCallingHandlers(
             organic_vars = organic_vars,
             window_start = min(df_for_robyn$date),
             window_end = max(df_for_robyn$date),
-            hyperparameters = hyperparameters # <-- Add this
+            hyperparameters = hyperparameters
         ),
         error = function(e) {
             write_diag(c(
@@ -1006,12 +994,15 @@ invisible(withCallingHandlers(
             stop(e)
         }
     ),
-    message = function(m) append_msg(conditionMessage(m)),
+    message = function(m) {
+        capture_msgs <<- c(capture_msgs, conditionMessage(m))
+        invokeRestart("muffleMessage")
+    },
     warning = function(w) {
-        append_warn(conditionMessage(w))
+        capture_warn <<- c(capture_warn, conditionMessage(w))
         invokeRestart("muffleWarning")
     }
-))
+)
 
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
@@ -1023,17 +1014,29 @@ write_diag(c(
 ))
 logf("HP        | diagnostics written to ", hp_diag_path)
 
+stopifnot(!is.null(InputCollect), is.list(InputCollect), !is.null(InputCollect$dt_input))
+
+# Save + upload now (early)
+ic_path <- file.path(dir_path, "InputCollect.RDS")
+saveRDS(InputCollect, ic_path)
+gcs_put_safe(ic_path, file.path(gcs_prefix, "InputCollect.RDS"))
+
+# Optional: tiny CSV snapshot of dt_input header to help future debugging
+hdr_csv <- file.path(dir_path, "dt_input_head.csv")
+readr::write_csv(utils::head(InputCollect$dt_input, 10), hdr_csv, na = "")
+gcs_put_safe(hdr_csv, file.path(gcs_prefix, "dt_input_head.csv"))
+
 ## ---------- OPTION A: Manually attach HPs to InputCollect and proceed ----------
 # InputCollect <- InputCollect_base
 # stopifnot(is.list(hyperparameters), length(hyperparameters) > 0)
 # InputCollect$hyperparameters <- hyperparameters
 
 ## Train-size sanity
-ts_used <- InputCollect$hyperparameters$train_size
-if (!is.numeric(ts_used) || length(ts_used) != 2L || any(is.na(ts_used))) {
+train_size <- InputCollect$hyperparameters$train_size
+if (!is.numeric(train_size) || length(train_size) != 2L || any(is.na(train_size))) {
     stop("train_size malformed inside hyperparameters; need numeric length-2.")
 }
-logf("HP        | train_size used: ", paste(ts_used, collapse = ","))
+logf("HP        | train_size used: ", paste(train_size, collapse = ","))
 
 ## Nonzero spends
 nz_spend <- sapply(paid_media_spends, function(c) sum(InputCollect$dt_input[[c]], na.rm = TRUE))
