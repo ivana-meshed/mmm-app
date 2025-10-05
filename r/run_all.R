@@ -805,15 +805,6 @@ used_cols <- unique(c(
 ))
 used_cols <- intersect(used_cols, names(df_for_robyn))
 
-na_map <- sapply(df_for_robyn[used_cols], function(z) sum(is.na(z) | !is.finite(z)))
-if (any(na_map > 0)) {
-    stop(
-        "Preflight: NA/Inf detected in used columns: ",
-        paste(names(na_map)[na_map > 0], na_map[na_map > 0], sep = "=", collapse = ", ")
-    )
-}
-
-
 logf("Integrity | dt_input columns: ", paste(names(df_for_robyn), collapse = ", "))
 
 used <- unique(c(
@@ -952,7 +943,14 @@ write_diag <- function(extra = NULL) {
     push_log()
 }
 
-# (1) First, probe robyn_inputs() and upload InputCollect immediately if it works
+## ---------- robyn_inputs() with hard guard ----------
+dir.create(dir_path, recursive = TRUE, showWarnings = FALSE) # ensure path exists
+
+InputCollect <- NULL
+inp_err <- NULL
+capture_msgs <- character()
+capture_warn <- character()
+
 InputCollect <- withCallingHandlers(
     tryCatch(
         robyn_inputs(
@@ -972,58 +970,52 @@ InputCollect <- withCallingHandlers(
             hyperparameters = hyperparameters
         ),
         error = function(e) {
-            write_diag(c(
-                "== ERROR ==", paste0("Condition: ", conditionMessage(e)), "",
-                "Traceback:", utils::capture.output(traceback(max.lines = 50L))
-            ))
-            stop(e)
+            inp_err <<- conditionMessage(e)
+            return(NULL) # do NOT stop here; we want to write diags first, then stop
         }
     ),
     message = function(m) {
-        append_msg(conditionMessage(m))
+        capture_msgs <<- c(capture_msgs, conditionMessage(m))
         invokeRestart("muffleMessage")
     },
     warning = function(w) {
-        append_warn(conditionMessage(w))
+        capture_warn <<- c(capture_warn, conditionMessage(w))
         invokeRestart("muffleWarning")
     }
 )
 
+# Always write the diagnostics file once, whether success or failure.
+hp_diag_lines <- c(
+    "=== ROBYN HP DIAGNOSTICS ===",
+    paste0("Time: ", as.character(Sys.time())), "",
+    "-- Paid media vars:",
+    paste0("  ", paste(paid_media_vars, collapse = ", ")),
+    "-- Organic vars:",
+    paste0("  ", paste(organic_vars, collapse = ", ")), "",
+    "-- Messages from robyn_inputs():",
+    if (length(capture_msgs)) paste0("  ", capture_msgs) else "  <none>", "",
+    "-- Warnings from robyn_inputs():",
+    if (length(capture_warn)) paste0("  ", capture_warn) else "  <none>", "",
+    if (!is.null(inp_err)) c("", "== ERROR ==", paste0("  ", inp_err)) else ""
+)
+writeLines(hp_diag_lines, hp_diag_path)
+gcs_put_safe(hp_diag_path, file.path(gcs_prefix, "robyn_hp_diagnostics.txt"))
+push_log()
 
-# (2) Now that InputCollect exists, compare HP keys to the template and append a second diag
-hp_template <- try(robyn_hyper_params(InputCollect), silent = TRUE)
-templ_names <- if (!inherits(hp_template, "try-error")) names(hp_template) else character(0)
-missing_in_yours <- setdiff(templ_names, names(hyperparameters))
-extra_in_yours <- setdiff(names(hyperparameters), templ_names)
+# If robyn_inputs failed, STOP cleanly right now with a descriptive status.json.
+if (is.null(InputCollect) || !is.list(InputCollect) || is.null(InputCollect$dt_input)) {
+    writeLines(jsonlite::toJSON(list(
+        state = "FAILED",
+        start_time = as.character(job_started),
+        end_time = as.character(Sys.time()),
+        error = paste("robyn_inputs() failed:", inp_err %||% "unknown")
+    ), auto_unbox = TRUE), status_json)
+    gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+    stop("robyn_inputs() failed — see robyn_hp_diagnostics.txt for details.")
+}
 
-write_diag(c(
-    "== Preflight diff vs. Robyn template ==",
-    paste0("Missing in your HPs: ", if (length(missing_in_yours)) paste(missing_in_yours, collapse = ", ") else "<none>"),
-    paste0("Extra keys you provided: ", if (length(extra_in_yours)) paste(extra_in_yours, collapse = ", ") else "<none>"),
-    paste0("Bad shapes: ", if (length(bad_shapes)) paste(bad_shapes, collapse = "; ") else "<none>"),
-    paste0("Bad ranges/order: ", if (length(bad_ranges)) paste(bad_ranges, collapse = "; ") else "<none>")
-))
-
-
-alloc_end <- max(InputCollect$dt_input$date)
+alloc_end <- max(InputCollect$dt_input$date, na.rm = TRUE)
 alloc_start <- alloc_end - 364
-
-write_diag(c(
-    "== SUCCESS ==",
-    "robyn_inputs() accepted the provided hyperparameters (probe).",
-    "Proceeding with OPTION A (manual attach to InputCollect$hyperparameters)."
-))
-logf("HP        | diagnostics written to ", hp_diag_path)
-
-stopifnot(!is.null(InputCollect), is.list(InputCollect), !is.null(InputCollect$dt_input))
-
-ic_path <- file.path(dir_path, "InputCollect.RDS")
-saveRDS(InputCollect, ic_path)
-gcs_put_safe(ic_path, file.path(gcs_prefix, "InputCollect.RDS"))
-
-hdr_csv <- file.path(dir_path, "dt_input_head.csv")
-readr::write_csv(utils::head(InputCollect$dt_input, 10), hdr_csv, na = "")
-gcs_put_safe(hdr_csv, file.path(gcs_prefix, "dt_input_head.csv"))
 
 ## ---------- OPTION A: Manually attach HPs to InputCollect and proceed ----------
 # InputCollect <- InputCollect_base
@@ -1076,18 +1068,27 @@ if (all(is.na(dv)) || sd(dv, na.rm = TRUE) == 0) {
 
 
 # ==== EXTRA VALIDATION & SNAPSHOT BEFORE robyn_run ====
-snap_path <- file.path(dir_path, "pre_run_snapshot.rds")
-saveRDS(list(
-    InputCollect = InputCollect,
-    dep_var = dep_var,
-    paid_media_spends = InputCollect$paid_media_spends,
-    paid_media_vars = InputCollect$paid_media_vars,
-    organic_vars = InputCollect$organic_vars,
-    context_vars = InputCollect$context_vars,
-    factor_vars = InputCollect$factor_vars,
-    window = c(start = min(InputCollect$dt_input$date), end = max(InputCollect$dt_input$date))
-), snap_path)
-gcs_put_safe(snap_path, file.path(gcs_prefix, "pre_run_snapshot.rds"))
+snap_path_local <- file.path(dir_path, "pre_run_snapshot.rds")
+tryCatch(
+    {
+        saveRDS(list(
+            InputCollect = InputCollect,
+            dep_var = dep_var,
+            paid_media_spends = InputCollect$paid_media_spends,
+            paid_media_vars = InputCollect$paid_media_vars,
+            organic_vars = InputCollect$organic_vars,
+            context_vars = InputCollect$context_vars,
+            factor_vars = InputCollect$factor_vars,
+            window = c(start = min(InputCollect$dt_input$date), end = max(InputCollect$dt_input$date))
+        ), snap_path_local)
+        gcs_put_safe(snap_path_local, file.path(gcs_prefix, "pre_run_snapshot.rds"))
+    },
+    error = function(e) {
+        logf("Save      | FAILED pre_run_snapshot.rds: ", conditionMessage(e))
+        stop("Pre-run snapshot failed; aborting to avoid partial state.")
+    }
+)
+
 
 # Columns Robyn will try to select during run
 sel_cols <- unique(na.omit(c(
@@ -1160,29 +1161,6 @@ must_df <- function(x, nm) if (!is.null(x) && !inherits(x, c("data.frame", "tbl"
 # Core slots Robyn expects to be non-NULL or data frames after robyn_inputs()
 must_exist(InputCollect$dt_input, "InputCollect$dt_input")
 must_df(InputCollect$dt_input, "InputCollect$dt_input")
-# dt_mod should already be prepared by robyn_inputs()
-# must_exist(InputCollect$dt_mod, "InputCollect$dt_mod")
-# must_df(InputCollect$dt_mod, "InputCollect$dt_mod")
-
-# ---- SNAPSHOT dt_mod + prove we can select the columns Robyn will use ----
-sel_cols <- unique(na.omit(c(
-    "date", InputCollect$dep_var,
-    InputCollect$paid_media_vars %||% character(0),
-    InputCollect$context_vars %||% character(0),
-    InputCollect$factor_vars %||% character(0),
-    InputCollect$organic_vars %||% character(0)
-)))
-# missing_in_dt_mod <- setdiff(sel_cols, names(InputCollect$dt_mod))
-# if (length(missing_in_dt_mod)) {
-#    stop("Preflight: columns missing from InputCollect$dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
-# }
-
-# Force a real select() now; if this fails, we fail here with details
-# sel_test <- try(dplyr::select(InputCollect$dt_mod, dplyr::all_of(sel_cols)), silent = TRUE)
-# if (inherits(sel_test, "try-error")) {
-#    err <- conditionMessage(attr(sel_test, "condition"))
-#    stop("Preflight: dplyr::select failed on dt_mod before robyn_run: ", err)
-# }
 
 
 # Prophet must be fully off
@@ -1193,23 +1171,7 @@ if (!is.null(InputCollect$prophet_vars) || !is.null(InputCollect$dt_prophet)) {
     )
 }
 
-# Sanity: the columns robyn_run will select are actually present in dt_mod
-sel_cols <- unique(na.omit(c(
-    "date", InputCollect$dep_var,
-    InputCollect$paid_media_vars %||% character(0),
-    InputCollect$context_vars %||% character(0),
-    InputCollect$factor_vars %||% character(0),
-    InputCollect$organic_vars %||% character(0)
-)))
-# missing_in_dt_mod <- setdiff(sel_cols, names(InputCollect$dt_mod))
-# if (length(missing_in_dt_mod)) {
-#    stop("Preflight: columns missing from InputCollect$dt_mod: ", paste(missing_in_dt_mod, collapse = ", "))
-# }
-
-
 # ---- FINAL GUARD on dt_mod just before robyn_run ----
-
-
 
 options(
     rlang_trace_top_env = rlang::current_env(),
@@ -1343,41 +1305,12 @@ run_err <- NULL
 run_tb <- NULL
 t0 <- Sys.time()
 
-out_dir <- "/your/debug/folder" # or dir_path you already use
-OutputModels <- try(run_once(InputCollect, iter = 200, trials = 1, ts_validation = TRUE, out_dir = dir_path), silent = TRUE)
-
-if (inherits(OutputModels, "try-error")) {
+OutputModels <- try(run_once(InputCollect, iter = iter, trials = trials, ts_validation = TRUE, out_dir = dir_path), silent = TRUE)
+if (inherits(OutputModels, "try-error") || is.null(OutputModels) || !NROW(OutputModels$resultHypParam)) {
     message("Retrying with ts_validation = FALSE …")
-    OutputModels <- run_once(InputCollect, iter = 200, trials = 1, ts_validation = FALSE, out_dir = dir_path)
+    OutputModels <- run_once(InputCollect, iter = iter, trials = trials, ts_validation = FALSE, out_dir = dir_path)
 }
 
-OutputModels <- tryCatch(
-    run_once(InputCollect, iter = 200, trials = 1, ts_validation = TRUE, out_dir = dir_path),
-    error = function(e) {
-        run_err <<- conditionMessage(e)
-        bt <- tryCatch(capture.output(print(attr(e, "backtrace"))), error = function(.) NULL)
-        run_tb <<- bt %||% utils::capture.output(traceback(max.lines = 50L))
-
-        # Write diag then retry without validation
-        diag_txt <- file.path(dir_path, "robyn_train_diagnostics.txt")
-        writeLines(c(
-            "robyn_run failed on validation path with a 'select(NULL, ...)' error or similar.",
-            paste0("Condition: ", run_err),
-            "---- rlang::trace_back() ----",
-            run_tb %||% "<none>"
-        ), diag_txt)
-        gcs_put_safe(diag_txt, file.path(gcs_prefix, "robyn_train_diagnostics.txt"))
-        logf("Train     | retrying with ts_validation=FALSE (diagnostic fallback)")
-
-        # Retry without validation
-        tryCatch(run_once(InputCollect, iter = 200, trials = 1, ts_validation = FALSE, out_dir = dir_path),
-            error = function(e2) {
-                run_err <<- paste0(run_err, " | retry error: ", conditionMessage(e2))
-                NULL
-            }
-        )
-    }
-)
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 
 if (is.null(OutputModels) || is.null(OutputModels$resultHypParam) || !NROW(OutputModels$resultHypParam)) {
