@@ -39,6 +39,11 @@ suppressPackageStartupMessages({
     library(tidyselect)
     library(tibble)
 })
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+    # Force a safe base family; avoid boolean/invalid family
+    suppressWarnings(ggplot2::theme_set(ggplot2::theme_gray(base_family = "")))
+}
+Sys.setenv("ROBUST_PLOT_FONT" = "") # harmless env knob for future use
 
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
@@ -1014,6 +1019,33 @@ if (is.null(InputCollect) || !is.list(InputCollect) || is.null(InputCollect$dt_i
     stop("robyn_inputs() failed — see robyn_hp_diagnostics.txt for details.")
 }
 
+# --- Harden InputCollect after robyn_inputs() ---
+# Ensure Robyn sees the same knobs we built
+InputCollect$hyperparameters <- hyperparameters
+
+# If robyn_inputs() blanked any vectors, restore them
+if (!length(InputCollect$paid_media_spends)) InputCollect$paid_media_spends <- paid_media_spends
+if (!length(InputCollect$paid_media_vars)) InputCollect$paid_media_vars <- paid_media_vars
+if (is.null(InputCollect$context_vars)) InputCollect$context_vars <- context_vars
+if (is.null(InputCollect$factor_vars)) InputCollect$factor_vars <- factor_vars
+if (is.null(InputCollect$organic_vars)) InputCollect$organic_vars <- organic_vars
+
+# Sanity: dt_input must have 'date' and every driver we expect
+must_have <- unique(c(
+    "date", dep_var,
+    InputCollect$paid_media_vars,
+    InputCollect$context_vars,
+    InputCollect$factor_vars,
+    InputCollect$organic_vars
+))
+missing_after_inputs <- setdiff(must_have, names(InputCollect$dt_input))
+if (length(missing_after_inputs)) {
+    stop(
+        "Post-inputs: missing columns in InputCollect$dt_input: ",
+        paste(missing_after_inputs, collapse = ", ")
+    )
+}
+
 alloc_end <- max(InputCollect$dt_input$date, na.rm = TRUE)
 alloc_start <- alloc_end - 364
 
@@ -1031,6 +1063,14 @@ logf("HP        | train_size used: ", paste(train_size, collapse = ","))
 
 ## Nonzero spends
 nz_spend <- sapply(paid_media_spends, function(c) sum(InputCollect$dt_input[[c]], na.rm = TRUE))
+all_zero_spend <- all(sapply(
+    InputCollect$paid_media_spends,
+    function(c) sum(InputCollect$dt_input[[c]], na.rm = TRUE) <= 0
+))
+if (all_zero_spend) {
+    logf("⚠ Spends  | All paid media spends are zero in the training window — skipping allocator and spend plan.")
+}
+
 logf("HP        | nonzero spend totals: ", paste(sprintf("%s=%.2f", names(nz_spend), nz_spend), collapse = "; "))
 push_log()
 
@@ -1442,6 +1482,11 @@ OutputCollect <- robyn_outputs(
     export = TRUE, plot_folder = dir_path,
     plot_pareto = FALSE, cores = NULL
 )
+if (is.null(OutputCollect) || is.null(OutputCollect$resultHypParam) ||
+    !NROW(OutputCollect$resultHypParam)) {
+    stop("robyn_outputs() failed to produce candidates; cannot proceed to onepagers/allocator.")
+}
+
 saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
 
@@ -1538,8 +1583,11 @@ try(
 push_log()
 
 ## ---------- SMART 3-month forecast ----------
+## ---------- SMART 3-month forecast ----------
 parse_nums <- function(x) as.numeric(unlist(strsplit(x, "[,;\\s]+")))
 spend_cols <- InputCollect$paid_media_spends
+
+# Monthly targets (ENV override > historical)
 monthly_override <- Sys.getenv("FORECAST_MONTHLY_BUDGETS", unset = "")
 if (nzchar(monthly_override)) {
     b <- parse_nums(monthly_override)
@@ -1550,50 +1598,29 @@ if (nzchar(monthly_override)) {
     logf("Forecast  | monthly targets (HIST): ", paste(round(monthly_targets, 0), collapse = ", "))
 }
 
-future_spend <- build_spend_forecast(
-    dt_input        = InputCollect$dt_input,
-    spend_cols      = spend_cols,
-    horizon_months  = 3,
-    monthly_targets = monthly_targets
-)
-plan_path <- file.path(dir_path, "spend_plan_daily_next3m.csv")
-safe_write_csv(future_spend, plan_path)
-gcs_put_safe(plan_path, file.path(gcs_prefix, "spend_plan_daily_next3m.csv"))
+# Check if all paid-media spends are zero in the training window
+all_zero_spend <- all(sapply(spend_cols, function(c) sum(InputCollect$dt_input[[c]], na.rm = TRUE) <= 0))
+if (all_zero_spend) {
+    logf("⚠ Spends  | All paid media spends are zero — skipping allocator and spend plan. Producing baseline-only forecast.")
 
-plan_check <- future_spend %>%
-    mutate(month = floor_date(date, "month")) %>%
-    group_by(month) %>%
-    summarise(plan_total = sum(rowSums(across(all_of(spend_cols)), na.rm = TRUE), na.rm = TRUE), .groups = "drop") %>%
-    arrange(month)
-if (nrow(plan_check)) {
-    ratios <- round(plan_check$plan_total / monthly_targets[1:nrow(plan_check)] - 1, 3)
-    logf("Forecast  | plan vs targets (ratio-1): ", paste(ratios, collapse = ", "))
-    if (any(abs(ratios) > 0.10, na.rm = TRUE)) logf("⚠ Forecast | Plan deviates >10% from targets.")
-}
+    # Baseline level from recent history (no incremental effect since no budget)
+    BASE_LOOKBACK <- as.integer(Sys.getenv("FORECAST_BASE_LOOKBACK_DAYS", "28"))
+    base_daily <- compute_base_daily(OutputCollect, InputCollect, lookback_days = BASE_LOOKBACK)
 
-BASE_LOOKBACK <- as.integer(Sys.getenv("FORECAST_BASE_LOOKBACK_DAYS", "28"))
-base_daily <- compute_base_daily(OutputCollect, InputCollect, lookback_days = BASE_LOOKBACK)
+    # Build a 3-month calendar starting next full month
+    start_next <- max(InputCollect$dt_input$date, na.rm = TRUE) + 1
+    start_month <- lubridate::floor_date(start_next, "month")
+    if (start_month < start_next) start_month <- start_month %m+% months(1)
+    months_vec <- seq(start_month, by = "1 month", length.out = 3)
 
-future_spend <- future_spend %>% mutate(month = floor_date(date, "month"))
-months_vec <- sort(unique(future_spend$month))
-SHARE_TOL <- as.numeric(Sys.getenv("FORECAST_SHARE_TOL", "1e-4"))
-proj_rows <- list()
-pred_alloc_dir <- file.path(dir_path, paste0("allocator_pred_plots_", timestamp))
-dir.create(pred_alloc_dir, showWarnings = FALSE)
-pred_plot_rows <- list()
-
-for (i in seq_along(months_vec)) {
-    m <- months_vec[i]
-    seg <- future_spend %>% filter(month == m)
-    days_in_m <- nrow(seg)
-    monthly_per_channel <- colSums(seg[, spend_cols, drop = FALSE], na.rm = TRUE)
-    total_budget <- sum(monthly_per_channel, na.rm = TRUE)
-
-    if (!is.finite(total_budget) || total_budget <= 0) {
-        proj_rows[[i]] <- data.frame(
+    proj_rows <- lapply(seq_along(months_vec), function(i) {
+        m <- months_vec[i]
+        m_end <- (m %m+% months(1)) - days(1)
+        days_in_m <- as.integer(m_end - m + 1)
+        data.frame(
             month = format(m, "%Y-%m"),
             start = as.Date(m),
-            end = as.Date((m %m+% months(1)) - days(1)),
+            end = as.Date(m_end),
             days = days_in_m,
             budget = 0,
             baseline = round(base_daily * days_in_m, 2),
@@ -1601,44 +1628,118 @@ for (i in seq_along(months_vec)) {
             forecast_total = round(base_daily * days_in_m, 2),
             stringsAsFactors = FALSE
         )
-        next
+    })
+
+    proj <- dplyr::bind_rows(proj_rows)
+    forecast_csv <- file.path(dir_path, "forecast_next3m.csv")
+    safe_write_csv(proj, forecast_csv)
+    gcs_put_safe(forecast_csv, file.path(gcs_prefix, "forecast_next3m.csv"))
+    logf("Forecast  | wrote baseline-only monthly projections: ", forecast_csv)
+} else {
+    # === Normal path: build daily spend plan + allocator-per-month ===
+    future_spend <- build_spend_forecast(
+        dt_input        = InputCollect$dt_input,
+        spend_cols      = spend_cols,
+        horizon_months  = 3,
+        monthly_targets = monthly_targets
+    )
+    plan_path <- file.path(dir_path, "spend_plan_daily_next3m.csv")
+    safe_write_csv(future_spend, plan_path)
+    gcs_put_safe(plan_path, file.path(gcs_prefix, "spend_plan_daily_next3m.csv"))
+
+    plan_check <- future_spend %>%
+        mutate(month = floor_date(date, "month")) %>%
+        group_by(month) %>%
+        summarise(plan_total = sum(rowSums(across(all_of(spend_cols)), na.rm = TRUE), na.rm = TRUE), .groups = "drop") %>%
+        arrange(month)
+    if (nrow(plan_check)) {
+        ratios <- round(plan_check$plan_total / monthly_targets[1:nrow(plan_check)] - 1, 3)
+        logf("Forecast  | plan vs targets (ratio-1): ", paste(ratios, collapse = ", "))
+        if (any(abs(ratios) > 0.10, na.rm = TRUE)) logf("⚠ Forecast | Plan deviates >10% from targets.")
     }
 
-    shares <- monthly_per_channel / total_budget
-    bands <- make_share_bands(shares, tol = SHARE_TOL)
+    BASE_LOOKBACK <- as.integer(Sys.getenv("FORECAST_BASE_LOOKBACK_DAYS", "28"))
+    base_daily <- compute_base_daily(OutputCollect, InputCollect, lookback_days = BASE_LOOKBACK)
 
-    al <- try(robyn_allocator(
-        InputCollect = InputCollect,
-        OutputCollect = OutputCollect,
-        select_model = best_id,
-        date_range = c(alloc_start, alloc_end),
-        expected_spend = total_budget,
-        scenario = "max_historical_response",
-        channel_constr_low = as.numeric(bands$low),
-        channel_constr_up = as.numeric(bands$up),
-        export = TRUE
-    ), silent = TRUE)
+    future_spend <- future_spend %>% mutate(month = floor_date(date, "month"))
+    months_vec <- sort(unique(future_spend$month))
+    SHARE_TOL <- as.numeric(Sys.getenv("FORECAST_SHARE_TOL", "1e-4"))
+    proj_rows <- list()
+    pred_alloc_dir <- file.path(dir_path, paste0("allocator_pred_plots_", timestamp))
+    dir.create(pred_alloc_dir, showWarnings = FALSE)
+    pred_plot_rows <- list()
 
-    al_tbl <- if (!inherits(al, "try-error")) al$result_allocator else NULL
-    incr <- get_allocator_total_response(al_tbl)
+    for (i in seq_along(months_vec)) {
+        m <- months_vec[i]
+        seg <- future_spend %>% filter(month == m)
+        days_in_m <- nrow(seg)
+        monthly_per_channel <- colSums(seg[, spend_cols, drop = FALSE], na.rm = TRUE)
+        total_budget <- sum(monthly_per_channel, na.rm = TRUE)
 
-    if (!inherits(al, "try-error")) {
-        pred_fname <- sprintf("allocator_pred_%s.png", format(m, "%Y-%m"))
-        pred_local <- file.path(pred_alloc_dir, pred_fname)
-        pred_key <- file.path(paste0("allocator_pred_plots_", timestamp), pred_fname)
-        try(
-            {
-                png(pred_local, width = 1200, height = 800)
-                plot(al)
-                dev.off()
-                gcs_put_safe(pred_local, file.path(gcs_prefix, pred_key))
-            },
-            silent = TRUE
-        )
-        pred_plot_rows[[length(pred_plot_rows) + 1]] <- data.frame(
+        if (!is.finite(total_budget) || total_budget <= 0) {
+            proj_rows[[i]] <- data.frame(
+                month = format(m, "%Y-%m"),
+                start = as.Date(m),
+                end = as.Date((m %m+% months(1)) - days(1)),
+                days = days_in_m,
+                budget = 0,
+                baseline = round(base_daily * days_in_m, 2),
+                incremental = 0,
+                forecast_total = round(base_daily * days_in_m, 2),
+                stringsAsFactors = FALSE
+            )
+            next
+        }
+
+        shares <- monthly_per_channel / total_budget
+        bands <- make_share_bands(shares, tol = SHARE_TOL)
+
+        al <- try(robyn_allocator(
+            InputCollect = InputCollect,
+            OutputCollect = OutputCollect,
+            select_model = best_id,
+            date_range = c(alloc_start, alloc_end),
+            expected_spend = total_budget,
+            scenario = "max_historical_response",
+            channel_constr_low = as.numeric(bands$low),
+            channel_constr_up = as.numeric(bands$up),
+            export = TRUE
+        ), silent = TRUE)
+
+        al_tbl <- if (!inherits(al, "try-error")) al$result_allocator else NULL
+        incr <- get_allocator_total_response(al_tbl)
+
+        if (!inherits(al, "try-error")) {
+            pred_fname <- sprintf("allocator_pred_%s.png", format(m, "%Y-%m"))
+            pred_local <- file.path(pred_alloc_dir, pred_fname)
+            pred_key <- file.path(paste0("allocator_pred_plots_", timestamp), pred_fname)
+            try(
+                {
+                    png(pred_local, width = 1200, height = 800)
+                    plot(al)
+                    dev.off()
+                    gcs_put_safe(pred_local, file.path(gcs_prefix, pred_key))
+                },
+                silent = TRUE
+            )
+
+            pred_plot_rows[[length(pred_plot_rows) + 1]] <- data.frame(
+                month = format(m, "%Y-%m"),
+                image_key = pred_key,
+                image_gs = sprintf("gs://%s/%s/%s", googleCloudStorageR::gcs_get_global_bucket(), gcs_prefix, pred_key),
+                budget = round(total_budget, 2),
+                baseline = round(base_daily * days_in_m, 2),
+                incremental = round(incr %||% 0, 2),
+                forecast_total = round(base_daily * days_in_m + (incr %||% 0), 2),
+                stringsAsFactors = FALSE
+            )
+        }
+
+        proj_rows[[i]] <- data.frame(
             month = format(m, "%Y-%m"),
-            image_key = pred_key,
-            image_gs = sprintf("gs://%s/%s/%s", googleCloudStorageR::gcs_get_global_bucket(), gcs_prefix, pred_key),
+            start = as.Date(m),
+            end = as.Date((m %m+% months(1)) - days(1)),
+            days = days_in_m,
             budget = round(total_budget, 2),
             baseline = round(base_daily * days_in_m, 2),
             incremental = round(incr %||% 0, 2),
@@ -1647,38 +1748,31 @@ for (i in seq_along(months_vec)) {
         )
     }
 
-    proj_rows[[i]] <- data.frame(
-        month = format(m, "%Y-%m"),
-        start = as.Date(m),
-        end = as.Date((m %m+% months(1)) - days(1)),
-        days = days_in_m,
-        budget = round(total_budget, 2),
-        baseline = round(base_daily * days_in_m, 2),
-        incremental = round(incr %||% 0, 2),
-        forecast_total = round(base_daily * days_in_m + (incr %||% 0), 2),
-        stringsAsFactors = FALSE
-    )
-}
-proj <- if (length(proj_rows)) {
-    dplyr::bind_rows(proj_rows)
-} else {
-    data.frame(
-        month = character(), start = as.Date(character()), end = as.Date(character()),
-        days = integer(), budget = double(), baseline = double(), incremental = double(), forecast_total = double()
-    )
+    if (length(pred_plot_rows)) {
+        pred_idx <- dplyr::bind_rows(pred_plot_rows)
+        pred_idx_csv <- file.path(dir_path, "forecast_allocator_index.csv")
+        safe_write_csv(pred_idx, pred_idx_csv)
+        gcs_put_safe(pred_idx_csv, file.path(gcs_prefix, "forecast_allocator_index.csv"))
+    }
+
+    proj <- if (length(proj_rows)) {
+        dplyr::bind_rows(proj_rows)
+    } else {
+        data.frame(
+            month = character(), start = as.Date(character()), end = as.Date(character()),
+            days = integer(), budget = double(), baseline = double(), incremental = double(), forecast_total = double()
+        )
+    }
+
+    forecast_csv <- file.path(dir_path, "forecast_next3m.csv")
+    safe_write_csv(proj, forecast_csv)
+    gcs_put_safe(forecast_csv, file.path(gcs_prefix, "forecast_next3m.csv"))
+    logf("Forecast  | wrote monthly projections: ", forecast_csv)
 }
 
-if (length(pred_plot_rows)) {
-    pred_idx <- dplyr::bind_rows(pred_plot_rows)
-    pred_idx_csv <- file.path(dir_path, "forecast_allocator_index.csv")
-    safe_write_csv(pred_idx, pred_idx_csv)
-    gcs_put_safe(pred_idx_csv, file.path(gcs_prefix, "forecast_allocator_index.csv"))
-}
-forecast_csv <- file.path(dir_path, "forecast_next3m.csv")
-safe_write_csv(proj, forecast_csv)
-gcs_put_safe(forecast_csv, file.path(gcs_prefix, "forecast_next3m.csv"))
-logf("Forecast  | wrote monthly projections: ", forecast_csv)
 push_log()
+## ---------- END SMART 3-month forecast ----------
+
 
 ## ---------- Mirror local dir ----------
 for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
