@@ -876,9 +876,12 @@ used <- unique(c(
   "IS_WEEKEND", "TV_IS_ON", "ORGANIC_TRAFFIC"
 ))
 
-chk <- within(df[intersect(used, names(df))], {
-  across(where(is.numeric), ~ replace(., !is.finite(.), NA_real_))
-})
+chk <- df %>%
+  dplyr::select(any_of(used)) %>%
+  dplyr::mutate(
+    dplyr::across(where(is.numeric), ~ replace(., !is.finite(.), NA_real_))
+  )
+
 colSums(!is.finite(as.matrix(chk[sapply(chk, is.numeric)])), na.rm = FALSE)
 
 win <- df %>% filter(date >= as.Date("2024-01-01"), date <= max(date))
