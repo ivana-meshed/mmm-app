@@ -471,9 +471,10 @@ logf("Stage     | Auth & early bucket")
 ensure_gcs_auth()
 early_bucket <- ensure_bucket()
 
-revision <- "unknown"
-country <- "xx"
-timestamp <- format(Sys.time(), "%m%d_%H%M%S")
+## Update identifiers/paths
+country <- cfg$country
+revision <- cfg$revision
+timestamp <- cfg$timestamp %||% timestamp
 dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
 gcs_prefix <- file.path("robyn", revision, country, timestamp)
@@ -547,13 +548,6 @@ tmp_cfg <- tempfile(fileext = ".json")
 gcs_download(cfg_path, tmp_cfg)
 cfg <- jsonlite::fromJSON(tmp_cfg)
 
-## Update identifiers/paths
-country <- cfg$country
-revision <- cfg$revision
-timestamp <- cfg$timestamp %||% timestamp
-dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
-dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
-gcs_prefix <- file.path("robyn", revision, country, timestamp)
 
 ## Switch bucket if cfg says so
 if (!is.null(cfg$gcs_bucket) && nzchar(cfg$gcs_bucket) && cfg$gcs_bucket != googleCloudStorageR::gcs_get_global_bucket()) {
