@@ -46,7 +46,14 @@ suppressPackageStartupMessages({
 
 
 
+# Aggressive font neutralization
+for (opt in c("robyn.plot.font", "robyn.plot.font.family", "robyn_font_family")) {
+    options(setNames(list(NULL), opt))
+}
 
+# Force cairo graphics
+options(bitmapType = "cairo")
+grDevices::X11.options(type = "cairo")
 
 
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
@@ -904,7 +911,7 @@ fix_font_opts <- function() {
     }
 }
 
-fix_font_opts()
+# fix_font_opts()
 
 
 
