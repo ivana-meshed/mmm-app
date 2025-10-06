@@ -108,8 +108,8 @@ RUN R -q -e "options(Ncpus=8); \
     upgrade='never', dependencies=c('Depends','Imports')); \
     # Verify installation \
     library(Robyn); \
-    cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')" \
-    echo (as.character(utils::packageVersion('Robyn')))
+    cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')"
+
 # Set up training environment
 WORKDIR /app
 COPY r/run_all.R /app/run_all.R
