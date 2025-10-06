@@ -961,38 +961,115 @@ inp_err <- NULL
 capture_msgs <- character()
 capture_warn <- character()
 
+## --- Build a single arg list so we can both log and call do.call() ---
+ri_args <- list(
+    dt_input = df_for_robyn,
+    date_var = "date",
+    dep_var = dep_var,
+    dep_var_type = "revenue",
+    adstock = adstock,
+    prophet_vars = NULL,
+    paid_media_spends = paid_media_spends,
+    paid_media_vars = paid_media_vars,
+    context_vars = context_vars,
+    # factor_vars    = context_vars,   # (intentionally off)
+    organic_vars = organic_vars,
+    window_start = min(df_for_robyn$date),
+    window_end = max(df_for_robyn$date),
+    hyperparameters = hyperparameters
+)
+
+## --- Log a compact, human-friendly snapshot to console.log ---
+logf("robyn_inputs() | ARG SNAPSHOT ↓")
+
+# dt_input summary
+dx <- ri_args$dt_input
+logf("  dt_input: nrow=", nrow(dx), " ncol=", ncol(dx))
+logf("  dt_input: columns = ", paste(names(dx), collapse = ", "))
+logf("  dt_input: date range = ", as.character(min(dx$date, na.rm = TRUE)), " → ", as.character(max(dx$date, na.rm = TRUE)))
+
+# Dep var + drivers/context/organic
+logf("  dep_var = ", ri_args$dep_var, " (type=", class(dx[[ri_args$dep_var]])[1], ")")
+logf("  paid_media_spends = ", paste(ri_args$paid_media_spends, collapse = ", "))
+logf("  paid_media_vars   = ", paste(ri_args$paid_media_vars, collapse = ", "))
+logf("  context_vars      = ", paste(ri_args$context_vars, collapse = ", "))
+logf("  organic_vars      = ", paste(ri_args$organic_vars, collapse = ", "))
+
+# Quick numeric sanity: flag non-numerics among used cols (except date)
+used_cols <- unique(c(
+    "date", ri_args$dep_var, ri_args$paid_media_spends, ri_args$paid_media_vars,
+    ri_args$context_vars, ri_args$organic_vars
+))
+used_cols <- intersect(used_cols, names(dx))
+non_num <- setdiff(used_cols[!vapply(dx[used_cols], is.numeric, logical(1))], "date")
+if (length(non_num)) {
+    logf("  ⚠ Non-numeric columns among used features: ", paste(non_num, collapse = ", "))
+}
+
+# Show a tiny head of dt_input for sanity
+utils::capture.output(print(utils::head(dx[, used_cols, drop = FALSE], 5))) |>
+    paste(collapse = "\n") |>
+    logf()
+
+# Hyperparameters overview
+hp_names <- sort(names(ri_args$hyperparameters))
+logf("  hyperparameters keys (", length(hp_names), "): ", paste(hp_names, collapse = ", "))
+if ("train_size" %in% hp_names) {
+    logf("  hyperparameters$train_size = ", paste(ri_args$hyperparameters$train_size, collapse = ","))
+}
+
+## --- Now run robyn_inputs(), capturing messages/warnings, and echoing errors to console ---
+inp_err <- NULL
+capture_msgs <- character()
+capture_warn <- character()
+
 InputCollect <- withCallingHandlers(
     tryCatch(
-        robyn_inputs(
-            dt_input = df_for_robyn,
-            date_var = "date",
-            dep_var = dep_var,
-            dep_var_type = "revenue",
-            adstock = adstock,
-            prophet_vars = NULL,
-            paid_media_spends = paid_media_spends,
-            paid_media_vars = paid_media_vars,
-            context_vars = context_vars,
-            # factor_vars = context_vars,
-            organic_vars = organic_vars,
-            window_start = min(df_for_robyn$date),
-            window_end = max(df_for_robyn$date),
-            hyperparameters = hyperparameters
-        ),
+        {
+            do.call(robyn_inputs, ri_args)
+        },
         error = function(e) {
             inp_err <<- conditionMessage(e)
-            return(NULL) # do NOT stop here; we want to write diags first, then stop
+
+            # Log the error and backtrace to the console log
+            logf("robyn_inputs() | ERROR: ", inp_err)
+
+            # rlang backtrace (if available)
+            bt <- try(utils::capture.output(rlang::last_trace()), silent = TRUE)
+            if (!inherits(bt, "try-error")) {
+                logf("robyn_inputs() | RLANG LAST TRACE ↓")
+                logf(paste(bt, collapse = "\n"))
+            } else {
+                # Base traceback as fallback
+                tb <- try(utils::capture.output(traceback(max.lines = 50L)), silent = TRUE)
+                if (!inherits(tb, "try-error")) {
+                    logf("robyn_inputs() | BASE TRACEBACK ↓")
+                    logf(paste(tb, collapse = "\n"))
+                }
+            }
+
+            return(NULL) # don't throw here; let caller decide after logging
         }
     ),
     message = function(m) {
-        capture_msgs <<- c(capture_msgs, conditionMessage(m))
+        msg <- conditionMessage(m)
+        capture_msgs <<- c(capture_msgs, msg)
+        logf("robyn_inputs() | message: ", msg)
         invokeRestart("muffleMessage")
     },
     warning = function(w) {
-        capture_warn <<- c(capture_warn, conditionMessage(w))
+        warn <- conditionMessage(w)
+        capture_warn <<- c(capture_warn, warn)
+        logf("robyn_inputs() | warning: ", warn)
         invokeRestart("muffleWarning")
     }
 )
+
+## (Optional) If you want to hard-stop immediately when inp_err exists, do it explicitly:
+if (is.null(InputCollect)) {
+    stop("robyn_inputs() failed: ", inp_err %||% "<no message>")
+}
+
 
 logf(
     "Post-inputs | spend sums: ",
