@@ -44,35 +44,7 @@ suppressPackageStartupMessages({
     library(systemfonts)
 })
 
-# Register a safe fallback under the family name Robyn expects
-try(
-    {
-        sf <- systemfonts::system_fonts()
-        # pick a widely present sans font as a fallback
-        # prefer DejaVu Sans / Liberation Sans / Arial if present
-        cand <- sf$path[grep("DejaVuSans|LiberationSans|Arial\\.(ttf|otf)$",
-            sf$path,
-            ignore.case = TRUE
-        )]
-        fallback <- if (length(cand)) cand[1] else sf$path[1]
 
-        systemfonts::register_font(
-            name = "Arial Narrow",
-            plain = fallback,
-            bold = fallback,
-            italic = fallback,
-            bolditalic = fallback
-        )
-    },
-    silent = TRUE
-)
-
-# (optional) align options with the now-registered family
-options(
-    robyn.plot.font        = "Arial Narrow",
-    robyn.plot.font.family = "Arial Narrow",
-    robyn_font_family      = "Arial Narrow"
-)
 
 
 
@@ -907,16 +879,28 @@ capture_warn <- character()
 # ---- HARDEN FONT OPTIONS BEFORE robyn_inputs() ----
 fix_font_opts <- function() {
     # Always set Robyn font options to a plain character, never NULL/TRUE/FALSE
+    # Force all font-related options to NULL (safest approach)
     options(
-        robyn.plot.font        = "",
-        robyn.plot.font.family = "",
-        robyn_font_family      = ""
+        robyn.plot.font        = NULL,
+        robyn.plot.font.family = NULL,
+        robyn_font_family      = NULL
     )
+
+    # Also reset ggplot2 defaults to use NULL for fonts
     if (requireNamespace("ggplot2", quietly = TRUE)) {
         ggplot2::theme_set(ggplot2::theme_gray(base_family = ""))
-        # Make sure any later element_text calls see a character family
-        try(ggplot2::theme_update(text = ggplot2::element_text(family = "")), silent = TRUE)
-        try(ggplot2::update_geom_defaults("text", list(family = "")), silent = TRUE)
+        try(
+            {
+                ggplot2::theme_update(
+                    text = ggplot2::element_text(family = NULL),
+                    plot.title = ggplot2::element_text(family = NULL),
+                    axis.text = ggplot2::element_text(family = NULL),
+                    axis.title = ggplot2::element_text(family = NULL)
+                )
+            },
+            silent = TRUE
+        )
+        try(ggplot2::update_geom_defaults("text", list(family = NULL)), silent = TRUE)
     }
 }
 
