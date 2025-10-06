@@ -71,6 +71,15 @@ print("pyarrow:", pyarrow.__version__)
 print("joblib:", joblib.__version__)
 PY
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-liberation fonts-dejavu fonts-dejavu-extra \
+    fontconfig \
+    && fc-cache -fv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN echo 'options(bitmapType="cairo")' >> /usr/local/lib/R/etc/Rprofile.site && \
+    echo 'Sys.setenv(R_GSCMD="/usr/bin/gs")' >> /usr/local/lib/R/etc/Rprofile.site
+
 # R packages optimized for parallel processing
 RUN R -q -e "options(Ncpus=8); \
     repos <- c(CRAN='https://cloud.r-project.org'); \
@@ -99,8 +108,8 @@ RUN R -q -e "options(Ncpus=8); \
     upgrade='never', dependencies=c('Depends','Imports')); \
     # Verify installation \
     library(Robyn); \
-    cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')"
-
+    cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')" \
+    echo (as.character(utils::packageVersion('Robyn')))
 # Set up training environment
 WORKDIR /app
 COPY r/run_all.R /app/run_all.R
