@@ -908,15 +908,15 @@ capture_warn <- character()
 fix_font_opts <- function() {
     # Always set Robyn font options to a plain character, never NULL/TRUE/FALSE
     options(
-        robyn.plot.font        = "sans",
-        robyn.plot.font.family = "sans",
-        robyn_font_family      = "sans"
+        robyn.plot.font        = "",
+        robyn.plot.font.family = "",
+        robyn_font_family      = ""
     )
     if (requireNamespace("ggplot2", quietly = TRUE)) {
-        ggplot2::theme_set(ggplot2::theme_gray(base_family = "sans"))
+        ggplot2::theme_set(ggplot2::theme_gray(base_family = ""))
         # Make sure any later element_text calls see a character family
-        try(ggplot2::theme_update(text = ggplot2::element_text(family = "sans")), silent = TRUE)
-        try(ggplot2::update_geom_defaults("text", list(family = "sans")), silent = TRUE)
+        try(ggplot2::theme_update(text = ggplot2::element_text(family = "")), silent = TRUE)
+        try(ggplot2::update_geom_defaults("text", list(family = "")), silent = TRUE)
     }
 }
 
