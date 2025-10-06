@@ -906,25 +906,23 @@ capture_warn <- character()
 
 # ---- HARDEN FONT OPTIONS BEFORE robyn_inputs() ----
 fix_font_opts <- function() {
-    # set to NULL (let ggplot decide) or a plain character like "sans"
-    coerce <- function(x) if (is.logical(x) || (length(x) && !is.character(x))) "sans" else x
-    opts <- options()
+    # Always set Robyn font options to a plain character, never NULL/TRUE/FALSE
     options(
-        "robyn.plot.font"        = coerce(opts[["robyn.plot.font"]]),
-        "robyn.plot.font.family" = coerce(opts[["robyn.plot.font.family"]]),
-        "robyn_font_family"      = coerce(opts[["robyn_font_family"]])
+        robyn.plot.font        = "sans",
+        robyn.plot.font.family = "sans",
+        robyn_font_family      = "sans"
     )
-    # safest of all: make them NULL so Robyn/ggplot won’t try to be clever
-    options("robyn.plot.font" = NULL, "robyn.plot.font.family" = NULL, "robyn_font_family" = NULL)
+    if (requireNamespace("ggplot2", quietly = TRUE)) {
+        ggplot2::theme_set(ggplot2::theme_gray(base_family = "sans"))
+        # Make sure any later element_text calls see a character family
+        try(ggplot2::theme_update(text = ggplot2::element_text(family = "sans")), silent = TRUE)
+        try(ggplot2::update_geom_defaults("text", list(family = "sans")), silent = TRUE)
+    }
 }
+
 fix_font_opts()
 
-# Also make ggplot default theme neutral
-if (requireNamespace("ggplot2", quietly = TRUE)) {
-    ggplot2::theme_set(ggplot2::theme_gray(base_family = NULL))
-    try(ggplot2::theme_update(text = ggplot2::element_text(family = NULL)), silent = TRUE)
-    try(ggplot2::update_geom_defaults("text", list(family = NULL)), silent = TRUE)
-}
+
 
 InputCollect <- withCallingHandlers(
     tryCatch(
