@@ -40,20 +40,40 @@ suppressPackageStartupMessages({
     library(tibble)
 })
 
+suppressPackageStartupMessages({
+    library(systemfonts)
+})
 
-## ---- Neutralize Robyn/plot font settings (must be character, not logical)
-## --- Force safe font config for Robyn + ggplot2 ---
-# Make sure Robyn options are character or NULL (never logical)
-options(
-    robyn.plot.font        = "sans",
-    robyn.plot.font.family = "sans",
-    robyn_font_family      = "sans"
+# Register a safe fallback under the family name Robyn expects
+try(
+    {
+        sf <- systemfonts::system_fonts()
+        # pick a widely present sans font as a fallback
+        # prefer DejaVu Sans / Liberation Sans / Arial if present
+        cand <- sf$path[grep("DejaVuSans|LiberationSans|Arial\\.(ttf|otf)$",
+            sf$path,
+            ignore.case = TRUE
+        )]
+        fallback <- if (length(cand)) cand[1] else sf$path[1]
+
+        systemfonts::register_font(
+            name = "Arial Narrow",
+            plain = fallback,
+            bold = fallback,
+            italic = fallback,
+            bolditalic = fallback
+        )
+    },
+    silent = TRUE
 )
-if (requireNamespace("ggplot2", quietly = TRUE)) {
-    ggplot2::theme_set(ggplot2::theme_gray(base_family = "sans"))
-    try(ggplot2::theme_update(text = ggplot2::element_text(family = "sans")), silent = TRUE)
-    try(ggplot2::update_geom_defaults("text", list(family = "sans")), silent = TRUE)
-}
+
+# (optional) align options with the now-registered family
+options(
+    robyn.plot.font        = "Arial Narrow",
+    robyn.plot.font.family = "Arial Narrow",
+    robyn_font_family      = "Arial Narrow"
+)
+
 
 
 
