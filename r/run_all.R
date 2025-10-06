@@ -881,9 +881,9 @@ fix_font_opts <- function() {
     # Always set Robyn font options to a plain character, never NULL/TRUE/FALSE
     # Force all font-related options to NULL (safest approach)
     options(
-        robyn.plot.font        = NULL,
-        robyn.plot.font.family = NULL,
-        robyn_font_family      = NULL
+        robyn.plot.font        = "",
+        robyn.plot.font.family = "",
+        robyn_font_family      = ""
     )
 
     # Also reset ggplot2 defaults to use NULL for fonts
@@ -892,15 +892,15 @@ fix_font_opts <- function() {
         try(
             {
                 ggplot2::theme_update(
-                    text = ggplot2::element_text(family = NULL),
-                    plot.title = ggplot2::element_text(family = NULL),
-                    axis.text = ggplot2::element_text(family = NULL),
-                    axis.title = ggplot2::element_text(family = NULL)
+                    text = ggplot2::element_text(family = ""),
+                    plot.title = ggplot2::element_text(family = ""),
+                    axis.text = ggplot2::element_text(family = ""),
+                    axis.title = ggplot2::element_text(family = "")
                 )
             },
             silent = TRUE
         )
-        try(ggplot2::update_geom_defaults("text", list(family = NULL)), silent = TRUE)
+        try(ggplot2::update_geom_defaults("text", list(family = "")), silent = TRUE)
     }
 }
 
