@@ -73,12 +73,16 @@ PY
 # ----- REAL ARIAL NARROW TTFs (no aliasing) -----
 # Copy proprietary Arial Narrow fonts you provide into the image
 # Expected files (names can vary): ARIALN.TTF, ARIALNB.TTF, ARIALNI.TTF, ARIALNBI.TTF
-COPY fonts/arial-narrow/*.ttf /usr/local/share/fonts/truetype/arial-narrow/
+# Copy proprietary Arial Narrow fonts into the image
+RUN mkdir -p /usr/local/share/fonts/truetype/arial-narrow
+COPY fonts/*.ttf /usr/local/share/fonts/truetype/arial-narrow/
 
-# Rebuild font cache and verify presence
-RUN fc-cache -f -v \
-    && echo "fc-match(Arial Narrow):" && fc-match "Arial Narrow" || true \
-    && echo "fc-list grep(Arial Narrow):" && fc-list | grep -i "Arial Narrow" || true
+# Verify and cache
+RUN set -eux; \
+    ls -l /usr/local/share/fonts/truetype/arial-narrow; \
+    fc-cache -f -v; \
+    echo "fc-match(Arial Narrow):"; fc-match "Arial Narrow" || true; \
+    echo "fc-list grep(Arial Narrow):"; fc-list | grep -i "Arial Narrow" || true
 
 # NOTE: We do NOT install ttf-mscorefonts-installer here; not needed for Arial Narrow if we copy TTFs.
 
