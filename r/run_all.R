@@ -118,6 +118,27 @@ log_head <- function(df, n = 5) {
         paste(collapse = "\n") |>
         logf()
 }
+logf("Fonts | listing arial-narrow dir…")
+try(logf(paste(system("ls -l /usr/local/share/fonts/truetype/arial-narrow", intern = TRUE), collapse = "\n")), silent = TRUE)
+
+logf("Fonts | fc-cache…")
+try(system("fc-cache -f -v", intern = TRUE), silent = TRUE)
+
+logf("Fonts | fc-match 'Arial Narrow' →")
+try(logf(paste(system("fc-match 'Arial Narrow'", intern = TRUE), collapse = "\n")), silent = TRUE)
+
+logf("Fonts | fc-list grep 'Arial Narrow' →")
+try(logf(paste(system("fc-list | grep -i 'Arial Narrow'", intern = TRUE), collapse = "\n")), silent = TRUE)
+
+logf("Fonts | systemfonts::match_font →")
+try(
+    {
+        library(systemfonts)
+        mf <- match_font("Arial Narrow")
+        logf(paste(capture.output(str(mf)), collapse = "\n"))
+    },
+    silent = TRUE
+)
 
 ## ---------- GCS AUTH & BUCKET (set BEFORE any upload) ----------
 options(googleAuthR.scopes.selected = "https://www.googleapis.com/auth/devstorage.read_write")
