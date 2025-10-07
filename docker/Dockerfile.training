@@ -1,5 +1,4 @@
 # Training-optimized Dockerfile for Cloud Run Jobs
-# Training-optimized Dockerfile for Cloud Run Jobs
 FROM rocker/r-ver:4.3.1
 
 # Never prompt during apt operations
@@ -7,7 +6,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-venv python3-dev\
+    python3 python3-pip python3-venv python3-dev \
     libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev libicu-dev \
     libfontconfig1-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev \
     libpng-dev libtiff5-dev libjpeg-dev \
@@ -15,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git curl \
     # NEW: Add performance libraries
     libopenblas-dev libomp-dev htop \
+    # Fonts (keep general families for fallbacks)
+    fontconfig fonts-liberation fonts-liberation2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Perf env (OpenBLAS/OMP)
@@ -27,7 +28,6 @@ ENV OMP_NUM_THREADS=8 \
     RETICULATE_PYTHON=/usr/bin/python3 \
     RETICULATE_AUTOCONFIGURE=0 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
-
 
 # Configure system for maximum performance on Cloud Run Jobs (8 cores)
 RUN echo 'export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}' >> /etc/environment && \
@@ -59,7 +59,6 @@ ENV RETICULATE_PYTHON=/usr/bin/python3
 ENV RETICULATE_AUTOCONFIGURE=0
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
-
 # Verify Python setup
 RUN python3 - <<'PY'
 import sys, nevergrad, numpy, scipy, pyarrow, joblib
@@ -71,35 +70,33 @@ print("pyarrow:", pyarrow.__version__)
 print("joblib:", joblib.__version__)
 PY
 
-# Add to Dockerfile before R packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    fonts-liberation fonts-liberation2 \
-    ttf-mscorefonts-installer \
-    fontconfig \
-    && fc-cache -fv \
-    && rm -rf /var/lib/apt/lists/*
+# ----- REAL ARIAL NARROW TTFs (no aliasing) -----
+# Copy proprietary Arial Narrow fonts you provide into the image
+# Expected files (names can vary): ARIALN.TTF, ARIALNB.TTF, ARIALNI.TTF, ARIALNBI.TTF
+COPY fonts/arial-narrow/*.ttf /usr/local/share/fonts/truetype/arial-narrow/
 
-# Accept EULA for MS fonts
-RUN echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
+# Rebuild font cache and verify presence
+RUN fc-cache -f -v \
+    && echo "fc-match(Arial Narrow):" && fc-match "Arial Narrow" || true \
+    && echo "fc-list grep(Arial Narrow):" && fc-list | grep -i "Arial Narrow" || true
 
+# NOTE: We do NOT install ttf-mscorefonts-installer here; not needed for Arial Narrow if we copy TTFs.
+
+# R graphics defaults
 RUN echo 'options(bitmapType="cairo")' >> /usr/local/lib/R/etc/Rprofile.site && \
     echo 'Sys.setenv(R_GSCMD="/usr/bin/gs")' >> /usr/local/lib/R/etc/Rprofile.site
 
 # R packages optimized for parallel processing
 RUN R -q -e "options(Ncpus=8); \
     repos <- c(CRAN='https://cloud.r-project.org'); \
-    # Core packages \
     install.packages(c('jsonlite','dplyr','tidyr','lubridate','readr','stringr', \
     'googleCloudStorageR','mime','reticulate','remotes','prophet'), repos=repos); \
-    # Performance packages \
     install.packages(c('arrow','future','future.apply','parallel','foreach','doParallel', \
     'data.table','dtplyr','furrr','RcppParallel'), repos=repos); \
-    # Graphics (minimal for headless) \
-    install.packages(c('ggplot2','gridExtra'), repos=repos)"
+    install.packages(c('ggplot2','gridExtra','systemfonts'), repos=repos)"
 
 # Install nloptr from source for better optimization
-RUN R -q -e "options(Ncpus=8); \
-    install.packages('nloptr', repos='https://cloud.r-project.org', type='source')"
+RUN R -q -e "options(Ncpus=8); install.packages('nloptr', repos='https://cloud.r-project.org', type='source')"
 
 # Install patchwork with correct version
 RUN R -q -e "options(Ncpus=8); \
@@ -111,7 +108,6 @@ RUN R -q -e "options(Ncpus=8); \
 RUN R -q -e "options(Ncpus=8); \
     remotes::install_github('facebookexperimental/Robyn', subdir='R', \
     upgrade='never', dependencies=c('Depends','Imports')); \
-    # Verify installation \
     library(Robyn); \
     cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')"
 
