@@ -883,6 +883,7 @@ inp_err <- NULL
 capture_msgs <- character()
 capture_warn <- character()
 
+
 # ---- HARDEN FONT OPTIONS BEFORE robyn_inputs() ----
 fix_font_opts <- function() {
     # Always set Robyn font options to a plain character, never NULL/TRUE/FALSE
