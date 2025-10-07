@@ -42,66 +42,50 @@ suppressPackageStartupMessages({
 
 suppressPackageStartupMessages({
     library(systemfonts)
+    library(ggplot2)
 })
 
+suppressPackageStartupMessages({
+    library(systemfonts)
+    library(ggplot2)
+})
 
-
-# Aggressive font neutralization
-for (opt in c("robyn.plot.font", "robyn.plot.font.family", "robyn_font_family")) {
-    options(setNames(list(NULL), opt))
+pick_font <- function() {
+    info <- try(systemfonts::match_font("Arial Narrow"), silent = TRUE)
+    if (!inherits(info, "try-error") && is.list(info) && !is.null(info$path) && nzchar(info$path)) {
+        return("Arial Narrow")
+    }
+    "" # fallback to device default if something’s off
 }
+
+robyn_family <- pick_font()
+
+# Make ggplot honor the base family everywhere
+ggplot2::theme_set(ggplot2::theme_gray(base_family = robyn_family))
+try(
+    ggplot2::theme_update(
+        text = ggplot2::element_text(family = robyn_family),
+        plot.title = ggplot2::element_text(family = robyn_family),
+        axis.text = ggplot2::element_text(family = robyn_family),
+        axis.title = ggplot2::element_text(family = robyn_family),
+        legend.text = ggplot2::element_text(family = robyn_family),
+        legend.title = ggplot2::element_text(family = robyn_family),
+        strip.text = ggplot2::element_text(family = robyn_family)
+    ),
+    silent = TRUE
+)
+
+# Let Robyn/plots inherit the family
+options(
+    robyn.plot.font        = robyn_family,
+    robyn.plot.font.family = robyn_family,
+    robyn_font_family      = robyn_family,
+    bitmapType             = "cairo"
+)
 
 # Force cairo graphics
 options(bitmapType = "cairo")
 grDevices::X11.options(type = "cairo")
-
-suppressPackageStartupMessages({
-    library(jsonlite)
-    library(dplyr)
-    library(tidyr)
-    library(lubridate)
-    library(readr)
-    library(stringr)
-    library(googleCloudStorageR)
-    library(mime)
-    library(reticulate)
-    library(arrow)
-    library(future)
-    library(future.apply)
-    library(parallel)
-    library(tidyselect)
-    library(tibble)
-})
-
-# CRITICAL: Wrap element_text to sanitize family parameter BEFORE loading Robyn
-library(ggplot2)
-original_element_text <- ggplot2::element_text
-
-safe_element_text <- function(family = NULL, face = NULL, colour = NULL,
-                              size = NULL, hjust = NULL, vjust = NULL,
-                              angle = NULL, lineheight = NULL, color = NULL,
-                              margin = NULL, debug = NULL, inherit.blank = FALSE) {
-    # Force family to NULL if it's logical or invalid
-    if (is.logical(family) || (!is.null(family) && !is.character(family))) {
-        family <- NULL
-    }
-    # Also sanitize if it's a character but problematic
-    if (is.character(family) && length(family) > 0) {
-        if (family %in% c("Arial Narrow", "ArialNarrow")) {
-            family <- "sans"
-        }
-    }
-
-    original_element_text(
-        family = family, face = face, colour = colour,
-        size = size, hjust = hjust, vjust = vjust,
-        angle = angle, lineheight = lineheight, color = color,
-        margin = margin, debug = debug, inherit.blank = inherit.blank
-    )
-}
-
-# Replace element_text in ggplot2 namespace
-# assignInNamespace("element_text", safe_element_text, ns = "ggplot2")
 
 # NOW load Robyn
 library(Robyn)
