@@ -71,11 +71,16 @@ print("pyarrow:", pyarrow.__version__)
 print("joblib:", joblib.__version__)
 PY
 
+# Add to Dockerfile before R packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    fonts-liberation fonts-dejavu fonts-dejavu-extra \
+    fonts-liberation fonts-liberation2 \
+    ttf-mscorefonts-installer \
     fontconfig \
     && fc-cache -fv \
     && rm -rf /var/lib/apt/lists/*
+
+# Accept EULA for MS fonts
+RUN echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
 
 RUN echo 'options(bitmapType="cairo")' >> /usr/local/lib/R/etc/Rprofile.site && \
     echo 'Sys.setenv(R_GSCMD="/usr/bin/gs")' >> /usr/local/lib/R/etc/Rprofile.site
