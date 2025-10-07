@@ -45,7 +45,9 @@ suppressPackageStartupMessages({
     library(ggplot2)
 })
 
-
+`%||%` <- function(a, b) {
+    if (is.null(a) || length(a) == 0 || (is.character(a) && length(a) == 1 && !nzchar(a)) || all(is.na(a))) b else a
+}
 # ----- Register Arial Narrow explicitly (safe if files exist; harmless otherwise) -----
 try(
     {
@@ -129,9 +131,7 @@ HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
 plan(multisession, workers = max_cores)
 
-`%||%` <- function(a, b) {
-    if (is.null(a) || length(a) == 0 || (is.character(a) && length(a) == 1 && !nzchar(a)) || all(is.na(a))) b else a
-}
+
 to_scalar <- function(x) {
     x <- suppressWarnings(as.numeric(x))
     if (!length(x)) {
