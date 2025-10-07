@@ -75,7 +75,7 @@ PY
 # Expected files (names can vary): ARIALN.TTF, ARIALNB.TTF, ARIALNI.TTF, ARIALNBI.TTF
 # Copy proprietary Arial Narrow fonts into the image
 RUN mkdir -p /usr/local/share/fonts/truetype/arial-narrow
-COPY r/fonts/*.ttf /usr/local/share/fonts/truetype/arial-narrow/
+COPY docker/fonts/*.ttf /usr/local/share/fonts/truetype/arial-narrow/
 
 # Verify and cache
 RUN set -eux; \
