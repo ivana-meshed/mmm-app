@@ -45,10 +45,45 @@ suppressPackageStartupMessages({
     library(ggplot2)
 })
 
-suppressPackageStartupMessages({
-    library(systemfonts)
-    library(ggplot2)
-})
+
+# ----- Register Arial Narrow explicitly (safe if files exist; harmless otherwise) -----
+try(
+    {
+        font_dir <- "/usr/local/share/fonts/truetype/arial-narrow"
+        files <- list.files(font_dir, pattern = "[.]ttf$", full.names = TRUE)
+
+        # helpers to find each face by filename (case-insensitive), robust to minor name variants
+        find_face <- function(pat) {
+            hit <- files[grepl(paste0("(?i)", pat, ".*[.]ttf$"), files, perl = TRUE)]
+            if (length(hit)) normalizePath(hit[1], mustWork = FALSE) else ""
+        }
+
+        plain <- find_face("arialn(?!b|i)") # ARIALN.TTF
+        bold <- find_face("arialnb") # ARIALNB.TTF
+        italic <- find_face("arialni") # ARIALNI.TTF
+        bolditalic <- find_face("arialnbi") # ARIALNBI.TTF
+
+        if (nzchar(plain)) {
+            systemfonts::register_font(
+                name        = "Arial Narrow",
+                plain       = plain,
+                bold        = if (nzchar(bold)) bold else NULL,
+                italic      = if (nzchar(italic)) italic else NULL,
+                bolditalic  = if (nzchar(bolditalic)) bolditalic else NULL
+            )
+        }
+    },
+    silent = TRUE
+)
+
+# ----- Now decide what family to use (installed? use it; else fallback to device default) -----
+pick_font <- function() {
+    info <- try(systemfonts::match_fonts("Arial Narrow"), silent = TRUE)
+    if (!inherits(info, "try-error") && is.list(info) && isTRUE(nzchar(info$path))) "Arial Narrow" else ""
+}
+
+robyn_family <- pick_font() # "Arial Narrow" if present, else ""
+
 
 pick_font <- function() {
     info <- try(systemfonts::match_fonts("Arial Narrow"), silent = TRUE)
