@@ -51,29 +51,28 @@ suppressPackageStartupMessages({
 })
 
 pick_font <- function() {
-    info <- try(systemfonts::match_font("Arial Narrow"), silent = TRUE)
+    info <- try(systemfonts::match_fonts("Arial Narrow"), silent = TRUE)
     if (!inherits(info, "try-error") && is.list(info) && !is.null(info$path) && nzchar(info$path)) {
         return("Arial Narrow")
     }
     "" # fallback to device default if something’s off
 }
 
-robyn_family <- pick_font()
-
-# Make ggplot honor the base family everywhere
-ggplot2::theme_set(ggplot2::theme_gray(base_family = robyn_family))
+robyn_family <- pick_font() # will be "" if Arial Narrow isn’t found
+ggplot2::theme_set(ggplot2::theme_gray(base_family = robyn_family %||% ""))
 try(
     ggplot2::theme_update(
-        text = ggplot2::element_text(family = robyn_family),
-        plot.title = ggplot2::element_text(family = robyn_family),
-        axis.text = ggplot2::element_text(family = robyn_family),
-        axis.title = ggplot2::element_text(family = robyn_family),
-        legend.text = ggplot2::element_text(family = robyn_family),
-        legend.title = ggplot2::element_text(family = robyn_family),
-        strip.text = ggplot2::element_text(family = robyn_family)
+        text = ggplot2::element_text(family = robyn_family %||% ""),
+        plot.title = ggplot2::element_text(family = robyn_family %||% ""),
+        axis.text = ggplot2::element_text(family = robyn_family %||% ""),
+        axis.title = ggplot2::element_text(family = robyn_family %||% ""),
+        legend.text = ggplot2::element_text(family = robyn_family %||% ""),
+        legend.title = ggplot2::element_text(family = robyn_family %||% ""),
+        strip.text = ggplot2::element_text(family = robyn_family %||% "")
     ),
     silent = TRUE
 )
+
 
 # Let Robyn/plots inherit the family
 options(
@@ -90,12 +89,6 @@ grDevices::X11.options(type = "cairo")
 # NOW load Robyn
 library(Robyn)
 
-# Set safe defaults
-options(
-    robyn.plot.font = NULL,
-    robyn.plot.font.family = NULL,
-    robyn_font_family = NULL
-)
 
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
