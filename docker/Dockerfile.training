@@ -95,9 +95,9 @@ RUN chmod 644 /usr/local/share/fonts/truetype/arial-narrow/* 2>/dev/null || true
 RUN cat <<'RPROF' >> /usr/local/lib/R/etc/Rprofile.site
 options(
   bitmapType = "cairo",
-  robyn.plot.font = "",
-  robyn.plot.font.family = "",
-  robyn_font_family = ""
+  robyn.plot.font = "sans",
+  robyn.plot.font.family = "sans",
+  robyn_font_family = "sans"
 )
 Sys.setenv(R_GSCMD="/usr/bin/gs")
 RPROF
