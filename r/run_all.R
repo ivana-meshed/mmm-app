@@ -977,52 +977,93 @@ log_ri_snapshot <- function(args) {
     if ("train_size" %in% hp_names) logf("  hyperparameters$train_size = ", paste(args$hyperparameters$train_size, collapse = ","))
 }
 
-log_ri_snapshot(robyn_args)
+# log_ri_snapshot(robyn_args)
 
-call_robyn_inputs <- local({
-    args <- rlang::duplicate(robyn_args, shallow = FALSE) # deep copy
-    force(args) # FORCE the promise now
-    function() do.call(Robyn::robyn_inputs, args)
+## 2) Make the error handler Rscript-safe
+options(error = function() {
+    err <- geterrmessage()
+    message("FATAL ERROR: ", err)
+    try(
+        {
+            writeLines(jsonlite::toJSON(list(
+                state = "FAILED",
+                start_time = as.character(job_started),
+                end_time = as.character(Sys.time()),
+                error = err
+            ), auto_unbox = TRUE), status_json)
+            if (nzchar(gcs_prefix)) gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+            push_log()
+        },
+        silent = TRUE
+    )
+    q("no", status = 1, runLast = FALSE)
 })
+
+## 3) Call robyn_inputs directly (no do.call/closure/promises)
+InputCollect <- NULL
+inp_err <- NULL
+capture_msgs <- character()
+capture_warn <- character()
 
 InputCollect <- withCallingHandlers(
     tryCatch(
-        {
-            call_robyn_inputs
-        },
+        Robyn::robyn_inputs(
+            dt_input          = df_for_robyn,
+            date_var          = "date",
+            dep_var           = dep_var,
+            dep_var_type      = "revenue",
+            adstock           = adstock,
+            prophet_vars      = NULL,
+            paid_media_spends = paid_media_spends,
+            paid_media_vars   = paid_media_vars,
+            context_vars      = context_vars,
+            organic_vars      = organic_vars,
+            window_start      = min(df_for_robyn$date),
+            window_end        = max(df_for_robyn$date),
+            hyperparameters   = hyperparameters
+        ),
         error = function(e) {
             inp_err <<- conditionMessage(e)
-            logf("robyn_inputs() | ERROR: ", inp_err)
-
-            bt <- try(utils::capture.output(rlang::last_trace()), silent = TRUE)
-            if (!inherits(bt, "try-error")) {
-                logf("robyn_inputs() | RLANG LAST TRACE ↓")
-                logf(paste(bt, collapse = "\n"))
-            } else {
-                tb <- try(utils::capture.output(traceback(max.lines = 50L)), silent = TRUE)
-                if (!inherits(tb, "try-error")) {
-                    logf("robyn_inputs() | BASE TRACEBACK ↓")
-                    logf(paste(tb, collapse = "\n"))
-                }
-            }
-            return(NULL)
+            NULL
         }
     ),
     message = function(m) {
         capture_msgs <<- c(capture_msgs, conditionMessage(m))
-        logf("robyn_inputs() | message: ", capture_msgs)
         invokeRestart("muffleMessage")
     },
     warning = function(w) {
         capture_warn <<- c(capture_warn, conditionMessage(w))
-        logf("robyn_inputs() | message: ", capture_warn)
-
         invokeRestart("muffleWarning")
     }
 )
 
+## 4) Guard the post-input logging (prevents the cascade)
+if (!is.null(InputCollect) && is.list(InputCollect) && !is.null(InputCollect$dt_input)) {
+    logf(
+        "Post-inputs | spend sums: ",
+        paste(
+            sprintf(
+                "%s=%.2f",
+                InputCollect$paid_media_spends,
+                sapply(InputCollect$paid_media_spends, function(c) sum(InputCollect$dt_input[[c]], na.rm = TRUE))
+            ),
+            collapse = "; "
+        )
+    )
+}
 
-
+## 5) Early fail if robyn_inputs() failed (as you intended)
+if (is.null(InputCollect) || is.null(InputCollect$dt_input)) {
+    writeLines(jsonlite::toJSON(list(
+        state = "FAILED",
+        start_time = as.character(job_started),
+        end_time = as.character(Sys.time()),
+        error = paste("robyn_inputs() failed:", inp_err %||% "unknown")
+    ), auto_unbox = TRUE), status_json)
+    gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+    push_log()
+    quit(status = 1)
+}
 
 logf(
     "Post-inputs | spend sums: ",
