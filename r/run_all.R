@@ -994,20 +994,21 @@ capture_warn <- character()
 
 ## --- Build a single arg list so we can both log and call do.call() ---
 robyn_args <- list(
-    dt_input          = df_for_robyn,
-    date_var          = "date",
-    dep_var           = dep_var,
-    dep_var_type      = "revenue",
-    adstock           = adstock,
-    prophet_vars      = NULL,
+    dt_input = df_for_robyn,
+    date_var = "date",
+    dep_var = dep_var,
+    dep_var_type = "revenue",
+    adstock = adstock,
+    prophet_vars = prophet_vars_used,
+    prophet_country = toupper(country),
     paid_media_spends = paid_media_spends,
-    paid_media_vars   = paid_media_vars,
-    context_vars      = context_vars,
+    paid_media_vars = paid_media_vars,
+    context_vars = context_vars,
     # factor_vars     = context_vars,   # (intentionally off)
-    organic_vars      = organic_vars,
-    window_start      = min(df_for_robyn$date),
-    window_end        = max(df_for_robyn$date),
-    hyperparameters   = hyperparameters
+    organic_vars = organic_vars,
+    window_start = min(df_for_robyn$date),
+    window_end = max(df_for_robyn$date),
+    hyperparameters = hyperparameters
 )
 
 ## --- Log a compact, human-friendly snapshot to console.log ---
@@ -1069,19 +1070,20 @@ logf(
 InputCollect <- withCallingHandlers(
     tryCatch(
         Robyn::robyn_inputs(
-            dt_input          = df_for_robyn,
-            date_var          = "date",
-            dep_var           = dep_var,
-            dep_var_type      = "revenue",
-            adstock           = adstock,
-            prophet_vars      = NULL,
+            dt_input = df_for_robyn,
+            date_var = "date",
+            dep_var = dep_var,
+            dep_var_type = "revenue",
+            adstock = adstock,
+            prophet_vars = prophet_vars_used,
+            prophet_country = toupper(country),
             paid_media_spends = paid_media_spends,
-            paid_media_vars   = paid_media_vars,
-            context_vars      = context_vars,
-            organic_vars      = organic_vars,
-            window_start      = min(df_for_robyn$date),
-            window_end        = max(df_for_robyn$date),
-            hyperparameters   = hyperparameters
+            paid_media_vars = paid_media_vars,
+            context_vars = context_vars,
+            organic_vars = organic_vars,
+            window_start = min(df_for_robyn$date),
+            window_end = max(df_for_robyn$date),
+            hyperparameters = hyperparameters
         ),
         error = function(e) {
             inp_err <<- conditionMessage(e)
