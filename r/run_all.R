@@ -130,10 +130,14 @@ try(
 
 # --- Let Robyn/plots inherit the family (always character(1), never NULL) ---
 # --- Let Robyn/plots inherit the family, but NEVER a boolean in 'robyn.plot.font' ---
+# 1) Force lares to ignore custom fonts entirely
+Sys.setenv(LARES_FONT = "ignore") # lares::theme_lares() treats "ignore" specially
+
+# 2) Make Robyn’s own font option a character, never logical
 options(
-    robyn.plot.font        = as.character(robyn_family), # <- crucial: not TRUE/FALSE
-    robyn.plot.font.family = as.character(robyn_family), # family string only
-    robyn_font_family      = as.character(robyn_family) # legacy key some versions use
+    robyn.plot.font = "ignore", # character, not TRUE/FALSE
+    robyn.plot.font.family = "ignore", # keep both consistent just in case
+    robyn_font_family = "ignore"
 )
 
 
@@ -170,6 +174,21 @@ try(
 
 # ---- NOW load Robyn ----
 library(Robyn)
+
+# Hot-patch lares::theme_lares to always ignore custom fonts
+# (must run before robyn_inputs/robyn_outputs/onepagers)
+try(
+    {
+        if (requireNamespace("lares", quietly = TRUE)) {
+            ns <- asNamespace("lares")
+            if (bindingIsLocked("theme_lares", ns)) unlockBinding("theme_lares", ns)
+            orig <- get("theme_lares", envir = ns)
+            assign("theme_lares", function(..., font = "ignore") orig(..., font = "ignore"), envir = ns)
+            lockBinding("theme_lares", ns)
+        }
+    },
+    silent = TRUE
+)
 
 
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
@@ -1002,8 +1021,17 @@ log_ri_snapshot <- function(args) {
 
 log_ri_snapshot(robyn_args)
 
-op <- options(robyn.plot.font = as.character(robyn_family)) # keep it a string
-on.exit(options(op), add = TRUE)
+# op <- options(robyn.plot.font = as.character(robyn_family)) # keep it a string
+# on.exit(options(op), add = TRUE)
+try(
+    {
+        if (requireNamespace("lares", quietly = TRUE)) {
+            test_theme <- lares::theme_lares() # should not error
+            stopifnot(is.character(getOption("robyn.plot.font")) || is.null(getOption("robyn.plot.font")))
+        }
+    },
+    silent = TRUE
+)
 
 ## 3) Call robyn_inputs directly (no do.call/closure/promises)
 InputCollect <- NULL
