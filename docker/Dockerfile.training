@@ -90,17 +90,17 @@ RUN chmod 644 /usr/local/share/fonts/truetype/arial-narrow/* 2>/dev/null || true
     && echo "fc-list grep(Arial Narrow):" && fc-list | grep -i "Arial Narrow" || true
 
 # ------------------------
-# R defaults for headless plotting (Cairo + Ghostscript + neutral font)
+# R defaults for headless plotting (Cairo + neutral font to avoid warnings)
 # ------------------------
-RUN bash -lc 'cat >> /usr/local/lib/R/etc/Rprofile.site << "RPROF"\n\
-    options(\n\
-    bitmapType = "cairo",\n\
-    robyn.plot.font = "",               # keep character(1), not logical\n\
-    robyn.plot.font.family = "",        # avoid font errors in Robyn/ggplot\n\
-    robyn_font_family = ""\n\
-    )\n\
-    Sys.setenv(R_GSCMD="/usr/bin/gs")\n\
-    RPROF'
+RUN cat <<'RPROF' >> /usr/local/lib/R/etc/Rprofile.site
+options(
+  bitmapType = "cairo",
+  robyn.plot.font = "",
+  robyn.plot.font.family = "",
+  robyn_font_family = ""
+)
+Sys.setenv(R_GSCMD="/usr/bin/gs")
+RPROF
 
 # ------------------------
 # R packages
