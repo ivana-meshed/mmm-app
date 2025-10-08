@@ -979,9 +979,11 @@ log_ri_snapshot <- function(args) {
 
 log_ri_snapshot(robyn_args)
 
-call_robyn_inputs <- (function(args) {
-    function() do.call(Robyn::robyn_inputs, args) # no `envir=`; let do.call use parent.frame()
-})(robyn_args)
+call_robyn_inputs <- local({
+    args <- rlang::duplicate(robyn_args, shallow = FALSE) # deep copy
+    force(args) # FORCE the promise now
+    function() do.call(Robyn::robyn_inputs, args)
+})
 
 InputCollect <- withCallingHandlers(
     tryCatch(
