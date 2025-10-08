@@ -1225,13 +1225,6 @@ if (all_zero_spend) {
 logf("HP        | nonzero spend totals: ", paste(sprintf("%s=%.2f", names(nz_spend), nz_spend), collapse = "; "))
 push_log()
 
-hp_template <- try(robyn_hyper_params(InputCollect), silent = TRUE)
-templ_names <- if (!inherits(hp_template, "try-error")) names(hp_template) else character(0)
-your_names <- names(hyperparameters)
-
-missing_in_yours <- setdiff(templ_names, your_names)
-extra_in_yours <- setdiff(your_names, templ_names)
-
 ## ---------- Train ----------
 reticulate::use_python("/usr/bin/python3", required = TRUE)
 cat("---- reticulate::py_config() ----\n")
@@ -1296,10 +1289,6 @@ if (length(missing_cols)) {
         paste(missing_cols, collapse = ", ")
     )
 }
-
-tmpl <- robyn_hyper_params(InputCollect)
-setdiff(names(tmpl), names(InputCollect$hyperparameters)) # missing
-setdiff(names(InputCollect$hyperparameters), names(tmpl)) # extra
 
 
 # Make sure each set is length > 0 (some Robyn paths assume non-empty)
