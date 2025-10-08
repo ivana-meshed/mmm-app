@@ -1007,7 +1007,9 @@ capture_warn <- character()
 InputCollect <- withCallingHandlers(
     tryCatch(
         {
-            do.call(robyn_inputs, robyn_args)
+            # ensure the args list exists **in this frame** that do.call will evaluate
+            .args <- robyn_args
+            do.call("robyn_inputs", .args, envir = environment())
         },
         error = function(e) {
             inp_err <<- conditionMessage(e)
@@ -1024,29 +1026,23 @@ InputCollect <- withCallingHandlers(
                     logf(paste(tb, collapse = "\n"))
                 }
             }
-
-            return(NULL) # don't throw here; let caller decide after logging
+            return(NULL)
         }
     ),
     message = function(m) {
-        msg <- conditionMessage(m)
-        capture_msgs <<- c(capture_msgs, msg)
-        logf("robyn_inputs() | message: ", msg)
+        capture_msgs <<- c(capture_msgs, conditionMessage(m))
+        logf("robyn_inputs() | message: ", capture_msgs)
         invokeRestart("muffleMessage")
     },
     warning = function(w) {
-        warn <- conditionMessage(w)
-        capture_warn <<- c(capture_warn, warn)
-        logf("robyn_inputs() | warning: ", warn)
+        capture_warn <<- c(capture_warn, conditionMessage(w))
+        logf("robyn_inputs() | message: ", capture_warn)
+
         invokeRestart("muffleWarning")
     }
 )
 
 
-## (Optional) If you want to hard-stop immediately when inp_err exists, do it explicitly:
-if (is.null(InputCollect)) {
-    stop("robyn_inputs() failed: ", inp_err %||% "<no message>")
-}
 
 
 logf(
