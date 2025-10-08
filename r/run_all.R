@@ -114,26 +114,28 @@ ggplot2::theme_set(ggplot2::theme_gray(base_family = robyn_family %||% "sans"))
 try(
     {
         ggplot2::theme_update(
-            text = ggplot2::element_text(family = robyn_family),
-            plot.title = ggplot2::element_text(family = robyn_family),
-            axis.text = ggplot2::element_text(family = robyn_family),
-            axis.title = ggplot2::element_text(family = robyn_family),
-            legend.text = ggplot2::element_text(family = robyn_family),
-            legend.title = ggplot2::element_text(family = robyn_family),
-            strip.text = ggplot2::element_text(family = robyn_family)
+            text = ggplot2::element_text(family = as.character(robyn_family)),
+            plot.title = ggplot2::element_text(family = as.character(robyn_family)),
+            axis.text = ggplot2::element_text(family = as.character(robyn_family)),
+            axis.title = ggplot2::element_text(family = as.character(robyn_family)),
+            legend.text = ggplot2::element_text(family = as.character(robyn_family)),
+            legend.title = ggplot2::element_text(family = as.character(robyn_family)),
+            strip.text = ggplot2::element_text(family = as.character(robyn_family))
         )
-        ggplot2::update_geom_defaults("text", list(family = robyn_family))
-        ggplot2::update_geom_defaults("label", list(family = robyn_family))
+        ggplot2::update_geom_defaults("text", list(family = as.character(robyn_family)))
+        ggplot2::update_geom_defaults("label", list(family = as.character(robyn_family)))
     },
     silent = TRUE
 )
 
 # --- Let Robyn/plots inherit the family (always character(1), never NULL) ---
+# --- Let Robyn/plots inherit the family, but NEVER a boolean in 'robyn.plot.font' ---
 options(
-    robyn.plot.font        = robyn_family,
-    robyn.plot.font.family = robyn_family,
-    robyn_font_family      = robyn_family
+    robyn.plot.font        = NULL, # <- crucial: not TRUE/FALSE
+    robyn.plot.font.family = as.character(robyn_family), # family string only
+    robyn_font_family      = as.character(robyn_family) # legacy key some versions use
 )
+
 
 # --- Font debug report to the log ---
 font_debug <- local({
@@ -160,7 +162,7 @@ try(
         p <- ggplot(data.frame(x = 1, y = 1), aes(x, y)) +
             geom_point() +
             ggplot2::labs(title = paste("Font probe –", robyn_family)) +
-            ggplot2::annotate("text", x = 1, y = 1.02, label = "Hello • ÄÖÜ ß ć ž", family = robyn_family, vjust = 0)
+            ggplot2::annotate("text", x = 1, y = 1.02, label = "Hello • ÄÖÜ ß ć ž", family = as.character(robyn_family), vjust = 0)
         ggsave(filename = "font_probe.png", plot = p, width = 6, height = 3, dpi = 120)
     },
     silent = TRUE
@@ -1000,7 +1002,8 @@ log_ri_snapshot <- function(args) {
 
 log_ri_snapshot(robyn_args)
 
-
+op <- options(robyn.plot.font = NULL) # ensure no boolean leaks in
+on.exit(options(op), add = TRUE)
 
 ## 3) Call robyn_inputs directly (no do.call/closure/promises)
 InputCollect <- NULL
