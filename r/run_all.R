@@ -139,12 +139,6 @@ font_debug <- local({
     )
 })
 
-logf("Fonts | chosen_family=", font_debug$chosen_family)
-logf("Fonts | cairo_enabled=", font_debug$cairo_enabled)
-logf("Fonts | systemfonts::match_font('Arial Narrow') path=", font_debug$arial_narrow_match_path)
-logf("Fonts | fc-match → ", font_debug$fc_match)
-logf("Fonts | fc-list top → ", font_debug$fc_list_top3)
-logf("Fonts | ggplot base_family=", font_debug$ggplot_base_family)
 
 # --- (Optional) Write a tiny probe plot to confirm the font works ---
 try(
@@ -154,7 +148,6 @@ try(
             ggplot2::labs(title = paste("Font probe –", robyn_family)) +
             ggplot2::annotate("text", x = 1, y = 1.02, label = "Hello • ÄÖÜ ß ć ž", family = robyn_family, vjust = 0)
         ggsave(filename = "font_probe.png", plot = p, width = 6, height = 3, dpi = 120)
-        logf("Fonts | wrote font_probe.png (", tryCatch(file.info("font_probe.png")$size, error = function(e) NA), " bytes)")
     },
     silent = TRUE
 )
@@ -189,27 +182,8 @@ log_head <- function(df, n = 5) {
         paste(collapse = "\n") |>
         logf()
 }
-logf("Fonts | listing arial-narrow dir…")
-try(logf(paste(system("ls -l /usr/local/share/fonts/truetype/arial-narrow", intern = TRUE), collapse = "\n")), silent = TRUE)
 
-logf("Fonts | fc-cache…")
-try(system("fc-cache -f -v", intern = TRUE), silent = TRUE)
 
-logf("Fonts | fc-match 'Arial Narrow' →")
-try(logf(paste(system("fc-match 'Arial Narrow'", intern = TRUE), collapse = "\n")), silent = TRUE)
-
-logf("Fonts | fc-list grep 'Arial Narrow' →")
-try(logf(paste(system("fc-list | grep -i 'Arial Narrow'", intern = TRUE), collapse = "\n")), silent = TRUE)
-
-logf("Fonts | systemfonts::match_font →")
-try(
-    {
-        library(systemfonts)
-        mf <- match_font("Arial Narrow")
-        logf(paste(capture.output(str(mf)), collapse = "\n"))
-    },
-    silent = TRUE
-)
 
 ## ---------- GCS AUTH & BUCKET (set BEFORE any upload) ----------
 options(googleAuthR.scopes.selected = "https://www.googleapis.com/auth/devstorage.read_write")
@@ -501,6 +475,37 @@ sink(log_con_err, type = "message")
 
 options(warn = 1)
 logf("Logging   | file=", log_file, " (split=TRUE)")
+
+logf("Fonts | chosen_family=", font_debug$chosen_family)
+logf("Fonts | cairo_enabled=", font_debug$cairo_enabled)
+logf("Fonts | systemfonts::match_font('Arial Narrow') path=", font_debug$arial_narrow_match_path)
+logf("Fonts | fc-match → ", font_debug$fc_match)
+logf("Fonts | fc-list top → ", font_debug$fc_list_top3)
+logf("Fonts | ggplot base_family=", font_debug$ggplot_base_family)
+
+logf("Fonts | wrote font_probe.png (", tryCatch(file.info("font_probe.png")$size, error = function(e) NA), " bytes)")
+
+logf("Fonts | listing arial-narrow dir…")
+try(logf(paste(system("ls -l /usr/local/share/fonts/truetype/arial-narrow", intern = TRUE), collapse = "\n")), silent = TRUE)
+
+logf("Fonts | fc-cache…")
+try(system("fc-cache -f -v", intern = TRUE), silent = TRUE)
+
+logf("Fonts | fc-match 'Arial Narrow' →")
+try(logf(paste(system("fc-match 'Arial Narrow'", intern = TRUE), collapse = "\n")), silent = TRUE)
+
+logf("Fonts | fc-list grep 'Arial Narrow' →")
+try(logf(paste(system("fc-list | grep -i 'Arial Narrow'", intern = TRUE), collapse = "\n")), silent = TRUE)
+
+logf("Fonts | systemfonts::match_font →")
+try(
+    {
+        library(systemfonts)
+        mf <- match_font("Arial Narrow")
+        logf(paste(capture.output(str(mf)), collapse = "\n"))
+    },
+    silent = TRUE
+)
 flush.console()
 
 on.exit(
