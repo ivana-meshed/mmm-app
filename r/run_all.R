@@ -131,7 +131,7 @@ try(
 # --- Let Robyn/plots inherit the family (always character(1), never NULL) ---
 # --- Let Robyn/plots inherit the family, but NEVER a boolean in 'robyn.plot.font' ---
 options(
-    robyn.plot.font        = NULL, # <- crucial: not TRUE/FALSE
+    robyn.plot.font        = as.character(robyn_family), # <- crucial: not TRUE/FALSE
     robyn.plot.font.family = as.character(robyn_family), # family string only
     robyn_font_family      = as.character(robyn_family) # legacy key some versions use
 )
@@ -1002,7 +1002,7 @@ log_ri_snapshot <- function(args) {
 
 log_ri_snapshot(robyn_args)
 
-op <- options(robyn.plot.font = NULL) # ensure no boolean leaks in
+op <- options(robyn.plot.font = as.character(robyn_family)) # keep it a string
 on.exit(options(op), add = TRUE)
 
 ## 3) Call robyn_inputs directly (no do.call/closure/promises)
@@ -1010,6 +1010,15 @@ InputCollect <- NULL
 inp_err <- NULL
 capture_msgs <- character()
 capture_warn <- character()
+
+# Final safety: never let family be logical for Robyn’s plotting
+if (is.logical(getOption("robyn.plot.font"))) {
+    options(robyn.plot.font = as.character(robyn_family))
+}
+logf(
+    "Fonts | getOption('robyn.plot.font') type=", typeof(getOption("robyn.plot.font")),
+    " value='", as.character(getOption("robyn.plot.font")), "'"
+)
 
 InputCollect <- withCallingHandlers(
     tryCatch(
@@ -1389,7 +1398,7 @@ run_once <- function(InputCollect, iter = 200, trials = 1, ts_validation = TRUE,
                     InputCollect       = InputCollect,
                     iterations         = iter,
                     trials             = trials,
-                    ts_validation      = TRUE,
+                    ts_validation      = ts_validation,
                     add_penalty_factor = TRUE,
                     cores              = parallel::detectCores()
                 )
