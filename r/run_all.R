@@ -988,7 +988,7 @@ call_robyn_inputs <- local({
 InputCollect <- withCallingHandlers(
     tryCatch(
         {
-            call_robyn_inputs()
+            call_robyn_inputs
         },
         error = function(e) {
             inp_err <<- conditionMessage(e)
