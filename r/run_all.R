@@ -923,26 +923,6 @@ check_pair <- function(k, v) {
 }
 invisible(lapply(names(hyperparameters), function(k) check_pair(k, hyperparameters[[k]])))
 
-write_diag <- function(extra = NULL) {
-    lines <- c(
-        "=== ROBYN HP DIAGNOSTICS ===",
-        paste0("Time: ", as.character(Sys.time())), "",
-        "-- Your hyperparameters (names):",
-        paste0("  ", paste(sort(names(hyperparameters)), collapse = ", ")), "",
-        "-- Paid media vars: ",
-        paste0("  ", paste(paid_media_vars, collapse = ", ")),
-        "-- Organic vars: ",
-        paste0("  ", paste(organic_vars, collapse = ", ")), "",
-        "-- Messages from robyn_inputs():",
-        if (length(capture_msgs)) paste0("  ", capture_msgs) else "  <none>", "",
-        "-- Warnings from robyn_inputs():",
-        if (length(capture_warn)) paste0("  ", capture_warn) else "  <none>", "",
-        extra %||% character(0)
-    )
-    writeLines(lines, hp_diag_path)
-    gcs_put_safe(hp_diag_path, file.path(gcs_prefix, "robyn_hp_diagnostics.txt"))
-    push_log()
-}
 
 ## ---------- robyn_inputs() with hard guard ----------
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE) # ensure path exists
@@ -999,17 +979,14 @@ log_ri_snapshot <- function(args) {
 
 log_ri_snapshot(robyn_args)
 
-## --- Now run robyn_inputs(), capturing messages/warnings, and echoing errors to console ---
-inp_err <- NULL
-capture_msgs <- character()
-capture_warn <- character()
+call_robyn_inputs <- (function(args) {
+    function() do.call(Robyn::robyn_inputs, args) # no `envir=`; let do.call use parent.frame()
+})(robyn_args)
 
 InputCollect <- withCallingHandlers(
     tryCatch(
         {
-            # ensure the args list exists **in this frame** that do.call will evaluate
-            .args <- robyn_args
-            do.call("robyn_inputs", .args, envir = environment())
+            call_robyn_inputs()
         },
         error = function(e) {
             inp_err <<- conditionMessage(e)
