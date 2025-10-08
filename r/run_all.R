@@ -45,7 +45,21 @@ suppressPackageStartupMessages({
     library(ggplot2)
 })
 
-`%||%` <- function(a, b) if (is.null(a) || length(a) == 0 || (is.character(a) && !nzchar(a)) || all(is.na(a))) b else a
+`%||%` <- function(a, b) {
+    if (is.null(a)) {
+        return(b)
+    }
+    if (length(a) == 0) {
+        return(b)
+    }
+    if (is.character(a) && length(a) == 1L && !nzchar(a)) {
+        return(b)
+    }
+    if (all(is.na(a))) {
+        return(b)
+    }
+    a
+}
 
 # Fallback logger if your logf isn't defined yet
 if (!exists("logf")) {
