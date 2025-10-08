@@ -45,85 +45,121 @@ suppressPackageStartupMessages({
     library(ggplot2)
 })
 
-`%||%` <- function(a, b) {
-    if (is.null(a) || length(a) == 0 || (is.character(a) && length(a) == 1 && !nzchar(a)) || all(is.na(a))) b else a
+`%||%` <- function(a, b) if (is.null(a) || length(a) == 0 || (is.character(a) && !nzchar(a)) || all(is.na(a))) b else a
+
+# Fallback logger if your logf isn't defined yet
+if (!exists("logf")) {
+    logf <- function(...) cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "|", paste0(..., collapse = ""), "\n")
 }
-# ----- Register Arial Narrow explicitly (safe if files exist; harmless otherwise) -----
+
+# --- Register Arial Narrow if the TTFs exist (harmless if they don't) ---
 try(
     {
         font_dir <- "/usr/local/share/fonts/truetype/arial-narrow"
         files <- list.files(font_dir, pattern = "[.]ttf$", full.names = TRUE)
-
-        # helpers to find each face by filename (case-insensitive), robust to minor name variants
-        find_face <- function(pat) {
-            hit <- files[grepl(paste0("(?i)", pat, ".*[.]ttf$"), files, perl = TRUE)]
-            if (length(hit)) normalizePath(hit[1], mustWork = FALSE) else ""
-        }
-
-        plain <- find_face("arialn(?!b|i)") # ARIALN.TTF
-        bold <- find_face("arialnb") # ARIALNB.TTF
-        italic <- find_face("arialni") # ARIALNI.TTF
-        bolditalic <- find_face("arialnbi") # ARIALNBI.TTF
-
-        if (nzchar(plain)) {
-            systemfonts::register_font(
-                name        = "Arial Narrow",
-                plain       = plain,
-                bold        = if (nzchar(bold)) bold else NULL,
-                italic      = if (nzchar(italic)) italic else NULL,
-                bolditalic  = if (nzchar(bolditalic)) bolditalic else NULL
-            )
+        if (length(files)) {
+            find_face <- function(pat) {
+                hit <- files[grepl(paste0("(?i)", pat, ".*[.]ttf$"), files, perl = TRUE)]
+                if (length(hit)) normalizePath(hit[1], mustWork = FALSE) else ""
+            }
+            plain <- find_face("arialn(?!b|i)") # ARIALN.TTF
+            bold <- find_face("arialnb") # ARIALNB.TTF
+            italic <- find_face("arialni") # ARIALNI.TTF
+            bolditalic <- find_face("arialnbi") # ARIALNBI.TTF
+            if (nzchar(plain)) {
+                systemfonts::register_font(
+                    name       = "Arial Narrow",
+                    plain      = plain,
+                    bold       = if (nzchar(bold)) bold else NULL,
+                    italic     = if (nzchar(italic)) italic else NULL,
+                    bolditalic = if (nzchar(bolditalic)) bolditalic else NULL
+                )
+            }
         }
     },
     silent = TRUE
 )
 
-# ----- Now decide what family to use (installed? use it; else fallback to device default) -----
-pick_font <- function() {
-    info <- try(systemfonts::match_fonts("Arial Narrow"), silent = TRUE)
-    if (!inherits(info, "try-error") && is.list(info) && isTRUE(nzchar(info$path))) "Arial Narrow" else ""
-}
-
-robyn_family <- pick_font() # "Arial Narrow" if present, else ""
-
-
-pick_font <- function() {
-    info <- try(systemfonts::match_fonts("Arial Narrow"), silent = TRUE)
+# --- Choose family: use Arial Narrow if it truly resolves to a file; else fall back to 'sans' ---
+pick_family <- function() {
+    info <- try(systemfonts::match_font("Arial Narrow"), silent = TRUE)
     if (!inherits(info, "try-error") && is.list(info) && !is.null(info$path) && nzchar(info$path)) {
         return("Arial Narrow")
     }
-    "" # fallback to device default if something’s off
+    "sans" # reliable mapped family (e.g. DejaVu Sans); avoids PostScript warnings
 }
+robyn_family <- pick_family()
 
-robyn_family <- pick_font() # will be "" if Arial Narrow isn’t found
-ggplot2::theme_set(ggplot2::theme_gray(base_family = robyn_family %||% ""))
+# --- Force Cairo devices for headless plotting ---
+options(bitmapType = "cairo")
+try(grDevices::X11.options(type = "cairo"), silent = TRUE)
+try(grDevices::pdf.options(useDingbats = FALSE, family = robyn_family %||% "sans"), silent = TRUE)
+
+# --- ggplot defaults ---
+ggplot2::theme_set(ggplot2::theme_gray(base_family = robyn_family %||% "sans"))
 try(
-    ggplot2::theme_update(
-        text = ggplot2::element_text(family = robyn_family %||% ""),
-        plot.title = ggplot2::element_text(family = robyn_family %||% ""),
-        axis.text = ggplot2::element_text(family = robyn_family %||% ""),
-        axis.title = ggplot2::element_text(family = robyn_family %||% ""),
-        legend.text = ggplot2::element_text(family = robyn_family %||% ""),
-        legend.title = ggplot2::element_text(family = robyn_family %||% ""),
-        strip.text = ggplot2::element_text(family = robyn_family %||% "")
-    ),
+    {
+        ggplot2::theme_update(
+            text = ggplot2::element_text(family = robyn_family),
+            plot.title = ggplot2::element_text(family = robyn_family),
+            axis.text = ggplot2::element_text(family = robyn_family),
+            axis.title = ggplot2::element_text(family = robyn_family),
+            legend.text = ggplot2::element_text(family = robyn_family),
+            legend.title = ggplot2::element_text(family = robyn_family),
+            strip.text = ggplot2::element_text(family = robyn_family)
+        )
+        ggplot2::update_geom_defaults("text", list(family = robyn_family))
+        ggplot2::update_geom_defaults("label", list(family = robyn_family))
+    },
     silent = TRUE
 )
 
-
-# Let Robyn/plots inherit the family
+# --- Let Robyn/plots inherit the family (always character(1), never NULL) ---
 options(
     robyn.plot.font        = robyn_family,
     robyn.plot.font.family = robyn_family,
-    robyn_font_family      = robyn_family,
-    bitmapType             = "cairo"
+    robyn_font_family      = robyn_family
 )
 
-# Force cairo graphics
-options(bitmapType = "cairo")
-grDevices::X11.options(type = "cairo")
+# --- Font debug report to the log ---
+font_debug <- local({
+    # system calls are best-effort (won't fail macOS silently)
+    fc_match <- try(system("fc-match 'Arial Narrow'", intern = TRUE), silent = TRUE)
+    fc_list <- try(system("fc-list | grep -i 'Arial Narrow' | head -n 3", intern = TRUE), silent = TRUE)
+    mf <- try(systemfonts::match_font("Arial Narrow"), silent = TRUE)
+    cairo_ok <- tryCatch(isTRUE(capabilities("cairo")), error = function(e) NA)
 
-# NOW load Robyn
+    list(
+        chosen_family = robyn_family,
+        cairo_enabled = cairo_ok,
+        arial_narrow_match_path = if (!inherits(mf, "try-error")) (mf$path %||% "") else "",
+        fc_match = if (!inherits(fc_match, "try-error")) paste(fc_match, collapse = " | ") else "<fc-match n/a>",
+        fc_list_top3 = if (!inherits(fc_list, "try-error")) paste(fc_list, collapse = " | ") else "<fc-list n/a>",
+        ggplot_base_family = tryCatch(ggplot2::theme_get()$text$family %||% "", error = function(e) "")
+    )
+})
+
+logf("Fonts | chosen_family=", font_debug$chosen_family)
+logf("Fonts | cairo_enabled=", font_debug$cairo_enabled)
+logf("Fonts | systemfonts::match_font('Arial Narrow') path=", font_debug$arial_narrow_match_path)
+logf("Fonts | fc-match → ", font_debug$fc_match)
+logf("Fonts | fc-list top → ", font_debug$fc_list_top3)
+logf("Fonts | ggplot base_family=", font_debug$ggplot_base_family)
+
+# --- (Optional) Write a tiny probe plot to confirm the font works ---
+try(
+    {
+        p <- ggplot(data.frame(x = 1, y = 1), aes(x, y)) +
+            geom_point() +
+            ggplot2::labs(title = paste("Font probe –", robyn_family)) +
+            ggplot2::annotate("text", x = 1, y = 1.02, label = "Hello • ÄÖÜ ß ć ž", family = robyn_family, vjust = 0)
+        ggsave(filename = "font_probe.png", plot = p, width = 6, height = 3, dpi = 120)
+        logf("Fonts | wrote font_probe.png (", tryCatch(file.info("font_probe.png")$size, error = function(e) NA), " bytes)")
+    },
+    silent = TRUE
+)
+
+# ---- NOW load Robyn ----
 library(Robyn)
 
 
