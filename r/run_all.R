@@ -521,21 +521,8 @@ on.exit(
 ## Error handler
 job_started <- Sys.time()
 status_json <- file.path(dir_path, "status.json")
-options(error = function(e) {
-    message("FATAL ERROR: ", conditionMessage(e))
-    try(
-        {
-            writeLines(jsonlite::toJSON(list(
-                state = "FAILED", start_time = as.character(job_started),
-                end_time = as.character(Sys.time()), error = conditionMessage(e)
-            ), auto_unbox = TRUE), status_json)
-            if (nzchar(gcs_prefix)) gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
-            push_log()
-        },
-        silent = TRUE
-    )
-    quit(status = 1)
-})
+
+
 
 ## Write RUNNING status
 writeLines(jsonlite::toJSON(list(state = "RUNNING", start_time = as.character(job_started)), auto_unbox = TRUE), status_json)
@@ -547,6 +534,26 @@ if (!is.null(cfg$gcs_bucket) && nzchar(cfg$gcs_bucket) && cfg$gcs_bucket != goog
     ensure_bucket(cfg$gcs_bucket)
 }
 push_log()
+
+## 2) Make the error handler Rscript-safe
+options(error = function() {
+    err <- geterrmessage()
+    message("FATAL ERROR: ", err)
+    try(
+        {
+            writeLines(jsonlite::toJSON(list(
+                state = "FAILED",
+                start_time = as.character(job_started),
+                end_time = as.character(Sys.time()),
+                error = err
+            ), auto_unbox = TRUE), status_json)
+            if (nzchar(gcs_prefix)) gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+            push_log()
+        },
+        silent = TRUE
+    )
+    q("no", status = 1, runLast = FALSE)
+})
 
 ## ---------- Params ----------
 iter <- as.numeric(cfg$iterations)
@@ -977,27 +984,9 @@ log_ri_snapshot <- function(args) {
     if ("train_size" %in% hp_names) logf("  hyperparameters$train_size = ", paste(args$hyperparameters$train_size, collapse = ","))
 }
 
-# log_ri_snapshot(robyn_args)
+log_ri_snapshot(robyn_args)
 
-## 2) Make the error handler Rscript-safe
-options(error = function() {
-    err <- geterrmessage()
-    message("FATAL ERROR: ", err)
-    try(
-        {
-            writeLines(jsonlite::toJSON(list(
-                state = "FAILED",
-                start_time = as.character(job_started),
-                end_time = as.character(Sys.time()),
-                error = err
-            ), auto_unbox = TRUE), status_json)
-            if (nzchar(gcs_prefix)) gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
-            push_log()
-        },
-        silent = TRUE
-    )
-    q("no", status = 1, runLast = FALSE)
-})
+
 
 ## 3) Call robyn_inputs directly (no do.call/closure/promises)
 InputCollect <- NULL
