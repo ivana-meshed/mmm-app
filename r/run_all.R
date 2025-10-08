@@ -953,118 +953,71 @@ capture_msgs <- character()
 capture_warn <- character()
 
 ## --- Build a single arg list so we can both log and call do.call() ---
-ri_args <- list(
-    dt_input = df_for_robyn,
-    date_var = "date",
-    dep_var = dep_var,
-    dep_var_type = "revenue",
-    adstock = adstock,
-    prophet_vars = NULL,
+robyn_args <- list(
+    dt_input          = df_for_robyn,
+    date_var          = "date",
+    dep_var           = dep_var,
+    dep_var_type      = "revenue",
+    adstock           = adstock,
+    prophet_vars      = NULL,
     paid_media_spends = paid_media_spends,
-    paid_media_vars = paid_media_vars,
-    context_vars = context_vars,
-    # factor_vars    = context_vars,   # (intentionally off)
-    organic_vars = organic_vars,
-    window_start = min(df_for_robyn$date),
-    window_end = max(df_for_robyn$date),
-    hyperparameters = hyperparameters
+    paid_media_vars   = paid_media_vars,
+    context_vars      = context_vars,
+    # factor_vars     = context_vars,   # (intentionally off)
+    organic_vars      = organic_vars,
+    window_start      = min(df_for_robyn$date),
+    window_end        = max(df_for_robyn$date),
+    hyperparameters   = hyperparameters
 )
 
 ## --- Log a compact, human-friendly snapshot to console.log ---
-logf("robyn_inputs() | ARG SNAPSHOT ↓")
+log_ri_snapshot <- function(args) {
+    dx <- args$dt_input
+    logf("robyn_inputs() | ARG SNAPSHOT ↓")
+    logf("  dt_input: nrow=", nrow(dx), " ncol=", ncol(dx))
+    logf("  dt_input: columns = ", paste(names(dx), collapse = ", "))
+    logf("  dt_input: date range = ", as.character(min(dx$date, na.rm = TRUE)), " → ", as.character(max(dx$date, na.rm = TRUE)))
+    logf("  dep_var = ", args$dep_var, " (type=", class(dx[[args$dep_var]])[1], ")")
+    logf("  paid_media_spends = ", paste(args$paid_media_spends, collapse = ", "))
+    logf("  paid_media_vars   = ", paste(args$paid_media_vars, collapse = ", "))
+    logf("  context_vars      = ", paste(args$context_vars, collapse = ", "))
+    logf("  organic_vars      = ", paste(args$organic_vars, collapse = ", "))
 
-# dt_input summary
-dx <- ri_args$dt_input
-logf("  dt_input: nrow=", nrow(dx), " ncol=", ncol(dx))
-logf("  dt_input: columns = ", paste(names(dx), collapse = ", "))
-logf("  dt_input: date range = ", as.character(min(dx$date, na.rm = TRUE)), " → ", as.character(max(dx$date, na.rm = TRUE)))
+    used_cols <- unique(c("date", args$dep_var, args$paid_media_spends, args$paid_media_vars, args$context_vars, args$organic_vars))
+    used_cols <- intersect(used_cols, names(dx))
+    non_num <- setdiff(used_cols[!vapply(dx[used_cols], is.numeric, logical(1))], "date")
+    if (length(non_num)) logf("  ⚠ Non-numeric columns among used features: ", paste(non_num, collapse = ", "))
 
-# Dep var + drivers/context/organic
-logf("  dep_var = ", ri_args$dep_var, " (type=", class(dx[[ri_args$dep_var]])[1], ")")
-logf("  paid_media_spends = ", paste(ri_args$paid_media_spends, collapse = ", "))
-logf("  paid_media_vars   = ", paste(ri_args$paid_media_vars, collapse = ", "))
-logf("  context_vars      = ", paste(ri_args$context_vars, collapse = ", "))
-logf("  organic_vars      = ", paste(ri_args$organic_vars, collapse = ", "))
+    utils::capture.output(print(utils::head(dx[, used_cols, drop = FALSE], 5))) |>
+        paste(collapse = "\n") |>
+        logf()
 
-# Quick numeric sanity: flag non-numerics among used cols (except date)
-used_cols <- unique(c(
-    "date", ri_args$dep_var, ri_args$paid_media_spends, ri_args$paid_media_vars,
-    ri_args$context_vars, ri_args$organic_vars
-))
-used_cols <- intersect(used_cols, names(dx))
-non_num <- setdiff(used_cols[!vapply(dx[used_cols], is.numeric, logical(1))], "date")
-if (length(non_num)) {
-    logf("  ⚠ Non-numeric columns among used features: ", paste(non_num, collapse = ", "))
+    hp_names <- sort(names(args$hyperparameters))
+    logf("  hyperparameters keys (", length(hp_names), "): ", paste(hp_names, collapse = ", "))
+    if ("train_size" %in% hp_names) logf("  hyperparameters$train_size = ", paste(args$hyperparameters$train_size, collapse = ","))
 }
 
-# Show a tiny head of dt_input for sanity
-utils::capture.output(print(utils::head(dx[, used_cols, drop = FALSE], 5))) |>
-    paste(collapse = "\n") |>
-    logf()
-
-# Hyperparameters overview
-hp_names <- sort(names(ri_args$hyperparameters))
-logf("  hyperparameters keys (", length(hp_names), "): ", paste(hp_names, collapse = ", "))
-if ("train_size" %in% hp_names) {
-    logf("  hyperparameters$train_size = ", paste(ri_args$hyperparameters$train_size, collapse = ","))
-}
+log_ri_snapshot(robyn_args)
 
 ## --- Now run robyn_inputs(), capturing messages/warnings, and echoing errors to console ---
 inp_err <- NULL
 capture_msgs <- character()
 capture_warn <- character()
 
-
-# ---- HARDEN FONT OPTIONS BEFORE robyn_inputs() ----
-fix_font_opts <- function() {
-    # Always set Robyn font options to a plain character, never NULL/TRUE/FALSE
-    # Force all font-related options to NULL (safest approach)
-    options(
-        robyn.plot.font        = "",
-        robyn.plot.font.family = "",
-        robyn_font_family      = ""
-    )
-
-    # Also reset ggplot2 defaults to use NULL for fonts
-    if (requireNamespace("ggplot2", quietly = TRUE)) {
-        ggplot2::theme_set(ggplot2::theme_gray(base_family = ""))
-        try(
-            {
-                ggplot2::theme_update(
-                    text = ggplot2::element_text(family = ""),
-                    plot.title = ggplot2::element_text(family = ""),
-                    axis.text = ggplot2::element_text(family = ""),
-                    axis.title = ggplot2::element_text(family = "")
-                )
-            },
-            silent = TRUE
-        )
-        try(ggplot2::update_geom_defaults("text", list(family = "")), silent = TRUE)
-    }
-}
-
-# fix_font_opts()
-
-
-
 InputCollect <- withCallingHandlers(
     tryCatch(
         {
-            do.call(robyn_inputs, ri_args)
+            do.call(robyn_inputs, robyn_args)
         },
         error = function(e) {
             inp_err <<- conditionMessage(e)
-
-            # Log the error and backtrace to the console log
             logf("robyn_inputs() | ERROR: ", inp_err)
 
-            # rlang backtrace (if available)
             bt <- try(utils::capture.output(rlang::last_trace()), silent = TRUE)
             if (!inherits(bt, "try-error")) {
                 logf("robyn_inputs() | RLANG LAST TRACE ↓")
                 logf(paste(bt, collapse = "\n"))
             } else {
-                # Base traceback as fallback
                 tb <- try(utils::capture.output(traceback(max.lines = 50L)), silent = TRUE)
                 if (!inherits(tb, "try-error")) {
                     logf("robyn_inputs() | BASE TRACEBACK ↓")
@@ -1088,6 +1041,7 @@ InputCollect <- withCallingHandlers(
         invokeRestart("muffleWarning")
     }
 )
+
 
 ## (Optional) If you want to hard-stop immediately when inp_err exists, do it explicitly:
 if (is.null(InputCollect)) {
