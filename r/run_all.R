@@ -842,11 +842,12 @@ sanitize_for_robyn <- function(df_full, dep_var, paid_media_spends, paid_media_v
 
 ## ---------- Inputs (BASE, no HPs) ----------
 if (!(dep_var %in% names(df))) stop("Dependent variable '", dep_var, "' not found in data.")
+# Before robyn_inputs()
 prophet_vars_used <- c("trend", "season", "holiday", "weekday")
 if (!requireNamespace("prophet", quietly = TRUE)) {
-    logf("Prophet    | package not available → disabling prophet_vars")
-    prophet_vars_used <- NULL
+    stop("Prophet is not installed but Prophet is required. Install it or set prophet_vars_used <- NULL.")
 }
+
 
 prophet_vars_used <- NULL # TEMP: avoid prophet merge branch while we debug
 
@@ -987,11 +988,6 @@ invisible(lapply(names(hyperparameters), function(k) check_pair(k, hyperparamete
 ## ---------- robyn_inputs() with hard guard ----------
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE) # ensure path exists
 
-InputCollect <- NULL
-inp_err <- NULL
-capture_msgs <- character()
-capture_warn <- character()
-
 ## --- Build a single arg list so we can both log and call do.call() ---
 robyn_args <- list(
     dt_input = df_for_robyn,
@@ -1099,6 +1095,12 @@ InputCollect <- withCallingHandlers(
         invokeRestart("muffleWarning")
     }
 )
+
+# normalize: if empty, turn OFF explicitly
+if (length(InputCollect$prophet_vars %||% character(0)) == 0) {
+    InputCollect$prophet_vars <- NULL
+    InputCollect$dt_prophet <- NULL
+}
 
 ## 4) Guard the post-input logging (prevents the cascade)
 if (!is.null(InputCollect) && is.list(InputCollect) && !is.null(InputCollect$dt_input)) {

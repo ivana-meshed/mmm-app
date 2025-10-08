@@ -3,7 +3,9 @@
 # - Fixes ggplot/Robyn font issues (Cairo + Ghostscript + sane defaults)
 # - Keeps your Python stack (nevergrad, etc.)
 # - Installs Robyn from GitHub
+# - Adds cmdstanr + prebuilt CmdStan so Prophet compiles at build time
 # -----------------------------------------------------------
+
 FROM rocker/r-ver:4.3.1
 
 # Never prompt during apt operations
@@ -11,21 +13,17 @@ ARG DEBIAN_FRONTEND=noninteractive
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Base OS deps + graphics stack (Cairo/Xt/Ghostscript) + fonts
+# Also includes full toolchain for CmdStan/Stan C++ builds
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Python toolchain
     python3 python3-pip python3-venv python3-dev \
-    # R build deps
     libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev libicu-dev \
-    # Font/graphics stack (critical for ggplot/Robyn in headless)
     libfontconfig1-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev \
     libpng-dev libtiff5-dev libjpeg-dev \
     libcairo2 libcairo2-dev libxt6 ghostscript \
-    # Useful fallback font families
     fonts-dejavu-core fontconfig fonts-liberation fonts-liberation2 \
-    # Math/BLAS/etc
     cmake gfortran pkg-config libnlopt-dev libblas-dev liblapack-dev \
     libopenblas-dev libomp-dev \
-    # misc
+    build-essential g++ make unzip \
     ca-certificates htop git curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -43,7 +41,7 @@ ENV OMP_NUM_THREADS=8 \
     LC_ALL=C.UTF-8
 
 # Make perf env visible to login shells too
-RUN echo 'export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}'        >> /etc/environment && \
+RUN echo 'export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}'           >> /etc/environment && \
     echo 'export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-8}' >> /etc/environment && \
     echo 'export MKL_NUM_THREADS=${MKL_NUM_THREADS:-8}'           >> /etc/environment && \
     echo 'export BLAS_NUM_THREADS=${BLAS_NUM_THREADS:-8}'         >> /etc/environment
@@ -55,7 +53,7 @@ RUN pip3 install --no-cache-dir \
     google-cloud-storage google-cloud-run \
     pandas numpy scipy nevergrad \
     numba pyarrow fastparquet polars \
-    joblib dask[complete] multiprocessing-logging \
+    joblib "dask[complete]" multiprocessing-logging \
     psutil memory-profiler \
     scikit-learn xgboost lightgbm
 
@@ -76,13 +74,11 @@ print("pyarrow:", pyarrow.__version__)
 print("joblib:", joblib.__version__)
 PY
 
-
 # ------------------------
 # Fonts: copy proprietary Arial Narrow TTFs (if provided)
 # Expected names: ARIALN.TTF, ARIALNB.TTF, ARIALNI.TTF, ARIALNBI.TTF
 # ------------------------
 RUN mkdir -p /usr/local/share/fonts/truetype/arial-narrow
-# Will succeed even if no files match (keeps build reproducible)
 COPY docker/fonts/*.ttf /usr/local/share/fonts/truetype/arial-narrow/
 RUN chmod 644 /usr/local/share/fonts/truetype/arial-narrow/* 2>/dev/null || true \
     && fc-cache -f -v \
@@ -94,10 +90,10 @@ RUN chmod 644 /usr/local/share/fonts/truetype/arial-narrow/* 2>/dev/null || true
 # ------------------------
 RUN cat <<'RPROF' >> /usr/local/lib/R/etc/Rprofile.site
 options(
-  bitmapType = "cairo",
-  robyn.plot.font = "sans",
-  robyn.plot.font.family = "sans",
-  robyn_font_family = "sans"
+    bitmapType = "cairo",
+    robyn.plot.font = "sans",
+    robyn.plot.font.family = "sans",
+    robyn_font_family = "sans"
 )
 Sys.setenv(R_GSCMD="/usr/bin/gs")
 RPROF
@@ -127,6 +123,23 @@ RUN R -q -e "options(Ncpus=8); \
 
 # Quick sanity: Cairo and (optional) Arial Narrow availability
 RUN R -q -e "print(capabilities('cairo')); library(systemfonts); print(try(match_font('Arial Narrow'), silent=TRUE))"
+
+# ------------------------
+# CmdStan (for Prophet via cmdstanr)
+# ------------------------
+ENV MAKEFLAGS="-j8"
+RUN R -q -e "options(Ncpus=8); \
+    if (!requireNamespace('cmdstanr', quietly=TRUE)) install.packages('cmdstanr', \
+    repos=c('https://mc-stan.org/r-packages/', 'https://cloud.r-project.org')); \
+    cmdstanr::install_cmdstan(dir='/usr/local/cmdstan', cores=8, quiet=TRUE); \
+    cat('CmdStan path: ', cmdstanr::cmdstan_path(), '\n'); \
+    cat('CmdStan ver:  ', as.character(cmdstanr::cmdstan_version()), '\n')"
+ENV CMDSTAN=/usr/local/cmdstan
+
+# Optional: one tiny fit to trigger Prophet model compilation during build (faster at runtime)
+RUN R -q -e "library(prophet); set.seed(1); \
+    df <- data.frame(ds = seq.Date(as.Date('2024-01-01'), by='day', length.out=30), y = rnorm(30)); \
+    m <- prophet(df, verbose=TRUE); invisible(m)"
 
 # ------------------------
 # App files & entrypoint
