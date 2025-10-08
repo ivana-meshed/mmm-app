@@ -45,6 +45,24 @@ suppressPackageStartupMessages({
     library(ggplot2)
 })
 
+# ---- Harden ggplot2 against boolean fonts (must be BEFORE library(Robyn)) ----
+suppressWarnings({
+    if (!"ggplot2" %in% (.packages())) library(ggplot2)
+    ns_gg <- asNamespace("ggplot2")
+    if (bindingIsLocked("element_text", ns_gg)) unlockBinding("element_text", ns_gg)
+    .orig_element_text <- get("element_text", envir = ns_gg)
+
+    assign("element_text", function(...) {
+        args <- list(...)
+        # If a logical family sneaks in from Robyn/lares/etc., drop it (NULL = use device default)
+        if ("family" %in% names(args) && is.logical(args$family)) args$family <- NULL
+        do.call(.orig_element_text, args)
+    }, envir = ns_gg)
+
+    lockBinding("element_text", ns_gg)
+})
+
+
 `%||%` <- function(a, b) {
     if (is.null(a)) {
         return(b)
