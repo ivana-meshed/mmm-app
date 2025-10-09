@@ -368,36 +368,7 @@ cat(
     "  adstock          :", adstock, "\n"
 )
 
-## ---------- Hyperparameters (build) ----------
-# Build hyperparameters FIRST (before robyn_inputs)
-hyperparameters <- list()
-mk_hp <- function(v) {
-    if (v == "ORGANIC_TRAFFIC") {
-        list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
-    } else if (v == "TV_COST") {
-        list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
-    } else if (v == "PARTNERSHIP_COSTS") {
-        list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
-    } else {
-        list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
-    }
-}
-
-hyper_vars <- c(paid_media_vars, organic_vars)
-for (v in hyper_vars) {
-    spec <- mk_hp(v)
-    hyperparameters[[paste0(v, "_alphas")]] <- spec$alphas
-    hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
-    hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
-}
-hyperparameters[["train_size"]] <- train_size
-
-## ---------- ROBYN INPUTS (with explicit error capture) ----------
-message("→ Calling robyn_inputs()...")
-message("  paid_media_vars: ", paste(paid_media_vars, collapse = ", "))
-message("  organic_vars: ", paste(organic_vars, collapse = ", "))
-message("  hyperparameters: ", length(hyperparameters), " keys")
-
+# First: call robyn_inputs WITHOUT hyperparameters
 InputCollect <- tryCatch(
     {
         robyn_inputs(
@@ -414,8 +385,8 @@ InputCollect <- tryCatch(
             organic_vars = organic_vars,
             window_start = start_data_date,
             window_end = end_data_date,
-            adstock = adstock,
-            hyperparameters = hyperparameters
+            adstock = adstock
+            # hyperparameters = hyperparameters
         )
     },
     error = function(e) {
@@ -441,6 +412,38 @@ InputCollect <- tryCatch(
         return(NULL)
     }
 )
+
+# Now build hyperparameters based on what Robyn ACTUALLY has
+hyper_vars <- c(InputCollect$paid_media_vars, InputCollect$organic_vars)
+hyperparameters <- list()
+
+mk_hp <- function(v) {
+    if (v == "ORGANIC_TRAFFIC") {
+        list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
+    } else if (v == "TV_COST") {
+        list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
+    } else if (v == "PARTNERSHIP_COSTS") {
+        list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
+    } else {
+        list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
+    }
+}
+
+for (v in hyper_vars) {
+    spec <- mk_hp(v)
+    hyperparameters[[paste0(v, "_alphas")]] <- spec$alphas
+    hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
+    hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
+}
+
+hyperparameters[["train_size"]] <- train_size
+
+# Now attach to InputCollect
+InputCollect$hyperparameters <- hyperparameters
+
+# Verify
+message("Hyperparameters keys: ", paste(names(hyperparameters), collapse = ", "))
+
 
 # Check if robyn_inputs succeeded
 if (is.null(InputCollect)) {
