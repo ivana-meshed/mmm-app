@@ -361,13 +361,16 @@ factor_vars <- intersect(cfg$factor_vars %||% character(0), names(df))
 org_base <- intersect(cfg$organic_vars %||% "ORGANIC_TRAFFIC", names(df))
 organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES" %in% names(df)) unique(c(org_base, "N_SEARCHES")) else org_base
 
+adstock <- cfg$adstock %||% "geometric"
+
 cat(
     "✅ Drivers\n",
     "  paid_media_spends:", paste(paid_media_spends, collapse = ", "), "\n",
     "  paid_media_vars  :", paste(paid_media_vars, collapse = ", "), "\n",
     "  context_vars     :", paste(context_vars, collapse = ", "), "\n",
     "  factor_vars      :", paste(factor_vars, collapse = ", "), "\n",
-    "  organic_vars     :", paste(organic_vars, collapse = ", "), "\n"
+    "  organic_vars     :", paste(organic_vars, collapse = ", "), "\n",
+    "  adstock          :", adstock, "\n"
 )
 
 ## ---------- Hyperparameters (build) ----------
@@ -481,12 +484,85 @@ InputCollect <- robyn_inputs(
     organic_vars = organic_vars,
     window_start = start_data_date,
     window_end = end_data_date,
-    adstock = "geometric"
+    adstock = adstock
 )
 
 # 2) Attach hyperparameters
 InputCollect$hyperparameters <- hyperparameters
-# InputCollect$adstock <- adstock
+InputCollect$adstock <- adstock
+
+
+## 3) Log a compact snapshot of ALL InputCollect variables
+log_InputCollect <- function(ic) {
+    cat("\n================= InputCollect snapshot =================\n")
+    cat("adstock        :", ic$adstock, "\n")
+    cat("dep_var        :", ic$dep_var, "\n")
+    cat("dep_var_type   :", ic$dep_var_type, "\n")
+    # date window
+    if (!is.null(ic$window_start) && !is.null(ic$window_end)) {
+        cat("window         :", as.character(ic$window_start), "→", as.character(ic$window_end), "\n")
+    } else if (!is.null(ic$dt_input$date)) {
+        cat("window         :", as.character(min(ic$dt_input$date)), "→", as.character(max(ic$dt_input$date)), "\n")
+    }
+    # prophet vars
+    if (!is.null(ic$prophet_vars)) cat("prophet_vars   :", paste(ic$prophet_vars, collapse = ", "), "\n")
+    if (!is.null(ic$prophet_country)) cat("prophet_country:", ic$prophet_country, "\n")
+    # drivers
+    if (!is.null(ic$paid_media_spends)) cat("paid_spends    :", paste(ic$paid_media_spends, collapse = ", "), "\n")
+    if (!is.null(ic$paid_media_vars)) cat("paid_vars      :", paste(ic$paid_media_vars, collapse = ", "), "\n")
+    if (!is.null(ic$organic_vars)) cat("organic_vars   :", paste(ic$organic_vars, collapse = ", "), "\n")
+    if (!is.null(ic$context_vars)) cat("context_vars   :", paste(ic$context_vars, collapse = ", "), "\n")
+    if (!is.null(ic$factor_vars)) cat("factor_vars    :", paste(ic$factor_vars, collapse = ", "), "\n")
+
+    # dt_input shape & columns
+    if (is.data.frame(ic$dt_input)) {
+        cat("dt_input       : data.frame[", nrow(ic$dt_input), " x ", ncol(ic$dt_input), "]\n", sep = "")
+        # show a concise list of columns
+        cn <- names(ic$dt_input)
+        cat("dt_input cols  : ", paste(utils::head(cn, 30), collapse = ", "),
+            if (length(cn) > 30) sprintf(" ... (+%d)", length(cn) - 30) else "", "\n",
+            sep = ""
+        )
+    }
+
+    # hyperparameters summary
+    cat("\n-- hyperparameters --\n")
+    if (!is.null(ic$hyperparameters) && length(ic$hyperparameters)) {
+        # print train_size first if present
+        if (!is.null(ic$hyperparameters$train_size)) {
+            cat("train_size     : [", paste(ic$hyperparameters$train_size, collapse = ", "), "]\n", sep = "")
+        }
+        # then each channel’s alpha/gamma/theta
+        keys <- setdiff(names(ic$hyperparameters), "train_size")
+        for (k in sort(keys)) {
+            v <- ic$hyperparameters[[k]]
+            sh <- paste0("[", paste(v, collapse = ", "), "]")
+            cat(sprintf("%-16s: %s\n", k, sh))
+        }
+    } else {
+        cat("<none>\n")
+    }
+
+    # dump all top-level keys with class & size (for completeness)
+    cat("\n-- all fields --\n")
+    for (nm in names(ic)) {
+        v <- ic[[nm]]
+        shape <- if (is.null(v)) {
+            "NULL"
+        } else if (is.data.frame(v)) {
+            sprintf("data.frame[%d x %d]", nrow(v), ncol(v))
+        } else if (is.list(v)) {
+            sprintf("list(len=%d)", length(v))
+        } else if (is.atomic(v)) {
+            sprintf("%s(len=%d)", class(v)[1], length(v))
+        } else {
+            class(v)[1]
+        }
+        cat(sprintf("  - %-18s %s\n", nm, shape))
+    }
+    cat("=========================================================\n\n")
+}
+log_InputCollect(InputCollect)
 
 # --- Sanity guards so robyn_run never starts with a bad InputCollect ---
 if (is.null(InputCollect) || !is.list(InputCollect)) {
