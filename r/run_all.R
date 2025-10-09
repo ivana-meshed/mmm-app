@@ -370,26 +370,9 @@ cat(
     "  organic_vars     :", paste(organic_vars, collapse = ", "), "\n"
 )
 
-## ---------- ROBYN INPUTS ----------
-InputCollect <- robyn_inputs(
-    dt_input = df,
-    date_var = "date",
-    dep_var = "UPLOAD_VALUE",
-    dep_var_type = "revenue",
-    prophet_vars = c("trend", "season", "holiday", "weekday"),
-    prophet_country = toupper(country),
-    paid_media_spends = paid_media_spends,
-    paid_media_vars = paid_media_vars,
-    context_vars = context_vars,
-    factor_vars = factor_vars,
-    organic_vars = organic_vars,
-    window_start = start_data_date,
-    window_end = end_data_date,
-    adstock = "geometric"
-)
 
-alloc_end <- max(InputCollect$dt_input$date)
-alloc_start <- alloc_end - 364
+
+
 
 ## ---------- Hyperparameters (build) ----------
 hyper_vars <- c(paid_media_vars, organic_vars)
@@ -466,20 +449,21 @@ robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
 ## ---------- robyn_inputs() with hard guard ----------
 InputCollect <- withCallingHandlers(
     tryCatch(
-        Robyn::robyn_inputs(
-            dt_input = df_for_robyn,
+        robyn_inputs(
+            dt_input = df,
             date_var = "date",
-            dep_var = dep_var,
+            dep_var = "UPLOAD_VALUE",
             dep_var_type = "revenue",
-            adstock = adstock,
-            prophet_vars = NULL, # prophet_vars_used,
-            prophet_country = NULL, # prophet_country,
+            prophet_vars = c("trend", "season", "holiday", "weekday"),
+            prophet_country = toupper(country),
             paid_media_spends = paid_media_spends,
             paid_media_vars = paid_media_vars,
             context_vars = context_vars,
+            factor_vars = factor_vars,
             organic_vars = organic_vars,
-            window_start = min(df_for_robyn$date),
-            window_end = max(df_for_robyn$date),
+            window_start = start_data_date,
+            window_end = end_data_date,
+            adstock = "geometric",
             hyperparameters = hyperparameters
         ),
         error = function(e) {
@@ -496,6 +480,9 @@ InputCollect <- withCallingHandlers(
         invokeRestart("muffleWarning")
     }
 )
+
+alloc_end <- max(InputCollect$dt_input$date)
+alloc_start <- alloc_end - 364
 
 OutputModels <- tryCatch(
     withCallingHandlers(
