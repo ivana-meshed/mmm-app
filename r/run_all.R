@@ -843,13 +843,20 @@ sanitize_for_robyn <- function(df_full, dep_var, paid_media_spends, paid_media_v
 ## ---------- Inputs (BASE, no HPs) ----------
 if (!(dep_var %in% names(df))) stop("Dependent variable '", dep_var, "' not found in data.")
 # Before robyn_inputs()
-prophet_vars_used <- c("trend", "season", "holiday", "weekday")
-if (!requireNamespace("prophet", quietly = TRUE)) {
-    stop("Prophet is not installed but Prophet is required. Install it or set prophet_vars_used <- NULL.")
+# ---- Prophet ON configuration ----
+use_prophet <- TRUE # or: isTRUE(cfg$use_prophet)
+prophet_country <- (cfg$prophet_country %||% toupper(country)) # prefer ISO-2 (e.g., "DE","US","GB")
+
+if (use_prophet) {
+    if (!requireNamespace("prophet", quietly = TRUE)) {
+        stop("Prophet is ON but the 'prophet' R package is not installed.")
+    }
+    prophet_vars_used <- c("trend", "season", "holiday", "weekday")
+} else {
+    prophet_vars_used <- NULL
+    prophet_country <- NULL
 }
 
-
-prophet_vars_used <- NULL # TEMP: avoid prophet merge branch while we debug
 
 # ---- guard against duplicate column names (causes weird selects later) ----
 dups <- names(df)[duplicated(names(df))]
@@ -996,7 +1003,7 @@ robyn_args <- list(
     dep_var_type = "revenue",
     adstock = adstock,
     prophet_vars = prophet_vars_used,
-    prophet_country = toupper(country),
+    prophet_country = prophet_country,
     paid_media_spends = paid_media_spends,
     paid_media_vars = paid_media_vars,
     context_vars = context_vars,
@@ -1324,12 +1331,6 @@ if (!is.numeric(InputCollect$hyperparameters$train_size) || any(is.na(InputColle
     stop("train_size is missing/NA inside hyperparameters. Aborting to avoid empty models.")
 }
 
-if (!is.null(InputCollect$prophet_vars) && is.null(InputCollect$dt_prophet)) {
-    stop(
-        "Prophet vars requested (", paste(InputCollect$prophet_vars, collapse = ","),
-        ") but InputCollect$dt_prophet is NULL. Install 'prophet' or set prophet_vars=NULL."
-    )
-}
 
 logf("Train     | start cores=", max_cores, " iter=", iter, " trials=", trials)
 
@@ -1489,10 +1490,84 @@ run_err <- NULL
 run_tb <- NULL
 t0 <- Sys.time()
 
+
+## ---------- Fallback knobs (tune if needed) ----------
+FALLBACK_ITER <- max(800, iter) # was 200; bump to 800 by default
+FALLBACK_TRLS <- max(3, trials) # was 1; try 3 populations
+
+widen_hps <- function(hp, media_vars, organic_vars) {
+    # widen all media thetas & gammas; relax alphas a bit
+    add <- list()
+    wspec_media <- function(v) list(alphas = c(0.5, 4.0), gammas = c(0.30, 0.99), thetas = c(0.01, 0.70))
+    wspec_tv <- function(v) list(alphas = c(0.6, 3.0), gammas = c(0.50, 0.99), thetas = c(0.60, 0.98))
+    wspec_org <- function(v) list(alphas = c(0.4, 3.0), gammas = c(0.20, 0.90), thetas = c(0.80, 0.995))
+
+    for (v in media_vars) {
+        spec <- if (identical(v, "TV_COST")) wspec_tv(v) else wspec_media(v)
+        add[[paste0(v, "_alphas")]] <- spec$alphas
+        add[[paste0(v, "_gammas")]] <- spec$gammas
+        add[[paste0(v, "_thetas")]] <- spec$thetas
+    }
+    for (v in organic_vars) {
+        spec <- wspec_org(v)
+        add[[paste0(v, "_alphas")]] <- spec$alphas
+        add[[paste0(v, "_gammas")]] <- spec$gammas
+        add[[paste0(v, "_thetas")]] <- spec$thetas
+    }
+    # keep only expected keys + train_size
+    keep <- c(
+        as.vector(outer(c(media_vars, organic_vars), c("_alphas", "_gammas", "_thetas"), paste0)),
+        "train_size"
+    )
+    out <- modifyList(hp, add)
+    out[intersect(names(out), keep)]
+}
+
+## ---- First attempt (already in your code) ----
 OutputModels <- try(run_once(InputCollect, iter = iter, trials = trials, ts_validation = TRUE, out_dir = dir_path), silent = TRUE)
 if (inherits(OutputModels, "try-error") || is.null(OutputModels) || !NROW(OutputModels$resultHypParam)) {
     message("Retrying with ts_validation = FALSE …")
-    OutputModels <- run_once(InputCollect, iter = iter, trials = trials, ts_validation = FALSE, out_dir = dir_path)
+    OutputModels <- try(run_once(InputCollect, iter = iter, trials = trials, ts_validation = FALSE, out_dir = dir_path), silent = TRUE)
+}
+
+## ---- Fallback attempt if still empty: widen HPs & drop penalty ----
+empty_models <- is.null(OutputModels) || is.null(OutputModels$resultHypParam) || !NROW(OutputModels$resultHypParam)
+if (empty_models) {
+    message("No candidates after normal run. Launching FALLBACK with widened HPs & no penalty...")
+    # Build widened HPs
+    hp_fallback <- widen_hps(
+        hp = InputCollect$hyperparameters,
+        media_vars = InputCollect$paid_media_vars,
+        organic_vars = InputCollect$organic_vars %||% character(0)
+    )
+    # simplify train_size for robustness
+    hp_fallback[["train_size"]] <- c(0.80, 0.80)
+
+    # Update InputCollect in place
+    InputCollect$hyperparameters <- hp_fallback
+
+    # A special run_once variant with add_penalty_factor = FALSE
+    run_once_fallback <- function(InputCollect, iter, trials, ts_validation, out_dir) {
+        withCallingHandlers(
+            robyn_run(
+                InputCollect       = InputCollect,
+                iterations         = iter,
+                trials             = trials,
+                ts_validation      = ts_validation,
+                add_penalty_factor = FALSE, # <- key difference
+                cores              = parallel::detectCores()
+            ),
+            warning = function(w) invokeRestart("muffleWarning"),
+            message = function(m) invokeRestart("muffleMessage")
+        )
+    }
+
+    # Try fallback (first without validation, then with)
+    OutputModels <- try(run_once_fallback(InputCollect, iter = FALLBACK_ITER, trials = FALLBACK_TRLS, ts_validation = FALSE, out_dir = dir_path), silent = TRUE)
+    if (inherits(OutputModels, "try-error") || is.null(OutputModels) || !NROW(OutputModels$resultHypParam)) {
+        message("Fallback (ts_validation=FALSE) still empty; one more try with ts_validation=TRUE …")
+        OutputModels <- try(run_once_fallback(InputCollect, iter = FALLBACK_ITER, trials = FALLBACK_TRLS, ts_validation = TRUE, out_dir = dir_path), silent = TRUE)
+    }
 }
 
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
