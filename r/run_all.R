@@ -589,7 +589,7 @@ for (v in hyper_vars) {
 hyperparameters[["train_size"]] <- train_size
 
 # Now attach to InputCollect
-InputCollect$hyperparameters <- hyperparameters
+InputCollect <- robyn_inputs(InputCollect, hyperparameters = hyperparameters) # Pass it
 
 # Verify
 message("Hyperparameters keys: ", paste(names(hyperparameters), collapse = ", "))
