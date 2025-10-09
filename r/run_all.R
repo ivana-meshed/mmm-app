@@ -489,7 +489,7 @@ InputCollect <- robyn_inputs(
 
 # 2) Attach hyperparameters
 InputCollect$hyperparameters <- hyperparameters
-InputCollect$adstock <- adstock
+# InputCollect$adstock <- adstock
 
 
 ## 3) Log a compact snapshot of ALL InputCollect variables
