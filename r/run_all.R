@@ -17,7 +17,7 @@ suppressPackageStartupMessages({
     library(lubridate)
     library(readr)
     library(stringr)
-    library(Robyn)
+    # library(Robyn)
     library(googleCloudStorageR)
     library(mime)
     library(reticulate)
@@ -26,6 +26,111 @@ suppressPackageStartupMessages({
     library(future.apply)
     library(parallel)
 })
+
+suppressPackageStartupMessages({
+    library(systemfonts)
+    library(ggplot2)
+})
+
+# ---- Harden ggplot2 against boolean fonts (must be BEFORE library(Robyn)) ----
+suppressWarnings({
+    if (!"ggplot2" %in% (.packages())) library(ggplot2)
+    ns_gg <- asNamespace("ggplot2")
+    if (bindingIsLocked("element_text", ns_gg)) unlockBinding("element_text", ns_gg)
+    .orig_element_text <- get("element_text", envir = ns_gg)
+
+    assign("element_text", function(...) {
+        args <- list(...)
+        # If a logical family sneaks in from Robyn/lares/etc., drop it (NULL = use device default)
+        if ("family" %in% names(args) && is.logical(args$family)) args$family <- NULL
+        do.call(.orig_element_text, args)
+    }, envir = ns_gg)
+
+    lockBinding("element_text", ns_gg)
+})
+
+ggplot2::theme_set(ggplot2::theme_gray(base_family = robyn_family %||% "sans"))
+try(
+    {
+        ggplot2::theme_update(
+            text = ggplot2::element_text(family = as.character(robyn_family)),
+            plot.title = ggplot2::element_text(family = as.character(robyn_family)),
+            axis.text = ggplot2::element_text(family = as.character(robyn_family)),
+            axis.title = ggplot2::element_text(family = as.character(robyn_family)),
+            legend.text = ggplot2::element_text(family = as.character(robyn_family)),
+            legend.title = ggplot2::element_text(family = as.character(robyn_family)),
+            strip.text = ggplot2::element_text(family = as.character(robyn_family))
+        )
+        ggplot2::update_geom_defaults("text", list(family = as.character(robyn_family)))
+        ggplot2::update_geom_defaults("label", list(family = as.character(robyn_family)))
+    },
+    silent = TRUE
+)
+
+# --- Let Robyn/plots inherit the family (always character(1), never NULL) ---
+# --- Let Robyn/plots inherit the family, but NEVER a boolean in 'robyn.plot.font' ---
+# 1) Force lares to ignore custom fonts entirely
+Sys.setenv(LARES_FONT = "ignore") # lares::theme_lares() treats "ignore" specially
+
+# 2) Make Robyn’s own font option a character, never logical
+options(
+    robyn.plot.font = "ignore", # character, not TRUE/FALSE
+    robyn.plot.font.family = "ignore", # keep both consistent just in case
+    robyn_font_family = "ignore"
+)
+
+
+# --- Font debug report to the log ---
+font_debug <- local({
+    # system calls are best-effort (won't fail macOS silently)
+    fc_match <- try(system("fc-match 'Arial Narrow'", intern = TRUE), silent = TRUE)
+    fc_list <- try(system("fc-list | grep -i 'Arial Narrow' | head -n 3", intern = TRUE), silent = TRUE)
+    mf <- try(systemfonts::match_font("Arial Narrow"), silent = TRUE)
+    cairo_ok <- tryCatch(isTRUE(capabilities("cairo")), error = function(e) NA)
+
+    list(
+        chosen_family = robyn_family,
+        cairo_enabled = cairo_ok,
+        arial_narrow_match_path = if (!inherits(mf, "try-error")) (mf$path %||% "") else "",
+        fc_match = if (!inherits(fc_match, "try-error")) paste(fc_match, collapse = " | ") else "<fc-match n/a>",
+        fc_list_top3 = if (!inherits(fc_list, "try-error")) paste(fc_list, collapse = " | ") else "<fc-list n/a>",
+        ggplot_base_family = tryCatch(ggplot2::theme_get()$text$family %||% "", error = function(e) "")
+    )
+})
+
+
+# --- (Optional) Write a tiny probe plot to confirm the font works ---
+try(
+    {
+        p <- ggplot(data.frame(x = 1, y = 1), aes(x, y)) +
+            geom_point() +
+            ggplot2::labs(title = paste("Font probe –", robyn_family)) +
+            ggplot2::annotate("text", x = 1, y = 1.02, label = "Hello • ÄÖÜ ß ć ž", family = as.character(robyn_family), vjust = 0)
+        ggsave(filename = "font_probe.png", plot = p, width = 6, height = 3, dpi = 120)
+    },
+    silent = TRUE
+)
+
+# ---- NOW load Robyn ----
+library(Robyn)
+
+# Hot-patch lares::theme_lares to always ignore custom fonts
+# (must run before robyn_inputs/robyn_outputs/onepagers)
+try(
+    {
+        if (requireNamespace("lares", quietly = TRUE)) {
+            ns <- asNamespace("lares")
+            if (bindingIsLocked("theme_lares", ns)) unlockBinding("theme_lares", ns)
+            orig <- get("theme_lares", envir = ns)
+            assign("theme_lares", function(..., font = "ignore") orig(..., font = "ignore"), envir = ns)
+            lockBinding("theme_lares", ns)
+        }
+    },
+    silent = TRUE
+)
+
+
+HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 
 max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
 plan(multisession, workers = max_cores)
