@@ -845,7 +845,7 @@ if (!(dep_var %in% names(df))) stop("Dependent variable '", dep_var, "' not foun
 # Before robyn_inputs()
 # ---- Prophet ON configuration ----
 use_prophet <- TRUE # or: isTRUE(cfg$use_prophet)
-prophet_country <- (cfg$prophet_country %||% toupper(country)) # prefer ISO-2 (e.g., "DE","US","GB")
+prophet_country <- toupper(country) # prefer ISO-2 (e.g., "DE","US","GB")
 
 if (use_prophet) {
     if (!requireNamespace("prophet", quietly = TRUE)) {
