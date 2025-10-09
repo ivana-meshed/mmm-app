@@ -32,6 +32,21 @@ suppressPackageStartupMessages({
     library(ggplot2)
 })
 
+`%||%` <- function(a, b) {
+    if (is.null(a)) {
+        return(b)
+    }
+    if (length(a) == 0) {
+        return(b)
+    }
+    if (is.character(a) && length(a) == 1L && !nzchar(a)) {
+        return(b)
+    }
+    if (all(is.na(a))) {
+        return(b)
+    }
+    a
+}
 # ---- Harden ggplot2 against boolean fonts (must be BEFORE library(Robyn)) ----
 suppressWarnings({
     if (!"ggplot2" %in% (.packages())) library(ggplot2)
@@ -134,19 +149,6 @@ HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 
 max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
 plan(multisession, workers = max_cores)
-
-`%||%` <- function(a, b) {
-    if (is.null(a) || length(a) == 0) {
-        return(b)
-    }
-    if (all(is.na(a))) {
-        return(b)
-    }
-    if (is.character(a) && length(a) == 1 && !nzchar(a)) {
-        return(b)
-    }
-    a
-}
 
 ## ---------- HELPERS ----------
 should_add_n_searches <- function(dtf, spend_cols, thr = 0.15) {
