@@ -592,6 +592,8 @@ if (length(bad_len)) {
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
+
+
 ## ---------- TRAIN (exact error capture; hard stop on failure) ----------
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
 t0 <- Sys.time()
