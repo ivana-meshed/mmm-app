@@ -486,7 +486,7 @@ InputCollect <- robyn_inputs(
 
 # 2) Attach hyperparameters
 InputCollect$hyperparameters <- hyperparameters
-InputCollect$adstock <- adstock
+# InputCollect$adstock <- adstock
 
 # --- Sanity guards so robyn_run never starts with a bad InputCollect ---
 if (is.null(InputCollect) || !is.list(InputCollect)) {
