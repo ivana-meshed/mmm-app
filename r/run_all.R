@@ -391,55 +391,64 @@ InputCollect <- robyn_inputs(
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
-## ---------- HYPERPARAMETERS ----------
+## ---------- Hyperparameters (build) ----------
 hyper_vars <- c(paid_media_vars, organic_vars)
 hyperparameters <- list()
-
-message("→ Setting up hyperparameters (", length(hyper_vars), " vars) with ", max_cores, " cores...")
-
-if (length(hyper_vars) > 10) {
-    hp <- future_lapply(hyper_vars, function(v) {
-        if (v == "ORGANIC_TRAFFIC") {
-            list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
-        } else if (v == "TV_COST") {
-            list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
-        } else if (v == "PARTNERSHIP_COSTS") {
-            list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
-        } else {
-            list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
-        }
-    }, future.seed = TRUE)
-    names(hp) <- hyper_vars
-    for (v in names(hp)) {
-        hyperparameters[[paste0(v, "_alphas")]] <- hp[[v]]$alphas
-        hyperparameters[[paste0(v, "_gammas")]] <- hp[[v]]$gammas
-        hyperparameters[[paste0(v, "_thetas")]] <- hp[[v]]$thetas
-    }
-} else {
-    for (v in hyper_vars) {
-        if (v == "ORGANIC_TRAFFIC") {
-            hyperparameters[[paste0(v, "_alphas")]] <- c(0.5, 2.0)
-            hyperparameters[[paste0(v, "_gammas")]] <- c(0.3, 0.7)
-            hyperparameters[[paste0(v, "_thetas")]] <- c(0.9, 0.99)
-        } else if (v == "TV_COST") {
-            hyperparameters[[paste0(v, "_alphas")]] <- c(0.8, 2.2)
-            hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.99)
-            hyperparameters[[paste0(v, "_thetas")]] <- c(0.7, 0.95)
-        } else if (v == "PARTNERSHIP_COSTS") {
-            hyperparameters[[paste0(v, "_alphas")]] <- c(0.65, 2.25)
-            hyperparameters[[paste0(v, "_gammas")]] <- c(0.45, 0.875)
-            hyperparameters[[paste0(v, "_thetas")]] <- c(0.3, 0.625)
-        } else {
-            hyperparameters[[paste0(v, "_alphas")]] <- c(1.0, 3.0)
-            hyperparameters[[paste0(v, "_gammas")]] <- c(0.6, 0.9)
-            hyperparameters[[paste0(v, "_thetas")]] <- c(0.1, 0.4)
-        }
+mk_hp <- function(v) {
+    if (v == "ORGANIC_TRAFFIC") {
+        list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
+    } else if (v == "TV_COST") {
+        list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
+    } else if (v == "PARTNERSHIP_COSTS") {
+        list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
+    } else {
+        list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
     }
 }
-hyperparameters[["train_size"]] <- train_size
-InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
+for (v in hyper_vars) {
+    spec <- mk_hp(v)
+    hyperparameters[[paste0(v, "_alphas")]] <- spec$alphas
+    hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
+    hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
+}
 
-## ---------- TRAIN ----------
+# When you construct `hyperparameters`, do THIS:
+hyperparameters[["train_size"]] <- train_size # <- overwrite cfg range
+
+expect_keys <- c(
+    as.vector(outer(c(paid_media_vars, organic_vars), c("_alphas", "_gammas", "_thetas"), paste0)),
+    "train_size"
+)
+missing <- setdiff(expect_keys, names(hyperparameters))
+extra <- setdiff(names(hyperparameters), expect_keys)
+logf("HP        | vars=", length(hyper_vars), " keys=", length(names(hyperparameters)), " missing=", length(missing), " extra=", length(extra))
+if (length(missing)) stop("Missing HP keys: ", paste(missing, collapse = ", "))
+if (length(extra)) stop("Extra HP keys (remove them): ", paste(extra, collapse = ", "))
+
+## ---------- HP diagnostics + robyn_inputs() PROBE ----------
+hp_diag_path <- file.path(dir_path, "robyn_hp_diagnostics.txt")
+capture_msgs <- character()
+capture_warn <- character()
+append_msg <- function(x) capture_msgs <<- c(capture_msgs, x)
+append_warn <- function(x) capture_warn <<- c(capture_warn, x)
+
+bad_shapes <- c()
+bad_ranges <- c()
+check_pair <- function(k, v) {
+    if (!is.numeric(v) || length(v) != 2L || any(is.na(v))) {
+        bad_shapes <<- c(bad_shapes, sprintf("%s (need numeric length-2)", k))
+        return()
+    }
+    if (grepl("_alphas$", k) && any(v <= 0)) bad_ranges <<- c(bad_ranges, sprintf("%s <= 0", k))
+    if (grepl("_gammas$|_thetas$", k) && any(v < 0 | v > 1)) bad_ranges <<- c(bad_ranges, sprintf("%s out of [0,1]", k))
+    if (v[1] > v[2]) bad_ranges <<- c(bad_ranges, sprintf("%s min>max (%.3f>%.3f)", k, v[1], v[2]))
+}
+invisible(lapply(names(hyperparameters), function(k) check_pair(k, hyperparameters[[k]])))
+
+
+## ---------- robyn_inputs() with hard guard ----------
+dir.create(dir_path, recursive = TRUE, showWarnings = FALSE) # ensure path exists
+
 ## ---------- TRAIN (with exact error capture) ----------
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
 t0 <- Sys.time()
@@ -453,6 +462,40 @@ robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
     # drop very long calls for readability
     vapply(cs, function(z) paste0(deparse(z, nlines = 3L), collapse = " "), character(1))
 }
+
+## ---------- robyn_inputs() with hard guard ----------
+InputCollect <- withCallingHandlers(
+    tryCatch(
+        Robyn::robyn_inputs(
+            dt_input = df_for_robyn,
+            date_var = "date",
+            dep_var = dep_var,
+            dep_var_type = "revenue",
+            adstock = adstock,
+            prophet_vars = NULL, # prophet_vars_used,
+            prophet_country = NULL, # prophet_country,
+            paid_media_spends = paid_media_spends,
+            paid_media_vars = paid_media_vars,
+            context_vars = context_vars,
+            organic_vars = organic_vars,
+            window_start = min(df_for_robyn$date),
+            window_end = max(df_for_robyn$date),
+            hyperparameters = hyperparameters
+        ),
+        error = function(e) {
+            inp_err <<- conditionMessage(e)
+            NULL
+        }
+    ),
+    message = function(m) {
+        capture_msgs <<- c(capture_msgs, conditionMessage(m))
+        invokeRestart("muffleMessage")
+    },
+    warning = function(w) {
+        capture_warn <<- c(capture_warn, conditionMessage(w))
+        invokeRestart("muffleWarning")
+    }
+)
 
 OutputModels <- tryCatch(
     withCallingHandlers(
