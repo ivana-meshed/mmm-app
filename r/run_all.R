@@ -370,10 +370,6 @@ cat(
     "  organic_vars     :", paste(organic_vars, collapse = ", "), "\n"
 )
 
-
-
-
-
 ## ---------- Hyperparameters (build) ----------
 hyper_vars <- c(paid_media_vars, organic_vars)
 hyperparameters <- list()
@@ -404,9 +400,16 @@ expect_keys <- c(
 )
 missing <- setdiff(expect_keys, names(hyperparameters))
 extra <- setdiff(names(hyperparameters), expect_keys)
-logf("HP        | vars=", length(hyper_vars), " keys=", length(names(hyperparameters)), " missing=", length(missing), " extra=", length(extra))
+
 if (length(missing)) stop("Missing HP keys: ", paste(missing, collapse = ", "))
 if (length(extra)) stop("Extra HP keys (remove them): ", paste(extra, collapse = ", "))
+
+# HP coverage & shapes
+req <- as.vector(outer(c(paid_media_vars, organic_vars), c("_alphas", "_gammas", "_thetas"), paste0))
+missing <- setdiff(req, names(hyperparameters))
+badlen <- names(hyperparameters)[vapply(hyperparameters, length, integer(1)) != 2]
+if (length(missing)) stop("Missing HP keys: ", paste(missing, collapse = ", "), call. = FALSE)
+if (length(badlen)) stop("Non length-2 HP entries: ", paste(badlen, collapse = ", "), call. = FALSE)
 
 ## ---------- HP diagnostics + robyn_inputs() PROBE ----------
 hp_diag_path <- file.path(dir_path, "robyn_hp_diagnostics.txt")
@@ -428,7 +431,23 @@ check_pair <- function(k, v) {
 }
 invisible(lapply(names(hyperparameters), function(k) check_pair(k, hyperparameters[[k]])))
 
-
+# Always write the diagnostics file once, whether success or failure.
+hp_diag_lines <- c(
+    "=== ROBYN HP DIAGNOSTICS ===",
+    paste0("Time: ", as.character(Sys.time())), "",
+    "-- Paid media vars:",
+    paste0("  ", paste(paid_media_vars, collapse = ", ")),
+    "-- Organic vars:",
+    paste0("  ", paste(organic_vars, collapse = ", ")), "",
+    "-- Messages from robyn_inputs():",
+    if (length(capture_msgs)) paste0("  ", capture_msgs) else "  <none>", "",
+    "-- Warnings from robyn_inputs():",
+    if (length(capture_warn)) paste0("  ", capture_warn) else "  <none>", "",
+    if (!is.null(inp_err)) c("", "== ERROR ==", paste0("  ", inp_err)) else ""
+)
+writeLines(hp_diag_lines, hp_diag_path)
+gcs_put_safe(hp_diag_path, file.path(gcs_prefix, "robyn_hp_diagnostics.txt"))
+push_log()
 ## ---------- robyn_inputs() with hard guard ----------
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE) # ensure path exists
 
@@ -446,47 +465,72 @@ robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
     vapply(cs, function(z) paste0(deparse(z, nlines = 3L), collapse = " "), character(1))
 }
 
-## ---------- robyn_inputs() with hard guard ----------
-InputCollect <- withCallingHandlers(
-    tryCatch(
-        robyn_inputs(
-            dt_input = df,
-            date_var = "date",
-            dep_var = "UPLOAD_VALUE",
-            dep_var_type = "revenue",
-            prophet_vars = c("trend", "season", "holiday", "weekday"),
-            prophet_country = toupper(country),
-            paid_media_spends = paid_media_spends,
-            paid_media_vars = paid_media_vars,
-            context_vars = context_vars,
-            factor_vars = factor_vars,
-            organic_vars = organic_vars,
-            window_start = start_data_date,
-            window_end = end_data_date,
-            adstock = "geometric",
-            hyperparameters = hyperparameters
-        ),
-        error = function(e) {
-            inp_err <<- conditionMessage(e)
-            NULL
-        }
-    ),
-    message = function(m) {
-        capture_msgs <<- c(capture_msgs, conditionMessage(m))
-        invokeRestart("muffleMessage")
-    },
-    warning = function(w) {
-        capture_warn <<- c(capture_warn, conditionMessage(w))
-        invokeRestart("muffleWarning")
-    }
+## ---------- ROBYN INPUTS (2-step, strict) ----------
+# 1) Build the base inputs (NO hyperparameters here)
+InputCollect <- robyn_inputs(
+    dt_input = df,
+    date_var = "date",
+    dep_var = "UPLOAD_VALUE",
+    dep_var_type = "revenue",
+    prophet_vars = c("trend", "season", "holiday", "weekday"),
+    prophet_country = toupper(country),
+    paid_media_spends = paid_media_spends,
+    paid_media_vars = paid_media_vars,
+    context_vars = context_vars,
+    factor_vars = factor_vars,
+    organic_vars = organic_vars,
+    window_start = start_data_date,
+    window_end = end_data_date,
+    adstock = "geometric"
 )
+
+# 2) Attach hyperparameters
+InputCollect <- robyn_inputs(
+    InputCollect = InputCollect,
+    hyperparameters = hyperparameters
+)
+
+# --- Sanity guards so robyn_run never starts with a bad InputCollect ---
+if (is.null(InputCollect) || !is.list(InputCollect)) {
+    stop("robyn_inputs() returned NULL/invalid InputCollect.", call. = FALSE)
+}
+if (is.null(InputCollect$hyperparameters)) {
+    # check missing keys to give a crisp message
+    req <- as.vector(outer(
+        c(paid_media_vars, organic_vars),
+        c("_alphas", "_gammas", "_thetas"), paste0
+    ))
+    miss <- setdiff(req, names(hyperparameters))
+    extra <- setdiff(names(hyperparameters), c(req, "train_size"))
+    msg <- c(
+        "InputCollect$hyperparameters is NULL after the attach step.",
+        if (length(miss)) paste("Missing keys:", paste(miss, collapse = ", ")),
+        if (length(extra)) paste("Unexpected keys:", paste(extra, collapse = ", "))
+    )
+    stop(paste(msg, collapse = "\n"), call. = FALSE)
+}
+# quick shape check
+bad_len <- names(InputCollect$hyperparameters)[
+    vapply(InputCollect$hyperparameters, length, integer(1)) == 0
+]
+if (length(bad_len)) {
+    stop("Zero-length HP entries: ", paste(bad_len, collapse = ", "), call. = FALSE)
+}
 
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
+## ---------- TRAIN (exact error capture; hard stop on failure) ----------
+message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
+t0 <- Sys.time()
+
+robyn_err_txt <- file.path(dir_path, "robyn_run_error.txt")
+robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
+.format_calls <- function(cs) vapply(cs, function(z) paste0(deparse(z, nlines = 3L), collapse = " "), character(1))
+
 OutputModels <- tryCatch(
     withCallingHandlers(
-        expr = robyn_run(
+        robyn_run(
             InputCollect = InputCollect,
             iterations = iter,
             trials = trials,
@@ -495,18 +539,14 @@ OutputModels <- tryCatch(
             cores = max_cores
         ),
         warning = function(w) {
-            # surface warnings but don't spam
             message("⚠️ [robyn_run warning] ", conditionMessage(w))
             invokeRestart("muffleWarning")
         }
     ),
     error = function(e) {
-        # capture stack as we unwind
         calls_chr <- .format_calls(sys.calls())
         elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
-
-        # human-friendly TXT
-        txt <- c(
+        writeLines(c(
             "robyn_run() FAILED",
             paste0("When     : ", as.character(Sys.time())),
             paste0("Elapsed  : ", round(elapsed, 2), " sec"),
@@ -515,13 +555,10 @@ OutputModels <- tryCatch(
             paste0("Class    : ", paste(class(e), collapse = ", ")),
             "--- Approximate R call stack (inner→outer) ---",
             paste(rev(calls_chr), collapse = "\n")
-        )
-        writeLines(txt, robyn_err_txt)
+        ), robyn_err_txt)
 
-        # machine-friendly JSON
         err_payload <- list(
-            state = "FAILED",
-            step = "robyn_run",
+            state = "FAILED", step = "robyn_run",
             timestamp = as.character(Sys.time()),
             training_started_at = as.character(t0),
             elapsed_seconds = elapsed,
@@ -529,42 +566,28 @@ OutputModels <- tryCatch(
             call = paste(deparse(conditionCall(e)), collapse = " "),
             class = unname(class(e)),
             stack_inner_to_outer = as.list(calls_chr),
-            params = list(iterations = iter, trials = trials, cores = max_cores),
-            session = list(
-                r_version = R.version.string,
-                platform  = R.version$platform,
-                packages  = rownames(installed.packages())
-            )
+            params = list(iterations = iter, trials = trials, cores = max_cores)
         )
         writeLines(jsonlite::toJSON(err_payload, auto_unbox = TRUE, pretty = TRUE), robyn_err_json)
-
-        # push to GCS (best-effort)
         gcs_put_safe(robyn_err_txt, file.path(gcs_prefix, basename(robyn_err_txt)))
         gcs_put_safe(robyn_err_json, file.path(gcs_prefix, basename(robyn_err_json)))
-
-        # update job status for orchestration to see failure immediately
+        # reflect failure in status.json
         try(
             {
-                writeLines(
-                    jsonlite::toJSON(
-                        list(
-                            state = "FAILED",
-                            start_time = as.character(job_started),
-                            end_time = as.character(Sys.time()),
-                            failed_step = "robyn_run",
-                            error_message = conditionMessage(e)
-                        ),
-                        auto_unbox = TRUE, pretty = TRUE
-                    ),
-                    status_json
-                )
+                writeLines(jsonlite::toJSON(list(
+                    state = "FAILED",
+                    start_time = as.character(job_started),
+                    end_time = as.character(Sys.time()),
+                    failed_step = "robyn_run",
+                    error_message = conditionMessage(e)
+                ), auto_unbox = TRUE, pretty = TRUE), status_json)
                 gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
             },
             silent = TRUE
         )
 
-        # rethrow so your global error handler/cleanup still triggers
-        stop(e)
+        # HARD stop (avoid “wrapup: argument 'e' missing” & avoid continuing)
+        stop(conditionMessage(e), call. = FALSE)
     }
 )
 
