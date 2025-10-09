@@ -440,16 +440,104 @@ hyperparameters[["train_size"]] <- train_size
 InputCollect <- robyn_inputs(InputCollect = InputCollect, hyperparameters = hyperparameters)
 
 ## ---------- TRAIN ----------
+## ---------- TRAIN (with exact error capture) ----------
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
 t0 <- Sys.time()
-OutputModels <- robyn_run(
-    InputCollect = InputCollect,
-    iterations = iter,
-    trials = trials,
-    ts_validation = TRUE,
-    add_penalty_factor = TRUE,
-    cores = max_cores
+
+# where to save detailed diagnostics
+robyn_err_txt <- file.path(dir_path, "robyn_run_error.txt")
+robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
+
+# small helper for a readable call stack
+.format_calls <- function(cs) {
+    # drop very long calls for readability
+    vapply(cs, function(z) paste0(deparse(z, nlines = 3L), collapse = " "), character(1))
+}
+
+OutputModels <- tryCatch(
+    withCallingHandlers(
+        expr = robyn_run(
+            InputCollect = InputCollect,
+            iterations = iter,
+            trials = trials,
+            ts_validation = TRUE,
+            add_penalty_factor = TRUE,
+            cores = max_cores
+        ),
+        warning = function(w) {
+            # surface warnings but don't spam
+            message("⚠️ [robyn_run warning] ", conditionMessage(w))
+            invokeRestart("muffleWarning")
+        }
+    ),
+    error = function(e) {
+        # capture stack as we unwind
+        calls_chr <- .format_calls(sys.calls())
+        elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+
+        # human-friendly TXT
+        txt <- c(
+            "robyn_run() FAILED",
+            paste0("When     : ", as.character(Sys.time())),
+            paste0("Elapsed  : ", round(elapsed, 2), " sec"),
+            paste0("Message  : ", conditionMessage(e)),
+            paste0("Call     : ", paste(deparse(conditionCall(e)), collapse = " ")),
+            paste0("Class    : ", paste(class(e), collapse = ", ")),
+            "--- Approximate R call stack (inner→outer) ---",
+            paste(rev(calls_chr), collapse = "\n")
+        )
+        writeLines(txt, robyn_err_txt)
+
+        # machine-friendly JSON
+        err_payload <- list(
+            state = "FAILED",
+            step = "robyn_run",
+            timestamp = as.character(Sys.time()),
+            training_started_at = as.character(t0),
+            elapsed_seconds = elapsed,
+            message = conditionMessage(e),
+            call = paste(deparse(conditionCall(e)), collapse = " "),
+            class = unname(class(e)),
+            stack_inner_to_outer = as.list(calls_chr),
+            params = list(iterations = iter, trials = trials, cores = max_cores),
+            session = list(
+                r_version = R.version.string,
+                platform  = R.version$platform,
+                packages  = rownames(installed.packages())
+            )
+        )
+        writeLines(jsonlite::toJSON(err_payload, auto_unbox = TRUE, pretty = TRUE), robyn_err_json)
+
+        # push to GCS (best-effort)
+        gcs_put_safe(robyn_err_txt, file.path(gcs_prefix, basename(robyn_err_txt)))
+        gcs_put_safe(robyn_err_json, file.path(gcs_prefix, basename(robyn_err_json)))
+
+        # update job status for orchestration to see failure immediately
+        try(
+            {
+                writeLines(
+                    jsonlite::toJSON(
+                        list(
+                            state = "FAILED",
+                            start_time = as.character(job_started),
+                            end_time = as.character(Sys.time()),
+                            failed_step = "robyn_run",
+                            error_message = conditionMessage(e)
+                        ),
+                        auto_unbox = TRUE, pretty = TRUE
+                    ),
+                    status_json
+                )
+                gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+            },
+            silent = TRUE
+        )
+
+        # rethrow so your global error handler/cleanup still triggers
+        stop(e)
+    }
 )
+
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
 
