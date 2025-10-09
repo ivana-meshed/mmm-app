@@ -64,6 +64,49 @@ suppressWarnings({
     lockBinding("element_text", ns_gg)
 })
 
+# --- Register Arial Narrow if the TTFs exist (harmless if they don't) ---
+try(
+    {
+        font_dir <- "/usr/local/share/fonts/truetype/arial-narrow"
+        files <- list.files(font_dir, pattern = "[.]ttf$", full.names = TRUE)
+        if (length(files)) {
+            find_face <- function(pat) {
+                hit <- files[grepl(paste0("(?i)", pat, ".*[.]ttf$"), files, perl = TRUE)]
+                if (length(hit)) normalizePath(hit[1], mustWork = FALSE) else ""
+            }
+            plain <- find_face("arialn(?!b|i)") # ARIALN.TTF
+            bold <- find_face("arialnb") # ARIALNB.TTF
+            italic <- find_face("arialni") # ARIALNI.TTF
+            bolditalic <- find_face("arialnbi") # ARIALNBI.TTF
+            if (nzchar(plain)) {
+                systemfonts::register_font(
+                    name       = "Arial Narrow",
+                    plain      = plain,
+                    bold       = if (nzchar(bold)) bold else NULL,
+                    italic     = if (nzchar(italic)) italic else NULL,
+                    bolditalic = if (nzchar(bolditalic)) bolditalic else NULL
+                )
+            }
+        }
+    },
+    silent = TRUE
+)
+
+# --- Choose family: use Arial Narrow if it truly resolves to a file; else fall back to 'sans' ---
+pick_family <- function() {
+    info <- try(systemfonts::match_font("Arial Narrow"), silent = TRUE)
+    if (!inherits(info, "try-error") && is.list(info) && !is.null(info$path) && nzchar(info$path)) {
+        return("Arial Narrow")
+    }
+    "sans" # reliable mapped family (e.g. DejaVu Sans); avoids PostScript warnings
+}
+robyn_family <- pick_family()
+# --- Force Cairo devices for headless plotting ---
+options(bitmapType = "cairo")
+try(grDevices::X11.options(type = "cairo"), silent = TRUE)
+try(grDevices::pdf.options(useDingbats = FALSE, family = robyn_family %||% "sans"), silent = TRUE)
+
+
 ggplot2::theme_set(ggplot2::theme_gray(base_family = robyn_family %||% "sans"))
 try(
     {
