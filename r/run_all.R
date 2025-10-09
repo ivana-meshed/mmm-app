@@ -1079,7 +1079,7 @@ InputCollect <- withCallingHandlers(
             dep_var_type = "revenue",
             adstock = adstock,
             prophet_vars = prophet_vars_used,
-            prophet_country = toupper(country),
+            prophet_country = prophet_country,
             paid_media_spends = paid_media_spends,
             paid_media_vars = paid_media_vars,
             context_vars = context_vars,
@@ -1347,14 +1347,6 @@ must_df <- function(x, nm) if (!is.null(x) && !inherits(x, c("data.frame", "tbl"
 must_exist(InputCollect$dt_input, "InputCollect$dt_input")
 must_df(InputCollect$dt_input, "InputCollect$dt_input")
 
-
-# Prophet must be fully off
-if (!is.null(InputCollect$prophet_vars) || !is.null(InputCollect$dt_prophet)) {
-    stop(
-        "Preflight: prophet appears enabled: vars=", paste(InputCollect$prophet_vars %||% "<NULL>", collapse = ","),
-        " dt_prophet is ", if (is.null(InputCollect$dt_prophet)) "NULL" else "non-NULL"
-    )
-}
 
 # ---- FINAL GUARD on dt_mod just before robyn_run ----
 
