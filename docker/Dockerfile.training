@@ -1,6 +1,6 @@
 # -----------------------------------------------------------
 # Training-optimized Dockerfile for Cloud Run Jobs (R + Py)
-# - Pins S7/cli/rlang/vctrs to avoid S7 plot crash
+# - Robust pins (CRAN first, GitHub fallback) to avoid S7 plot crash
 # - Keeps Python stack (nevergrad, etc.)
 # - Installs Robyn from GitHub AFTER pins
 # - Prebuilds CmdStan outside R, then wires up cmdstanr (for Prophet)
@@ -38,7 +38,6 @@ ENV OMP_NUM_THREADS=8 \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-# Make perf env visible to login shells too
 RUN echo 'export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}'           >> /etc/environment && \
     echo 'export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-8}' >> /etc/environment && \
     echo 'export MKL_NUM_THREADS=${MKL_NUM_THREADS:-8}'           >> /etc/environment && \
@@ -114,15 +113,19 @@ RUN R -q -e "options(Ncpus=8); \
     remotes::install_github('thomasp85/patchwork@v1.3.1', upgrade='never', dependencies=TRUE) }"
 
 # ------------------------
-# 🔧 Pin S7 / cli / rlang / vctrs to avoid S7 plot crash
-# (We pin *before* installing Robyn so dependencies link against these)
+# 🔧 Robust pins: CRAN first, GitHub tag fallback (avoids build failures)
 # ------------------------
-RUN R -q -e "options(Ncpus=8); remotes::install_version('S7',     version='0.1.2', repos='https://cloud.r-project.org', upgrade='never')"
-RUN R -q -e "options(Ncpus=8); remotes::install_version('cli',    version='3.6.2', repos='https://cloud.r-project.org', upgrade='never')"
-RUN R -q -e "options(Ncpus=8); remotes::install_version('rlang',  version='1.1.4', repos='https://cloud.r-project.org', upgrade='never')"
-RUN R -q -e "options(Ncpus=8); remotes::install_version('vctrs',  version='0.6.5', repos='https://cloud.r-project.org', upgrade='never')"
-# If your trace later implicates gt/htmltools, you can also pin 'gt' here, e.g.:
-# RUN R -q -e "options(Ncpus=8); remotes::install_version('gt', version='0.10.1', repos='https://cloud.r-project.org', upgrade='never')"
+RUN R -q -e "options(Ncpus=8); \
+    pin <- function(pkg, ver, gh_tag) { \
+    ok <- FALSE; \
+    tryCatch({ remotes::install_version(pkg, version = ver, repos = 'https://cloud.r-project.org', upgrade = 'never'); ok <<- TRUE }, \
+    error = function(e) message('CRAN pin failed for ', pkg, ' ', ver, ': ', conditionMessage(e))); \
+    if (!ok) remotes::install_github(gh_tag, upgrade = 'never'); \
+    }; \
+    pin('S7',    '0.1.2', 'r-lib/S7@v0.1.2'); \
+    pin('cli',   '3.6.2', 'r-lib/cli@v3.6.2'); \
+    pin('rlang', '1.1.4', 'r-lib/rlang@v1.1.4'); \
+    pin('vctrs', '0.6.5', 'r-lib/vctrs@v0.6.5')"
 
 # Re-install Robyn *after* pins
 RUN R -q -e "options(Ncpus=8); \
@@ -148,7 +151,7 @@ RUN wget -O /tmp/cmdstan.tar.gz "https://github.com/stan-dev/cmdstan/releases/do
 
 RUN R -q -e "options(Ncpus=8); \
     if (!requireNamespace('cmdstanr', quietly=TRUE)) install.packages('cmdstanr', \
-    repos=c('https://mc-stan.org/r-packages/', 'https://cloud.r-project.org')); \
+        repos=c('https://mc-stan.org/r-packages/', 'https://cloud.r-project.org')); \
     library(cmdstanr); set_cmdstan_path(Sys.getenv('CMDSTAN')); \
     cat('CmdStan path: ', cmdstanr::cmdstan_path(), '\n'); \
     cat('CmdStan ver:  ', as.character(cmdstanr::cmdstan_version()), '\n')"
