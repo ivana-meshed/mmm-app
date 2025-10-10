@@ -166,7 +166,21 @@ try(
             geom_point() +
             ggplot2::labs(title = paste("Font probe –", robyn_family)) +
             ggplot2::annotate("text", x = 1, y = 1.02, label = "Hello • ÄÖÜ ß ć ž", family = as.character(robyn_family), vjust = 0)
-        ggsave(filename = "font_probe.png", plot = p, width = 6, height = 3, dpi = 120)
+        # In probe:
+        probe_file <- file.path(dir_path, "font_probe.png") # Ensure in upload path
+        tryCatch(
+            {
+                ggsave(probe_file, p, width = 6, height = 3, dpi = 120, type = "cairo-png")
+                if (!file.exists(probe_file) || file.info(probe_file)$size == 0) {
+                    stop("Probe plot failed: no file or empty")
+                }
+                message("Probe OK: ", file.info(probe_file)$size, " bytes")
+            },
+            error = function(e) {
+                message("Probe error: ", e$message)
+                # Log to console.log
+            }
+        )
     },
     silent = TRUE
 )
@@ -1013,10 +1027,12 @@ for (m in top_models) {
             InputCollect,
             OutputCollect,
             select_model = m,
+            plot_folder = dir_path,
             export = TRUE
         ),
         silent = TRUE
     )
+    message("Files in dir_path: ", paste(list.files(dir_path, pattern = "onepager|plot", recursive = TRUE), collapse = ", "))
 }
 
 # Onepagers: try PNG first, then PDF (restored fallback)
@@ -1083,7 +1099,7 @@ if (!is.finite(expected_spend) || expected_spend <= 0) {
 }
 
 stopifnot(best_id %in% OutputCollect$resultHypParam$solID)
-stopifnot(length(low_bounds) == length(up_bounds), length(low_bounds) == length(alloc_channels))
+stopifnot(length(low_bounds) == length(up_bounds), length(low_bounds) == length(InputCollect$paid_media_vars))
 
 # Trace helpers
 alloc_trace_file <- file.path(dir_path, "allocator_error_trace.txt")
