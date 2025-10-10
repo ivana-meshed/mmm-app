@@ -160,29 +160,24 @@ font_debug <- local({
 
 
 # --- (Optional) Write a tiny probe plot to confirm the font works ---
-try(
+p <- ggplot(data.frame(x = 1, y = 1), aes(x, y)) +
+    geom_point() +
+    ggplot2::labs(title = paste("Font probe –", robyn_family)) +
+    ggplot2::annotate("text", x = 1, y = 1.02, label = "Hello • ÄÖÜ ß ć ž", family = as.character(robyn_family), vjust = 0)
+# In probe:
+probe_file <- file.path(dir_path, "font_probe.png") # Ensure in upload path
+tryCatch(
     {
-        p <- ggplot(data.frame(x = 1, y = 1), aes(x, y)) +
-            geom_point() +
-            ggplot2::labs(title = paste("Font probe –", robyn_family)) +
-            ggplot2::annotate("text", x = 1, y = 1.02, label = "Hello • ÄÖÜ ß ć ž", family = as.character(robyn_family), vjust = 0)
-        # In probe:
-        probe_file <- file.path(dir_path, "font_probe.png") # Ensure in upload path
-        tryCatch(
-            {
-                ggsave(probe_file, p, width = 6, height = 3, dpi = 120, type = "cairo-png")
-                if (!file.exists(probe_file) || file.info(probe_file)$size == 0) {
-                    stop("Probe plot failed: no file or empty")
-                }
-                message("Probe OK: ", file.info(probe_file)$size, " bytes")
-            },
-            error = function(e) {
-                message("Probe error: ", e$message)
-                # Log to console.log
-            }
-        )
+        ggsave(probe_file, p, width = 6, height = 3, dpi = 120, type = "cairo-png")
+        if (!file.exists(probe_file) || file.info(probe_file)$size == 0) {
+            stop("Probe plot failed: no file or empty")
+        }
+        message("Probe OK: ", file.info(probe_file)$size, " bytes")
     },
-    silent = TRUE
+    error = function(e) {
+        message("Probe error: ", e$message)
+        # Log to console.log
+    }
 )
 
 # ---- NOW load Robyn ----
@@ -1022,16 +1017,16 @@ top_models <- OutputCollect$resultHypParam$solID[
     1:min(3, nrow(OutputCollect$resultHypParam))
 ]
 for (m in top_models) {
-    try(
-        robyn_onepagers(
-            InputCollect,
-            OutputCollect,
-            select_model = m,
-            plot_folder = dir_path,
-            export = TRUE
-        ),
-        silent = TRUE
-    )
+    # try(
+    robyn_onepagers(
+        InputCollect,
+        OutputCollect,
+        select_model = m,
+        plot_folder = dir_path,
+        export = TRUE
+    ) # ,
+    #    silent = TRUE
+    # )
     message("Files in dir_path: ", paste(list.files(dir_path, pattern = "onepager|plot", recursive = TRUE), collapse = ", "))
 }
 
@@ -1080,10 +1075,12 @@ alloc_end <- max(InputCollect$dt_input$date, na.rm = TRUE)
 alloc_start <- max(min(InputCollect$dt_input$date, na.rm = TRUE), alloc_end - 364)
 
 # Constraints aligned to paid channels
-is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
-low_bounds <- ifelse(is_brand, 0, 0.3)
-up_bounds <- ifelse(is_brand, 0, 4)
-
+alloc_channels <- InputCollect$paid_media_vars # e.g., c("GA_SUPPLY_COST", "GA_DEMAND_COST", ...)
+is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST" # All FALSE here, but keeps logic
+low_vec <- ifelse(is_brand, 0, 0.3) # Temp unnamed
+up_vec <- ifelse(is_brand, 0, 4) # Or 1.5 for brand if added later
+low_bounds <- setNames(low_vec, alloc_channels) # ← KEY: Name them!
+up_bounds <- setNames(up_vec, alloc_channels) # Matches vars order
 
 # Expected spend baseline
 base_df <- dplyr::filter(InputCollect$dt_input, date >= alloc_start, date <= alloc_end)
@@ -1097,9 +1094,12 @@ if (!is.finite(expected_spend) || expected_spend <= 0) {
         unlist(use.names = TRUE)
     expected_spend <- sum(hist_vec_all, na.rm = TRUE)
 }
+message("Expected spend: ", round(expected_spend, 2), " (window: ", round(sum(hist_vec, na.rm = TRUE), 2), ")") # ← ADD LOG
 
 stopifnot(best_id %in% OutputCollect$resultHypParam$solID)
-stopifnot(length(low_bounds) == length(up_bounds), length(low_bounds) == length(InputCollect$paid_media_vars))
+stopifnot(length(low_bounds) == length(up_bounds), length(low_bounds) == length(alloc_channels)) # Now safe
+
+# ... (rest of allocator call unchanged)
 
 # Trace helpers
 alloc_trace_file <- file.path(dir_path, "allocator_error_trace.txt")
