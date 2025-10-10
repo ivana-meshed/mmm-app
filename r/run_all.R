@@ -1054,66 +1054,41 @@ if (length(cand_png)) {
     }
 }
 
-## ---------- ALLOCATOR (robust) ----------
+## ---------- ALLOCATOR (robust; with error traces + base-graphics fallback) ----------
 message("→ Running allocator...")
 
-# 1) Safe date_range inside train window
+# Safe window (<= 365d and within train)
 alloc_end <- max(InputCollect$dt_input$date, na.rm = TRUE)
 alloc_start <- max(min(InputCollect$dt_input$date, na.rm = TRUE), alloc_end - 364)
 
-# 2) Build named constraints aligned to paid channels
+# Constraints (named, aligned to paid channels)
 alloc_channels <- InputCollect$paid_media_vars
 low_bounds <- setNames(rep(0.3, length(alloc_channels)), alloc_channels)
 up_bounds <- setNames(rep(4.0, length(alloc_channels)), alloc_channels)
 
-# 3) Compute a sensible expected spend baseline in the same window
+# Expected spend baseline over the same window (fallback to full window)
 base_df <- dplyr::filter(InputCollect$dt_input, date >= alloc_start, date <= alloc_end)
 hist_vec <- base_df |>
     dplyr::summarise(dplyr::across(dplyr::all_of(InputCollect$paid_media_spends), ~ sum(.x, na.rm = TRUE))) |>
     unlist(use.names = TRUE)
-
 expected_spend <- sum(hist_vec, na.rm = TRUE)
 if (!is.finite(expected_spend) || expected_spend <= 0) {
-    # fallback to whole-window total if the window has no spend
     hist_vec_all <- InputCollect$dt_input |>
         dplyr::summarise(dplyr::across(dplyr::all_of(InputCollect$paid_media_spends), ~ sum(.x, na.rm = TRUE))) |>
         unlist(use.names = TRUE)
     expected_spend <- sum(hist_vec_all, na.rm = TRUE)
 }
 
-# 4) Validate model id and inputs (hard stop if off)
+# Sanity checks
 stopifnot(best_id %in% OutputCollect$resultHypParam$solID)
-stopifnot(
-    length(low_bounds) == length(up_bounds),
-    length(low_bounds) == length(alloc_channels)
-)
+stopifnot(length(low_bounds) == length(up_bounds), length(low_bounds) == length(alloc_channels))
 
-# 5) Call allocator with a supported scenario + explicit expected_spend
-alloc_msgs <- character(0)
-
-## ---------- ALLOCATOR (robust + traced plot + fallback ggplot) ----------
-message("→ Running allocator...")
-
-# 0) Files & helpers
-alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
-dir.create(alloc_dir, showWarnings = FALSE)
-alloc_log_file <- file.path(dir_path, "allocator_log.txt")
+# Trace helper (used for allocator & plot fallbacks)
 alloc_trace_file <- file.path(dir_path, "allocator_error_trace.txt")
-plot_trace_file <- file.path(dir_path, "allocator_plot_error_trace.txt")
-alloc_png_main <- file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png"))
-alloc_png_fallback <- file.path(alloc_dir, paste0("allocator_", best_id, "_365d_fallback.png"))
-alloc_png_gcs_prefix <- paste0("allocator_plots_", timestamp, "/")
-
-writeLines(c(
-    sprintf("MSG: >>> Running budget allocator for model ID %s ...", best_id)
-), alloc_log_file)
-gcs_put_safe(alloc_log_file, file.path(gcs_prefix, basename(alloc_log_file)))
-
-# Small utilities
-.write_trace <- function(file_path, e) {
+write_trace <- function(title, e = NULL) {
     msg <- c(
-        sprintf("Error at %s", Sys.time()),
-        paste0("Message: ", conditionMessage(e)),
+        sprintf("%s at %s", title, Sys.time()),
+        if (!is.null(e)) paste0("Message: ", conditionMessage(e)) else NULL,
         "",
         "--- sys.calls() (inner → outer) ---",
         paste(rev(sapply(sys.calls(), function(z) paste(deparse(z, nlines = 3L), collapse = " "))), collapse = "\n"),
@@ -1121,68 +1096,11 @@ gcs_put_safe(alloc_log_file, file.path(gcs_prefix, basename(alloc_log_file)))
         "--- sessionInfo() ---",
         capture.output(utils::sessionInfo())
     )
-    writeLines(msg, file_path)
-    gcs_put_safe(file_path, file.path(gcs_prefix, basename(file_path)))
+    writeLines(msg, alloc_trace_file)
+    gcs_put_safe(alloc_trace_file, file.path(gcs_prefix, basename(alloc_trace_file)))
 }
 
-plot_with_trace <- function(obj, file_png) {
-    tryCatch(
-        {
-            png(file_png, width = 1200, height = 800, res = 96)
-            plot(obj) # <- Robyn's plot() method (may throw the S7 error)
-            dev.off()
-            TRUE
-        },
-        error = function(e) {
-            try(grDevices::dev.off(), silent = TRUE)
-            .write_trace(plot_trace_file, e)
-            FALSE
-        }
-    )
-}
-
-# 1) Safe date_range inside train window (365d back if available)
-alloc_end <- max(InputCollect$dt_input$date, na.rm = TRUE)
-alloc_start <- max(min(InputCollect$dt_input$date, na.rm = TRUE), alloc_end - 364)
-
-writeLines(c(
-    sprintf("MSG: Date Window: %s:%s (%d days)", alloc_start, alloc_end, as.integer(alloc_end - alloc_start + 1L))
-), alloc_log_file, append = TRUE)
-gcs_put_safe(alloc_log_file, file.path(gcs_prefix, basename(alloc_log_file)))
-
-# 2) Named constraints aligned to paid channels
-alloc_channels <- InputCollect$paid_media_vars
-stopifnot(length(alloc_channels) > 0)
-
-# uniform constraints; tweak per-channel here if needed
-channel_constr_low <- setNames(rep(0.3, length(alloc_channels)), alloc_channels)
-channel_constr_up <- setNames(rep(4.0, length(alloc_channels)), alloc_channels)
-
-# 3) Baseline expected_spend from the same window
-base_df <- dplyr::filter(InputCollect$dt_input, date >= alloc_start, date <= alloc_end)
-hist_vec <- base_df |>
-    dplyr::summarise(dplyr::across(dplyr::all_of(InputCollect$paid_media_spends), ~ sum(.x, na.rm = TRUE))) |>
-    unlist(use.names = TRUE)
-
-expected_spend <- sum(hist_vec, na.rm = TRUE)
-if (!is.finite(expected_spend) || expected_spend <= 0) {
-    hist_vec_all <- InputCollect$dt_input |>
-        dplyr::summarise(dplyr::across(dplyr::all_of(InputCollect$paid_media_spends), ~ sum(.x, na.rm = TRUE))) |>
-        unlist(use.names = TRUE)
-    expected_spend <- sum(hist_vec_all, na.rm = TRUE)
-}
-if (!is.finite(expected_spend) || expected_spend <= 0) {
-    stop("Allocator: expected_spend computed as non-finite or <= 0. Check spend columns.")
-}
-
-# 4) Validate IDs / lengths
-stopifnot(best_id %in% OutputCollect$resultHypParam$solID)
-stopifnot(
-    length(channel_constr_low) == length(channel_constr_up),
-    length(channel_constr_low) == length(alloc_channels)
-)
-
-# 5) Call allocator (messages/warnings silenced; traced on error)
+# Run allocator (suppress chatty messages/warnings into tryCatch)
 AllocatorCollect <- tryCatch(
     withCallingHandlers(
         robyn_allocator(
@@ -1191,76 +1109,189 @@ AllocatorCollect <- tryCatch(
             select_model       = best_id,
             date_range         = c(alloc_start, alloc_end),
             scenario           = "max_response", # supported scenario
-            expected_spend     = expected_spend, # numeric baseline
-            channel_constr_low = channel_constr_low, # named numeric
-            channel_constr_up  = channel_constr_up, # named numeric
-            export             = FALSE # we handle files ourselves
+            expected_spend     = expected_spend, # numeric
+            channel_constr_low = low_bounds, # named
+            channel_constr_up  = up_bounds, # named
+            export             = FALSE
         ),
         warning = function(w) invokeRestart("muffleWarning"),
         message = function(m) invokeRestart("muffleMessage")
     ),
     error = function(e) {
-        .write_trace(alloc_trace_file, e)
+        write_trace("Allocator error", e)
         NULL
     }
 )
 
-if (is.null(AllocatorCollect) || is.null(AllocatorCollect$result_allocator)) {
-    writeLines("ERROR: Allocator returned NULL or no 'result_allocator'. See allocator_error_trace.txt if present.",
-        alloc_log_file,
-        append = TRUE
-    )
-    gcs_put_safe(alloc_log_file, file.path(gcs_prefix, basename(alloc_log_file)))
+# Persist a tiny allocator log for observability
+alloc_log <- file.path(dir_path, "allocator_log.txt")
+cat(
+    "MSG: >>> Running budget allocator for model ID", best_id, "...\n",
+    "MSG: Date Window:", as.character(alloc_start), ":", as.character(alloc_end), "(365 max)\n",
+    if (is.null(AllocatorCollect)) "ERROR: Allocator returned NULL\n" else "OK: Allocator returned a result\n",
+    file = alloc_log
+)
+gcs_put_safe(alloc_log, file.path(gcs_prefix, "allocator_log.txt"))
+
+# Extract metrics robustly
+best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == best_id, ]
+alloc_tbl <- if (!is.null(AllocatorCollect) && !is.null(AllocatorCollect$result_allocator)) {
+    AllocatorCollect$result_allocator
 } else {
-    writeLines(sprintf("MSG: Allocator rows: %s", nrow(AllocatorCollect$result_allocator)),
-        alloc_log_file,
-        append = TRUE
-    )
-    gcs_put_safe(alloc_log_file, file.path(gcs_prefix, basename(alloc_log_file)))
+    NULL
 }
 
-# 6) Plot: first try Robyn::plot(), then fallback ggplot if it throws the S7 error
-if (!is.null(AllocatorCollect) && !is.null(AllocatorCollect$result_allocator)) {
-    ok_main <- plot_with_trace(AllocatorCollect, alloc_png_main)
+to_num <- function(x) suppressWarnings(as.numeric(x))
+total_response <- if (!is.null(alloc_tbl) && "total_response" %in% names(alloc_tbl)) to_scalar(alloc_tbl$total_response[1]) else NA_real_
+total_spend <- if (!is.null(alloc_tbl) && "total_spend" %in% names(alloc_tbl)) to_scalar(alloc_tbl$total_spend[1]) else NA_real_
+message("Allocator metrics: response=", round(total_response, 2), " spend=", round(total_spend, 2))
 
-    if (ok_main) {
-        gcs_put_safe(alloc_png_main, file.path(gcs_prefix, paste0(alloc_png_gcs_prefix, basename(alloc_png_main))))
-        message("✅ Allocator plot created")
-    } else {
-        message("⚠️ Allocator plot() failed, creating fallback ggplot…")
-        dfp <- AllocatorCollect$result_allocator
+# Save allocator metrics
+metrics_txt <- file.path(dir_path, "allocator_metrics.txt")
+metrics_csv <- file.path(dir_path, "allocator_metrics.csv")
+writeLines(c(
+    paste("Model ID:", best_id),
+    paste("Training Time (mins):", round(training_time, 2)),
+    paste("Max Cores Used:", max_cores),
+    paste("R2 (train):", round(best_row$rsq_train %||% NA_real_, 4)),
+    paste("NRMSE (train):", round(best_row$nrmse_train %||% NA_real_, 4)),
+    paste("R2 (validation):", round(best_row$rsq_val %||% NA_real_, 4)),
+    paste("NRMSE (validation):", round(best_row$nrmse_val %||% NA_real_, 4)),
+    paste("R2 (test):", round(best_row$rsq_test %||% NA_real_, 4)),
+    paste("NRMSE (test):", round(best_row$nrmse_test %||% NA_real_, 4)),
+    paste("DECOMP.RSSD (train):", round(best_row$decomp.rssd %||% NA_real_, 4)),
+    paste("Allocator Total Response:", round(total_response, 2)),
+    paste("Allocator Total Spend:", round(total_spend, 2))
+), con = metrics_txt)
+gcs_put_safe(metrics_txt, file.path(gcs_prefix, "allocator_metrics.txt"))
 
-        # Heuristic to find column names across Robyn versions
-        pick_col <- function(cands) {
-            hit <- intersect(cands, names(dfp))
-            if (length(hit)) hit[1] else NA_character_
-        }
-        ch <- pick_col(c("channel", "media", "variable", "paid_media_vars"))
-        sp <- pick_col(c("optimal_spend", "spend", "budget", "expected_spend", "total_spend"))
-        if (is.na(ch) || is.na(sp)) {
-            writeLines("ERROR: Fallback plot: could not infer channel/spend columns.", alloc_log_file, append = TRUE)
-            gcs_put_safe(alloc_log_file, file.path(gcs_prefix, basename(alloc_log_file)))
-        } else {
-            dfp[[ch]] <- as.character(dfp[[ch]])
-            p <- ggplot2::ggplot(
-                dfp |> dplyr::arrange(dplyr::desc(.data[[sp]])),
-                ggplot2::aes(x = stats::reorder(.data[[ch]], .data[[sp]]), y = .data[[sp]])
-            ) +
-                ggplot2::geom_col() +
-                ggplot2::coord_flip() +
-                ggplot2::labs(
-                    title = "Allocator — optimal spend by channel (365d window)",
-                    x = NULL, y = "Optimal spend"
-                )
-            ggplot2::ggsave(alloc_png_fallback, plot = p, width = 12, height = 8, dpi = 96)
-            gcs_put_safe(alloc_png_fallback, file.path(gcs_prefix, paste0(alloc_png_gcs_prefix, basename(alloc_png_fallback))))
-            message("✅ Wrote fallback allocator plot (ggplot2).")
+metrics_df <- data.frame(
+    model_id = best_id,
+    training_time_mins = round(training_time, 2),
+    max_cores_used = max_cores,
+    r2_train = round(best_row$rsq_train %||% NA_real_, 4),
+    nrmse_train = round(best_row$nrmse_train %||% NA_real_, 4),
+    r2_val = round(best_row$rsq_val %||% NA_real_, 4),
+    nrmse_val = round(best_row$nrmse_val %||% NA_real_, 4),
+    r2_test = round(best_row$rsq_test %||% NA_real_, 4),
+    nrmse_test = round(best_row$nrmse_test %||% NA_real_, 4),
+    decomp_rssd_train = round(best_row$decomp.rssd %||% NA_real_, 4),
+    allocator_total_response = round(total_response, 2),
+    allocator_total_spend = round(total_spend, 2),
+    stringsAsFactors = FALSE
+)
+write.csv(metrics_df, metrics_csv, row.names = FALSE)
+gcs_put_safe(metrics_csv, file.path(gcs_prefix, "allocator_metrics.csv"))
+
+# ---------- Plot: ggplot method first; base-graphics fallback on S7/ggplot issues ----------
+make_base_allocator_plot <- function(df, outfile) {
+    # Try to find columns
+    ch_col <- c("channel", "media", "variable", "paid_media_vars")
+    spend_new <- c("optimal_spend", "recommended_spend", "opt_spend", "spend_new")
+    spend_cur <- c("current_spend", "historical_spend", "spend_hist", "spend_old")
+
+    channel <- NULL
+    for (nm in ch_col) {
+        if (nm %in% names(df)) {
+            channel <- df[[nm]]
+            break
         }
     }
-} else {
-    message("⚠️ Allocator plot skipped (allocator failed or returned NULL)")
+    if (is.null(channel)) channel <- rownames(df)
+
+    new_col <- NULL
+    for (nm in spend_new) {
+        if (nm %in% names(df)) {
+            new_col <- df[[nm]]
+            break
+        }
+    }
+    cur_col <- NULL
+    for (nm in spend_cur) {
+        if (nm %in% names(df)) {
+            cur_col <- df[[nm]]
+            break
+        }
+    }
+
+    if (is.null(new_col)) {
+        # As last resort: any column containing "spend"
+        cand <- grep("spend", names(df), ignore.case = TRUE, value = TRUE)
+        if (length(cand)) new_col <- df[[cand[1]]]
+    }
+
+    png(outfile, width = 1200, height = 800, res = 120)
+    op <- par(no.readonly = TRUE)
+    on.exit(
+        {
+            par(op)
+            dev.off()
+        },
+        add = TRUE
+    )
+
+    if (!is.null(cur_col)) {
+        mat <- rbind(Current = as.numeric(cur_col), Recommended = as.numeric(new_col))
+        colnames(mat) <- as.character(channel)
+        barplot(mat,
+            beside = TRUE, las = 2, cex.names = 0.8,
+            main = "Allocator (base graphics fallback)",
+            ylab = "Spend", xlab = "Channel"
+        )
+        legend("topright", legend = rownames(mat), bty = "n")
+    } else {
+        barplot(
+            height = as.numeric(new_col), names.arg = as.character(channel),
+            las = 2, cex.names = 0.8,
+            main = "Allocator (base graphics fallback)",
+            ylab = "Recommended Spend", xlab = "Channel"
+        )
+    }
 }
 
+alloc_plot_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
+dir.create(alloc_plot_dir, showWarnings = FALSE)
+alloc_png <- file.path(alloc_plot_dir, paste0("allocator_", best_id, "_365d.png"))
+
+if (!is.null(AllocatorCollect) && !is.null(AllocatorCollect$result_allocator) && nrow(AllocatorCollect$result_allocator) > 0) {
+    ok <- FALSE
+    # Try Robyn's plot method (ggplot)
+    try(
+        {
+            png(alloc_png, width = 1200, height = 800, res = 96)
+            plot(AllocatorCollect)
+            dev.off()
+            ok <- TRUE
+        },
+        silent = TRUE
+    )
+
+    if (!ok) {
+        # Fallback to base
+        tryCatch(
+            {
+                make_base_allocator_plot(AllocatorCollect$result_allocator, alloc_png)
+                ok <- TRUE
+            },
+            error = function(e) {
+                message("⚠️ Allocator plot fallback failed: ", conditionMessage(e))
+                write_trace("Allocator plot fallback error", e)
+            }
+        )
+    }
+
+    if (ok && file.exists(alloc_png)) {
+        gcs_put_safe(
+            alloc_png,
+            file.path(gcs_prefix, paste0("allocator_plots_", timestamp, "/allocator_", best_id, "_365d.png"))
+        )
+        message("✅ Allocator plot created (", if (ok) "ok" else "fallback", ")")
+    } else {
+        message("⚠️ Allocator plot skipped (no image produced)")
+    }
+} else {
+    message("⚠️ Allocator plot skipped (allocator NULL or empty)")
+}
 
 
 ## ---------- METRICS + PLOT ----------
