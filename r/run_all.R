@@ -1133,7 +1133,7 @@ AllocatorCollect <- tryCatch(
             expected_spend     = expected_spend,
             channel_constr_low = low_bounds,
             channel_constr_up  = up_bounds,
-            export             = FALSE
+            export             = TRUE
         ),
         warning = function(w) invokeRestart("muffleWarning"),
         message = function(m) invokeRestart("muffleMessage")
