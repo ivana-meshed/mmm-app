@@ -1054,28 +1054,60 @@ if (length(cand_png)) {
     }
 }
 
-
 ## ---------- ALLOCATOR ----------
 is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
 low_bounds <- ifelse(is_brand, 0, 0.3)
 up_bounds <- ifelse(is_brand, 0, 4)
-AllocatorCollect <- try(
-    robyn_allocator(
-        InputCollect = InputCollect, OutputCollect = OutputCollect,
-        select_model = best_id, date_range = c(alloc_start, alloc_end),
-        expected_spend = NULL, scenario = "max_historical_response",
-        channel_constr_low = low_bounds, channel_constr_up = up_bounds,
-        export = TRUE
-    ),
-    silent = TRUE
+
+message("→ Running allocator...")
+AllocatorCollect <- tryCatch(
+    {
+        robyn_allocator(
+            InputCollect = InputCollect,
+            OutputCollect = OutputCollect,
+            select_model = best_id,
+            date_range = c(alloc_start, alloc_end),
+            expected_spend = NULL,
+            scenario = "max_historical_response",
+            channel_constr_low = low_bounds,
+            channel_constr_up = up_bounds,
+            export = TRUE
+        )
+    },
+    error = function(e) {
+        message("⚠️ Allocator failed (non-fatal): ", conditionMessage(e))
+        NULL
+    }
 )
 
 ## ---------- METRICS + PLOT ----------
 best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == best_id, ]
-alloc_tbl <- if (!inherits(AllocatorCollect, "try-error")) AllocatorCollect$result_allocator else NULL
 
-total_response <- to_scalar(if (!is.null(alloc_tbl)) alloc_tbl$total_response else NA_real_)
-total_spend <- to_scalar(if (!is.null(alloc_tbl)) alloc_tbl$total_spend else NA_real_)
+# Safe extraction of allocator metrics
+if (!is.null(AllocatorCollect) && !inherits(AllocatorCollect, "try-error")) {
+    alloc_tbl <- if (!is.null(AllocatorCollect$result_allocator)) {
+        AllocatorCollect$result_allocator
+    } else {
+        NULL
+    }
+} else {
+    alloc_tbl <- NULL
+}
+
+# Extract with safe defaults
+total_response <- NA_real_
+total_spend <- NA_real_
+
+if (!is.null(alloc_tbl) && is.data.frame(alloc_tbl) && nrow(alloc_tbl) > 0) {
+    if ("total_response" %in% names(alloc_tbl)) {
+        total_response <- to_scalar(alloc_tbl$total_response[1])
+    }
+    if ("total_spend" %in% names(alloc_tbl)) {
+        total_spend <- to_scalar(alloc_tbl$total_spend[1])
+    }
+}
+
+message("Allocator metrics: response=", round(total_response, 2), " spend=", round(total_spend, 2))
 
 metrics_txt <- file.path(dir_path, "allocator_metrics.txt")
 metrics_csv <- file.path(dir_path, "allocator_metrics.csv")
@@ -1114,21 +1146,30 @@ metrics_df <- data.frame(
 write.csv(metrics_df, metrics_csv, row.names = FALSE)
 gcs_put_safe(metrics_csv, file.path(gcs_prefix, "allocator_metrics.csv"))
 
-# Allocator plot (restored)
-alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
-dir.create(alloc_dir, showWarnings = FALSE)
-try(
-    {
-        png(file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")), width = 1200, height = 800)
-        plot(AllocatorCollect)
-        dev.off()
-        gcs_put_safe(
-            file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")),
-            file.path(gcs_prefix, paste0("allocator_plots_", timestamp, "/allocator_", best_id, "_365d.png"))
-        )
-    },
-    silent = TRUE
-)
+# Allocator plot (safe)
+if (!is.null(AllocatorCollect) && !inherits(AllocatorCollect, "try-error")) {
+    alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
+    dir.create(alloc_dir, showWarnings = FALSE)
+    tryCatch(
+        {
+            png(file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")),
+                width = 1200, height = 800, res = 96
+            )
+            plot(AllocatorCollect)
+            dev.off()
+            gcs_put_safe(
+                file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")),
+                file.path(gcs_prefix, paste0("allocator_plots_", timestamp, "/allocator_", best_id, "_365d.png"))
+            )
+            message("✅ Allocator plot created")
+        },
+        error = function(e) {
+            message("⚠️ Allocator plot failed (non-fatal): ", conditionMessage(e))
+        }
+    )
+} else {
+    message("⚠️ Allocator plot skipped (allocator failed or returned NULL)")
+}
 
 ## ---------- UPLOAD EVERYTHING ----------
 for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
