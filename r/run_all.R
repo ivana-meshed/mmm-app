@@ -1090,33 +1090,56 @@ stopifnot(
 
 # 5) Call allocator with a supported scenario + explicit expected_spend
 alloc_msgs <- character(0)
+## ---------- ALLOCATOR (with deep trace) ----------
+message("→ Running allocator...")
+
+alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
+dir.create(alloc_dir, showWarnings = FALSE)
+
+alloc_trace_file <- file.path(dir_path, "allocator_error_trace.txt")
+
+alloc_trace <- function(e) {
+    msg <- c(
+        sprintf("Allocator error at %s", Sys.time()),
+        paste0("Message: ", conditionMessage(e)),
+        "",
+        "--- sys.calls() (inner → outer) ---",
+        paste(rev(sapply(sys.calls(), function(z) paste(deparse(z, nlines = 3L), collapse = " "))), collapse = "\n"),
+        "",
+        "--- sessionInfo() ---",
+        capture.output(utils::sessionInfo())
+    )
+    writeLines(msg, alloc_trace_file)
+    gcs_put_safe(alloc_trace_file, file.path(gcs_prefix, basename(alloc_trace_file)))
+}
+
 AllocatorCollect <- tryCatch(
     withCallingHandlers(
         robyn_allocator(
-            InputCollect = InputCollect,
-            OutputCollect = OutputCollect,
-            select_model = best_id,
-            date_range = c(alloc_start, alloc_end),
-            scenario = "max_response", # <- supported everywhere
-            expected_spend = expected_spend, # <- crucial
-            channel_constr_low = low_bounds,
-            channel_constr_up = up_bounds,
-            export = TRUE
+            InputCollect       = InputCollect,
+            OutputCollect      = OutputCollect,
+            select_model       = best_id,
+            date_range         = c(alloc_start, alloc_end),
+            scenario           = "max_response",
+            expected_spend     = expected_spend, # numeric (you already compute this)
+            channel_constr_low = low_bounds, # named, length == channels
+            channel_constr_up  = up_bounds, # named, length == channels
+            export             = FALSE # see §2 below
         ),
-        warning = function(w) {
-            alloc_msgs <<- c(alloc_msgs, paste("WARN:", conditionMessage(w)))
-            invokeRestart("muffleWarning")
-        },
-        message = function(m) {
-            alloc_msgs <<- c(alloc_msgs, paste("MSG:", conditionMessage(m)))
-            invokeRestart("muffleMessage")
-        }
+        warning = function(w) invokeRestart("muffleWarning"),
+        message = function(m) invokeRestart("muffleMessage")
     ),
     error = function(e) {
-        alloc_msgs <<- c(alloc_msgs, paste("ERROR:", conditionMessage(e)))
+        alloc_trace(e)
         NULL
     }
 )
+
+if (is.null(AllocatorCollect)) {
+    message("⚠️ Allocator returned NULL. See allocator_error_trace.txt for stack.")
+} else {
+    message("✅ Allocator succeeded with ", nrow(AllocatorCollect$result_allocator), " rows.")
+}
 
 # 6) Persist allocator diagnostics
 if (length(alloc_msgs)) {
