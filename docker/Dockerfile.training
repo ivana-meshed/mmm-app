@@ -1,19 +1,17 @@
 # -----------------------------------------------------------
 # Training-optimized Dockerfile for Cloud Run Jobs (R + Py)
-# - Fixes ggplot/Robyn font issues (Cairo + Ghostscript + sane defaults)
-# - Keeps your Python stack (nevergrad, etc.)
-# - Installs Robyn from GitHub
+# - Pins S7/cli/rlang/vctrs to avoid S7 plot crash
+# - Keeps Python stack (nevergrad, etc.)
+# - Installs Robyn from GitHub AFTER pins
 # - Prebuilds CmdStan outside R, then wires up cmdstanr (for Prophet)
 # -----------------------------------------------------------
 
 FROM rocker/r-ver:4.3.1
 
-# Never prompt during apt operations
 ARG DEBIAN_FRONTEND=noninteractive
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Base OS deps + graphics stack (Cairo/Xt/Ghostscript) + fonts
-# Also includes full toolchain for CmdStan/Stan C++ builds
+# OS deps + graphics stack + toolchain
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv python3-dev \
     libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev libicu-dev \
@@ -27,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates htop git curl wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Perf environment
+# Perf env
 ENV OMP_NUM_THREADS=8 \
     OPENBLAS_NUM_THREADS=8 \
     BLAS_NUM_THREADS=8 \
@@ -57,119 +55,124 @@ RUN pip3 install --no-cache-dir \
     psutil memory-profiler \
     scikit-learn xgboost lightgbm
 
-# Install uv so reticulate can use it if needed
+# uv for reticulate
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
 RUN mkdir -p /root/.cache/R/reticulate/uv/bin \
     && ln -sf "$(command -v uv)" /root/.cache/R/reticulate/uv/bin/uv
 
-# Verify Python setup
+# Quick Python sanity
 RUN python3 - <<'PY'
-import nevergrad, numpy, scipy, pyarrow, joblib
-print("Python setup verified")
-print("nevergrad:", nevergrad.__version__)
-print("numpy:", numpy.__version__)
-print("scipy:", scipy.__version__)
-print("pyarrow:", pyarrow.__version__)
-print("joblib:", joblib.__version__)
-PY
+    import nevergrad, numpy, scipy, pyarrow, joblib
+    print("Python setup verified")
+    print("nevergrad:", nevergrad.__version__)
+    print("numpy:", numpy.__version__)
+    print("scipy:", scipy.__version__)
+    print("pyarrow:", pyarrow.__version__)
+    print("joblib:", joblib.__version__)
+    PY
 
-# ------------------------
-# Fonts: copy proprietary Arial Narrow TTFs (if provided)
-# Expected names: ARIALN.TTF, ARIALNB.TTF, ARIALNI.TTF, ARIALNBI.TTF
-# ------------------------
-RUN mkdir -p /usr/local/share/fonts/truetype/arial-narrow
-COPY docker/fonts/*.ttf /usr/local/share/fonts/truetype/arial-narrow/
-RUN chmod 644 /usr/local/share/fonts/truetype/arial-narrow/* 2>/dev/null || true \
-    && fc-cache -f -v \
-    && echo "fc-match(Arial Narrow):" && fc-match "Arial Narrow" || true \
-    && echo "fc-list grep(Arial Narrow):" && fc-list | grep -i "Arial Narrow" || true
+    # ------------------------
+    # Fonts: optional Arial Narrow (if provided at build time)
+    # ------------------------
+    RUN mkdir -p /usr/local/share/fonts/truetype/arial-narrow
+    COPY docker/fonts/*.ttf /usr/local/share/fonts/truetype/arial-narrow/
+    RUN chmod 644 /usr/local/share/fonts/truetype/arial-narrow/* 2>/dev/null || true \
+        && fc-cache -f -v \
+        && echo "fc-match(Arial Narrow):" && fc-match "Arial Narrow" || true \
+        && echo "fc-list grep(Arial Narrow):" && fc-list | grep -i "Arial Narrow" || true
 
-# ------------------------
-# R defaults for headless plotting (Cairo + neutral font to avoid warnings)
-# ------------------------
-RUN cat <<'RPROF' >> /usr/local/lib/R/etc/Rprofile.site
-options(
-    bitmapType = "cairo",
-    robyn.plot.font = "sans",
-    robyn.plot.font.family = "sans",
-    robyn_font_family = "sans"
-)
-Sys.setenv(R_GSCMD="/usr/bin/gs")
-RPROF
+    # ------------------------
+    # R defaults for headless plotting
+    # ------------------------
+    RUN cat <<'RPROF' >> /usr/local/lib/R/etc/Rprofile.site
+    options(
+        bitmapType = "cairo",
+        robyn.plot.font = "sans",
+        robyn.plot.font.family = "sans",
+        robyn_font_family = "sans"
+    )
+    Sys.setenv(R_GSCMD="/usr/bin/gs")
+    RPROF
 
-# ------------------------
-# R packages
-# ------------------------
-RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
-    install.packages(c('jsonlite','dplyr','tidyr','lubridate','readr','stringr', \
-    'googleCloudStorageR','mime','reticulate','remotes','prophet'), repos=repos); \
-    install.packages(c('arrow','future','future.apply','parallel','foreach','doParallel', \
-    'data.table','dtplyr','furrr','RcppParallel'), repos=repos); \
-    install.packages(c('ggplot2','gridExtra','systemfonts'), repos=repos)"
+    # ------------------------
+    # Base R packages
+    # ------------------------
+    RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
+        install.packages(c('jsonlite','dplyr','tidyr','lubridate','readr','stringr', \
+        'googleCloudStorageR','mime','reticulate','remotes','prophet'), repos=repos); \
+        install.packages(c('arrow','future','future.apply','parallel','foreach','doParallel', \
+        'data.table','dtplyr','furrr','RcppParallel'), repos=repos); \
+        install.packages(c('ggplot2','gridExtra','systemfonts'), repos=repos)"
 
-# nloptr from source (often faster/more stable)
-RUN R -q -e "options(Ncpus=8); install.packages('nloptr', repos='https://cloud.r-project.org', type='source')"
+    # nloptr from source
+    RUN R -q -e "options(Ncpus=8); install.packages('nloptr', repos='https://cloud.r-project.org', type='source')"
 
-# Patchwork exact version (if desired by Robyn examples)
-RUN R -q -e "options(Ncpus=8); \
-    if (!requireNamespace('patchwork', quietly=TRUE) || utils::packageVersion('patchwork') < '1.3.1') { \
-    remotes::install_github('thomasp85/patchwork@v1.3.1', upgrade='never', dependencies=TRUE) }"
+    # patchwork exact (Robyn examples often assume it)
+    RUN R -q -e "options(Ncpus=8); \
+        if (!requireNamespace('patchwork', quietly=TRUE) || utils::packageVersion('patchwork') < '1.3.1') { \
+          remotes::install_github('thomasp85/patchwork@v1.3.1', upgrade='never', dependencies=TRUE) }"
 
-# Robyn (R)
-RUN R -q -e "options(Ncpus=8); \
-    remotes::install_github('facebookexperimental/Robyn', subdir='R', upgrade='never', dependencies=c('Depends','Imports')); \
-    library(Robyn); cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')"
+    # ------------------------
+    # 🔧 Pin S7 / cli / rlang / vctrs to avoid S7 plot crash
+    # (We pin *before* installing Robyn so dependencies link against these)
+    # ------------------------
+    RUN R -q -e "options(Ncpus=8); remotes::install_version('S7',     version='0.1.2', repos='https://cloud.r-project.org', upgrade='never')"
+    RUN R -q -e "options(Ncpus=8); remotes::install_version('cli',    version='3.6.2', repos='https://cloud.r-project.org', upgrade='never')"
+    RUN R -q -e "options(Ncpus=8); remotes::install_version('rlang',  version='1.1.4', repos='https://cloud.r-project.org', upgrade='never')"
+    RUN R -q -e "options(Ncpus=8); remotes::install_version('vctrs',  version='0.6.5', repos='https://cloud.r-project.org', upgrade='never')"
+    # If your trace later implicates gt/htmltools, you can also pin 'gt' here, e.g.:
+    # RUN R -q -e "options(Ncpus=8); remotes::install_version('gt', version='0.10.1', repos='https://cloud.r-project.org', upgrade='never')"
 
-# Quick sanity: Cairo and (optional) Arial Narrow availability
-RUN R -q -e "print(capabilities('cairo')); library(systemfonts); print(try(match_font('Arial Narrow'), silent=TRUE))"
+    # Re-install Robyn *after* pins
+    RUN R -q -e "options(Ncpus=8); \
+        remotes::install_github('facebookexperimental/Robyn', subdir='R', upgrade='never', dependencies=c('Depends','Imports')); \
+        library(Robyn); cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')"
 
-# ------------------------
-# CmdStan (build outside R) + wire up cmdstanr
-# ------------------------
-ARG CMDSTAN_VERSION=2.35.0
-ENV MAKEFLAGS="-j8"
-ENV CMDSTAN=/usr/local/cmdstan
-ENV PATH="${CMDSTAN}/bin:${PATH}"
+    # Sanity: Cairo + optional Arial Narrow
+    RUN R -q -e "print(capabilities('cairo')); library(systemfonts); print(try(match_font('Arial Narrow'), silent=TRUE))"
 
-# Download and build CmdStan
-RUN wget -O /tmp/cmdstan.tar.gz "https://github.com/stan-dev/cmdstan/releases/download/v${CMDSTAN_VERSION}/cmdstan-${CMDSTAN_VERSION}.tar.gz" \
-    && tar -xzf /tmp/cmdstan.tar.gz -C /usr/local \
-    && mv "/usr/local/cmdstan-${CMDSTAN_VERSION}" "${CMDSTAN}" \
-    && make -C "${CMDSTAN}" build \
-    && "${CMDSTAN}/bin/stanc" --version || true
+    # ------------------------
+    # CmdStan + cmdstanr
+    # ------------------------
+    ARG CMDSTAN_VERSION=2.35.0
+    ENV MAKEFLAGS="-j8"
+    ENV CMDSTAN=/usr/local/cmdstan
+    ENV PATH="${CMDSTAN}/bin:${PATH}"
 
-# Install cmdstanr and point it to the prebuilt CmdStan
-RUN R -q -e "options(Ncpus=8); \
-    if (!requireNamespace('cmdstanr', quietly=TRUE)) install.packages('cmdstanr', \
-    repos=c('https://mc-stan.org/r-packages/', 'https://cloud.r-project.org')); \
-    library(cmdstanr); set_cmdstan_path(Sys.getenv('CMDSTAN')); \
-    cat('CmdStan path: ', cmdstanr::cmdstan_path(), '\n'); \
-    cat('CmdStan ver:  ', as.character(cmdstanr::cmdstan_version()), '\n')"
+    RUN wget -O /tmp/cmdstan.tar.gz "https://github.com/stan-dev/cmdstan/releases/download/v${CMDSTAN_VERSION}/cmdstan-${CMDSTAN_VERSION}.tar.gz" \
+        && tar -xzf /tmp/cmdstan.tar.gz -C /usr/local \
+        && mv "/usr/local/cmdstan-${CMDSTAN_VERSION}" "${CMDSTAN}" \
+        && make -C "${CMDSTAN}" build \
+        && "${CMDSTAN}/bin/stanc" --version || true
 
-# Optional: tiny Prophet fit to compile model at build time (uses cmdstanr backend)
-RUN R -q -e "library(prophet); set.seed(1); \
-    df <- data.frame(ds = seq.Date(as.Date('2024-01-01'), by='day', length.out=30), y = rnorm(30)); \
-    m <- prophet(df, verbose=TRUE); invisible(m)"
+    RUN R -q -e "options(Ncpus=8); \
+        if (!requireNamespace('cmdstanr', quietly=TRUE)) install.packages('cmdstanr', \
+          repos=c('https://mc-stan.org/r-packages/', 'https://cloud.r-project.org')); \
+        library(cmdstanr); set_cmdstan_path(Sys.getenv('CMDSTAN')); \
+        cat('CmdStan path: ', cmdstanr::cmdstan_path(), '\n'); \
+        cat('CmdStan ver:  ', as.character(cmdstanr::cmdstan_version()), '\n')"
 
-# ------------------------
-# App files & entrypoint
-# ------------------------
-WORKDIR /app
-COPY r/run_all.R /app/run_all.R
-COPY docker/training_entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+    # Pre-compile Prophet model once (cmdstanr backend)
+    RUN R -q -e "library(prophet); set.seed(1); \
+        df <- data.frame(ds = seq.Date(as.Date('2024-01-01'), by='day', length.out=30), y = rnorm(30)); \
+        m <- prophet(df, verbose=TRUE); invisible(m)"
 
-# Workspace for large temp artifacts
-RUN mkdir -p /tmp/training-workspace && chmod 777 /tmp/training-workspace
+    # ------------------------
+    # App files & entrypoint
+    # ------------------------
+    WORKDIR /app
+    COPY r/run_all.R /app/run_all.R
+    COPY docker/training_entrypoint.sh /app/entrypoint.sh
+    RUN chmod +x /app/entrypoint.sh
 
-# Runtime env
-ENV APP_ROOT=/app \
-    TRAINING_MODE=1 \
-    TZ=Europe/Berlin \
-    R_GSCMD=/usr/bin/gs \
-    RETICULATE_PYTHON=/usr/bin/python3 \
-    RETICULATE_AUTOCONFIGURE=0
+    RUN mkdir -p /tmp/training-workspace && chmod 777 /tmp/training-workspace
 
-# Cloud Run Job entrypoint
-ENTRYPOINT ["/app/entrypoint.sh"]
+    ENV APP_ROOT=/app \
+        TRAINING_MODE=1 \
+        TZ=Europe/Berlin \
+        R_GSCMD=/usr/bin/gs \
+        RETICULATE_PYTHON=/usr/bin/python3 \
+        RETICULATE_AUTOCONFIGURE=0
+
+    ENTRYPOINT ["/app/entrypoint.sh"]
