@@ -112,8 +112,7 @@ RUN R -q -e "options(Ncpus=8); install.packages('nloptr', repos='https://cloud.r
 # patchwork exact (often used by Robyn examples)
 RUN R -q -e "options(Ncpus=8); \
     if (!requireNamespace('patchwork', quietly=TRUE) || utils::packageVersion('patchwork') < '1.3.1') { \
-    remotes::install_github('thomasp85/patchwork@v1.3.1', upgrade='never', dependencies=TRUE) }"
-
+    remotes::install_version('patchwork', version='1.3.1', repos=c(CRAN='https://cloud.r-project.org'), upgrade='never', dependencies=TRUE) }"
 # Robyn (after core libs)
 RUN R -q -e "options(Ncpus=8); \
     remotes::install_github('facebookexperimental/Robyn', subdir='R', upgrade='never', dependencies=c('Depends','Imports')); \
