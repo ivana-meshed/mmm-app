@@ -567,6 +567,11 @@ InputCollect <- tryCatch(
 hyper_vars <- c(InputCollect$paid_media_vars, InputCollect$organic_vars)
 hyperparameters <- list()
 
+
+# Now attach to InputCollect
+## ---------- BUILD HYPERPARAMETERS FIRST ----------
+# BEFORE calling robyn_inputs(), build the hyperparameter list
+
 mk_hp <- function(v) {
     if (v == "ORGANIC_TRAFFIC") {
         list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
@@ -579,28 +584,69 @@ mk_hp <- function(v) {
     }
 }
 
+# Build hyperparameters from the original paid_media_vars and organic_vars
+# (the ones you identified before robyn_inputs, not after)
+# hyper_vars <- c(paid_media_vars, organic_vars)
+# hyperparameters <- list()
+
 for (v in hyper_vars) {
     spec <- mk_hp(v)
     hyperparameters[[paste0(v, "_alphas")]] <- spec$alphas
     hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
     hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
 }
-
 hyperparameters[["train_size"]] <- train_size
 
-# Now attach to InputCollect
-# InputCollect <- robyn_inputs(InputCollect, hyperparameters = hyperparameters) # Pass it
-InputCollect$hyperparameters <- hyperparameters # Attach it manually
-# Verify
-message("Hyperparameters keys: ", paste(names(hyperparameters), collapse = ", "))
+message("Pre-built hyperparameters: ", length(hyperparameters), " keys")
 
+## ---------- NOW CALL robyn_inputs WITH hyperparameters ----------
+InputCollect <- tryCatch(
+    {
+        robyn_inputs(
+            dt_input = df,
+            date_var = "date",
+            dep_var = "UPLOAD_VALUE",
+            dep_var_type = "revenue",
+            prophet_vars = c("trend", "season", "holiday", "weekday"),
+            prophet_country = toupper(country),
+            paid_media_spends = paid_media_spends,
+            paid_media_vars = paid_media_vars,
+            context_vars = context_vars,
+            factor_vars = factor_vars,
+            organic_vars = organic_vars,
+            window_start = start_data_date,
+            window_end = end_data_date,
+            adstock = adstock,
+            hyperparameters = hyperparameters # ← PASS IT HERE
+        )
+    },
+    error = function(e) {
+        msg <- conditionMessage(e)
+        message("❌ robyn_inputs() FAILED: ", msg)
+        message("Call: ", paste(deparse(conditionCall(e)), collapse = " "))
+
+        err_file <- file.path(dir_path, "robyn_inputs_error.txt")
+        writeLines(c(
+            "robyn_inputs() FAILED",
+            paste0("When: ", Sys.time()),
+            paste0("Message: ", msg),
+            paste0("Call: ", paste(deparse(conditionCall(e)), collapse = " ")),
+            paste0("Class: ", paste(class(e), collapse = ", ")),
+            "",
+            "Stack trace:",
+            paste(capture.output(traceback()), collapse = "\n")
+        ), err_file)
+        gcs_put_safe(err_file, file.path(gcs_prefix, basename(err_file)))
+
+        return(NULL)
+    }
+)
 
 # Check if robyn_inputs succeeded
 if (is.null(InputCollect)) {
     err_msg <- "robyn_inputs() returned NULL"
     message("FATAL: ", err_msg)
 
-    # Write status as FAILED
     writeLines(
         jsonlite::toJSON(list(
             state = "FAILED",
@@ -616,6 +662,34 @@ if (is.null(InputCollect)) {
     quit(status = 1)
 }
 
+# Verify critical slots exist
+critical_slots <- c("dt_input", "dt_mod", "dt_modRollWind", "paid_media_vars", "paid_media_spends", "hyperparameters")
+missing_slots <- critical_slots[!sapply(critical_slots, function(s) !is.null(InputCollect[[s]]))]
+
+if (length(missing_slots) > 0) {
+    err_msg <- paste("InputCollect missing critical slots:", paste(missing_slots, collapse = ", "))
+    message("FATAL: ", err_msg)
+
+    writeLines(
+        jsonlite::toJSON(list(
+            state = "FAILED",
+            step = "robyn_inputs_validation",
+            start_time = as.character(job_started),
+            end_time = as.character(Sys.time()),
+            error = err_msg
+        ), auto_unbox = TRUE, pretty = TRUE),
+        status_json
+    )
+    gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+    cleanup()
+    quit(status = 1)
+}
+
+message("✅ robyn_inputs() succeeded")
+message("   - dt_input: ", nrow(InputCollect$dt_input), " rows x ", ncol(InputCollect$dt_input), " cols")
+message("   - dt_mod: NOT NULL (ready for robyn_run)")
+message("   - Date range: ", as.character(min(InputCollect$dt_input$date)), " to ", as.character(max(InputCollect$dt_input$date)))
+message("   - Hyperparameters: ", length(InputCollect$hyperparameters), " keys")
 # Verify critical slots exist
 critical_slots <- c("dt_input", "paid_media_vars", "paid_media_spends", "hyperparameters")
 missing_slots <- critical_slots[!sapply(critical_slots, function(s) !is.null(InputCollect[[s]]))]
