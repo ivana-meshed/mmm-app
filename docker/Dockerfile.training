@@ -101,7 +101,7 @@ RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
     install.packages(c('arrow','future','future.apply','parallel','foreach','doParallel', \
     'data.table','dtplyr','furrr','RcppParallel'), repos=repos); \
     install.packages(c('gridExtra','systemfonts'), repos=repos); \
-    install.packages("ggplot2", version = "3.3.6", repos = repos)"
+    install.packages(\"ggplot2\", version = \"3.4.4\", repos = repos)"
 
 # Ensure modern core libs present (current CRAN)
 RUN R -q -e "options(Ncpus=8); install.packages(c('S7','cli','rlang','vctrs'), repos='https://cloud.r-project.org')"
