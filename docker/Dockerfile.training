@@ -11,7 +11,7 @@ FROM rocker/r-ver:4.3.1
 ARG DEBIAN_FRONTEND=noninteractive
 ENV DEBIAN_FRONTEND=noninteractive
 
-# OS deps + graphics stack + toolchain
+# OS deps, graphics, toolchain
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv python3-dev \
     libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev libicu-dev \
@@ -25,7 +25,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates htop git curl wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Perf env
 ENV OMP_NUM_THREADS=8 \
     OPENBLAS_NUM_THREADS=8 \
     BLAS_NUM_THREADS=8 \
@@ -81,9 +80,7 @@ RUN chmod 644 /usr/local/share/fonts/truetype/arial-narrow/* 2>/dev/null || true
     && echo "fc-match(Arial Narrow):" && fc-match "Arial Narrow" || true \
     && echo "fc-list grep(Arial Narrow):" && fc-list | grep -i "Arial Narrow" || true
 
-# ------------------------
-# R defaults for headless plotting
-# ------------------------
+# Headless plotting defaults
 RUN cat <<'RPROF' >> /usr/local/lib/R/etc/Rprofile.site
 options(
     bitmapType = "cairo",
@@ -94,9 +91,7 @@ options(
 Sys.setenv(R_GSCMD="/usr/bin/gs")
 RPROF
 
-# ------------------------
 # Base R packages
-# ------------------------
 RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
     install.packages(c('jsonlite','dplyr','tidyr','lubridate','readr','stringr', \
     'googleCloudStorageR','mime','reticulate','remotes','prophet'), repos=repos); \
@@ -104,40 +99,26 @@ RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
     'data.table','dtplyr','furrr','RcppParallel'), repos=repos); \
     install.packages(c('ggplot2','gridExtra','systemfonts'), repos=repos)"
 
+# Ensure modern core libs present (current CRAN)
+RUN R -q -e "options(Ncpus=8); install.packages(c('S7','cli','rlang','vctrs'), repos='https://cloud.r-project.org')"
+
 # nloptr from source
 RUN R -q -e "options(Ncpus=8); install.packages('nloptr', repos='https://cloud.r-project.org', type='source')"
 
-# patchwork exact (Robyn examples often assume it)
+# patchwork exact (often used by Robyn examples)
 RUN R -q -e "options(Ncpus=8); \
     if (!requireNamespace('patchwork', quietly=TRUE) || utils::packageVersion('patchwork') < '1.3.1') { \
     remotes::install_github('thomasp85/patchwork@v1.3.1', upgrade='never', dependencies=TRUE) }"
 
-# ------------------------
-# 🔧 Robust pins: CRAN first, GitHub tag fallback (avoids build failures)
-# ------------------------
-RUN R -q -e "options(Ncpus=8); \
-    pin <- function(pkg, ver, gh_tag) { \
-    ok <- FALSE; \
-    tryCatch({ remotes::install_version(pkg, version = ver, repos = 'https://cloud.r-project.org', upgrade = 'never'); ok <<- TRUE }, \
-    error = function(e) message('CRAN pin failed for ', pkg, ' ', ver, ': ', conditionMessage(e))); \
-    if (!ok) remotes::install_github(gh_tag, upgrade = 'never'); \
-    }; \
-    pin('S7',    '0.1.2', 'r-lib/S7@v0.1.2'); \
-    pin('cli',   '3.6.2', 'r-lib/cli@v3.6.2'); \
-    pin('rlang', '1.1.4', 'r-lib/rlang@v1.1.4'); \
-    pin('vctrs', '0.6.5', 'r-lib/vctrs@v0.6.5')"
-
-# Re-install Robyn *after* pins
+# Robyn (after core libs)
 RUN R -q -e "options(Ncpus=8); \
     remotes::install_github('facebookexperimental/Robyn', subdir='R', upgrade='never', dependencies=c('Depends','Imports')); \
     library(Robyn); cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')"
 
-# Sanity: Cairo + optional Arial Narrow
+# Quick Cairo/font sanity
 RUN R -q -e "print(capabilities('cairo')); library(systemfonts); print(try(match_font('Arial Narrow'), silent=TRUE))"
 
-# ------------------------
 # CmdStan + cmdstanr
-# ------------------------
 ARG CMDSTAN_VERSION=2.35.0
 ENV MAKEFLAGS="-j8"
 ENV CMDSTAN=/usr/local/cmdstan
@@ -151,19 +132,17 @@ RUN wget -O /tmp/cmdstan.tar.gz "https://github.com/stan-dev/cmdstan/releases/do
 
 RUN R -q -e "options(Ncpus=8); \
     if (!requireNamespace('cmdstanr', quietly=TRUE)) install.packages('cmdstanr', \
-        repos=c('https://mc-stan.org/r-packages/', 'https://cloud.r-project.org')); \
+    repos=c('https://mc-stan.org/r-packages/', 'https://cloud.r-project.org')); \
     library(cmdstanr); set_cmdstan_path(Sys.getenv('CMDSTAN')); \
     cat('CmdStan path: ', cmdstanr::cmdstan_path(), '\n'); \
     cat('CmdStan ver:  ', as.character(cmdstanr::cmdstan_version()), '\n')"
 
-# Pre-compile Prophet model once (cmdstanr backend)
+# Pre-compile Prophet model once
 RUN R -q -e "library(prophet); set.seed(1); \
     df <- data.frame(ds = seq.Date(as.Date('2024-01-01'), by='day', length.out=30), y = rnorm(30)); \
     m <- prophet(df, verbose=TRUE); invisible(m)"
 
-# ------------------------
 # App files & entrypoint
-# ------------------------
 WORKDIR /app
 COPY r/run_all.R /app/run_all.R
 COPY docker/training_entrypoint.sh /app/entrypoint.sh
