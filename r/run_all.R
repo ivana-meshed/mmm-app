@@ -160,23 +160,35 @@ font_debug <- local({
 
 
 # --- (Optional) Write a tiny probe plot to confirm the font works ---
-p <- ggplot(data.frame(x = 1, y = 1), aes(x, y)) +
-    geom_point() +
-    ggplot2::labs(title = paste("Font probe –", robyn_family)) +
-    ggplot2::annotate("text", x = 1, y = 1.02, label = "Hello • ÄÖÜ ß ć ž", family = as.character(robyn_family), vjust = 0)
-# In probe:
-probe_file <- file.path(dir_path, "font_probe.png") # Ensure in upload path
 tryCatch(
     {
-        ggsave(probe_file, p, width = 6, height = 3, dpi = 120, type = "cairo-png")
-        if (!file.exists(probe_file) || file.info(probe_file)$size == 0) {
-            stop("Probe plot failed: no file or empty")
-        }
-        message("Probe OK: ", file.info(probe_file)$size, " bytes")
+        p <- ggplot(data.frame(x = 1, y = 1), aes(x, y)) +
+            geom_point() +
+            ggplot2::labs(title = paste("Font probe –", robyn_family)) +
+            ggplot2::annotate("text", x = 1, y = 1.02, label = "Hello • ÄÖÜ ß ć ž", family = as.character(robyn_family), vjust = 0)
+        # In probe:
+        probe_file <- file.path(dir_path, "font_probe.png") # Ensure in upload path
+        message("Writing probe plot to ", probe_file)
+        tryCatch(
+            {
+                ggsave(probe_file, p, width = 6, height = 3, dpi = 120, type = "cairo-png")
+                if (!file.exists(probe_file) || file.info(probe_file)$size == 0) {
+                    stop("Probe plot failed: no file or empty")
+                }
+                message("Probe OK: ", file.info(probe_file)$size, " bytes")
+            },
+            error = function(e) {
+                write_trace("Probe error", e)
+                message("Probe error: ", e$message)
+                # Log to console.log
+            }
+        )
     },
     error = function(e) {
-        message("Probe error: ", e$message)
-        # Log to console.log
+        msg <- conditionMessage(e)
+        message("❌ probe_file FAILED: ", msg)
+        message("Call: ", paste(deparse(conditionCall(e)), collapse = " "))
+        return(NULL)
     }
 )
 
@@ -1017,16 +1029,19 @@ top_models <- OutputCollect$resultHypParam$solID[
     1:min(3, nrow(OutputCollect$resultHypParam))
 ]
 for (m in top_models) {
-    # try(
-    robyn_onepagers(
-        InputCollect,
-        OutputCollect,
-        select_model = m,
-        plot_folder = dir_path,
-        export = TRUE
-    ) # ,
-    #    silent = TRUE
-    # )
+    tryCatch(
+        robyn_onepagers(
+            InputCollect,
+            OutputCollect,
+            select_model = m,
+            plot_folder = dir_path,
+            export = TRUE
+        ),
+        error = function(e) {
+            write_trace("Allocator error", e)
+            NULL
+        }
+    )
     message("Files in dir_path: ", paste(list.files(dir_path, pattern = "onepager|plot", recursive = TRUE), collapse = ", "))
 }
 
