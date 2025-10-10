@@ -47,6 +47,23 @@ suppressPackageStartupMessages({
     }
     a
 }
+suppressWarnings({
+    if (!"ggplot2" %in% (.packages())) library(ggplot2)
+    ns_gg <- asNamespace("ggplot2")
+    et <- get("element_text", envir = ns_gg)
+    if (is.function(et)) { # ggplot2 < 4.0
+        if (bindingIsLocked("element_text", ns_gg)) unlockBinding("element_text", ns_gg)
+        .orig_element_text <- et
+        assign("element_text", function(...) {
+            args <- list(...)
+            if ("family" %in% names(args) && is.logical(args$family)) args$family <- NULL
+            do.call(.orig_element_text, args)
+        }, envir = ns_gg)
+        lockBinding("element_text", ns_gg)
+    } else {
+        message("ggplot2 >= 4.0 detected; skipping element_text monkey-patch (S7).")
+    }
+})
 
 
 # --- Register Arial Narrow if the TTFs exist (harmless if they don't) ---
