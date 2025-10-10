@@ -94,7 +94,7 @@ try(
 
 # --- Choose family: use Arial Narrow if it truly resolves to a file; else fall back to 'sans' ---
 pick_family <- function() {
-    info <- try(systemfonts::match_font("Arial Narrow"), silent = TRUE)
+    info <- try(systemfonts::match_fonts("Arial Narrow"), silent = TRUE)
     if (!inherits(info, "try-error") && is.list(info) && !is.null(info$path) && nzchar(info$path)) {
         return("Arial Narrow")
     }
@@ -589,8 +589,8 @@ for (v in hyper_vars) {
 hyperparameters[["train_size"]] <- train_size
 
 # Now attach to InputCollect
-InputCollect <- robyn_inputs(InputCollect, hyperparameters = hyperparameters) # Pass it
-
+# InputCollect <- robyn_inputs(InputCollect, hyperparameters = hyperparameters) # Pass it
+InputCollect$hyperparameters <- hyperparameters # Attach it manually
 # Verify
 message("Hyperparameters keys: ", paste(names(hyperparameters), collapse = ", "))
 
