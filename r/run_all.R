@@ -1064,9 +1064,10 @@ alloc_end <- max(InputCollect$dt_input$date, na.rm = TRUE)
 alloc_start <- max(min(InputCollect$dt_input$date, na.rm = TRUE), alloc_end - 364)
 
 # Constraints aligned to paid channels
-alloc_channels <- InputCollect$paid_media_vars
-low_bounds <- setNames(rep(0.3, length(alloc_channels)), alloc_channels)
-up_bounds <- setNames(rep(4.0, length(alloc_channels)), alloc_channels)
+is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
+low_bounds <- ifelse(is_brand, 0, 0.3)
+up_bounds <- ifelse(is_brand, 0, 4)
+
 
 # Expected spend baseline
 base_df <- dplyr::filter(InputCollect$dt_input, date >= alloc_start, date <= alloc_end)
