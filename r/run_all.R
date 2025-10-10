@@ -47,22 +47,7 @@ suppressPackageStartupMessages({
     }
     a
 }
-# ---- Harden ggplot2 against boolean fonts (must be BEFORE library(Robyn)) ----
-suppressWarnings({
-    if (!"ggplot2" %in% (.packages())) library(ggplot2)
-    ns_gg <- asNamespace("ggplot2")
-    if (bindingIsLocked("element_text", ns_gg)) unlockBinding("element_text", ns_gg)
-    .orig_element_text <- get("element_text", envir = ns_gg)
 
-    assign("element_text", function(...) {
-        args <- list(...)
-        # If a logical family sneaks in from Robyn/lares/etc., drop it (NULL = use device default)
-        if ("family" %in% names(args) && is.logical(args$family)) args$family <- NULL
-        do.call(.orig_element_text, args)
-    }, envir = ns_gg)
-
-    lockBinding("element_text", ns_gg)
-})
 
 # --- Register Arial Narrow if the TTFs exist (harmless if they don't) ---
 try(
@@ -1133,7 +1118,7 @@ AllocatorCollect <- tryCatch(
             expected_spend     = expected_spend,
             channel_constr_low = low_bounds,
             channel_constr_up  = up_bounds,
-            export             = TRUE
+            export             = FALSE
         ),
         warning = function(w) invokeRestart("muffleWarning"),
         message = function(m) invokeRestart("muffleMessage")
