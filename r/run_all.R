@@ -1054,31 +1054,84 @@ if (length(cand_png)) {
     }
 }
 
-## ---------- ALLOCATOR ----------
-is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
-low_bounds <- ifelse(is_brand, 0, 0.3)
-up_bounds <- ifelse(is_brand, 0, 4)
-
+## ---------- ALLOCATOR (robust) ----------
 message("→ Running allocator...")
+
+# 1) Safe date_range inside train window
+alloc_end <- max(InputCollect$dt_input$date, na.rm = TRUE)
+alloc_start <- max(min(InputCollect$dt_input$date, na.rm = TRUE), alloc_end - 364)
+
+# 2) Build named constraints aligned to paid channels
+alloc_channels <- InputCollect$paid_media_vars
+low_bounds <- setNames(rep(0.3, length(alloc_channels)), alloc_channels)
+up_bounds <- setNames(rep(4.0, length(alloc_channels)), alloc_channels)
+
+# 3) Compute a sensible expected spend baseline in the same window
+base_df <- dplyr::filter(InputCollect$dt_input, date >= alloc_start, date <= alloc_end)
+hist_vec <- base_df |>
+    dplyr::summarise(dplyr::across(dplyr::all_of(InputCollect$paid_media_spends), ~ sum(.x, na.rm = TRUE))) |>
+    unlist(use.names = TRUE)
+
+expected_spend <- sum(hist_vec, na.rm = TRUE)
+if (!is.finite(expected_spend) || expected_spend <= 0) {
+    # fallback to whole-window total if the window has no spend
+    hist_vec_all <- InputCollect$dt_input |>
+        dplyr::summarise(dplyr::across(dplyr::all_of(InputCollect$paid_media_spends), ~ sum(.x, na.rm = TRUE))) |>
+        unlist(use.names = TRUE)
+    expected_spend <- sum(hist_vec_all, na.rm = TRUE)
+}
+
+# 4) Validate model id and inputs (hard stop if off)
+stopifnot(best_id %in% OutputCollect$resultHypParam$solID)
+stopifnot(
+    length(low_bounds) == length(up_bounds),
+    length(low_bounds) == length(alloc_channels)
+)
+
+# 5) Call allocator with a supported scenario + explicit expected_spend
+alloc_msgs <- character(0)
 AllocatorCollect <- tryCatch(
-    {
+    withCallingHandlers(
         robyn_allocator(
             InputCollect = InputCollect,
             OutputCollect = OutputCollect,
             select_model = best_id,
             date_range = c(alloc_start, alloc_end),
-            expected_spend = NULL,
-            scenario = "max_historical_response",
+            scenario = "max_response", # <- supported everywhere
+            expected_spend = expected_spend, # <- crucial
             channel_constr_low = low_bounds,
             channel_constr_up = up_bounds,
             export = TRUE
-        )
-    },
+        ),
+        warning = function(w) {
+            alloc_msgs <<- c(alloc_msgs, paste("WARN:", conditionMessage(w)))
+            invokeRestart("muffleWarning")
+        },
+        message = function(m) {
+            alloc_msgs <<- c(alloc_msgs, paste("MSG:", conditionMessage(m)))
+            invokeRestart("muffleMessage")
+        }
+    ),
     error = function(e) {
-        message("⚠️ Allocator failed (non-fatal): ", conditionMessage(e))
+        alloc_msgs <<- c(alloc_msgs, paste("ERROR:", conditionMessage(e)))
         NULL
     }
 )
+
+# 6) Persist allocator diagnostics
+if (length(alloc_msgs)) {
+    writeLines(alloc_msgs, file.path(dir_path, "allocator_log.txt"))
+    gcs_put_safe(file.path(dir_path, "allocator_log.txt"), file.path(gcs_prefix, "allocator_log.txt"))
+}
+
+# 7) Proceed or explain
+if (is.null(AllocatorCollect) || is.null(AllocatorCollect$result_allocator)) {
+    message("⚠️ Allocator returned NULL (see allocator_log.txt).")
+} else {
+    message("✅ Allocator succeeded. Total rows: ", nrow(AllocatorCollect$result_allocator))
+    # plotting block unchanged…
+}
+
 
 ## ---------- METRICS + PLOT ----------
 best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == best_id, ]
