@@ -53,6 +53,8 @@ RUN pip3 install --no-cache-dir \
     psutil memory-profiler \
     scikit-learn xgboost lightgbm
 
+RUN R -e "capabilities()['cairo']"
+
 # uv for reticulate
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
@@ -79,6 +81,7 @@ RUN chmod 644 /usr/local/share/fonts/truetype/arial-narrow/* 2>/dev/null || true
     && fc-cache -f -v \
     && echo "fc-match(Arial Narrow):" && fc-match "Arial Narrow" || true \
     && echo "fc-list grep(Arial Narrow):" && fc-list | grep -i "Arial Narrow" || true
+RUN fc-cache -fv
 
 # Headless plotting defaults
 RUN cat <<'RPROF' >> /usr/local/lib/R/etc/Rprofile.site
@@ -97,7 +100,8 @@ RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
     'googleCloudStorageR','mime','reticulate','remotes','prophet'), repos=repos); \
     install.packages(c('arrow','future','future.apply','parallel','foreach','doParallel', \
     'data.table','dtplyr','furrr','RcppParallel'), repos=repos); \
-    install.packages(c('ggplot2','gridExtra','systemfonts'), repos=repos)"
+    install.packages(c('gridExtra','systemfonts'), repos=repos); \
+    install.packages("ggplot2", version = "3.3.6", repos = repos)"
 
 # Ensure modern core libs present (current CRAN)
 RUN R -q -e "options(Ncpus=8); install.packages(c('S7','cli','rlang','vctrs'), repos='https://cloud.r-project.org')"
