@@ -94,6 +94,12 @@ PY
 #Sys.setenv(R_GSCMD="/usr/bin/gs")
 #RPROF
 
+# Bootstrap core C++/graphics/Stan deps (required for reticulate, prophet, etc.)
+RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
+    install.packages(c('Rcpp', 'BH', 'png', 'assertthat', 'dygraphs', 'extraDistr', 'xts', \
+    'rstan', 'rstantools', 'StanHeaders', 'RcppEigen', 'googleAuthR'), \
+    repos=repos, type='source', dependencies=TRUE)"
+
 # Pre-install ggplot2 3.4.4 deps (pinned to compatible versions)
 RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
     install.packages(c('rlang', 'scales', 'tibble', 'cli', 'glue', 'lifecycle', 'vctrs', 'withr'), \
