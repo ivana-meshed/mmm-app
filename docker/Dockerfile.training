@@ -96,17 +96,19 @@ RPROF
 
 # Base R packages (core first, then pinned ggplot2 in separate layer)
 # Pin ggplot2 to exact archive tar.gz (3.4.4: stable, no S7 issues)
+# Pin ggplot2 FIRST (before any deps like dplyr that pull it)
 RUN R -q -e "download.file('https://cran.r-project.org/src/contrib/Archive/ggplot2/ggplot2_3.4.4.tar.gz', '/tmp/ggplot2_3.4.4.tar.gz', quiet=TRUE); \
-    install.packages('/tmp/ggplot2_3.4.4.tar.gz', repos=NULL, type='source', dependencies=FALSE); \
+    install.packages('/tmp/ggplot2_3.4.4.tar.gz', repos=NULL, type='source', dependencies=TRUE); \
     unlink('/tmp/ggplot2_3.4.4.tar.gz'); \
     packageVersion('ggplot2')"
+
+# Base R packages (now uses pinned ggplot2; no deps to avoid overrides)
 RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
     install.packages(c('jsonlite','dplyr','tidyr','lubridate','readr','stringr', \
-    'googleCloudStorageR','mime','reticulate','remotes','prophet'), repos=repos); \
+    'googleCloudStorageR','mime','reticulate','remotes','prophet'), repos=repos, dependencies=FALSE); \
     install.packages(c('arrow','future','future.apply','parallel','foreach','doParallel', \
-    'data.table','dtplyr','furrr','RcppParallel'), repos=repos); \
-    install.packages(c('gridExtra','systemfonts'), repos=repos)"
-
+    'data.table','dtplyr','furrr','RcppParallel'), repos=repos, dependencies=FALSE); \
+    install.packages(c('gridExtra','systemfonts'), repos=repos, dependencies=FALSE)"
 # Ensure modern core libs present (current CRAN)
 #RUN R -q -e "options(Ncpus=8); install.packages(c('S7','cli','rlang','vctrs'), repos='https://cloud.r-project.org')"
 
