@@ -21,7 +21,7 @@ suppressPackageStartupMessages({
     library(googleCloudStorageR)
     library(mime)
     library(reticulate)
-    # library(arrow)
+    library(arrow)
     library(future)
     library(future.apply)
     library(parallel)
@@ -288,7 +288,7 @@ if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
 
     ensure_gcs_auth()
     gcs_download(cfg$data_gcs_path, temp_data)
-    df <- read_parquet(temp_data, as_data_frame = TRUE)
+    df <- arrow::read_parquet(temp_data, as_data_frame = TRUE)
     unlink(temp_data)
     message(sprintf("✅ Data loaded: %s rows, %s columns", format(nrow(df), big.mark = ","), ncol(df)))
 } else {
