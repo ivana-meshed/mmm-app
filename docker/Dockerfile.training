@@ -100,7 +100,7 @@ RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
     repos=repos, type='source', dependencies=FALSE)"
 
 # Pin ggplot2 to exact archive (uses pre-installed deps)
-RUN R -q -e "download.file('https://cran.r-project.org/src/contrib/Archive/ggplot2/ggplot2_3.5.2.tar.gz', '/tmp/ggplot2_3.4.4.tar.gz', quiet=TRUE); \
+RUN R -q -e "download.file('https://cran.r-project.org/src/contrib/Archive/ggplot2/ggplot2_3.5.2.tar.gz', '/tmp/ggplot2_3.5.2.tar.gz', quiet=TRUE); \
     install.packages('/tmp/ggplot2_3.5.2.tar.gz', repos=NULL, type='source', dependencies=FALSE); \
     unlink('/tmp/ggplot2_3.5.2.tar.gz'); \
     packageVersion('ggplot2')"
