@@ -95,16 +95,21 @@ Sys.setenv(R_GSCMD="/usr/bin/gs")
 RPROF
 
 # Base R packages
+# Base R packages (core first, then pinned ggplot2 in separate layer)
 RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
     install.packages(c('jsonlite','dplyr','tidyr','lubridate','readr','stringr', \
     'googleCloudStorageR','mime','reticulate','remotes','prophet'), repos=repos); \
     install.packages(c('arrow','future','future.apply','parallel','foreach','doParallel', \
     'data.table','dtplyr','furrr','RcppParallel'), repos=repos); \
-    install.packages(c('gridExtra','systemfonts'), repos=repos); \
-    install.packages(\"ggplot2\", version = \"3.4.4\", repos = repos)"
+    install.packages(c('gridExtra','systemfonts'), repos=repos)"
+
+# Pin ggplot2 separately with remotes for reliability
+RUN R -q -e "options(Ncpus=8); \
+    remotes::install_version('ggplot2', version='3.5.2', repos=c(CRAN='https://cloud.r-project.org'), \
+    upgrade='never', dependencies=FALSE)"
 
 # Ensure modern core libs present (current CRAN)
-RUN R -q -e "options(Ncpus=8); install.packages(c('S7','cli','rlang','vctrs'), repos='https://cloud.r-project.org')"
+#RUN R -q -e "options(Ncpus=8); install.packages(c('S7','cli','rlang','vctrs'), repos='https://cloud.r-project.org')"
 
 # nloptr from source
 RUN R -q -e "options(Ncpus=8); install.packages('nloptr', repos='https://cloud.r-project.org', type='source')"
