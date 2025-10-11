@@ -75,24 +75,24 @@ PY
 # ------------------------
 # Fonts: optional Arial Narrow (if provided at build time)
 # ------------------------
-RUN mkdir -p /usr/local/share/fonts/truetype/arial-narrow
-COPY docker/fonts/*.ttf /usr/local/share/fonts/truetype/arial-narrow/
-RUN chmod 644 /usr/local/share/fonts/truetype/arial-narrow/* 2>/dev/null || true \
-    && fc-cache -f -v \
-    && echo "fc-match(Arial Narrow):" && fc-match "Arial Narrow" || true \
-    && echo "fc-list grep(Arial Narrow):" && fc-list | grep -i "Arial Narrow" || true
-RUN fc-cache -fv
+#RUN mkdir -p /usr/local/share/fonts/truetype/arial-narrow
+#COPY docker/fonts/*.ttf /usr/local/share/fonts/truetype/arial-narrow/
+#RUN chmod 644 /usr/local/share/fonts/truetype/arial-narrow/* 2>/dev/null || true \
+#    && fc-cache -f -v \
+#    && echo "fc-match(Arial Narrow):" && fc-match "Arial Narrow" || true \
+#    && echo "fc-list grep(Arial Narrow):" && fc-list | grep -i "Arial Narrow" || true
+#RUN fc-cache -fv
 
 # Headless plotting defaults
-RUN cat <<'RPROF' >> /usr/local/lib/R/etc/Rprofile.site
-options(
-    bitmapType = "cairo",
-    robyn.plot.font = "sans",
-    robyn.plot.font.family = "sans",
-    robyn_font_family = "sans"
-)
-Sys.setenv(R_GSCMD="/usr/bin/gs")
-RPROF
+#RUN cat <<'RPROF' >> /usr/local/lib/R/etc/Rprofile.site
+#options(
+#    bitmapType = "cairo",
+#    robyn.plot.font = "sans",
+#    robyn.plot.font.family = "sans",
+#    robyn_font_family = "sans"
+#)
+#Sys.setenv(R_GSCMD="/usr/bin/gs")
+#RPROF
 
 # Pre-install ggplot2 3.4.4 deps (pinned to compatible versions)
 RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
@@ -108,9 +108,9 @@ RUN R -q -e "download.file('https://cran.r-project.org/src/contrib/Archive/ggplo
 # Base R packages (use pinned ggplot2; no deps)
 RUN R -q -e "options(Ncpus=8); repos <- c(CRAN='https://cloud.r-project.org'); \
     install.packages(c('jsonlite','dplyr','tidyr','lubridate','readr','stringr', \
-    'googleCloudStorageR','mime','reticulate','remotes','prophet'), repos=repos, dependencies=FALSE); \
+    'googleCloudStorageR','mime','reticulate','remotes','prophet','globals', 'listenv', 'parallelly','iterators'), repos=repos, dependencies=FALSE); \
     install.packages(c('arrow','future','future.apply','parallel','foreach','doParallel', \
-    'data.table','dtplyr','furrr','RcppParallel'), repos=repos, dependencies=TRUE); \
+    'data.table','dtplyr','furrr','RcppParallel'), repos=repos, dependencies=FALSE); \
     install.packages(c('gridExtra','systemfonts'), repos=repos, dependencies=FALSE)"
 
 # nloptr from source
