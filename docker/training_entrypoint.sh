@@ -40,7 +40,6 @@ cat('R version:', R.version.string, '\n')
 cat('Available cores:', parallel::detectCores(), '\n')
 library(Robyn)
 library(future)
-library(arrow)
 cat('Robyn loaded successfully\n')
 "
 
