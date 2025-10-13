@@ -2,7 +2,7 @@ name: CI (dev)
 
 on:
   push:
-    branches: [opt]
+    branches: [main]
 
 permissions:
   id-token: write
