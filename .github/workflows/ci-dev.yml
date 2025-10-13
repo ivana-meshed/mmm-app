@@ -2,7 +2,7 @@ name: CI (dev)
 
 on:
   push:
-    branches: [ggplot]
+    branches: [opt]
 
 permissions:
   id-token: write
