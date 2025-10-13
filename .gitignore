@@ -34,6 +34,9 @@ tmp/
 temp/
 *.tmp
 
+*.pdf
+docs/*.png
+
 # Credentials (never commit!)
 *service*account*.json
 *sa-key*.json
@@ -42,3 +45,21 @@ secrets/
 
 *.json
 *.png
+*.plan
+*.txt
+./terraformd/*
+/infra/terraform/~/.terraform.d/*
+/infra/terraform/.terraform/*
+/infra/terraform/tfplan
+baseline_report.md
+performance_report.md
+scripts/reports/*
+.vscode/*
+.pylintrc
+pyproject.toml
+scripts/deploy.sh
+scripts/ci_cd.sh
+scripts/setup_dev_env.sh
+scripts/run_all.sh
+scripts/collect_baseline.py
+scripts/perf_test.py
