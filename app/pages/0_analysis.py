@@ -1,20 +1,32 @@
 # pages/01_Analysis.py
 import json
-import math
 import numpy as np
 import pandas as pd
 import streamlit as st
 import altair as alt
 
-from app_shared import effective_sql, ensure_sf_conn, run_sql
+from app_shared import (
+    effective_sql,
+    ensure_sf_conn,
+    run_sql,
+    _sf_params_from_env,
+)
 
 st.set_page_config(page_title="Exploratory Analysis", layout="wide")
 st.title("📈 Exploratory Analysis")
 
 
 # ------------------ utils ------------------
+
+try:
+    conn = ensure_sf_conn()  # creates/reuses and pings
+except Exception as e:
+    st.error(f"Snowflake connection not available: {e}")
+    st.stop()
+
+
 def _conn_fp() -> str:
-    p = st.session_state.get("sf_params") or {}
+    p = (st.session_state.get("sf_params") or {}) or _sf_params_from_env()
     keep = {
         k: p.get(k)
         for k in ("account", "warehouse", "database", "schema", "role", "user")
@@ -23,12 +35,13 @@ def _conn_fp() -> str:
 
 
 @st.cache_data(show_spinner=False)
-def load_data(sql: str, conn_fp: str, sample_n: int | None) -> pd.DataFrame:
-    ensure_sf_conn()
-    df = run_sql(sql)
-    # Optional downsampling (deterministic)
+def load_data(
+    sql: str, conn_fingerprint: str, sample_n: int | None
+) -> pd.DataFrame:
+    # NOTE: 'conn_fingerprint' is a cache key only; you don't use it in the body
+    df = run_sql(sql)  # <-- this is the central query path
     if sample_n and sample_n > 0 and len(df) > sample_n:
-        return df.sample(sample_n, random_state=42).reset_index(drop=True)
+        df = df.sample(sample_n, random_state=42).reset_index(drop=True)
     return df
 
 

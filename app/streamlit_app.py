@@ -109,6 +109,58 @@ st.session_state.setdefault("queue_saved_at", None)
 
 
 # ─────────────────────────────
+# One-time Snowflake init for this Streamlit session
+# ─────────────────────────────
+def _init_sf_once():
+    """
+    Create or reuse a single Snowflake connection for this Streamlit session.
+    - Pulls params from form state if present, else from env via _sf_params_from_env()
+    - Calls _connect_snowflake(...) once and stores it in st.session_state
+    - Safe to call on every rerun; it only connects if we don't have one
+    """
+    # If we already have a live connection in this session, do nothing.
+    if (
+        st.session_state.get("sf_connected")
+        and st.session_state.get("sf_conn") is not None
+    ):
+        return
+
+    # Prefer params already captured from the Tab 1 form
+    params = st.session_state.get("sf_params")
+
+    # Fallback to environment if form hasn't been used yet
+    if not params:
+        # _sf_params_from_env is imported from app_shared in your file header
+        # It should read SF_ACCOUNT, SF_USER, SF_WAREHOUSE, etc.
+        params = _sf_params_from_env() or {}
+
+    # If we still don't have the minimum fields, just exit quietly
+    need = ("user", "account", "warehouse", "database", "schema")
+    if not params or any(not str(params.get(k) or "").strip() for k in need):
+        return  # let the user fill the form on Tab 1
+
+    # Connect once
+    try:
+        conn = _connect_snowflake(
+            user=params["user"],
+            password=params.get("password"),  # may be None if you use SSO/OAuth
+            account=params["account"],
+            warehouse=params["warehouse"],
+            database=params["database"],
+            schema=params["schema"],
+            role=params.get("role"),
+        )
+        st.session_state["sf_conn"] = conn
+        st.session_state["sf_params"] = params
+        st.session_state["sf_connected"] = True
+    except Exception as e:
+        # Don't crash the page; just mark disconnected and let Tab 1 handle UI
+        st.session_state["sf_conn"] = None
+        st.session_state["sf_connected"] = False
+        logger.warning("Auto Snowflake init failed: %s", e)
+
+
+# ─────────────────────────────
 # Launcher used by queue tick
 # ─────────────────────────────
 def prepare_and_launch_job(params: dict) -> dict:
@@ -132,7 +184,7 @@ def prepare_and_launch_job(params: dict) -> dict:
 
         # 1) Query Snowflake
         with timed_step("Query Snowflake", timings):
-            df = run_sql(sql_eff)
+            df = ensure_sf_conn(sql_eff)
         """with timed_step("Optional resample (queue job)", timings):
             df = _maybe_resample_df(
                 df,
@@ -762,6 +814,7 @@ tab_conn, tab_single, tab_queue = st.tabs(
     ["1) Snowflake Connection", "2) Single Job Training", "3) Queue Training"]
 )
 
+_init_sf_once()
 
 # Auto-load persisted queue once per session (per queue_name)
 if not st.session_state.queue_loaded_from_gcs:
@@ -814,6 +867,7 @@ with tab_conn:
             sf_password = st.text_input("Password", type="password")
 
         submitted = st.form_submit_button("🔌 Connect")
+        # inside the Tab 1 form submit block (you already have this; just ensure params are saved)
         if submitted:
             try:
                 conn = _connect_snowflake(
@@ -825,6 +879,7 @@ with tab_conn:
                     schema=sf_schema,
                     role=sf_role,
                 )
+                # Save for the session so all pages reuse it
                 st.session_state["sf_params"] = dict(
                     user=sf_user,
                     account=sf_account,
@@ -832,6 +887,8 @@ with tab_conn:
                     database=sf_db,
                     schema=sf_schema,
                     role=sf_role,
+                    password=sf_password
+                    or None,  # include if you rely on password auth
                 )
                 st.session_state["sf_conn"] = conn
                 st.session_state["sf_connected"] = True
@@ -879,7 +936,7 @@ with tab_conn:
             )
             if st.button("Run query", key="run_adhoc"):
                 try:
-                    df_prev = run_sql(adhoc_sql)
+                    df_prev = ensure_sf_conn(adhoc_sql)
                     st.dataframe(df_prev, width="stretch")
                 except Exception as e:
                     st.error(f"Query failed: {e}")
@@ -903,7 +960,7 @@ with tab_single:
                 else:
                     try:
                         preview_sql = f"SELECT * FROM ({sql_eff}) t LIMIT 5"
-                        df_prev = run_sql(preview_sql)
+                        df_prev = ensure_sf_conn(preview_sql)
                         st.success("Connection OK")
                         st.dataframe(df_prev, width="stretch")
                     except Exception as e:
@@ -1051,7 +1108,7 @@ with tab_single:
 
                         # 1) Query Snowflake
                         with timed_step("Query Snowflake", timings):
-                            df = run_sql(sql_eff)
+                            df = ensure_sf_conn(sql_eff)
                         # NEW: optional resample (single job)
                         # with timed_step(
                         #    "Optional resample (single job)", timings

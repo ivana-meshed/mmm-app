@@ -606,6 +606,88 @@ def ensure_sf_conn() -> sf.SnowflakeConnection:
     return conn
 
 
+# Pick ONE of these depending on your stack:
+USE_CONNECTOR = True  # set False if you use Snowpark Session
+
+if USE_CONNECTOR:
+    import snowflake.connector as sf
+else:
+    from snowflake.snowpark import Session
+
+KEEPALIVE_SECONDS = 10 * 60  # ping every 10 min of inactivity
+
+
+@st.cache_resource(show_spinner=False)
+def get_snowflake_connection(
+    **kwargs,
+):
+    """
+    Returns a single connection object per Streamlit user session.
+    Cached across pages with st.cache_resource.
+    kwargs are part of cache key, so keep them stable.
+    """
+    if USE_CONNECTOR:
+        conn = sf.connect(
+            # --- REQUIRED AUTH/ACCOUNT FIELDS ---
+            # account=..., user=..., password=..., role=..., warehouse=..., database=..., schema=...,
+            # Or use OAuth / SSO as you prefer.
+            client_session_keep_alive=True,  # <-- IMPORTANT
+            session_parameters={
+                "CLIENT_SESSION_KEEP_ALIVE": True,  # belt & suspenders
+            },
+            **kwargs,
+        )
+        return conn
+    else:
+        # Snowpark version
+        # cfg = { "account": "...", "user": "...", "password": "...", ... }
+        sess = Session.builder.configs(kwargs).create()
+        # Snowpark inherits the same server-side session lifetime; no explicit client heartbeat,
+        # but using it via queries and our ping keeps it active.
+        return sess
+
+
+def keepalive_ping(conn):
+    """
+    Run a lightweight query if we've been idle for a bit.
+    Avoids extra chatter yet prevents idle timeouts.
+    """
+    now = time.time()
+    last = st.session_state.get("_sf_last_ping", 0)
+    if now - last < KEEPALIVE_SECONDS:
+        return
+
+    try:
+        if USE_CONNECTOR:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchall()
+        else:
+            # Snowpark
+            conn.sql("SELECT 1").collect()
+        st.session_state["_sf_last_ping"] = now
+    except Exception:
+        # Attempt a transparent reconnect once
+        st.session_state.pop("_sf_last_ping", None)
+        # Rebuild connection with the SAME params used originally
+        # If you pass kwargs into get_snowflake_connection, capture them in session_state at login.
+        params = st.session_state.get("_sf_conn_kwargs", {})
+        new_conn = get_snowflake_connection(**params)
+        # one immediate ping
+        try:
+            if USE_CONNECTOR:
+                with new_conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetchall()
+            else:
+                new_conn.sql("SELECT 1").collect()
+            st.session_state["_sf_last_ping"] = time.time()
+        except Exception as e:
+            # Surface a concise error while letting the page continue rendering
+            st.error(f"Snowflake connection could not be restored: {e}")
+            raise
+
+
 def run_sql(sql: str) -> pd.DataFrame:
     conn = ensure_sf_conn()
     cur = conn.cursor()
