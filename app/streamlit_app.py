@@ -184,7 +184,7 @@ def prepare_and_launch_job(params: dict) -> dict:
 
         # 1) Query Snowflake
         with timed_step("Query Snowflake", timings):
-            df = ensure_sf_conn(sql_eff)
+            df = run_sql(sql_eff)
         """with timed_step("Optional resample (queue job)", timings):
             df = _maybe_resample_df(
                 df,
@@ -936,7 +936,7 @@ with tab_conn:
             )
             if st.button("Run query", key="run_adhoc"):
                 try:
-                    df_prev = ensure_sf_conn(adhoc_sql)
+                    df_prev = run_sql(adhoc_sql)
                     st.dataframe(df_prev, width="stretch")
                 except Exception as e:
                     st.error(f"Query failed: {e}")
@@ -960,7 +960,7 @@ with tab_single:
                 else:
                     try:
                         preview_sql = f"SELECT * FROM ({sql_eff}) t LIMIT 5"
-                        df_prev = ensure_sf_conn(preview_sql)
+                        df_prev = run_sql(preview_sql)
                         st.success("Connection OK")
                         st.dataframe(df_prev, width="stretch")
                     except Exception as e:
@@ -1108,7 +1108,7 @@ with tab_single:
 
                         # 1) Query Snowflake
                         with timed_step("Query Snowflake", timings):
-                            df = ensure_sf_conn(sql_eff)
+                            df = run_sql(sql_eff)
                         # NEW: optional resample (single job)
                         # with timed_step(
                         #    "Optional resample (single job)", timings
