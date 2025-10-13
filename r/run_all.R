@@ -51,6 +51,143 @@ suppressPackageStartupMessages({
 
 library(Robyn)
 
+## ---------- LOG HELPERS ----------
+safe_write <- function(txt, path) {
+    dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+    writeLines(txt, path, useBytes = TRUE)
+}
+
+flush_and_ship_log <- function(step = NULL) {
+    if (!is.null(step)) message(sprintf("📌 LOG SNAPSHOT @ %s: %s", Sys.time(), step))
+    try(flush.console(), silent = TRUE)
+    try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+}
+
+log_df_snapshot <- function(df, root, max_rows = 20) {
+    # head
+    hpath <- file.path(root, "debug", "df_head.csv")
+    tryCatch(
+        {
+            suppressWarnings(write.csv(utils::head(df, max_rows), hpath, row.names = FALSE))
+            gcs_put_safe(hpath, file.path(gcs_prefix, "debug/df_head.csv"))
+        },
+        error = function(e) message("df_head snapshot failed: ", conditionMessage(e))
+    )
+
+    # structure
+    spath <- file.path(root, "debug", "df_str.txt")
+    try(
+        {
+            cap <- utils::capture.output(str(df))
+            safe_write(cap, spath)
+            gcs_put_safe(spath, file.path(gcs_prefix, "debug/df_str.txt"))
+        },
+        silent = TRUE
+    )
+
+    # summary + NA counts + date range
+    sumtxt <- c(
+        sprintf("Rows x Cols: %s x %s", nrow(df), ncol(df)),
+        "",
+        "Names:",
+        paste(names(df), collapse = ", "),
+        "",
+        "Classes:",
+        paste(vapply(df, function(x) class(x)[1], character(1)), collapse = ", "),
+        "",
+        "NA counts (top 40):"
+    )
+    na_tbl <- sort(colSums(is.na(df)), decreasing = TRUE)
+    na_lines <- utils::capture.output(print(utils::head(na_tbl, 40)))
+    if ("date" %in% names(df)) {
+        dr <- sprintf("Date range: %s → %s", as.character(min(df$date, na.rm = TRUE)), as.character(max(df$date, na.rm = TRUE)))
+    } else {
+        dr <- "Date range: <no 'date' column>"
+    }
+    sumtxt <- c(sumtxt, na_lines, "", dr)
+
+    sumpath <- file.path(root, "debug", "df_summary.txt")
+    safe_write(sumtxt, sumpath)
+    gcs_put_safe(sumpath, file.path(gcs_prefix, "debug/df_summary.txt"))
+}
+
+log_ic_snapshot_files <- function(ic, root, tag = "preflight") {
+    # Compact “print(ic)” and fields
+    ipath <- file.path(root, "debug", sprintf("InputCollect_%s.txt", tag))
+    try(
+        {
+            lines <- c(
+                sprintf("=== InputCollect (%s) ===", tag),
+                paste("is.null:", is.null(ic)),
+                if (!is.null(ic)) {
+                    c(
+                        paste("adstock:", ic$adstock %||% "<NULL>"),
+                        paste("dep_var:", ic$dep_var %||% "<NULL>"),
+                        paste("paid_media_vars:", paste(ic$paid_media_vars %||% character(), collapse = ", ")),
+                        paste("paid_media_spends:", paste(ic$paid_media_spends %||% character(), collapse = ", ")),
+                        paste("organic_vars:", paste(ic$organic_vars %||% character(), collapse = ", ")),
+                        paste("context_vars:", paste(ic$context_vars %||% character(), collapse = ", ")),
+                        paste("factor_vars:", paste(ic$factor_vars %||% character(), collapse = ", ")),
+                        paste("window:", as.character(ic$window_start %||% NA), "→", as.character(ic$window_end %||% NA)),
+                        paste("hyperparameters keys:", paste(setdiff(names(ic$hyperparameters %||% list()), ""), collapse = ", "))
+                    )
+                }
+            )
+            safe_write(lines, ipath)
+            gcs_put_safe(ipath, file.path(gcs_prefix, sprintf("debug/InputCollect_%s.txt", tag)))
+        },
+        silent = TRUE
+    )
+
+    # dt_input head
+    if (!is.null(ic) && is.data.frame(ic$dt_input)) {
+        dipath <- file.path(root, "debug", sprintf("InputCollect_%s_dt_input_head.csv", tag))
+        try(
+            {
+                write.csv(utils::head(ic$dt_input, 20), dipath, row.names = FALSE)
+                gcs_put_safe(dipath, file.path(gcs_prefix, sprintf("debug/InputCollect_%s_dt_input_head.csv", tag)))
+            },
+            silent = TRUE
+        )
+    }
+}
+
+log_hyperparameters <- function(hp, root) {
+    jpath <- file.path(root, "debug", "hyperparameters.json")
+    try(
+        {
+            json <- jsonlite::toJSON(hp, auto_unbox = TRUE, pretty = TRUE, null = "null")
+            writeLines(json, jpath)
+            gcs_put_safe(jpath, file.path(gcs_prefix, "debug/hyperparameters.json"))
+        },
+        silent = TRUE
+    )
+}
+
+log_cfg_copy <- function(cfg, root) {
+    cpath <- file.path(root, "debug", "job_config.copy.json")
+    try(
+        {
+            writeLines(jsonlite::toJSON(cfg, auto_unbox = TRUE, pretty = TRUE), cpath)
+            gcs_put_safe(cpath, file.path(gcs_prefix, "debug/job_config.copy.json"))
+        },
+        silent = TRUE
+    )
+}
+
+# Define write_trace used later in onepagers error handler (was referenced but not defined)
+write_trace <- function(title, e) {
+    p <- file.path(dir_path, "debug", paste0(gsub("[^A-Za-z0-9_-]", "_", title), "_error.txt"))
+    lines <- c(
+        sprintf("[%s] %s", Sys.time(), title),
+        paste("Message:", conditionMessage(e)),
+        "",
+        "--- traceback() ---"
+    )
+    tb <- utils::capture.output(traceback())
+    safe_write(c(lines, tb), p)
+    gcs_put_safe(p, file.path(gcs_prefix, "debug", basename(p)))
+}
 
 
 
@@ -247,7 +384,37 @@ cleanup <- function() {
     try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
 }
 
+## Global panic trap: log any uncaught error before the process exits
+install_panic_trap <- function() {
+    options(error = function() {
+        err <- geterrmessage()
+        payload <- list(
+            state = "FAILED",
+            step = "uncaught_error",
+            when = as.character(Sys.time()),
+            message = err
+        )
+        # files
+        ptxt <- file.path(dir_path, "panic_error.txt")
+        pjson <- file.path(dir_path, "panic_error.json")
+        safe_write(c("UNCAUGHT ERROR", as.character(Sys.time()), err), ptxt)
+        writeLines(jsonlite::toJSON(payload, auto_unbox = TRUE, pretty = TRUE), pjson)
+        # status.json best-effort
+        try(writeLines(jsonlite::toJSON(
+            c(list(state = "FAILED"), payload),
+            auto_unbox = TRUE, pretty = TRUE
+        ), status_json), silent = TRUE)
+        # ship artifacts
+        try(gcs_put_safe(ptxt, file.path(gcs_prefix, "panic_error.txt")), silent = TRUE)
+        try(gcs_put_safe(pjson, file.path(gcs_prefix, "panic_error.json")), silent = TRUE)
+        try(gcs_put_safe(status_json, file.path(gcs_prefix, "status.json")), silent = TRUE)
+        try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+    })
+}
+
 on.exit(cleanup(), add = TRUE)
+install_panic_trap()
+
 
 ## ---------- PYTHON / NEVERGRAD ----------
 reticulate::use_python("/usr/bin/python3", required = TRUE)
@@ -291,6 +458,10 @@ if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
     df <- arrow::read_parquet(temp_data, as_data_frame = TRUE)
     unlink(temp_data)
     message(sprintf("✅ Data loaded: %s rows, %s columns", format(nrow(df), big.mark = ","), ncol(df)))
+
+    log_cfg_copy(cfg, dir_path)
+    log_df_snapshot(df, dir_path)
+    flush_and_ship_log("after data load")
 } else {
     stop("No data_gcs_path provided in configuration.")
 }
@@ -429,6 +600,18 @@ InputCollect <- tryCatch(
     }
 )
 
+# Preflight IC snapshot (NULL-friendly)
+message("Preflight InputCollect is NULL? ", is.null(InputCollect))
+log_ic_snapshot_files(InputCollect, dir_path, tag = "preflight")
+flush_and_ship_log("after preflight robyn_inputs")
+
+# Breadcrumb before hyper_vars access (does not change behavior)
+message("About to build hyper_vars; InputCollect NULL? ", is.null(InputCollect))
+if (!is.null(InputCollect)) {
+    message("paid_media_vars (preflight): ", paste(InputCollect$paid_media_vars, collapse = ", "))
+    message("organic_vars (preflight): ", paste(InputCollect$organic_vars, collapse = ", "))
+}
+
 # Now build hyperparameters based on what Robyn ACTUALLY has
 hyper_vars <- c(InputCollect$paid_media_vars, InputCollect$organic_vars)
 hyperparameters <- list()
@@ -464,6 +647,10 @@ for (v in hyper_vars) {
 hyperparameters[["train_size"]] <- train_size
 
 message("Pre-built hyperparameters: ", length(hyperparameters), " keys")
+
+log_hyperparameters(hyperparameters, dir_path)
+flush_and_ship_log("after hyperparameters build")
+
 
 ## ---------- NOW CALL robyn_inputs WITH hyperparameters ----------
 InputCollect <- tryCatch(
@@ -507,6 +694,9 @@ InputCollect <- tryCatch(
         return(NULL)
     }
 )
+# Already prints a textual snapshot; also persist files to debug/
+log_ic_snapshot_files(InputCollect, dir_path, tag = "with_hp")
+flush_and_ship_log("after robyn_inputs with hyperparameters")
 
 # Check if robyn_inputs succeeded
 if (is.null(InputCollect)) {
@@ -698,6 +888,7 @@ robyn_err_txt <- file.path(dir_path, "robyn_run_error.txt")
 robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
 .format_calls <- function(cs) vapply(cs, function(z) paste0(deparse(z, nlines = 3L), collapse = " "), character(1))
 
+flush_and_ship_log("before robyn_run")
 OutputModels <- tryCatch(
     withCallingHandlers(
         robyn_run(
@@ -761,6 +952,7 @@ OutputModels <- tryCatch(
     }
 )
 
+flush_and_ship_log("after robyn_run")
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
 
@@ -845,6 +1037,7 @@ gcs_put_safe(file.path(dir_path, "OutputModels.RDS"), file.path(gcs_prefix, "Out
 gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "InputCollect.RDS"))
 
 ## ---------- OUTPUTS & ONEPAGERS ----------
+flush_and_ship_log("before robyn_outputs")
 OutputCollect <- robyn_outputs(
     InputCollect, OutputModels,
     pareto_fronts = 2, csv_out = "pareto",
@@ -852,6 +1045,7 @@ OutputCollect <- robyn_outputs(
     export = TRUE, plot_folder = dir_path,
     plot_pareto = FALSE, cores = NULL
 )
+flush_and_ship_log("after robyn_outputs")
 saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
 
@@ -867,6 +1061,7 @@ writeLines(
 )
 gcs_put_safe(file.path(dir_path, "best_model_id.txt"), file.path(gcs_prefix, "best_model_id.txt"))
 
+flush_and_ship_log("before onepagers")
 # onepagers for top models
 top_models <- OutputCollect$resultHypParam$solID[
     1:min(3, nrow(OutputCollect$resultHypParam))
@@ -903,7 +1098,7 @@ for (m in top_models) {
         silent = TRUE
     )
 }
-
+flush_and_ship_log("after onepagers")
 # Onepagers: try PNG first, then PDF (restored fallback)
 all_files <- list.files(dir_path, recursive = TRUE, full.names = TRUE)
 escaped_id <- gsub("\\.", "\\\\.", best_id)
@@ -944,6 +1139,7 @@ if (length(cand_png)) {
 
 ## ---------- ALLOCATOR ----------
 
+flush_and_ship_log("before robyn_allocator")
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
@@ -960,7 +1156,7 @@ AllocatorCollect <- try(
     ),
     silent = TRUE
 )
-
+flush_and_ship_log("after robyn_allocator")
 ## ---------- METRICS + PLOT ----------
 best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == best_id, ]
 alloc_tbl <- if (!inherits(AllocatorCollect, "try-error")) AllocatorCollect$result_allocator else NULL
@@ -1022,6 +1218,7 @@ try(
 )
 
 ## ---------- UPLOAD EVERYTHING ----------
+flush_and_ship_log("before final upload")
 for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
     rel <- sub(paste0("^", normalizePath(dir_path), "/?"), "", normalizePath(f))
     gcs_put_safe(f, file.path(gcs_prefix, rel))
