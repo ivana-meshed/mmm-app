@@ -569,41 +569,32 @@ def _sf_params_from_env() -> Optional[dict]:
 
 
 def ensure_sf_conn() -> sf.SnowflakeConnection:
+    """
+    Manual-only: return an already established connection or raise.
+    Does NOT auto-connect from env. Use the Connect button to create it.
+    """
     conn = st.session_state.get("sf_conn")
-    params = st.session_state.get("sf_params") or {}
-    if not params:
-        envp = _sf_params_from_env()
-        if envp:
-            params = envp
-            # store redacted copy so code paths relying on sf_params don't crash
-            st.session_state["sf_params"] = {
-                k: v for k, v in envp.items() if k != "password"
-            }
-        else:
-            raise RuntimeError(
-                "No Snowflake params. Use UI once or set SF_* env vars."
-            )
-    if conn is not None:
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT 1")
-            cur.fetchall()
-            cur.close()
-            return conn
-        except Exception:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            st.session_state["sf_conn"] = None
-    if not params:
+    if conn is None:
         raise RuntimeError(
-            "No Snowflake connection parameters found. Please connect first."
+            "Not connected to Snowflake. Open the 'Snowflake Connection' tab and click Connect."
         )
-    conn = _connect_snowflake(**params)
-    st.session_state["sf_conn"] = conn
-    st.session_state["sf_connected"] = True
-    return conn
+    # Ping; if dead, clear and ask the user to reconnect explicitly
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.fetchall()
+        cur.close()
+        return conn
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        st.session_state["sf_conn"] = None
+        st.session_state["sf_connected"] = False
+        raise RuntimeError(
+            "Snowflake session expired. Please reconnect from the Connection tab."
+        )
 
 
 # Pick ONE of these depending on your stack:

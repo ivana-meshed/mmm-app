@@ -111,53 +111,24 @@ st.session_state.setdefault("queue_saved_at", None)
 # ─────────────────────────────
 # One-time Snowflake init for this Streamlit session
 # ─────────────────────────────
+# streamlit_app.py
+
+
 def _init_sf_once():
     """
-    Create or reuse a single Snowflake connection for this Streamlit session.
-    - Pulls params from form state if present, else from env via _sf_params_from_env()
-    - Calls _connect_snowflake(...) once and stores it in st.session_state
-    - Safe to call on every rerun; it only connects if we don't have one
+    Manual mode: do not auto-connect. If a connection exists, optionally ping it.
     """
-    # If we already have a live connection in this session, do nothing.
-    if (
-        st.session_state.get("sf_connected")
-        and st.session_state.get("sf_conn") is not None
-    ):
-        return
+    if st.session_state.get("sf_connected") and st.session_state.get("sf_conn"):
+        try:
+            # optional light ping to keep alive
+            from app_shared import keepalive_ping
 
-    # Prefer params already captured from the Tab 1 form
-    params = st.session_state.get("sf_params")
-
-    # Fallback to environment if form hasn't been used yet
-    if not params:
-        # _sf_params_from_env is imported from app_shared in your file header
-        # It should read SF_ACCOUNT, SF_USER, SF_WAREHOUSE, etc.
-        params = _sf_params_from_env() or {}
-
-    # If we still don't have the minimum fields, just exit quietly
-    need = ("user", "account", "warehouse", "database", "schema")
-    if not params or any(not str(params.get(k) or "").strip() for k in need):
-        return  # let the user fill the form on Tab 1
-
-    # Connect once
-    try:
-        conn = _connect_snowflake(
-            user=params["user"],
-            password=params.get("password"),  # may be None if you use SSO/OAuth
-            account=params["account"],
-            warehouse=params["warehouse"],
-            database=params["database"],
-            schema=params["schema"],
-            role=params.get("role"),
-        )
-        st.session_state["sf_conn"] = conn
-        st.session_state["sf_params"] = params
-        st.session_state["sf_connected"] = True
-    except Exception as e:
-        # Don't crash the page; just mark disconnected and let Tab 1 handle UI
-        st.session_state["sf_conn"] = None
-        st.session_state["sf_connected"] = False
-        logger.warning("Auto Snowflake init failed: %s", e)
+            keepalive_ping(st.session_state["sf_conn"])
+        except Exception:
+            # if ping fails, mark disconnected but do not auto-reconnect
+            st.session_state["sf_conn"] = None
+            st.session_state["sf_connected"] = False
+    # else: do nothing; user must click Connect
 
 
 # ─────────────────────────────
