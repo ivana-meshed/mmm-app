@@ -688,6 +688,30 @@ def _queue_tick():
         )
 
 
+def _auto_refresh_and_tick(interval_ms: int = 2000):
+    """
+    If the queue is marked as running, perform one tick and schedule a client-side
+    refresh so the page re-runs and we tick again.
+    """
+    if not st.session_state.get("queue_running"):
+        return
+
+    # If there’s nothing left, stop auto-refreshing.
+    q = st.session_state.get("job_queue") or []
+    if len(q) == 0:
+        st.session_state.queue_running = False
+        return
+
+    # Advance the queue once
+    _queue_tick()
+
+    # Schedule a client-side refresh
+    st.markdown(
+        f"<script>setTimeout(function(){{window.location.reload();}}, {interval_ms});</script>",
+        unsafe_allow_html=True,
+    )
+
+
 def _sorted_with_controls(
     df: pd.DataFrame, prefix: str, exclude_cols=("Delete",)
 ):
@@ -1148,6 +1172,11 @@ with tab_single:
 _queue_tick()
 
 with tab_queue:
+    if st.session_state.get("queue_running") and not (
+        st.session_state.get("job_queue") or []
+    ):
+        st.session_state.queue_running = False
+
     st.subheader(
         "Batch queue (CSV) — queue & run multiple jobs sequentially",
     )
@@ -1815,6 +1844,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.session_state.queue_name, st.session_state.job_queue
             )
             st.success("Queue saved to GCS.")
+
+        _auto_refresh_and_tick(interval_ms=2000)
 
         # Queue table
         maybe_refresh_queue_from_gcs()
