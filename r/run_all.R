@@ -888,6 +888,22 @@ for (m in top_models) {
     message("Files in dir_path: ", paste(list.files(dir_path, pattern = "onepager|plot", recursive = TRUE), collapse = ", "))
 }
 
+# onepagers for top models
+top_models <- OutputCollect$resultHypParam$solID[
+    1:min(3, nrow(OutputCollect$resultHypParam))
+]
+for (m in top_models) {
+    try(
+        robyn_onepagers(
+            InputCollect,
+            OutputCollect,
+            select_model = m,
+            export = TRUE
+        ),
+        silent = TRUE
+    )
+}
+
 # Onepagers: try PNG first, then PDF (restored fallback)
 all_files <- list.files(dir_path, recursive = TRUE, full.names = TRUE)
 escaped_id <- gsub("\\.", "\\\\.", best_id)
@@ -925,132 +941,36 @@ if (length(cand_png)) {
     }
 }
 
-## ---------- ALLOCATOR + METRICS + PLOT (no ggplot/S7; single source of truth) ----------
-message("→ Running allocator...")
 
-# Window (≤365d and within train)
-alloc_end <- max(InputCollect$dt_input$date, na.rm = TRUE)
-alloc_start <- max(min(InputCollect$dt_input$date, na.rm = TRUE), alloc_end - 364)
+## ---------- ALLOCATOR ----------
 
-# Constraints aligned to paid channels
-alloc_channels <- InputCollect$paid_media_vars # e.g., c("GA_SUPPLY_COST", "GA_DEMAND_COST", ...)
-is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST" # All FALSE here, but keeps logic
-low_vec <- ifelse(is_brand, 0, 0.3) # Temp unnamed
-up_vec <- ifelse(is_brand, 0, 4) # Or 1.5 for brand if added later
-low_bounds <- setNames(low_vec, alloc_channels) # ← KEY: Name them!
-up_bounds <- setNames(up_vec, alloc_channels) # Matches vars order
+alloc_end <- max(InputCollect$dt_input$date)
+alloc_start <- alloc_end - 364
 
-# Expected spend baseline
-base_df <- dplyr::filter(InputCollect$dt_input, date >= alloc_start, date <= alloc_end)
-hist_vec <- base_df |>
-    dplyr::summarise(dplyr::across(dplyr::all_of(InputCollect$paid_media_spends), ~ sum(.x, na.rm = TRUE))) |>
-    unlist(use.names = TRUE)
-expected_spend <- sum(hist_vec, na.rm = TRUE)
-if (!is.finite(expected_spend) || expected_spend <= 0) {
-    hist_vec_all <- InputCollect$dt_input |>
-        dplyr::summarise(dplyr::across(dplyr::all_of(InputCollect$paid_media_spends), ~ sum(.x, na.rm = TRUE))) |>
-        unlist(use.names = TRUE)
-    expected_spend <- sum(hist_vec_all, na.rm = TRUE)
-}
-message("Expected spend: ", round(expected_spend, 2), " (window: ", round(sum(hist_vec, na.rm = TRUE), 2), ")") # ← ADD LOG
-
-stopifnot(best_id %in% OutputCollect$resultHypParam$solID)
-stopifnot(length(low_bounds) == length(up_bounds), length(low_bounds) == length(alloc_channels)) # Now safe
-
-# ... (rest of allocator call unchanged)
-
-# Trace helpers
-alloc_trace_file <- file.path(dir_path, "allocator_error_trace.txt")
-alloc_debug_file <- file.path(dir_path, "allocator_debug_dump.txt")
-write_trace <- function(title, e = NULL) {
-    msg <- c(
-        sprintf("%s at %s", title, Sys.time()),
-        if (!is.null(e)) paste0("Message: ", conditionMessage(e)) else NULL,
-        "",
-        "--- sys.calls() (inner → outer) ---",
-        paste(rev(sapply(sys.calls(), function(z) paste(deparse(z, nlines = 3L), collapse = " "))), collapse = "\n"),
-        "",
-        "--- sessionInfo() ---",
-        capture.output(utils::sessionInfo())
-    )
-    writeLines(msg, alloc_trace_file)
-    gcs_put_safe(alloc_trace_file, file.path(gcs_prefix, basename(alloc_trace_file)))
-}
-
-dump_debug <- function(AllocatorCollect) {
-    con <- file(alloc_debug_file, open = "wt")
-    on.exit(close(con), add = TRUE)
-    cat("=== Allocator debug dump ===\n", file = con)
-    cat("time:", as.character(Sys.time()), "\n", file = con)
-    cat("best_id:", best_id, "\n", file = con)
-    cat("window:", as.character(alloc_start), "→", as.character(alloc_end), "\n", file = con)
-    if (is.null(AllocatorCollect)) {
-        cat("AllocatorCollect: NULL\n", file = con)
-    } else {
-        cat("AllocatorCollect class:", paste(class(AllocatorCollect), collapse = ","), "\n", file = con)
-        if (!is.null(AllocatorCollect$result_allocator)) {
-            cat("result_allocator rows:", nrow(AllocatorCollect$result_allocator), "\n", file = con)
-            cat("result_allocator cols:", paste(names(AllocatorCollect$result_allocator), collapse = ", "), "\n", file = con)
-        } else {
-            cat("result_allocator: NULL\n", file = con)
-        }
-    }
-    gcs_put_safe(alloc_debug_file, file.path(gcs_prefix, basename(alloc_debug_file)))
-}
-
-# Run allocator (no messages/warnings)
-AllocatorCollect <- tryCatch(
-    withCallingHandlers(
-        robyn_allocator(
-            InputCollect       = InputCollect,
-            OutputCollect      = OutputCollect,
-            select_model       = best_id,
-            date_range         = c(alloc_start, alloc_end),
-            scenario           = "max_response",
-            expected_spend     = expected_spend,
-            channel_constr_low = low_bounds,
-            channel_constr_up  = up_bounds,
-            export             = FALSE
-        ),
-        warning = function(w) invokeRestart("muffleWarning"),
-        message = function(m) invokeRestart("muffleMessage")
+is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
+low_bounds <- ifelse(is_brand, 0, 0.3)
+up_bounds <- ifelse(is_brand, 0, 4)
+AllocatorCollect <- try(
+    robyn_allocator(
+        InputCollect = InputCollect, OutputCollect = OutputCollect,
+        select_model = best_id, date_range = c(alloc_start, alloc_end),
+        expected_spend = NULL, scenario = "max_historical_response",
+        channel_constr_low = low_bounds, channel_constr_up = up_bounds,
+        export = TRUE
     ),
-    error = function(e) {
-        write_trace("Allocator error", e)
-        NULL
-    }
+    silent = TRUE
 )
 
-# Log line + debug dump
-alloc_log <- file.path(dir_path, "allocator_log.txt")
-cat(
-    "MSG: >>> Running budget allocator for model ID", best_id, "...\n",
-    "MSG: Date Window:", as.character(alloc_start), ":", as.character(alloc_end), "(365 max)\n",
-    if (is.null(AllocatorCollect)) "ERROR: Allocator returned NULL\n" else "OK: Allocator returned a result\n",
-    file = alloc_log
-)
-gcs_put_safe(alloc_log, file.path(gcs_prefix, "allocator_log.txt"))
-dump_debug(AllocatorCollect)
-
-# Metrics
+## ---------- METRICS + PLOT ----------
 best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == best_id, ]
-alloc_tbl <- if (!is.null(AllocatorCollect) && !is.null(AllocatorCollect$result_allocator)) AllocatorCollect$result_allocator else NULL
-to_scalar <- function(x) {
-    x <- suppressWarnings(as.numeric(x))
-    if (!length(x)) {
-        return(NA_real_)
-    }
-    if (length(x) > 1) {
-        return(sum(x, na.rm = TRUE))
-    }
-    x
-}
-total_response <- if (!is.null(alloc_tbl) && "total_response" %in% names(alloc_tbl)) to_scalar(alloc_tbl$total_response[1]) else NA_real_
-total_spend <- if (!is.null(alloc_tbl) && "total_spend" %in% names(alloc_tbl)) to_scalar(alloc_tbl$total_spend[1]) else NA_real_
-message("Allocator metrics: response=", round(total_response, 2), " spend=", round(total_spend, 2))
+alloc_tbl <- if (!inherits(AllocatorCollect, "try-error")) AllocatorCollect$result_allocator else NULL
+
+total_response <- to_scalar(if (!is.null(alloc_tbl)) alloc_tbl$total_response else NA_real_)
+total_spend <- to_scalar(if (!is.null(alloc_tbl)) alloc_tbl$total_spend else NA_real_)
 
 metrics_txt <- file.path(dir_path, "allocator_metrics.txt")
 metrics_csv <- file.path(dir_path, "allocator_metrics.csv")
+
 writeLines(c(
     paste("Model ID:", best_id),
     paste("Training Time (mins):", round(training_time, 2)),
@@ -1085,99 +1005,21 @@ metrics_df <- data.frame(
 write.csv(metrics_df, metrics_csv, row.names = FALSE)
 gcs_put_safe(metrics_csv, file.path(gcs_prefix, "allocator_metrics.csv"))
 
-# -------- Base-graphics plot (NO ggplot; NO S7) --------
-make_base_allocator_plot <- function(df, outfile) {
-    # Identify columns
-    ch_col <- c("channel", "media", "variable", "paid_media_vars")
-    spend_new <- c("optimal_spend", "recommended_spend", "opt_spend", "spend_new")
-    spend_cur <- c("current_spend", "historical_spend", "spend_hist", "spend_old")
-
-    channel <- NULL
-    for (nm in ch_col) {
-        if (nm %in% names(df)) {
-            channel <- df[[nm]]
-            break
-        }
-    }
-    if (is.null(channel)) channel <- rownames(df)
-
-    new_col <- NULL
-    for (nm in spend_new) {
-        if (nm %in% names(df)) {
-            new_col <- df[[nm]]
-            break
-        }
-    }
-    cur_col <- NULL
-    for (nm in spend_cur) {
-        if (nm %in% names(df)) {
-            cur_col <- df[[nm]]
-            break
-        }
-    }
-
-    if (is.null(new_col)) {
-        cand <- grep("spend", names(df), ignore.case = TRUE, value = TRUE)
-        if (length(cand)) new_col <- df[[cand[1]]]
-    }
-
-    if (is.null(new_col)) stop("Allocator table has no recognizable recommended spend column.")
-
-    png(outfile, width = 1200, height = 800, res = 120)
-    op <- par(no.readonly = TRUE)
-    on.exit(
-        {
-            par(op)
-            dev.off()
-        },
-        add = TRUE
-    )
-
-    if (!is.null(cur_col)) {
-        mat <- rbind(Current = as.numeric(cur_col), Recommended = as.numeric(new_col))
-        colnames(mat) <- as.character(channel)
-        barplot(mat,
-            beside = TRUE, las = 2, cex.names = 0.8,
-            main = "Allocator (base graphics)", ylab = "Spend", xlab = "Channel"
-        )
-        legend("topright", legend = rownames(mat), bty = "n")
-    } else {
-        barplot(
-            height = as.numeric(new_col), names.arg = as.character(channel),
-            las = 2, cex.names = 0.8,
-            main = "Allocator (base graphics)", ylab = "Recommended Spend", xlab = "Channel"
-        )
-    }
-}
-
-alloc_plot_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
-dir.create(alloc_plot_dir, showWarnings = FALSE)
-alloc_png <- file.path(alloc_plot_dir, paste0("allocator_", best_id, "_365d.png"))
-
-if (!is.null(alloc_tbl) && is.data.frame(alloc_tbl) && nrow(alloc_tbl) > 0) {
-    plot_ok <- FALSE
-    tryCatch(
-        {
-            make_base_allocator_plot(alloc_tbl, alloc_png)
-            plot_ok <- TRUE
-        },
-        error = function(e) {
-            write_trace("Allocator base-plot error", e)
-        }
-    )
-    if (plot_ok && file.exists(alloc_png)) {
+# Allocator plot (restored)
+alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
+dir.create(alloc_dir, showWarnings = FALSE)
+try(
+    {
+        png(file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")), width = 1200, height = 800)
+        plot(AllocatorCollect)
+        dev.off()
         gcs_put_safe(
-            alloc_png,
+            file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")),
             file.path(gcs_prefix, paste0("allocator_plots_", timestamp, "/allocator_", best_id, "_365d.png"))
         )
-        message("✅ Allocator plot created (base graphics)")
-    } else {
-        message("⚠️ Allocator plot skipped (no image produced)")
-    }
-} else {
-    message("⚠️ Allocator plot skipped (allocator NULL or empty)")
-}
-
+    },
+    silent = TRUE
+)
 
 ## ---------- UPLOAD EVERYTHING ----------
 for (f in list.files(dir_path, recursive = TRUE, full.names = TRUE)) {
