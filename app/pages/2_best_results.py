@@ -15,6 +15,13 @@ from google.auth.iam import Signer as IAMSigner
 from google.auth.transport.requests import Request
 from google.cloud import storage
 
+try:
+    from app_shared import ensure_sf_conn, keepalive_ping
+except Exception:
+    ensure_sf_conn = None
+    keepalive_ping = None
+
+
 # ---------- Page ----------
 st.set_page_config(
     page_title="Best models per country: Robyn MMM",
@@ -35,6 +42,30 @@ DEFAULT_BETA = 1.0
 st.session_state.setdefault("weights", DEFAULT_WEIGHTS)
 st.session_state.setdefault("alpha", DEFAULT_ALPHA)
 st.session_state.setdefault("beta", DEFAULT_BETA)
+
+
+def _sf_keepalive(throttle_sec: int = 60) -> None:
+    """Ping the shared Snowflake session so it stays warm while users browse."""
+    if ensure_sf_conn is None or keepalive_ping is None:
+        return
+    try:
+        import time
+
+        now = time.time()
+        last = st.session_state.get("_sf_last_ping", 0)
+        if now - last < throttle_sec:
+            return
+        conn = ensure_sf_conn()  # reuses st.session_state["sf_conn"] if present
+        if conn:
+            keepalive_ping(conn)  # cheap SELECT 1 / ping
+            st.session_state["_sf_last_ping"] = now
+            st.session_state["sf_connected"] = True
+    except Exception:
+        # Never block/break this page if Snowflake isn't configured/available
+        pass
+
+
+_sf_keepalive()
 
 
 # ---------- Clients / cached ----------

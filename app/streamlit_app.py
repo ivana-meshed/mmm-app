@@ -109,6 +109,29 @@ st.session_state.setdefault("queue_saved_at", None)
 
 
 # ─────────────────────────────
+# One-time Snowflake init for this Streamlit session
+# ─────────────────────────────
+# streamlit_app.py
+
+
+def _init_sf_once():
+    """
+    Manual mode: do not auto-connect. If a connection exists, optionally ping it.
+    """
+    if st.session_state.get("sf_connected") and st.session_state.get("sf_conn"):
+        try:
+            # optional light ping to keep alive
+            from app_shared import keepalive_ping
+
+            keepalive_ping(st.session_state["sf_conn"])
+        except Exception:
+            # if ping fails, mark disconnected but do not auto-reconnect
+            st.session_state["sf_conn"] = None
+            st.session_state["sf_connected"] = False
+    # else: do nothing; user must click Connect
+
+
+# ─────────────────────────────
 # Launcher used by queue tick
 # ─────────────────────────────
 def prepare_and_launch_job(params: dict) -> dict:
@@ -688,6 +711,30 @@ def _queue_tick():
         )
 
 
+def _auto_refresh_and_tick(interval_ms: int = 2000):
+    """
+    If the queue is marked as running, perform one tick and schedule a client-side
+    refresh so the page re-runs and we tick again.
+    """
+    if not st.session_state.get("queue_running"):
+        return
+
+    # If there’s nothing left, stop auto-refreshing.
+    q = st.session_state.get("job_queue") or []
+    if len(q) == 0:
+        st.session_state.queue_running = False
+        return
+
+    # Advance the queue once
+    _queue_tick()
+
+    # Schedule a client-side refresh
+    st.markdown(
+        f"<script>setTimeout(function(){{window.location.reload();}}, {interval_ms});</script>",
+        unsafe_allow_html=True,
+    )
+
+
 def _sorted_with_controls(
     df: pd.DataFrame, prefix: str, exclude_cols=("Delete",)
 ):
@@ -738,6 +785,7 @@ tab_conn, tab_single, tab_queue = st.tabs(
     ["1) Snowflake Connection", "2) Single Job Training", "3) Queue Training"]
 )
 
+_init_sf_once()
 
 # Auto-load persisted queue once per session (per queue_name)
 if not st.session_state.queue_loaded_from_gcs:
@@ -790,6 +838,7 @@ with tab_conn:
             sf_password = st.text_input("Password", type="password")
 
         submitted = st.form_submit_button("🔌 Connect")
+        # inside the Tab 1 form submit block (you already have this; just ensure params are saved)
         if submitted:
             try:
                 conn = _connect_snowflake(
@@ -801,6 +850,7 @@ with tab_conn:
                     schema=sf_schema,
                     role=sf_role,
                 )
+                # Save for the session so all pages reuse it
                 st.session_state["sf_params"] = dict(
                     user=sf_user,
                     account=sf_account,
@@ -808,6 +858,8 @@ with tab_conn:
                     database=sf_db,
                     schema=sf_schema,
                     role=sf_role,
+                    password=sf_password
+                    or None,  # include if you rely on password auth
                 )
                 st.session_state["sf_conn"] = conn
                 st.session_state["sf_connected"] = True
@@ -1148,6 +1200,11 @@ with tab_single:
 _queue_tick()
 
 with tab_queue:
+    if st.session_state.get("queue_running") and not (
+        st.session_state.get("job_queue") or []
+    ):
+        st.session_state.queue_running = False
+
     st.subheader(
         "Batch queue (CSV) — queue & run multiple jobs sequentially",
     )
@@ -1815,6 +1872,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.session_state.queue_name, st.session_state.job_queue
             )
             st.success("Queue saved to GCS.")
+
+        _auto_refresh_and_tick(interval_ms=2000)
 
         # Queue table
         maybe_refresh_queue_from_gcs()
