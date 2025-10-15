@@ -98,22 +98,14 @@ jobs:
           terraform_version: 1.13.0
           terraform_wrapper: false
 
-      - name: Configure Terraform CLI & plugin cache
+      - name: Configure Terraform plugin cache
         shell: bash
         run: |
-          mkdir -p "$HOME/.terraform.d/plugin-cache"
-          cat > "$HOME/.terraformrc" <<'EOF'
-          plugin_cache_dir = "$HOME/.terraform.d/plugin-cache"
-          disable_checkpoint = true
-          EOF
-          echo "TF_CLI_CONFIG_FILE=$HOME/.terraformrc" >> "$GITHUB_ENV"
+          set -euo pipefail
+          CACHE_DIR="$RUNNER_TOOL_CACHE/terraform-plugins"
+          mkdir -p "$CACHE_DIR"
+          echo "TF_PLUGIN_CACHE_DIR=$CACHE_DIR" >> "$GITHUB_ENV"
 
-      - name: Cache Terraform plugins
-        uses: actions/cache@v4
-        with:
-          path: ~/.terraform.d/plugin-cache
-          key: ${{ runner.os }}-tf-plugins-${{ hashFiles('infra/terraform/.terraform.lock.hcl') }}
-          restore-keys: ${{ runner.os }}-tf-plugins-
 
       - name: Terraform init / validate
         working-directory: infra/terraform
