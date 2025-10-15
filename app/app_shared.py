@@ -748,7 +748,7 @@ def _load_private_key(private_key_str: str) -> bytes:
     )
 
 
-@st.cache_resource(show_spinner=False)
+# @st.cache_resource(show_spinner=False)
 def get_snowflake_connection(**kwargs):
     """Prefer key-pair auth via Secret Manager; fall back to password only if explicitly present."""
     project_id = kwargs.pop("project_id", PROJECT_ID)
