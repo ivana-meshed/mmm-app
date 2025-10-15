@@ -113,9 +113,9 @@ jobs:
           TF_IN_AUTOMATION: "true"
           TF_WORKSPACE: dev
         run: |
+          terraform init -input=false -reconfigure -backend-config="prefix=envs/dev"
           terraform -version
           terraform workspace new dev || terraform workspace select dev  # Create/select if needed
-          terraform init -input=false -reconfigure -backend-config="prefix=envs/dev"
           terraform fmt -check
           terraform validate
 
