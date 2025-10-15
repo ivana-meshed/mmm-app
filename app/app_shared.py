@@ -763,6 +763,7 @@ def get_snowflake_connection(**kwargs):
             pk_bytes = _load_private_key_bytes_from_gsm(
                 secret_id
             )  # DER PKCS#8 bytes
+            st.write("Loaded key bytes:", len(pk_bytes))
             return _connect_snowflake(
                 user=kwargs["user"],
                 account=kwargs["account"],
