@@ -67,12 +67,6 @@ variable "max_instances" {
   default     = 10
 }
 
-variable "sf_password" {
-  type      = string
-  sensitive = true
-  default   = null # set via TF var or CI, or skip and add secret version via gcloud in CI
-}
-
 variable "sf_private_key" {
   type        = string
   sensitive   = true

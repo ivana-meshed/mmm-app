@@ -852,7 +852,6 @@ with tab_conn:
                 value=(st.session_state.sf_params or {}).get("role", "")
                 or os.getenv("SF_ROLE"),
             )
-            # sf_password = st.text_input("Password", type="password")
 
         submitted = st.form_submit_button("🔌 Connect")
 

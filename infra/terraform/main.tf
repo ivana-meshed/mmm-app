@@ -25,10 +25,6 @@ resource "google_service_account" "scheduler" {
   display_name = "Robyn Queue Scheduler"
 }
 
-data "google_secret_manager_secret" "sf_password" {
-  project   = var.project_id
-  secret_id = "sf-password"
-}
 
 # Snowflake private key secret
 resource "google_secret_manager_secret" "sf_private_key" {
@@ -153,13 +149,6 @@ resource "google_cloud_run_service_iam_member" "scheduler_can_invoke_web" {
   service  = google_cloud_run_service.web_service.name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
-}
-
-
-resource "google_secret_manager_secret_iam_member" "sf_password_access" {
-  secret_id = data.google_secret_manager_secret.sf_password.id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.web_service_sa.email}"
 }
 
 # Let the Terraform deployer impersonate (act as) the Scheduler SA
@@ -317,15 +306,6 @@ resource "google_cloud_run_service" "web_service" {
         env {
           name  = "SF_ROLE"
           value = var.sf_role
-        }
-        env {
-          name = "SF_PASSWORD"
-          value_from {
-            secret_key_ref {
-              name = data.google_secret_manager_secret.sf_password.secret_id
-              key  = "latest"
-            }
-          }
         }
         env {
           name  = "SF_PRIVATE_KEY_SECRET"
