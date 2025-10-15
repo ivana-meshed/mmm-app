@@ -182,6 +182,7 @@ jobs:
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
+          TF_VAR_sf_private_key: ${{ secrets.SF_PRIVATE_KEY }}
           WEB_IMAGE_URL: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
           TRAINING_IMAGE_URL: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:${{ github.sha }}
         run: |
