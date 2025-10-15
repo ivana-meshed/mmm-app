@@ -205,6 +205,7 @@ jobs:
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
+          TF_VAR_sf_private_key: ${{ secrets.SF_PRIVATE_KEY }}
         run: terraform apply -input=false -auto-approve tfplan
 
       - name: Print deployment info

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 import pandas as pd
 import streamlit as st
 import snowflake.connector as sf
-from google.cloud import storage, run_v2
+from google.cloud import storage, run_v2, secretmanager
 
 from data_processor import DataProcessor
 from uuid import uuid4
@@ -608,34 +608,85 @@ else:
 KEEPALIVE_SECONDS = 10 * 60  # ping every 10 min of inactivity
 
 
-@st.cache_resource(show_spinner=False)
-def get_snowflake_connection(
-    **kwargs,
+def _fetch_private_key_from_secret(project_id: str, secret_id: str) -> str:
+    """Fetch RSA private key from Secret Manager at runtime."""
+    client = secretmanager.SecretManagerServiceClient()
+    name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
+    try:
+        response = client.access_secret_version(request={"name": name})
+        return response.payload.data.decode("UTF-8")  # PEM string
+    except Exception as e:
+        logger.error(f"Failed to fetch SF private key: {e}")
+        raise ValueError("SF private key fetch failed—check IAM")
+
+
+def _load_private_key(private_key_str: str) -> bytes:
+    """Load private key from PEM string."""
+    if not private_key_str:
+        raise ValueError("Private key not configured")
+    # Decode if base64 (if stored that way; adjust if plain PEM)
+    if "\n" not in private_key_str:
+        private_key_str = base64.b64decode(private_key_str).decode("utf-8")
+    return serialization.load_pem_private_key(
+        private_key_str.encode("utf-8"),
+        password=None,  # No passphrase
+    )
+
+
+def _connect_snowflake_keypair(
+    user,
+    account,
+    warehouse,
+    database,
+    schema,
+    role,
+    project_id=None,
+    secret_id=None,
 ):
-    """
-    Returns a single connection object per Streamlit user session.
-    Cached across pages with st.cache_resource.
-    kwargs are part of cache key, so keep them stable.
-    """
-    if USE_CONNECTOR:
-        conn = sf.connect(
-            # --- REQUIRED AUTH/ACCOUNT FIELDS ---
-            # account=..., user=..., password=..., role=..., warehouse=..., database=..., schema=...,
-            # Or use OAuth / SSO as you prefer.
-            client_session_keep_alive=True,  # <-- IMPORTANT
-            session_parameters={
-                "CLIENT_SESSION_KEEP_ALIVE": True,  # belt & suspenders
-            },
-            **kwargs,
-        )
-        return conn
+    """Key-pair auth connection (no password needed)."""
+    if secret_id and project_id:
+        private_key_str = _fetch_private_key_from_secret(project_id, secret_id)
+        private_key = _load_private_key(private_key_str)
     else:
-        # Snowpark version
-        # cfg = { "account": "...", "user": "...", "password": "...", ... }
-        sess = Session.builder.configs(kwargs).create()
-        # Snowpark inherits the same server-side session lifetime; no explicit client heartbeat,
-        # but using it via queries and our ping keeps it active.
-        return sess
+        raise ValueError("Project ID and secret ID required for key-pair auth")
+
+    conn = sf.connect(
+        user=user,
+        account=account,
+        warehouse=warehouse,
+        database=database,
+        schema=schema,
+        role=role or None,
+        private_key=private_key,  # Loaded bytes object
+        client_session_keep_alive=True,
+        session_parameters={"CLIENT_SESSION_KEEP_ALIVE": True},
+    )
+    return conn
+
+
+@st.cache_resource(show_spinner=False)
+def get_snowflake_connection(**kwargs):
+    """Prioritizes key-pair auth from Secret Manager; falls back to password if key unavailable."""
+    project_id = kwargs.pop("project_id", PROJECT_ID)  # From env or default
+    secret_id = kwargs.pop(
+        "sf_private_key_secret",
+        os.getenv("SF_PRIVATE_KEY_SECRET", "sf-private-key"),
+    )  # From Cloud Run env
+
+    if secret_id:  # Prefer key-pair
+        kwargs.pop("password", None)  # Ignore password if present
+        try:
+            return _connect_snowflake_keypair(
+                **kwargs, project_id=project_id, secret_id=secret_id
+            )
+        except ValueError as ve:
+            st.warning(
+                f"Key-pair auth unavailable ({ve}); using password."
+            )  # Optional UI warning
+            logger.warning(
+                ve
+            )  # Fallback to password auth (your existing _connect_snowflake)
+    return _connect_snowflake(**kwargs)
 
 
 def keepalive_ping(conn):

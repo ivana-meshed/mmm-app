@@ -41,7 +41,8 @@ from app_shared import (
     get_job_manager,
     get_data_processor,
     _fmt_secs,
-    _connect_snowflake,  # use shared connector for consistency with ensure_sf_conn
+    _connect_snowflake,
+    get_snowflake_connection,  # use shared connector for consistency with ensure_sf_conn
     read_job_history_from_gcs,
     save_job_history_to_gcs,
     append_row_to_job_history,
@@ -835,20 +836,21 @@ with tab_conn:
                 value=(st.session_state.sf_params or {}).get("role", "")
                 or os.getenv("SF_ROLE"),
             )
-            sf_password = st.text_input("Password", type="password")
+            # sf_password = st.text_input("Password", type="password")
 
         submitted = st.form_submit_button("🔌 Connect")
         # inside the Tab 1 form submit block (you already have this; just ensure params are saved)
         if submitted:
             try:
-                conn = _connect_snowflake(
+                conn = get_snowflake_connection(
                     user=sf_user,
-                    password=sf_password,
+                    password=sf_password or None,
                     account=sf_account,
                     warehouse=sf_wh,
                     database=sf_db,
                     schema=sf_schema,
                     role=sf_role,
+                    project_id=PROJECT_ID,
                 )
                 # Save for the session so all pages reuse it
                 st.session_state["sf_params"] = dict(

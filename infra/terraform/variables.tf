@@ -73,5 +73,9 @@ variable "sf_password" {
   default   = null # set via TF var or CI, or skip and add secret version via gcloud in CI
 }
 
-
+variable "sf_private_key" {
+  type        = string
+  sensitive   = true
+  description = "RSA private key PEM for Snowflake"
+}
 

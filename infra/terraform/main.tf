@@ -30,6 +30,32 @@ data "google_secret_manager_secret" "sf_password" {
   secret_id = "sf-password"
 }
 
+# Snowflake private key secret
+resource "google_secret_manager_secret" "sf_private_key" {
+  secret_id = "sf-private-key"
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region # europe-west1
+      }
+    }
+  }
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_version" "sf_private_key_version" {
+  secret      = google_secret_manager_secret.sf_private_key.id
+  secret_data = var.sf_private_key # From tfvars/CI
+}
+
+# Grant web SA access
+resource "google_secret_manager_secret_iam_member" "sf_private_key_access" {
+  secret_id = google_secret_manager_secret.sf_private_key.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
 
 # Allow web service to execute training jobs
 #resource "google_service_account_iam_member" "web_service_job_executor" {
@@ -298,6 +324,10 @@ resource "google_cloud_run_service" "web_service" {
               key  = "latest"
             }
           }
+        }
+        env {
+          name  = "SF_PRIVATE_KEY_SECRET"
+          value = google_secret_manager_secret.sf_private_key.secret_id
         }
       }
     }
