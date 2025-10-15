@@ -111,7 +111,6 @@ jobs:
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
-          TF_WORKSPACE: dev
         run: |
           terraform init -input=false -reconfigure -backend-config="prefix=envs/dev"
           terraform -version
