@@ -855,19 +855,12 @@ with tab_conn:
             # sf_password = st.text_input("Password", type="password")
 
         submitted = st.form_submit_button("🔌 Connect")
-        if submitted:
-            try:
-                conn = ensure_sf_conn()
-                st.success("Connected to Snowflake with key-pair auth.")
-            except Exception as e:
-                st.error(f"Connection failed: {e}")
 
         # inside the Tab 1 form submit block (you already have this; just ensure params are saved)
-        """if submitted:
+        if submitted:
             try:
                 conn = get_snowflake_connection(
                     user=sf_user,
-                    # password=sf_password or None,
                     account=sf_account,
                     warehouse=sf_wh,
                     database=sf_db,
@@ -875,7 +868,6 @@ with tab_conn:
                     role=sf_role,
                     project_id=PROJECT_ID,
                 )
-                # Save for the session so all pages reuse it
                 st.session_state["sf_params"] = dict(
                     user=sf_user,
                     account=sf_account,
@@ -883,7 +875,6 @@ with tab_conn:
                     database=sf_db,
                     schema=sf_schema,
                     role=sf_role,
-                    # password=sf_password or None,  # include if you rely on password auth
                 )
                 st.session_state["sf_conn"] = conn
                 st.session_state["sf_connected"] = True
@@ -892,7 +883,7 @@ with tab_conn:
                 )
             except Exception as e:
                 st.session_state["sf_connected"] = False
-                st.error(f"Connection failed: {e}")"""
+                st.error(f"Connection failed: {e}")
 
     if st.session_state.sf_connected:
         with st.container(border=True):

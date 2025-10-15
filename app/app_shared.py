@@ -7,10 +7,12 @@ from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 import logging
 import tempfile
+import base64
 
 logger = logging.getLogger(__name__)
 
 import pandas as pd
+import numpy as np
 import streamlit as st
 import snowflake.connector as sf
 from google.cloud import storage, run_v2, secretmanager
@@ -400,20 +402,6 @@ def get_job_manager():
     return CloudRunJobManager(PROJECT_ID, REGION)
 
 
-def _connect_snowflake(
-    user, password, account, warehouse, database, schema, role
-):
-    return sf.connect(
-        user=user,
-        password=password,
-        account=account,
-        warehouse=warehouse,
-        database=database,
-        schema=schema,
-        role=role or None,
-    )
-
-
 class CloudRunJobManager:
     """Manages Cloud Run Job executions."""
 
@@ -626,6 +614,42 @@ def _sf_params_from_env() -> Optional[dict]:
     return None
 
 
+def _connect_snowflake(
+    user,
+    account,
+    warehouse,
+    database,
+    schema,
+    role,
+    password=None,
+    private_key=None,
+):
+    if private_key is not None:
+        return sf.connect(
+            user=user,
+            account=account,
+            warehouse=warehouse,
+            database=database,
+            schema=schema,
+            role=role or None,
+            private_key=private_key,  # <- crucial
+            client_session_keep_alive=True,
+            session_parameters={"CLIENT_SESSION_KEEP_ALIVE": True},
+        )
+    else:
+        return sf.connect(
+            user=user,
+            password=password,
+            account=account,
+            warehouse=warehouse,
+            database=database,
+            schema=schema,
+            role=role or None,
+            client_session_keep_alive=True,
+            session_parameters={"CLIENT_SESSION_KEEP_ALIVE": True},
+        )
+
+
 def ensure_sf_conn() -> sf.SnowflakeConnection:
     conn = st.session_state.get("sf_conn")
     params = st.session_state.get("sf_params") or {}
@@ -724,65 +748,52 @@ def _load_private_key(private_key_str: str) -> bytes:
     )
 
 
-def _connect_snowflake(
-    user,
-    account,
-    warehouse,
-    database,
-    schema,
-    role,
-    password=None,
-    private_key=None,
-):
-    if private_key is not None:
-        return sf.connect(
-            user=user,
-            account=account,
-            warehouse=warehouse,
-            database=database,
-            schema=schema,
-            role=role or None,
-            private_key=private_key,  # <- crucial
-            client_session_keep_alive=True,
-            session_parameters={"CLIENT_SESSION_KEEP_ALIVE": True},
-        )
-    else:
-        return sf.connect(
-            user=user,
-            password=password,
-            account=account,
-            warehouse=warehouse,
-            database=database,
-            schema=schema,
-            role=role or None,
-            client_session_keep_alive=True,
-            session_parameters={"CLIENT_SESSION_KEEP_ALIVE": True},
-        )
-
-
 @st.cache_resource(show_spinner=False)
 def get_snowflake_connection(**kwargs):
-    """Prioritizes key-pair auth from Secret Manager; falls back to password if key unavailable."""
-    project_id = kwargs.pop("project_id", PROJECT_ID)  # From env or default
+    """Prefer key-pair auth via Secret Manager; fall back to password only if explicitly present."""
+    project_id = kwargs.pop("project_id", PROJECT_ID)
     secret_id = kwargs.pop(
         "sf_private_key_secret",
         os.getenv("SF_PRIVATE_KEY_SECRET", "sf-private-key"),
-    )  # From Cloud Run env
+    )
 
-    if secret_id:  # Prefer key-pair
-        kwargs.pop("password", None)  # Ignore password if present
+    # Key-pair path (preferred)
+    if secret_id:
         try:
-            return _connect_snowflake_keypair(
-                **kwargs, project_id=project_id, secret_id=secret_id
+            pk_bytes = _load_private_key_bytes_from_gsm(
+                secret_id
+            )  # DER PKCS#8 bytes
+            return _connect_snowflake(
+                user=kwargs["user"],
+                account=kwargs["account"],
+                warehouse=kwargs["warehouse"],
+                database=kwargs["database"],
+                schema=kwargs["schema"],
+                role=kwargs.get("role"),
+                private_key=pk_bytes,
             )
-        except ValueError as ve:
+        except Exception as e:
+            # Optional: keep this if you want a visible hint in the UI
             st.warning(
-                f"Key-pair auth unavailable ({ve}); using password."
-            )  # Optional UI warning
-            logger.warning(
-                ve
-            )  # Fallback to password auth (your existing _connect_snowflake)
-    return _connect_snowflake(**kwargs)
+                f"Key-pair auth failed ({e}). Falling back to password if provided."
+            )
+
+    # Optional password fallback (only if SF_PASSWORD env is defined, otherwise just raise)
+    p = os.getenv("SF_PASSWORD")
+    if p:
+        return _connect_snowflake(
+            user=kwargs["user"],
+            account=kwargs["account"],
+            warehouse=kwargs["warehouse"],
+            database=kwargs["database"],
+            schema=kwargs["schema"],
+            role=kwargs.get("role"),
+            password=p,
+        )
+
+    raise RuntimeError(
+        "Could not establish Snowflake connection (key-pair failed and no password fallback)."
+    )
 
 
 def keepalive_ping(conn):
