@@ -51,7 +51,7 @@ RUN pip3 install --no-cache-dir \
     numba pyarrow fastparquet polars \
     joblib "dask[complete]" multiprocessing-logging \
     psutil memory-profiler \
-    scikit-learn xgboost lightgbm
+    scikit-learn xgboost lightgbm cryptography
 
 RUN R -e "capabilities()['cairo']"
 
