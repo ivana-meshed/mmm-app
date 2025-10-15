@@ -8,7 +8,6 @@ permissions:
   id-token: write
   contents: read
 
-
 jobs:
   ci:
     runs-on: ubuntu-latest
@@ -27,6 +26,11 @@ jobs:
       WEB_RUNTIME_SA: mmm-web-service-sa@datawarehouse-422511.iam.gserviceaccount.com
       TRAINING_RUNTIME_SA: mmm-training-job-sa@datawarehouse-422511.iam.gserviceaccount.com
       TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
+      # TF_VAR_* for sensitive/default vars (preferred over -var flags)
+      TF_VAR_sf_private_key: ${{ secrets.SF_PRIVATE_KEY }}
+      TF_VAR_scheduler_job_name: robyn-queue-tick-dev
+      TF_VAR_queue_name: default-dev
+      # ... (add other non-sensitive TF_VAR_* if needed from dev.tfvars)
 
     steps:
       - uses: actions/checkout@v4
@@ -70,8 +74,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:latest
+            ${{ env.WEB_IMAGE_URL }}
+            ${{ env.WEB_IMAGE_URL_LATEST }}
           cache-from: type=gha,scope=mmm-web
           cache-to: type=gha,mode=max,scope=mmm-web
 
@@ -83,8 +87,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:${{ github.sha }}
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:latest
+            ${{ env.TRAINING_IMAGE_URL }}
+            ${{ env.TRAINING_IMAGE_URL_LATEST }}
           cache-from: type=gha,scope=mmm-training
           cache-to: type=gha,mode=max,scope=mmm-training
 
@@ -121,6 +125,27 @@ jobs:
           terraform fmt -check
           terraform validate
 
+      - name: Import existing secrets if needed
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Import sf-private-key if exists (idempotent)
+          if gcloud secrets describe sf-private-key --project=$PROJECT_ID >/dev/null 2>&1; then  # ← FIX: $PROJECT_ID
+            echo "Importing sf-private-key secret..."
+            terraform import google_secret_manager_secret.sf_private_key projects/$PROJECT_ID/secrets/sf-private-key || true  # ← FIX: $PROJECT_ID
+
+            # Import latest version (get version ID)
+            VERSION_ID=$(gcloud secrets versions list --secret=sf-private-key --project=$PROJECT_ID --limit=1 --format="value(name.basename())")  # ← FIX: $PROJECT_ID
+            if [ -n "$VERSION_ID" ]; then
+              echo "Importing sf-private-key version $VERSION_ID..."
+              terraform import 'google_secret_manager_secret_version.sf_private_key_version[0]' projects/$PROJECT_ID/secrets/sf-private-key/$VERSION_ID || true  # ← FIX: $PROJECT_ID
+            fi
+          else
+            echo "sf-private-key does not exist yet—will create on apply."
+          fi
+
       - name: Import existing service accounts if needed
         working-directory: infra/terraform
         shell: bash
@@ -129,16 +154,16 @@ jobs:
 
           # Import web service SA if it exists
           terraform state show google_service_account.web_service_sa >/dev/null 2>&1 || \
-          terraform import google_service_account.web_service_sa "projects/${PROJECT_ID}/serviceAccounts/${WEB_RUNTIME_SA}" || true
+          terraform import google_service_account.web_service_sa "projects/$PROJECT_ID/serviceAccounts/$WEB_RUNTIME_SA" || true  # ← FIX: $PROJECT_ID
 
           # Import scheduler SA if it exists
           terraform state show google_service_account.scheduler >/dev/null 2>&1 || \
           terraform import google_service_account.scheduler \
-            "projects/${PROJECT_ID}/serviceAccounts/robyn-queue-scheduler@${PROJECT_ID}.iam.gserviceaccount.com" || true
+            "projects/$PROJECT_ID/serviceAccounts/robyn-queue-scheduler@$PROJECT_ID.iam.gserviceaccount.com" || true  # ← FIX: $PROJECT_ID
 
           # Import training job SA if it exists
           terraform state show google_service_account.training_job_sa >/dev/null 2>&1 || \
-          terraform import google_service_account.training_job_sa "projects/${PROJECT_ID}/serviceAccounts/${TRAINING_RUNTIME_SA}" || true
+          terraform import google_service_account.training_job_sa "projects/$PROJECT_ID/serviceAccounts/$TRAINING_RUNTIME_SA" || true  # ← FIX: $PROJECT_ID
 
       - name: Clear taint & disable deletion protection
         working-directory: infra/terraform
@@ -170,43 +195,40 @@ jobs:
             # Re-import web service
             terraform state rm google_cloud_run_service.web_service || true
             terraform import google_cloud_run_service.web_service \
-              "projects/${PROJECT_ID}/locations/${REGION}/services/${SERVICE_NAME}-web" || true
+              "projects/$PROJECT_ID/locations/$REGION/services/${SERVICE_NAME}-web" || true
 
             # Re-import training job
             terraform state rm google_cloud_run_v2_job.training_job || true
             terraform import google_cloud_run_v2_job.training_job \
-              "projects/${PROJECT_ID}/locations/${REGION}/jobs/${SERVICE_NAME}-training" || true
+              "projects/$PROJECT_ID/locations/$REGION/jobs/${SERVICE_NAME}-training" || true
           fi
 
       - name: Terraform plan
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
-          TF_VAR_sf_private_key: ${{ secrets.SF_PRIVATE_KEY }}
-          WEB_IMAGE_URL: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
-          TRAINING_IMAGE_URL: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:${{ github.sha }}
+          # Remove -var flags; use TF_VAR_* env vars only (set above)
+          TF_VAR_project_id: $PROJECT_ID
+          TF_VAR_region: $REGION
+          TF_VAR_service_name: $SERVICE_NAME
+          TF_VAR_bucket_name: $BUCKET
+          TF_VAR_deployer_sa: $SA_EMAIL
+          TF_VAR_web_image: $WEB_IMAGE_URL
+          TF_VAR_training_image: $TRAINING_IMAGE_URL
+          # scheduler/queue from env (set above)
         run: |
           echo "Deploying images:"
           echo "  Web service: $WEB_IMAGE_URL"
           echo "  Training job: $TRAINING_IMAGE_URL"
 
           terraform plan -input=false \
-            -var "project_id=$PROJECT_ID" \
-            -var "region=$REGION" \
-            -var "service_name=$SERVICE_NAME" \
-            -var "bucket_name=$BUCKET" \
-            -var "deployer_sa=$SA_EMAIL" \
-            -var "web_image=$WEB_IMAGE_URL" \
-            -var "training_image=$TRAINING_IMAGE_URL" \
-            -var "scheduler_job_name=robyn-queue-tick-dev" \
-            -var "queue_name=default-dev" \
-            -out=tfplan
+            -out=tfplan  # No -var flags needed
 
       - name: Terraform apply
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
-          TF_VAR_sf_private_key: ${{ secrets.SF_PRIVATE_KEY }}
+          # Same TF_VAR_* as plan
         run: terraform apply -input=false -auto-approve tfplan
 
       - name: Print deployment info
@@ -223,4 +245,4 @@ jobs:
           echo "Architecture:"
           echo "  - Web Interface: Cloud Run Service (2 CPUs, 4GB)"
           echo "  - Training Jobs: Cloud Run Jobs (up to 32 CPUs, 128GB)"
-          echo "  - Storage: GCS Bucket (${BUCKET})"
+          echo "  - Storage: GCS Bucket ($BUCKET)"
