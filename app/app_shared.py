@@ -19,6 +19,9 @@ from data_processor import DataProcessor
 from uuid import uuid4
 from google.api_core.exceptions import PreconditionFailed
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.backends import default_backend
+
 # Environment constants
 PROJECT_ID = os.getenv("PROJECT_ID")
 REGION = os.getenv("REGION", "europe-west1")
@@ -547,14 +550,69 @@ def effective_sql(table: str, query: str) -> Optional[str]:
     return None
 
 
+def _gsm_secret_latest_resource(secret_id: str) -> str:
+    # Accept "sf-private-key" or full resource path; always return .../versions/latest
+    if not secret_id:
+        raise RuntimeError("SF_PRIVATE_KEY_SECRET is not set")
+    if secret_id.startswith("projects/"):
+        base = secret_id
+    else:
+        if not PROJECT_ID:
+            raise RuntimeError("PROJECT_ID env is not set")
+        base = f"projects/{PROJECT_ID}/secrets/{secret_id}"
+    return base + "/versions/latest"
+
+
+def _load_private_key_bytes_from_gsm(secret_id: str) -> bytes:
+    """
+    Reads a PEM (or already PKCS#8 DER) private key from GSM and returns PKCS#8 DER bytes,
+    as required by snowflake-connector-python (private_key=...).
+    """
+    client = secretmanager.SecretManagerServiceClient()
+    name = _gsm_secret_latest_resource(secret_id)
+    payload = client.access_secret_version(name=name).payload.data
+
+    # Try PEM first
+    try:
+        pem = payload.decode("utf-8")
+        key = serialization.load_pem_private_key(
+            pem.encode("utf-8"),
+            password=None,  # set if your key is passphrase-protected
+            backend=default_backend(),
+        )
+        return key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    except Exception:
+        # If not PEM, maybe it’s already DER PKCS#8
+        return bytes(payload)
+
+
 def _sf_params_from_env() -> Optional[dict]:
     u = os.getenv("SF_USER")
-    p = os.getenv("SF_PASSWORD")
     a = os.getenv("SF_ACCOUNT")
     w = os.getenv("SF_WAREHOUSE")
     d = os.getenv("SF_DATABASE")
     s = os.getenv("SF_SCHEMA")
     r = os.getenv("SF_ROLE", "")
+    secret_id = os.getenv("SF_PRIVATE_KEY_SECRET")  # e.g. "sf-private-key"
+
+    if all([u, a, w, d, s]) and secret_id:
+        pkb = _load_private_key_bytes_from_gsm(secret_id)
+        return dict(
+            user=u,
+            account=a,
+            warehouse=w,
+            database=d,
+            schema=s,
+            role=r or None,
+            private_key=pkb,  # <- key-pair auth
+        )
+
+    # (Optional) fall back to password if explicitly present
+    p = os.getenv("SF_PASSWORD")
     if all([u, p, a, w, d, s]):
         return dict(
             user=u,
@@ -563,38 +621,71 @@ def _sf_params_from_env() -> Optional[dict]:
             warehouse=w,
             database=d,
             schema=s,
-            role=r,
+            role=r or None,
         )
     return None
 
 
 def ensure_sf_conn() -> sf.SnowflakeConnection:
-    """
-    Manual-only: return an already established connection or raise.
-    Does NOT auto-connect from env. Use the Connect button to create it.
-    """
     conn = st.session_state.get("sf_conn")
-    if conn is None:
-        raise RuntimeError(
-            "Not connected to Snowflake. Open the 'Snowflake Connection' tab and click Connect."
-        )
-    # Ping; if dead, clear and ask the user to reconnect explicitly
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT 1")
-        cur.fetchall()
-        cur.close()
-        return conn
-    except Exception:
+    params = st.session_state.get("sf_params") or {}
+
+    if not params:
+        envp = _sf_params_from_env()
+        if envp:
+            params = envp
+            # store redacted copy for UI/state (don’t keep private bytes in state)
+            redacted = {
+                k: ("<pk-bytes>" if k == "private_key" else v)
+                for k, v in envp.items()
+                if k not in ("password",)
+            }
+            st.session_state["sf_params"] = redacted
+        else:
+            raise RuntimeError(
+                "No Snowflake params. Use UI once or set SF_* env vars."
+            )
+
+    if conn is not None:
         try:
-            conn.close()
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchall()
+            return conn
         except Exception:
-            pass
-        st.session_state["sf_conn"] = None
-        st.session_state["sf_connected"] = False
-        raise RuntimeError(
-            "Snowflake session expired. Please reconnect from the Connection tab."
+            try:
+                conn.close()
+            except Exception:
+                pass
+            st.session_state["sf_conn"] = None
+
+    # Build a new connection
+    if "private_key" in params:
+        conn = _connect_snowflake(
+            user=params["user"],
+            account=params["account"],
+            warehouse=params["warehouse"],
+            database=params["database"],
+            schema=params["schema"],
+            role=params.get("role"),
+            private_key=_load_private_key_bytes_from_gsm(
+                os.getenv("SF_PRIVATE_KEY_SECRET")
+            ),
         )
+    else:
+        conn = _connect_snowflake(
+            user=params["user"],
+            account=params["account"],
+            warehouse=params["warehouse"],
+            database=params["database"],
+            schema=params["schema"],
+            role=params.get("role"),
+            password=os.getenv("SF_PASSWORD"),
+        )
+
+    st.session_state["sf_conn"] = conn
+    st.session_state["sf_connected"] = True
+    return conn
 
 
 # Pick ONE of these depending on your stack:
@@ -633,35 +724,40 @@ def _load_private_key(private_key_str: str) -> bytes:
     )
 
 
-def _connect_snowflake_keypair(
+def _connect_snowflake(
     user,
     account,
     warehouse,
     database,
     schema,
     role,
-    project_id=None,
-    secret_id=None,
+    password=None,
+    private_key=None,
 ):
-    """Key-pair auth connection (no password needed)."""
-    if secret_id and project_id:
-        private_key_str = _fetch_private_key_from_secret(project_id, secret_id)
-        private_key = _load_private_key(private_key_str)
+    if private_key is not None:
+        return sf.connect(
+            user=user,
+            account=account,
+            warehouse=warehouse,
+            database=database,
+            schema=schema,
+            role=role or None,
+            private_key=private_key,  # <- crucial
+            client_session_keep_alive=True,
+            session_parameters={"CLIENT_SESSION_KEEP_ALIVE": True},
+        )
     else:
-        raise ValueError("Project ID and secret ID required for key-pair auth")
-
-    conn = sf.connect(
-        user=user,
-        account=account,
-        warehouse=warehouse,
-        database=database,
-        schema=schema,
-        role=role or None,
-        private_key=private_key,  # Loaded bytes object
-        client_session_keep_alive=True,
-        session_parameters={"CLIENT_SESSION_KEEP_ALIVE": True},
-    )
-    return conn
+        return sf.connect(
+            user=user,
+            password=password,
+            account=account,
+            warehouse=warehouse,
+            database=database,
+            schema=schema,
+            role=role or None,
+            client_session_keep_alive=True,
+            session_parameters={"CLIENT_SESSION_KEEP_ALIVE": True},
+        )
 
 
 @st.cache_resource(show_spinner=False)

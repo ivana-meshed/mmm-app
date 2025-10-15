@@ -786,6 +786,22 @@ tab_conn, tab_single, tab_queue = st.tabs(
     ["1) Snowflake Connection", "2) Single Job Training", "3) Queue Training"]
 )
 
+st.write(
+    {
+        k: os.getenv(k)
+        for k in [
+            "SF_USER",
+            "SF_ACCOUNT",
+            "SF_WAREHOUSE",
+            "SF_DATABASE",
+            "SF_SCHEMA",
+            "SF_ROLE",
+            "SF_PRIVATE_KEY_SECRET",
+            "PROJECT_ID",
+        ]
+    }
+)
+
 _init_sf_once()
 
 # Auto-load persisted queue once per session (per queue_name)
