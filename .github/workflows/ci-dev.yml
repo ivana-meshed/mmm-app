@@ -131,12 +131,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Import sf-private-key if exists (idempotent)
+          # Import sf-private-key if exists
           if gcloud secrets describe sf-private-key --project=$PROJECT_ID >/dev/null 2>&1; then
             echo "Importing sf-private-key secret..."
             terraform import google_secret_manager_secret.sf_private_key projects/$PROJECT_ID/secrets/sf-private-key || true
 
-            # Import latest version
             VERSION_ID=$(gcloud secrets versions list sf-private-key --project=$PROJECT_ID --limit=1 --format="value(name.basename())")
             if [ -n "$VERSION_ID" ]; then
               echo "Importing sf-private-key version $VERSION_ID..."
@@ -146,27 +145,36 @@ jobs:
             echo "sf-private-key does not exist yet—will create on apply."
           fi
 
-          # Import web service SA if it exists
+          # Import SAs (existing)
           terraform state show google_service_account.web_service_sa >/dev/null 2>&1 || \
           terraform import google_service_account.web_service_sa "projects/$PROJECT_ID/serviceAccounts/$WEB_RUNTIME_SA" || true
 
-          # Import scheduler SA if it exists
           terraform state show google_service_account.scheduler >/dev/null 2>&1 || \
           terraform import google_service_account.scheduler \
             "projects/$PROJECT_ID/serviceAccounts/robyn-queue-scheduler@$PROJECT_ID.iam.gserviceaccount.com" || true
 
-          # Import training job SA if it exists
           terraform state show google_service_account.training_job_sa >/dev/null 2>&1 || \
           terraform import google_service_account.training_job_sa "projects/$PROJECT_ID/serviceAccounts/$TRAINING_RUNTIME_SA" || true
 
-          # ← ADD: Import training job if exists (FIXES 409 error)
+          # Import training job (ENHANCED: Force describe + import with logging)
+          echo "Checking for existing training job..."
           if gcloud run jobs describe ${SERVICE_NAME}-training --region=$REGION --project=$PROJECT_ID >/dev/null 2>&1; then
-            echo "Importing training job..."
+            echo "Training job exists—importing..."
             terraform import google_cloud_run_v2_job.training_job projects/$PROJECT_ID/locations/$REGION/jobs/${SERVICE_NAME}-training || true
+            # Force refresh after import
+            terraform refresh -target=google_cloud_run_v2_job.training_job || true
           else
-            echo "Training job does not exist yet—will create on apply."
+            echo "Training job does not exist—will create on apply."
           fi
 
+          # Import web service if exists (for completeness)
+          if gcloud run services describe ${SERVICE_NAME}-web --region=$REGION --project=$PROJECT_ID >/dev/null 2>&1; then
+            echo "Web service exists—importing..."
+            terraform import google_cloud_run_service.web_service projects/$PROJECT_ID/locations/$REGION/services/${SERVICE_NAME}-web || true
+            terraform refresh -target=google_cloud_run_service.web_service || true
+          else
+            echo "Web service does not exist—will create on apply."
+          fi
       - name: Clear taint & disable deletion protection
         working-directory: infra/terraform
         shell: bash
@@ -177,7 +185,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Disable deletion protection on web service
+          # Disable deletion protection on web service (FIX: Only for services, not jobs)
           echo "Disabling Cloud Run deletion protection..."
           gcloud run services update "${SERVICE_NAME}-web" \
             --region="$REGION" \
