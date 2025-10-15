@@ -6,4 +6,8 @@ terraform {
       version = "~> 5.28"
     }
   }
+  backend "gcs" {
+    bucket = "mmm-app-output"              # Shared bucket
+    prefix = "envs/${terraform.workspace}" # Dynamic: envs/prod, envs/dev
+  }
 }

@@ -119,8 +119,10 @@ jobs:
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
+          TF_WORKSPACE: dev
         run: |
           terraform -version
+          terraform workspace new dev || terraform workspace select dev  # Create/select if needed
           terraform init -input=false -reconfigure -backend-config="prefix=envs/dev"
           terraform fmt -check
           terraform validate
@@ -232,6 +234,7 @@ jobs:
           echo "  Training job: $TRAINING_IMAGE_URL"
 
           terraform plan -input=false \
+            -var-file="envs/dev.tfvars" \
             -out=tfplan  # No -var flags needed
 
       - name: Terraform apply
