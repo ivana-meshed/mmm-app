@@ -48,6 +48,8 @@ resource "google_secret_manager_secret" "sf_private_key" {
 resource "google_secret_manager_secret_version" "sf_private_key_version" {
   secret      = google_secret_manager_secret.sf_private_key.id
   secret_data = var.sf_private_key # From tfvars/CI
+  enabled     = true
+  depends_on  = [google_project_service.secretmanager]
 }
 
 # Grant web SA access
