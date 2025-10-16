@@ -81,8 +81,9 @@ jobs:
           tags: |
             ${{ env.WEB_IMAGE_URL }}
             ${{ env.WEB_IMAGE_URL_LATEST }}
-          cache-from: type=gha,scope=mmm-web
-          cache-to: type=gha,mode=max,scope=mmm-web
+          cache-from: type=gha,scope=mmm-web-${{ github.ref_name }}
+          cache-to: type=gha,mode=max,scope=mmm-web-${{ github.ref_name }}
+          #no-cache: true
 
       - name: Build & Push training job image
         uses: docker/build-push-action@v6

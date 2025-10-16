@@ -29,6 +29,8 @@ WORKDIR /app
 # Copy only web application files
 ARG GIT_SHA
 ENV GIT_SHA=$GIT_SHA
+LABEL org.opencontainers.image.revision=$GIT_SHA
+
 COPY app/ /app/
 COPY requirements.txt /app/requirements.txt
 COPY docker/web_entrypoint.sh /app/entrypoint.sh
