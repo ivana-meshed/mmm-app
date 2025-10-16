@@ -83,12 +83,6 @@ jobs:
             ${{ env.WEB_IMAGE_URL_LATEST }}
           cache-from: type=gha,scope=mmm-web
           cache-to: type=gha,mode=max,scope=mmm-web
-      - name: Sanity-check built web image contents
-        run: |
-          docker pull "${WEB_IMAGE_URL}"
-          echo "Inside-image streamlit_app.py (first 40 lines):"
-          docker run --rm "${WEB_IMAGE_URL}" \
-            /bin/sh -lc 'sed -n "1,100p" /app/streamlit_app.py'
 
       - name: Build & Push training job image
         uses: docker/build-push-action@v6
