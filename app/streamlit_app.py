@@ -69,20 +69,16 @@ import streamlit as st
 
 
 def _require_login_and_domain():
-    # Try to read email; if it fails, user isn't logged in yet
-    try:
-        email = (st.user.email or "").lower().strip()
-    except Exception:
-        email = ""
+    is_logged_in = bool(getattr(st.user, "is_logged_in", False))
 
-    if not email:
+    if not is_logged_in:
         st.title("Robyn MMM Trainer")
         st.write("Sign in with your MeshedData Google account to continue.")
         if st.button("Sign in with Google"):
-            st.login("google")  # needs [auth] in secrets.toml
+            st.login("google")  # <-- specify the configured provider
         st.stop()
 
-    # Domain gate
+    email = (getattr(st.user, "email", "") or "").lower().strip()
     if not email.endswith("@mesheddata.com"):
         st.error("This app is restricted to @mesheddata.com accounts.")
         if st.button("Sign out"):
