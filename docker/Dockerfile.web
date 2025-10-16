@@ -27,6 +27,8 @@ RUN pip install --no-cache-dir \
 WORKDIR /app
 
 # Copy only web application files
+ARG GIT_SHA
+ENV GIT_SHA=$GIT_SHA
 COPY app/ /app/
 COPY requirements.txt /app/requirements.txt
 COPY docker/web_entrypoint.sh /app/entrypoint.sh

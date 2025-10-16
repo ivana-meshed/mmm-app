@@ -269,6 +269,7 @@ resource "google_cloud_run_service" "web_service" {
         "run.googleapis.com/min-instances"  = var.min_instances
         "run.googleapis.com/max-instances"  = var.max_instances
         "run.googleapis.com/timeout"        = "300s"
+        "deploy.kubernetes.io/revision-sha" = substr(var.web_image, length(var.web_image) - 40, 40)
       }
     }
 
