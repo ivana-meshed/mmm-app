@@ -79,7 +79,7 @@ def _require_login_and_domain():
         st.title("Robyn MMM Trainer")
         st.write("Sign in with your MeshedData Google account to continue.")
         if st.button("Sign in with Google"):
-            st.login()  # needs [auth] in secrets.toml
+            st.login("google")  # needs [auth] in secrets.toml
         st.stop()
 
     # Domain gate

@@ -61,31 +61,32 @@ PY
 }
 
 # Prefer *_SECRET first (resource path), then raw fallback
-AUTH_CLIENT_ID_VAL="$(py_get_secret "${AUTH_CLIENT_ID:-${AUTH_CLIENT_ID:-}}")"
-AUTH_CLIENT_SECRET_VAL="$(py_get_secret "${AUTH_CLIENT_SECRET:-${AUTH_CLIENT_SECRET:-}}")"
-AUTH_COOKIE_SECRET_VAL="$(py_get_secret "${AUTH_COOKIE_SECRET:-${AUTH_COOKIE_SECRET:-}}")"
-AUTH_REDIRECT_URI_VAL="${AUTH_REDIRECT_URI:-}"
-
-# Fail fast if anything critical is empty
-if [[ -z "$AUTH_CLIENT_ID_VAL" || -z "$AUTH_CLIENT_SECRET_VAL" || -z "$AUTH_COOKIE_SECRET_VAL" || -z "$AUTH_REDIRECT_URI_VAL" ]]; then
-  echo "ERROR: Missing one of AUTH_CLIENT_ID(_SECRET) / AUTH_CLIENT_SECRET(_SECRET) / AUTH_COOKIE_SECRET(_SECRET) / AUTH_REDIRECT_URI"
-  echo "       Verify Terraform env vars and that the web service account has roles/secretmanager.secretAccessor."
-  exit 1
-fi
+AUTH_CLIENT_ID="$(py_get_secret "${AUTH_CLIENT_ID:-${AUTH_CLIENT_ID:-}}")"
+AUTH_CLIENT_SECRET="$(py_get_secret "${AUTH_CLIENT_SECRET:-${AUTH_CLIENT_SECRET:-}}")"
+AUTH_COOKIE_SECRET="$(py_get_secret "${AUTH_COOKIE_SECRET:-${AUTH_COOKIE_SECRET:-}}")"
+AUTH_REDIRECT_URI="${AUTH_REDIRECT_URI:-}"
 
 # --- Build Streamlit secrets.toml for OIDC auth ---
 mkdir -p /app/.streamlit
-OIDC_META_URL="https://accounts.google.com/.well-known/openid-configuration"
+
+# Fail fast if anything critical is empty
+if [[ -z "$AUTH_CLIENT_ID" || -z "$AUTH_CLIENT_SECRET" || -z "$AUTH_COOKIE_SECRET" || -z "$AUTH_REDIRECT_URI" ]]; then
+  echo "ERROR: Missing one of AUTH_CLIENT_ID / AUTH_CLIENT_SECRET / AUTH_COOKIE_SECRET / AUTH_REDIRECT_URI"
+  exit 1
+fi
 
 cat > /app/.streamlit/secrets.toml <<EOF
 [auth]
-redirect_uri = "${AUTH_REDIRECT_URI_VAL}"
-cookie_secret = "${AUTH_COOKIE_SECRET_VAL}"
-client_id = "${AUTH_CLIENT_ID_VAL}"
-client_secret = "${AUTH_CLIENT_SECRET_VAL}"
-server_metadata_url = "${OIDC_META_URL}"
-# Not a security boundary; we still enforce domain in code.
-client_kwargs = { hd = "mesheddata.com" }
+providers = ["google"]
+
+[auth.google]
+client_id = "${AUTH_CLIENT_ID}"
+client_secret = "${AUTH_CLIENT_SECRET}"
+redirect_uri = "${AUTH_REDIRECT_URI}"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+
+# Cookie used by Streamlit sessions
+cookie_secret = "${AUTH_COOKIE_SECRET}"
 EOF
 
 echo "✅ Wrote /app/.streamlit/secrets.toml"
