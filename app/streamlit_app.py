@@ -65,6 +65,32 @@ st.set_page_config(page_title="Robyn MMM Trainer", layout="wide")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+import streamlit as st
+
+
+def _require_login_and_domain():
+    # Kick off OIDC login if not logged in
+    if not st.user.is_logged_in:
+        # Show a minimal page that only renders the login button
+        st.title("Robyn MMM Trainer")
+        st.write("Sign in with your MeshedData Google account to continue.")
+        if st.button("Sign in with Google"):
+            st.login()  # uses [auth] from secrets.toml
+        st.stop()
+
+    # Basic domain check (authoritative check: ID token email claim)
+    email = (st.user.email or "").lower().strip()
+    if not email.endswith("@mesheddata.com"):
+        st.error("This app is restricted to @mesheddata.com accounts.")
+        # Optional: log out immediately to force account switch
+        if st.button("Sign out"):
+            st.logout()
+        st.stop()
+
+
+# Call it once, near the top of your app before any other UI
+_require_login_and_domain()
+
 query_params = st.query_params
 logger.info(
     "Starting app/streamlit_app.py", extra={"query_params": dict(query_params)}

@@ -73,3 +73,15 @@ variable "sf_private_key" {
   description = "RSA private key PEM for Snowflake"
 }
 
+variable "auth_cookie_secret" {
+  type      = string
+  sensitive = true
+}
+variable "auth_client_id" {
+  type      = string
+  sensitive = true
+}
+variable "auth_client_secret" {
+  type      = string
+  sensitive = true
+}

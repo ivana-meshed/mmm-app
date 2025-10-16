@@ -28,6 +28,9 @@ jobs:
       TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
       # TF_VAR_* for sensitive/default vars (preferred over -var flags)
       TF_VAR_sf_private_key: ${{ secrets.SF_PRIVATE_KEY }}
+      TF_VAR_auth_client_id: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      TF_VAR_auth_client_secret: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      TF_VAR_auth_cookie_secret: ${{ secrets.STREAMLIT_COOKIE_SECRET }}
       TF_VAR_scheduler_job_name: robyn-queue-tick-dev
       TF_VAR_queue_name: default-dev
       # ... (add other non-sensitive TF_VAR_* if needed from dev.tfvars)
