@@ -69,20 +69,20 @@ import streamlit as st
 
 
 def _require_login_and_domain():
-    # Kick off OIDC login if not logged in
-    if not st.user.is_logged_in:
-        # Show a minimal page that only renders the login button
+    # In unauthenticated state, st.user exposes no attributes.
+    is_logged_in = getattr(st.user, "is_logged_in", False)
+
+    if not is_logged_in:
         st.title("Robyn MMM Trainer")
         st.write("Sign in with your MeshedData Google account to continue.")
         if st.button("Sign in with Google"):
-            st.login()  # uses [auth] from secrets.toml
+            st.login()  # requires [auth] in secrets.toml
         st.stop()
 
-    # Basic domain check (authoritative check: ID token email claim)
-    email = (st.user.email or "").lower().strip()
+    # Only reaches here when logged in and attributes exist
+    email = (getattr(st.user, "email", "") or "").lower().strip()
     if not email.endswith("@mesheddata.com"):
         st.error("This app is restricted to @mesheddata.com accounts.")
-        # Optional: log out immediately to force account switch
         if st.button("Sign out"):
             st.logout()
         st.stop()
