@@ -87,7 +87,7 @@ def _require_login_and_domain():
 
 
 # Call it once, near the top of your app before any other UI
-_require_login_and_domain()
+# _require_login_and_domain()
 
 query_params = st.query_params
 logger.info(
