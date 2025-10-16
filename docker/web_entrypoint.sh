@@ -42,44 +42,56 @@ if [ ! -f "streamlit_app.py" ]; then
 fi
 
 # --- Build Streamlit secrets.toml for OIDC auth ---
-mkdir -p /app/.streamlit
-
-get_secret_payload () {
-  local resource="$1"
-  if [[ "$resource" == projects/*/secrets/*/versions/* ]]; then
-    # Requires roles/secretmanager.secretAccessor on the Cloud Run SA
-    gcloud secrets versions access "$resource" || true
-  else
-    # Treat as raw value
-    echo -n "$resource"
-  fi
+py_get_secret() {
+  python3 - "$1" <<'PY'
+import os, sys, base64
+path = sys.argv[1]
+if path.startswith("projects/") and "/secrets/" in path and "/versions/" in path:
+    try:
+        from google.cloud import secretmanager
+        client = secretmanager.SecretManagerServiceClient()
+        payload = client.access_secret_version(name=path).payload.data
+        sys.stdout.write(payload.decode("utf-8"))
+    except Exception as e:
+        # Print nothing; caller can decide if empty is acceptable
+        pass
+else:
+    sys.stdout.write(path)
+PY
 }
 
-AUTH_CLIENT_ID="$(get_secret_payload "${AUTH_CLIENT_ID:-$AUTH_CLIENT_ID}")"
-AUTH_CLIENT_SECRET="$(get_secret_payload "${AUTH_CLIENT_SECRET:-$AUTH_CLIENT_SECRET}")"
-AUTH_COOKIE_SECRET="$(get_secret_payload "${AUTH_COOKIE_SECRET:-$AUTH_COOKIE_SECRET}")"
+# Prefer *_SECRET first (resource path), then raw fallback
+AUTH_CLIENT_ID_VAL="$(py_get_secret "${AUTH_CLIENT_ID:-${AUTH_CLIENT_ID:-}}")"
+AUTH_CLIENT_SECRET_VAL="$(py_get_secret "${AUTH_CLIENT_SECRET:-${AUTH_CLIENT_SECRET:-}}")"
+AUTH_COOKIE_SECRET_VAL="$(py_get_secret "${AUTH_COOKIE_SECRET:-${AUTH_COOKIE_SECRET:-}}")"
+AUTH_REDIRECT_URI_VAL="${AUTH_REDIRECT_URI:-}"
 
 # Fail fast if anything critical is empty
-if [[ -z "$AUTH_CLIENT_ID" || -z "$AUTH_CLIENT_SECRET" || -z "$AUTH_COOKIE_SECRET" || -z "$AUTH_REDIRECT_URI" ]]; then
-  echo "ERROR: Missing one of AUTH_CLIENT_ID / AUTH_CLIENT_SECRET / AUTH_COOKIE_SECRET / AUTH_REDIRECT_URI"
-  echo "      Make sure Terraform set the env vars and the service account can read the secrets."
+if [[ -z "$AUTH_CLIENT_ID_VAL" || -z "$AUTH_CLIENT_SECRET_VAL" || -z "$AUTH_COOKIE_SECRET_VAL" || -z "$AUTH_REDIRECT_URI_VAL" ]]; then
+  echo "ERROR: Missing one of AUTH_CLIENT_ID(_SECRET) / AUTH_CLIENT_SECRET(_SECRET) / AUTH_COOKIE_SECRET(_SECRET) / AUTH_REDIRECT_URI"
+  echo "       Verify Terraform env vars and that the web service account has roles/secretmanager.secretAccessor."
   exit 1
 fi
 
+# --- Build Streamlit secrets.toml for OIDC auth ---
+mkdir -p /app/.streamlit
 OIDC_META_URL="https://accounts.google.com/.well-known/openid-configuration"
 
 cat > /app/.streamlit/secrets.toml <<EOF
 [auth]
-redirect_uri = "${AUTH_REDIRECT_URI}"
-cookie_secret = "${AUTH_COOKIE_SECRET}"
-client_id = "${AUTH_CLIENT_ID}"
-client_secret = "${AUTH_CLIENT_SECRET}"
+redirect_uri = "${AUTH_REDIRECT_URI_VAL}"
+cookie_secret = "${AUTH_COOKIE_SECRET_VAL}"
+client_id = "${AUTH_CLIENT_ID_VAL}"
+client_secret = "${AUTH_CLIENT_SECRET_VAL}"
 server_metadata_url = "${OIDC_META_URL}"
-# Optional hint to Google; *not* a security boundary
+# Not a security boundary; we still enforce domain in code.
 client_kwargs = { hd = "mesheddata.com" }
 EOF
 
-echo "Wrote /app/.streamlit/secrets.toml with [auth] config"
+echo "✅ Wrote /app/.streamlit/secrets.toml"
+
+# Optional: show a redacted preview in logs for debugging
+sed -n '1,80p' /app/.streamlit/secrets.toml | sed -E 's/(client_secret *= *").*/\1***"/; s/(cookie_secret *= *").*/\1***"/'
 
 # Start Streamlit application
 echo "Starting Streamlit on port ${PORT}..."
