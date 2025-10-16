@@ -82,8 +82,22 @@ cookie_secret = "${AUTH_COOKIE_SECRET}"
 client_id = "${AUTH_CLIENT_ID}"
 client_secret = "${AUTH_CLIENT_SECRET}"
 server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
-providers = ["google"]  # optional; harmless to keep
+providers = ["google"]
 EOF
+
+python3 - <<'PY'
+import tomllib, sys, os
+p = "/app/.streamlit/secrets.toml"
+with open(p,"rb") as f:
+    s = tomllib.load(f)
+auth = s.get("auth", {})
+required = ["redirect_uri", "cookie_secret", "client_id", "client_secret", "server_metadata_url"]
+missing = [k for k in required if not auth.get(k)]
+print("Auth keys present:", sorted(k for k in auth.keys()))
+if missing:
+    print("MISSING keys in [auth]:", missing, file=sys.stderr)
+    sys.exit(1)
+PY
 
 echo "✅ Wrote /app/.streamlit/secrets.toml"
 
