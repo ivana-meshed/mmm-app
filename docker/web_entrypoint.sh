@@ -41,6 +41,27 @@ if [ ! -f "streamlit_app.py" ]; then
     exit 1
 fi
 
+# --- Build Streamlit secrets.toml for OIDC auth ---
+mkdir -p /app/.streamlit
+
+# Fetch secret payloads via Secret Manager only if env holds resource names.
+# If you inject raw values as envs instead, just write them directly.
+
+get_secret_payload () {
+  local resource="$1"
+  if [[ "$resource" == projects/*/secrets/*/versions/* ]]; then
+    # Requires the Cloud Run SA to have roles/secretmanager.secretAccessor
+    gcloud secrets versions access "$resource" || true
+  else
+    # Treat as raw value
+    echo -n "$resource"
+  fi
+}
+
+AUTH_CLIENT_ID="$(get_secret_payload "${AUTH_CLIENT_ID_SECRET:-$AUTH_CLIENT_ID}")"
+AUTH_CLIENT_SECRET="$(get_secret_payload "${AUTH_CLIENT_SECRET_SECRET:-$AUTH_CLIENT_SECRET}")"
+AUTH_COOKIE_SECRET="$(get_secret_payload "${AUTH_COOKIE_SECRET_SECRET:-$AUTH_COOKIE_SECRET}")"
+
 # Start Streamlit application
 echo "Starting Streamlit on port ${PORT}..."
 exec python3 -m streamlit run streamlit_app.py \
