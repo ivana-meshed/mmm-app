@@ -364,15 +364,15 @@ resource "google_cloud_run_service" "web_service" {
         # Example for google_cloud_run_service or v2 resource; adapt to your existing block.
         # Add these env vars (or "secret env vars") so the container can read them
         env {
-          name  = "AUTH_CLIENT_ID_SECRET"
+          name  = "AUTH_CLIENT_ID"
           value = "projects/${var.project_id}/secrets/streamlit-auth-client-id/versions/latest"
         }
         env {
-          name  = "AUTH_CLIENT_SECRET_SECRET"
+          name  = "AUTH_CLIENT_SECRET"
           value = "projects/${var.project_id}/secrets/streamlit-auth-client-secret/versions/latest"
         }
         env {
-          name  = "AUTH_COOKIE_SECRET_SECRET"
+          name  = "AUTH_COOKIE_SECRET"
           value = "projects/${var.project_id}/secrets/streamlit-auth-cookie-secret/versions/latest"
         }
         # The redirect URI must include your actual URL and /oauth2callback
