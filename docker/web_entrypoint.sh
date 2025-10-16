@@ -77,16 +77,12 @@ fi
 
 cat > /app/.streamlit/secrets.toml <<EOF
 [auth]
-providers = ["google"]
-
-[auth.google]
+redirect_uri = "${AUTH_REDIRECT_URI}"
+cookie_secret = "${AUTH_COOKIE_SECRET}"
 client_id = "${AUTH_CLIENT_ID}"
 client_secret = "${AUTH_CLIENT_SECRET}"
-redirect_uri = "${AUTH_REDIRECT_URI}"
 server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
-
-# Cookie used by Streamlit sessions
-cookie_secret = "${AUTH_COOKIE_SECRET}"
+providers = ["google"]  # optional; harmless to keep
 EOF
 
 echo "✅ Wrote /app/.streamlit/secrets.toml"

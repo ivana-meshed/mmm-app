@@ -69,13 +69,14 @@ import streamlit as st
 
 
 def _require_login_and_domain():
-    is_logged_in = bool(getattr(st.user, "is_logged_in", False))
+    # Before login, st.user has no attributes—use getattr to avoid AttributeError
+    is_logged_in = getattr(st.user, "is_logged_in", False)
 
     if not is_logged_in:
         st.title("Robyn MMM Trainer")
         st.write("Sign in with your MeshedData Google account to continue.")
         if st.button("Sign in with Google"):
-            st.login("google")  # <-- specify the configured provider
+            st.login()  # <-- no provider arg when using flat [auth] keys
         st.stop()
 
     email = (getattr(st.user, "email", "") or "").lower().strip()
