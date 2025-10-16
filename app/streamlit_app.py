@@ -51,6 +51,7 @@ from app_shared import (
     _normalize_resample_agg,
 )
 
+
 # Instantiate shared resources
 data_processor = get_data_processor()
 job_manager = get_job_manager()
