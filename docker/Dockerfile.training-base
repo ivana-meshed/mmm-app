@@ -68,13 +68,17 @@ RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
     install.packages(c('Rcpp','BH','rstan','rstantools','StanHeaders','RcppEigen','png','dygraphs','xts','extraDistr'))"
 
 # ---------- CmdStan (pin 2.35.0; cached build) ----------
+# CmdStan + cmdstanr
 ARG CMDSTAN_VERSION=2.35.0
-ENV MAKEFLAGS="-j8" CMDSTAN=/usr/local/cmdstan PATH="${CMDSTAN}/bin:${PATH}"
-RUN --mount=type=cache,target=/root/.cache/cmdstan \
-    wget -O /tmp/cmdstan.tgz "https://github.com/stan-dev/cmdstan/releases/download/v${CMDSTAN_VERSION}/cmdstan-${CMDSTAN_VERSION}.tar.gz" \
-    && tar -xzf /tmp/cmdstan.tgz -C /usr/local \
+ENV MAKEFLAGS="-j8"
+ENV CMDSTAN=/usr/local/cmdstan
+ENV PATH="${CMDSTAN}/bin:${PATH}"
+
+RUN wget -O /tmp/cmdstan.tar.gz "https://github.com/stan-dev/cmdstan/releases/download/v${CMDSTAN_VERSION}/cmdstan-${CMDSTAN_VERSION}.tar.gz" \
+    && tar -xzf /tmp/cmdstan.tar.gz -C /usr/local \
     && mv "/usr/local/cmdstan-${CMDSTAN_VERSION}" "${CMDSTAN}" \
-    && make -C "${CMDSTAN}" build
+    && make -C "${CMDSTAN}" build \
+    && "${CMDSTAN}/bin/stanc" --version || true
 
 # cmdstanr pin from CI (0.8.0)
 RUN R -q -e "options(Ncpus=8); \
