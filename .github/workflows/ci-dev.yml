@@ -79,8 +79,8 @@ jobs:
           build-args: |
             GIT_SHA=${{ github.sha }}
           tags: |
-            ${{ env.WEB_IMAGE_URL }}
-            ${{ env.WEB_IMAGE_URL_LATEST }}
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:latest
           #cache-from: type=gha,scope=mmm-web-${{ github.ref_name }}
           #cache-to: type=gha,mode=max,scope=mmm-web-${{ github.ref_name }}
           no-cache: true
@@ -93,8 +93,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.TRAINING_IMAGE_URL }}
-            ${{ env.TRAINING_IMAGE_URL_LATEST }}
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:${{ github.sha }}
+            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:latest
           cache-from: type=gha,scope=mmm-training
           cache-to: type=gha,mode=max,scope=mmm-training
 
