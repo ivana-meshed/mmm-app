@@ -814,7 +814,7 @@ tab_conn, tab_single, tab_queue = st.tabs(
     ["1) Snowflake Connection", "2) Single Job Training", "3) Queue Training"]
 )
 
-st.write(
+"""st.write(
     {
         k: os.getenv(k)
         for k in [
@@ -828,7 +828,7 @@ st.write(
             "PROJECT_ID",
         ]
     }
-)
+)"""
 
 _init_sf_once()
 
@@ -1272,7 +1272,6 @@ with tab_single:
                 }
 
         render_jobs_job_history(key_prefix="single")
-        # render_job_status_monitor(key_prefix="single")
 
     # ===================== BATCH QUEUE (CSV) =====================
 
