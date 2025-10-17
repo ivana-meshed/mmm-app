@@ -255,8 +255,8 @@ jobs:
           TF_VAR_service_name: $SERVICE_NAME
           TF_VAR_bucket_name: $BUCKET
           TF_VAR_deployer_sa: $SA_EMAIL
-          TF_VAR_web_image: $WEB_IMAGE_URL
-          TF_VAR_training_image: $TRAINING_IMAGE_URL
+          #TF_VAR_web_image: $WEB_IMAGE_URL
+          #TF_VAR_training_image: $TRAINING_IMAGE_URL
           # scheduler/queue from env (set above)
         run: |
           echo "Deploying images:"
@@ -264,15 +264,8 @@ jobs:
           echo "  Training job: $TRAINING_IMAGE_URL"
 
           terraform plan -input=false \
-            -var "project_id=$PROJECT_ID" \
-            -var "region=$REGION" \
-            -var "service_name=$SERVICE_NAME" \
-            -var "bucket_name=$BUCKET" \
-            -var "deployer_sa=$SA_EMAIL" \
             -var "web_image=$WEB_IMAGE_URL" \
             -var "training_image=$TRAINING_IMAGE_URL" \
-            -var "scheduler_job_name=robyn-queue-tick-dev" \
-            -var "queue_name=default-dev" \
             -var-file="envs/dev.tfvars" \
             -out=tfplan  # No -var flags needed
 
