@@ -16,11 +16,16 @@ from google.auth.transport.requests import Request
 from google.cloud import storage
 
 try:
-    from app_shared import ensure_sf_conn, keepalive_ping
+    from app_shared import (
+        ensure_sf_conn,
+        keepalive_ping,
+        require_login_and_domain,
+    )
 except Exception:
     ensure_sf_conn = None
     keepalive_ping = None
 
+require_login_and_domain()
 
 # ---------- Page ----------
 st.set_page_config(

@@ -67,11 +67,21 @@ variable "max_instances" {
   default     = 10
 }
 
-variable "sf_password" {
-  type      = string
-  sensitive = true
-  default   = null # set via TF var or CI, or skip and add secret version via gcloud in CI
+variable "sf_private_key" {
+  type        = string
+  sensitive   = true
+  description = "RSA private key PEM for Snowflake"
 }
 
-
-
+variable "auth_cookie_secret" {
+  type      = string
+  sensitive = true
+}
+variable "auth_client_id" {
+  type      = string
+  sensitive = true
+}
+variable "auth_client_secret" {
+  type      = string
+  sensitive = true
+}

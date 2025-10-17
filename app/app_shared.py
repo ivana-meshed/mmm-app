@@ -7,17 +7,22 @@ from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 import logging
 import tempfile
+import base64
 
 logger = logging.getLogger(__name__)
 
 import pandas as pd
+import numpy as np
 import streamlit as st
 import snowflake.connector as sf
-from google.cloud import storage, run_v2
+from google.cloud import storage, run_v2, secretmanager
 
 from data_processor import DataProcessor
 from uuid import uuid4
 from google.api_core.exceptions import PreconditionFailed
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.backends import default_backend
 
 # Environment constants
 PROJECT_ID = os.getenv("PROJECT_ID")
@@ -397,20 +402,6 @@ def get_job_manager():
     return CloudRunJobManager(PROJECT_ID, REGION)
 
 
-def _connect_snowflake(
-    user, password, account, warehouse, database, schema, role
-):
-    return sf.connect(
-        user=user,
-        password=password,
-        account=account,
-        warehouse=warehouse,
-        database=database,
-        schema=schema,
-        role=role or None,
-    )
-
-
 class CloudRunJobManager:
     """Manages Cloud Run Job executions."""
 
@@ -547,14 +538,69 @@ def effective_sql(table: str, query: str) -> Optional[str]:
     return None
 
 
+def _gsm_secret_latest_resource(secret_id: str) -> str:
+    # Accept "sf-private-key" or full resource path; always return .../versions/latest
+    if not secret_id:
+        raise RuntimeError("SF_PRIVATE_KEY_SECRET is not set")
+    if secret_id.startswith("projects/"):
+        base = secret_id
+    else:
+        if not PROJECT_ID:
+            raise RuntimeError("PROJECT_ID env is not set")
+        base = f"projects/{PROJECT_ID}/secrets/{secret_id}"
+    return base + "/versions/latest"
+
+
+def _load_private_key_bytes_from_gsm(secret_id: str) -> bytes:
+    """
+    Reads a PEM (or already PKCS#8 DER) private key from GSM and returns PKCS#8 DER bytes,
+    as required by snowflake-connector-python (private_key=...).
+    """
+    client = secretmanager.SecretManagerServiceClient()
+    name = _gsm_secret_latest_resource(secret_id)
+    payload = client.access_secret_version(name=name).payload.data
+
+    # Try PEM first
+    try:
+        pem = payload.decode("utf-8")
+        key = serialization.load_pem_private_key(
+            pem.encode("utf-8"),
+            password=None,  # set if your key is passphrase-protected
+            backend=default_backend(),
+        )
+        return key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    except Exception:
+        # If not PEM, maybe it’s already DER PKCS#8
+        return bytes(payload)
+
+
 def _sf_params_from_env() -> Optional[dict]:
     u = os.getenv("SF_USER")
-    p = os.getenv("SF_PASSWORD")
     a = os.getenv("SF_ACCOUNT")
     w = os.getenv("SF_WAREHOUSE")
     d = os.getenv("SF_DATABASE")
     s = os.getenv("SF_SCHEMA")
     r = os.getenv("SF_ROLE", "")
+    secret_id = os.getenv("SF_PRIVATE_KEY_SECRET")  # e.g. "sf-private-key"
+
+    if all([u, a, w, d, s]) and secret_id:
+        pkb = _load_private_key_bytes_from_gsm(secret_id)
+        return dict(
+            user=u,
+            account=a,
+            warehouse=w,
+            database=d,
+            schema=s,
+            role=r or None,
+            private_key=pkb,  # <- key-pair auth
+        )
+
+    # (Optional) fall back to password if explicitly present
+    p = os.getenv("SF_PASSWORD")
     if all([u, p, a, w, d, s]):
         return dict(
             user=u,
@@ -563,38 +609,93 @@ def _sf_params_from_env() -> Optional[dict]:
             warehouse=w,
             database=d,
             schema=s,
-            role=r,
+            role=r or None,
         )
     return None
 
 
+def _connect_snowflake(
+    user,
+    account,
+    warehouse,
+    database,
+    schema,
+    role,
+    password=None,
+    private_key=None,
+):
+    if private_key is not None:
+        return sf.connect(
+            user=user,
+            account=account,
+            warehouse=warehouse,
+            database=database,
+            schema=schema,
+            role=role or None,
+            private_key=private_key,  # <- crucial
+            client_session_keep_alive=True,
+            session_parameters={"CLIENT_SESSION_KEEP_ALIVE": True},
+        )
+    else:
+        return sf.connect(
+            user=user,
+            password=password,
+            account=account,
+            warehouse=warehouse,
+            database=database,
+            schema=schema,
+            role=role or None,
+            client_session_keep_alive=True,
+            session_parameters={"CLIENT_SESSION_KEEP_ALIVE": True},
+        )
+
+
 def ensure_sf_conn() -> sf.SnowflakeConnection:
-    """
-    Manual-only: return an already established connection or raise.
-    Does NOT auto-connect from env. Use the Connect button to create it.
-    """
     conn = st.session_state.get("sf_conn")
-    if conn is None:
-        raise RuntimeError(
-            "Not connected to Snowflake. Open the 'Snowflake Connection' tab and click Connect."
-        )
-    # Ping; if dead, clear and ask the user to reconnect explicitly
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT 1")
-        cur.fetchall()
-        cur.close()
-        return conn
-    except Exception:
+    params = st.session_state.get("sf_params") or {}
+
+    if conn is not None:
         try:
-            conn.close()
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchall()
+            return conn
         except Exception:
-            pass
-        st.session_state["sf_conn"] = None
-        st.session_state["sf_connected"] = False
-        raise RuntimeError(
-            "Snowflake session expired. Please reconnect from the Connection tab."
+            try:
+                conn.close()
+            except Exception:
+                pass
+            st.session_state["sf_conn"] = None
+
+    # 👇 NEW: prefer key bytes from the current session if available
+    pk_bytes = st.session_state.get("_sf_private_key_bytes")
+    if pk_bytes and params:
+        conn = _connect_snowflake(
+            user=params["user"],
+            account=params["account"],
+            warehouse=params["warehouse"],
+            database=params["database"],
+            schema=params["schema"],
+            role=params.get("role"),
+            private_key=pk_bytes,
         )
+        st.session_state["sf_conn"] = conn
+        st.session_state["sf_connected"] = True
+        return conn
+
+    # fall back to env/Secret Manager (old behavior), if you still keep it
+    envp = _sf_params_from_env()
+    if envp:
+        conn = _connect_snowflake(**envp)
+        st.session_state["sf_conn"] = conn
+        st.session_state["sf_connected"] = True
+        # don't store private bytes in sf_params
+        st.session_state["sf_params"] = {
+            k: v for k, v in envp.items() if k != "private_key"
+        }
+        return conn
+
+    raise RuntimeError("No Snowflake params. Use the UI to connect.")
 
 
 # Pick ONE of these depending on your stack:
@@ -608,34 +709,78 @@ else:
 KEEPALIVE_SECONDS = 10 * 60  # ping every 10 min of inactivity
 
 
-@st.cache_resource(show_spinner=False)
-def get_snowflake_connection(
-    **kwargs,
-):
-    """
-    Returns a single connection object per Streamlit user session.
-    Cached across pages with st.cache_resource.
-    kwargs are part of cache key, so keep them stable.
-    """
-    if USE_CONNECTOR:
-        conn = sf.connect(
-            # --- REQUIRED AUTH/ACCOUNT FIELDS ---
-            # account=..., user=..., password=..., role=..., warehouse=..., database=..., schema=...,
-            # Or use OAuth / SSO as you prefer.
-            client_session_keep_alive=True,  # <-- IMPORTANT
-            session_parameters={
-                "CLIENT_SESSION_KEEP_ALIVE": True,  # belt & suspenders
-            },
-            **kwargs,
+def _fetch_private_key_from_secret(project_id: str, secret_id: str) -> str:
+    """Fetch RSA private key from Secret Manager at runtime."""
+    client = secretmanager.SecretManagerServiceClient()
+    name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
+    try:
+        response = client.access_secret_version(request={"name": name})
+        return response.payload.data.decode("UTF-8")  # PEM string
+    except Exception as e:
+        logger.error(f"Failed to fetch SF private key: {e}")
+        raise ValueError("SF private key fetch failed—check IAM")
+
+
+def _load_private_key(private_key_str: str) -> bytes:
+    """Load private key from PEM string."""
+    if not private_key_str:
+        raise ValueError("Private key not configured")
+    # Decode if base64 (if stored that way; adjust if plain PEM)
+    if "\n" not in private_key_str:
+        private_key_str = base64.b64decode(private_key_str).decode("utf-8")
+    return serialization.load_pem_private_key(
+        private_key_str.encode("utf-8"),
+        password=None,  # No passphrase
+    )
+
+
+# @st.cache_resource(show_spinner=False)
+def get_snowflake_connection(**kwargs):
+    """Prefer key-pair auth via Secret Manager; fall back to password only if explicitly present."""
+    project_id = kwargs.pop("project_id", PROJECT_ID)
+    secret_id = kwargs.pop(
+        "sf_private_key_secret",
+        os.getenv("SF_PRIVATE_KEY_SECRET", "sf-private-key"),
+    )
+
+    # Key-pair path (preferred)
+    if secret_id:
+        try:
+            pk_bytes = _load_private_key_bytes_from_gsm(
+                secret_id
+            )  # DER PKCS#8 bytes
+            st.write("Loaded key bytes:", len(pk_bytes))
+            return _connect_snowflake(
+                user=kwargs["user"],
+                account=kwargs["account"],
+                warehouse=kwargs["warehouse"],
+                database=kwargs["database"],
+                schema=kwargs["schema"],
+                role=kwargs.get("role"),
+                private_key=pk_bytes,
+            )
+        except Exception as e:
+            # Optional: keep this if you want a visible hint in the UI
+            st.warning(
+                f"Key-pair auth failed ({e}). Falling back to password if provided."
+            )
+
+    # Optional password fallback (only if SF_PASSWORD env is defined, otherwise just raise)
+    p = os.getenv("SF_PASSWORD")
+    if p:
+        return _connect_snowflake(
+            user=kwargs["user"],
+            account=kwargs["account"],
+            warehouse=kwargs["warehouse"],
+            database=kwargs["database"],
+            schema=kwargs["schema"],
+            role=kwargs.get("role"),
+            password=p,
         )
-        return conn
-    else:
-        # Snowpark version
-        # cfg = { "account": "...", "user": "...", "password": "...", ... }
-        sess = Session.builder.configs(kwargs).create()
-        # Snowpark inherits the same server-side session lifetime; no explicit client heartbeat,
-        # but using it via queries and our ping keeps it active.
-        return sess
+
+    raise RuntimeError(
+        "Could not establish Snowflake connection (key-pair failed and no password fallback)."
+    )
 
 
 def keepalive_ping(conn):
@@ -1102,6 +1247,37 @@ def _is_bool_like(series: pd.Series) -> bool:
         return set(map(float, u)).issubset({0.0, 1.0})
     except Exception:
         return False
+
+
+def require_login_and_domain(allowed_domain: str = "mesheddata.com") -> None:
+    """
+    Hard-stops the current Streamlit run unless the user is logged in
+    with a Google account from the allowed domain.
+    Call this at the very top of *every* page.
+    """
+    # Allow lightweight health checks to pass through if you use them on pages too
+    q = getattr(st, "query_params", {})
+    if q.get("health") == "true":
+        return  # let the page handle its health endpoint and st.stop() later if needed
+
+    is_logged_in = getattr(st.user, "is_logged_in", False)
+    if not is_logged_in:
+        st.set_page_config(page_title="Sign in", layout="centered")
+        st.title("Robyn MMM")
+        st.write(
+            f"Sign in with your {allowed_domain} Google account to continue."
+        )
+        if st.button("Sign in with Google"):
+            st.login()  # flat [auth] config → no provider arg
+        st.stop()
+
+    email = (getattr(st.user, "email", "") or "").lower().strip()
+    if not email.endswith(f"@{allowed_domain}"):
+        st.set_page_config(page_title="Access restricted", layout="centered")
+        st.error(f"This app is restricted to @{allowed_domain} accounts.")
+        if st.button("Sign out"):
+            st.logout()
+        st.stop()
 
 
 def _maybe_resample_df(

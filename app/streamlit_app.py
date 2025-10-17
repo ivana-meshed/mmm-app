@@ -11,6 +11,9 @@ import pandas as pd
 import snowflake.connector as sf
 import streamlit as st
 from google.cloud import storage
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.backends import default_backend
+
 
 from app_shared import (
     # Env / constants (already read from env in app_shared)
@@ -41,10 +44,12 @@ from app_shared import (
     get_job_manager,
     get_data_processor,
     _fmt_secs,
-    _connect_snowflake,  # use shared connector for consistency with ensure_sf_conn
+    _connect_snowflake,
+    get_snowflake_connection,  # use shared connector for consistency with ensure_sf_conn
     read_job_history_from_gcs,
     save_job_history_to_gcs,
     append_row_to_job_history,
+    require_login_and_domain,
     _safe_tick_once,  # (kept for parity; not used below
     _maybe_resample_df,
     _normalize_resample_freq,
@@ -64,6 +69,10 @@ TERMINAL_STATES = {"SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"}
 st.set_page_config(page_title="Robyn MMM Trainer", layout="wide")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# Call it once, near the top of your app before any other UI
+require_login_and_domain()
 
 query_params = st.query_params
 logger.info(
@@ -820,11 +829,21 @@ with tab_conn:
                 value=(st.session_state.sf_params or {}).get("warehouse", "")
                 or os.getenv("SF_WAREHOUSE"),
             )
-            sf_db = st.text_input(
-                "Database",
-                value=(st.session_state.sf_params or {}).get("database", "")
-                or os.getenv("SF_DATABASE"),
+
+            st.markdown(
+                "**Private key (PEM)** — paste or upload one of the two below:"
             )
+            sf_pk_pem = st.text_area(
+                "Paste PEM key",
+                value="",
+                placeholder="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----",
+                help="This stays only in your browser session. Not stored on server.",
+                height=120,
+            )
+            sf_pk_file = st.file_uploader(
+                "…or upload a .pem file", type=["pem", "key", "p8"]
+            )
+
         with c2:
             sf_schema = st.text_input(
                 "Schema",
@@ -836,40 +855,81 @@ with tab_conn:
                 value=(st.session_state.sf_params or {}).get("role", "")
                 or os.getenv("SF_ROLE"),
             )
-            sf_password = st.text_input("Password", type="password")
+            sf_db = st.text_input(
+                "Database",
+                value=(st.session_state.sf_params or {}).get("database", "")
+                or os.getenv("SF_DATABASE"),
+            )
+
+            # ✅ NEW: default MMM_RAW; allow fully-qualified or relative to DB/SCHEMA above
+            preview_table = st.text_input(
+                "Preview table after connect",
+                value=st.session_state.get("sf_preview_table", "MMM_RAW"),
+                help="Use DB.SCHEMA.TABLE or a table in the selected Database/Schema.",
+            )
 
         submitted = st.form_submit_button("🔌 Connect")
-        # inside the Tab 1 form submit block (you already have this; just ensure params are saved)
-        if submitted:
-            try:
-                conn = _connect_snowflake(
-                    user=sf_user,
-                    password=sf_password,
-                    account=sf_account,
-                    warehouse=sf_wh,
-                    database=sf_db,
-                    schema=sf_schema,
-                    role=sf_role,
-                )
-                # Save for the session so all pages reuse it
-                st.session_state["sf_params"] = dict(
-                    user=sf_user,
-                    account=sf_account,
-                    warehouse=sf_wh,
-                    database=sf_db,
-                    schema=sf_schema,
-                    role=sf_role,
-                    password=sf_password
-                    or None,  # include if you rely on password auth
-                )
-                st.session_state["sf_conn"] = conn
-                st.session_state["sf_connected"] = True
-                st.success(
-                    f"Connected to Snowflake as `{sf_user}` on `{sf_account}`."
-                )
-            except Exception as e:
-                st.session_state["sf_connected"] = False
-                st.error(f"Connection failed: {e}")
+
+    if submitted:
+        try:
+            # choose source: uploaded file wins if provided
+            if sf_pk_file is not None:
+                pem = sf_pk_file.read().decode("utf-8", errors="replace")
+            else:
+                pem = (sf_pk_pem or "").strip()
+            if not pem:
+                raise ValueError("Provide a Snowflake private key (PEM).")
+
+            # Convert PEM -> PKCS#8 DER bytes (what the Snowflake connector needs)
+            key = serialization.load_pem_private_key(
+                pem.encode("utf-8"), password=None, backend=default_backend()
+            )
+            pk_der = key.private_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+
+            # Build connection using the provided key (no Secret Manager)
+            conn = _connect_snowflake(
+                user=sf_user,
+                account=sf_account,
+                warehouse=sf_wh,
+                database=sf_db,
+                schema=sf_schema,
+                role=sf_role,
+                private_key=pk_der,
+            )
+
+            # Store non-sensitive params and keep key bytes only in-session
+            st.session_state["sf_params"] = dict(
+                user=sf_user,
+                account=sf_account,
+                warehouse=sf_wh,
+                database=sf_db,
+                schema=sf_schema,
+                role=sf_role,
+            )
+            st.session_state["_sf_private_key_bytes"] = pk_der  # <— in memory
+            st.session_state["sf_conn"] = conn
+            st.session_state["sf_connected"] = True
+            st.success(
+                f"Connected to Snowflake as `{sf_user}` on `{sf_account}`."
+            )
+            st.session_state["sf_preview_table"] = preview_table
+            if preview_table.strip():
+                try:
+                    df_prev = run_sql(f"SELECT * FROM {preview_table} LIMIT 20")
+                    st.caption(f"Preview: first 20 rows of `{preview_table}`")
+                    st.dataframe(df_prev, width="stretch", hide_index=True)
+                except Exception as e:
+                    st.warning(
+                        f"Could not preview table `{preview_table}`: {e}"
+                    )
+
+        except Exception as e:
+            st.session_state["sf_connected"] = False
+            st.error(f"Connection failed: {e}")
 
     if st.session_state.sf_connected:
         with st.container(border=True):
@@ -896,22 +956,12 @@ with tab_conn:
                     conn = st.session_state.get("sf_conn")
                     if conn:
                         conn.close()
+                finally:
                     st.session_state["sf_conn"] = None
                     st.session_state["sf_connected"] = False
+                    st.session_state.pop("_sf_private_key_bytes", None)  # <—
                     st.success("Disconnected.")
-                except Exception as e:
-                    st.error(f"Disconnect error: {e}")
-        with st.expander("🧪 Query Runner (optional)"):
-            adhoc_sql = st.text_area(
-                "Enter SQL to preview (SELECT only)",
-                value="SELECT CURRENT_TIMESTAMP;",
-            )
-            if st.button("Run query", key="run_adhoc"):
-                try:
-                    df_prev = run_sql(adhoc_sql)
-                    st.dataframe(df_prev, width="stretch")
-                except Exception as e:
-                    st.error(f"Query failed: {e}")
+
     else:
         st.info("Not connected. Fill the form above and click **Connect**.")
 
@@ -1194,7 +1244,6 @@ with tab_single:
                 }
 
         render_jobs_job_history(key_prefix="single")
-        # render_job_status_monitor(key_prefix="single")
 
     # ===================== BATCH QUEUE (CSV) =====================
 
@@ -1999,38 +2048,3 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             st.write(
                 "**Note**: Training runs asynchronously in Cloud Run Jobs."
             )
-
-
-# ─────────────────────────────
-# Sidebar: system info + auto-refresh
-# ─────────────────────────────
-with st.sidebar:
-    st.subheader("🔧 System Info")
-    st.write(f"**Project ID**: {PROJECT_ID}")
-    st.write(f"**Region**: {REGION}")
-    st.write(f"**Training Job**: {TRAINING_JOB_NAME}")
-    st.write(f"**GCS Bucket**: {GCS_BUCKET}")
-    try:
-        import psutil
-
-        memory = psutil.virtual_memory()
-        st.write(f"**Available Memory**: {memory.available / 1024**3:.1f} GB")
-        st.write(f"**Memory Usage**: {memory.percent:.1f}%")
-    except ImportError:
-        st.write("**Memory Info**: psutil not available")
-
-    if st.session_state["job_executions"]:
-        st.subheader("📋 Recent Jobs")
-        for i, exec_info in enumerate(st.session_state.job_executions[-3:]):
-            status = exec_info.get("status", "UNKNOWN")
-            ts = exec_info.get("timestamp", "")
-            st.write(f"**Job {i+1}**: {status}")
-            st.write(f"*{ts}*")
-
-    # Manual auto-refresh toggle (simple rerun)
-    if st.toggle(
-        "Auto-refresh status",
-        value=st.session_state["auto_refresh"],
-        key="auto_refresh",
-    ):
-        st.rerun()

@@ -25,11 +25,35 @@ resource "google_service_account" "scheduler" {
   display_name = "Robyn Queue Scheduler"
 }
 
-data "google_secret_manager_secret" "sf_password" {
-  project   = var.project_id
-  secret_id = "sf-password"
+
+# Snowflake private key secret
+resource "google_secret_manager_secret" "sf_private_key" {
+  secret_id = "sf-private-key"
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region # europe-west1
+      }
+    }
+  }
+
+  depends_on = [google_project_service.secretmanager]
 }
 
+resource "google_secret_manager_secret_version" "sf_private_key_version" {
+  secret      = google_secret_manager_secret.sf_private_key.id
+  secret_data = var.sf_private_key # From tfvars/CI
+  enabled     = true
+  depends_on  = [google_project_service.secretmanager]
+}
+
+# Grant web SA access
+resource "google_secret_manager_secret_iam_member" "sf_private_key_access" {
+  secret_id = google_secret_manager_secret.sf_private_key.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
 
 # Allow web service to execute training jobs
 #resource "google_service_account_iam_member" "web_service_job_executor" {
@@ -127,13 +151,6 @@ resource "google_cloud_run_service_iam_member" "scheduler_can_invoke_web" {
   member   = "serviceAccount:${google_service_account.scheduler.email}"
 }
 
-
-resource "google_secret_manager_secret_iam_member" "sf_password_access" {
-  secret_id = data.google_secret_manager_secret.sf_password.id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.web_service_sa.email}"
-}
-
 # Let the Terraform deployer impersonate (act as) the Scheduler SA
 resource "google_service_account_iam_member" "allow_deployer_actas_scheduler" {
   service_account_id = google_service_account.scheduler.name
@@ -187,6 +204,56 @@ resource "google_project_service" "secretmanager" {
   disable_on_destroy = false
 }
 
+resource "google_secret_manager_secret" "auth_client_id" {
+  secret_id = "streamlit-auth-client-id"
+  replication {
+    user_managed {
+      replicas {
+        location = var.region # europe-west1
+      }
+    }
+  }
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_version" "auth_client_id_v" {
+  secret      = google_secret_manager_secret.auth_client_id.id
+  secret_data = var.auth_client_id
+}
+
+resource "google_secret_manager_secret" "auth_client_secret" {
+  secret_id = "streamlit-auth-client-secret"
+  replication {
+    user_managed {
+      replicas {
+        location = var.region # europe-west1
+      }
+    }
+  }
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_version" "auth_client_secret_v" {
+  secret      = google_secret_manager_secret.auth_client_secret.id
+  secret_data = var.auth_client_secret
+}
+
+resource "google_secret_manager_secret" "auth_cookie_secret" {
+  secret_id = "streamlit-auth-cookie-secret"
+  replication {
+    user_managed {
+      replicas {
+        location = var.region # europe-west1
+      }
+    }
+  }
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_version" "auth_cookie_secret_v" {
+  secret      = google_secret_manager_secret.auth_cookie_secret.id
+  secret_data = var.auth_cookie_secret
+}
 
 ##############################################################
 # Cloud Run Service (Streamlit Web Interface)
@@ -202,6 +269,7 @@ resource "google_cloud_run_service" "web_service" {
         "run.googleapis.com/min-instances"  = var.min_instances
         "run.googleapis.com/max-instances"  = var.max_instances
         "run.googleapis.com/timeout"        = "300s"
+        #"deploy.kubernetes.io/revision-sha" = substr(var.web_image, length(var.web_image) - 40, 40)
       }
     }
 
@@ -291,14 +359,30 @@ resource "google_cloud_run_service" "web_service" {
           value = var.sf_role
         }
         env {
-          name = "SF_PASSWORD"
-          value_from {
-            secret_key_ref {
-              name = data.google_secret_manager_secret.sf_password.secret_id
-              key  = "latest"
-            }
-          }
+          name  = "SF_PRIVATE_KEY_SECRET"
+          value = google_secret_manager_secret.sf_private_key.secret_id
         }
+        # Example for google_cloud_run_service or v2 resource; adapt to your existing block.
+        # Add these env vars (or "secret env vars") so the container can read them
+        env {
+          name  = "AUTH_CLIENT_ID"
+          value = "projects/${var.project_id}/secrets/streamlit-auth-client-id/versions/latest"
+        }
+        env {
+          name  = "AUTH_CLIENT_SECRET"
+          value = "projects/${var.project_id}/secrets/streamlit-auth-client-secret/versions/latest"
+        }
+        env {
+          name  = "AUTH_COOKIE_SECRET"
+          value = "projects/${var.project_id}/secrets/streamlit-auth-cookie-secret/versions/latest"
+        }
+        # The redirect URI must include your actual URL and /oauth2callback
+        # If you already know your domain, set it now; otherwise do a 2-pass apply (see note below).
+        env {
+          name  = "AUTH_REDIRECT_URI"
+          value = "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
+        }
+
       }
     }
   }
@@ -312,6 +396,22 @@ resource "google_cloud_run_service" "web_service" {
     google_project_service.run,
     google_project_service.ar,
   ]
+}
+
+resource "google_secret_manager_secret_iam_member" "web_sa_can_read_auth_id" {
+  secret_id = google_secret_manager_secret.auth_client_id.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
+resource "google_secret_manager_secret_iam_member" "web_sa_can_read_auth_secret" {
+  secret_id = google_secret_manager_secret.auth_client_secret.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
+resource "google_secret_manager_secret_iam_member" "web_sa_can_read_cookie_secret" {
+  secret_id = google_secret_manager_secret.auth_cookie_secret.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.web_service_sa.email}"
 }
 
 ##############################################################
