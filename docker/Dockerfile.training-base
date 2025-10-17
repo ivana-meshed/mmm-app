@@ -33,6 +33,7 @@ ARG RSPM="https://packagemanager.posit.co/cran/__linux__/bookworm/latest"
 ENV RSPM=${RSPM}
 RUN R -q -e "options(repos=c(CRAN=Sys.getenv('RSPM'))); install.packages('remotes')"
 
+
 # ---------- R core packages pinned EXACTLY as per CI log ----------
 # We use remotes::install_version to pin; PPM used as CRAN mirror.
 RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
