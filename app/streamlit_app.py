@@ -848,22 +848,6 @@ with tab_conn:
                 value=(st.session_state.sf_params or {}).get("warehouse", "")
                 or os.getenv("SF_WAREHOUSE"),
             )
-            sf_db = st.text_input(
-                "Database",
-                value=(st.session_state.sf_params or {}).get("database", "")
-                or os.getenv("SF_DATABASE"),
-            )
-        with c2:
-            sf_schema = st.text_input(
-                "Schema",
-                value=(st.session_state.sf_params or {}).get("schema", "")
-                or os.getenv("SF_SCHEMA"),
-            )
-            sf_role = st.text_input(
-                "Role",
-                value=(st.session_state.sf_params or {}).get("role", "")
-                or os.getenv("SF_ROLE"),
-            )
 
             st.markdown(
                 "**Private key (PEM)** — paste or upload one of the two below:"
@@ -877,6 +861,30 @@ with tab_conn:
             )
             sf_pk_file = st.file_uploader(
                 "…or upload a .pem file", type=["pem", "key", "p8"]
+            )
+
+        with c2:
+            sf_schema = st.text_input(
+                "Schema",
+                value=(st.session_state.sf_params or {}).get("schema", "")
+                or os.getenv("SF_SCHEMA"),
+            )
+            sf_role = st.text_input(
+                "Role",
+                value=(st.session_state.sf_params or {}).get("role", "")
+                or os.getenv("SF_ROLE"),
+            )
+            sf_db = st.text_input(
+                "Database",
+                value=(st.session_state.sf_params or {}).get("database", "")
+                or os.getenv("SF_DATABASE"),
+            )
+
+            # ✅ NEW: default MMM_RAW; allow fully-qualified or relative to DB/SCHEMA above
+            preview_table = st.text_input(
+                "Preview table after connect",
+                value=st.session_state.get("sf_preview_table", "MMM_RAW"),
+                help="Use DB.SCHEMA.TABLE or a table in the selected Database/Schema.",
             )
 
         submitted = st.form_submit_button("🔌 Connect")
@@ -927,6 +935,16 @@ with tab_conn:
             st.success(
                 f"Connected to Snowflake as `{sf_user}` on `{sf_account}`."
             )
+            st.session_state["sf_preview_table"] = preview_table
+            if preview_table.strip():
+                try:
+                    df_prev = run_sql(f"SELECT * FROM {preview_table} LIMIT 20")
+                    st.caption(f"Preview: first 20 rows of `{preview_table}`")
+                    st.dataframe(df_prev, width="stretch", hide_index=True)
+                except Exception as e:
+                    st.warning(
+                        f"Could not preview table `{preview_table}`: {e}"
+                    )
 
         except Exception as e:
             st.session_state["sf_connected"] = False
@@ -963,17 +981,6 @@ with tab_conn:
                     st.session_state.pop("_sf_private_key_bytes", None)  # <—
                     st.success("Disconnected.")
 
-        with st.expander("🧪 Query Runner (optional)"):
-            adhoc_sql = st.text_area(
-                "Enter SQL to preview (SELECT only)",
-                value="SELECT CURRENT_TIMESTAMP;",
-            )
-            if st.button("Run query", key="run_adhoc"):
-                try:
-                    df_prev = run_sql(adhoc_sql)
-                    st.dataframe(df_prev, width="stretch")
-                except Exception as e:
-                    st.error(f"Query failed: {e}")
     else:
         st.info("Not connected. Fill the form above and click **Connect**.")
 
