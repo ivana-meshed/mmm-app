@@ -70,6 +70,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build & Push web service image
+        id: build_web
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -79,13 +80,13 @@ jobs:
           build-args: |
             GIT_SHA=${{ github.sha }}
           tags: |
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:latest
-          #cache-from: type=gha,scope=mmm-web-${{ github.ref_name }}
-          #cache-to: type=gha,mode=max,scope=mmm-web-${{ github.ref_name }}
-          no-cache: true
+            ${{ env.WEB_IMAGE_URL }}
+            ${{ env.WEB_IMAGE_URL_LATEST }}
+          cache-from: type=gha,scope=mmm-web-${{ github.ref_name }}
+          cache-to: type=gha,mode=max,scope=mmm-web-${{ github.ref_name }}
 
       - name: Build & Push training job image
+        id: build_training
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -93,10 +94,20 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:${{ github.sha }}
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:latest
+            ${{ env.TRAINING_IMAGE_URL }}
+            ${{ env.TRAINING_IMAGE_URL_LATEST }}
           cache-from: type=gha,scope=mmm-training
           cache-to: type=gha,mode=max,scope=mmm-training
+
+      - name: Compute digest-pinned image refs
+        shell: bash
+        run: |
+          # docker/build-push-action exposes the built manifest digest as outputs.digest (e.g. "sha256:abcd...")
+          echo "WEB_IMAGE_DIGEST=${{ steps.build_web.outputs.digest }}" >> "$GITHUB_ENV"
+          echo "TRAINING_IMAGE_DIGEST=${{ steps.build_training.outputs.digest }}" >> "$GITHUB_ENV"
+
+          echo "WEB_IMAGE_REF=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}@${{ steps.build_web.outputs.digest }}" >> "$GITHUB_ENV"
+          echo "TRAINING_IMAGE_REF=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}@${{ steps.build_training.outputs.digest }}" >> "$GITHUB_ENV"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -247,35 +258,33 @@ jobs:
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
-          WEB_IMAGE_URL: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
-          TRAINING_IMAGE_URL: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:${{ github.sha }}
-          # Remove -var flags; use TF_VAR_* env vars only (set above)
           TF_VAR_project_id: $PROJECT_ID
           TF_VAR_region: $REGION
           TF_VAR_service_name: $SERVICE_NAME
           TF_VAR_bucket_name: $BUCKET
           TF_VAR_deployer_sa: $SA_EMAIL
-          #TF_VAR_web_image: $WEB_IMAGE_URL
-          #TF_VAR_training_image: $TRAINING_IMAGE_URL
-          # scheduler/queue from env (set above)
+          # 👇 use digest-pinned refs here
+          TF_VAR_web_image: ${{ env.WEB_IMAGE_REF }}
+          TF_VAR_training_image: ${{ env.TRAINING_IMAGE_REF }}
         run: |
-          echo "Deploying images:"
-          echo "  Web service: $WEB_IMAGE_URL"
-          echo "  Training job: $TRAINING_IMAGE_URL"
+          echo "Deploying images (digest pinned):"
+          echo "  Web service: $WEB_IMAGE_REF"
+          echo "  Training job: $TRAINING_IMAGE_REF"
 
-          terraform plan -input=false \
-            -var "web_image=$WEB_IMAGE_URL" \
-            -var "training_image=$TRAINING_IMAGE_URL" \
-            -var-file="envs/dev.tfvars" \
-            -out=tfplan  # No -var flags needed
+          terraform plan -input=false -var-file="envs/dev.tfvars" -out=tfplan
 
       - name: Terraform apply
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
-          # Same TF_VAR_* as plan
+          TF_VAR_project_id: $PROJECT_ID
+          TF_VAR_region: $REGION
+          TF_VAR_service_name: $SERVICE_NAME
+          TF_VAR_bucket_name: $BUCKET
+          TF_VAR_deployer_sa: $SA_EMAIL
+          TF_VAR_web_image: ${{ env.WEB_IMAGE_REF }}
+          TF_VAR_training_image: ${{ env.TRAINING_IMAGE_REF }}
         run: terraform apply -input=false -auto-approve tfplan
-
       - name: Print deployment info
         working-directory: infra/terraform
         run: |
