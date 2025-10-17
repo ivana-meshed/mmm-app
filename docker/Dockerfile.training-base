@@ -46,12 +46,18 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install -r /tmp/requirements-training.txt --upgrade-strategy only-if-needed
 
 # ---------- R: Posit PPM ----------
+# --- R: Posit PPM with CRAN fallback for reliability ---
 ARG RSPM="https://packagemanager.posit.co/cran/__linux__/ubuntu/jammy/latest"
 ENV RSPM=${RSPM}
-RUN R -q -e "options(repos=c(CRAN=Sys.getenv('RSPM'))); install.packages('remotes')"
+
+# Try PPM first; if unreachable, fall back to CRAN
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(repos=repos); \
+    if (!requireNamespace('remotes', quietly=TRUE)) install.packages('remotes')"
 
 # ---------- PINNED core set (your original pins) ----------
-RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(Ncpus=8); \
     pinned <- c( \
     jsonlite='2.0.0', dplyr='1.1.4', tidyr='1.3.1', lubridate='1.9.3', \
     readr='2.1.5', stringr='1.5.1', reticulate='1.40.0', data.table='1.15.4', \
@@ -66,7 +72,7 @@ RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
     LaplacesDemon='16.1.6', VGAM='1.1-13', evd='2.3-7.1', skellam='0.2.4', \
     googleAnalyticsR='1.2.0', miniUI='0.1.2', shiny='1.11.1', bit64='4.6.0-1', glue='1.8.0' \
     ); \
-    for (pkg in names(pinned)) remotes::install_version(pkg, version=pinned[[pkg]], upgrade='never', repos=c(CRAN=Sys.getenv('RSPM')))"
+    for (pkg in names(pinned)) remotes::install_version(pkg, version=pinned[[pkg]], upgrade='never', repos=repos)"
 
 # Quick check ICU and stringi alignment (optional)
 RUN ldconfig -p | grep -E 'libicu(i18n|uc)\.so\.70' || true
@@ -74,26 +80,30 @@ RUN R -q -e "packageVersion('stringi'); sessionInfo()$otherPkgs$stringi"
 
 # ---------- ggplot2 pin ----------
 ARG GGPLOT2_VER=3.5.2
-RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
-    if (!requireNamespace('ggplot2', quietly=TRUE) || packageVersion('ggplot2') != '${GGPLOT2_VER}') \
-    remotes::install_version('ggplot2', version='${GGPLOT2_VER}', upgrade='never', repos=c(CRAN=Sys.getenv('RSPM')))"
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(Ncpus=8); \
+    if (!requireNamespace('ggplot2', quietly=TRUE) || packageVersion('${GGPLOT2_VER}') != '${GGPLOT2_VER}') \
+    remotes::install_version('ggplot2', version='3.5.2', upgrade='never', repos=repos)"
 
 # ---------- Stan stack (compiled) ----------
-RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
-    install.packages(c('Rcpp','BH','rstan','rstantools','StanHeaders','RcppEigen','png','dygraphs','xts','extraDistr'))"
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(Ncpus=8); \
+    install.packages(c('Rcpp','BH','rstan','rstantools','StanHeaders','RcppEigen','png','dygraphs','xts','extraDistr'), repos=repos)"
 
 # ---------- Tidy deps often pulled by ggplot2 (install unpinned, no deps) ----------
 # (We avoid reinstalling/overriding pinned glue/withr.)
-RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
-    install.packages(c('rlang','scales','tibble','cli','lifecycle','vctrs'), dependencies=FALSE)"
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(Ncpus=8); \
+    install.packages(c('rlang','scales','tibble','cli','lifecycle','vctrs'), dependencies=FALSE, repos=repos)"
 
 # ---------- Add remaining “missing” packages from the second list ----------
 # Installed WITHOUT dependencies so they don't override the pinned set above.
-RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(Ncpus=8); \
     install.packages(c( \
     'googleAuthR', 'googleCloudStorageR', 'mime', 'foreach', 'doParallel', \
     'dtplyr', 'furrr', 'RcppParallel' , 'prophet'\
-    ), dependencies=FALSE)"
+    ), dependencies=FALSE, repos=repos)"
 
 # ---------- nloptr (needs source) ----------
 RUN R -q -e "options(Ncpus=8); install.packages('nloptr', repos=Sys.getenv('RSPM'), type='source')"
