@@ -654,22 +654,6 @@ def ensure_sf_conn() -> sf.SnowflakeConnection:
     conn = st.session_state.get("sf_conn")
     params = st.session_state.get("sf_params") or {}
 
-    if not params:
-        envp = _sf_params_from_env()
-        if envp:
-            params = envp
-            # store redacted copy for UI/state (don’t keep private bytes in state)
-            redacted = {
-                k: ("<pk-bytes>" if k == "private_key" else v)
-                for k, v in envp.items()
-                if k not in ("password",)
-            }
-            st.session_state["sf_params"] = redacted
-        else:
-            raise RuntimeError(
-                "No Snowflake params. Use UI once or set SF_* env vars."
-            )
-
     if conn is not None:
         try:
             with conn.cursor() as cur:
@@ -683,8 +667,9 @@ def ensure_sf_conn() -> sf.SnowflakeConnection:
                 pass
             st.session_state["sf_conn"] = None
 
-    # Build a new connection
-    if "private_key" in params:
+    # 👇 NEW: prefer key bytes from the current session if available
+    pk_bytes = st.session_state.get("_sf_private_key_bytes")
+    if pk_bytes and params:
         conn = _connect_snowflake(
             user=params["user"],
             account=params["account"],
@@ -692,24 +677,25 @@ def ensure_sf_conn() -> sf.SnowflakeConnection:
             database=params["database"],
             schema=params["schema"],
             role=params.get("role"),
-            private_key=_load_private_key_bytes_from_gsm(
-                os.getenv("SF_PRIVATE_KEY_SECRET")
-            ),
+            private_key=pk_bytes,
         )
-    else:
-        conn = _connect_snowflake(
-            user=params["user"],
-            account=params["account"],
-            warehouse=params["warehouse"],
-            database=params["database"],
-            schema=params["schema"],
-            role=params.get("role"),
-            password=os.getenv("SF_PASSWORD"),
-        )
+        st.session_state["sf_conn"] = conn
+        st.session_state["sf_connected"] = True
+        return conn
 
-    st.session_state["sf_conn"] = conn
-    st.session_state["sf_connected"] = True
-    return conn
+    # fall back to env/Secret Manager (old behavior), if you still keep it
+    envp = _sf_params_from_env()
+    if envp:
+        conn = _connect_snowflake(**envp)
+        st.session_state["sf_conn"] = conn
+        st.session_state["sf_connected"] = True
+        # don't store private bytes in sf_params
+        st.session_state["sf_params"] = {
+            k: v for k, v in envp.items() if k != "private_key"
+        }
+        return conn
+
+    raise RuntimeError("No Snowflake params. Use the UI to connect.")
 
 
 # Pick ONE of these depending on your stack:

@@ -11,6 +11,9 @@ import pandas as pd
 import snowflake.connector as sf
 import streamlit as st
 from google.cloud import storage
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.backends import default_backend
+
 
 from app_shared import (
     # Env / constants (already read from env in app_shared)
@@ -878,36 +881,72 @@ with tab_conn:
                 or os.getenv("SF_ROLE"),
             )
 
-        submitted = st.form_submit_button("🔌 Connect")
+            st.markdown(
+                "**Private key (PEM)** — paste or upload one of the two below:"
+            )
+            sf_pk_pem = st.text_area(
+                "Paste PEM key",
+                value="",
+                placeholder="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----",
+                help="This stays only in your browser session. Not stored on server.",
+                height=120,
+            )
+            sf_pk_file = st.file_uploader(
+                "…or upload a .pem file", type=["pem", "key"]
+            )
 
-        # inside the Tab 1 form submit block (you already have this; just ensure params are saved)
-        if submitted:
-            try:
-                conn = get_snowflake_connection(
-                    user=sf_user,
-                    account=sf_account,
-                    warehouse=sf_wh,
-                    database=sf_db,
-                    schema=sf_schema,
-                    role=sf_role,
-                    project_id=PROJECT_ID,
-                )
-                st.session_state["sf_params"] = dict(
-                    user=sf_user,
-                    account=sf_account,
-                    warehouse=sf_wh,
-                    database=sf_db,
-                    schema=sf_schema,
-                    role=sf_role,
-                )
-                st.session_state["sf_conn"] = conn
-                st.session_state["sf_connected"] = True
-                st.success(
-                    f"Connected to Snowflake as `{sf_user}` on `{sf_account}`."
-                )
-            except Exception as e:
-                st.session_state["sf_connected"] = False
-                st.error(f"Connection failed: {e}")
+    submitted = st.form_submit_button("🔌 Connect")
+
+    if submitted:
+        try:
+            # choose source: uploaded file wins if provided
+            if sf_pk_file is not None:
+                pem = sf_pk_file.read().decode("utf-8", errors="replace")
+            else:
+                pem = (sf_pk_pem or "").strip()
+            if not pem:
+                raise ValueError("Provide a Snowflake private key (PEM).")
+
+            # Convert PEM -> PKCS#8 DER bytes (what the Snowflake connector needs)
+            key = serialization.load_pem_private_key(
+                pem.encode("utf-8"), password=None, backend=default_backend()
+            )
+            pk_der = key.private_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+
+            # Build connection using the provided key (no Secret Manager)
+            conn = _connect_snowflake(
+                user=sf_user,
+                account=sf_account,
+                warehouse=sf_wh,
+                database=sf_db,
+                schema=sf_schema,
+                role=sf_role,
+                private_key=pk_der,
+            )
+
+            # Store non-sensitive params and keep key bytes only in-session
+            st.session_state["sf_params"] = dict(
+                user=sf_user,
+                account=sf_account,
+                warehouse=sf_wh,
+                database=sf_db,
+                schema=sf_schema,
+                role=sf_role,
+            )
+            st.session_state["_sf_private_key_bytes"] = pk_der  # <— in memory
+            st.session_state["sf_conn"] = conn
+            st.session_state["sf_connected"] = True
+            st.success(
+                f"Connected to Snowflake as `{sf_user}` on `{sf_account}`."
+            )
+
+        except Exception as e:
+            st.session_state["sf_connected"] = False
+            st.error(f"Connection failed: {e}")
 
     if st.session_state.sf_connected:
         with st.container(border=True):
@@ -934,11 +973,12 @@ with tab_conn:
                     conn = st.session_state.get("sf_conn")
                     if conn:
                         conn.close()
+                finally:
                     st.session_state["sf_conn"] = None
                     st.session_state["sf_connected"] = False
+                    st.session_state.pop("_sf_private_key_bytes", None)  # <—
                     st.success("Disconnected.")
-                except Exception as e:
-                    st.error(f"Disconnect error: {e}")
+
         with st.expander("🧪 Query Runner (optional)"):
             adhoc_sql = st.text_area(
                 "Enter SQL to preview (SELECT only)",
