@@ -81,9 +81,9 @@ jobs:
           tags: |
             ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
             ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:latest
-          #cache-from: type=gha,scope=mmm-web-${{ github.ref_name }}
-          #cache-to: type=gha,mode=max,scope=mmm-web-${{ github.ref_name }}
-          no-cache: true
+          cache-from: type=gha,scope=mmm-web-${{ github.ref_name }}
+          cache-to: type=gha,mode=max,scope=mmm-web-${{ github.ref_name }}
+          #no-cache: true
 
       - name: Build & Push training job image
         uses: docker/build-push-action@v6
