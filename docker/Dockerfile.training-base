@@ -1,0 +1,75 @@
+FROM rocker/r-ver:4.3.1
+ARG DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
+
+# BuildKit cache for apt
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-venv python3-dev \
+    libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev libicu-dev \
+    libfontconfig1-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev \
+    libpng-dev libtiff5-dev libjpeg-dev \
+    libcairo2 libcairo2-dev libxt6 ghostscript \
+    fonts-dejavu-core fontconfig fonts-liberation fonts-liberation2 \
+    cmake gfortran pkg-config libnlopt-dev libblas-dev liblapack-dev \
+    libopenblas-dev libomp-dev ccache \
+    build-essential g++ make unzip ca-certificates git curl wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Speed up compiles
+ENV CCACHE_DIR=/root/.cache/ccache \
+    PATH="/usr/lib/ccache:$PATH"
+RUN --mount=type=cache,target=/root/.cache/ccache true
+
+# Python deps via requirements to preserve cache
+COPY docker/requirements-training.txt /tmp/requirements-training.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --no-cache-dir -r /tmp/requirements-training.txt
+
+# Use Posit PPM for precompiled R binaries (fast!)
+ARG RSPM="https://packagemanager.posit.co/cran/__linux__/bookworm/latest"
+ENV RSPM=${RSPM}
+RUN R -q -e "options(repos=c(CRAN=Sys.getenv('RSPM'))); install.packages(c('remotes'))"
+
+# Core R packages (prefer binaries)
+RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
+    install.packages(c('jsonlite','dplyr','tidyr','lubridate','readr','stringr','arrow','reticulate', \
+    'data.table','future','future.apply','foreach','doParallel','RcppParallel', \
+    'gridExtra','systemfonts','globals','listenv','parallelly','iterators'))"
+
+# ggplot2 pin (binary if available; else source)
+ARG GGPLOT2_VER=3.5.2
+RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
+    if (!requireNamespace('ggplot2', quietly=TRUE) || packageVersion('ggplot2') != '${GGPLOT2_VER}') \
+    remotes::install_version('ggplot2', version='${GGPLOT2_VER}', upgrade='never', repos=c(CRAN=Sys.getenv('RSPM')))"
+
+# Stan stack (binary if possible)
+RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
+    install.packages(c('Rcpp','BH','rstan','rstantools','StanHeaders','RcppEigen','png','dygraphs','xts','extraDistr'))"
+
+# CmdStan (cache the build)
+ARG CMDSTAN_VERSION=2.35.0
+ENV MAKEFLAGS="-j8" CMDSTAN=/usr/local/cmdstan PATH="${CMDSTAN}/bin:${PATH}"
+RUN --mount=type=cache,target=/root/.cache/cmdstan \
+    wget -O /tmp/cmdstan.tgz "https://github.com/stan-dev/cmdstan/releases/download/v${CMDSTAN_VERSION}/cmdstan-${CMDSTAN_VERSION}.tar.gz" \
+    && tar -xzf /tmp/cmdstan.tgz -C /usr/local \
+    && mv "/usr/local/cmdstan-${CMDSTAN_VERSION}" "${CMDSTAN}" \
+    && make -C "${CMDSTAN}" build
+
+RUN R -q -e "if (!requireNamespace('cmdstanr', quietly=TRUE)) install.packages('cmdstanr', repos=c('https://mc-stan.org/r-packages/', Sys.getenv('RSPM'))); \
+    library(cmdstanr); set_cmdstan_path(Sys.getenv('CMDSTAN')); cmdstan_version()"
+
+# Prophet warm-up compile (first model)
+RUN R -q -e "options(mc.cores=8); library(prophet); set.seed(1); \
+    df <- data.frame(ds=seq.Date(as.Date('2024-01-01'), by='day', length.out=10), y=rnorm(10)); prophet(df)"
+
+# Robyn pinned by ref (only rebuild when you change this)
+ARG ROBYN_REF="v3.12.1"   # example — set a tag/commit you trust
+RUN R -q -e "options(Ncpus=8); remotes::install_github('facebookexperimental/Robyn', ref='${ROBYN_REF}', subdir='R', upgrade='never')"
+
+# Show versions for sanity (but keep deterministic)
+RUN R -q -e "cat('Robyn:', as.character(utils::packageVersion('Robyn')), '\n')"
+
+# Final env
+ENV OMP_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 BLAS_NUM_THREADS=8 R_MAX_CORES=8 \
+    RETICULATE_PYTHON=/usr/bin/python3 RETICULATE_AUTOCONFIGURE=0 LANG=C.UTF-8 LC_ALL=C.UTF-8
