@@ -17,6 +17,23 @@ RUN --mount=type=cache,target=/var/cache/apt \
     libnode-dev \
     && rm -rf /var/lib/apt/lists/*
 
+ENV OMP_NUM_THREADS=8 \
+    OPENBLAS_NUM_THREADS=8 \
+    BLAS_NUM_THREADS=8 \
+    R_MAX_CORES=8 \
+    R_COMPILE_PKGS=1 \
+    R_DISABLE_HTTPD=1 \
+    RETICULATE_PYTHON=/usr/bin/python3 \
+    RETICULATE_AUTOCONFIGURE=0 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+RUN echo 'export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}'           >> /etc/environment && \
+    echo 'export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-8}' >> /etc/environment && \
+    echo 'export MKL_NUM_THREADS=${MKL_NUM_THREADS:-8}'           >> /etc/environment && \
+    echo 'export BLAS_NUM_THREADS=${BLAS_NUM_THREADS:-8}'         >> /etc/environment
+
 # ---------- ccache ----------
 ENV CCACHE_DIR=/root/.cache/ccache PATH="/usr/lib/ccache:$PATH"
 RUN --mount=type=cache,target=/root/.cache/ccache true
@@ -113,7 +130,3 @@ RUN R -q -e "options(Ncpus=8); \
     remotes::install_github('facebookexperimental/Robyn', subdir='R', upgrade='never', dependencies=c('Depends','Imports')); \
     library(Robyn); cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')"
 
-
-# ---------- Env ----------
-ENV OMP_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 BLAS_NUM_THREADS=8 R_MAX_CORES=8 \
-    RETICULATE_PYTHON=/usr/bin/python3 RETICULATE_AUTOCONFIGURE=0 LANG=C.UTF-8 LC_ALL=C.UTF-8
