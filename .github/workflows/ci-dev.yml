@@ -247,6 +247,8 @@ jobs:
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
+          WEB_IMAGE_URL: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
+          TRAINING_IMAGE_URL: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:${{ github.sha }}
           # Remove -var flags; use TF_VAR_* env vars only (set above)
           TF_VAR_project_id: $PROJECT_ID
           TF_VAR_region: $REGION
