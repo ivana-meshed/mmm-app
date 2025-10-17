@@ -7,7 +7,7 @@ on:
         - 'docker/Dockerfile.training'
         - 'r/**'
         - 'docker/training_entrypoint.sh'
-        - 'docker/Dockerfile.training-base'   # exclude base so normal builds skip base
+        - '!docker/Dockerfile.training-base'   # exclude base so normal builds skip base
 
 permissions:
   id-token: write
