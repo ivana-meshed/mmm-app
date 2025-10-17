@@ -814,22 +814,6 @@ tab_conn, tab_single, tab_queue = st.tabs(
     ["1) Snowflake Connection", "2) Single Job Training", "3) Queue Training"]
 )
 
-"""st.write(
-    {
-        k: os.getenv(k)
-        for k in [
-            "SF_USER",
-            "SF_ACCOUNT",
-            "SF_WAREHOUSE",
-            "SF_DATABASE",
-            "SF_SCHEMA",
-            "SF_ROLE",
-            "SF_PRIVATE_KEY_SECRET",
-            "PROJECT_ID",
-        ]
-    }
-)"""
-
 _init_sf_once()
 
 # Auto-load persisted queue once per session (per queue_name)
@@ -2076,38 +2060,3 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             st.write(
                 "**Note**: Training runs asynchronously in Cloud Run Jobs."
             )
-
-
-# ─────────────────────────────
-# Sidebar: system info + auto-refresh
-# ─────────────────────────────
-with st.sidebar:
-    st.subheader("🔧 System Info")
-    st.write(f"**Project ID**: {PROJECT_ID}")
-    st.write(f"**Region**: {REGION}")
-    st.write(f"**Training Job**: {TRAINING_JOB_NAME}")
-    st.write(f"**GCS Bucket**: {GCS_BUCKET}")
-    try:
-        import psutil
-
-        memory = psutil.virtual_memory()
-        st.write(f"**Available Memory**: {memory.available / 1024**3:.1f} GB")
-        st.write(f"**Memory Usage**: {memory.percent:.1f}%")
-    except ImportError:
-        st.write("**Memory Info**: psutil not available")
-
-    if st.session_state["job_executions"]:
-        st.subheader("📋 Recent Jobs")
-        for i, exec_info in enumerate(st.session_state.job_executions[-3:]):
-            status = exec_info.get("status", "UNKNOWN")
-            ts = exec_info.get("timestamp", "")
-            st.write(f"**Job {i+1}**: {status}")
-            st.write(f"*{ts}*")
-
-    # Manual auto-refresh toggle (simple rerun)
-    if st.toggle(
-        "Auto-refresh status",
-        value=st.session_state["auto_refresh"],
-        key="auto_refresh",
-    ):
-        st.rerun()
