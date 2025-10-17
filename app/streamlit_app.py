@@ -49,6 +49,7 @@ from app_shared import (
     read_job_history_from_gcs,
     save_job_history_to_gcs,
     append_row_to_job_history,
+    require_login_and_domain,
     _safe_tick_once,  # (kept for parity; not used below
     _maybe_resample_df,
     _normalize_resample_freq,
@@ -68,30 +69,9 @@ st.set_page_config(page_title="Robyn MMM Trainer", layout="wide")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-import streamlit as st
-
-
-def _require_login_and_domain():
-    # Before login, st.user has no attributes—use getattr to avoid AttributeError
-    is_logged_in = getattr(st.user, "is_logged_in", False)
-
-    if not is_logged_in:
-        st.title("Robyn MMM Trainer")
-        st.write("Sign in with your MeshedData Google account to continue.")
-        if st.button("Sign in with Google"):
-            st.login()  # <-- no provider arg when using flat [auth] keys
-        st.stop()
-
-    email = (getattr(st.user, "email", "") or "").lower().strip()
-    if not email.endswith("@mesheddata.com"):
-        st.error("This app is restricted to @mesheddata.com accounts.")
-        if st.button("Sign out"):
-            st.logout()
-        st.stop()
-
 
 # Call it once, near the top of your app before any other UI
-_require_login_and_domain()
+require_login_and_domain()
 
 query_params = st.query_params
 logger.info(

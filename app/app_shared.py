@@ -1249,6 +1249,37 @@ def _is_bool_like(series: pd.Series) -> bool:
         return False
 
 
+def require_login_and_domain(allowed_domain: str = "mesheddata.com") -> None:
+    """
+    Hard-stops the current Streamlit run unless the user is logged in
+    with a Google account from the allowed domain.
+    Call this at the very top of *every* page.
+    """
+    # Allow lightweight health checks to pass through if you use them on pages too
+    q = getattr(st, "query_params", {})
+    if q.get("health") == "true":
+        return  # let the page handle its health endpoint and st.stop() later if needed
+
+    is_logged_in = getattr(st.user, "is_logged_in", False)
+    if not is_logged_in:
+        st.set_page_config(page_title="Sign in", layout="centered")
+        st.title("Robyn MMM")
+        st.write(
+            f"Sign in with your {allowed_domain} Google account to continue."
+        )
+        if st.button("Sign in with Google"):
+            st.login()  # flat [auth] config → no provider arg
+        st.stop()
+
+    email = (getattr(st.user, "email", "") or "").lower().strip()
+    if not email.endswith(f"@{allowed_domain}"):
+        st.set_page_config(page_title="Access restricted", layout="centered")
+        st.error(f"This app is restricted to @{allowed_domain} accounts.")
+        if st.button("Sign out"):
+            st.logout()
+        st.stop()
+
+
 def _maybe_resample_df(
     df: pd.DataFrame,
     date_col: str | None,

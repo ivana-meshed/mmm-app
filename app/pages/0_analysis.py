@@ -10,7 +10,10 @@ from app_shared import (
     ensure_sf_conn,
     run_sql,
     _sf_params_from_env,
+    require_login_and_domain,
 )
+
+require_login_and_domain()
 
 st.set_page_config(page_title="Exploratory Analysis", layout="wide")
 st.title("📈 Exploratory Analysis")
