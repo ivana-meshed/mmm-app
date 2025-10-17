@@ -6,7 +6,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=cache,target=/var/cache/apt \
     apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv python3-dev \
-    libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev libicu-dev libicu72 \
+    libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev \
+    libicu-dev libicu72 \
     libfontconfig1-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev \
     libpng-dev libtiff5-dev libjpeg-dev \
     libcairo2 libcairo2-dev libxt6 ghostscript \
@@ -45,7 +46,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install -r /tmp/requirements-training.txt --upgrade-strategy only-if-needed
 
 # ---------- R: Posit PPM ----------
-ARG RSPM="https://packagemanager.posit.co/cran/__linux__/bookworm/latest"
+ARG RSPM="https://packagemanager.posit.co/cran/__linux__/ubuntu/jammy/latest"
 ENV RSPM=${RSPM}
 RUN R -q -e "options(repos=c(CRAN=Sys.getenv('RSPM'))); install.packages('remotes')"
 
@@ -66,6 +67,10 @@ RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
     googleAnalyticsR='1.2.0', miniUI='0.1.2', shiny='1.11.1', bit64='4.6.0-1', glue='1.8.0' \
     ); \
     for (pkg in names(pinned)) remotes::install_version(pkg, version=pinned[[pkg]], upgrade='never', repos=c(CRAN=Sys.getenv('RSPM')))"
+
+# Quick check ICU and stringi alignment (optional)
+RUN ldconfig -p | grep -E 'libicu(i18n|uc)\.so\.70' || true
+RUN R -q -e "packageVersion('stringi'); sessionInfo()$otherPkgs$stringi"
 
 # ---------- ggplot2 pin ----------
 ARG GGPLOT2_VER=3.5.2
