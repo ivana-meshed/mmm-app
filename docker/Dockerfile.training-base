@@ -7,7 +7,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
     apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv python3-dev \
     libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev \
-    libicu-dev libicu72 \
+    libicu-dev libicu70 \
     libfontconfig1-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev \
     libpng-dev libtiff5-dev libjpeg-dev \
     libcairo2 libcairo2-dev libxt6 ghostscript \
