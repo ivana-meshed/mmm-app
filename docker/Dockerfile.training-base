@@ -20,22 +20,18 @@ RUN --mount=type=cache,target=/var/cache/apt \
 ENV CCACHE_DIR=/root/.cache/ccache PATH="/usr/lib/ccache:$PATH"
 RUN --mount=type=cache,target=/root/.cache/ccache true
 
-# ---------- Python (cached; exact versions live in the requirements file) ----------
-# Speed tips: prefer wheels, reuse cache, skip version check
+# ---------- Python (cached) ----------
 ENV PIP_NO_INPUT=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 COPY docker/requirements-training.txt /tmp/requirements-training.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install -r /tmp/requirements-training.txt --upgrade-strategy only-if-needed
 
-# ---------- R: use Posit PPM as primary repo ----------
-# (We still pin exact versions via remotes below for determinism)
+# ---------- R: Posit PPM ----------
 ARG RSPM="https://packagemanager.posit.co/cran/__linux__/bookworm/latest"
 ENV RSPM=${RSPM}
 RUN R -q -e "options(repos=c(CRAN=Sys.getenv('RSPM'))); install.packages('remotes')"
 
-
-# ---------- R core packages pinned EXACTLY as per CI log ----------
-# We use remotes::install_version to pin; PPM used as CRAN mirror.
+# ---------- PINNED core set (your original pins) ----------
 RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
     pinned <- c( \
     jsonlite='2.0.0', dplyr='1.1.4', tidyr='1.3.1', lubridate='1.9.3', \
@@ -51,27 +47,38 @@ RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
     LaplacesDemon='16.1.6', VGAM='1.1-13', evd='2.3-7.1', skellam='0.2.4', \
     googleAnalyticsR='1.2.0', miniUI='0.1.2', shiny='1.11.1', bit64='4.6.0-1', glue='1.8.0' \
     ); \
-    for (pkg in names(pinned)) { \
-    remotes::install_version(pkg, version=pinned[[pkg]], upgrade='never', \
-    repos=c(CRAN=Sys.getenv('RSPM'))); \
-    }"
+    for (pkg in names(pinned)) remotes::install_version(pkg, version=pinned[[pkg]], upgrade='never', repos=c(CRAN=Sys.getenv('RSPM')))"
 
-# ---------- ggplot2 pin (as in CI) ----------
+# ---------- ggplot2 pin ----------
 ARG GGPLOT2_VER=3.5.2
 RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
     if (!requireNamespace('ggplot2', quietly=TRUE) || packageVersion('ggplot2') != '${GGPLOT2_VER}') \
     remotes::install_version('ggplot2', version='${GGPLOT2_VER}', upgrade='never', repos=c(CRAN=Sys.getenv('RSPM')))"
 
-# ---------- Stan stack (keep latest that matches CI behavior except where pinned) ----------
-# rstan / StanHeaders were not printed with explicit versions in the log, so leave unpinned.
+# ---------- Stan stack (compiled) ----------
 RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
     install.packages(c('Rcpp','BH','rstan','rstantools','StanHeaders','RcppEigen','png','dygraphs','xts','extraDistr'))"
 
-# ---------- CmdStan (pin 2.35.0; cached build) ----------
-# CmdStan + cmdstanr
+# ---------- Tidy deps often pulled by ggplot2 (install unpinned, no deps) ----------
+# (We avoid reinstalling/overriding pinned glue/withr.)
+RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
+    install.packages(c('rlang','scales','tibble','cli','lifecycle','vctrs'), dependencies=FALSE)"
+
+# ---------- Add remaining “missing” packages from the second list ----------
+# Installed WITHOUT dependencies so they don't override the pinned set above.
+RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
+    install.packages(c( \
+    'googleAuthR', 'googleCloudStorageR', 'mime', 'foreach', 'doParallel', \
+    'dtplyr', 'furrr', 'RcppParallel' \
+    ), dependencies=FALSE)"
+
+# ---------- nloptr (needs source) ----------
+RUN R -q -e "options(Ncpus=8); install.packages('nloptr', repos=Sys.getenv('RSPM'), type='source')"
+
+# ---------- CmdStan + cmdstanr ----------
 ARG CMDSTAN_VERSION=2.35.0
-ENV MAKEFLAGS="-j8"
-ENV CMDSTAN=/usr/local/cmdstan
+ENV MAKEFLAGS="-j8" \
+    CMDSTAN=/usr/local/cmdstan
 ENV PATH="${CMDSTAN}/bin:${PATH}"
 
 RUN wget -O /tmp/cmdstan.tar.gz "https://github.com/stan-dev/cmdstan/releases/download/v${CMDSTAN_VERSION}/cmdstan-${CMDSTAN_VERSION}.tar.gz" \
@@ -80,21 +87,32 @@ RUN wget -O /tmp/cmdstan.tar.gz "https://github.com/stan-dev/cmdstan/releases/do
     && make -C "${CMDSTAN}" build \
     && "${CMDSTAN}/bin/stanc" --version || true
 
-# cmdstanr pin from CI (0.8.0)
 RUN R -q -e "options(Ncpus=8); \
     if (!requireNamespace('cmdstanr', quietly=TRUE) || packageVersion('cmdstanr') != '0.8.0') \
     remotes::install_version('cmdstanr', version='0.8.0', repos=c('https://mc-stan.org/r-packages/', Sys.getenv('RSPM')), upgrade='never'); \
     library(cmdstanr); set_cmdstan_path(Sys.getenv('CMDSTAN')); cmdstan_version()"
 
-# ---------- Prophet warm-up compile ----------
+# ---------- Prophet (pin; avoid upgrading your pinned deps) ----------
+RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
+    if (!requireNamespace('prophet', quietly=TRUE) || packageVersion('prophet') != '1.2.1') { \
+    remotes::install_version('prophet', version='1.2.1', repos=c(CRAN=Sys.getenv('RSPM')), upgrade='never'); \
+    }"
+
+# ---------- Prophet warm-up ----------
 RUN R -q -e "options(mc.cores=8); library(prophet); set.seed(1); \
     df <- data.frame(ds=seq.Date(as.Date('2024-01-01'), by='day', length.out=10), y=rnorm(10)); prophet(df)"
 
-# ---------- Robyn pin (3.12.1 from CI) ----------
+# ---------- patchwork (pin) ----------
+RUN R -q -e "options(Ncpus=8); \
+    if (!requireNamespace('patchwork', quietly=TRUE) || utils::packageVersion('patchwork') < '1.3.1') \
+    remotes::install_version('patchwork', version='1.3.1', repos=c(CRAN=Sys.getenv('RSPM')), upgrade='never')"
+
+# ---------- Robyn (pin) ----------
 ARG ROBYN_REF="v3.12.1"
-RUN R -q -e "options(Ncpus=8); remotes::install_github('facebookexperimental/Robyn', ref='${ROBYN_REF}', subdir='R', upgrade='never'); \
+RUN R -q -e "options(Ncpus=8); \
+    remotes::install_github('facebookexperimental/Robyn', ref='${ROBYN_REF}', subdir='R', upgrade='never'); \
     cat('Robyn:', as.character(utils::packageVersion('Robyn')), '\n')"
 
-# ---------- Final env ----------
+# ---------- Env ----------
 ENV OMP_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 BLAS_NUM_THREADS=8 R_MAX_CORES=8 \
     RETICULATE_PYTHON=/usr/bin/python3 RETICULATE_AUTOCONFIGURE=0 LANG=C.UTF-8 LC_ALL=C.UTF-8
