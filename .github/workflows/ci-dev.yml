@@ -5,7 +5,9 @@ on:
     branches: [feat-*]
     paths:
         - 'docker/Dockerfile.training'
+        - '.github/workflows/ci-dev.yml'
         - 'r/**'
+        - 'app/**'
         - 'docker/training_entrypoint.sh'
         - '!docker/Dockerfile.training-base'   # exclude base so normal builds skip base
 
