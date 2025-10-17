@@ -264,6 +264,15 @@ jobs:
           echo "  Training job: $TRAINING_IMAGE_URL"
 
           terraform plan -input=false \
+            -var "project_id=$PROJECT_ID" \
+            -var "region=$REGION" \
+            -var "service_name=$SERVICE_NAME" \
+            -var "bucket_name=$BUCKET" \
+            -var "deployer_sa=$SA_EMAIL" \
+            -var "web_image=$WEB_IMAGE_URL" \
+            -var "training_image=$TRAINING_IMAGE_URL" \
+            -var "scheduler_job_name=robyn-queue-tick-dev" \
+            -var "queue_name=default-dev" \
             -var-file="envs/dev.tfvars" \
             -out=tfplan  # No -var flags needed
 
