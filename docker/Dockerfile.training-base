@@ -2,7 +2,7 @@ FROM rocker/r-ver:4.3.1
 ARG DEBIAN_FRONTEND=noninteractive
 ENV DEBIAN_FRONTEND=noninteractive
 
-# BuildKit cache for apt
+# ---------- APT (with cache) ----------
 RUN --mount=type=cache,target=/var/cache/apt \
     apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv python3-dev \
@@ -16,38 +16,57 @@ RUN --mount=type=cache,target=/var/cache/apt \
     build-essential g++ make unzip ca-certificates git curl wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Speed up compiles
-ENV CCACHE_DIR=/root/.cache/ccache \
-    PATH="/usr/lib/ccache:$PATH"
+# ---------- ccache ----------
+ENV CCACHE_DIR=/root/.cache/ccache PATH="/usr/lib/ccache:$PATH"
 RUN --mount=type=cache,target=/root/.cache/ccache true
 
-# Python deps via requirements to preserve cache
+# ---------- Python (cached; exact versions live in the requirements file) ----------
+# Speed tips: prefer wheels, reuse cache, skip version check
+ENV PIP_NO_INPUT=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 COPY docker/requirements-training.txt /tmp/requirements-training.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install --no-cache-dir -r /tmp/requirements-training.txt
+    pip3 install -r /tmp/requirements-training.txt --upgrade-strategy only-if-needed
 
-# Use Posit PPM for precompiled R binaries (fast!)
+# ---------- R: use Posit PPM as primary repo ----------
+# (We still pin exact versions via remotes below for determinism)
 ARG RSPM="https://packagemanager.posit.co/cran/__linux__/bookworm/latest"
 ENV RSPM=${RSPM}
-RUN R -q -e "options(repos=c(CRAN=Sys.getenv('RSPM'))); install.packages(c('remotes'))"
+RUN R -q -e "options(repos=c(CRAN=Sys.getenv('RSPM'))); install.packages('remotes')"
 
-# Core R packages (prefer binaries)
+# ---------- R core packages pinned EXACTLY as per CI log ----------
+# We use remotes::install_version to pin; PPM used as CRAN mirror.
 RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
-    install.packages(c('jsonlite','dplyr','tidyr','lubridate','readr','stringr','arrow','reticulate', \
-    'data.table','future','future.apply','foreach','doParallel','RcppParallel', \
-    'gridExtra','systemfonts','globals','listenv','parallelly','iterators'))"
+    pinned <- c( \
+    jsonlite='2.0.0', dplyr='1.1.4', tidyr='1.3.1', lubridate='1.9.3', \
+    readr='2.1.5', stringr='1.5.1', reticulate='1.40.0', data.table='1.15.4', \
+    globals='0.16.3', listenv='0.9.1', parallelly='1.38.0', iterators='1.0.14', \
+    gridExtra='2.3', systemfonts='1.2.0', \
+    arrow='21.0.0.1', future='1.67.0', future.apply='1.20.0', \
+    rstudioapi='0.17.1', knitr='1.50', coda='0.19-4.1', V8='8.0.1', \
+    usethis='3.2.1', pkgload='1.4.1', roxygen2='7.3.3', withr='3.0.2', \
+    ragg='1.5.0', readxl='1.4.5', reprex='2.1.1', rvest='1.0.5', dichromat='2.0-0.1', \
+    formattable='0.2.1', nycflights13='1.0.2', whoami='1.3.0', RSQLite='2.4.3', lintr='3.2.0', \
+    abind='1.4-8', tensorA='0.36.2.1', distributional='0.5.0', farver='2.1.2', \
+    LaplacesDemon='16.1.6', VGAM='1.1-13', evd='2.3-7.1', skellam='0.2.4', \
+    googleAnalyticsR='1.2.0', miniUI='0.1.2', shiny='1.11.1', bit64='4.6.0-1', glue='1.8.0' \
+    ); \
+    for (pkg in names(pinned)) { \
+    remotes::install_version(pkg, version=pinned[[pkg]], upgrade='never', \
+    repos=c(CRAN=Sys.getenv('RSPM'))); \
+    }"
 
-# ggplot2 pin (binary if available; else source)
+# ---------- ggplot2 pin (as in CI) ----------
 ARG GGPLOT2_VER=3.5.2
 RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
     if (!requireNamespace('ggplot2', quietly=TRUE) || packageVersion('ggplot2') != '${GGPLOT2_VER}') \
     remotes::install_version('ggplot2', version='${GGPLOT2_VER}', upgrade='never', repos=c(CRAN=Sys.getenv('RSPM')))"
 
-# Stan stack (binary if possible)
+# ---------- Stan stack (keep latest that matches CI behavior except where pinned) ----------
+# rstan / StanHeaders were not printed with explicit versions in the log, so leave unpinned.
 RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
     install.packages(c('Rcpp','BH','rstan','rstantools','StanHeaders','RcppEigen','png','dygraphs','xts','extraDistr'))"
 
-# CmdStan (cache the build)
+# ---------- CmdStan (pin 2.35.0; cached build) ----------
 ARG CMDSTAN_VERSION=2.35.0
 ENV MAKEFLAGS="-j8" CMDSTAN=/usr/local/cmdstan PATH="${CMDSTAN}/bin:${PATH}"
 RUN --mount=type=cache,target=/root/.cache/cmdstan \
@@ -56,20 +75,21 @@ RUN --mount=type=cache,target=/root/.cache/cmdstan \
     && mv "/usr/local/cmdstan-${CMDSTAN_VERSION}" "${CMDSTAN}" \
     && make -C "${CMDSTAN}" build
 
-RUN R -q -e "if (!requireNamespace('cmdstanr', quietly=TRUE)) install.packages('cmdstanr', repos=c('https://mc-stan.org/r-packages/', Sys.getenv('RSPM'))); \
+# cmdstanr pin from CI (0.8.0)
+RUN R -q -e "options(Ncpus=8); \
+    if (!requireNamespace('cmdstanr', quietly=TRUE) || packageVersion('cmdstanr') != '0.8.0') \
+    remotes::install_version('cmdstanr', version='0.8.0', repos=c('https://mc-stan.org/r-packages/', Sys.getenv('RSPM')), upgrade='never'); \
     library(cmdstanr); set_cmdstan_path(Sys.getenv('CMDSTAN')); cmdstan_version()"
 
-# Prophet warm-up compile (first model)
+# ---------- Prophet warm-up compile ----------
 RUN R -q -e "options(mc.cores=8); library(prophet); set.seed(1); \
     df <- data.frame(ds=seq.Date(as.Date('2024-01-01'), by='day', length.out=10), y=rnorm(10)); prophet(df)"
 
-# Robyn pinned by ref (only rebuild when you change this)
-ARG ROBYN_REF="v3.12.1"   # example — set a tag/commit you trust
-RUN R -q -e "options(Ncpus=8); remotes::install_github('facebookexperimental/Robyn', ref='${ROBYN_REF}', subdir='R', upgrade='never')"
+# ---------- Robyn pin (3.12.1 from CI) ----------
+ARG ROBYN_REF="v3.12.1"
+RUN R -q -e "options(Ncpus=8); remotes::install_github('facebookexperimental/Robyn', ref='${ROBYN_REF}', subdir='R', upgrade='never'); \
+    cat('Robyn:', as.character(utils::packageVersion('Robyn')), '\n')"
 
-# Show versions for sanity (but keep deterministic)
-RUN R -q -e "cat('Robyn:', as.character(utils::packageVersion('Robyn')), '\n')"
-
-# Final env
+# ---------- Final env ----------
 ENV OMP_NUM_THREADS=8 OPENBLAS_NUM_THREADS=8 BLAS_NUM_THREADS=8 R_MAX_CORES=8 \
     RETICULATE_PYTHON=/usr/bin/python3 RETICULATE_AUTOCONFIGURE=0 LANG=C.UTF-8 LC_ALL=C.UTF-8
