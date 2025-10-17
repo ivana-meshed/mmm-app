@@ -892,10 +892,10 @@ with tab_conn:
                 height=120,
             )
             sf_pk_file = st.file_uploader(
-                "…or upload a .pem file", type=["pem", "key"]
+                "…or upload a .pem file", type=["pem", "key", "p8"]
             )
 
-    submitted = st.form_submit_button("🔌 Connect")
+        submitted = st.form_submit_button("🔌 Connect")
 
     if submitted:
         try:
