@@ -102,9 +102,6 @@ def _safe_json_dump_to_gcs(payload: dict, bucket: str, dest_blob: str):
 # ──────────────────────────────────────────────────────────────
 st.title("Customize your analytics — map your data in 3 steps.")
 
-with st.expander("Show example mock (reference)"):
-    st.image("/mnt/data/Prepare Data.png", use_container_width=True)
-
 # ──────────────────────────────────────────────────────────────
 # Step 1) Choose your dataset
 # ──────────────────────────────────────────────────────────────
