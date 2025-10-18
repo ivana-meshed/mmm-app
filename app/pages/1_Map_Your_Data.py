@@ -251,19 +251,23 @@ with g3:
     )
 
 
-def _build_goals_df(selected: List[str], group: str) -> pd.DataFrame:
+def _build_goals_df(selected: list[str], group: str) -> pd.DataFrame:
+    # Ensure object dtype even if `selected` is empty
     return pd.DataFrame(
         {
-            "var": selected,
-            "group": group,
-            "type": [
-                (
-                    "revenue"
-                    if "rev" in v.lower() or "gmv" in v.lower()
-                    else "conversion"
-                )
-                for v in selected
-            ],
+            "var": pd.Series(selected, dtype="object"),
+            "group": pd.Series([group] * len(selected), dtype="object"),
+            "type": pd.Series(
+                [
+                    (
+                        "revenue"
+                        if ("rev" in v.lower() or "gmv" in v.lower())
+                        else "conversion"
+                    )
+                    for v in selected
+                ],
+                dtype="object",
+            ),
         }
     )
 
@@ -276,6 +280,23 @@ goals_df = pd.concat(
     ignore_index=True,
 )
 st.caption("Tag goal variables with a type (used later as dep_variable_type):")
+
+
+# If still empty, create a typed empty frame to keep Streamlit happy
+if goals_df.empty:
+    goals_df = pd.DataFrame(
+        {
+            "var": pd.Series(dtype="object"),
+            "group": pd.Series(dtype="object"),
+            "type": pd.Series(dtype="object"),
+        }
+    )
+
+# Final safety: coerce to text-friendly dtypes
+goals_df = goals_df.fillna("").astype(
+    {"var": "object", "group": "object", "type": "object"}
+)
+
 goals_df = st.data_editor(
     goals_df,
     use_container_width=True,
@@ -291,6 +312,7 @@ goals_df = st.data_editor(
     },
     key="goals_editor",
 )
+
 
 # 2b) Auto-tag rules (suffix → category)
 st.subheader("Auto-tag rules")
@@ -344,13 +366,21 @@ def _infer_category(col: str, rules: Dict[str, List[str]]) -> str:
     return ""  # not tagged
 
 
-mapping_seed = pd.DataFrame(
-    {
-        "var": all_cols,
-        "category": [_infer_category(c, auto_rules) for c in all_cols],
-        "custom_tags": ["" for _ in all_cols],  # optional extra tag
-    }
+mapping_seed = (
+    pd.DataFrame(
+        {
+            "var": pd.Series(all_cols, dtype="object"),
+            "category": pd.Series(
+                [_infer_category(c, auto_rules) for c in all_cols],
+                dtype="object",
+            ),
+            "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
+        }
+    )
+    .fillna("")
+    .astype({"var": "object", "category": "object", "custom_tags": "object"})
 )
+
 
 st.subheader("Applied mapping (editable)")
 st.caption(
