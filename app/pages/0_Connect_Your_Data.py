@@ -13,6 +13,7 @@ from app_shared import (
     run_sql,
     _require_sf_session,
     GCS_BUCKET,
+    _connect_snowflake,
 )
 
 
