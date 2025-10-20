@@ -361,18 +361,18 @@ with r1:
 c1, c2, c3 = st.columns([1.5, 1, 2])
 with c1:
     countries = _iso2_countries_gcs_first(BUCKET)
-    # Respect previous choice if present
     initial_country_idx = (
         countries.index(st.session_state["country"])
         if st.session_state["country"] in countries
         else 0
     )
-    country = st.selectbox(
+    st.selectbox(
         "Country (ISO2)",
         options=countries,
         index=initial_country_idx,
         key="country",
     )
+
 with c2:
     source_mode = st.selectbox(
         "Source",
@@ -383,10 +383,6 @@ with c2:
     )
 with c3:
     st.caption(f"GCS Bucket: **{BUCKET}**")
-
-# keep them in session for step1_loader
-st.session_state["country"] = country
-st.session_state["source_mode"] = source_mode
 
 
 @_fragment()
@@ -436,8 +432,6 @@ def step1_loader():
                 _list_country_versions_cached.clear()
                 st.success("Refreshed GCS version list.")
                 st.rerun()
-
-        submitted = st.form_submit_button("Load")
 
     if not submitted:
         df = st.session_state["df_raw"]
