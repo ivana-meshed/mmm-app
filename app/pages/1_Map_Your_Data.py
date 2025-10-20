@@ -17,6 +17,7 @@ from app_shared import (
     effective_sql,
     GCS_BUCKET,
     PROJECT_ID,
+    require_login_and_domain,
 )
 
 # ──────────────────────────────────────────────────────────────
@@ -344,6 +345,8 @@ st.title("Customize your analytics — map your data in 3 steps.")
 # ──────────────────────────────────────────────────────────────
 st.header("Step 1) Choose your dataset")
 # ──────────────────────────────────────────────────────────────
+
+require_login_and_domain()
 
 # sensible defaults so we can read these anywhere
 st.session_state.setdefault("sf_table", "MMM_RAW")
