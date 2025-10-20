@@ -392,18 +392,21 @@ def step1_loader():
         # Buttons row: Load + Refresh GCS list (side-by-side, wide)
         b1, b2 = st.columns([1, 1.2])
         with b1:
-            submitted = st.form_submit_button("Load", use_container_width=True)
+            load_clicked = st.form_submit_button(
+                "Load", use_container_width=True
+            )
         with b2:
-            if st.button(
-                "↻ Refresh GCS list",
-                use_container_width=True,
-                key="refresh_gcs_in_form",
-            ):
-                _list_country_versions_cached.clear()
-                st.success("Refreshed GCS version list.")
-                st.rerun()
+            refresh_clicked = st.form_submit_button(
+                "↻ Refresh GCS list", use_container_width=True
+            )
 
-    if not submitted:
+    # --- right after the form block (i.e., after the `with st.form(...):` ends)
+    if refresh_clicked:
+        _list_country_versions_cached.clear()
+        st.success("Refreshed GCS version list.")
+        st.rerun()
+
+    if not load_clicked:
         df = st.session_state["df_raw"]
         if not df.empty:
             st.caption("Preview (from session):")
