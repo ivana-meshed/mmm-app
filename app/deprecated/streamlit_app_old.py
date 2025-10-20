@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 
 query_params = st.query_params
 logger.info(
-    "Starting app/streamlit_app.py", extra={"query_params": dict(query_params)}
+    "Starting app/0_Connect_Your_Data.py",
+    extra={"query_params": dict(query_params)},
 )
 
 # Health check endpoint (returns JSON, does not render UI)

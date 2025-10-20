@@ -1,4 +1,4 @@
-# streamlit_app.py — Streamlit front-end for launching & monitoring Robyn training jobs on Cloud Run Jobs
+# 0_Connect_Your_Data.py — Streamlit front-end for launching & monitoring Robyn training jobs on Cloud Run Jobs
 import json
 import logging
 import os
@@ -76,7 +76,8 @@ require_login_and_domain()
 
 query_params = st.query_params
 logger.info(
-    "Starting app/streamlit_app.py", extra={"query_params": dict(query_params)}
+    "Starting app/0_Connect_Your_Data.py",
+    extra={"query_params": dict(query_params)},
 )
 
 # Health check endpoint (returns JSON, does not render UI)
@@ -121,7 +122,7 @@ st.session_state.setdefault("queue_saved_at", None)
 # ─────────────────────────────
 # One-time Snowflake init for this Streamlit session
 # ─────────────────────────────
-# streamlit_app.py
+# 0_Connect_Your_Data.py
 
 
 def _init_sf_once():

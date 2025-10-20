@@ -58,10 +58,10 @@ EOF
 
 # Start the main application
 echo "🌐 Starting Streamlit application..."
-test -f streamlit_app.py || { echo 'Missing /app/streamlit_app.py'; ls -la; exit 1; }
+test -f 0_Connect_Your_Data.py || { echo 'Missing /app/0_Connect_Your_Data.py'; ls -la; exit 1; }
 
 # Start streamlit in background
-python3 -m streamlit run streamlit_app.py --server.address=0.0.0.0 --server.port=${PORT} &
+python3 -m streamlit run 0_Connect_Your_Data.py --server.address=0.0.0.0 --server.port=${PORT} &
 STREAMLIT_PID=$!
 
 # Wait for warmup to complete (with timeout)

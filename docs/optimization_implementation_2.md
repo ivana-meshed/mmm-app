@@ -21,7 +21,7 @@ resource "google_cloud_run_service" "svc" {
         "run.googleapis.com/max-instances" = "10"
       }
     }
-    
+
     spec {
       service_account_name  = google_service_account.runner.email
       container_concurrency = 1  # Keep at 1 for resource-intensive training
@@ -29,7 +29,7 @@ resource "google_cloud_run_service" "svc" {
 
       containers {
         image = var.image
-        
+
         # UPGRADED RESOURCE ALLOCATION
         resources {
           limits = {
@@ -71,7 +71,7 @@ resource "google_cloud_run_service" "svc" {
           name  = "APP_ROOT"
           value = "/app"
         }
-        
+
         env {
           name  = "RUN_SERVICE_ACCOUNT_EMAIL"
           value = google_service_account.runner.email
@@ -92,7 +92,7 @@ resource "google_cloud_run_service" "svc" {
           name  = "OMP_NUM_THREADS"
           value = "8"  # OpenMP parallelization
         }
-        
+
         # Enable parallel processing in Python
         env {
           name  = "PYTHONUNBUFFERED"
@@ -141,7 +141,7 @@ variable "cpu_limit" {
 }
 
 variable "memory_limit" {
-  description = "Memory limit for Cloud Run service"  
+  description = "Memory limit for Cloud Run service"
   type        = string
   default     = "32Gi"
 }
@@ -261,7 +261,7 @@ EXPOSE 8080
 
 # ✅ Use a shell entry so $PORT expands; bind to 0.0.0.0
 # Also fail fast if the app file is missing.
-CMD ["bash","-lc","test -f streamlit_app.py || { echo 'Missing /app/streamlit_app.py'; ls -la; exit 1; }; python3 -m streamlit run streamlit_app.py --server.address=0.0.0.0 --server.port=${PORT}"]
+CMD ["bash","-lc","test -f 0_Connect_Your_Data.py || { echo 'Missing /app/0_Connect_Your_Data.py'; ls -la; exit 1; }; python3 -m streamlit run 0_Connect_Your_Data.py --server.address=0.0.0.0 --server.port=${PORT}"]
 ```
 
 ## 2. Data Format Switch (CSV→Parquet)
@@ -283,58 +283,58 @@ logger = logging.getLogger(__name__)
 
 class DataProcessor:
     """Optimized data processor with Parquet support"""
-    
+
     def __init__(self, gcs_bucket: str = None):
         self.gcs_bucket = gcs_bucket or os.getenv("GCS_BUCKET", "mmm-app-output")
         self.storage_client = storage.Client()
-        
-    def csv_to_parquet(self, csv_data: pd.DataFrame, 
+
+    def csv_to_parquet(self, csv_data: pd.DataFrame,
                       output_path: str = None) -> str:
         """Convert CSV DataFrame to Parquet format with optimization"""
-        
+
         # Optimize data types for better compression and speed
         df_optimized = self._optimize_dtypes(csv_data)
-        
+
         # Create Parquet file in memory
         table = pa.Table.from_pandas(df_optimized)
-        
+
         # Use memory buffer for Cloud environment
         buffer = io.BytesIO()
-        
+
         # Write with optimal compression settings
         pq.write_table(
-            table, 
-            buffer, 
+            table,
+            buffer,
             compression='snappy',  # Good balance of speed vs compression
             use_dictionary=True,   # Better for categorical data
             row_group_size=50000,  # Optimize for typical MMM dataset sizes
             use_byte_stream_split=True  # Better compression for floats
         )
-        
+
         buffer.seek(0)
-        
+
         if output_path:
             # Save to local file
             with open(output_path, 'wb') as f:
                 f.write(buffer.read())
             buffer.seek(0)
-        
+
         logger.info(f"Converted DataFrame to Parquet: {len(df_optimized):,} rows, "
                    f"Original CSV size: {df_optimized.memory_usage(deep=True).sum() / 1024**2:.1f} MB")
-        
+
         return buffer
-    
+
     def _optimize_dtypes(self, df: pd.DataFrame) -> pd.DataFrame:
         """Optimize DataFrame data types for better performance"""
         df_opt = df.copy()
-        
+
         for col in df_opt.columns:
             col_data = df_opt[col]
-            
+
             # Skip date columns
             if col.lower() in ['date', 'timestamp'] or pd.api.types.is_datetime64_any_dtype(col_data):
                 continue
-                
+
             # Optimize numeric columns
             if pd.api.types.is_numeric_dtype(col_data):
                 # Check if it's actually integers
@@ -367,54 +367,54 @@ class DataProcessor:
                             # Check if float32 is sufficient
                             if (col_data.astype('float32') == col_data).all():
                                 df_opt[col] = col_data.astype('float32')
-                        
+
             # Optimize string/categorical columns
             elif pd.api.types.is_object_dtype(col_data):
                 # Convert to category if few unique values
                 unique_ratio = col_data.nunique() / len(col_data)
                 if unique_ratio < 0.5:  # Less than 50% unique values
                     df_opt[col] = col_data.astype('category')
-        
-        memory_reduction = (1 - df_opt.memory_usage(deep=True).sum() / 
+
+        memory_reduction = (1 - df_opt.memory_usage(deep=True).sum() /
                            df.memory_usage(deep=True).sum()) * 100
-        
+
         logger.info(f"Memory usage reduced by {memory_reduction:.1f}%")
         return df_opt
-    
-    def upload_to_gcs(self, data_buffer: io.BytesIO, 
+
+    def upload_to_gcs(self, data_buffer: io.BytesIO,
                      gcs_path: str) -> str:
         """Upload Parquet buffer to GCS"""
         bucket = self.storage_client.bucket(self.gcs_bucket)
         blob = bucket.blob(gcs_path)
-        
+
         data_buffer.seek(0)
         blob.upload_from_file(data_buffer, content_type='application/octet-stream')
-        
+
         logger.info(f"Uploaded Parquet file to gs://{self.gcs_bucket}/{gcs_path}")
         return f"gs://{self.gcs_bucket}/{gcs_path}"
-    
+
     def read_parquet_from_gcs(self, gcs_path: str) -> pd.DataFrame:
         """Read Parquet file from GCS"""
         bucket = self.storage_client.bucket(self.gcs_bucket)
         blob = bucket.blob(gcs_path)
-        
+
         # Download to memory buffer
         buffer = io.BytesIO()
         blob.download_to_file(buffer)
         buffer.seek(0)
-        
+
         # Read Parquet from buffer
         df = pd.read_parquet(buffer)
-        
+
         logger.info(f"Loaded Parquet file from GCS: {len(df):,} rows, "
                    f"{len(df.columns)} columns")
-        
+
         return df
 ```
 
 ### Updated Streamlit Application
 
-**File: `app/streamlit_app.py`** (Update data processing section)
+**File: `app/0_Connect_Your_Data.py`** (Update data processing section)
 ```python
 import json, os, subprocess, tempfile, time, shlex
 import streamlit as st
@@ -487,7 +487,7 @@ if st.button("Train"):
                 sql = effective_sql()
                 csv_path = None
                 parquet_path = None
-                
+
                 if sql:
                     if not sf_password:
                         st.error("Password is required to pull data from Snowflake.")
@@ -495,29 +495,29 @@ if st.button("Train"):
                     try:
                         st.write("Querying Snowflake…")
                         df = run_sql(sql)
-                        
+
                         # NEW: Create both CSV (for compatibility) and Parquet (for speed)
                         csv_path = os.path.join(td, "input_snapshot.csv")
                         parquet_path = os.path.join(td, "input_snapshot.parquet")
-                        
+
                         # Save CSV for backward compatibility
                         df.to_csv(csv_path, index=False)
-                        
+
                         # NEW: Create optimized Parquet file
                         st.write("Optimizing data format (CSV → Parquet)...")
                         parquet_buffer = data_processor.csv_to_parquet(df, parquet_path)
-                        
+
                         # Show optimization results
                         csv_size = os.path.getsize(csv_path) / 1024**2
                         parquet_size = os.path.getsize(parquet_path) / 1024**2
                         compression_ratio = (1 - parquet_size / csv_size) * 100
-                        
+
                         st.success(f"Data optimization complete:")
                         st.write(f"- Original CSV: {csv_size:.1f} MB")
                         st.write(f"- Optimized Parquet: {parquet_size:.1f} MB")
                         st.write(f"- Size reduction: {compression_ratio:.1f}%")
                         st.write(f"- Pulled {len(df):,} rows from Snowflake")
-                        
+
                     except Exception as e:
                         st.error(f"Query failed: {e}")
                         st.stop()
@@ -531,8 +531,8 @@ if st.button("Train"):
 
                 # 3) Build job.json with both CSV and Parquet paths
                 job_cfg = build_job_json(
-                    td, 
-                    csv_path=csv_path, 
+                    td,
+                    csv_path=csv_path,
                     parquet_path=parquet_path,  # NEW: Pass Parquet path
                     annotations_path=annotations_path
                 )
@@ -541,7 +541,7 @@ if st.button("Train"):
                 env = os.environ.copy()
                 if sf_password:
                     env["SNOWFLAKE_PASSWORD"] = sf_password
-                
+
                 # NEW: Performance environment variables
                 env["R_MAX_CORES"] = str(os.cpu_count() or 4)
                 env["OMP_NUM_THREADS"] = str(os.cpu_count() or 4)
@@ -585,7 +585,7 @@ if st.button("Train"):
 ```r
 #!/usr/bin/env Rscript
 
-## ---------- ENV ---------- 
+## ---------- ENV ----------
 Sys.setenv(
   RETICULATE_PYTHON = "/usr/bin/python3",
   RETICULATE_AUTOCONFIGURE = "0",
@@ -625,22 +625,22 @@ cfg <- get_cfg()
 # NEW: Check for Parquet file first (faster loading)
 if (!is.null(cfg$parquet_path) && file.exists(cfg$parquet_path)) {
   message("→ Reading optimized Parquet file: ", cfg$parquet_path)
-  
+
   # Load Parquet file (much faster than CSV)
   df <- arrow::read_parquet(
     cfg$parquet_path,
     # Optimize memory usage
     as_data_frame = TRUE
   )
-  
+
   message(sprintf("✅ Parquet loaded: %s rows, %s columns in %.2f seconds",
                  format(nrow(df), big.mark = ","),
                  ncol(df),
                  proc.time()[["elapsed"]]))
-  
+
 } else if (!is.null(cfg$csv_path) && file.exists(cfg$csv_path)) {
   message("→ Reading CSV provided by Streamlit: ", cfg$csv_path)
-  
+
   # Fallback to CSV with optimized reading
   df <- readr::read_csv(
     cfg$csv_path,
@@ -649,11 +649,11 @@ if (!is.null(cfg$parquet_path) && file.exists(cfg$parquet_path)) {
     lazy = FALSE,
     show_col_types = FALSE
   )
-  
-  message(sprintf("✅ CSV loaded: %s rows, %s columns", 
+
+  message(sprintf("✅ CSV loaded: %s rows, %s columns",
                  format(nrow(df), big.mark = ","),
                  ncol(df)))
-  
+
 } else {
   stop(paste(
     "Neither parquet_path nor csv_path found in job.json or files missing.",
@@ -674,12 +674,12 @@ hyperparameters <- list()
 # NEW: Use parallel processing for hyperparameter setup if needed
 if (length(hyper_vars) > 10) {
   message("→ Setting up hyperparameters in parallel...")
-  
+
   hyperparameters <- future_lapply(hyper_vars, function(v) {
     if (v == "ORGANIC_TRAFFIC") {
       list(
         alphas = c(0.5, 2.0),
-        gammas = c(0.3, 0.7), 
+        gammas = c(0.3, 0.7),
         thetas = c(0.9, 0.99)
       )
     } else if (v == "TV_COST") {
@@ -702,10 +702,10 @@ if (length(hyper_vars) > 10) {
       )
     }
   }, future.seed = TRUE)
-  
+
   # Convert to named list
   names(hyperparameters) <- hyper_vars
-  
+
   # Flatten the structure for Robyn
   hyperparameters_flat <- list()
   for (v in names(hyperparameters)) {
@@ -714,7 +714,7 @@ if (length(hyper_vars) > 10) {
     hyperparameters_flat[[paste0(v, "_thetas")]] <- hyperparameters[[v]]$thetas
   }
   hyperparameters <- hyperparameters_flat
-  
+
 } else {
   # Original sequential approach for smaller parameter sets
   for (v in hyper_vars) {
@@ -789,7 +789,7 @@ class HealthChecker:
             'r_ready': False,
             'gcs_authenticated': False
         }
-        
+
     def check_container_health(self):
         """Comprehensive health check for the container"""
         health_status = {
@@ -798,24 +798,24 @@ class HealthChecker:
             'uptime_seconds': (datetime.now() - self.startup_time).total_seconds(),
             'checks': {}
         }
-        
+
         try:
             # Check system resources
             health_status['checks']['cpu_usage'] = psutil.cpu_percent(interval=1)
             health_status['checks']['memory_usage'] = psutil.virtual_memory().percent
             health_status['checks']['disk_usage'] = psutil.disk_usage('/').percent
-            
+
             # Check if R is available
             try:
                 import subprocess
-                result = subprocess.run(['R', '--version'], 
+                result = subprocess.run(['R', '--version'],
                                       capture_output=True, text=True, timeout=5)
                 health_status['checks']['r_available'] = result.returncode == 0
                 self.warm_status['r_ready'] = result.returncode == 0
             except Exception as e:
                 health_status['checks']['r_available'] = False
                 health_status['checks']['r_error'] = str(e)
-            
+
             # Check GCS authentication
             try:
                 from google.cloud import storage
@@ -829,7 +829,7 @@ class HealthChecker:
             except Exception as e:
                 health_status['checks']['gcs_authenticated'] = False
                 health_status['checks']['gcs_error'] = str(e)
-            
+
             # Check Python dependencies
             try:
                 import pandas, numpy, pyarrow, streamlit
@@ -838,25 +838,25 @@ class HealthChecker:
             except ImportError as e:
                 health_status['checks']['python_deps'] = False
                 health_status['checks']['python_deps_error'] = str(e)
-            
+
             # Overall container readiness
             self.warm_status['container_ready'] = all([
                 health_status['checks'].get('r_available', False),
-                health_status['checks'].get('gcs_authenticated', False), 
+                health_status['checks'].get('gcs_authenticated', False),
                 health_status['checks'].get('python_deps', False)
             ])
-            
+
             health_status['warm_status'] = self.warm_status
-            
+
             # Determine overall health
             critical_checks = ['r_available', 'gcs_authenticated', 'python_deps']
             if not all(health_status['checks'].get(check, False) for check in critical_checks):
                 health_status['status'] = 'unhealthy'
-            
+
         except Exception as e:
             health_status['status'] = 'error'
             health_status['error'] = str(e)
-            
+
         return health_status
 
 # Global health checker instance
@@ -865,20 +865,20 @@ health_checker = HealthChecker()
 def create_health_page():
     """Create Streamlit page for health checks"""
     st.set_page_config(
-        page_title="Health Check", 
-        page_icon="🏥", 
+        page_title="Health Check",
+        page_icon="🏥",
         layout="wide"
     )
-    
+
     st.title("🏥 Container Health Status")
-    
+
     # Auto-refresh every 10 seconds
     if st.button("🔄 Refresh Health Status") or 'auto_refresh' not in st.session_state:
         st.session_state['auto_refresh'] = True
         st.rerun()
-    
+
     health_status = health_checker.check_container_health()
-    
+
     # Display overall status
     if health_status['status'] == 'healthy':
         st.success("✅ Container is healthy and ready")
@@ -886,41 +886,41 @@ def create_health_page():
         st.warning("⚠️ Container has health issues")
     else:
         st.error("❌ Container health check failed")
-    
+
     # Display detailed metrics in columns
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
         st.metric("CPU Usage", f"{health_status['checks'].get('cpu_usage', 0):.1f}%")
         st.metric("Memory Usage", f"{health_status['checks'].get('memory_usage', 0):.1f}%")
-        
+
     with col2:
         st.metric("Disk Usage", f"{health_status['checks'].get('disk_usage', 0):.1f}%")
         uptime = health_status.get('uptime_seconds', 0)
         st.metric("Uptime", f"{uptime/60:.1f} min")
-        
+
     with col3:
         r_status = "✅" if health_status['checks'].get('r_available') else "❌"
         st.metric("R Available", r_status)
         gcs_status = "✅" if health_status['checks'].get('gcs_authenticated') else "❌"
         st.metric("GCS Auth", gcs_status)
-    
+
     # Warm status indicators
     st.subheader("🔥 Warm-up Status")
     warm_status = health_status.get('warm_status', {})
-    
+
     for component, status in warm_status.items():
         icon = "✅" if status else "⏳"
         st.write(f"{icon} {component.replace('_', ' ').title()}: {'Ready' if status else 'Not Ready'}")
-    
+
     # Detailed health check results
     with st.expander("🔍 Detailed Health Checks"):
         st.json(health_status)
-        
+
     # Auto-refresh countdown
     st.write("---")
     st.write("Page will auto-refresh every 30 seconds when container is warming up")
-    
+
     return health_status
 
 if __name__ == "__main__":
@@ -935,7 +935,7 @@ create_health_page()
 
 ### Container Warming Script
 
-**File: `app/warm_container.py`** (New file)  
+**File: `app/warm_container.py`** (New file)
 ```python
 """
 Container warming script to pre-load dependencies and authenticate services
@@ -959,54 +959,54 @@ class ContainerWarmer:
     def __init__(self):
         self.warming_tasks = []
         self.warming_status = {}
-        
+
     def warm_python_environment(self):
         """Pre-import critical Python packages"""
         logger.info("🐍 Warming Python environment...")
         start_time = time.time()
-        
+
         try:
             # Import data processing libraries
             import pandas as pd
             import numpy as np
             import pyarrow as pa
             import pyarrow.parquet as pq
-            
+
             # Import cloud libraries
             from google.cloud import storage, secretmanager
             from google.auth import default
-            
+
             # Import streamlit
             import streamlit as st
-            
+
             # Import snowflake
             import snowflake.connector
-            
+
             # Pre-create commonly used objects
             _ = storage.Client()  # Initialize GCS client
             _ = pd.DataFrame({'test': [1, 2, 3]})  # Pre-allocate pandas
             _ = np.array([1, 2, 3])  # Pre-allocate numpy
-            
+
             elapsed = time.time() - start_time
             logger.info(f"✅ Python environment warmed in {elapsed:.2f}s")
             self.warming_status['python'] = True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to warm Python environment: {e}")
             self.warming_status['python'] = False
-    
+
     def warm_r_environment(self):
         """Pre-load R and critical packages"""
         logger.info("📊 Warming R environment...")
         start_time = time.time()
-        
+
         try:
             # R script to pre-load packages
             r_warmup_script = """
             # Suppress package startup messages
             suppressPackageStartupMessages({
                 library(jsonlite)
-                library(dplyr) 
+                library(dplyr)
                 library(tidyr)
                 library(readr)
                 library(arrow)
@@ -1017,22 +1017,22 @@ class ContainerWarmer:
                 library(parallel)
                 library(future)
             })
-            
+
             # Configure parallel processing
             max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "4"))
             plan(multisession, workers = max_cores)
-            
-            # Configure reticulate  
+
+            # Configure reticulate
             Sys.setenv(RETICULATE_PYTHON = "/usr/bin/python3")
             Sys.setenv(RETICULATE_AUTOCONFIGURE = "0")
-            
+
             # Test basic functionality
             df <- data.frame(x = 1:10, y = letters[1:10])
             result <- df %>% filter(x > 5)
-            
+
             cat("R environment warmed successfully\\n")
             """
-            
+
             # Execute R warming script
             result = subprocess.run(
                 ['R', '--slave', '--vanilla', '-e', r_warmup_script],
@@ -1040,7 +1040,7 @@ class ContainerWarmer:
                 text=True,
                 timeout=60  # 1 minute timeout
             )
-            
+
             if result.returncode == 0:
                 elapsed = time.time() - start_time
                 logger.info(f"✅ R environment warmed in {elapsed:.2f}s")
@@ -1048,79 +1048,79 @@ class ContainerWarmer:
             else:
                 logger.error(f"❌ R warming failed: {result.stderr}")
                 self.warming_status['r'] = False
-                
+
         except subprocess.TimeoutExpired:
             logger.error("❌ R environment warming timed out")
             self.warming_status['r'] = False
         except Exception as e:
             logger.error(f"❌ Failed to warm R environment: {e}")
             self.warming_status['r'] = False
-    
+
     def warm_gcs_authentication(self):
         """Pre-authenticate with Google Cloud Services"""
         logger.info("☁️ Warming GCS authentication...")
         start_time = time.time()
-        
+
         try:
             from google.cloud import storage
             from google.auth import default
-            
+
             # Get default credentials
             credentials, project = default()
-            
+
             # Initialize storage client
             storage_client = storage.Client(credentials=credentials)
-            
+
             # Test bucket access
             bucket_name = os.getenv('GCS_BUCKET', 'mmm-app-output')
             bucket = storage_client.bucket(bucket_name)
-            
+
             # Perform lightweight operation to verify access
             list(storage_client.list_blobs(bucket, max_results=1))
-            
+
             elapsed = time.time() - start_time
             logger.info(f"✅ GCS authentication warmed in {elapsed:.2f}s")
             self.warming_status['gcs'] = True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to warm GCS authentication: {e}")
             self.warming_status['gcs'] = False
-    
+
     def warm_system_resources(self):
         """Warm system-level resources"""
         logger.info("🖥️ Warming system resources...")
         start_time = time.time()
-        
+
         try:
             # Get system information
             cpu_count = os.cpu_count()
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
-            
+
             logger.info(f"System specs: {cpu_count} CPUs, {memory.total//1024**3}GB RAM")
-            
+
             # Set optimal environment variables
             os.environ['R_MAX_CORES'] = str(cpu_count)
-            os.environ['OMP_NUM_THREADS'] = str(cpu_count) 
+            os.environ['OMP_NUM_THREADS'] = str(cpu_count)
             os.environ['OPENBLAS_NUM_THREADS'] = str(cpu_count)
-            
+
             # Pre-allocate some memory to reduce fragmentation
             dummy_data = [0] * 1000000  # Allocate ~8MB
             del dummy_data
-            
+
             elapsed = time.time() - start_time
             logger.info(f"✅ System resources warmed in {elapsed:.2f}s")
             self.warming_status['system'] = True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to warm system resources: {e}")
             self.warming_status['system'] = False
-    
+
     def run_parallel_warming(self):
         """Run all warming tasks in parallel"""
         logger.info("🔥 Starting container warming process...")
         total_start_time = time.time()
-        
+
         # Define warming tasks
         warming_tasks = [
             ('system', self.warm_system_resources),
@@ -1128,14 +1128,14 @@ class ContainerWarmer:
             ('gcs', self.warm_gcs_authentication),
             ('r', self.warm_r_environment)  # R last as it's most time-consuming
         ]
-        
+
         # Execute tasks in parallel
         with ThreadPoolExecutor(max_workers=4) as executor:
             future_to_task = {
-                executor.submit(task_func): task_name 
+                executor.submit(task_func): task_name
                 for task_name, task_func in warming_tasks
             }
-            
+
             for future in as_completed(future_to_task):
                 task_name = future_to_task[future]
                 try:
@@ -1143,13 +1143,13 @@ class ContainerWarmer:
                     logger.info(f"✅ {task_name} warming completed")
                 except Exception as e:
                     logger.error(f"❌ {task_name} warming failed: {e}")
-        
+
         total_elapsed = time.time() - total_start_time
         successful_tasks = sum(1 for status in self.warming_status.values() if status)
         total_tasks = len(self.warming_status)
-        
+
         logger.info(f"🎯 Container warming completed: {successful_tasks}/{total_tasks} tasks successful in {total_elapsed:.2f}s")
-        
+
         # Write warming status to file for health checks
         try:
             import json
@@ -1162,14 +1162,14 @@ class ContainerWarmer:
                 }, f)
         except Exception as e:
             logger.warning(f"Could not write warming status: {e}")
-        
+
         return self.warming_status
 
 def main():
     """Main warming function"""
     warmer = ContainerWarmer()
     status = warmer.run_parallel_warming()
-    
+
     # Exit with error code if critical components failed
     critical_components = ['python', 'gcs']
     if not all(status.get(comp, False) for comp in critical_components):
@@ -1220,10 +1220,10 @@ WARMUP_PID=$!
 
 # Start the main application
 echo "🌐 Starting Streamlit application..."
-test -f streamlit_app.py || { echo 'Missing /app/streamlit_app.py'; ls -la; exit 1; }
+test -f 0_Connect_Your_Data.py || { echo 'Missing /app/0_Connect_Your_Data.py'; ls -la; exit 1; }
 
 # Start streamlit in background
-python3 -m streamlit run streamlit_app.py --server.address=0.0.0.0 --server.port=${PORT} &
+python3 -m streamlit run 0_Connect_Your_Data.py --server.address=0.0.0.0 --server.port=${PORT} &
 STREAMLIT_PID=$!
 
 # Wait for warmup to complete (with timeout)
@@ -1269,10 +1269,10 @@ resource "google_cloud_run_service" "svc" {
         # Allocate CPU during startup for warming
         "run.googleapis.com/cpu-throttling" = "false"
         # Increase startup timeout for warming
-        "run.googleapis.com/timeout" = "600s"  
+        "run.googleapis.com/timeout" = "600s"
       }
     }
-    
+
     spec {
       service_account_name  = google_service_account.runner.email
       container_concurrency = 1
@@ -1280,7 +1280,7 @@ resource "google_cloud_run_service" "svc" {
 
       containers {
         image = var.image
-        
+
         resources {
           limits = {
             cpu    = var.cpu_limit
@@ -1360,7 +1360,7 @@ resource "google_cloud_scheduler_job" "warmup_job" {
   http_target {
     http_method = "GET"
     uri         = "${google_cloud_run_service.svc.status[0].url}/health"
-    
+
     headers = {
       "User-Agent" = "Cloud-Scheduler-Warmup"
     }
@@ -1373,7 +1373,7 @@ resource "google_cloud_scheduler_job" "warmup_job" {
 
 # Enable Cloud Scheduler API
 resource "google_project_service" "scheduler" {
-  project            = var.project_id  
+  project            = var.project_id
   service            = "cloudscheduler.googleapis.com"
   disable_on_destroy = false
 }
@@ -1398,29 +1398,29 @@ import json
 def test_resource_scaling():
     """Test that the container is using upgraded resources"""
     print("🧪 Testing Resource Scaling...")
-    
+
     try:
         import psutil
         cpu_count = psutil.cpu_count()
         memory = psutil.virtual_memory()
-        
+
         print(f"✅ CPU cores available: {cpu_count}")
         print(f"✅ Total memory: {memory.total // 1024**3} GB")
-        
+
         # Verify environment variables are set
         r_cores = os.getenv('R_MAX_CORES', 'Not set')
-        omp_threads = os.getenv('OMP_NUM_THREADS', 'Not set') 
-        
+        omp_threads = os.getenv('OMP_NUM_THREADS', 'Not set')
+
         print(f"✅ R_MAX_CORES: {r_cores}")
         print(f"✅ OMP_NUM_THREADS: {omp_threads}")
-        
+
         if cpu_count >= 8 and memory.total >= 30 * 1024**3:  # 30GB+
             print("✅ Resource scaling test PASSED")
             return True
         else:
             print("❌ Resource scaling test FAILED - insufficient resources")
             return False
-            
+
     except Exception as e:
         print(f"❌ Resource scaling test ERROR: {e}")
         return False
@@ -1428,55 +1428,55 @@ def test_resource_scaling():
 def test_parquet_performance():
     """Test Parquet vs CSV performance"""
     print("\n🧪 Testing Parquet Performance...")
-    
+
     try:
         # Create test dataset
         test_data = pd.DataFrame({
             'date': pd.date_range('2024-01-01', periods=10000, freq='D'),
             'cost_column_1': np.random.rand(10000) * 1000,
-            'cost_column_2': np.random.rand(10000) * 500, 
+            'cost_column_2': np.random.rand(10000) * 500,
             'impressions': np.random.randint(0, 100000, 10000),
             'category': np.random.choice(['A', 'B', 'C', 'D'], 10000)
         })
-        
+
         # Test CSV writing/reading
         csv_start = time.time()
         test_data.to_csv('/tmp/test.csv', index=False)
         csv_write_time = time.time() - csv_start
-        
-        csv_start = time.time() 
+
+        csv_start = time.time()
         csv_loaded = pd.read_csv('/tmp/test.csv')
         csv_read_time = time.time() - csv_start
-        
+
         # Test Parquet writing/reading
         parquet_start = time.time()
         test_data.to_parquet('/tmp/test.parquet', compression='snappy')
         parquet_write_time = time.time() - parquet_start
-        
+
         parquet_start = time.time()
-        parquet_loaded = pd.read_parquet('/tmp/test.parquet') 
+        parquet_loaded = pd.read_parquet('/tmp/test.parquet')
         parquet_read_time = time.time() - parquet_start
-        
+
         # Compare file sizes
         csv_size = os.path.getsize('/tmp/test.csv') / 1024**2  # MB
         parquet_size = os.path.getsize('/tmp/test.parquet') / 1024**2  # MB
-        
+
         print(f"📊 CSV - Write: {csv_write_time:.3f}s, Read: {csv_read_time:.3f}s, Size: {csv_size:.1f}MB")
         print(f"📊 Parquet - Write: {parquet_write_time:.3f}s, Read: {parquet_read_time:.3f}s, Size: {parquet_size:.1f}MB")
-        
+
         read_speedup = csv_read_time / parquet_read_time
         size_reduction = (1 - parquet_size / csv_size) * 100
-        
+
         print(f"✅ Read speedup: {read_speedup:.1f}x")
         print(f"✅ Size reduction: {size_reduction:.1f}%")
-        
+
         if read_speedup > 1.5 and size_reduction > 20:
             print("✅ Parquet performance test PASSED")
             return True
         else:
             print("❌ Parquet performance test FAILED")
             return False
-            
+
     except Exception as e:
         print(f"❌ Parquet performance test ERROR: {e}")
         return False
@@ -1484,24 +1484,24 @@ def test_parquet_performance():
 def test_container_warming():
     """Test container warming functionality"""
     print("\n🧪 Testing Container Warming...")
-    
+
     try:
         # Test health endpoint
         response = requests.get('http://localhost:8080/health', timeout=10)
-        
+
         if response.status_code == 200:
             print("✅ Health endpoint accessible")
-            
+
             # Check if warming status file exists
             if os.path.exists('/tmp/warming_status.json'):
                 with open('/tmp/warming_status.json', 'r') as f:
                     warming_status = json.load(f)
-                
+
                 print(f"✅ Warming status: {warming_status}")
-                
+
                 successful_components = sum(1 for status in warming_status['warming_status'].values() if status)
                 total_components = len(warming_status['warming_status'])
-                
+
                 if successful_components >= 3:  # At least 3 of 4 components
                     print("✅ Container warming test PASSED")
                     return True
@@ -1514,7 +1514,7 @@ def test_container_warming():
         else:
             print(f"❌ Health endpoint returned status {response.status_code}")
             return False
-            
+
     except Exception as e:
         print(f"❌ Container warming test ERROR: {e}")
         return False
@@ -1522,48 +1522,48 @@ def test_container_warming():
 def test_r_performance():
     """Test R environment performance"""
     print("\n🧪 Testing R Performance...")
-    
+
     try:
         r_test_script = """
         # Test parallel processing
         library(parallel)
         library(future)
-        
+
         # Check core configuration
         max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "1"))
         cat("R_MAX_CORES:", max_cores, "\\n")
-        
+
         # Test parallel computation
         start_time <- Sys.time()
         plan(multisession, workers = max_cores)
-        
+
         # Parallel computation test
         result <- future_lapply(1:1000, function(x) {
             sum(rnorm(1000))
         }, future.seed = TRUE)
-        
+
         end_time <- Sys.time()
         elapsed <- as.numeric(end_time - start_time)
-        
+
         cat("Parallel computation time:", elapsed, "seconds\\n")
-        
+
         # Test arrow/parquet reading
         if (requireNamespace("arrow", quietly = TRUE)) {
             cat("Arrow package available\\n")
         } else {
             cat("Arrow package NOT available\\n")
         }
-        
+
         cat("R performance test completed\\n")
         """
-        
+
         result = subprocess.run(
             ['R', '--slave', '--vanilla', '-e', r_test_script],
             capture_output=True,
             text=True,
             timeout=30
         )
-        
+
         if result.returncode == 0:
             print("✅ R performance test output:")
             print(result.stdout)
@@ -1573,7 +1573,7 @@ def test_r_performance():
             print("❌ R performance test FAILED:")
             print(result.stderr)
             return False
-            
+
     except Exception as e:
         print(f"❌ R performance test ERROR: {e}")
         return False
@@ -1581,16 +1581,16 @@ def test_r_performance():
 def main():
     """Run all optimization tests"""
     print("🚀 Running Optimization Tests\n")
-    
+
     tests = [
         ("Resource Scaling", test_resource_scaling),
-        ("Parquet Performance", test_parquet_performance), 
+        ("Parquet Performance", test_parquet_performance),
         ("Container Warming", test_container_warming),
         ("R Performance", test_r_performance)
     ]
-    
+
     results = {}
-    
+
     for test_name, test_func in tests:
         try:
             results[test_name] = test_func()
@@ -1598,20 +1598,20 @@ def main():
             print(f"❌ {test_name} test crashed: {e}")
             results[test_name] = False
         print()  # Add spacing between tests
-    
+
     # Summary
     print("📋 Test Results Summary:")
     print("=" * 50)
-    
+
     passed = sum(1 for result in results.values() if result)
     total = len(results)
-    
+
     for test_name, passed_test in results.items():
         status = "✅ PASSED" if passed_test else "❌ FAILED"
         print(f"{test_name}: {status}")
-    
+
     print(f"\nOverall: {passed}/{total} tests passed")
-    
+
     if passed == total:
         print("🎉 All optimization tests PASSED!")
         return 0
@@ -1712,11 +1712,11 @@ cd infra/terraform
 # Update terraform.tfvars with new image
 cat > terraform.tfvars << EOF
 project_id     = "$PROJECT_ID"
-region         = "$REGION"  
+region         = "$REGION"
 bucket_name    = "mmm-app-output"
 image          = "$FULL_IMAGE_NAME"
 cpu_limit      = "8"
-memory_limit   = "32Gi" 
+memory_limit   = "32Gi"
 min_instances  = 2
 max_instances  = 10
 EOF
@@ -1787,7 +1787,7 @@ BENCHMARK_RESULT=$(curl -s -X POST "$SERVICE_URL/api/benchmark" \
 
 if [ "$BENCHMARK_RESULT" != "benchmark_failed" ]; then
     print_success "✅ Performance benchmark completed"
-else  
+else
     print_warning "⚠️ Performance benchmark could not be run"
 fi
 
@@ -1801,18 +1801,18 @@ cat > optimization_report.md << EOF
 
 ## Deployment Summary
 - **Deployment Time**: $(date)
-- **Image**: $FULL_IMAGE_NAME  
+- **Image**: $FULL_IMAGE_NAME
 - **Service URL**: $SERVICE_URL
 
 ## Optimizations Applied
 
 ### ✅ Resource Scaling
 - CPU: 4 → 8 vCPUs
-- Memory: 16GB → 32GB  
+- Memory: 16GB → 32GB
 - Parallel processing: Enabled
 - Status: **DEPLOYED**
 
-### ✅ Data Format Optimization  
+### ✅ Data Format Optimization
 - Format: CSV → Parquet
 - Compression: Snappy
 - Expected speedup: 5-10x faster data loading
@@ -1829,7 +1829,7 @@ cat > optimization_report.md << EOF
 
 ### Before Optimizations
 - Small jobs: 20-30 minutes
-- Medium jobs: 45-60 minutes  
+- Medium jobs: 45-60 minutes
 - Large jobs: 90-120 minutes
 
 ### After Optimizations (Expected)
@@ -1862,7 +1862,7 @@ echo ""
 echo "🎉 MMM Trainer Optimizations Successfully Deployed!"
 echo ""
 echo "📊 Summary:"
-echo "  - Resource scaling: ✅ 4→8 vCPU, 16→32GB RAM"  
+echo "  - Resource scaling: ✅ 4→8 vCPU, 16→32GB RAM"
 echo "  - Data format: ✅ CSV→Parquet optimization"
 echo "  - Container warming: ✅ Pre-warmed instances"
 echo "  - Service URL: $SERVICE_URL"
@@ -1903,7 +1903,7 @@ class PerformanceMonitor:
     def __init__(self, service_url: str):
         self.service_url = service_url.rstrip('/')
         self.metrics: List[PerformanceMetric] = []
-        
+
     def check_service_health(self) -> Dict:
         """Check service health and warming status"""
         try:
@@ -1914,22 +1914,22 @@ class PerformanceMonitor:
                 return {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
         except Exception as e:
             return {"status": "error", "error": str(e)}
-    
+
     def run_performance_test(self, job_type: str = "small") -> PerformanceMetric:
         """Run a performance test job"""
         print(f"🧪 Running {job_type} performance test...")
-        
+
         # Test parameters based on job type
         test_params = {
             "small": {"iterations": 50, "trials": 2, "expected_duration": 15},
-            "medium": {"iterations": 100, "trials": 3, "expected_duration": 30}, 
+            "medium": {"iterations": 100, "trials": 3, "expected_duration": 30},
             "large": {"iterations": 200, "trials": 5, "expected_duration": 60}
         }
-        
+
         params = test_params.get(job_type, test_params["small"])
-        
+
         start_time = datetime.datetime.now()
-        
+
         # Simulate training job (in real implementation, this would trigger actual training)
         test_payload = {
             "country": "test",
@@ -1938,27 +1938,27 @@ class PerformanceMonitor:
             "test_mode": True,
             "optimization_enabled": True
         }
-        
+
         try:
             # For this example, we'll simulate the request
             # In real implementation: response = requests.post(f"{self.service_url}/train", json=test_payload)
-            
+
             # Simulate processing time based on optimizations
             if job_type == "small":
                 time.sleep(2)  # Simulate 2 seconds (optimized from ~20 minutes)
-            elif job_type == "medium": 
+            elif job_type == "medium":
                 time.sleep(5)  # Simulate 5 seconds (optimized from ~45 minutes)
             else:
                 time.sleep(10) # Simulate 10 seconds (optimized from ~90 minutes)
-            
+
             end_time = datetime.datetime.now()
             duration = (end_time - start_time).total_seconds() / 60  # Convert to minutes
-            
+
             # Get resource usage from health endpoint
             health_data = self.check_service_health()
             cpu_usage = health_data.get("checks", {}).get("cpu_usage", 0)
             memory_usage = health_data.get("checks", {}).get("memory_usage", 0)
-            
+
             metric = PerformanceMetric(
                 timestamp=start_time,
                 job_type=job_type,
@@ -1968,15 +1968,15 @@ class PerformanceMonitor:
                 success=True,
                 optimization_version="v1.0"
             )
-            
+
             self.metrics.append(metric)
             print(f"✅ {job_type} test completed in {duration:.2f} minutes")
-            
+
             return metric
-            
+
         except Exception as e:
             print(f"❌ {job_type} test failed: {e}")
-            
+
             metric = PerformanceMetric(
                 timestamp=start_time,
                 job_type=job_type,
@@ -1986,35 +1986,35 @@ class PerformanceMonitor:
                 success=False,
                 optimization_version="v1.0"
             )
-            
+
             self.metrics.append(metric)
             return metric
-    
+
     def run_monitoring_cycle(self, cycles: int = 5):
         """Run multiple monitoring cycles"""
         print(f"🔄 Starting {cycles} monitoring cycles...")
-        
+
         for cycle in range(1, cycles + 1):
             print(f"\n📊 Monitoring Cycle {cycle}/{cycles}")
-            
+
             # Check health first
             health = self.check_service_health()
             print(f"Health Status: {health.get('status', 'unknown')}")
-            
+
             # Run performance tests
             for job_type in ["small", "medium", "large"]:
                 self.run_performance_test(job_type)
                 time.sleep(5)  # Brief pause between tests
-            
+
             if cycle < cycles:
                 print(f"⏰ Waiting 2 minutes before next cycle...")
                 time.sleep(120)  # Wait 2 minutes between cycles
-    
+
     def generate_report(self) -> str:
         """Generate performance analysis report"""
         if not self.metrics:
             return "No performance data collected."
-        
+
         # Convert to DataFrame for analysis
         df = pd.DataFrame([
             {
@@ -2027,7 +2027,7 @@ class PerformanceMonitor:
             }
             for m in self.metrics
         ])
-        
+
         # Calculate statistics
         stats_by_type = df.groupby('job_type').agg({
             'duration_minutes': ['mean', 'std', 'min', 'max'],
@@ -2035,7 +2035,7 @@ class PerformanceMonitor:
             'cpu_usage': 'mean',
             'memory_usage': 'mean'
         }).round(2)
-        
+
         # Generate report
         report = f"""
 # Performance Monitoring Report
@@ -2053,29 +2053,29 @@ class PerformanceMonitor:
 
 ### Duration Analysis
 """
-        
+
         # Compare against baseline expectations
         baseline = {"small": 25, "medium": 52.5, "large": 105}  # Pre-optimization averages
-        
+
         for job_type in ["small", "medium", "large"]:
             type_data = df[df['job_type'] == job_type]
             if len(type_data) > 0:
                 avg_duration = type_data['duration_minutes'].mean()
                 baseline_duration = baseline[job_type]
                 improvement = (1 - avg_duration / baseline_duration) * 100
-                
+
                 report += f"""
-- **{job_type.title()} Jobs**: 
+- **{job_type.title()} Jobs**:
   - Average Duration: {avg_duration:.1f} minutes
-  - Baseline: {baseline_duration} minutes  
+  - Baseline: {baseline_duration} minutes
   - Improvement: {improvement:.1f}%
   - Success Rate: {type_data['success'].mean()*100:.1f}%
 """
-        
+
         # Resource utilization
         avg_cpu = df['cpu_usage'].mean()
         avg_memory = df['memory_usage'].mean()
-        
+
         report += f"""
 
 ### Resource Utilization
@@ -2084,33 +2084,33 @@ class PerformanceMonitor:
 
 ### Recommendations
 """
-        
+
         if avg_cpu > 80:
             report += "- ⚠️ High CPU usage detected - consider further scaling\n"
         elif avg_cpu < 30:
             report += "- 💡 Low CPU usage - resources may be over-provisioned\n"
         else:
             report += "- ✅ CPU utilization appears optimal\n"
-            
+
         if avg_memory > 80:
             report += "- ⚠️ High memory usage detected - monitor for memory leaks\n"
         elif avg_memory < 30:
-            report += "- 💡 Low memory usage - memory allocation may be excessive\n" 
+            report += "- 💡 Low memory usage - memory allocation may be excessive\n"
         else:
             report += "- ✅ Memory utilization appears optimal\n"
-        
+
         # Overall assessment
         successful_tests = df['success'].sum()
         total_tests = len(df)
         success_rate = successful_tests / total_tests * 100
-        
+
         if success_rate >= 95:
             report += "\n## Overall Assessment: ✅ EXCELLENT"
         elif success_rate >= 80:
             report += "\n## Overall Assessment: ✅ GOOD"
         else:
             report += "\n## Overall Assessment: ⚠️ NEEDS ATTENTION"
-        
+
         report += f"""
 
 - Success Rate: {success_rate:.1f}%
@@ -2119,13 +2119,13 @@ class PerformanceMonitor:
 
 ## Next Steps
 1. Continue monitoring for 1 week to establish baseline
-2. Compare real training jobs against these synthetic tests  
+2. Compare real training jobs against these synthetic tests
 3. Consider implementing Phase 2 optimizations (parallel trials)
 4. Adjust resource allocation if needed based on utilization patterns
 """
-        
+
         return report
-    
+
     def save_metrics(self, filename: str = "performance_metrics.json"):
         """Save metrics to file"""
         data = [
@@ -2140,40 +2140,40 @@ class PerformanceMonitor:
             }
             for m in self.metrics
         ]
-        
+
         with open(filename, 'w') as f:
             json.dump(data, f, indent=2)
-        
+
         print(f"📁 Metrics saved to {filename}")
 
 def main():
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='Monitor MMM Trainer Performance')
     parser.add_argument('--service-url', required=True, help='MMM Trainer service URL')
     parser.add_argument('--cycles', type=int, default=3, help='Number of monitoring cycles')
     parser.add_argument('--output', default='performance_report.md', help='Output report filename')
-    
+
     args = parser.parse_args()
-    
+
     print("🚀 Starting MMM Trainer Performance Monitoring")
     print(f"Service URL: {args.service_url}")
     print(f"Monitoring Cycles: {args.cycles}")
-    
+
     monitor = PerformanceMonitor(args.service_url)
-    
+
     # Run monitoring
     monitor.run_monitoring_cycle(args.cycles)
-    
+
     # Generate and save report
     report = monitor.generate_report()
-    
+
     with open(args.output, 'w') as f:
         f.write(report)
-    
+
     # Save raw metrics
     monitor.save_metrics()
-    
+
     print(f"\n📋 Performance report saved to: {args.output}")
     print("🎯 Monitoring completed successfully!")
 
@@ -2206,7 +2206,7 @@ This implementation provides complete code for the three critical optimizations:
 
 ### 🧪 **Testing & Validation**
 - **Comprehensive test suite** validating all optimizations
-- **Deployment automation** with rollback capabilities  
+- **Deployment automation** with rollback capabilities
 - **Performance monitoring** with before/after comparisons
 - **Detailed reporting** of optimization effectiveness
 

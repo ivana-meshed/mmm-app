@@ -28,30 +28,30 @@ The MMM (Marketing Mix Modeling) Trainer is a cloud-native application built for
 graph TB
     %% User Layer
     User[👤 Data Scientist] --> Web[🌐 Streamlit Web App]
-    
+
     %% Application Layer
     Web --> |Configure Training| Main[📊 Main Training Page]
     Web --> |View Results| Results[📈 Results Browser]
     Web --> |Debug| Debug[🔧 Debug Results]
-    
+
     %% Data Sources
     Main --> |Query Data| SF[(❄️ Snowflake)]
     Main --> |Upload Annotations| Local[📁 Local Files]
-    
+
     %% Processing Layer
     Main --> |Execute| R[🔷 R/Robyn Engine]
     R --> |Load Libraries| Deps[📦 R Dependencies]
     R --> |ML Training| Nevergrad[🧠 Nevergrad/Python]
-    
+
     %% Storage Layer
     R --> |Upload Artifacts| GCS[(☁️ Google Cloud Storage)]
     Results --> |Browse Files| GCS
-    
+
     %% Infrastructure Layer
     Web -.-> |Deployed on| CloudRun[☁️ Cloud Run]
     CloudRun -.-> |Uses| SA[🔐 Service Account]
     SA -.-> |Access| IAM[🛡️ IAM Roles]
-    
+
     %% CI/CD Layer
     GitHub[📋 GitHub Repo] --> |Triggers| Actions[⚡ GitHub Actions]
     Actions --> |Build| Docker[🐳 Docker Image]
@@ -65,7 +65,7 @@ graph TB
     classDef data fill:#e8f5e8
     classDef infra fill:#fff3e0
     classDef storage fill:#fce4ec
-    
+
     class User user
     class Web,Main,Results,Debug app
     class SF,Local,GCS storage
@@ -89,7 +89,7 @@ graph TB
 
 ### 1. Streamlit Application (`app/`)
 
-#### Main Training Interface (`streamlit_app.py`)
+#### Main Training Interface (`0_Connect_Your_Data.py`)
 - **Purpose**: Primary interface for configuring and launching MMM training jobs
 - **Key Features**:
   - Snowflake connection configuration
@@ -122,27 +122,27 @@ flowchart TD
     Start([🚀 R Script Start]) --> LoadCfg[📋 Load Job Config]
     LoadCfg --> Auth[🔐 GCS Authentication]
     Auth --> LoadData[📊 Load Data from CSV]
-    
+
     LoadData --> Clean[🧹 Data Cleaning]
     Clean --> Country[🌍 Country Filtering]
     Country --> Features[⚙️ Feature Engineering]
-    
+
     Features --> Inputs[📥 Robyn Inputs]
     Inputs --> Hyper[🎯 Hyperparameters]
     Hyper --> Train[🏋️ Model Training]
-    
+
     Train --> Output[📤 Generate Outputs]
     Output --> Onepage[📄 Create Onepagers]
     Onepage --> Allocator[💰 Run Allocator]
-    
+
     Allocator --> Metrics[📊 Calculate Metrics]
     Metrics --> Upload[☁️ Upload to GCS]
     Upload --> End([✅ Complete])
-    
+
     classDef process fill:#e3f2fd
     classDef data fill:#e8f5e8
     classDef output fill:#fff3e0
-    
+
     class LoadCfg,Auth,Clean,Country,Features,Inputs,Hyper process
     class LoadData,Train data
     class Output,Onepage,Allocator,Metrics,Upload output
@@ -187,29 +187,29 @@ sequenceDiagram
     participant SF as ❄️ Snowflake
     participant R as 🔷 R Engine
     participant GCS as ☁️ GCS Bucket
-    
+
     U->>S: Configure training parameters
     U->>S: Submit training job
-    
+
     S->>SF: Query input data
     SF->>S: Return dataset
-    
+
     S->>S: Save data as CSV
     S->>S: Create job.json config
-    
+
     S->>R: Execute Rscript with job config
-    
+
     R->>R: Load and clean data
     R->>R: Feature engineering
     R->>R: Train Robyn models
     R->>R: Generate outputs & allocator
-    
+
     R->>GCS: Upload training artifacts
     R->>GCS: Upload logs and metrics
-    
+
     R->>S: Return exit code
     S->>U: Display training status
-    
+
     Note over GCS: Files stored at:<br/>gs://bucket/robyn/{rev}/{country}/{timestamp}/
 ```
 
@@ -220,17 +220,17 @@ sequenceDiagram
     participant S as 🌐 Results Page
     participant GCS as ☁️ GCS Bucket
     participant IAM as 🔐 IAM Service
-    
+
     U->>S: Access results page
     S->>GCS: List blobs with prefix
     GCS->>S: Return file listings
-    
+
     S->>S: Group by revision/country/timestamp
     S->>S: Parse metadata files
-    
+
     U->>S: Select specific run
     S->>GCS: Download file metadata
-    
+
     alt Signed URL Available
         S->>IAM: Request signed URL
         IAM->>S: Return temporary URL
@@ -282,7 +282,7 @@ export SNOWFLAKE_PASSWORD=your-password
 gcloud iam service-accounts create github-deployer \
     --display-name="GitHub Actions Deployer"
 
-# Create runtime service account  
+# Create runtime service account
 gcloud iam service-accounts create mmm-trainer-sa \
     --display-name="MMM Trainer Runtime"
 ```
@@ -393,7 +393,7 @@ docker run --rm mmm-app:local R -e "library(Robyn); library(reticulate); py_conf
 git checkout ci-cd
 git push origin ci-cd
 
-# Deploy to production (main branch)  
+# Deploy to production (main branch)
 git checkout main
 git push origin main
 ```
@@ -463,18 +463,18 @@ graph TB
         SA2[🤖 mmm-trainer-sa SA]
         IAM[🛡️ Cloud IAM]
     end
-    
+
     subgraph "Compute & Container"
         CR[☁️ Cloud Run]
         AR[📦 Artifact Registry]
         CB[🔨 Cloud Build]
     end
-    
+
     subgraph "Storage & Data"
         GCS[🗄️ Cloud Storage]
         GCSL[📋 Cloud Logging]
     end
-    
+
     subgraph "APIs & Services"
         API1[🌐 Cloud Run API]
         API2[🌐 Artifact Registry API]
@@ -482,48 +482,48 @@ graph TB
         API4[🌐 Cloud Storage API]
         API5[🌐 Cloud Build API]
     end
-    
+
     subgraph "External Integrations"
         GH[📋 GitHub Actions]
         SF[❄️ Snowflake]
         USER[👤 End Users]
     end
-    
+
     %% Identity flows
     GH -.->|OIDC Authentication| WIF
     WIF --> SA1
     SA1 -.->|Impersonate| SA2
     IAM --> SA1
     IAM --> SA2
-    
+
     %% Compute flows
     SA1 -->|Deploy| CR
     SA1 -->|Push Images| AR
     CR -->|Pull Images| AR
     CB -.->|Build Support| AR
-    
+
     %% Storage flows
     SA2 -->|Read/Write Artifacts| GCS
     CR -->|Application Logs| GCSL
     SA2 -.->|Generate Signed URLs| GCS
-    
+
     %% API enablement
     CR --> API1
     AR --> API2
     SA2 --> API3
     GCS --> API4
     CB --> API5
-    
+
     %% External connections
     USER -->|HTTPS Requests| CR
     CR -->|Query Data| SF
-    
+
     classDef identity fill:#e8f5e8
     classDef compute fill:#e3f2fd
     classDef storage fill:#fff3e0
     classDef api fill:#f3e5f5
     classDef external fill:#fce4ec
-    
+
     class WIF,SA1,SA2,IAM identity
     class CR,AR,CB compute
     class GCS,GCSL storage
@@ -563,22 +563,22 @@ Environment Variables:
 ```mermaid
 graph LR
     subgraph "Auto-scaling Logic"
-        IDLE[🟢 0 Instances<br/>No Traffic] 
+        IDLE[🟢 0 Instances<br/>No Traffic]
         COLD[🟡 Cold Start<br/>~30-60 seconds]
         WARM[🟢 1 Instance<br/>Serving Requests]
         SCALE[🔵 2+ Instances<br/>High Concurrency]
     end
-    
+
     IDLE -->|First Request| COLD
     COLD -->|Container Ready| WARM
     WARM -->|Traffic Spike| SCALE
     SCALE -->|Traffic Decreases| WARM
     WARM -->|15 min idle| IDLE
-    
+
     classDef active fill:#c8e6c9
     classDef scaling fill:#bbdefb
     classDef idle fill:#fff9c4
-    
+
     class WARM,SCALE active
     class COLD scaling
     class IDLE idle
@@ -591,38 +591,38 @@ graph LR
 graph TB
     subgraph "Artifact Registry Repository"
         REPO[📦 mmm-repo<br/>Format: Docker<br/>Location: europe-west1]
-        
+
         subgraph "Images"
             LATEST[🏷️ mmm-app:latest<br/>Production Image]
             SHA[🏷️ mmm-app:abc123<br/>Commit SHA Tag]
         end
-        
+
         subgraph "Metadata"
             SIZE[📏 Size: ~2.5 GB]
             LAYERS[📚 Layers: 25+]
             SCAN[🔍 Vulnerability Scanning]
         end
-        
+
         REPO --> LATEST
         REPO --> SHA
         REPO --> SIZE
         REPO --> LAYERS
         REPO --> SCAN
     end
-    
+
     subgraph "Access Control"
         SA1[🤖 github-deployer<br/>roles/artifactregistry.writer]
         SA2[🤖 mmm-trainer-sa<br/>roles/artifactregistry.reader]
         CR[☁️ Cloud Run<br/>Pull Access]
     end
-    
+
     SA1 -.->|Push Images| REPO
     SA2 -.->|Pull Images| REPO
     CR -.->|Runtime Pull| REPO
-    
+
     classDef registry fill:#e3f2fd
     classDef access fill:#e8f5e8
-    
+
     class REPO,LATEST,SHA,SIZE,LAYERS,SCAN registry
     class SA1,SA2,CR access
 ```
@@ -634,34 +634,34 @@ graph TB
 graph TB
     subgraph "Primary Storage Bucket: mmm-app-output"
         ROOT[🗄️ mmm-app-output/]
-        
+
         subgraph "Organized Hierarchy"
             ROBYN[📁 robyn/]
-            
+
             subgraph "Revision Level"
                 R100[📁 r100/]
                 R101[📁 r101/]
                 R102[📁 r102/]
             end
-            
+
             subgraph "Country Level (under r100/)"
                 FR[📁 fr/]
                 DE[📁 de/]
                 UK[📁 uk/]
             end
-            
+
             subgraph "Timestamp Level (under fr/)"
                 TS1[📁 0827_143022/]
                 TS2[📁 0827_151505/]
                 TS3[📁 0828_093011/]
             end
-            
+
             subgraph "Artifacts (under 0827_143022/)"
                 FILES[📄 best_model_id.txt<br/>📊 allocator_metrics.csv<br/>📈 1_7_3.png<br/>📋 robyn_console.log<br/>🔬 OutputModels.RDS<br/>📊 InputCollect.RDS]
             end
         end
     end
-    
+
     ROOT --> ROBYN
     ROBYN --> R100
     ROBYN --> R101
@@ -673,11 +673,11 @@ graph TB
     FR --> TS2
     FR --> TS3
     TS1 --> FILES
-    
+
     classDef bucket fill:#fff3e0
     classDef folder fill:#e8f5e8
     classDef files fill:#e3f2fd
-    
+
     class ROOT bucket
     class ROBYN,R100,R101,R102,FR,DE,UK,TS1,TS2,TS3 folder
     class FILES files
@@ -691,20 +691,20 @@ sequenceDiagram
     participant GCS as 🗄️ Cloud Storage
     participant WEB as 🌐 Streamlit App
     participant USER as 👤 End User
-    
+
     Note over R,GCS: Training Phase - Write Operations
     R->>SA: Authenticate with service account
     SA->>GCS: Create directory structure
     R->>GCS: Upload training artifacts
     R->>GCS: Upload logs and metrics
     R->>GCS: Upload visualizations (PNG/PDF)
-    
+
     Note over WEB,USER: Browsing Phase - Read Operations
     USER->>WEB: Access Results page
     WEB->>SA: Authenticate for listing
     SA->>GCS: List objects with prefix filter
     GCS->>WEB: Return object metadata
-    
+
     USER->>WEB: Request file download
     WEB->>SA: Generate signed URL
     SA->>GCS: Create temporary access token
@@ -723,48 +723,48 @@ graph TB
         OIDC[🔐 OIDC Token]
         WIF[🌐 Workload Identity Federation]
     end
-    
+
     subgraph "Service Accounts"
         subgraph "Deployment SA"
             SA1[🤖 github-deployer@project.iam.gserviceaccount.com]
             SA1ROLES[🛡️ Roles:<br/>• roles/run.admin<br/>• roles/artifactregistry.reader<br/>• roles/storage.objectAdmin<br/>• roles/iam.serviceAccountUser<br/>• roles/iam.serviceAccountTokenCreator]
         end
-        
+
         subgraph "Runtime SA"
             SA2[🤖 mmm-trainer-sa@project.iam.gserviceaccount.com]
             SA2ROLES[🛡️ Roles:<br/>• roles/storage.objectAdmin<br/>• roles/iam.serviceAccountTokenCreator<br/>• roles/artifactregistry.reader]
         end
     end
-    
+
     subgraph "Resource Access"
         CR[☁️ Cloud Run Service]
         AR[📦 Artifact Registry]
         GCS[🗄️ Cloud Storage]
         IAM_API[🌐 IAM Credentials API]
     end
-    
+
     GH --> OIDC
     OIDC --> WIF
     WIF --> SA1
-    
+
     SA1 --> SA1ROLES
     SA1 -->|Deploy & Configure| CR
     SA1 -->|Pull Images| AR
     SA1 -->|Upload Artifacts| GCS
     SA1 -->|Impersonate| SA2
-    
+
     SA2 --> SA2ROLES
     SA2 -->|Runtime Storage| GCS
     SA2 -->|Sign URLs| IAM_API
     SA2 -->|Pull Images| AR
-    
+
     CR -.->|Runs As| SA2
-    
+
     classDef github fill:#f0f8ff
     classDef sa fill:#e8f5e8
     classDef resources fill:#fff3e0
     classDef roles fill:#f3e5f5
-    
+
     class GH,OIDC,WIF github
     class SA1,SA2 sa
     class CR,AR,GCS,IAM_API resources
@@ -775,29 +775,29 @@ graph TB
 ```mermaid
 flowchart TD
     START([🚀 GitHub Action Triggered]) --> AUTH{🔐 Authentication}
-    
+
     AUTH -->|OIDC Token| WIF[🌐 Workload Identity Federation]
     WIF --> VERIFY{✅ Verify Repository}
     VERIFY -->|Match| ASSUME[🤖 Assume github-deployer SA]
     VERIFY -->|No Match| DENY[❌ Access Denied]
-    
+
     ASSUME --> CHECK_PERMS{🛡️ Check Permissions}
     CHECK_PERMS -->|Has roles/run.admin| DEPLOY[🚀 Deploy Cloud Run]
     CHECK_PERMS -->|Has roles/artifactregistry.reader| PULL[📦 Pull Images]
     CHECK_PERMS -->|Has roles/storage.objectAdmin| UPLOAD[📤 Upload Artifacts]
     CHECK_PERMS -->|Has roles/iam.serviceAccountUser| IMPERSONATE[🔄 Impersonate Runtime SA]
-    
+
     DEPLOY --> SUCCESS[✅ Deployment Complete]
     PULL --> SUCCESS
     UPLOAD --> SUCCESS
     IMPERSONATE --> SUCCESS
-    
+
     classDef auth fill:#e8f5e8
     classDef decision fill:#fff3e0
     classDef action fill:#e3f2fd
     classDef result fill:#c8e6c9
     classDef error fill:#ffcdd2
-    
+
     class AUTH,WIF,ASSUME,IMPERSONATE auth
     class VERIFY,CHECK_PERMS decision
     class DEPLOY,PULL,UPLOAD action
@@ -814,57 +814,57 @@ graph TB
         USER[👤 End Users]
         GH_RUNNERS[🏃 GitHub Actions Runners]
     end
-    
+
     subgraph "Google Cloud Platform"
         subgraph "Global Load Balancer"
             GLB[🌐 HTTPS Load Balancer<br/>SSL Termination]
         end
-        
+
         subgraph "europe-west1 Region"
             subgraph "Managed Services"
                 CR[☁️ Cloud Run<br/>Fully Managed]
                 AR[📦 Artifact Registry<br/>Private Repository]
                 GCS[🗄️ Cloud Storage<br/>Private Bucket]
             end
-            
+
             subgraph "Identity & Access"
                 IAM[🛡️ Cloud IAM]
                 WIF[🔐 Workload Identity Federation]
             end
         end
-        
+
         subgraph "Global Services"
             GCSL[📋 Cloud Logging]
             MON[📊 Cloud Monitoring]
         end
     end
-    
+
     subgraph "External Services"
         SF[❄️ Snowflake<br/>Data Warehouse]
     end
-    
+
     %% Network flows
     USER -->|HTTPS Only| GLB
     GLB -->|Internal| CR
     GH_RUNNERS -.->|OIDC| WIF
     WIF -.->|Federated Auth| IAM
-    
+
     %% Service connections
     CR -->|Private Network| GCS
     CR -->|Private Network| AR
     CR -->|Service Auth| IAM
     CR -->|Egress| SF
-    
+
     %% Observability
     CR -->|Logs| GCSL
     CR -->|Metrics| MON
-    
+
     classDef internet fill:#ffebee
     classDef gcp fill:#e8f5e8
     classDef managed fill:#e3f2fd
     classDef security fill:#fff3e0
     classDef external fill:#f3e5f5
-    
+
     class USER,GH_RUNNERS internet
     class GLB,CR,AR,GCS,IAM,WIF,GCSL,MON gcp
     class CR,AR,GCS managed
@@ -881,24 +881,24 @@ sequenceDiagram
     participant SA as 🤖 Service Account
     participant GCS as 🗄️ Cloud Storage
     participant SF as ❄️ Snowflake
-    
+
     Note over U,SF: Secure Data Flow
-    
+
     U->>GLB: HTTPS Request (TLS 1.3)
     GLB->>CR: Internal routing (encrypted)
-    
+
     Note over CR: Authentication & Authorization
     CR->>SA: Authenticate with metadata server
     SA->>CR: Return access tokens
-    
+
     Note over CR,GCS: Secure Storage Operations
     CR->>GCS: API call with OAuth2 token
     GCS->>CR: Return data (encrypted in transit)
-    
+
     Note over CR,SF: External Data Query
     CR->>SF: TLS connection with credentials
     SF->>CR: Return query results
-    
+
     Note over CR,U: Signed URL Generation
     CR->>SA: Request signed URL
     SA->>GCS: Generate temporary access token
@@ -906,11 +906,11 @@ sequenceDiagram
     SA->>CR: Provide signed URL
     CR->>U: Return signed URL
     U->>GCS: Direct download (bypasses Cloud Run)
-    
+
     rect rgba(255, 0, 0, 0.1)
         Note over U,GCS: All traffic encrypted end-to-end
     end
-    
+
     rect rgba(0, 255, 0, 0.1)
         Note over SA,GCS: No persistent credentials stored
     end
@@ -924,18 +924,18 @@ gantt
     title Cloud Run Instance Lifecycle
     dateFormat X
     axisFormat %M:%S
-    
+
     section Instance 1
     Cold Start     :crit, cold1, 0, 60
     Warm Serving   :active, warm1, 60, 1800
     Training Job   :done, train1, 1800, 5400
     Idle Timeout   :milestone, idle1, 5400
-    
-    section Instance 2  
+
+    section Instance 2
     Cold Start     :crit, cold2, 300, 360
     Warm Serving   :active, warm2, 360, 1200
     Idle Timeout   :milestone, idle2, 1200
-    
+
     section Cost Impact
     Billing Start  :milestone, bill1, 60
     Peak Usage     :crit, peak, 1800, 5400
@@ -993,11 +993,11 @@ Log Sources:
     - Application logs (stdout/stderr)
     - Request logs (HTTP access)
     - System logs (container lifecycle)
-  
-  - resource.type = "gcs_bucket"  
+
+  - resource.type = "gcs_bucket"
     - Storage access logs
     - Object lifecycle events
-    
+
   - resource.type = "artifact_registry"
     - Image push/pull events
     - Vulnerability scan results
@@ -1011,15 +1011,15 @@ Log Retention:
 ```yaml
 Cloud Run Metrics:
   - Request count and latency
-  - Instance count and utilization  
+  - Instance count and utilization
   - Memory and CPU usage
   - Cold start frequency
-  
+
 Storage Metrics:
   - Object count and total size
   - Request rate and bandwidth
   - Error rates by operation
-  
+
 Cost Metrics:
   - Daily/monthly spend by service
   - Resource utilization efficiency
@@ -1034,7 +1034,7 @@ Cost Metrics:
 ```yaml
 Roles:
   - roles/run.admin                    # Deploy Cloud Run services
-  - roles/artifactregistry.reader      # Pull Docker images  
+  - roles/artifactregistry.reader      # Pull Docker images
   - roles/storage.objectAdmin          # Manage GCS objects
   - roles/iam.serviceAccountUser       # Act as runtime SA
   - roles/iam.serviceAccountTokenCreator # Sign URLs
@@ -1148,7 +1148,7 @@ resource "google_cloud_run_service" "svc" {
     spec {
       container_concurrency = 1
       timeout_seconds       = 3600  # 1 hour
-      
+
       containers {
         resources {
           limits = {
@@ -1171,7 +1171,7 @@ Training Logs:
   Content: Complete R execution output, errors, warnings
 
 Application Logs:
-  Location: "Cloud Logging > Cloud Run > mmm-app"  
+  Location: "Cloud Logging > Cloud Run > mmm-app"
   Content: Streamlit app logs, user interactions
 
 System Logs:
@@ -1186,14 +1186,14 @@ Deployment Logs:
 #### Log Analysis Queries
 ```sql
 -- Find training failures
-SELECT timestamp, jsonPayload.message 
-FROM `project.cloud_run_logs` 
+SELECT timestamp, jsonPayload.message
+FROM `project.cloud_run_logs`
 WHERE jsonPayload.message CONTAINS "FATAL ERROR"
 ORDER BY timestamp DESC LIMIT 10
 
 -- Monitor resource usage
 SELECT timestamp, jsonPayload.memory_usage_mb
-FROM `project.cloud_run_logs`  
+FROM `project.cloud_run_logs`
 WHERE jsonPayload.memory_usage_mb > 8000
 ORDER BY timestamp DESC
 ```
@@ -1226,28 +1226,28 @@ gantt
     title Current Training Job Timeline (Typical 200 iterations, 5 trials)
     dateFormat X
     axisFormat %M
-    
+
     section Container Lifecycle
     Cold Start           :crit, cold, 0, 2
     Dependency Loading   :active, deps, 2, 5
     Ready to Process     :milestone, ready, 5
-    
+
     section Data Processing
     Snowflake Query      :done, sf_query, 5, 8
     Data Download        :done, sf_down, 8, 10
     Data Cleaning        :done, clean, 10, 12
     Feature Engineering  :done, features, 12, 15
-    
+
     section Model Training
     Robyn Setup         :active, setup, 15, 17
     Hyperparameter Opt  :crit, hyper, 17, 45
     Model Validation    :active, valid, 45, 50
-    
+
     section Output Generation
     Visualizations      :done, viz, 50, 55
     Allocator Analysis  :done, alloc, 55, 58
     GCS Upload         :done, upload, 58, 60
-    
+
     section Bottlenecks
     Python/R Bridge    :crit, bridge, 17, 45
     Sequential Processing :crit, seq, 17, 58
@@ -1258,18 +1258,18 @@ gantt
 graph TB
     subgraph "Current Single-Instance Architecture"
         CR[☁️ Cloud Run Instance<br/>4 vCPU, 16GB RAM]
-        
+
         subgraph "Resource Usage Over Time"
             IDLE[⏳ 0-15min: <50% CPU<br/>Data loading, setup]
             PEAK[🔥 15-45min: 100% CPU<br/>Hyperparameter optimization]
             MIXED[📊 45-60min: 70% CPU<br/>Visualization, upload]
         end
-        
+
         CR --> IDLE
-        CR --> PEAK  
+        CR --> PEAK
         CR --> MIXED
     end
-    
+
     subgraph "Identified Bottlenecks"
         B1[🐌 Cold Start Penalty<br/>2-3 minutes]
         B2[🔗 Python/R Integration<br/>Communication overhead]
@@ -1277,11 +1277,11 @@ graph TB
         B4[💾 Memory Constraints<br/>Large dataset limitations]
         B5[🌐 Network I/O<br/>GCS uploads during training]
     end
-    
+
     classDef bottleneck fill:#ffcdd2
     classDef resource fill:#e3f2fd
     classDef timing fill:#fff3e0
-    
+
     class B1,B2,B3,B4,B5 bottleneck
     class CR resource
     class IDLE,PEAK,MIXED timing
@@ -1297,49 +1297,49 @@ graph TB
             COORD[🎯 Training Coordinator<br/>Cloud Run Job Controller]
             QUEUE[📋 Job Queue<br/>Cloud Tasks]
         end
-        
+
         subgraph "Parallel Training Workers"
             W1[⚡ Worker 1<br/>Trials 1-2]
-            W2[⚡ Worker 2<br/>Trials 3-4]  
+            W2[⚡ Worker 2<br/>Trials 3-4]
             W3[⚡ Worker 3<br/>Trial 5]
             W4[⚡ Worker 4<br/>Validation]
         end
-        
+
         subgraph "Shared Infrastructure"
             CACHE[🗄️ Redis Cache<br/>Preprocessed Data]
             GCS[☁️ GCS Bucket<br/>Shared Results]
         end
-        
+
         subgraph "Results Aggregation"
             AGG[📊 Result Aggregator<br/>Model Selection]
             VIZ[🎨 Visualization Generator<br/>Final Outputs]
         end
     end
-    
+
     COORD --> QUEUE
     QUEUE --> W1
     QUEUE --> W2
     QUEUE --> W3
     QUEUE --> W4
-    
+
     W1 --> CACHE
     W2 --> CACHE
     W3 --> CACHE
     W4 --> CACHE
-    
+
     W1 --> GCS
     W2 --> GCS
     W3 --> GCS
     W4 --> GCS
-    
+
     GCS --> AGG
     AGG --> VIZ
-    
+
     classDef orchestration fill:#e8f5e8
     classDef worker fill:#e3f2fd
     classDef shared fill:#fff3e0
     classDef results fill:#f3e5f5
-    
+
     class COORD,QUEUE orchestration
     class W1,W2,W3,W4 worker
     class CACHE,GCS shared
@@ -1352,23 +1352,23 @@ gantt
     title Optimized Training Job Timeline (Same 200 iterations, 5 trials)
     dateFormat X
     axisFormat %M
-    
+
     section Preparation (Parallel)
     Data Preprocessing   :done, prep, 0, 3
     Worker Warm-up      :active, warmup, 0, 1
-    
+
     section Parallel Training
     Trial 1 (Worker 1)  :active, t1, 3, 15
     Trial 2 (Worker 2)  :active, t2, 3, 15
     Trial 3 (Worker 3)  :active, t3, 3, 15
     Trial 4 (Worker 4)  :active, t4, 3, 15
     Trial 5 (Worker 1)  :active, t5, 15, 25
-    
+
     section Aggregation
     Result Collection   :done, collect, 25, 27
     Model Selection     :done, select, 27, 28
     Final Visualizations :done, final_viz, 28, 30
-    
+
     section Speed Improvement
     Original Duration   :crit, original, 0, 60
     Optimized Duration  :milestone, optimized, 30
@@ -1389,7 +1389,7 @@ stateDiagram-v2
     Multiple --> Warm: Demand decreases
     Warm --> Cold: Idle timeout (5 min)
     Cold --> [*]: Container destroyed
-    
+
     note right of Warm
         Pre-loaded:
         - R libraries
@@ -1397,7 +1397,7 @@ stateDiagram-v2
         - Base datasets
         - Model templates
     end note
-    
+
     note right of Training
         Reduced startup:
         2-3 min → 30 sec
@@ -1414,7 +1414,7 @@ Container Pool Configuration:
     - Cache common datasets in memory
     - Initialize Robyn framework
     - Pre-authenticate GCS connections
-  
+
   Scaling Rules:
     - Scale up: When queue > 2 jobs
     - Scale down: When idle > 5 minutes
@@ -1429,28 +1429,28 @@ graph TB
     subgraph "Current Setup"
         CR1[☁️ Cloud Run<br/>4 vCPU, 16GB RAM<br/>General Purpose]
     end
-    
+
     subgraph "Optimized Setup"
         CR2[☁️ Cloud Run<br/>8 vCPU, 32GB RAM<br/>CPU-Optimized]
-        
+
         subgraph "Alternative: GCE Custom"
             GCE[🖥️ Compute Engine<br/>16 vCPU, 64GB RAM<br/>N2-highmem instances]
             GPU[🎮 Optional GPU<br/>T4 or V100<br/>For deep learning components]
         end
-        
+
         subgraph "Alternative: Batch Processing"
             BATCH[⚡ Cloud Batch<br/>Massive parallel jobs<br/>Spot instances for cost]
         end
     end
-    
+
     CR1 -.->|Upgrade Path| CR2
     CR2 -.->|For Heavy Workloads| GCE
     CR2 -.->|For Cost Optimization| BATCH
-    
+
     classDef current fill:#ffcdd2
     classDef optimized fill:#c8e6c9
     classDef alternative fill:#e3f2fd
-    
+
     class CR1 current
     class CR2 optimized
     class GCE,GPU,BATCH alternative
@@ -1463,15 +1463,15 @@ Training Job Sizing:
     CPU: 4 vCPU
     Memory: 16 GiB
     Expected Duration: 10-15 minutes
-  
+
   Medium Jobs (100-200 iterations, 5 trials):
-    CPU: 8 vCPU  
+    CPU: 8 vCPU
     Memory: 32 GiB
     Expected Duration: 15-25 minutes (with optimization)
-    
+
   Large Jobs (500+ iterations, 10+ trials):
     CPU: 16 vCPU
-    Memory: 64 GiB  
+    Memory: 64 GiB
     Consider: Compute Engine or Batch
     Expected Duration: 30-45 minutes
 ```
@@ -1488,24 +1488,24 @@ graph TB
         R1 --> CLEAN1[🧹 Data Cleaning]
         CLEAN1 --> TRAIN1[🏋️ Training]
     end
-    
+
     subgraph "Optimized Data Flow"
         SF2[❄️ Snowflake] --> CACHE[🗄️ Redis/Memcached<br/>Preprocessed Data]
         CACHE --> WORKERS[⚡ Training Workers<br/>Parallel Access]
-        
+
         subgraph "Pre-processing Pipeline"
             SF2 --> PREP[🔧 Data Preprocessor<br/>Cloud Function]
             PREP --> PARQUET[📊 Parquet Files<br/>Columnar Format]
             PARQUET --> CACHE
         end
-        
+
         WORKERS --> TRAIN2[🏋️ Parallel Training]
     end
-    
+
     classDef current fill:#ffcdd2
     classDef optimized fill:#c8e6c9
     classDef preprocessing fill:#e3f2fd
-    
+
     class SF1,STREAM1,CSV1,R1,CLEAN1,TRAIN1 current
     class SF2,CACHE,WORKERS,TRAIN2 optimized
     class PREP,PARQUET preprocessing
@@ -1516,12 +1516,12 @@ graph TB
 Data Format Optimization:
   Current: CSV (text-based, slow parsing)
   Optimized: Parquet (columnar, 5-10x faster)
-  
+
 Caching Strategy:
   Level 1: In-memory (Redis) - Hot data
-  Level 2: SSD cache - Warm data  
+  Level 2: SSD cache - Warm data
   Level 3: Cold storage - Archive
-  
+
 Preprocessing Pipeline:
   1. Incremental data updates
   2. Feature engineering cache
@@ -1535,29 +1535,29 @@ Preprocessing Pipeline:
 ```mermaid
 flowchart TD
     START([Training Start]) --> STRATEGY{Choose Strategy}
-    
+
     STRATEGY -->|Current| SEQUENTIAL[🐌 Sequential Trials<br/>Trial 1 → Trial 2 → ...]
     STRATEGY -->|Optimized| PARALLEL[⚡ Parallel Trials<br/>All trials simultaneously]
     STRATEGY -->|Advanced| ADAPTIVE[🧠 Adaptive Optimization<br/>Early stopping + pruning]
-    
+
     SEQUENTIAL --> SLOW[⏱️ 45-60 minutes]
     PARALLEL --> FAST[⚡ 15-25 minutes]
     ADAPTIVE --> SMART[🎯 10-20 minutes]
-    
+
     subgraph "Adaptive Techniques"
         EARLY[🛑 Early Stopping<br/>Stop poor performers]
         PRUNE[✂️ Hyperparameter Pruning<br/>Focus on promising regions]
         WARM[🔄 Warm Starting<br/>Reuse previous results]
     end
-    
+
     ADAPTIVE --> EARLY
-    ADAPTIVE --> PRUNE  
+    ADAPTIVE --> PRUNE
     ADAPTIVE --> WARM
-    
+
     classDef current fill:#ffcdd2
     classDef optimized fill:#fff3e0
     classDef advanced fill:#c8e6c9
-    
+
     class SEQUENTIAL,SLOW current
     class PARALLEL,FAST optimized
     class ADAPTIVE,SMART,EARLY,PRUNE,WARM advanced
@@ -1582,7 +1582,7 @@ stopCluster(cl)
 # Advanced approach (adaptive with early stopping)
 library(optuna)  # Or similar optimization framework
 study <- create_study()
-optimize(study, objective_function, n_trials=trials, 
+optimize(study, objective_function, n_trials=trials,
          pruner=MedianPruner(), timeout=3600)
 ```
 
@@ -1597,12 +1597,12 @@ gantt
     Resource Scaling     :p1a, 2024-01-01, 3d
     Container Warm-up    :p1b, 2024-01-04, 4d
     Data Format Switch   :p1c, 2024-01-08, 3d
-    
-    section Phase 2: Architecture  
+
+    section Phase 2: Architecture
     Parallel Processing  :p2a, 2024-01-12, 10d
     Caching Layer       :p2b, 2024-01-22, 7d
     Worker Pool         :p2c, 2024-01-29, 5d
-    
+
     section Phase 3: Advanced
     Adaptive Algorithms :p3a, 2024-02-05, 14d
     GPU Integration     :p3b, 2024-02-19, 10d
@@ -1614,19 +1614,19 @@ gantt
 Performance Metrics:
   Current Baseline:
     Small Jobs: 20-30 minutes
-    Medium Jobs: 45-60 minutes  
+    Medium Jobs: 45-60 minutes
     Large Jobs: 90-120 minutes
-    
+
   After Phase 1 (Quick Wins):
     Small Jobs: 10-15 minutes (50% improvement)
     Medium Jobs: 25-35 minutes (40% improvement)
     Large Jobs: 60-75 minutes (30% improvement)
-    
+
   After Phase 2 (Architecture):
     Small Jobs: 5-8 minutes (70% improvement)
     Medium Jobs: 15-20 minutes (65% improvement)
     Large Jobs: 30-40 minutes (60% improvement)
-    
+
   After Phase 3 (Advanced):
     Small Jobs: 3-5 minutes (80% improvement)
     Medium Jobs: 10-15 minutes (75% improvement)
@@ -1641,21 +1641,21 @@ graph TB
         INFRA[💰 Infrastructure Costs<br/>+50-100% compute]
         COMPLEX[🔧 Operational Complexity<br/>Medium increase]
     end
-    
+
     subgraph "Benefits"
         SPEED[⚡ Training Speed<br/>60-80% faster]
         THROUGHPUT[📈 Job Throughput<br/>3-5x more jobs/day]
         UX[👤 User Experience<br/>Near real-time results]
         COST_EFF[💡 Cost Efficiency<br/>Better resource utilization]
     end
-    
+
     DEV -.->|Investment| SPEED
     INFRA -.->|Higher Usage| THROUGHPUT
     COMPLEX -.->|Worth It| UX
-    
+
     classDef cost fill:#ffcdd2
     classDef benefit fill:#c8e6c9
-    
+
     class DEV,INFRA,COMPLEX cost
     class SPEED,THROUGHPUT,UX,COST_EFF benefit
 ```
@@ -1682,17 +1682,17 @@ Key Metrics to Track:
     - P50, P95, P99 completion times
     - By job size categories
     - Before/after optimization comparisons
-    
+
   Resource Utilization:
     - CPU usage over time
     - Memory consumption patterns
     - Instance scaling events
-    
+
   Cost Metrics:
     - Cost per training job
     - Resource efficiency ratios
     - Idle time percentages
-    
+
   Quality Metrics:
     - Model accuracy (ensure no degradation)
     - Training convergence rates
