@@ -271,12 +271,61 @@ st.title("Customize your analytics — map your data in 3 steps.")
 # Step 1) Choose your dataset
 # ──────────────────────────────────────────────────────────────
 st.header("Step 1) Choose your dataset")
+# ──────────────────────────────────────────────────────────────
+
+# sensible defaults so we can read these anywhere
+st.session_state.setdefault("sf_table", "MMM_RAW")
+st.session_state.setdefault("sf_sql", "")
+st.session_state.setdefault("sf_country_field", "COUNTRY")
+st.session_state.setdefault("source_mode", "Latest (GCS)")
+
+# quick tools outside the form so they're always defined
+r1, r2 = st.columns([1, 6])
+with r1:
+    if st.button("↻ Refresh GCS list"):
+        _list_country_versions_cached.clear()
+        st.success("Refreshed GCS version list.")
+
+c1, c2, c3 = st.columns([1.5, 1, 2])
+with c1:
+    country = st.text_input(
+        "Country", value=st.session_state.get("country", "fr")
+    ).strip()
+with c2:
+    source_mode = st.selectbox(
+        "Source",
+        ["Latest (GCS)", "Previous (GCS)", "Snowflake (current)"],
+        index=["Latest (GCS)", "Previous (GCS)", "Snowflake (current)"].index(
+            st.session_state.get("source_mode", "Latest (GCS)")
+        ),
+    )
+with c3:
+    st.caption(f"GCS Bucket: **{BUCKET}**")
+
+# keep them in session for step1_loader
+st.session_state["country"] = country
+st.session_state["source_mode"] = source_mode
 
 
 @_fragment()
 def step1_loader():
     # Use a FORM so edits don’t commit on every keystroke
     with st.form("load_data_form", clear_on_submit=False):
+        default_table = st.session_state.get("sf_table", "MMM_RAW")
+        tcol = st.text_input(
+            "Table (DB.SCHEMA.TABLE)", value=default_table, key="sf_table"
+        )
+        qcol = st.text_area(
+            "Custom SQL (optional)",
+            value=st.session_state.get("sf_sql", ""),
+            key="sf_sql",
+        )
+        cfield = st.text_input(
+            "Country field",
+            value=st.session_state.get("sf_country_field", "COUNTRY"),
+            key="sf_country_field",
+        )
+        # only show the GCS versions picker when relevant
         versions = []
         if country and source_mode in ("Latest (GCS)", "Previous (GCS)"):
             versions = _list_country_versions_cached(BUCKET, country)
@@ -289,37 +338,6 @@ def step1_loader():
             ts_choice = st.selectbox(
                 "Pick a timestamp (GCS)", options=versions, key="pick_ts"
             )
-
-        # Snowflake inputs (shown but harmless when not used)
-        default_table = st.session_state.get("sf_preview_table", "MMM_RAW")
-        tcol = st.text_input(
-            "Table (DB.SCHEMA.TABLE)", value=default_table, key="sf_table"
-        )
-        qcol = st.text_area("Custom SQL (optional)", value="", key="sf_sql")
-        cfield = st.text_input(
-            "Country field", value="COUNTRY", key="sf_country_field"
-        )
-
-        r1, r2 = st.columns([1, 6])
-        with r1:
-            if st.button("↻ Refresh GCS list"):
-                _list_country_versions_cached.clear()  # ⬅️ clear cache
-                st.success("Refreshed GCS version list.")
-
-        c1, c2, c3 = st.columns([1.5, 1, 2])
-        with c1:
-            country = st.text_input(
-                "Country", value=st.session_state.get("country", "fr")
-            ).strip()
-        with c2:
-            source_mode = st.selectbox(
-                "Source",
-                ["Latest (GCS)", "Previous (GCS)", "Snowflake (current)"],
-            )
-        with c3:
-            st.caption(f"GCS Bucket: **{BUCKET}**")
-
-        st.session_state["country"] = country
 
         submitted = st.form_submit_button("Load")
 
