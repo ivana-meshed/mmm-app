@@ -2,7 +2,14 @@ name: CI (dev)
 
 on:
   push:
-    branches: [dev]
+    branches: [feat-*]
+    paths:
+        - 'docker/Dockerfile.training'
+        - '.github/workflows/ci-dev.yml'
+        - 'r/**'
+        - 'app/**'
+        - 'docker/training_entrypoint.sh'
+        - '!docker/Dockerfile.training-base'   # exclude base so normal builds skip base
 
 permissions:
   id-token: write
@@ -84,6 +91,19 @@ jobs:
             ${{ env.WEB_IMAGE_URL_LATEST }}
           cache-from: type=gha,scope=mmm-web-${{ github.ref_name }}
           cache-to: type=gha,mode=max,scope=mmm-web-${{ github.ref_name }}
+      - name: Build & Push training-base
+        id: build_training_base
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile.training-base
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/mmm-training-base:latest
+          cache-from: |
+            type=registry,ref=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/mmm-training-base:buildcache
+          cache-to: |
+            type=registry,ref=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/mmm-training-base:buildcache,mode=max
 
       - name: Build & Push training job image
         id: build_training
@@ -91,13 +111,18 @@ jobs:
         with:
           context: .
           file: ./docker/Dockerfile.training
+          build-args: |
+            BASE_REF=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/mmm-training-base:latest
           platforms: linux/amd64
           push: true
           tags: |
             ${{ env.TRAINING_IMAGE_URL }}
             ${{ env.TRAINING_IMAGE_URL_LATEST }}
-          cache-from: type=gha,scope=mmm-training
-          cache-to: type=gha,mode=max,scope=mmm-training
+          cache-from: |
+            type=registry,ref=${{ env.TRAINING_IMAGE_URL_LATEST }}
+            type=registry,ref=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:buildcache
+          cache-to: |
+            type=registry,ref=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:buildcache,mode=max
 
       - name: Compute digest-pinned image refs
         shell: bash
