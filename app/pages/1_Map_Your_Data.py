@@ -355,10 +355,6 @@ st.session_state.setdefault("sf_country_field", "COUNTRY")
 st.session_state.setdefault("source_mode", "Latest (GCS)")
 
 
-with c3:
-    st.caption(f"GCS Bucket: **{BUCKET}**")
-
-
 @_fragment()
 def step1_loader():
     country = st.session_state.get("country", "de")
