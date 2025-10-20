@@ -1,10 +1,11 @@
-# pages/streamlit_app.py
+# pages/0_Connect_Your_Data.py
 import os, io, json, tempfile
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+from app_split_helpers import *  # bring in all helper functions/constants
 
 from app_shared import (
     require_login_and_domain,

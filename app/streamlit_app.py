@@ -1,3 +1,5 @@
+from app_split_helpers import *
+
 # streamlit_app.py (proposed new Home)
 import streamlit as st
 
@@ -9,7 +11,6 @@ st.title("Robyn MMM Trainer")
 
 st.write(
     """
-Welcome! The app is now organized into three pages:
 1. **Connect your Data** – set up your Snowflake connection.
 2. **Map Your Data** – map columns and save/load metadata.
 3. **Experiment** – run single or queued Robyn experiments.
