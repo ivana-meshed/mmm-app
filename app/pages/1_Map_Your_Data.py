@@ -332,13 +332,21 @@ def step1_loader():
 
     # ——— On submit: perform the actual load (cached) and persist in session_state
     try:
-        if source_mode == "Latest (GCS)" and versions:
-            df = _download_parquet_from_gcs_cached(
-                BUCKET, _latest_symlink_blob(country)
-            )
-            st.session_state.update(
-                df_raw=df, data_origin="gcs_latest", picked_ts="latest"
-            )
+        if source_mode == "Latest (GCS)":
+            try:
+                df = _download_parquet_from_gcs_cached(
+                    BUCKET, _latest_symlink_blob(country)
+                )
+                st.session_state.update(
+                    df_raw=df, data_origin="gcs_latest", picked_ts="latest"
+                )
+            except Exception:
+                # then fall back to listing / previous / snowflake as you do now
+                versions = _list_country_versions_cached(BUCKET, country)
+                if versions:
+                    st.info("Latest not found; try 'Previous (GCS)'.")
+                else:
+                    st.info("No saved data found; falling back to Snowflake.")
 
         elif source_mode == "Previous (GCS)" and ts_choice:
             df = _download_parquet_from_gcs_cached(
@@ -435,39 +443,28 @@ with st.form("goals_form", clear_on_submit=False):
             "Secondary goal variables", options=all_cols, default=[]
         )
 
-    # build editable frame from current selection OR from session if already edited
+    def _mk(selected, group):
+        return pd.DataFrame(
+            {
+                "var": pd.Series(selected, dtype="object"),
+                "group": pd.Series([group] * len(selected), dtype="object"),
+                "type": pd.Series(
+                    [_guess_goal_type(v) for v in selected], dtype="object"
+                ),
+            }
+        )
+
     if st.session_state["goals_df"].empty:
-
-        def _mk(selected, group):
-            return pd.DataFrame(
-                {
-                    "var": pd.Series(selected, dtype="object"),
-                    "group": pd.Series([group] * len(selected), dtype="object"),
-                    "type": pd.Series(
-                        [
-                            (
-                                "revenue"
-                                if any(k in v.lower() for k in ("rev", "gmv"))
-                                else "conversion"
-                            )
-                            for v in selected
-                        ],
-                        dtype="object",
-                    ),
-                }
-            )
-
-        if primary_goals or secondary_goals:
-            goals_src = pd.concat(
-                [
-                    _mk(primary_goals, "primary"),
-                    _mk(secondary_goals, "secondary"),
-                ],
-                ignore_index=True,
-            )
-        else:
-            goals_src = _initial_goals_from_columns(all_cols)
+        # manual first, heuristics after, then drop dups keeping manual
+        heur = _initial_goals_from_columns(all_cols)
+        manual = pd.concat(
+            [_mk(primary_goals, "primary"), _mk(secondary_goals, "secondary")],
+            ignore_index=True,
+        )
+        goals_src = pd.concat([manual, heur], ignore_index=True)
+        goals_src = goals_src.drop_duplicates(subset=["var"], keep="first")
     else:
+        # keep whatever is already in session as the starting table
         goals_src = st.session_state["goals_df"]
 
     goals_src = goals_src.fillna("").astype(
@@ -491,8 +488,32 @@ with st.form("goals_form", clear_on_submit=False):
     goals_submit = st.form_submit_button("✅ Apply goal changes")
 
 if goals_submit:
-    st.session_state["goals_df"] = goals_edit
-    st.success("Goals updated.")
+    base = st.session_state.get("goals_df")
+    edited = goals_edit.copy()
+
+    # keep only non-empty vars
+    edited = edited[edited["var"].astype(str).str.strip() != ""].astype(
+        "object"
+    )
+
+    if base is None or base.empty:
+        merged = edited
+    else:
+        # prefer edited rows on conflicts
+        base = base.astype("object")
+        base_no_dups = base[~base["var"].isin(edited["var"])]
+        merged = pd.concat([base_no_dups, edited], ignore_index=True)
+
+    # normalize dtypes & drop accidental duplicates
+    merged = (
+        merged.drop_duplicates(subset=["var"], keep="last")
+        .fillna("")
+        .astype({"var": "object", "group": "object", "type": "object"})
+    )
+
+    st.session_state["goals_df"] = merged
+    st.success("Goals appended & updated.")
+
 
 # ---- Auto-tag rules (simple inputs update state immediately, but we only regenerate mapping when rules actually changed) ----
 rcol1, rcol2, rcol3 = st.columns(3)
@@ -558,35 +579,6 @@ if rules_changed:
         ).astype("object")
 
 
-with st.form("mapping_form", clear_on_submit=False):
-    if st.session_state["mapping_df"].empty:
-        # ⬇️ seed using current rules immediately
-        st.session_state["mapping_df"] = pd.DataFrame(
-            {
-                "var": pd.Series(all_cols, dtype="object"),
-                "category": pd.Series(
-                    [
-                        _infer_category(c, st.session_state["auto_rules"])
-                        for c in all_cols
-                    ],
-                    dtype="object",
-                ),
-                "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
-            }
-        ).astype("object")
-
-        st.session_state["mapping_df"] = pd.DataFrame(
-            {
-                "var": pd.Series(all_cols, dtype="object"),
-                "category": pd.Series(
-                    [_infer_category(c, new_rules) for c in all_cols],
-                    dtype="object",
-                ),
-                "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
-            }
-        ).astype("object")
-
-
 # ---- Mapping editor (form) ----
 allowed_categories = [
     "paid_media_spends",
@@ -597,23 +589,6 @@ allowed_categories = [
     "",
 ]
 
-
-with st.form("mapping_form", clear_on_submit=False):
-    if st.session_state["mapping_df"].empty:
-        # ⬇️ seed using current rules immediately
-        st.session_state["mapping_df"] = pd.DataFrame(
-            {
-                "var": pd.Series(all_cols, dtype="object"),
-                "category": pd.Series(
-                    [
-                        _infer_category(c, st.session_state["auto_rules"])
-                        for c in all_cols
-                    ],
-                    dtype="object",
-                ),
-                "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
-            }
-        ).astype("object")
 
 with st.expander(
     "📥 Load saved metadata & apply to current dataset", expanded=False
@@ -642,18 +617,75 @@ with st.expander(
         except Exception as e:
             st.error(f"Failed to load metadata: {e}")
 
+# ✅ if still empty (first load), seed using current rules (outside the form)
+if st.session_state["mapping_df"].empty:
+    st.session_state["mapping_df"] = pd.DataFrame(
+        {
+            "var": pd.Series(all_cols, dtype="object"),
+            "category": pd.Series(
+                [
+                    _infer_category(c, st.session_state["auto_rules"])
+                    for c in all_cols
+                ],
+                dtype="object",
+            ),
+            "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
+        }
+    ).astype("object")
 
-with st.form("mapping_form", clear_on_submit=False):
-    # if still empty (first load), seed once using current rules
-    if st.session_state["mapping_df"].empty:
-        st.session_state["mapping_df"] = pd.DataFrame(
-            {
-                "var": pd.Series(all_cols, dtype="object"),
-                "category": pd.Series([""] * len(all_cols), dtype="object"),
-                "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
-            }
-        ).astype("object")
+# ---- Mapping editor (form) ----
+allowed_categories = [
+    "paid_media_spends",
+    "paid_media_vars",
+    "context_vars",
+    "organic_vars",
+    "factor_vars",
+    "",
+]
 
+# ✅ mapping_df is already seeded above if empty
+
+# --- Re-apply auto-tag rules on demand (outside any form) ---
+rt1, rt2 = st.columns([1, 1])
+
+# Only fill previously-untagged rows (preserves manual edits)
+if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing"):
+    m = st.session_state["mapping_df"].copy()
+    inferred = {
+        c: _infer_category(c, st.session_state["auto_rules"]) for c in all_cols
+    }
+    m["category"] = m.apply(
+        lambda r: (
+            r["category"]
+            if str(r["category"]).strip()
+            else inferred.get(r["var"], "")
+        ),
+        axis=1,
+    )
+    st.session_state["mapping_df"] = m.astype("object")
+    st.success("Filled categories for previously untagged columns.")
+
+# Overwrite everything from current rules (discard manual edits)
+if rt2.button("♻️ Re-apply to ALL columns", key="retag_all"):
+    st.session_state["mapping_df"] = pd.DataFrame(
+        {
+            "var": pd.Series(all_cols, dtype="object"),
+            "category": pd.Series(
+                [
+                    _infer_category(c, st.session_state["auto_rules"])
+                    for c in all_cols
+                ],
+                dtype="object",
+            ),
+            "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
+        }
+    ).astype("object")
+    st.warning(
+        "Re-applied rules to ALL columns (manual categories were overwritten)."
+    )
+
+
+with st.form("mapping_form_main", clear_on_submit=False):
     mapping_src = (
         st.session_state["mapping_df"]
         .fillna("")
@@ -661,14 +693,13 @@ with st.form("mapping_form", clear_on_submit=False):
             {"var": "object", "category": "object", "custom_tags": "object"}
         )
     )
+
     mapping_edit = st.data_editor(
         mapping_src,
         use_container_width=True,
         num_rows="dynamic",
         column_config={
-            "var": st.column_config.TextColumn(
-                "Column", disabled=True
-            ),  # disable name edits to keep alignment with dataset
+            "var": st.column_config.TextColumn("Column", disabled=True),
             "category": st.column_config.SelectboxColumn(
                 "Category", options=allowed_categories
             ),
