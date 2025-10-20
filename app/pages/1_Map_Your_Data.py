@@ -218,6 +218,15 @@ def _download_json_from_gcs(gs_bucket: str, blob_path: str) -> dict:
     return json.loads(blob.download_as_bytes())
 
 
+def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
+    s = str(col).lower()
+    for cat, endings in rules.items():
+        for suf in endings:
+            if s.endswith(str(suf).lower()):
+                return cat
+    return ""
+
+
 def _apply_metadata_to_current_df(meta: dict, current_cols: list[str]) -> None:
     # goals (keep only ones that exist now)
     meta_goals = meta.get("goals", []) or []
@@ -242,14 +251,6 @@ def _apply_metadata_to_current_df(meta: dict, current_cols: list[str]) -> None:
     for cat, vars_ in meta_map.items():
         for v in vars_ or []:
             var_to_cat[str(v)] = cat
-
-    def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
-        s = str(col).lower()
-        for cat, endings in rules.items():
-            for suf in endings:
-                if s.endswith(str(suf).lower()):
-                    return cat
-        return ""
 
     rows = []
     for c in current_cols:
@@ -545,13 +546,16 @@ if rules_changed:
     # seed mapping again only when rules change AND user hasn't started manual edits
     if st.session_state["mapping_df"].empty:
 
-        def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
-            s = str(col).lower()
-            for cat, endings in rules.items():
-                for suf in endings:
-                    if s.endswith(str(suf).lower()):
-                        return cat
-            return ""
+        st.session_state["mapping_df"] = pd.DataFrame(
+            {
+                "var": pd.Series(all_cols, dtype="object"),
+                "category": pd.Series(
+                    [_infer_category(c, new_rules) for c in all_cols],
+                    dtype="object",
+                ),
+                "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
+            }
+        ).astype("object")
 
 
 with st.form("mapping_form", clear_on_submit=False):
