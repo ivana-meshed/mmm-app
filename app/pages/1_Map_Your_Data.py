@@ -340,12 +340,6 @@ def _iso2_countries_gcs_first(bucket: str) -> list[str]:
 # ──────────────────────────────────────────────────────────────
 st.title("Customize your analytics — map your data in 3 steps.")
 
-# ──────────────────────────────────────────────────────────────
-# Step 1) Choose your dataset
-# ──────────────────────────────────────────────────────────────
-st.header("Step 1) Choose your dataset")
-# ──────────────────────────────────────────────────────────────
-
 require_login_and_domain()
 
 # sensible defaults so we can read these anywhere
