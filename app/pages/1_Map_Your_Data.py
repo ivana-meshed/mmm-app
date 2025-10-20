@@ -351,36 +351,7 @@ st.session_state.setdefault("sf_sql", "")
 st.session_state.setdefault("sf_country_field", "COUNTRY")
 st.session_state.setdefault("source_mode", "Latest (GCS)")
 
-# quick tools outside the form so they're always defined
-r1, r2 = st.columns([1, 6])
-with r1:
-    if st.button("↻ Refresh GCS list"):
-        _list_country_versions_cached.clear()
-        st.success("Refreshed GCS version list.")
 
-c1, c2, c3 = st.columns([1.5, 1, 2])
-with c1:
-    countries = _iso2_countries_gcs_first(BUCKET)
-    initial_country_idx = (
-        countries.index(st.session_state["country"])
-        if st.session_state["country"] in countries
-        else 0
-    )
-    st.selectbox(
-        "Country (ISO2)",
-        options=countries,
-        index=initial_country_idx,
-        key="country",
-    )
-
-with c2:
-    source_mode = st.selectbox(
-        "Source",
-        ["Latest (GCS)", "Previous (GCS)", "Snowflake (current)"],
-        index=["Latest (GCS)", "Previous (GCS)", "Snowflake (current)"].index(
-            st.session_state.get("source_mode", "Latest (GCS)")
-        ),
-    )
 with c3:
     st.caption(f"GCS Bucket: **{BUCKET}**")
 
