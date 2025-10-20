@@ -12,7 +12,7 @@ from app_shared import (
     get_data_processor,
     run_sql,
     _require_sf_session,
-    BUCKET,
+    GCS_BUCKET,
 )
 
 
