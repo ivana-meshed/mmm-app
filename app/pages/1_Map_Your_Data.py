@@ -354,6 +354,29 @@ st.session_state.setdefault("sf_sql", "")
 st.session_state.setdefault("sf_country_field", "COUNTRY")
 st.session_state.setdefault("source_mode", "Latest (GCS)")
 
+# ──────────────────────────────────────────────────────────────
+# Step 1) Choose your dataset
+# ──────────────────────────────────────────────────────────────
+st.header("Step 1) Choose your dataset")
+
+# Country picker (ISO2, GCS-first). Keep this OUTSIDE the form.
+c1, c2 = st.columns([1.2, 2])
+with c1:
+    countries = _iso2_countries_gcs_first(BUCKET)
+    initial_idx = (
+        countries.index(st.session_state.get("country", "de"))
+        if st.session_state.get("country", "de") in countries
+        else 0
+    )
+    st.selectbox(
+        "Country (ISO2)",
+        options=countries,
+        index=initial_idx,
+        key="country",  # don't also set st.session_state["country"] manually
+    )
+with c2:
+    st.caption(f"GCS Bucket: **{BUCKET}**")
+
 
 @_fragment()
 def step1_loader():
