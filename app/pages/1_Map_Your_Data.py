@@ -272,26 +272,6 @@ st.title("Customize your analytics — map your data in 3 steps.")
 # ──────────────────────────────────────────────────────────────
 st.header("Step 1) Choose your dataset")
 
-r1, r2 = st.columns([1, 6])
-with r1:
-    if st.button("↻ Refresh GCS list"):
-        _list_country_versions_cached.clear()  # ⬅️ clear cache
-        st.success("Refreshed GCS version list.")
-
-c1, c2, c3 = st.columns([1.5, 1, 2])
-with c1:
-    country = st.text_input(
-        "Country", value=st.session_state.get("country", "fr")
-    ).strip()
-with c2:
-    source_mode = st.selectbox(
-        "Source", ["Latest (GCS)", "Previous (GCS)", "Snowflake (current)"]
-    )
-with c3:
-    st.caption(f"GCS Bucket: **{BUCKET}**")
-
-st.session_state["country"] = country
-
 
 @_fragment()
 def step1_loader():
@@ -320,6 +300,27 @@ def step1_loader():
             "Country field", value="COUNTRY", key="sf_country_field"
         )
 
+        r1, r2 = st.columns([1, 6])
+        with r1:
+            if st.button("↻ Refresh GCS list"):
+                _list_country_versions_cached.clear()  # ⬅️ clear cache
+                st.success("Refreshed GCS version list.")
+
+        c1, c2, c3 = st.columns([1.5, 1, 2])
+        with c1:
+            country = st.text_input(
+                "Country", value=st.session_state.get("country", "fr")
+            ).strip()
+        with c2:
+            source_mode = st.selectbox(
+                "Source",
+                ["Latest (GCS)", "Previous (GCS)", "Snowflake (current)"],
+            )
+        with c3:
+            st.caption(f"GCS Bucket: **{BUCKET}**")
+
+        st.session_state["country"] = country
+
         submitted = st.form_submit_button("Load")
 
     if not submitted:
@@ -332,7 +333,10 @@ def step1_loader():
 
     # ——— On submit: perform the actual load (cached) and persist in session_state
     try:
+        df = None  # <-- important: default
+
         if source_mode == "Latest (GCS)":
+            # 1) Try the latest symlink
             try:
                 df = _download_parquet_from_gcs_cached(
                     BUCKET, _latest_symlink_blob(country)
@@ -341,24 +345,80 @@ def step1_loader():
                     df_raw=df, data_origin="gcs_latest", picked_ts="latest"
                 )
             except Exception:
-                # then fall back to listing / previous / snowflake as you do now
+                # 2) If latest is missing, check if *any* versions exist
                 versions = _list_country_versions_cached(BUCKET, country)
                 if versions:
-                    st.info("Latest not found; try 'Previous (GCS)'.")
+                    # Auto-fallback to most recent previous version
+                    fallback_ts = versions[0]
+                    st.info(
+                        f"‘latest’ not found — loading most recent saved version: {fallback_ts}."
+                    )
+                    df = _download_parquet_from_gcs_cached(
+                        BUCKET, _data_blob(country, fallback_ts)
+                    )
+                    st.session_state.update(
+                        df_raw=df,
+                        data_origin="gcs_timestamp",
+                        picked_ts=fallback_ts,
+                    )
                 else:
-                    st.info("No saved data found; falling back to Snowflake.")
+                    # 3) No GCS data at all → Snowflake
+                    st.info(
+                        "No saved data found in GCS; falling back to Snowflake."
+                    )
+                    _require_sf_session()
+                    sql = (
+                        effective_sql(
+                            st.session_state["sf_table"],
+                            st.session_state["sf_sql"],
+                        )
+                        or ""
+                    )
+                    if sql and not st.session_state["sf_sql"].strip():
+                        sql = f"{sql} WHERE {st.session_state['sf_country_field']} = '{country.upper()}'"
+                    if not sql:
+                        st.warning(
+                            "Provide a table or SQL to load from Snowflake."
+                        )
+                    else:
+                        df = _load_from_snowflake_cached(sql)
+                        st.session_state.update(
+                            df_raw=df, data_origin="snowflake", picked_ts=""
+                        )
 
-        elif source_mode == "Previous (GCS)" and ts_choice:
-            df = _download_parquet_from_gcs_cached(
-                BUCKET, _data_blob(country, ts_choice)
-            )
-            st.session_state.update(
-                df_raw=df, data_origin="gcs_timestamp", picked_ts=ts_choice
-            )
+        elif source_mode == "Previous (GCS)":
+            versions = _list_country_versions_cached(BUCKET, country)
+            if not versions:
+                # Nothing saved → Snowflake fallback
+                st.info("No saved versions in GCS; falling back to Snowflake.")
+                _require_sf_session()
+                sql = (
+                    effective_sql(
+                        st.session_state["sf_table"], st.session_state["sf_sql"]
+                    )
+                    or ""
+                )
+                if sql and not st.session_state["sf_sql"].strip():
+                    sql = f"{sql} WHERE {st.session_state['sf_country_field']} = '{country.upper()}'"
+                if not sql:
+                    st.warning("Provide a table or SQL to load from Snowflake.")
+                else:
+                    df = _load_from_snowflake_cached(sql)
+                    st.session_state.update(
+                        df_raw=df, data_origin="snowflake", picked_ts=""
+                    )
+            else:
+                # Use the user's pick, default to most recent if none selected
+                ts_choice = st.session_state.get("pick_ts") or versions[0]
+                df = _download_parquet_from_gcs_cached(
+                    BUCKET, _data_blob(country, ts_choice)
+                )
+                st.session_state.update(
+                    df_raw=df, data_origin="gcs_timestamp", picked_ts=ts_choice
+                )
 
-        else:  # Snowflake (or GCS fallback with no versions)
+        else:  # "Snowflake (current)"
             _require_sf_session()
-
             sql = (
                 effective_sql(
                     st.session_state["sf_table"], st.session_state["sf_sql"]
@@ -367,13 +427,20 @@ def step1_loader():
             )
             if sql and not st.session_state["sf_sql"].strip():
                 sql = f"{sql} WHERE {st.session_state['sf_country_field']} = '{country.upper()}'"
-            df = _load_from_snowflake_cached(sql)
-            st.session_state.update(
-                df_raw=df, data_origin="snowflake", picked_ts=""
-            )
+            if not sql:
+                st.warning("Provide a table or SQL to load from Snowflake.")
+            else:
+                df = _load_from_snowflake_cached(sql)
+                st.session_state.update(
+                    df_raw=df, data_origin="snowflake", picked_ts=""
+                )
 
-        st.success(f"Loaded {len(df):,} rows.")
-        st.dataframe(df.head(20), use_container_width=True, hide_index=True)
+        # Only show success/preview if df exists
+        if df is not None and not df.empty:
+            st.success(f"Loaded {len(df):,} rows.")
+            st.dataframe(df.head(20), use_container_width=True, hide_index=True)
+        else:
+            st.warning("Data load finished, but no rows were returned.")
 
     except Exception as e:
         st.error(f"Load failed: {e}")
