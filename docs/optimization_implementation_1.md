@@ -261,7 +261,7 @@ EXPOSE 8080
 
 # ✅ Use a shell entry so $PORT expands; bind to 0.0.0.0
 # Also fail fast if the app file is missing.
-CMD ["bash","-lc","test -f 0_Connect_Your_Data.py || { echo 'Missing /app/0_Connect_Your_Data.py'; ls -la; exit 1; }; python3 -m streamlit run 0_Connect_Your_Data.py --server.address=0.0.0.0 --server.port=${PORT}"]
+CMD ["bash","-lc","test -f streamlit_app.py || { echo 'Missing /app/streamlit_app.py'; ls -la; exit 1; }; python3 -m streamlit run streamlit_app.py --server.address=0.0.0.0 --server.port=${PORT}"]
 ```
 
 ## 2. Data Format Switch (CSV→Parquet)
@@ -414,7 +414,7 @@ class DataProcessor:
 
 ### Updated Streamlit Application
 
-**File: `app/0_Connect_Your_Data.py`** (Update data processing section)
+**File: `app/streamlit_app.py`** (Update data processing section)
 ```python
 import json, os, subprocess, tempfile, time, shlex
 import streamlit as st
@@ -1220,10 +1220,10 @@ WARMUP_PID=$!
 
 # Start the main application
 echo "🌐 Starting Streamlit application..."
-test -f 0_Connect_Your_Data.py || { echo 'Missing /app/0_Connect_Your_Data.py'; ls -la; exit 1; }
+test -f streamlit_app.py || { echo 'Missing /app/streamlit_app.py'; ls -la; exit 1; }
 
 # Start streamlit in background
-python3 -m streamlit run 0_Connect_Your_Data.py --server.address=0.0.0.0 --server.port=${PORT} &
+python3 -m streamlit run streamlit_app.py --server.address=0.0.0.0 --server.port=${PORT} &
 STREAMLIT_PID=$!
 
 # Wait for warmup to complete (with timeout)

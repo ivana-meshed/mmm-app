@@ -21,7 +21,7 @@ See the diagrams:
 
 ```
 app/
-  0_Connect_Your_Data.py     # Streamlit UI; connects to Snowflake, writes CSV, invokes R
+  streamlit_app.py     # Streamlit UI; connects to Snowflake, writes CSV, invokes R
 r/
   run_all.R            # Robyn training entrypoint (reads job_cfg and csv_path)
 infra/terraform/
@@ -120,7 +120,7 @@ gcloud run services describe mmm-trainer \
 ## Streamlit on Cloud Run (CORS / 403)
 
 - Entry point binds to `0.0.0.0` and uses `--server.port=$PORT` so Cloud Run can reach it.
-- If you see a browser 403 due to proxy/CORS, set in `0_Connect_Your_Data.py` (or a `config.toml`):
+- If you see a browser 403 due to proxy/CORS, set in `streamlit_app.py` (or a `config.toml`):
   ```python
   st.set_page_config(page_title="Robyn MMM Trainer", layout="wide")
   # Streamlit 1.30+ generally OK behind Cloud Run. For older versions, you can also set:

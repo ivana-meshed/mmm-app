@@ -18,7 +18,7 @@ export GCS_BUCKET="mmm-app-output"
 # Optional (your app defaults to /app):
 export APP_ROOT="$(pwd)/app"
 
-streamlit run app/0_Connect_Your_Data.py
+streamlit run app/streamlit_app.py
 
 
 

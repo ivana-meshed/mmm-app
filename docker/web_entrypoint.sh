@@ -35,8 +35,8 @@ except ImportError as e:
 "
 
 # Check required files
-if [ ! -f "0_Connect_Your_Data.py" ]; then
-    echo "ERROR: 0_Connect_Your_Data.py not found"
+if [ ! -f "streamlit_app.py" ]; then
+    echo "ERROR: streamlit_app.py not found"
     ls -la /app/
     exit 1
 fi
@@ -106,7 +106,7 @@ sed -n '1,80p' /app/.streamlit/secrets.toml | sed -E 's/(client_secret *= *").*/
 
 # Start Streamlit application
 echo "Starting Streamlit on port ${PORT}..."
-exec python3 -m streamlit run 0_Connect_Your_Data.py \
+exec python3 -m streamlit run streamlit_app.py \
     --server.address=0.0.0.0 \
     --server.port=${PORT} \
     --server.headless=true \

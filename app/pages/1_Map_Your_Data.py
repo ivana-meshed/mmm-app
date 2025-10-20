@@ -935,3 +935,42 @@ if st.session_state["last_saved_meta_path"]:
 
 with st.expander("Preview metadata JSON", expanded=False):
     st.json(payload, expanded=False)
+
+
+# --- Make mapped categories handy for the next page
+def _by_cat(df: pd.DataFrame, cat: str) -> list[str]:
+    return df.loc[df["category"] == cat, "var"].dropna().astype(str).tolist()
+
+
+if not st.session_state["mapping_df"].empty:
+    allowed_categories = [
+        "paid_media_spends",
+        "paid_media_vars",
+        "context_vars",
+        "organic_vars",
+        "factor_vars",
+    ]
+    by_cat = {
+        cat: _by_cat(st.session_state["mapping_df"], cat)
+        for cat in allowed_categories
+    }
+    st.session_state["mapped_by_cat"] = by_cat  # ← used by Experiment
+    st.session_state["mapped_dep_var"] = st.session_state.get("dep_var", "")
+
+# --- Show Next only when we have metadata (either loaded or just saved)
+can_go_next = not st.session_state["mapping_df"].empty
+if can_go_next:
+    st.divider()
+    coln1, coln2 = st.columns([1, 5])
+    with coln1:
+        try:
+            # Streamlit >= 1.27
+            if st.button("Next → Experiment", use_container_width=True):
+                import streamlit as stlib
+
+                stlib.switch_page("pages/2_Experiment.py")
+        except Exception:
+            # Fallback: link
+            st.page_link(
+                "pages/2_Experiment.py", label="Next → Experiment", icon="➡️"
+            )

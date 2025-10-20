@@ -33,6 +33,8 @@ data/
 tmp/
 temp/
 *.tmp
+docs/
+app/deprecated/
 
 *.pdf
 docs/*.png

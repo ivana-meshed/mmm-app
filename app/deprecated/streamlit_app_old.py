@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 query_params = st.query_params
 logger.info(
-    "Starting app/0_Connect_Your_Data.py",
+    "Starting app/streamlit_app.py",
     extra={"query_params": dict(query_params)},
 )
 
