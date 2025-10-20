@@ -309,6 +309,8 @@ st.session_state["source_mode"] = source_mode
 
 @_fragment()
 def step1_loader():
+    country = st.session_state.get("country", "de")
+    source_mode = st.session_state.get("source_mode", "Latest (GCS)")
     # Use a FORM so edits don’t commit on every keystroke
     with st.form("load_data_form", clear_on_submit=False):
         default_table = st.session_state.get("sf_table", "MMM_RAW")
@@ -457,6 +459,7 @@ def step1_loader():
         if df is not None and not df.empty:
             st.success(f"Loaded {len(df):,} rows.")
             st.dataframe(df.head(20), use_container_width=True, hide_index=True)
+            st.rerun()  # optional: jump straight to Step 2 in the same click
         else:
             st.warning("Data load finished, but no rows were returned.")
 
