@@ -22,6 +22,7 @@ st.set_page_config(
 )
 
 require_login_and_domain()
+ensure_session_defaults()
 
 st.title("Connect your Data")
 

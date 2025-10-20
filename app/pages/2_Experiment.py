@@ -12,14 +12,13 @@ from app_shared import (
     get_data_processor,
     run_sql,
     _require_sf_session,
-    GCS_BUCKET,
 )
 
-from app_split_helpers import *
 
 st.set_page_config(page_title="Experiment", page_icon="🧪", layout="wide")
 
 require_login_and_domain()
+ensure_session_defaults()
 
 st.title("Experiment")
 
@@ -30,7 +29,7 @@ tab_single, tab_queue = st.tabs(["Single run", "Queue"])
 # Extracted from streamlit_app.py tab_single (Single run):
 with tab_single:
     st.subheader("Robyn configuration & training")
-    if not st.session_state.sf_connected:
+    if not st.session_state.get("sf_connected", False):
         st.warning("Please connect to Snowflake in tab 1 first.")
     if st.session_state.sf_connected:
         # Data selection

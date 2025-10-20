@@ -26,6 +26,7 @@ from app_shared import (
 # ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Map your data", layout="wide")
 require_login_and_domain()
+ensure_session_defaults()
 
 dp = get_data_processor()
 BUCKET = st.session_state.get("gcs_bucket", GCS_BUCKET)

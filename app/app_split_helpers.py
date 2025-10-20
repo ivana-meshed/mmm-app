@@ -788,6 +788,41 @@ def _sorted_with_controls(
     return sorted_df, st.session_state.get(nonce_key, 0)
 
 
+# --- session defaults (safe across all pages) ---
+def ensure_session_defaults():
+    ss = st.session_state
+    # Snowflake
+    ss.setdefault("sf_connected", False)
+    ss.setdefault("sf_params", {})  # user/account/warehouse/...
+    ss.setdefault("_sf_private_key_bytes", None)  # key bytes when provided
+
+    # Buckets (use whatever your environment provides)
+    ss.setdefault(
+        "gcs_bucket",
+        os.getenv("GCS_BUCKET") or os.getenv("BUCKET") or "robyn-demo-bucket",
+    )
+
+    # Single-run bookkeeping
+    ss.setdefault("job_executions", [])  # list of execution dicts
+    ss.setdefault("last_timings", {})  # {'df':..., 'timestamp':...}
+
+    # Queue defaults
+    ss.setdefault("queue_name", "default")
+    ss.setdefault("job_queue", [])
+    ss.setdefault("queue_running", False)
+    ss.setdefault("queue_saved_at", None)
+
+    # Upload/editor scaffolding
+    ss.setdefault("uploaded_df", pd.DataFrame())
+    ss.setdefault("uploaded_fingerprint", None)
+
+    # Builder table for queue
+    if "qb_df" not in ss:
+        ss.qb_df = pd.DataFrame()
+
+
+# --- end session defaults ---
+
 # ─────────────────────────────
 # UI layout
 # ─────────────────────────────
