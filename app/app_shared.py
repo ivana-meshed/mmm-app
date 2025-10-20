@@ -1425,3 +1425,14 @@ def _maybe_resample_df(
     if out.columns[0] != date_col:
         out.rename(columns={out.columns[0]: date_col}, inplace=True)
     return out
+
+
+def _require_sf_session():
+    if not (
+        st.session_state.get("sf_connected")
+        and st.session_state.get("_sf_private_key_bytes")
+    ):
+        st.error(
+            "Please connect to Snowflake in Tab 1 and provide a private key."
+        )
+        st.stop()

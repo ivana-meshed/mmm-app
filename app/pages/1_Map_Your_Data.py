@@ -11,6 +11,7 @@ from app_shared import (
     require_login_and_domain,
     get_data_processor,
     run_sql,
+    _require_sf_session,
     ensure_sf_conn,
     upload_to_gcs,
     effective_sql,
@@ -112,6 +113,7 @@ def _download_parquet_from_gcs_cached(
 
 @st.cache_data(show_spinner=False)
 def _load_from_snowflake_cached(sql: str) -> pd.DataFrame:
+    _require_sf_session()
     return run_sql(sql)
 
 
@@ -154,6 +156,111 @@ _fragment = getattr(
     lambda f=None, **_: (lambda *a, **k: f(*a, **k)) if f else (lambda f: f),
 )
 
+
+def _guess_goal_type(col: str) -> str:
+    s = col.lower()
+    revenue_keys = (
+        "rev",
+        "revenue",
+        "gmv",
+        "sales",
+        "bookings",
+        "turnover",
+        "profit",
+    )
+    conversion_keys = (
+        "conv",
+        "conversion",
+        "lead",
+        "signup",
+        "install",
+        "purchase",
+        "txn",
+        "transactions",
+        "orders",
+    )
+    if any(k in s for k in revenue_keys):
+        return "revenue"
+    if any(k in s for k in conversion_keys):
+        return "conversion"
+    # fallback: numeric columns with common names
+    return "conversion"
+
+
+def _initial_goals_from_columns(cols: list[str]) -> pd.DataFrame:
+    # Pick a few top candidates by name for convenience; user can delete/edit
+    candidates = [
+        c
+        for c in cols
+        if any(
+            k in c.lower()
+            for k in ("rev", "gmv", "sales", "conv", "lead", "purchase")
+        )
+    ]
+    # limit to a manageable number
+    candidates = candidates[:8] if candidates else []
+    return pd.DataFrame(
+        {
+            "var": pd.Series(candidates, dtype="object"),
+            "group": pd.Series(["primary"] * len(candidates), dtype="object"),
+            "type": pd.Series(
+                [_guess_goal_type(c) for c in candidates], dtype="object"
+            ),
+        }
+    )
+
+
+def _download_json_from_gcs(gs_bucket: str, blob_path: str) -> dict:
+    client = storage.Client()
+    blob = client.bucket(gs_bucket).blob(blob_path)
+    if not blob.exists():
+        raise FileNotFoundError(f"gs://{gs_bucket}/{blob_path} not found")
+    return json.loads(blob.download_as_bytes())
+
+
+def _apply_metadata_to_current_df(meta: dict, current_cols: list[str]) -> None:
+    # goals (keep only ones that exist now)
+    meta_goals = meta.get("goals", []) or []
+    g = (
+        pd.DataFrame(meta_goals).astype("object")
+        if meta_goals
+        else pd.DataFrame(columns=["var", "group", "type"]).astype("object")
+    )
+    g = g[g["var"].isin(current_cols)]
+    st.session_state["goals_df"] = g
+
+    # rules
+    if isinstance(meta.get("autotag_rules"), dict):
+        st.session_state["auto_rules"] = {
+            k: [str(x) for x in v] for k, v in meta["autotag_rules"].items()
+        }
+
+    # mapping → build a full mapping_df for current columns
+    meta_map = meta.get("mapping", {}) or {}
+    # Flatten mapping dict: {cat: [vars]}
+    var_to_cat = {}
+    for cat, vars_ in meta_map.items():
+        for v in vars_ or []:
+            var_to_cat[str(v)] = cat
+
+    def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
+        s = str(col).lower()
+        for cat, endings in rules.items():
+            for suf in endings:
+                if s.endswith(str(suf).lower()):
+                    return cat
+        return ""
+
+    rows = []
+    for c in current_cols:
+        cat = var_to_cat.get(c)
+        if not cat:
+            # fallback to rules for new cols
+            cat = _infer_category(c, st.session_state["auto_rules"])
+        rows.append({"var": c, "category": cat or "", "custom_tags": ""})
+    st.session_state["mapping_df"] = pd.DataFrame(rows).astype("object")
+
+
 # ──────────────────────────────────────────────────────────────
 # Page header & helper image
 # ──────────────────────────────────────────────────────────────
@@ -163,6 +270,12 @@ st.title("Customize your analytics — map your data in 3 steps.")
 # Step 1) Choose your dataset
 # ──────────────────────────────────────────────────────────────
 st.header("Step 1) Choose your dataset")
+
+r1, r2 = st.columns([1, 6])
+with r1:
+    if st.button("↻ Refresh GCS list"):
+        _list_country_versions_cached.clear()  # ⬅️ clear cache
+        st.success("Refreshed GCS version list.")
 
 c1, c2, c3 = st.columns([1.5, 1, 2])
 with c1:
@@ -235,6 +348,8 @@ def step1_loader():
             )
 
         else:  # Snowflake (or GCS fallback with no versions)
+            _require_sf_session()
+
             sql = (
                 effective_sql(
                     st.session_state["sf_table"], st.session_state["sf_sql"]
@@ -269,6 +384,7 @@ def _save_current_raw():
         st.session_state["picked_ts"] = res["timestamp"]
         st.session_state["data_origin"] = "gcs_latest"
         st.session_state["last_saved_raw_path"] = res["data_gcs_path"]
+        _list_country_versions_cached.clear()  # ⬅️ invalidate immediately
         st.success(f"Saved raw snapshot → {res['data_gcs_path']}")
     except Exception as e:
         st.error(f"Saving to GCS failed: {e}")
@@ -340,10 +456,16 @@ with st.form("goals_form", clear_on_submit=False):
                 }
             )
 
-        goals_src = pd.concat(
-            [_mk(primary_goals, "primary"), _mk(secondary_goals, "secondary")],
-            ignore_index=True,
-        )
+        if primary_goals or secondary_goals:
+            goals_src = pd.concat(
+                [
+                    _mk(primary_goals, "primary"),
+                    _mk(secondary_goals, "secondary"),
+                ],
+                ignore_index=True,
+            )
+        else:
+            goals_src = _initial_goals_from_columns(all_cols)
     else:
         goals_src = st.session_state["goals_df"]
 
@@ -424,11 +546,30 @@ if rules_changed:
     if st.session_state["mapping_df"].empty:
 
         def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
+            s = str(col).lower()
             for cat, endings in rules.items():
                 for suf in endings:
-                    if col.lower().endswith(suf.lower()):
+                    if s.endswith(str(suf).lower()):
                         return cat
             return ""
+
+
+with st.form("mapping_form", clear_on_submit=False):
+    if st.session_state["mapping_df"].empty:
+        # ⬇️ seed using current rules immediately
+        st.session_state["mapping_df"] = pd.DataFrame(
+            {
+                "var": pd.Series(all_cols, dtype="object"),
+                "category": pd.Series(
+                    [
+                        _infer_category(c, st.session_state["auto_rules"])
+                        for c in all_cols
+                    ],
+                    dtype="object",
+                ),
+                "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
+            }
+        ).astype("object")
 
         st.session_state["mapping_df"] = pd.DataFrame(
             {
@@ -441,6 +582,7 @@ if rules_changed:
             }
         ).astype("object")
 
+
 # ---- Mapping editor (form) ----
 allowed_categories = [
     "paid_media_spends",
@@ -450,6 +592,53 @@ allowed_categories = [
     "factor_vars",
     "",
 ]
+
+
+with st.form("mapping_form", clear_on_submit=False):
+    if st.session_state["mapping_df"].empty:
+        # ⬇️ seed using current rules immediately
+        st.session_state["mapping_df"] = pd.DataFrame(
+            {
+                "var": pd.Series(all_cols, dtype="object"),
+                "category": pd.Series(
+                    [
+                        _infer_category(c, st.session_state["auto_rules"])
+                        for c in all_cols
+                    ],
+                    dtype="object",
+                ),
+                "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
+            }
+        ).astype("object")
+
+with st.expander(
+    "📥 Load saved metadata & apply to current dataset", expanded=False
+):
+    lc1, lc2, lc3 = st.columns([1.2, 1, 1])
+    load_country = lc1.text_input(
+        "Country (metadata source)", value=st.session_state["country"]
+    )
+    # list available versions for chosen country
+    meta_versions = _list_country_versions_cached(
+        BUCKET, load_country
+    )  # reuse same listing under /datasets/
+    # We also allow 'latest' for metadata
+    version_opts = ["latest"] + meta_versions
+    picked_meta_ts = lc2.selectbox("Version", options=version_opts, index=0)
+    if lc3.button("Load & apply"):
+        try:
+            meta_blob = (
+                _meta_latest_blob(load_country)
+                if picked_meta_ts == "latest"
+                else _meta_blob(load_country, picked_meta_ts)
+            )
+            meta = _download_json_from_gcs(BUCKET, meta_blob)
+            _apply_metadata_to_current_df(meta, all_cols)
+            st.success(f"Applied metadata from gs://{BUCKET}/{meta_blob}")
+        except Exception as e:
+            st.error(f"Failed to load metadata: {e}")
+
+
 with st.form("mapping_form", clear_on_submit=False):
     # if still empty (first load), seed once using current rules
     if st.session_state["mapping_df"].empty:
@@ -485,6 +674,7 @@ with st.form("mapping_form", clear_on_submit=False):
         },
         key="mapping_editor",
     )
+
     mapping_submit = st.form_submit_button("✅ Apply mapping changes")
 
 if mapping_submit:
@@ -555,6 +745,7 @@ def _save_metadata():
             payload, BUCKET, _meta_latest_blob(st.session_state["country"])
         )
         st.session_state["last_saved_meta_path"] = f"gs://{BUCKET}/{vblob}"
+        _list_country_versions_cached.clear()  # ⬅️ refresh loader pickers
         st.success(
             f"Saved metadata → gs://{BUCKET}/{vblob} (and updated latest)"
         )
