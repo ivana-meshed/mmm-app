@@ -5,7 +5,6 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
-from app_split_helpers import *  # bring in all helper functions/constants
 
 from app_shared import (
     require_login_and_domain,
@@ -13,6 +12,37 @@ from app_shared import (
     run_sql,
     _require_sf_session,
 )
+
+from app_split_helpers import *  # bring in all helper functions/constants
+
+# --- queue tick shim (keeps original behavior even if symbol not exported) ---
+try:
+    # use the canonical one from helpers if present
+    from app_split_helpers import _queue_tick as _queue_tick_imported
+except Exception:
+    _queue_tick_imported = None
+
+if _queue_tick_imported is None:
+    # Rebuild minimal _queue_tick using the same primitives as the original
+    from app_split_helpers import (
+        queue_tick_once_headless,
+        prepare_and_launch_job,
+        maybe_refresh_queue_from_gcs,
+        GCS_BUCKET,
+    )
+
+    def _queue_tick() -> None:
+        queue_tick_once_headless(
+            st.session_state.queue_name,
+            st.session_state.get("gcs_bucket", GCS_BUCKET),
+            launcher=prepare_and_launch_job,
+        )
+        # keep exact semantics: refresh local after a tick
+        maybe_refresh_queue_from_gcs(force=True)
+
+else:
+    _queue_tick = _queue_tick_imported
+# ---------------------------------------------------------------------------
 
 
 st.set_page_config(page_title="Experiment", page_icon="🧪", layout="wide")
