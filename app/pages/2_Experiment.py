@@ -24,6 +24,8 @@ from app_shared import (
     _require_sf_session,
 )
 
+data_processor = get_data_processor()
+
 from app_split_helpers import *  # bring in all helper functions/constants
 
 
