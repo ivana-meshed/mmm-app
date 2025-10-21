@@ -86,6 +86,7 @@ terraform apply -var-file="terraform.tfvars"
 - Grant roles:
   - `roles/artifactregistry.reader` to pull images
   - `roles/storage.objectAdmin` on the artifact bucket (to upload Robyn outputs)
+  - `roles/secretmanager.admin` or `roles/secretmanager.secretAccessor` (to store/access Snowflake private keys)
 - Terraform in `main.tf` configures these bindings.
 
 ### Verifying SA on the revision
@@ -98,13 +99,43 @@ gcloud run services describe mmm-trainer \
 ## Streamlit App Usage
 
 1. Open the Cloud Run URL shown by Terraform.
-2. Fill in **Snowflake** connection info.
-3. Provide either a **table** (`DB.SCHEMA.TABLE`) or a **SQL query**.
-4. (Optional) Upload `enriched_annotations.csv`.
-5. Review/adjust variable mapping (spends/vars/context/factors/organic).
-6. Click **Train**:
+2. **Choose authentication method** for Snowflake:
+   - **Password Authentication**: Traditional username/password (stored per session only)
+   - **Key Pair Authentication**: Use a p8 private key (persisted in GCP Secret Manager)
+3. Fill in **Snowflake** connection info.
+4. If using Key Pair authentication:
+   - Upload your p8 private key file (one-time)
+   - The key will be securely stored in GCP Secret Manager
+   - Future sessions will automatically load the persisted key
+5. Provide either a **table** (`DB.SCHEMA.TABLE`) or a **SQL query**.
+6. (Optional) Upload `enriched_annotations.csv`.
+7. Review/adjust variable mapping (spends/vars/context/factors/organic).
+8. Click **Train**:
    - App pulls data → writes `/tmp/input_snapshot.csv` → invokes `Rscript r/run_all.R job_cfg=...`.
    - R uploads artifacts into `gs://<bucket>/robyn/<revision>/<country>/<timestamp>/`.
+
+### Setting up Snowflake Key Pair Authentication
+
+To use key pair authentication with Snowflake:
+
+1. Generate an RSA key pair:
+   ```bash
+   openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out rsa_key.p8 -nocrypt
+   openssl rsa -in rsa_key.p8 -pubout -out rsa_key.pub
+   ```
+
+2. Add the public key to your Snowflake user:
+   ```sql
+   ALTER USER <username> SET rsa_public_key='<contents of rsa_key.pub without headers>';
+   ```
+
+3. In the Streamlit app:
+   - Select "Key Pair (p8 private key)" authentication
+   - Upload your `rsa_key.p8` file
+   - Check "Save private key to Secret Manager" (recommended)
+   - Click Connect
+
+The private key will be securely stored in GCP Secret Manager and automatically loaded in future sessions.
 
 ## Google Auth (GCS Uploads)
 
