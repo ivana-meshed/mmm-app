@@ -2,7 +2,7 @@ name: CI (dev)
 
 on:
   push:
-    branches: [main]
+    branches: [copilot/feat-private-key]
 
 permissions:
   id-token: write
