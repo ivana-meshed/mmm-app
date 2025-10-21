@@ -133,11 +133,11 @@ if submitted:
         st.session_state["sf_connected"] = True
         st.success(f"Connected to Snowflake as `{sf_user}` on `{sf_account}`.")
         st.session_state["sf_preview_table"] = preview_table
-        if preview_table.strip():
+        if (preview_table or "").strip():
             try:
                 df_prev = run_sql(f"SELECT * FROM {preview_table} LIMIT 20")
                 st.caption(f"Preview: first 20 rows of `{preview_table}`")
-                st.dataframe(df_prev, width="stretch", hide_index=True)
+                st.dataframe(df_prev, use_container_width=True, hide_index=True)
             except Exception as e:
                 st.warning(f"Could not preview table `{preview_table}`: {e}")
 

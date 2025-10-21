@@ -59,7 +59,7 @@ with tab_single:
                         preview_sql = f"SELECT * FROM ({sql_eff}) t LIMIT 5"
                         df_prev = run_sql(preview_sql)
                         st.success("Connection OK")
-                        st.dataframe(df_prev, width="stretch")
+                        st.dataframe(df_prev, use_container_width=True)
                     except Exception as e:
                         st.error(f"Preview failed: {e}")
 
@@ -102,7 +102,8 @@ with tab_single:
                 "None": "none",
                 "Weekly (W)": "W",
                 "Monthly (M)": "M",
-            }[resample_freq_label]
+            }.get(resample_freq_label or "None", "none")
+
             resample_agg_label = c_rs2.selectbox(
                 "Aggregation for metrics (when resampling)",
                 ["sum", "avg (mean)", "max", "min"],
@@ -114,7 +115,7 @@ with tab_single:
                 "avg (mean)": "mean",
                 "max": "max",
                 "min": "min",
-            }[resample_agg_label]
+            }.get(resample_agg_label or "sum", "sum")
 
         # Variables
         with st.expander("Variable mapping"):
@@ -225,6 +226,15 @@ with tab_single:
                             data_blob = (
                                 f"training-data/{timestamp}/input_data.parquet"
                             )
+                            if (
+                                "gcs_bucket" not in st.session_state
+                                or not st.session_state["gcs_bucket"]
+                            ):
+                                st.error(
+                                    "Missing GCS bucket in session state. Please map your data first."
+                                )
+                                st.stop()
+                            gcs_bucket = st.session_state["gcs_bucket"]
                             data_gcs_path = upload_to_gcs(
                                 gcs_bucket, parquet_path, data_blob
                             )
@@ -267,6 +277,7 @@ with tab_single:
 
                         # 5) Launch Cloud Run Job
                         with timed_step("Launch training job", timings):
+                            assert TRAINING_JOB_NAME is not None
                             execution_name = job_manager.create_execution(
                                 TRAINING_JOB_NAME
                             )
@@ -299,6 +310,8 @@ with tab_single:
                                 mode="w", suffix=".csv", delete=False
                             ) as tmp:
                                 df_times.to_csv(tmp.name, index=False)
+                                gcs_bucket = st.session_state["gcs_bucket"]
+
                                 upload_to_gcs(gcs_bucket, tmp.name, dest_blob)
                             st.success(
                                 f"Timings CSV uploaded to gs://{gcs_bucket}/{dest_blob}"
@@ -518,11 +531,11 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             with st.form("uploaded_csv_form"):
                 # Show editable grid with a Delete column (like queue builder)
 
-                uploaded_edited = st.data_editor(
+                uploaded_edited = st.data_editor(  # type: ignore[arg-type]
                     uploaded_view,
                     key=f"uploaded_editor_{up_nonce}",  # <= bump key when sort changes
                     num_rows="dynamic",
-                    width="stretch",
+                    use_container_width=True,
                     hide_index=True,
                     column_config={
                         "Delete": st.column_config.CheckboxColumn(
@@ -549,11 +562,12 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             # ---- Handle CSV form actions ----
 
             if delete_uploaded_clicked:
-                keep_mask = (
-                    ~uploaded_edited.get("Delete", False)
-                    .fillna(False)
-                    .astype(bool)
+                delete_col = (
+                    uploaded_edited["Delete"]
+                    if "Delete" in uploaded_edited
+                    else pd.Series(False, index=uploaded_edited.index)
                 )
+                keep_mask = ~delete_col.fillna(False).astype(bool)
                 st.session_state.uploaded_df = (
                     uploaded_edited.loc[keep_mask]
                     .drop(columns="Delete", errors="ignore")
@@ -639,20 +653,22 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 for i, r in up_base.iterrows():
                     params = _normalize_row(r)
                     if not (params.get("query") or params.get("table")):
-                        dup["missing_data_source"].append(i + 1)
+                        dup["missing_data_source"].append(i + 1)  # type: ignore
                         to_append_mask.append(False)
                         continue
                     sig = _sig_from_params_dict(params)
                     if sig in builder_sigs:
-                        dup["in_builder"].append(i + 1)
+                        dup["in_builder"].append(
+                            i + 1  # type: ignore
+                        )  # pyright: ignore[reportOperatorIssue]
                         to_append_mask.append(False)
                         continue
                     if sig in queue_sigs:
-                        dup["in_queue"].append(i + 1)
+                        dup["in_queue"].append(i + 1)  # type: ignore
                         to_append_mask.append(False)
                         continue
                     if sig in job_history_sigs:
-                        dup["in_job_history"].append(i + 1)
+                        dup["in_job_history"].append(i + 1)  # type: ignore
                         to_append_mask.append(False)
                         continue
                     to_append_mask.append(True)
@@ -775,7 +791,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             builder_edited = st.data_editor(
                 builder_src,
                 num_rows="dynamic",
-                width="stretch",
+                width="stretch",  # type: ignore
                 key=f"queue_builder_editor_{qb_nonce}",  # <= bump key when sort changes
                 hide_index=True,
                 column_config={
@@ -783,7 +799,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         "Delete", help="Mark to remove from builder"
                     )
                 },
-            )
+            )  # type: ignore
 
             # Persist edits to builder params (drop Delete column)
             st.session_state.qb_df = builder_edited.drop(
@@ -1055,9 +1071,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     df_queue_view,
                     key=f"queue_editor_{q_nonce}",  # <= bump key when sort changes
                     hide_index=True,
-                    width="stretch",
+                    width="stretch",  # type: ignore
                     column_config=q_cfg,
-                )
+                )  # type: ignore
 
                 delete_queue_clicked = st.form_submit_button(
                     "🗑 Delete selected (PENDING/ERROR only)"
@@ -1120,7 +1136,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     df_times["Time (s)"] / total * 100
                 ).round(1)
             st.markdown("**Setup steps (this session)**")
-            st.dataframe(df_times, width="stretch")
+            st.dataframe(df_times, width="stretch")  # type: ignore
             st.write(f"**Total setup time:** {_fmt_secs(total)}")
             st.write(
                 "**Note**: Training runs asynchronously in Cloud Run Jobs."
