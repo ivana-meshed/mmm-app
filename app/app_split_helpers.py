@@ -130,31 +130,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# Call it once, near the top of your app before any other UI
-require_login_and_domain()
-
-query_params = st.query_params
-logger.info(
-    "Starting app/0_Connect_Your_Data.py",
-    extra={"query_params": dict(query_params)},
-)
-
-# Health check endpoint (returns JSON, does not render UI)
-if query_params.get("health") == "true":
-    try:
-        from health import health_checker  # optional module
-
-        st.json(health_checker.check_container_health())
-    except Exception as e:
-        st.json(
-            {
-                "status": "error",
-                "timestamp": datetime.now().isoformat(),
-                "error": str(e),
-            }
-        )
-    st.stop()
-
 # ─────────────────────────────
 # Session defaults
 # ─────────────────────────────
@@ -269,6 +244,7 @@ def prepare_and_launch_job(params: dict) -> dict:
 
         # 5) Launch job (Cloud Run Jobs)
         with timed_step("Launch training job", timings):
+            assert TRAINING_JOB_NAME is not None, "TRAINING_JOB_NAME is not set"
             execution_name = job_manager.create_execution(TRAINING_JOB_NAME)
 
         # Seed timings.csv (web-side steps) if not present
@@ -301,7 +277,7 @@ def prepare_and_launch_job(params: dict) -> dict:
 # Early stateless tick endpoint (?queue_tick=1)
 # ─────────────────────────────
 res = handle_queue_tick_from_query_params(
-    st.query_params,
+    st.query_params,  # type: ignore
     st.session_state.get("gcs_bucket", GCS_BUCKET),
     launcher=prepare_and_launch_job,
 )
@@ -390,7 +366,6 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
         )
         st.dataframe(
             df_job_history,
-            width="stretch",
             use_container_width=True,
             hide_index=True,
             key=f"job_history_view_{key_prefix}_{st.session_state.get('job_history_nonce', 0)}",
@@ -549,19 +524,19 @@ _builder_defaults = dict(
 def _make_normalizer(defaults: dict):
     def _normalize_row(row: pd.Series) -> dict:
         def _g(v, default):
-            return row.get(v) if (v in row and pd.notna(row[v])) else default
+            return row.get(v) if (v in row and pd.notna(row[v])) else default  # type: ignore
 
         return {
             "country": str(_g("country", defaults["country"])),
             "revision": str(_g("revision", defaults["revision"])),
             "date_input": str(_g("date_input", defaults["date_input"])),
             "iterations": (
-                int(float(_g("iterations", defaults["iterations"])))
+                int(float(_g("iterations", defaults["iterations"])))  # type: ignore
                 if str(_g("iterations", defaults["iterations"])).strip()
                 else int(defaults["iterations"])
             ),
             "trials": (
-                int(float(_g("trials", defaults["trials"])))
+                int(float(_g("trials", defaults["trials"])))  # type: ignore
                 if str(_g("trials", defaults["trials"])).strip()
                 else int(defaults["trials"])
             ),
@@ -842,7 +817,7 @@ def _sorted_with_controls(
         st.session_state[nonce_key] = st.session_state.get(nonce_key, 0) + 1
 
     sorted_df = df.sort_values(
-        by=col, ascending=asc, na_position="last", kind="mergesort"
+        by=col, ascending=asc, na_position="last", kind="mergesort"  # type: ignore
     )
     return sorted_df, st.session_state.get(nonce_key, 0)
 

@@ -278,7 +278,14 @@ def _iso2_countries_gcs_first(bucket: str) -> list[str]:
     try:
         import pycountry
 
-        all_iso2 = sorted({c.alpha_2.lower() for c in pycountry.countries})
+        # Explicitly type the loop variable and cast to avoid Pylance complaints
+        all_iso2 = sorted(
+            {
+                str(getattr(c, "alpha_2", "")).lower()
+                for c in list(pycountry.countries)
+                if getattr(c, "alpha_2", None)
+            }
+        )
     except Exception:
         # Fallback if pycountry isn't installed
         all_iso2 = sorted(
@@ -443,7 +450,11 @@ def step1_loader():
                     BUCKET, _latest_symlink_blob(country)
                 )
                 st.session_state.update(
-                    df_raw=df, data_origin="gcs_latest", picked_ts="latest"
+                    {
+                        "df_raw": df,
+                        "data_origin": "gcs_latest",
+                        "picked_ts": "latest",
+                    }
                 )
             except Exception:
                 if versions:
@@ -454,10 +465,13 @@ def step1_loader():
                     df = _download_parquet_from_gcs_cached(
                         BUCKET, _data_blob(country, fallback_ts)
                     )
+
                     st.session_state.update(
-                        df_raw=df,
-                        data_origin="gcs_timestamp",
-                        picked_ts=fallback_ts,
+                        {
+                            "df_raw": df,
+                            "data_origin": "gcs_timestamp",
+                            "picked_ts": "fallback_ts",
+                        }
                     )
                 else:
                     st.info(
@@ -476,7 +490,11 @@ def step1_loader():
                     if sql:
                         df = _load_from_snowflake_cached(sql)
                         st.session_state.update(
-                            df_raw=df, data_origin="snowflake", picked_ts=""
+                            {
+                                "df_raw": df,
+                                "data_origin": "snowflake",
+                                "picked_ts": "",
+                            }
                         )
                     else:
                         st.warning(
@@ -489,7 +507,11 @@ def step1_loader():
                 BUCKET, _data_blob(country, choice)
             )
             st.session_state.update(
-                df_raw=df, data_origin="gcs_timestamp", picked_ts=choice
+                {
+                    "df_raw": df,
+                    "data_origin": "gcs_timestamp",
+                    "picked_ts": "choice",
+                }
             )
 
         else:  # "Snowflake"
@@ -505,7 +527,11 @@ def step1_loader():
             if sql:
                 df = _load_from_snowflake_cached(sql)
                 st.session_state.update(
-                    df_raw=df, data_origin="snowflake", picked_ts=""
+                    {
+                        "df_raw": df,
+                        "data_origin": "snowflake",
+                        "picked_ts": "",
+                    }
                 )
             else:
                 st.warning("Provide a table or SQL to load from Snowflake.")
@@ -736,28 +762,43 @@ with st.expander(
     "📥 Load saved metadata & apply to current dataset", expanded=False
 ):
     lc1, lc2, lc3 = st.columns([1.2, 1, 1])
-    load_country = lc1.text_input(
-        "Country (metadata source)", value=st.session_state["country"]
-    )
+    load_country = (
+        lc1.text_input(
+            "Country (metadata source)", value=st.session_state["country"]
+        )
+        or ""
+    )  # ensure string, not None
+
     # list available versions for chosen country
-    meta_versions = _list_country_versions_cached(
-        BUCKET, load_country
-    )  # reuse same listing under /datasets/
-    # We also allow 'latest' for metadata
+    if load_country.strip():
+        meta_versions = _list_country_versions_cached(BUCKET, load_country)
+    else:
+        meta_versions = []
+
+    # Allow 'latest' for metadata
     version_opts = ["latest"] + meta_versions
     picked_meta_ts = lc2.selectbox("Version", options=version_opts, index=0)
+
     if lc3.button("Load & apply"):
-        try:
-            meta_blob = (
-                _meta_latest_blob(load_country)
-                if picked_meta_ts == "latest"
-                else _meta_blob(load_country, picked_meta_ts)
-            )
-            meta = _download_json_from_gcs(BUCKET, meta_blob)
-            _apply_metadata_to_current_df(meta, all_cols)
-            st.success(f"Applied metadata from gs://{BUCKET}/{meta_blob}")
-        except Exception as e:
-            st.error(f"Failed to load metadata: {e}")
+        if not load_country.strip():
+            st.warning("Please select a country first.")
+        elif not picked_meta_ts:
+            st.warning("Please select a metadata version.")
+        else:
+            try:
+                meta_blob: str
+                if picked_meta_ts == "latest":
+                    meta_blob = _meta_latest_blob(load_country)
+                else:
+                    # coerce picked_meta_ts to str to satisfy the type checker
+                    meta_blob = _meta_blob(load_country, str(picked_meta_ts))
+
+                meta = _download_json_from_gcs(BUCKET, meta_blob)
+                _apply_metadata_to_current_df(meta, all_cols)
+                st.success(f"Applied metadata from gs://{BUCKET}/{meta_blob}")
+            except Exception as e:
+                st.error(f"Failed to load metadata: {e}")
+
 
 # ✅ if still empty (first load), seed using current rules (outside the form)
 if st.session_state["mapping_df"].empty:
@@ -937,11 +978,6 @@ if st.session_state["last_saved_meta_path"]:
 
 with st.expander("Preview metadata JSON", expanded=False):
     st.json(payload, expanded=False)
-
-
-# --- Make mapped categories handy for the next page
-def _by_cat(df: pd.DataFrame, cat: str) -> list[str]:
-    return df.loc[df["category"] == cat, "var"].dropna().astype(str).tolist()
 
 
 if not st.session_state["mapping_df"].empty:

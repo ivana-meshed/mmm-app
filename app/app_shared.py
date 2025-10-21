@@ -123,7 +123,7 @@ def _empty_job_history_df() -> pd.DataFrame:
 def _safe_tick_once(
     queue_name: str,
     bucket_name: Optional[str] = None,
-    launcher: Optional[callable] = None,
+    launcher: Optional[callable] = None,  # type: ignore
     max_retries: int = 3,
 ) -> dict:
     """
@@ -160,7 +160,7 @@ def _safe_tick_once(
                 pass
 
         blob.reload()  # get current generation
-        gen = int(blob.generation)
+        gen = int(blob.generation)  # type: ignore
         try:
             doc = json.loads(blob.download_as_text())
         except Exception:
@@ -174,7 +174,7 @@ def _safe_tick_once(
         if not running_flag:
             return {"ok": True, "message": "queue is paused", "changed": False}
 
-        jm = CloudRunJobManager(PROJECT_ID, REGION)
+        jm = CloudRunJobManager(PROJECT_ID, REGION)  # type: ignore
 
         # 1) Update RUNNING/LAUNCHING job if any
         run_idx = next(
@@ -283,7 +283,7 @@ def _safe_tick_once(
 
         # Persist the post-launch state with another guarded write
         blob.reload()
-        gen2 = int(blob.generation)
+        gen2 = int(blob.generation)  # type: ignore
         doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
         try:
             blob.upload_from_string(
@@ -399,7 +399,7 @@ def get_data_processor():
 
 @st.cache_resource
 def get_job_manager():
-    return CloudRunJobManager(PROJECT_ID, REGION)
+    return CloudRunJobManager(PROJECT_ID, REGION)  # type: ignore
 
 
 class CloudRunJobManager:
@@ -434,9 +434,9 @@ class CloudRunJobManager:
                 )
                 if execs:
                     execs.sort(
-                        key=lambda e: getattr(e, "create_time", None),
+                        key=lambda e: getattr(e, "create_time", None),  # type: ignore
                         reverse=True,
-                    )
+                    )  # type: ignore
                     execution_name = execs[0].name
                     break
             except Exception:
@@ -704,7 +704,8 @@ USE_CONNECTOR = True  # set False if you use Snowpark Session
 if USE_CONNECTOR:
     import snowflake.connector as sf
 else:
-    from snowflake.snowpark import Session
+    # Avoid hard dependency on Snowpark when not used; import lazily only if you switch.
+    Session = None  # placeholder; do `from snowflake.snowpark import Session` at call site if needed
 
 KEEPALIVE_SECONDS = 10 * 60  # ping every 10 min of inactivity
 
@@ -731,7 +732,7 @@ def _load_private_key(private_key_str: str) -> bytes:
     return serialization.load_pem_private_key(
         private_key_str.encode("utf-8"),
         password=None,  # No passphrase
-    )
+    )  # type: ignore
 
 
 # @st.cache_resource(show_spinner=False)
@@ -816,7 +817,7 @@ def keepalive_ping(conn):
                     cur.execute("SELECT 1")
                     cur.fetchall()
             else:
-                new_conn.sql("SELECT 1").collect()
+                new_conn.sql("SELECT 1").collect()  # type: ignore
             st.session_state["_sf_last_ping"] = time.time()
         except Exception as e:
             # Surface a concise error while letting the page continue rendering
@@ -928,9 +929,9 @@ def append_row_to_job_history(row_dict: dict, bucket_name: str):
     df_new = df_new.set_index("job_id")
     for jid, s in df_new.iterrows():
         if jid in df_old.index:
-            df_old.loc[jid] = df_old.loc[jid].combine_first(s)
+            df_old.loc[jid] = df_old.loc[jid].combine_first(s)  # type: ignore
         else:
-            df_old.loc[jid] = s
+            df_old.loc[jid] = s  # type: ignore
 
     df_merged = df_old.reset_index()
     df_merged = normalize_job_history_df(df_merged)
@@ -993,7 +994,7 @@ def build_job_config_from_params(
         "gcs_bucket": params.get("gcs_bucket")
         or st.session_state["gcs_bucket"],
         "data_gcs_path": _normalize_gs_uri(data_gcs_path),
-        "annotations_gcs_path": _normalize_gs_uri(annotations_gcs_path),
+        "annotations_gcs_path": _normalize_gs_uri(annotations_gcs_path),  # type: ignore
         "paid_media_spends": [
             s.strip()
             for s in str(params["paid_media_spends"]).split(",")
@@ -1169,7 +1170,7 @@ def load_queue_payload(
 def queue_tick_once_headless(
     queue_name: str,
     bucket_name: Optional[str] = None,
-    launcher: Optional[callable] = None,
+    launcher: Optional[callable] = None,  # type: ignore
 ) -> dict:
     return _safe_tick_once(queue_name, bucket_name, launcher)
 
@@ -1182,7 +1183,7 @@ def queue_tick_once_headless(
 def handle_queue_tick_from_query_params(
     query_params: Dict[str, Any],
     bucket_name: Optional[str] = None,
-    launcher: Optional[callable] = None,
+    launcher: Optional[callable] = None,  # type: ignore
 ) -> Optional[dict]:
     """
     If ?queue_tick=1 is present, process one headless queue tick and return the result.
@@ -1260,7 +1261,7 @@ def require_login_and_domain(allowed_domain: str = "mesheddata.com") -> None:
     if q.get("health") == "true":
         return  # let the page handle its health endpoint and st.stop() later if needed
 
-    is_logged_in = getattr(st.user, "is_logged_in", False)
+    is_logged_in = getattr(st.user, "is_logged_in", False)  # type: ignore
     if not is_logged_in:
         st.set_page_config(page_title="Sign in", layout="centered")
         st.title("Robyn MMM")
@@ -1268,21 +1269,21 @@ def require_login_and_domain(allowed_domain: str = "mesheddata.com") -> None:
             f"Sign in with your {allowed_domain} Google account to continue."
         )
         if st.button("Sign in with Google"):
-            st.login()  # flat [auth] config → no provider arg
+            st.login()  # type: ignore # flat [auth] config → no provider arg
         st.stop()
 
-    email = (getattr(st.user, "email", "") or "").lower().strip()
+    email = (getattr(st.user, "email", "") or "").lower().strip()  # type: ignore
     if not email.endswith(f"@{allowed_domain}"):
         st.set_page_config(page_title="Access restricted", layout="centered")
         st.error(f"This app is restricted to @{allowed_domain} accounts.")
         if st.button("Sign out"):
-            st.logout()
+            st.logout()  # type: ignore # flat [auth] config → no provider arg
         st.stop()
 
 
 def _maybe_resample_df(
     df: pd.DataFrame,
-    date_col: str | None,
+    date_col: str | None,  # type: ignore
     freq: str,  # 'none' | 'W' | 'M'
     agg: str,  # 'sum' | 'mean' | 'max' | 'min'
     cat_strategy: str = "auto",  # 'auto' | 'mean' | 'sum' | 'max' | 'mode'
@@ -1410,7 +1411,7 @@ def _maybe_resample_df(
                     .resample(rule)
                     .agg(lambda x: x.mode().iloc[0] if len(x) else np.nan)
                     .to_frame(name=f"{c}_mode")
-                )
+                )  # type: ignore
                 res_parts.append(res_mode)
 
     # Merge all parts
