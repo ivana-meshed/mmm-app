@@ -4,3 +4,4 @@ snowflake-connector-python
 google-cloud-secret-manager
 google-cloud-storage
 protobuf<5
+cryptography

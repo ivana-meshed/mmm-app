@@ -49,6 +49,8 @@ from app_shared import (
     _maybe_resample_df,
     _normalize_resample_freq,
     _normalize_resample_agg,
+    save_snowflake_private_key,
+    load_snowflake_private_key,
 )
 
 # Instantiate shared resources
@@ -97,6 +99,8 @@ st.session_state.setdefault("auto_refresh", False)
 st.session_state.setdefault("sf_params", None)
 st.session_state.setdefault("sf_connected", False)
 st.session_state.setdefault("sf_conn", None)
+st.session_state.setdefault("sf_private_key", None)
+st.session_state.setdefault("sf_auth_method", "password")  # "password" or "key_pair"
 
 # Batch queue state
 st.session_state.setdefault("job_queue", [])  # list of dicts
@@ -750,9 +754,34 @@ if not st.session_state.queue_loaded_from_gcs:
     except Exception as e:
         st.warning(f"Could not auto-load queue from GCS: {e}")
 
+# Auto-load persisted private key once per session
+if "sf_private_key_loaded" not in st.session_state:
+    try:
+        private_key = load_snowflake_private_key()
+        if private_key:
+            st.session_state.sf_private_key = private_key
+            st.session_state.sf_auth_method = "key_pair"
+            logger.info("Loaded persisted Snowflake private key from Secret Manager")
+    except Exception as e:
+        logger.warning(f"Could not auto-load private key: {e}")
+    finally:
+        st.session_state.sf_private_key_loaded = True
+
 # ============= TAB 1: Snowflake Connection =============
 with tab_conn:
     st.subheader("Connect to Snowflake (persists for this session)")
+    
+    # Authentication method selection
+    auth_method = st.radio(
+        "Authentication Method",
+        options=["password", "key_pair"],
+        format_func=lambda x: "Password" if x == "password" else "Key Pair (p8 private key)",
+        index=0 if st.session_state.sf_auth_method == "password" else 1,
+        key="auth_method_radio",
+        horizontal=True,
+    )
+    st.session_state.sf_auth_method = auth_method
+    
     with st.form("sf_connect_form", clear_on_submit=False):
         c1, c2 = st.columns(2)
         with c1:
@@ -787,20 +816,71 @@ with tab_conn:
                 value=(st.session_state.sf_params or {}).get("role", "")
                 or os.getenv("SF_ROLE"),
             )
-            sf_password = st.text_input("Password", type="password")
+            if auth_method == "password":
+                sf_password = st.text_input("Password", type="password")
+            else:
+                sf_password = None
+
+        # Private key upload section (outside columns, only for key_pair auth)
+        if auth_method == "key_pair":
+            st.markdown("---")
+            st.markdown("**Private Key Authentication**")
+            
+            # Show status of persisted key
+            if st.session_state.get("sf_private_key"):
+                st.success("✅ Private key loaded from Secret Manager (persisted across sessions)")
+            else:
+                st.info("No private key found. Please upload a p8 private key file.")
+            
+            p8_file = st.file_uploader(
+                "Upload p8 private key file",
+                type=["p8", "pem"],
+                help="Upload your Snowflake private key file. It will be securely stored in GCP Secret Manager.",
+            )
+            
+            persist_key = st.checkbox(
+                "Save private key to Secret Manager (recommended)",
+                value=True,
+                help="Store the key securely in GCP Secret Manager for reuse across sessions",
+            )
 
         submitted = st.form_submit_button("🔌 Connect")
         if submitted:
             try:
-                conn = _connect_snowflake(
+                # Handle private key upload if in key_pair mode
+                if auth_method == "key_pair":
+                    if p8_file is not None:
+                        # Read the uploaded file
+                        private_key_bytes = p8_file.read()
+                        st.session_state.sf_private_key = private_key_bytes
+                        
+                        # Save to Secret Manager if requested
+                        if persist_key:
+                            if save_snowflake_private_key(private_key_bytes):
+                                st.success("Private key saved to Secret Manager!")
+                            else:
+                                st.warning("Failed to save private key to Secret Manager, but will use for this session")
+                    elif not st.session_state.get("sf_private_key"):
+                        st.error("Please upload a private key file or ensure one is already persisted.")
+                        st.stop()
+                
+                # Prepare connection parameters
+                conn_params = dict(
                     user=sf_user,
-                    password=sf_password,
+                    password=sf_password if auth_method == "password" else None,
                     account=sf_account,
                     warehouse=sf_wh,
                     database=sf_db,
                     schema=sf_schema,
                     role=sf_role,
                 )
+                
+                # Add private key if using key_pair auth
+                if auth_method == "key_pair":
+                    conn_params["private_key"] = st.session_state.get("sf_private_key")
+                
+                conn = _connect_snowflake(**conn_params)
+                
                 st.session_state["sf_params"] = dict(
                     user=sf_user,
                     account=sf_account,
@@ -812,7 +892,7 @@ with tab_conn:
                 st.session_state["sf_conn"] = conn
                 st.session_state["sf_connected"] = True
                 st.success(
-                    f"Connected to Snowflake as `{sf_user}` on `{sf_account}`."
+                    f"Connected to Snowflake as `{sf_user}` on `{sf_account}` using {auth_method.replace('_', ' ')} authentication."
                 )
             except Exception as e:
                 st.session_state["sf_connected"] = False
@@ -821,6 +901,8 @@ with tab_conn:
     if st.session_state.sf_connected:
         with st.container(border=True):
             st.markdown("**Status:** ✅ Connected")
+            auth_display = "🔑 Key Pair" if st.session_state.sf_auth_method == "key_pair" else "🔐 Password"
+            st.markdown(f"**Authentication:** {auth_display}")
             c1, c2, c3 = st.columns(3)
             c1.write(
                 f"**Warehouse:** `{st.session_state.sf_params.get('warehouse','')}`"

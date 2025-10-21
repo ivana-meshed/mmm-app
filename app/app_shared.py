@@ -398,17 +398,53 @@ def get_job_manager():
 
 
 def _connect_snowflake(
-    user, password, account, warehouse, database, schema, role
+    user, password, account, warehouse, database, schema, role, private_key=None
 ):
-    return sf.connect(
-        user=user,
-        password=password,
-        account=account,
-        warehouse=warehouse,
-        database=database,
-        schema=schema,
-        role=role or None,
-    )
+    """
+    Connect to Snowflake using either password or private key authentication.
+    
+    Args:
+        user: Snowflake username
+        password: Password (used if private_key is None)
+        account: Snowflake account identifier
+        warehouse: Warehouse name
+        database: Database name
+        schema: Schema name
+        role: Role name (optional)
+        private_key: Private key bytes for key-pair authentication (optional)
+    """
+    if private_key:
+        # Use key-pair authentication
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+        
+        # Load the private key
+        p_key = serialization.load_pem_private_key(
+            private_key,
+            password=None,  # Assumes unencrypted key for now
+            backend=default_backend()
+        )
+        
+        return sf.connect(
+            user=user,
+            account=account,
+            private_key=p_key,
+            warehouse=warehouse,
+            database=database,
+            schema=schema,
+            role=role or None,
+        )
+    else:
+        # Use password authentication
+        return sf.connect(
+            user=user,
+            password=password,
+            account=account,
+            warehouse=warehouse,
+            database=database,
+            schema=schema,
+            role=role or None,
+        )
 
 
 class CloudRunJobManager:
@@ -600,6 +636,13 @@ def ensure_sf_conn() -> sf.SnowflakeConnection:
         raise RuntimeError(
             "No Snowflake connection parameters found. Please connect first."
         )
+    
+    # Get private key if using key-pair authentication
+    private_key = st.session_state.get("sf_private_key")
+    if private_key:
+        params = params.copy()
+        params["private_key"] = private_key
+        
     conn = _connect_snowflake(**params)
     st.session_state["sf_conn"] = conn
     st.session_state["sf_connected"] = True
@@ -1006,6 +1049,50 @@ def _normalize_resample_freq(freq: str) -> str:
     if f.startswith("m"):
         return "M"  # monthly
     return "none"
+
+
+# ─────────────────────────────
+# Snowflake Private Key Management
+# ─────────────────────────────
+
+def save_snowflake_private_key(private_key_bytes: bytes, project_id: Optional[str] = None) -> bool:
+    """
+    Save Snowflake private key to GCP Secret Manager.
+    
+    Args:
+        private_key_bytes: The private key file contents
+        project_id: GCP project ID (optional, will be inferred if not provided)
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        from gcp_secrets import upsert_secret
+        secret_id = "snowflake-private-key"
+        upsert_secret(secret_id, private_key_bytes, project_id)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save private key to Secret Manager: {e}")
+        return False
+
+
+def load_snowflake_private_key(project_id: Optional[str] = None) -> Optional[bytes]:
+    """
+    Load Snowflake private key from GCP Secret Manager.
+    
+    Args:
+        project_id: GCP project ID (optional, will be inferred if not provided)
+    
+    Returns:
+        Private key bytes if found, None otherwise
+    """
+    try:
+        from gcp_secrets import access_secret
+        secret_id = "snowflake-private-key"
+        return access_secret(secret_id, project_id)
+    except Exception as e:
+        logger.error(f"Failed to load private key from Secret Manager: {e}")
+        return None
 
 
 def _normalize_resample_agg(agg: str) -> str:
