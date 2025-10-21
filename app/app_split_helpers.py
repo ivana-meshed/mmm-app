@@ -95,6 +95,7 @@ __all__ = [
     "_maybe_resample_df",
     "_normalize_resample_freq",
     "_normalize_resample_agg",
+    "params_from_ui",
     # private-but-needed by pages (export them anyway)
     "prepare_and_launch_job",
     "render_jobs_job_history",
@@ -111,6 +112,8 @@ __all__ = [
     "_auto_refresh_and_tick",
     "_sorted_with_controls",
     "ensure_session_defaults",
+    "data_processor",
+    "job_manager",
 ]
 
 # Instantiate shared resources
