@@ -3,4 +3,5 @@ pandas
 snowflake-connector-python
 google-cloud-secret-manager
 google-cloud-storage
+google-cloud-run
 protobuf<5
