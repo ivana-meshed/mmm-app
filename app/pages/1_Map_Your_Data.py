@@ -290,12 +290,13 @@ def _detect_data_type(df: pd.DataFrame, col: str) -> str:
     
     dtype = df[col].dtype
     
+    # Check bool first (pandas considers bool as numeric, but we want it as categorical)
+    if pd.api.types.is_bool_dtype(dtype):
+        return "categorical"
     # Check pandas dtype
-    if pd.api.types.is_numeric_dtype(dtype):
+    elif pd.api.types.is_numeric_dtype(dtype):
         return "numeric"
     elif pd.api.types.is_categorical_dtype(dtype) or pd.api.types.is_object_dtype(dtype):
-        return "categorical"
-    elif pd.api.types.is_bool_dtype(dtype):
         return "categorical"
     else:
         # Default to numeric for datetime and other types
