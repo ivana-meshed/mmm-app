@@ -369,15 +369,24 @@ with tab_single:
 
         # Variables
         with st.expander("Variable mapping", expanded=True):
+            # Get available columns from loaded data
+            preview_df = st.session_state.get("preview_df")
+            if preview_df is not None and not preview_df.empty:
+                # Get all columns except date column
+                all_columns = [col for col in preview_df.columns if col.lower() != 'date']
+            else:
+                # Fallback to empty list if no data loaded yet
+                all_columns = []
+            
             # Auto-populate from metadata if available
             metadata = st.session_state.get("loaded_metadata")
 
             default_values = {
-                "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-                "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-                "context_vars": "IS_WEEKEND,TV_IS_ON",
-                "factor_vars": "IS_WEEKEND,TV_IS_ON",
-                "organic_vars": "ORGANIC_TRAFFIC",
+                "paid_media_spends": ["GA_SUPPLY_COST", "GA_DEMAND_COST", "BING_DEMAND_COST", "META_DEMAND_COST", "TV_COST", "PARTNERSHIP_COSTS"],
+                "paid_media_vars": ["GA_SUPPLY_COST", "GA_DEMAND_COST", "BING_DEMAND_COST", "META_DEMAND_COST", "TV_COST", "PARTNERSHIP_COSTS"],
+                "context_vars": ["IS_WEEKEND", "TV_IS_ON"],
+                "factor_vars": ["IS_WEEKEND", "TV_IS_ON"],
+                "organic_vars": ["ORGANIC_TRAFFIC"],
             }
 
             # Extract values from metadata if available
@@ -449,33 +458,63 @@ with tab_single:
                         if m.get("category") == cat and m.get("var")
                     ]
                     if vars_in_cat:
-                        default_values[cat] = ", ".join(vars_in_cat)
+                        default_values[cat] = vars_in_cat
 
-            paid_media_spends = st.text_input(
-                "paid_media_spends (comma-separated)",
-                value=default_values["paid_media_spends"],
-                help="Media spend columns",
+            # Filter defaults to only include columns that exist in the data
+            if all_columns:
+                for cat in default_values:
+                    default_values[cat] = [v for v in default_values[cat] if v in all_columns]
+            
+            # If no data is loaded, show a warning
+            if not all_columns:
+                st.warning("⚠️ Please load data first to see available columns for selection.")
+            
+            # Paid media spends - multiselect
+            paid_media_spends_list = st.multiselect(
+                "paid_media_spends",
+                options=all_columns,
+                default=default_values["paid_media_spends"],
+                help="Select media spend columns",
             )
-            paid_media_vars = st.text_input(
-                "paid_media_vars (comma-separated)",
-                value=default_values["paid_media_vars"],
-                help="Media variable columns (e.g., impressions, clicks)",
+            
+            # Paid media vars - multiselect (will be made nested later based on clarification)
+            paid_media_vars_list = st.multiselect(
+                "paid_media_vars",
+                options=all_columns,
+                default=default_values["paid_media_vars"],
+                help="Select media variable columns (e.g., impressions, clicks)",
             )
-            context_vars = st.text_input(
+            
+            # Context vars - multiselect
+            context_vars_list = st.multiselect(
                 "context_vars",
-                value=default_values["context_vars"],
-                help="Contextual variables (e.g., seasonality, events)",
+                options=all_columns,
+                default=default_values["context_vars"],
+                help="Select contextual variables (e.g., seasonality, events)",
             )
-            factor_vars = st.text_input(
+            
+            # Factor vars - multiselect
+            factor_vars_list = st.multiselect(
                 "factor_vars",
-                value=default_values["factor_vars"],
-                help="Factor/categorical variables",
+                options=all_columns,
+                default=default_values["factor_vars"],
+                help="Select factor/categorical variables",
             )
-            organic_vars = st.text_input(
+            
+            # Organic vars - multiselect
+            organic_vars_list = st.multiselect(
                 "organic_vars",
-                value=default_values["organic_vars"],
-                help="Organic/baseline variables",
+                options=all_columns,
+                default=default_values["organic_vars"],
+                help="Select organic/baseline variables",
             )
+            
+            # Convert lists to comma-separated strings for backward compatibility
+            paid_media_spends = ", ".join(paid_media_spends_list)
+            paid_media_vars = ", ".join(paid_media_vars_list)
+            context_vars = ", ".join(context_vars_list)
+            factor_vars = ", ".join(factor_vars_list)
+            organic_vars = ", ".join(organic_vars_list)
 
         # Outputs
         with st.expander("Outputs"):
