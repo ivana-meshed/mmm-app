@@ -510,7 +510,7 @@ def step1_loader():
                 {
                     "df_raw": df,
                     "data_origin": "gcs_timestamp",
-                    "picked_ts": "choice",
+                    "picked_ts": choice,
                 }
             )
 
