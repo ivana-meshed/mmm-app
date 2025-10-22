@@ -25,6 +25,18 @@ from app_shared import (
 )
 
 # ──────────────────────────────────────────────────────────────
+# Constants
+# ──────────────────────────────────────────────────────────────
+ALLOWED_CATEGORIES = [
+    "paid_media_spends",
+    "paid_media_vars",
+    "context_vars",
+    "organic_vars",
+    "factor_vars",
+    "",
+]
+
+# ──────────────────────────────────────────────────────────────
 # Setup
 # ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Map your data", layout="wide")
@@ -300,6 +312,35 @@ def _default_agg_strategy(data_type: str) -> str:
         return "sum"
     else:
         return "auto"
+
+
+def _build_mapping_df(all_cols: list[str], df_raw: pd.DataFrame, rules: dict) -> pd.DataFrame:
+    """
+    Build a complete mapping DataFrame with all required columns.
+    Helper function to reduce code duplication.
+    """
+    return pd.DataFrame(
+        {
+            "var": pd.Series(all_cols, dtype="object"),
+            "category": pd.Series(
+                [_infer_category(c, rules) for c in all_cols],
+                dtype="object",
+            ),
+            "channel": pd.Series(
+                [_extract_channel_from_column(c) for c in all_cols],
+                dtype="object",
+            ),
+            "data_type": pd.Series(
+                [_detect_data_type(df_raw, c) for c in all_cols],
+                dtype="object",
+            ),
+            "agg_strategy": pd.Series(
+                [_default_agg_strategy(_detect_data_type(df_raw, c)) for c in all_cols],
+                dtype="object",
+            ),
+            "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
+        }
+    ).astype("object")
 
 
 def _initial_goals_from_columns(cols: list[str]) -> pd.DataFrame:
@@ -939,40 +980,10 @@ if rules_changed:
     st.session_state["auto_rules"] = new_rules
     # seed mapping again only when rules change AND user hasn't started manual edits
     if st.session_state["mapping_df"].empty:
-        st.session_state["mapping_df"] = pd.DataFrame(
-            {
-                "var": pd.Series(all_cols, dtype="object"),
-                "category": pd.Series(
-                    [_infer_category(c, new_rules) for c in all_cols],
-                    dtype="object",
-                ),
-                "channel": pd.Series(
-                    [_extract_channel_from_column(c) for c in all_cols],
-                    dtype="object",
-                ),
-                "data_type": pd.Series(
-                    [_detect_data_type(df_raw, c) for c in all_cols],
-                    dtype="object",
-                ),
-                "agg_strategy": pd.Series(
-                    [_default_agg_strategy(_detect_data_type(df_raw, c)) for c in all_cols],
-                    dtype="object",
-                ),
-                "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
-            }
-        ).astype("object")
+        st.session_state["mapping_df"] = _build_mapping_df(all_cols, df_raw, new_rules)
 
 
 # ---- Mapping editor (form) ----
-allowed_categories = [
-    "paid_media_spends",
-    "paid_media_vars",
-    "context_vars",
-    "organic_vars",
-    "factor_vars",
-    "",
-]
-
 
 with st.expander(
     "📥 Load saved metadata & apply to current dataset", expanded=False
@@ -1026,43 +1037,9 @@ with st.expander(
 
 # ✅ if still empty (first load), seed using current rules (outside the form)
 if st.session_state["mapping_df"].empty:
-    st.session_state["mapping_df"] = pd.DataFrame(
-        {
-            "var": pd.Series(all_cols, dtype="object"),
-            "category": pd.Series(
-                [
-                    _infer_category(c, st.session_state["auto_rules"])
-                    for c in all_cols
-                ],
-                dtype="object",
-            ),
-            "channel": pd.Series(
-                [_extract_channel_from_column(c) for c in all_cols],
-                dtype="object",
-            ),
-            "data_type": pd.Series(
-                [_detect_data_type(df_raw, c) for c in all_cols],
-                dtype="object",
-            ),
-            "agg_strategy": pd.Series(
-                [_default_agg_strategy(_detect_data_type(df_raw, c)) for c in all_cols],
-                dtype="object",
-            ),
-            "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
-        }
-    ).astype("object")
-
-# ---- Mapping editor (form) ----
-allowed_categories = [
-    "paid_media_spends",
-    "paid_media_vars",
-    "context_vars",
-    "organic_vars",
-    "factor_vars",
-    "",
-]
-
-# ✅ mapping_df is already seeded above if empty
+    st.session_state["mapping_df"] = _build_mapping_df(
+        all_cols, df_raw, st.session_state["auto_rules"]
+    )
 
 # --- Re-apply auto-tag rules on demand (outside any form) ---
 rt1, rt2 = st.columns([1, 1])
@@ -1120,31 +1097,9 @@ if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing"):
 
 # Overwrite everything from current rules (discard manual edits)
 if rt2.button("♻️ Re-apply to ALL columns", key="retag_all"):
-    st.session_state["mapping_df"] = pd.DataFrame(
-        {
-            "var": pd.Series(all_cols, dtype="object"),
-            "category": pd.Series(
-                [
-                    _infer_category(c, st.session_state["auto_rules"])
-                    for c in all_cols
-                ],
-                dtype="object",
-            ),
-            "channel": pd.Series(
-                [_extract_channel_from_column(c) for c in all_cols],
-                dtype="object",
-            ),
-            "data_type": pd.Series(
-                [_detect_data_type(df_raw, c) for c in all_cols],
-                dtype="object",
-            ),
-            "agg_strategy": pd.Series(
-                [_default_agg_strategy(_detect_data_type(df_raw, c)) for c in all_cols],
-                dtype="object",
-            ),
-            "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
-        }
-    ).astype("object")
+    st.session_state["mapping_df"] = _build_mapping_df(
+        all_cols, df_raw, st.session_state["auto_rules"]
+    )
     st.warning(
         "Re-applied rules to ALL columns (manual categories were overwritten)."
     )
@@ -1171,7 +1126,7 @@ with st.form("mapping_form_main", clear_on_submit=False):
         column_config={
             "var": st.column_config.TextColumn("Column", disabled=True),
             "category": st.column_config.SelectboxColumn(
-                "Category", options=allowed_categories
+                "Category", options=ALLOWED_CATEGORIES
             ),
             "channel": st.column_config.SelectboxColumn(
                 "Channel", options=[""] + all_available_channels,
@@ -1326,14 +1281,8 @@ def _by_cat(df: pd.DataFrame, cat: str) -> list[str]:
     return df.loc[df["category"] == cat, "var"].dropna().astype(str).tolist()
 
 
-allowed_categories = [
-    "paid_media_spends",
-    "paid_media_vars",
-    "context_vars",
-    "organic_vars",
-    "factor_vars",
-]
-by_cat = {cat: _by_cat(mapping_df, cat) for cat in allowed_categories}
+# Use allowed categories from constant, excluding empty string for by_cat
+by_cat = {cat: _by_cat(mapping_df, cat) for cat in ALLOWED_CATEGORIES if cat}
 
 dep_options = goals_df["var"].tolist() or df_raw.columns.astype(str).tolist()
 dep_var = st.selectbox(
