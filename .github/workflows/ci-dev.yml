@@ -125,6 +125,17 @@ jobs:
           cache-to: |
             type=registry,ref=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:buildcache,mode=max
 
+      - name: Setup Python for tests
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          echo "Running unit tests for single job run functionality..."
+          python3 -m unittest tests.test_single_job_config -v
+
       - name: Compute digest-pinned image refs
         shell: bash
         run: |
