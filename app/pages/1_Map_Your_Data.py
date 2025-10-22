@@ -152,10 +152,11 @@ def _init_state():
     )
     st.session_state.setdefault(
         "mapping_df",
-        pd.DataFrame(columns=["var", "category", "custom_tags"]).astype(
+        pd.DataFrame(columns=["var", "category", "channel", "data_type", "agg_strategy", "custom_tags"]).astype(
             "object"
         ),
     )
+    st.session_state.setdefault("custom_channels", [])
     st.session_state.setdefault("last_saved_raw_path", "")
     st.session_state.setdefault("last_saved_meta_path", "")
 
@@ -200,6 +201,107 @@ def _guess_goal_type(col: str) -> str:
     return "conversion"
 
 
+# ──────────────────────────────────────────────────────────────
+# Channel detection helpers
+# ──────────────────────────────────────────────────────────────
+def _get_known_channels() -> list[str]:
+    """Return list of known marketing channel names."""
+    return [
+        "meta",
+        "facebook",
+        "fb",
+        "instagram",
+        "ig",
+        "tiktok",
+        "google",
+        "ga",
+        "googleanalytics",
+        "adwords",
+        "youtube",
+        "yt",
+        "tv",
+        "television",
+        "partnership",
+        "partner",
+        "affiliate",
+        "email",
+        "newsletter",
+        "twitter",
+        "x",
+        "linkedin",
+        "pinterest",
+        "snapchat",
+        "reddit",
+        "amazon",
+        "display",
+        "programmatic",
+        "video",
+        "search",
+        "sem",
+        "seo",
+        "organic",
+        "direct",
+        "referral",
+        "paid",
+        "ppc",
+    ]
+
+
+def _extract_channel_from_column(col: str) -> str:
+    """
+    Extract channel name from column if it follows pattern "<CHANNEL>_<something>".
+    Returns empty string if no channel detected.
+    """
+    col_lower = col.lower().strip()
+    
+    # Combine known channels with custom channels from session
+    known_channels = _get_known_channels()
+    custom_channels = st.session_state.get("custom_channels", [])
+    all_channels = known_channels + custom_channels
+    
+    # Check if column starts with a known channel followed by underscore
+    for channel in all_channels:
+        if col_lower.startswith(f"{channel}_"):
+            return channel
+    
+    # No channel detected
+    return ""
+
+
+def _detect_data_type(df: pd.DataFrame, col: str) -> str:
+    """
+    Detect if a column is numeric or categorical.
+    Returns 'numeric' or 'categorical'.
+    """
+    if col not in df.columns:
+        return "numeric"
+    
+    dtype = df[col].dtype
+    
+    # Check pandas dtype
+    if pd.api.types.is_numeric_dtype(dtype):
+        return "numeric"
+    elif pd.api.types.is_categorical_dtype(dtype) or pd.api.types.is_object_dtype(dtype):
+        return "categorical"
+    elif pd.api.types.is_bool_dtype(dtype):
+        return "categorical"
+    else:
+        # Default to numeric for datetime and other types
+        return "numeric"
+
+
+def _default_agg_strategy(data_type: str) -> str:
+    """
+    Return default aggregation strategy based on data type.
+    For numeric: 'sum'
+    For categorical: 'auto'
+    """
+    if data_type == "numeric":
+        return "sum"
+    else:
+        return "auto"
+
+
 def _initial_goals_from_columns(cols: list[str]) -> pd.DataFrame:
     # Pick a few top candidates by name for convenience; user can delete/edit
     candidates = [
@@ -240,7 +342,7 @@ def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
     return ""
 
 
-def _apply_metadata_to_current_df(meta: dict, current_cols: list[str]) -> None:
+def _apply_metadata_to_current_df(meta: dict, current_cols: list[str], df_raw: pd.DataFrame) -> None:
     # goals (keep only ones that exist now)
     meta_goals = meta.get("goals", []) or []
     g = (
@@ -257,6 +359,10 @@ def _apply_metadata_to_current_df(meta: dict, current_cols: list[str]) -> None:
             k: [str(x) for x in v] for k, v in meta["autotag_rules"].items()
         }
 
+    # custom channels
+    if isinstance(meta.get("custom_channels"), list):
+        st.session_state["custom_channels"] = meta["custom_channels"]
+
     # mapping → build a full mapping_df for current columns
     meta_map = meta.get("mapping", {}) or {}
     # Flatten mapping dict: {cat: [vars]}
@@ -265,13 +371,35 @@ def _apply_metadata_to_current_df(meta: dict, current_cols: list[str]) -> None:
         for v in vars_ or []:
             var_to_cat[str(v)] = cat
 
+    # Get channel, data_type, and agg_strategy from metadata if available
+    meta_channels = meta.get("channels", {}) or {}
+    meta_data_types = meta.get("data_types", {}) or {}
+    meta_agg_strategies = meta.get("agg_strategies", {}) or {}
+
     rows = []
     for c in current_cols:
         cat = var_to_cat.get(c)
         if not cat:
             # fallback to rules for new cols
             cat = _infer_category(c, st.session_state["auto_rules"])
-        rows.append({"var": c, "category": cat or "", "custom_tags": ""})
+        
+        # Get or detect channel
+        channel = meta_channels.get(c, "") or _extract_channel_from_column(c)
+        
+        # Get or detect data type
+        data_type = meta_data_types.get(c, "") or _detect_data_type(df_raw, c)
+        
+        # Get or default aggregation strategy
+        agg_strategy = meta_agg_strategies.get(c, "") or _default_agg_strategy(data_type)
+        
+        rows.append({
+            "var": c,
+            "category": cat or "",
+            "channel": channel,
+            "data_type": data_type,
+            "agg_strategy": agg_strategy,
+            "custom_tags": ""
+        })
     st.session_state["mapping_df"] = pd.DataFrame(rows).astype("object")
 
 
@@ -730,6 +858,36 @@ if goals_submit:
     st.success("Goals appended & updated.")
 
 
+# ---- Custom channels UI ----
+st.subheader("Custom Marketing Channels")
+ch_col1, ch_col2 = st.columns([2, 1])
+with ch_col1:
+    new_channel = st.text_input(
+        "Add custom channel (e.g., 'spotify', 'podcast')",
+        key="new_channel_input",
+        help="Enter channel names that aren't in the default list"
+    )
+with ch_col2:
+    if st.button("➕ Add Channel", key="add_channel_btn"):
+        if new_channel and new_channel.strip():
+            custom_channels = st.session_state.get("custom_channels", [])
+            channel_lower = new_channel.strip().lower()
+            if channel_lower not in custom_channels and channel_lower not in _get_known_channels():
+                custom_channels.append(channel_lower)
+                st.session_state["custom_channels"] = custom_channels
+                st.success(f"Added custom channel: {channel_lower}")
+                st.rerun()
+            elif channel_lower in custom_channels:
+                st.warning(f"Channel '{channel_lower}' already exists in custom channels")
+            else:
+                st.warning(f"Channel '{channel_lower}' already exists in known channels")
+
+# Display current custom channels
+if st.session_state.get("custom_channels"):
+    st.caption("Custom channels: " + ", ".join(st.session_state["custom_channels"]))
+
+st.divider()
+
 # ---- Auto-tag rules (simple inputs update state immediately, but we only regenerate mapping when rules actually changed) ----
 rcol1, rcol2, rcol3 = st.columns(3)
 
@@ -781,12 +939,23 @@ if rules_changed:
     st.session_state["auto_rules"] = new_rules
     # seed mapping again only when rules change AND user hasn't started manual edits
     if st.session_state["mapping_df"].empty:
-
         st.session_state["mapping_df"] = pd.DataFrame(
             {
                 "var": pd.Series(all_cols, dtype="object"),
                 "category": pd.Series(
                     [_infer_category(c, new_rules) for c in all_cols],
+                    dtype="object",
+                ),
+                "channel": pd.Series(
+                    [_extract_channel_from_column(c) for c in all_cols],
+                    dtype="object",
+                ),
+                "data_type": pd.Series(
+                    [_detect_data_type(df_raw, c) for c in all_cols],
+                    dtype="object",
+                ),
+                "agg_strategy": pd.Series(
+                    [_default_agg_strategy(_detect_data_type(df_raw, c)) for c in all_cols],
                     dtype="object",
                 ),
                 "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
@@ -850,7 +1019,7 @@ with st.expander(
                     meta_blob = _meta_blob(load_country, str(picked_meta_ts))
 
                 meta = _download_json_from_gcs(BUCKET, meta_blob)
-                _apply_metadata_to_current_df(meta, all_cols)
+                _apply_metadata_to_current_df(meta, all_cols, df_raw)
                 st.success(f"Applied metadata from gs://{BUCKET}/{meta_blob}")
             except Exception as e:
                 st.error(f"Failed to load metadata: {e}")
@@ -865,6 +1034,18 @@ if st.session_state["mapping_df"].empty:
                     _infer_category(c, st.session_state["auto_rules"])
                     for c in all_cols
                 ],
+                dtype="object",
+            ),
+            "channel": pd.Series(
+                [_extract_channel_from_column(c) for c in all_cols],
+                dtype="object",
+            ),
+            "data_type": pd.Series(
+                [_detect_data_type(df_raw, c) for c in all_cols],
+                dtype="object",
+            ),
+            "agg_strategy": pd.Series(
+                [_default_agg_strategy(_detect_data_type(df_raw, c)) for c in all_cols],
                 dtype="object",
             ),
             "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
@@ -892,11 +1073,45 @@ if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing"):
     inferred = {
         c: _infer_category(c, st.session_state["auto_rules"]) for c in all_cols
     }
+    
+    # Ensure all columns exist
+    if "channel" not in m.columns:
+        m["channel"] = ""
+    if "data_type" not in m.columns:
+        m["data_type"] = "numeric"
+    if "agg_strategy" not in m.columns:
+        m["agg_strategy"] = "sum"
+    
+    # Fill missing values
     m["category"] = m.apply(
         lambda r: (
             r["category"]
             if str(r["category"]).strip()
             else inferred.get(r["var"], "")
+        ),
+        axis=1,
+    )
+    m["channel"] = m.apply(
+        lambda r: (
+            r["channel"]
+            if str(r.get("channel", "")).strip()
+            else _extract_channel_from_column(str(r["var"]))
+        ),
+        axis=1,
+    )
+    m["data_type"] = m.apply(
+        lambda r: (
+            r["data_type"]
+            if str(r.get("data_type", "")).strip()
+            else _detect_data_type(df_raw, str(r["var"]))
+        ),
+        axis=1,
+    )
+    m["agg_strategy"] = m.apply(
+        lambda r: (
+            r["agg_strategy"]
+            if str(r.get("agg_strategy", "")).strip()
+            else _default_agg_strategy(str(r.get("data_type", "numeric")))
         ),
         axis=1,
     )
@@ -915,6 +1130,18 @@ if rt2.button("♻️ Re-apply to ALL columns", key="retag_all"):
                 ],
                 dtype="object",
             ),
+            "channel": pd.Series(
+                [_extract_channel_from_column(c) for c in all_cols],
+                dtype="object",
+            ),
+            "data_type": pd.Series(
+                [_detect_data_type(df_raw, c) for c in all_cols],
+                dtype="object",
+            ),
+            "agg_strategy": pd.Series(
+                [_default_agg_strategy(_detect_data_type(df_raw, c)) for c in all_cols],
+                dtype="object",
+            ),
             "custom_tags": pd.Series([""] * len(all_cols), dtype="object"),
         }
     ).astype("object")
@@ -924,14 +1151,19 @@ if rt2.button("♻️ Re-apply to ALL columns", key="retag_all"):
 
 
 with st.form("mapping_form_main", clear_on_submit=False):
-    mapping_src = (
-        st.session_state["mapping_df"]
-        .fillna("")
-        .astype(
-            {"var": "object", "category": "object", "custom_tags": "object"}
-        )
-    )
-
+    mapping_src = st.session_state["mapping_df"].fillna("")
+    
+    # Ensure all expected columns exist
+    expected_cols = ["var", "category", "channel", "data_type", "agg_strategy", "custom_tags"]
+    for col in expected_cols:
+        if col not in mapping_src.columns:
+            mapping_src[col] = ""
+    
+    mapping_src = mapping_src.astype("object")
+    
+    # Get all available channels for the dropdown
+    all_available_channels = sorted(set(_get_known_channels() + st.session_state.get("custom_channels", [])))
+    
     mapping_edit = st.data_editor(
         mapping_src,
         use_container_width=True,
@@ -940,6 +1172,19 @@ with st.form("mapping_form_main", clear_on_submit=False):
             "var": st.column_config.TextColumn("Column", disabled=True),
             "category": st.column_config.SelectboxColumn(
                 "Category", options=allowed_categories
+            ),
+            "channel": st.column_config.SelectboxColumn(
+                "Channel", options=[""] + all_available_channels,
+                help="Marketing channel for this column"
+            ),
+            "data_type": st.column_config.SelectboxColumn(
+                "Data Type", options=["numeric", "categorical"],
+                help="Whether the column contains numeric or categorical data"
+            ),
+            "agg_strategy": st.column_config.SelectboxColumn(
+                "Aggregation",
+                options=["sum", "mean", "max", "min", "auto", "mode"],
+                help="Strategy for aggregating when resampling. Numeric: sum/mean/max/min. Categorical: auto/mean/sum/max/mode"
             ),
             "custom_tags": st.column_config.TextColumn(
                 "Custom Tags (optional)"
@@ -953,6 +1198,119 @@ with st.form("mapping_form_main", clear_on_submit=False):
 if mapping_submit:
     st.session_state["mapping_df"] = mapping_edit
     st.success("Mapping updated.")
+
+# ──────────────────────────────────────────────────────────────
+# Channel Aggregation: OTHER and TOTAL columns
+# ──────────────────────────────────────────────────────────────
+st.subheader("Channel Aggregation (Optional)")
+st.markdown("""
+Add aggregated columns for each marketing channel:
+- **`<CHANNEL>_OTHER`**: Sum of columns in the channel that lack a category
+- **`<CHANNEL>_TOTAL`**: Sum of all columns in the channel
+""")
+
+# Get unique channels from mapping
+mapping_df_current = st.session_state["mapping_df"]
+unique_channels = sorted([
+    ch for ch in mapping_df_current["channel"].dropna().unique()
+    if str(ch).strip() and str(ch).lower() != "nan"
+])
+
+if unique_channels:
+    selected_channels = st.multiselect(
+        "Select channels to create aggregates for:",
+        options=unique_channels,
+        default=[],
+        help="For each selected channel, create _OTHER and _TOTAL columns"
+    )
+    
+    if st.button("➕ Add Channel Aggregates", key="add_aggregates"):
+        if not selected_channels:
+            st.warning("Please select at least one channel")
+        else:
+            df_current = st.session_state["df_raw"].copy()
+            new_cols_added = []
+            
+            for channel in selected_channels:
+                # Get all columns for this channel
+                channel_cols = mapping_df_current[
+                    mapping_df_current["channel"].str.lower() == channel.lower()
+                ]["var"].tolist()
+                
+                if not channel_cols:
+                    continue
+                
+                # Filter to numeric columns only
+                numeric_channel_cols = [
+                    c for c in channel_cols
+                    if c in df_current.columns and pd.api.types.is_numeric_dtype(df_current[c])
+                ]
+                
+                if not numeric_channel_cols:
+                    st.warning(f"No numeric columns found for channel '{channel}'")
+                    continue
+                
+                # Get columns without category (for OTHER)
+                uncategorized_cols = mapping_df_current[
+                    (mapping_df_current["channel"].str.lower() == channel.lower()) &
+                    ((mapping_df_current["category"] == "") | (mapping_df_current["category"].isna()))
+                ]["var"].tolist()
+                
+                numeric_uncategorized = [
+                    c for c in uncategorized_cols
+                    if c in df_current.columns and pd.api.types.is_numeric_dtype(df_current[c])
+                ]
+                
+                # Create TOTAL column
+                total_col_name = f"{channel.upper()}_TOTAL"
+                if total_col_name not in df_current.columns:
+                    df_current[total_col_name] = df_current[numeric_channel_cols].sum(axis=1)
+                    new_cols_added.append(total_col_name)
+                    
+                    # Add to mapping_df
+                    new_row = pd.DataFrame([{
+                        "var": total_col_name,
+                        "category": "paid_media_spends",  # Default category
+                        "channel": channel,
+                        "data_type": "numeric",
+                        "agg_strategy": "sum",
+                        "custom_tags": "auto_generated_total"
+                    }])
+                    st.session_state["mapping_df"] = pd.concat(
+                        [st.session_state["mapping_df"], new_row], ignore_index=True
+                    )
+                
+                # Create OTHER column (only if there are uncategorized columns)
+                if numeric_uncategorized:
+                    other_col_name = f"{channel.upper()}_OTHER"
+                    if other_col_name not in df_current.columns:
+                        df_current[other_col_name] = df_current[numeric_uncategorized].sum(axis=1)
+                        new_cols_added.append(other_col_name)
+                        
+                        # Add to mapping_df
+                        new_row = pd.DataFrame([{
+                            "var": other_col_name,
+                            "category": "paid_media_spends",  # Default category
+                            "channel": channel,
+                            "data_type": "numeric",
+                            "agg_strategy": "sum",
+                            "custom_tags": "auto_generated_other"
+                        }])
+                        st.session_state["mapping_df"] = pd.concat(
+                            [st.session_state["mapping_df"], new_row], ignore_index=True
+                        )
+            
+            # Update the raw dataframe
+            if new_cols_added:
+                st.session_state["df_raw"] = df_current
+                st.success(f"Added {len(new_cols_added)} aggregate column(s): {', '.join(new_cols_added)}")
+                st.rerun()
+            else:
+                st.info("No new aggregate columns were created (they may already exist)")
+else:
+    st.info("No channels detected in the mapping. Add channel information to columns first.")
+
+st.divider()
 
 # ──────────────────────────────────────────────────────────────
 # Step 3) Save your mapping
@@ -991,6 +1349,21 @@ goals_json = [
     if str(r.get("var", "")).strip()
 ]
 
+# Extract channel, data_type, and agg_strategy mappings
+channels_map = {
+    str(r["var"]): str(r.get("channel", ""))
+    for _, r in mapping_df.iterrows()
+    if str(r.get("channel", "")).strip()
+}
+data_types_map = {
+    str(r["var"]): str(r.get("data_type", "numeric"))
+    for _, r in mapping_df.iterrows()
+}
+agg_strategies_map = {
+    str(r["var"]): str(r.get("agg_strategy", "sum"))
+    for _, r in mapping_df.iterrows()
+}
+
 payload = {
     "project_id": PROJECT_ID,
     "bucket": BUCKET,
@@ -1005,7 +1378,11 @@ payload = {
     "goals": goals_json,
     "dep_variable_type": {g["var"]: g["type"] for g in goals_json},
     "autotag_rules": auto_rules,
+    "custom_channels": st.session_state.get("custom_channels", []),
     "mapping": by_cat,
+    "channels": channels_map,
+    "data_types": data_types_map,
+    "agg_strategies": agg_strategies_map,
     "dep_var": dep_var or "",
 }
 
