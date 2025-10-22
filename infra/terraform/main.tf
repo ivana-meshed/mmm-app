@@ -88,10 +88,9 @@ resource "google_secret_manager_secret_iam_member" "sf_private_key_persistent_ve
   member    = "serviceAccount:${google_service_account.web_service_sa.email}"
 }
 
-# Grant permission to delete the persistent key secret (for "Clear Saved Key" functionality)
-resource "google_secret_manager_secret_iam_member" "sf_private_key_persistent_deleter" {
+resource "google_secret_manager_secret_iam_member" "sf_private_key_persistent_version_manager" {
   secret_id = google_secret_manager_secret.sf_private_key_persistent.id
-  role      = "roles/secretmanager.secretDeleter"
+  role      = "roles/secretmanager.secretVersionManager"
   member    = "serviceAccount:${google_service_account.web_service_sa.email}"
 }
 
