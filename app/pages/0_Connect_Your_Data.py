@@ -30,7 +30,9 @@ require_login_and_domain()
 ensure_session_defaults()
 
 # Secret ID for persistent private key storage
-PERSISTENT_KEY_SECRET_ID = os.getenv("SF_PERSISTENT_KEY_SECRET", "sf-private-key-persistent")
+PERSISTENT_KEY_SECRET_ID = os.getenv(
+    "SF_PERSISTENT_KEY_SECRET", "sf-private-key-persistent"
+)
 
 
 def load_persisted_key() -> Optional[bytes]:
@@ -78,10 +80,14 @@ if not st.session_state.get("_checked_persisted_key"):
     if persisted_key:
         st.session_state["_sf_private_key_bytes"] = persisted_key
         persisted_key_available = True
-        st.info("✅ Found a previously saved private key. You can connect without uploading a new one.")
+        st.info(
+            "✅ Found a previously saved private key. You can connect without uploading a new one."
+        )
     st.session_state["_checked_persisted_key"] = True
 else:
-    persisted_key_available = st.session_state.get("_sf_private_key_bytes") is not None
+    persisted_key_available = (
+        st.session_state.get("_sf_private_key_bytes") is not None
+    )
 
 with st.form("sf_connect_form", clear_on_submit=False):
     c1, c2 = st.columns(2)
@@ -116,12 +122,12 @@ with st.form("sf_connect_form", clear_on_submit=False):
         sf_pk_file = st.file_uploader(
             "…or upload a .pem file", type=["pem", "key", "p8"]
         )
-        
+
         # Add checkbox to persist the key
         save_key = st.checkbox(
             "💾 Save this key for future sessions",
             value=False,
-            help="Store the private key in Google Secret Manager so you don't have to upload it every time."
+            help="Store the private key in Google Secret Manager so you don't have to upload it every time.",
         )
 
     with c2:
@@ -155,7 +161,7 @@ if submitted:
         # Determine which key to use: new upload/paste OR existing persisted key
         pem = None
         pk_der = None
-        
+
         # Priority 1: newly uploaded file
         if sf_pk_file is not None:
             pem = sf_pk_file.read().decode("utf-8", errors="replace")
@@ -166,7 +172,9 @@ if submitted:
         elif st.session_state.get("_sf_private_key_bytes"):
             pk_der = st.session_state["_sf_private_key_bytes"]
         else:
-            raise ValueError("Provide a Snowflake private key (PEM) or ensure a saved key exists.")
+            raise ValueError(
+                "Provide a Snowflake private key (PEM) or ensure a saved key exists."
+            )
 
         # If we have a PEM string, convert it to DER
         if pem:
@@ -178,13 +186,17 @@ if submitted:
                 format=serialization.PrivateFormat.PKCS8,
                 encryption_algorithm=serialization.NoEncryption(),
             )
-            
+
             # Save to Secret Manager if requested
             if save_key:
                 if save_persisted_key(pem):
-                    st.success("✅ Private key saved to Secret Manager for future use.")
+                    st.success(
+                        "✅ Private key saved to Secret Manager for future use."
+                    )
                 else:
-                    st.warning("⚠️ Failed to save key to Secret Manager, but connection will proceed.")
+                    st.warning(
+                        "⚠️ Failed to save key to Secret Manager, but connection will proceed."
+                    )
 
         # Build connection using the key
         conn = _connect_snowflake(
@@ -255,13 +267,18 @@ if st.session_state.sf_connected:
             try:
                 # Delete the secret from Secret Manager
                 from google.cloud import secretmanager
+
                 client = secretmanager.SecretManagerServiceClient()
-                name = f"projects/{PROJECT_ID}/secrets/{PERSISTENT_KEY_SECRET_ID}"
+                name = (
+                    f"projects/{PROJECT_ID}/secrets/{PERSISTENT_KEY_SECRET_ID}"
+                )
                 try:
                     client.delete_secret(request={"name": name})
                     st.session_state.pop("_sf_private_key_bytes", None)
                     st.session_state["_checked_persisted_key"] = False
-                    st.success("✅ Saved private key deleted from Secret Manager.")
+                    st.success(
+                        "✅ Saved private key deleted from Secret Manager."
+                    )
                 except Exception as e:
                     st.warning(f"Could not delete saved key: {e}")
             except Exception as e:
@@ -274,6 +291,19 @@ else:
 
 # Once Snowflake is connected, allow navigation to mapping
 st.divider()
+try:
+    if st.session_state.get("sf_connected"):
+        if st.button("Next → Map Your Data", use_container_width=True):
+            import streamlit as stlib
+
+            stlib.switch_page("pages/1_Map_Your_Data.py")
+    else:
+        st.info("Fill in your Snowflake credentials above to enable Next.")
+except Exception:
+    st.page_link(
+        "pages/1_Map_Your_Data.py", label="Next → Map Your Data", icon="➡️"
+    )
+
 col1, col2 = st.columns([1, 5])
 with col1:
     try:
