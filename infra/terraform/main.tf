@@ -26,7 +26,7 @@ resource "google_service_account" "scheduler" {
 }
 
 
-# Snowflake private key secret
+# Snowflake private key secret (for environment-based config)
 resource "google_secret_manager_secret" "sf_private_key" {
   secret_id = "sf-private-key"
 
@@ -48,10 +48,45 @@ resource "google_secret_manager_secret_version" "sf_private_key_version" {
   depends_on  = [google_project_service.secretmanager]
 }
 
-# Grant web SA access
+# Grant web SA read access to environment-based key
 resource "google_secret_manager_secret_iam_member" "sf_private_key_access" {
   secret_id = google_secret_manager_secret.sf_private_key.id
   role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
+
+# Persistent private key secret (user-uploaded keys)
+resource "google_secret_manager_secret" "sf_private_key_persistent" {
+  secret_id = "sf-private-key-persistent"
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region # europe-west1
+      }
+    }
+  }
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+# Grant web SA permissions to read, add versions, and delete the persistent key secret
+resource "google_secret_manager_secret_iam_member" "sf_private_key_persistent_accessor" {
+  secret_id = google_secret_manager_secret.sf_private_key_persistent.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "sf_private_key_persistent_version_adder" {
+  secret_id = google_secret_manager_secret.sf_private_key_persistent.id
+  role      = "roles/secretmanager.secretVersionAdder"
+  member    = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
+
+# Grant permission to delete the persistent key secret (for "Clear Saved Key" functionality)
+resource "google_secret_manager_secret_iam_member" "sf_private_key_persistent_deleter" {
+  secret_id = google_secret_manager_secret.sf_private_key_persistent.id
+  role      = "roles/secretmanager.secretDeleter"
   member    = "serviceAccount:${google_service_account.web_service_sa.email}"
 }
 
@@ -361,6 +396,10 @@ resource "google_cloud_run_service" "web_service" {
         env {
           name  = "SF_PRIVATE_KEY_SECRET"
           value = google_secret_manager_secret.sf_private_key.secret_id
+        }
+        env {
+          name  = "SF_PERSISTENT_KEY_SECRET"
+          value = google_secret_manager_secret.sf_private_key_persistent.secret_id
         }
         # Example for google_cloud_run_service or v2 resource; adapt to your existing block.
         # Add these env vars (or "secret env vars") so the container can read them

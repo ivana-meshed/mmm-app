@@ -28,30 +28,30 @@ The MMM (Marketing Mix Modeling) Trainer is a cloud-native application built for
 graph TB
     %% User Layer
     User[👤 Data Scientist] --> Web[🌐 Streamlit Web App]
-    
+
     %% Application Layer
     Web --> |Configure Training| Main[📊 Main Training Page]
     Web --> |View Results| Results[📈 Results Browser]
     Web --> |Debug| Debug[🔧 Debug Results]
-    
+
     %% Data Sources
     Main --> |Query Data| SF[(❄️ Snowflake)]
     Main --> |Upload Annotations| Local[📁 Local Files]
-    
+
     %% Processing Layer
     Main --> |Execute| R[🔷 R/Robyn Engine]
     R --> |Load Libraries| Deps[📦 R Dependencies]
     R --> |ML Training| Nevergrad[🧠 Nevergrad/Python]
-    
+
     %% Storage Layer
     R --> |Upload Artifacts| GCS[(☁️ Google Cloud Storage)]
     Results --> |Browse Files| GCS
-    
+
     %% Infrastructure Layer
     Web -.-> |Deployed on| CloudRun[☁️ Cloud Run]
     CloudRun -.-> |Uses| SA[🔐 Service Account]
     SA -.-> |Access| IAM[🛡️ IAM Roles]
-    
+
     %% CI/CD Layer
     GitHub[📋 GitHub Repo] --> |Triggers| Actions[⚡ GitHub Actions]
     Actions --> |Build| Docker[🐳 Docker Image]
@@ -65,7 +65,7 @@ graph TB
     classDef data fill:#e8f5e8
     classDef infra fill:#fff3e0
     classDef storage fill:#fce4ec
-    
+
     class User user
     class Web,Main,Results,Debug app
     class SF,Local,GCS storage
@@ -89,7 +89,7 @@ graph TB
 
 ### 1. Streamlit Application (`app/`)
 
-#### Main Training Interface (`streamlit_app.py`)
+#### Main Training Interface (`0_Connect_Your_Data.py`)
 - **Purpose**: Primary interface for configuring and launching MMM training jobs
 - **Key Features**:
   - Snowflake connection configuration
@@ -122,27 +122,27 @@ flowchart TD
     Start([🚀 R Script Start]) --> LoadCfg[📋 Load Job Config]
     LoadCfg --> Auth[🔐 GCS Authentication]
     Auth --> LoadData[📊 Load Data from CSV]
-    
+
     LoadData --> Clean[🧹 Data Cleaning]
     Clean --> Country[🌍 Country Filtering]
     Country --> Features[⚙️ Feature Engineering]
-    
+
     Features --> Inputs[📥 Robyn Inputs]
     Inputs --> Hyper[🎯 Hyperparameters]
     Hyper --> Train[🏋️ Model Training]
-    
+
     Train --> Output[📤 Generate Outputs]
     Output --> Onepage[📄 Create Onepagers]
     Onepage --> Allocator[💰 Run Allocator]
-    
+
     Allocator --> Metrics[📊 Calculate Metrics]
     Metrics --> Upload[☁️ Upload to GCS]
     Upload --> End([✅ Complete])
-    
+
     classDef process fill:#e3f2fd
     classDef data fill:#e8f5e8
     classDef output fill:#fff3e0
-    
+
     class LoadCfg,Auth,Clean,Country,Features,Inputs,Hyper process
     class LoadData,Train data
     class Output,Onepage,Allocator,Metrics,Upload output
@@ -187,29 +187,29 @@ sequenceDiagram
     participant SF as ❄️ Snowflake
     participant R as 🔷 R Engine
     participant GCS as ☁️ GCS Bucket
-    
+
     U->>S: Configure training parameters
     U->>S: Submit training job
-    
+
     S->>SF: Query input data
     SF->>S: Return dataset
-    
+
     S->>S: Save data as CSV
     S->>S: Create job.json config
-    
+
     S->>R: Execute Rscript with job config
-    
+
     R->>R: Load and clean data
     R->>R: Feature engineering
     R->>R: Train Robyn models
     R->>R: Generate outputs & allocator
-    
+
     R->>GCS: Upload training artifacts
     R->>GCS: Upload logs and metrics
-    
+
     R->>S: Return exit code
     S->>U: Display training status
-    
+
     Note over GCS: Files stored at:<br/>gs://bucket/robyn/{rev}/{country}/{timestamp}/
 ```
 
@@ -220,17 +220,17 @@ sequenceDiagram
     participant S as 🌐 Results Page
     participant GCS as ☁️ GCS Bucket
     participant IAM as 🔐 IAM Service
-    
+
     U->>S: Access results page
     S->>GCS: List blobs with prefix
     GCS->>S: Return file listings
-    
+
     S->>S: Group by revision/country/timestamp
     S->>S: Parse metadata files
-    
+
     U->>S: Select specific run
     S->>GCS: Download file metadata
-    
+
     alt Signed URL Available
         S->>IAM: Request signed URL
         IAM->>S: Return temporary URL
@@ -282,7 +282,7 @@ export SNOWFLAKE_PASSWORD=your-password
 gcloud iam service-accounts create github-deployer \
     --display-name="GitHub Actions Deployer"
 
-# Create runtime service account  
+# Create runtime service account
 gcloud iam service-accounts create mmm-trainer-sa \
     --display-name="MMM Trainer Runtime"
 ```
@@ -393,7 +393,7 @@ docker run --rm mmm-app:local R -e "library(Robyn); library(reticulate); py_conf
 git checkout ci-cd
 git push origin ci-cd
 
-# Deploy to production (main branch)  
+# Deploy to production (main branch)
 git checkout main
 git push origin main
 ```
@@ -457,7 +457,7 @@ gitGraph
 ```yaml
 Roles:
   - roles/run.admin                    # Deploy Cloud Run services
-  - roles/artifactregistry.reader      # Pull Docker images  
+  - roles/artifactregistry.reader      # Pull Docker images
   - roles/storage.objectAdmin          # Manage GCS objects
   - roles/iam.serviceAccountUser       # Act as runtime SA
   - roles/iam.serviceAccountTokenCreator # Sign URLs
@@ -571,7 +571,7 @@ resource "google_cloud_run_service" "svc" {
     spec {
       container_concurrency = 1
       timeout_seconds       = 3600  # 1 hour
-      
+
       containers {
         resources {
           limits = {
@@ -594,7 +594,7 @@ Training Logs:
   Content: Complete R execution output, errors, warnings
 
 Application Logs:
-  Location: "Cloud Logging > Cloud Run > mmm-app"  
+  Location: "Cloud Logging > Cloud Run > mmm-app"
   Content: Streamlit app logs, user interactions
 
 System Logs:
@@ -609,14 +609,14 @@ Deployment Logs:
 #### Log Analysis Queries
 ```sql
 -- Find training failures
-SELECT timestamp, jsonPayload.message 
-FROM `project.cloud_run_logs` 
+SELECT timestamp, jsonPayload.message
+FROM `project.cloud_run_logs`
 WHERE jsonPayload.message CONTAINS "FATAL ERROR"
 ORDER BY timestamp DESC LIMIT 10
 
 -- Monitor resource usage
 SELECT timestamp, jsonPayload.memory_usage_mb
-FROM `project.cloud_run_logs`  
+FROM `project.cloud_run_logs`
 WHERE jsonPayload.memory_usage_mb > 8000
 ORDER BY timestamp DESC
 ```
