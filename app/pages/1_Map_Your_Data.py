@@ -470,7 +470,7 @@ def step1_loader():
                         {
                             "df_raw": df,
                             "data_origin": "gcs_timestamp",
-                            "picked_ts": "fallback_ts",
+                            "picked_ts": fallback_ts,
                         }
                     )
                 else:
