@@ -4,10 +4,6 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from contextlib import contextmanager
 
-import os, io, json, time, re
-from datetime import datetime, timezone
-
-
 import logging
 import base64
 
@@ -22,9 +18,18 @@ from app_shared import (
     get_data_processor,
     run_sql,
     _require_sf_session,
+    GCS_BUCKET,
+    PROJECT_ID,
+    REGION,
+    TRAINING_JOB_NAME,
+    upload_to_gcs,
+    parse_train_size,
+    timed_step,
+    get_job_manager,
 )
 
 data_processor = get_data_processor()
+job_manager = get_job_manager()
 
 from app_split_helpers import *  # bring in all helper functions/constants
 
@@ -144,12 +149,14 @@ with tab_single:
         
         # Load data button with automatic preview
         if st.button("Load selected data", type="primary"):
+            tmp_path = None
             try:
                 with st.spinner("Loading data from GCS..."):
                     blob_path = _get_data_blob(selected_country, selected_version)
                     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
-                        _download_from_gcs(gcs_bucket, blob_path, tmp.name)
-                        df_prev = pd.read_parquet(tmp.name)
+                        tmp_path = tmp.name
+                        _download_from_gcs(gcs_bucket, blob_path, tmp_path)
+                        df_prev = pd.read_parquet(tmp_path)
                         st.session_state["preview_df"] = df_prev
                         st.session_state["selected_country"] = selected_country
                         st.session_state["selected_version"] = selected_version
@@ -159,9 +166,11 @@ with tab_single:
                         st.session_state["loaded_metadata"] = metadata
                         
                         st.success(f"✅ Loaded {len(df_prev)} rows, {len(df_prev.columns)} columns")
-                os.unlink(tmp.name)
             except Exception as e:
                 st.error(f"Failed to load data: {e}")
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
         
         # Show preview if available
         if "preview_df" in st.session_state and st.session_state["preview_df"] is not None:
