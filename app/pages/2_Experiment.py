@@ -373,17 +373,33 @@ with tab_single:
             preview_df = st.session_state.get("preview_df")
             if preview_df is not None and not preview_df.empty:
                 # Get all columns except date column
-                all_columns = [col for col in preview_df.columns if col.lower() != 'date']
+                all_columns = [
+                    col for col in preview_df.columns if col.lower() != "date"
+                ]
             else:
                 # Fallback to empty list if no data loaded yet
                 all_columns = []
-            
+
             # Auto-populate from metadata if available
             metadata = st.session_state.get("loaded_metadata")
 
             default_values = {
-                "paid_media_spends": ["GA_SUPPLY_COST", "GA_DEMAND_COST", "BING_DEMAND_COST", "META_DEMAND_COST", "TV_COST", "PARTNERSHIP_COSTS"],
-                "paid_media_vars": ["GA_SUPPLY_COST", "GA_DEMAND_COST", "BING_DEMAND_COST", "META_DEMAND_COST", "TV_COST", "PARTNERSHIP_COSTS"],
+                "paid_media_spends": [
+                    "GA_SUPPLY_COST",
+                    "GA_DEMAND_COST",
+                    "BING_DEMAND_COST",
+                    "META_DEMAND_COST",
+                    "TV_COST",
+                    "PARTNERSHIP_COSTS",
+                ],
+                "paid_media_vars": [
+                    "GA_SUPPLY_COST",
+                    "GA_DEMAND_COST",
+                    "BING_DEMAND_COST",
+                    "META_DEMAND_COST",
+                    "TV_COST",
+                    "PARTNERSHIP_COSTS",
+                ],
                 "context_vars": ["IS_WEEKEND", "TV_IS_ON"],
                 "factor_vars": ["IS_WEEKEND", "TV_IS_ON"],
                 "organic_vars": ["ORGANIC_TRAFFIC"],
@@ -463,12 +479,16 @@ with tab_single:
             # Filter defaults to only include columns that exist in the data
             if all_columns:
                 for cat in default_values:
-                    default_values[cat] = [v for v in default_values[cat] if v in all_columns]
-            
+                    default_values[cat] = [
+                        v for v in default_values[cat] if v in all_columns
+                    ]
+
             # If no data is loaded, show a warning
             if not all_columns:
-                st.warning("⚠️ Please load data first to see available columns for selection.")
-            
+                st.warning(
+                    "⚠️ Please load data first to see available columns for selection."
+                )
+
             # Paid media spends - multiselect
             paid_media_spends_list = st.multiselect(
                 "paid_media_spends",
@@ -476,7 +496,7 @@ with tab_single:
                 default=default_values["paid_media_spends"],
                 help="Select media spend columns",
             )
-            
+
             # Paid media vars - multiselect (will be made nested later based on clarification)
             paid_media_vars_list = st.multiselect(
                 "paid_media_vars",
@@ -484,7 +504,7 @@ with tab_single:
                 default=default_values["paid_media_vars"],
                 help="Select media variable columns (e.g., impressions, clicks)",
             )
-            
+
             # Context vars - multiselect
             context_vars_list = st.multiselect(
                 "context_vars",
@@ -492,7 +512,7 @@ with tab_single:
                 default=default_values["context_vars"],
                 help="Select contextual variables (e.g., seasonality, events)",
             )
-            
+
             # Factor vars - multiselect
             factor_vars_list = st.multiselect(
                 "factor_vars",
@@ -500,7 +520,7 @@ with tab_single:
                 default=default_values["factor_vars"],
                 help="Select factor/categorical variables",
             )
-            
+
             # Organic vars - multiselect
             organic_vars_list = st.multiselect(
                 "organic_vars",
@@ -508,7 +528,7 @@ with tab_single:
                 default=default_values["organic_vars"],
                 help="Select organic/baseline variables",
             )
-            
+
             # Convert lists to comma-separated strings for backward compatibility
             paid_media_spends = ", ".join(paid_media_spends_list)
             paid_media_vars = ", ".join(paid_media_vars_list)
@@ -1501,7 +1521,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                             "CANCELLED",
                             "FAILED",
                         ):
-                            continue  # drop it
+                            continue  #
                         else:
                             blocked.append(e["id"])
                             new_q.append(e)
