@@ -1289,87 +1289,56 @@ if unique_channels:
                     continue
 
                 # Get columns without category (for OTHER)
-                # Get columns without category (for OTHER)
-                # include columns that:
-                #  - have no category (empty / NaN)
-                #  - OR have category == "other" (case-insensitive)
-                #  - OR have custom_tags that include the token 'other' (case-insensitive)
-                mask_channel = (
-                    mapping_df_current["channel"].astype(str).str.lower()
-                    == channel.lower()
-                )
+                # --- Create per-suffix aggregates for this channel (TOTAL and OTHER) ---
+                import re
+                from collections import defaultdict
 
-                mask_uncategorized = mask_channel & (
-                    mapping_df_current["category"]
-                    .astype(str)
-                    .str.strip()
-                    .eq("")
-                    | mapping_df_current["category"]
-                    .astype(str)
-                    .str.lower()
-                    .eq("other")
-                    | mapping_df_current["custom_tags"]
-                    .astype(str)
-                    .str.lower()
-                    .str.contains(r"\bother\b", regex=True)
-                )
+                # Build suffix → cols mapping for numeric columns in this channel.
+                # Suffix = part after the first underscore following the channel name,
+                # fallback to last token after last underscore if needed.
+                suffix_to_cols = defaultdict(list)
+                for c in channel_cols:
+                    if c not in df_current.columns:
+                        continue
+                    if not pd.api.types.is_numeric_dtype(df_current[c]):
+                        continue
+                    low = c.lower()
+                    if low.startswith(f"{channel.lower()}_"):
+                        suffix = low[len(channel) + 1 :]
+                    else:
+                        suffix = low.split("_")[-1] or low
+                    suffix_to_cols[suffix].append(c)
 
-                uncategorized_cols = mapping_df_current.loc[
-                    mask_uncategorized, "var"
-                ].tolist()
+                for suffix, cols_in_suffix in suffix_to_cols.items():
+                    # sanitize suffix for column name
+                    safe_suffix = re.sub(r"\W+", "_", suffix).strip("_").upper()
+                    if not safe_suffix:
+                        continue
 
-                numeric_uncategorized = [
-                    c
-                    for c in uncategorized_cols
-                    if c in df_current.columns
-                    and pd.api.types.is_numeric_dtype(df_current[c])
-                ]
-
-                # Create TOTAL column
-                total_col_name = f"{channel.upper()}_TOTAL"
-                if total_col_name not in df_current.columns:
-                    df_current[total_col_name] = df_current[
-                        numeric_channel_cols
-                    ].sum(axis=1)
-                    new_cols_added.append(total_col_name)
-
-                    # Add to mapping_df
-                    new_row = pd.DataFrame(
-                        [
-                            {
-                                "var": total_col_name,
-                                "category": "paid_media_spends",  # Default category
-                                "channel": channel,
-                                "data_type": "numeric",
-                                "agg_strategy": "sum",
-                                "custom_tags": "auto_generated_total",
-                            }
-                        ]
-                    )
-                    st.session_state["mapping_df"] = pd.concat(
-                        [st.session_state["mapping_df"], new_row],
-                        ignore_index=True,
-                    )
-
-                # Create OTHER column (only if there are uncategorized columns)
-                if numeric_uncategorized:
-                    other_col_name = f"{channel.upper()}_OTHER"
-                    if other_col_name not in df_current.columns:
-                        df_current[other_col_name] = df_current[
-                            numeric_uncategorized
+                    # create TOTAL per suffix (sums all numeric columns in this suffix group)
+                    total_col_name = f"{channel.upper()}_TOTAL_{safe_suffix}"
+                    if total_col_name not in df_current.columns:
+                        df_current[total_col_name] = df_current[
+                            cols_in_suffix
                         ].sum(axis=1)
-                        new_cols_added.append(other_col_name)
+                        new_cols_added.append(total_col_name)
 
-                        # Add to mapping_df
+                        # infer category for generated total using your auto_rules (fallback)
+                        inferred_cat = (
+                            _infer_category(
+                                f"_{suffix}", st.session_state["auto_rules"]
+                            )
+                            or "paid_media_spends"
+                        )
                         new_row = pd.DataFrame(
                             [
                                 {
-                                    "var": other_col_name,
-                                    "category": "paid_media_spends",  # Default category
+                                    "var": total_col_name,
+                                    "category": inferred_cat,
                                     "channel": channel,
                                     "data_type": "numeric",
                                     "agg_strategy": "sum",
-                                    "custom_tags": "auto_generated_other",
+                                    "custom_tags": "auto_generated_total",
                                 }
                             ]
                         )
@@ -1378,6 +1347,73 @@ if unique_channels:
                             ignore_index=True,
                         )
 
+                    # create OTHER per suffix: only sum columns in this suffix group that are uncategorized / marked as other
+                    # build mask restricting mapping rows to this channel+suffix group
+                    cols_in_suffix_lower = {ci.lower() for ci in cols_in_suffix}
+                    mask_suffix = (
+                        mapping_df_current["var"]
+                        .astype(str)
+                        .str.lower()
+                        .isin(cols_in_suffix_lower)
+                    )
+
+                    mask_uncategorized = mask_suffix & (
+                        mapping_df_current["category"]
+                        .astype(str)
+                        .str.strip()
+                        .eq("")
+                        | mapping_df_current["category"]
+                        .astype(str)
+                        .str.lower()
+                        .eq("other")
+                        | mapping_df_current["custom_tags"]
+                        .astype(str)
+                        .str.lower()
+                        .str.contains(r"\bother\b", regex=True)
+                    )
+
+                    uncategorized_cols = mapping_df_current.loc[
+                        mask_uncategorized, "var"
+                    ].tolist()
+                    numeric_uncategorized = [
+                        c
+                        for c in uncategorized_cols
+                        if c in df_current.columns
+                        and pd.api.types.is_numeric_dtype(df_current[c])
+                    ]
+
+                    if numeric_uncategorized:
+                        other_col_name = (
+                            f"{channel.upper()}_OTHER_{safe_suffix}"
+                        )
+                        if other_col_name not in df_current.columns:
+                            df_current[other_col_name] = df_current[
+                                numeric_uncategorized
+                            ].sum(axis=1)
+                            new_cols_added.append(other_col_name)
+
+                            inferred_cat = (
+                                _infer_category(
+                                    f"_{suffix}", st.session_state["auto_rules"]
+                                )
+                                or "paid_media_spends"
+                            )
+                            new_row = pd.DataFrame(
+                                [
+                                    {
+                                        "var": other_col_name,
+                                        "category": inferred_cat,
+                                        "channel": channel,
+                                        "data_type": "numeric",
+                                        "agg_strategy": "sum",
+                                        "custom_tags": "auto_generated_other",
+                                    }
+                                ]
+                            )
+                            st.session_state["mapping_df"] = pd.concat(
+                                [st.session_state["mapping_df"], new_row],
+                                ignore_index=True,
+                            )
             # Update the raw dataframe
             if new_cols_added:
                 st.session_state["df_raw"] = df_current
