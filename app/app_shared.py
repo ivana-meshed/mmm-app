@@ -667,8 +667,29 @@ def ensure_sf_conn() -> sf.SnowflakeConnection:
                 pass
             st.session_state["sf_conn"] = None
 
-    # 👇 NEW: prefer key bytes from the current session if available
+    # Try to get key bytes from session state, or load from Secret Manager
     pk_bytes = st.session_state.get("_sf_private_key_bytes")
+    
+    # If no key in session but we have params, try loading from persistent storage
+    if not pk_bytes and params:
+        try:
+            from gcp_secrets import access_secret
+            PERSISTENT_KEY_SECRET_ID = os.getenv("SF_PERSISTENT_KEY_SECRET", "sf-private-key-persistent")
+            pem_bytes = access_secret(PERSISTENT_KEY_SECRET_ID, PROJECT_ID)
+            if pem_bytes:
+                # Convert PEM -> PKCS#8 DER bytes
+                key = serialization.load_pem_private_key(
+                    pem_bytes, password=None, backend=default_backend()
+                )
+                pk_bytes = key.private_bytes(
+                    encoding=serialization.Encoding.DER,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption(),
+                )
+                st.session_state["_sf_private_key_bytes"] = pk_bytes
+        except Exception:
+            pass  # Fall through to other methods
+    
     if pk_bytes and params:
         conn = _connect_snowflake(
             user=params["user"],
