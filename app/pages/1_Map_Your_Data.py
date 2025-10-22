@@ -1,4 +1,7 @@
-# pages/2_Customize_Analytics.py
+# (Updated) pages/2_Customize_Analytics.py
+# - Normalizes GCS "latest" vs "Latest" so the Source list shows only one entry.
+# - Replaces any "latest" items from _list_country_versions with canonical "Latest"
+#   and preserves ordering / uniqueness.
 import os, io, json, tempfile
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -386,10 +389,22 @@ def step1_loader():
     country = st.session_state.get("country", "de")
 
     # Get available GCS versions for the chosen country
-    versions = _list_country_versions_cached(
+    versions_raw = _list_country_versions_cached(
         BUCKET, country
-    )  # e.g. ["20250107_101500", "20241231_235959"]
-    source_options = ["Latest"] + versions + ["Snowflake"]
+    )  # e.g. ["20250107_101500", "20241231_235959", "latest"]
+    # Normalize versions: canonicalize any 'latest' -> 'Latest' and de-duplicate, preserving order
+    seen = set()
+    versions = []
+    for v in versions_raw:
+        vv = "Latest" if str(v).lower() == "latest" else v
+        if vv not in seen:
+            versions.append(vv)
+            seen.add(vv)
+
+    # Build source options with a single 'Latest' entry and no duplicate 'latest'
+    source_options = (
+        ["Latest"] + [v for v in versions if v != "Latest"] + ["Snowflake"]
+    )
 
     # Use a FORM so edits don’t commit on every keystroke
     with st.form("load_data_form", clear_on_submit=False):
@@ -458,21 +473,53 @@ def step1_loader():
                 )
             except Exception:
                 if versions:
-                    fallback_ts = versions[0]
-                    st.info(
-                        f"‘latest’ not found — loading most recent saved version: {fallback_ts}."
+                    fallback_ts = (
+                        versions[0]
+                        if versions[0] != "Latest"
+                        else (versions[1] if len(versions) > 1 else None)
                     )
-                    df = _download_parquet_from_gcs_cached(
-                        BUCKET, _data_blob(country, fallback_ts)
-                    )
+                    if fallback_ts:
+                        st.info(
+                            f"‘latest’ not found — loading most recent saved version: {fallback_ts}."
+                        )
+                        df = _download_parquet_from_gcs_cached(
+                            BUCKET, _data_blob(country, fallback_ts)
+                        )
 
-                    st.session_state.update(
-                        {
-                            "df_raw": df,
-                            "data_origin": "gcs_timestamp",
-                            "picked_ts": fallback_ts,
-                        }
-                    )
+                        st.session_state.update(
+                            {
+                                "df_raw": df,
+                                "data_origin": "gcs_timestamp",
+                                "picked_ts": fallback_ts,
+                            }
+                        )
+                    else:
+                        st.info(
+                            "No saved timestamp versions found in GCS; falling back to Snowflake."
+                        )
+                        _require_sf_session()
+                        sql = (
+                            effective_sql(
+                                st.session_state["sf_table"],
+                                st.session_state["sf_sql"],
+                            )
+                            or ""
+                        )
+                        if sql and not st.session_state["sf_sql"].strip():
+                            sql = f"{sql} WHERE {st.session_state['sf_country_field']} = '{country.upper()}'"
+                        if sql:
+                            df = _load_from_snowflake_cached(sql)
+                            st.session_state.update(
+                                {
+                                    "df_raw": df,
+                                    "data_origin": "snowflake",
+                                    "picked_ts": "",
+                                }
+                            )
+                        else:
+                            st.warning(
+                                "Provide a table or SQL to load from Snowflake."
+                            )
                 else:
                     st.info(
                         "No saved data found in GCS; falling back to Snowflake."
@@ -523,7 +570,7 @@ def step1_loader():
                 or ""
             )
             if sql and not st.session_state["sf_sql"].strip():
-                sql = f"{sql} WHERE {st.session_state['sf_country_field']} = '{country.upper()}'"
+                sql = f"{sql} WHERE {sql and st.session_state['sf_country_field']} = '{country.upper()}'"
             if sql:
                 df = _load_from_snowflake_cached(sql)
                 st.session_state.update(
@@ -771,12 +818,21 @@ with st.expander(
 
     # list available versions for chosen country
     if load_country.strip():
-        meta_versions = _list_country_versions_cached(BUCKET, load_country)
+        meta_versions_raw = _list_country_versions_cached(BUCKET, load_country)
     else:
-        meta_versions = []
+        meta_versions_raw = []
 
-    # Allow 'latest' for metadata
-    version_opts = ["latest"] + meta_versions
+    # Normalize meta versions the same way (canonical 'Latest')
+    seen_meta = set()
+    meta_versions = []
+    for v in meta_versions_raw:
+        vv = "Latest" if str(v).lower() == "latest" else v
+        if vv not in seen_meta:
+            meta_versions.append(vv)
+            seen_meta.add(vv)
+
+    # Allow 'Latest' for metadata
+    version_opts = ["Latest"] + [v for v in meta_versions if v != "Latest"]
     picked_meta_ts = lc2.selectbox("Version", options=version_opts, index=0)
 
     if lc3.button("Load & apply"):
@@ -787,7 +843,7 @@ with st.expander(
         else:
             try:
                 meta_blob: str
-                if picked_meta_ts == "latest":
+                if picked_meta_ts == "Latest":
                     meta_blob = _meta_latest_blob(load_country)
                 else:
                     # coerce picked_meta_ts to str to satisfy the type checker
@@ -798,7 +854,6 @@ with st.expander(
                 st.success(f"Applied metadata from gs://{BUCKET}/{meta_blob}")
             except Exception as e:
                 st.error(f"Failed to load metadata: {e}")
-
 
 # ✅ if still empty (first load), seed using current rules (outside the form)
 if st.session_state["mapping_df"].empty:
