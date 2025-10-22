@@ -955,6 +955,38 @@ if st.session_state.get("custom_channels"):
     st.caption(
         "Custom channels: " + ", ".join(st.session_state["custom_channels"])
     )
+# Show recognized channels from mapping and inferred from column names
+mapping_channels = []
+if (
+    "mapping_df" in st.session_state
+    and not st.session_state["mapping_df"].empty
+):
+    mapping_channels = sorted(
+        {
+            str(ch).strip().lower()
+            for ch in st.session_state["mapping_df"]["channel"]
+            .dropna()
+            .astype(str)
+            if str(ch).strip()
+        }
+    )
+
+# infer channels directly from column names (uses same extractor as mapping)
+inferred_channels = sorted(
+    {
+        _extract_channel_from_column(c)
+        for c in all_cols
+        if _extract_channel_from_column(c)
+    }
+)
+
+# combine and dedupe
+recognized_channels = sorted(set(mapping_channels + inferred_channels))
+
+if recognized_channels:
+    st.caption(
+        "Recognized channels from data: " + ", ".join(recognized_channels)
+    )
 
 st.divider()
 
@@ -1257,16 +1289,34 @@ if unique_channels:
                     continue
 
                 # Get columns without category (for OTHER)
-                uncategorized_cols = mapping_df_current[
-                    (
-                        mapping_df_current["channel"].str.lower()
-                        == channel.lower()
-                    )
-                    & (
-                        (mapping_df_current["category"] == "")
-                        | (mapping_df_current["category"].isna())
-                    )
-                ]["var"].tolist()
+                # Get columns without category (for OTHER)
+                # include columns that:
+                #  - have no category (empty / NaN)
+                #  - OR have category == "other" (case-insensitive)
+                #  - OR have custom_tags that include the token 'other' (case-insensitive)
+                mask_channel = (
+                    mapping_df_current["channel"].astype(str).str.lower()
+                    == channel.lower()
+                )
+
+                mask_uncategorized = mask_channel & (
+                    mapping_df_current["category"]
+                    .astype(str)
+                    .str.strip()
+                    .eq("")
+                    | mapping_df_current["category"]
+                    .astype(str)
+                    .str.lower()
+                    .eq("other")
+                    | mapping_df_current["custom_tags"]
+                    .astype(str)
+                    .str.lower()
+                    .str.contains(r"\bother\b", regex=True)
+                )
+
+                uncategorized_cols = mapping_df_current.loc[
+                    mask_uncategorized, "var"
+                ].tolist()
 
                 numeric_uncategorized = [
                     c
