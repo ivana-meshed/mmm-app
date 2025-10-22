@@ -293,7 +293,7 @@ else:
 st.divider()
 try:
     if st.session_state.get("sf_connected"):
-        if st.button("Next → Map Your Data", use_container_width=True):
+        if st.button("Next → Map Your Data"):
             import streamlit as stlib
 
             stlib.switch_page("pages/1_Map_Your_Data.py")
@@ -303,18 +303,3 @@ except Exception:
     st.page_link(
         "pages/1_Map_Your_Data.py", label="Next → Map Your Data", icon="➡️"
     )
-
-col1, col2 = st.columns([1, 5])
-with col1:
-    try:
-        if st.session_state.get("sf_connected"):
-            if st.button("Next → Map Your Data", use_container_width=True):
-                import streamlit as stlib
-
-                stlib.switch_page("pages/1_Map_Your_Data.py")
-        else:
-            st.info("Fill in your Snowflake credentials above to enable Next.")
-    except Exception:
-        st.page_link(
-            "pages/1_Map_Your_Data.py", label="Next → Map Your Data", icon="➡️"
-        )
