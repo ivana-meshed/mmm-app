@@ -1,4 +1,4 @@
-# pages/2_Experiment.py
+# (full file contents)
 import os, io, json, tempfile, time, re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
@@ -382,8 +382,60 @@ with tab_single:
 
             # Extract values from metadata if available
             if metadata and "mapping" in metadata:
-                mapping = metadata["mapping"]
-                # Group by category
+                mapping_raw = metadata["mapping"]
+
+                # Normalize mapping into a list of dicts with keys 'var' and 'category'
+                normalized_mapping: List[Dict[str, Optional[str]]] = []
+                try:
+                    if isinstance(mapping_raw, dict):
+                        # Two common shapes:
+                        # 1) { category: [var1, var2, ...], ... }
+                        # 2) { var_name: { "category": "...", ... }, ... } OR { var_name: "category" }
+                        values_are_lists = all(
+                            isinstance(v, list) for v in mapping_raw.values()
+                        )
+                        if values_are_lists:
+                            # keys are categories
+                            for cat_key, vars_list in mapping_raw.items():
+                                for v in vars_list:
+                                    normalized_mapping.append(
+                                        {"var": v, "category": cat_key}
+                                    )
+                        else:
+                            # keys are var names
+                            for var_name, val in mapping_raw.items():
+                                if isinstance(val, dict):
+                                    category = val.get("category")
+                                elif isinstance(val, str):
+                                    category = val
+                                else:
+                                    category = None
+                                normalized_mapping.append(
+                                    {"var": var_name, "category": category}
+                                )
+                    elif isinstance(mapping_raw, list):
+                        # List may contain dicts or strings
+                        for item in mapping_raw:
+                            if isinstance(item, dict):
+                                # Expect item to have 'var' and maybe 'category'
+                                normalized_mapping.append(
+                                    {
+                                        "var": item.get("var")
+                                        or item.get("name")
+                                        or None,
+                                        "category": item.get("category"),
+                                    }
+                                )
+                            elif isinstance(item, str):
+                                # Bare var name with unknown category
+                                normalized_mapping.append(
+                                    {"var": item, "category": None}
+                                )
+                    # Fallback: if normalization yielded nothing, leave mapping_empty
+                except Exception:
+                    normalized_mapping = []
+
+                # Use normalized mapping to fill defaults per category when possible
                 for cat in [
                     "paid_media_spends",
                     "paid_media_vars",
@@ -392,7 +444,9 @@ with tab_single:
                     "organic_vars",
                 ]:
                     vars_in_cat = [
-                        m["var"] for m in mapping if m.get("category") == cat
+                        m.get("var")
+                        for m in normalized_mapping
+                        if m.get("category") == cat and m.get("var")
                     ]
                     if vars_in_cat:
                         default_values[cat] = ", ".join(vars_in_cat)
