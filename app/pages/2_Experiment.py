@@ -40,55 +40,251 @@ tab_single, tab_queue = st.tabs(["Single run", "Queue"])
 
 # Prefill fields from saved metadata if present (session_state keys should already be set by Map Your Data page).
 
+# Helper functions for GCS data loading
+def _list_country_versions(bucket: str, country: str) -> List[str]:
+    """Return timestamp folder names available in datasets/<country>/."""
+    client = storage.Client()
+    prefix = f"datasets/{country.lower().strip()}/"
+    blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+    ts = set()
+    for blob in blobs:
+        parts = blob.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "raw.parquet":
+            ts.add(parts[-2])
+    versions = sorted(ts, reverse=True)
+    # Replace "latest" with "Latest" if present
+    return ["Latest" if v.lower() == "latest" else v for v in versions]
+
+def _get_data_blob(country: str, version: str) -> str:
+    """Get GCS blob path for data."""
+    if version.lower() == "latest":
+        return f"datasets/{country.lower().strip()}/latest/raw.parquet"
+    return f"datasets/{country.lower().strip()}/{version}/raw.parquet"
+
+def _get_meta_blob(country: str, version: str) -> str:
+    """Get GCS blob path for metadata."""
+    if version.lower() == "latest":
+        return f"metadata/{country.lower().strip()}/latest/mapping.json"
+    return f"metadata/{country.lower().strip()}/{version}/mapping.json"
+
+def _download_from_gcs(bucket: str, blob_path: str, local_path: str):
+    """Download file from GCS."""
+    client = storage.Client()
+    blob = client.bucket(bucket).blob(blob_path)
+    if not blob.exists():
+        raise FileNotFoundError(f"gs://{bucket}/{blob_path} not found")
+    blob.download_to_filename(local_path)
+
+def _load_metadata_from_gcs(bucket: str, country: str, version: str) -> Optional[Dict]:
+    """Load metadata.json from GCS."""
+    try:
+        client = storage.Client()
+        blob_path = _get_meta_blob(country, version)
+        blob = client.bucket(bucket).blob(blob_path)
+        if not blob.exists():
+            return None
+        return json.loads(blob.download_as_bytes())
+    except Exception as e:
+        st.warning(f"Could not load metadata: {e}")
+        return None
+
+def _get_latest_revision(bucket: str, country: str) -> str:
+    """Get the latest revision tag from GCS for a country."""
+    try:
+        client = storage.Client()
+        prefix = f"robyn/"
+        blobs = list(client.list_blobs(bucket, prefix=prefix, delimiter="/"))
+        # Extract revision folders
+        revisions = set()
+        for blob in blobs:
+            parts = blob.name.split("/")
+            if len(parts) >= 2:
+                revisions.add(parts[1])
+        
+        # Sort revisions (assuming r### format)
+        sorted_revs = sorted([r for r in revisions if r.startswith("r")], 
+                           key=lambda x: int(x[1:]) if x[1:].isdigit() else 0,
+                           reverse=True)
+        return sorted_revs[0] if sorted_revs else "r100"
+    except Exception:
+        return "r100"
+
 # Extracted from streamlit_app.py tab_single (Single run):
 with tab_single:
     st.subheader("Robyn configuration & training")
-    if not st.session_state.get("sf_connected", False):
-        st.warning("Please connect to Snowflake in tab 1 first.")
-    if st.session_state.sf_connected:
-        # Data selection
-        with st.expander("Data selection"):
-            table = st.text_input("Table (DB.SCHEMA.TABLE)")
-            query = st.text_area("Custom SQL (optional)")
-            if st.button("Test connection & preview 5 rows"):
-                sql_eff = effective_sql(table, query)
-                if not sql_eff:
-                    st.warning("Provide a table or a SQL query.")
-                else:
-                    try:
-                        preview_sql = f"SELECT * FROM ({sql_eff}) t LIMIT 5"
-                        df_prev = run_sql(preview_sql)
-                        st.success("Connection OK")
-                        st.dataframe(df_prev, use_container_width=True)
-                    except Exception as e:
-                        st.error(f"Preview failed: {e}")
+    
+    # Data selection
+    with st.expander("Data selection", expanded=True):
+        # Country selection
+        available_countries = ["fr", "de", "it", "es", "nl", "uk"]
+        selected_country = st.selectbox(
+            "Country",
+            options=available_countries,
+            index=0,
+            help="Select the country for which to load data"
+        )
+        
+        # Get available data versions for selected country
+        gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
+        try:
+            available_versions = _list_country_versions(gcs_bucket, selected_country)
+            if not available_versions:
+                available_versions = ["Latest"]
+        except Exception as e:
+            st.warning(f"Could not list data versions: {e}")
+            available_versions = ["Latest"]
+        
+        # Data source selection
+        selected_version = st.selectbox(
+            "Data source",
+            options=available_versions,
+            index=0,
+            help="Select data version to use. Latest = most recently saved data."
+        )
+        
+        # Load data button with automatic preview
+        if st.button("Load selected data", type="primary"):
+            try:
+                with st.spinner("Loading data from GCS..."):
+                    blob_path = _get_data_blob(selected_country, selected_version)
+                    with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
+                        _download_from_gcs(gcs_bucket, blob_path, tmp.name)
+                        df_prev = pd.read_parquet(tmp.name)
+                        st.session_state["preview_df"] = df_prev
+                        st.session_state["selected_country"] = selected_country
+                        st.session_state["selected_version"] = selected_version
+                        
+                        # Load metadata
+                        metadata = _load_metadata_from_gcs(gcs_bucket, selected_country, selected_version)
+                        st.session_state["loaded_metadata"] = metadata
+                        
+                        st.success(f"✅ Loaded {len(df_prev)} rows, {len(df_prev.columns)} columns")
+                os.unlink(tmp.name)
+            except Exception as e:
+                st.error(f"Failed to load data: {e}")
+        
+        # Show preview if available
+        if "preview_df" in st.session_state and st.session_state["preview_df"] is not None:
+            st.write("**Preview (first 5 rows):**")
+            st.dataframe(st.session_state["preview_df"].head(5), use_container_width=True)
 
         # Robyn config
-        with st.expander("Robyn configuration"):
-            country = st.text_input("Country", value="fr")
-            iterations = st.number_input("Iterations", value=200, min_value=50)
-            trials = st.number_input("Trials", value=5, min_value=1)
-            train_size = st.text_input("Train size", value="0.7,0.9")
-            revision = st.text_input("Revision tag", value="r100")
-            date_input = st.text_input(
-                "Date tag", value=time.strftime("%Y-%m-%d")
+        with st.expander("Robyn configuration", expanded=True):
+            # Country auto-filled from Data Selection
+            country = st.session_state.get("selected_country", "fr")
+            st.info(f"**Country:** {country.upper()} (from Data Selection)")
+            
+            # Iterations and Trials as presets
+            preset_options = {
+                "Test run": {"iterations": 200, "trials": 3},
+                "Production": {"iterations": 2000, "trials": 5},
+                "Custom": {"iterations": 5000, "trials": 10}
+            }
+            preset_choice = st.selectbox(
+                "Training preset",
+                options=list(preset_options.keys()),
+                index=0,
+                help="Choose a training preset or use custom values"
             )
-            dep_var = st.text_input(
-                "dep_var",
-                value="UPLOAD_VALUE",
-                help="Dependent variable column in your data (e.g., UPLOAD_VALUE)",
+            
+            if preset_choice == "Custom":
+                col1, col2 = st.columns(2)
+                with col1:
+                    iterations = st.number_input("Iterations", value=5000, min_value=50, step=100)
+                with col2:
+                    trials = st.number_input("Trials", value=10, min_value=1, step=1)
+            else:
+                iterations = preset_options[preset_choice]["iterations"]
+                trials = preset_options[preset_choice]["trials"]
+                st.info(f"**Iterations:** {iterations}, **Trials:** {trials}")
+            
+            # Train size stays as is
+            train_size = st.text_input("Train size", value="0.7,0.9",
+                                      help="Comma-separated train/validation split ratios")
+            
+            # Revision tag - auto-prefilled with latest
+            default_revision = _get_latest_revision(gcs_bucket, country)
+            revision = st.text_input("Revision tag", value=default_revision,
+                                    help="Revision identifier for organizing outputs")
+            
+            # Training date range instead of single date tag
+            col1, col2 = st.columns(2)
+            with col1:
+                start_data_date = st.date_input(
+                    "Training start date",
+                    value=datetime(2024, 1, 1).date(),
+                    help="Start date for training data window (start_data_date in R script)"
+                )
+            with col2:
+                end_data_date = st.date_input(
+                    "Training end date",
+                    value=datetime.now().date(),
+                    help="End date for training data window (end_data_date in R script)"
+                )
+            
+            # Convert dates to strings for config
+            start_date_str = start_data_date.strftime("%Y-%m-%d")
+            end_date_str = end_data_date.strftime("%Y-%m-%d")
+            
+            # Goal variable from metadata
+            metadata = st.session_state.get("loaded_metadata")
+            if metadata and "goals" in metadata:
+                goal_options = [g["var"] for g in metadata["goals"] if g.get("group") == "primary"]
+                if goal_options:
+                    dep_var = st.selectbox(
+                        "Goal variable",
+                        options=goal_options,
+                        index=0,
+                        help="Primary goal variable (dependent variable) for the model"
+                    )
+                    # Find the corresponding type
+                    dep_var_type = next(
+                        (g["type"] for g in metadata["goals"] if g["var"] == dep_var),
+                        "revenue"
+                    )
+                else:
+                    dep_var = st.text_input("Goal variable", value="UPLOAD_VALUE")
+                    dep_var_type = "revenue"
+            else:
+                dep_var = st.text_input("Goal variable", value="UPLOAD_VALUE",
+                                       help="Dependent variable column in your data")
+                dep_var_type = "revenue"
+            
+            # Goals type - display and allow override
+            dep_var_type = st.selectbox(
+                "Goals type",
+                options=["revenue", "conversion"],
+                index=0 if dep_var_type == "revenue" else 1,
+                help="Type of the goal variable: revenue (monetary) or conversion (count)"
             )
+            
+            # Date variable
             date_var = st.text_input(
                 "date_var",
                 value="date",
                 help="Date column in your data (e.g., date)",
             )
+            
+            # Adstock selection
             adstock = st.selectbox(
                 "adstock",
                 options=["geometric", "weibull_cdf", "weibull_pdf"],
                 index=0,
                 help="Robyn adstock function",
             )
+            
+            # Hyperparameters - conditional on adstock
+            st.write("**Hyperparameters**")
+            hyperparameter_preset = st.selectbox(
+                "Hyperparameter preset",
+                options=["Facebook recommend", "Meshed recommend", "Custom"],
+                index=1,
+                help="Choose hyperparameter preset or define custom values"
+            )
+            
+            # Store the hyperparameter choice for later use
+            st.session_state["hyperparameter_preset"] = hyperparameter_preset
+            st.session_state["adstock_choice"] = adstock
 
             # NEW: optional resampling
             c_rs1, c_rs2 = st.columns([1, 1])
@@ -118,23 +314,51 @@ with tab_single:
             }.get(resample_agg_label or "sum", "sum")
 
         # Variables
-        with st.expander("Variable mapping"):
+        with st.expander("Variable mapping", expanded=True):
+            # Auto-populate from metadata if available
+            metadata = st.session_state.get("loaded_metadata")
+            
+            default_values = {
+                "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
+                "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
+                "context_vars": "IS_WEEKEND,TV_IS_ON",
+                "factor_vars": "IS_WEEKEND,TV_IS_ON",
+                "organic_vars": "ORGANIC_TRAFFIC"
+            }
+            
+            # Extract values from metadata if available
+            if metadata and "mapping" in metadata:
+                mapping = metadata["mapping"]
+                # Group by category
+                for cat in ["paid_media_spends", "paid_media_vars", "context_vars", "factor_vars", "organic_vars"]:
+                    vars_in_cat = [m["var"] for m in mapping if m.get("category") == cat]
+                    if vars_in_cat:
+                        default_values[cat] = ", ".join(vars_in_cat)
+            
             paid_media_spends = st.text_input(
                 "paid_media_spends (comma-separated)",
-                value="GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
+                value=default_values["paid_media_spends"],
+                help="Media spend columns"
             )
             paid_media_vars = st.text_input(
                 "paid_media_vars (comma-separated)",
-                value="GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
+                value=default_values["paid_media_vars"],
+                help="Media variable columns (e.g., impressions, clicks)"
             )
             context_vars = st.text_input(
-                "context_vars", value="IS_WEEKEND,TV_IS_ON"
+                "context_vars",
+                value=default_values["context_vars"],
+                help="Contextual variables (e.g., seasonality, events)"
             )
             factor_vars = st.text_input(
-                "factor_vars", value="IS_WEEKEND,TV_IS_ON"
+                "factor_vars",
+                value=default_values["factor_vars"],
+                help="Factor/categorical variables"
             )
             organic_vars = st.text_input(
-                "organic_vars", value="ORGANIC_TRAFFIC"
+                "organic_vars",
+                value=default_values["organic_vars"],
+                help="Organic/baseline variables"
             )
 
         # Outputs
@@ -154,24 +378,25 @@ with tab_single:
             annotations_gcs_path: Optional[str],
         ) -> Dict[str, Any]:
             return build_job_config_from_params(
-                params_from_ui(
+                params_from_ui_single(
                     country,
                     iterations,
                     trials,
                     train_size,
                     revision,
-                    date_input,
+                    start_date_str,
+                    end_date_str,
                     paid_media_spends,
                     paid_media_vars,
                     context_vars,
                     factor_vars,
                     organic_vars,
                     gcs_bucket,
-                    table,
-                    query,
                     dep_var,
+                    dep_var_type,
                     date_var,
                     adstock,
+                    hyperparameter_preset,
                     resample_freq,  # NEW
                     resample_agg,  # NEW
                 ),
@@ -179,8 +404,61 @@ with tab_single:
                 timestamp,
                 annotations_gcs_path,
             )
+        
+        def params_from_ui_single(
+            country,
+            iterations,
+            trials,
+            train_size,
+            revision,
+            start_date_str,
+            end_date_str,
+            paid_media_spends,
+            paid_media_vars,
+            context_vars,
+            factor_vars,
+            organic_vars,
+            gcs_bucket,
+            dep_var,
+            dep_var_type,
+            date_var,
+            adstock,
+            hyperparameter_preset,
+            resample_freq,
+            resample_agg,
+        ) -> dict:
+            return {
+                "country": country,
+                "iterations": int(iterations),
+                "trials": int(trials),
+                "train_size": parse_train_size(train_size),
+                "revision": revision,
+                "start_date": start_date_str,
+                "end_date": end_date_str,
+                "paid_media_spends": paid_media_spends,
+                "paid_media_vars": paid_media_vars,
+                "context_vars": context_vars,
+                "factor_vars": factor_vars,
+                "organic_vars": organic_vars,
+                "gcs_bucket": gcs_bucket,
+                "table": "",  # Not used in GCS mode
+                "query": "",  # Not used in GCS mode
+                "dep_var": dep_var,
+                "dep_var_type": dep_var_type,
+                "date_var": date_var,
+                "adstock": adstock,
+                "hyperparameter_preset": hyperparameter_preset,
+                "resample_freq": resample_freq,
+                "resample_agg": resample_agg,
+                "data_gcs_path": "",  # Will be filled later
+            }
 
         if st.button("🚀 Start Training Job", type="primary"):
+            # Validate data is loaded
+            if "preview_df" not in st.session_state or st.session_state["preview_df"] is None:
+                st.error("Please load data first using the 'Load selected data' button.")
+                st.stop()
+            
             if not all([PROJECT_ID, REGION, TRAINING_JOB_NAME]):
                 st.error(
                     "Missing configuration. Check environment variables on the web service."
@@ -194,50 +472,15 @@ with tab_single:
             try:
                 with st.spinner("Preparing and launching training job..."):
                     with tempfile.TemporaryDirectory() as td:
-                        sql_eff = effective_sql(table, query)
                         data_gcs_path = None
                         annotations_gcs_path = None
 
-                        if not sql_eff:
-                            st.error(
-                                "Provide a table or SQL query to prepare training data."
-                            )
-                            st.stop()
-
-                        # 1) Query Snowflake
-                        with timed_step("Query Snowflake", timings):
-                            df = run_sql(sql_eff)
-                        # NEW: optional resample (single job)
-                        # with timed_step(
-                        #    "Optional resample (single job)", timings
-                        # ):
-                        #    df = _maybe_resample_df(
-                        #        df, date_var, resample_freq, resample_agg
-                        #    )
-                        # 2) Convert to Parquet
-                        with timed_step("Convert to Parquet", timings):
-                            parquet_path = os.path.join(
-                                td, "input_data.parquet"
-                            )
-                            data_processor.csv_to_parquet(df, parquet_path)
-
-                        # 3) Upload data to GCS
-                        with timed_step("Upload data to GCS", timings):
-                            data_blob = (
-                                f"training-data/{timestamp}/input_data.parquet"
-                            )
-                            if (
-                                "gcs_bucket" not in st.session_state
-                                or not st.session_state["gcs_bucket"]
-                            ):
-                                st.error(
-                                    "Missing GCS bucket in session state. Please map your data first."
-                                )
-                                st.stop()
-                            gcs_bucket = st.session_state["gcs_bucket"]
-                            data_gcs_path = upload_to_gcs(
-                                gcs_bucket, parquet_path, data_blob
-                            )
+                        # Use the already loaded GCS data
+                        blob_path = _get_data_blob(selected_country, selected_version)
+                        data_gcs_path = f"gs://{gcs_bucket}/{blob_path}"
+                        
+                        # No need to query and upload - data is already in GCS
+                        st.info(f"Using data from: {data_gcs_path}")
 
                         if ann_file is not None:
                             with timed_step(

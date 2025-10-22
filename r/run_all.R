@@ -351,6 +351,17 @@ trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
 timestamp <- cfg$timestamp %||% format(Sys.time(), "%m%d_%H%M%S")
 
+# NEW: Training date range
+start_data_date <- as.Date(cfg$start_date %||% "2024-01-01")
+end_data_date <- as.Date(cfg$end_date %||% Sys.Date())
+
+# NEW: dep_var and dep_var_type from config
+dep_var_from_cfg <- cfg$dep_var %||% "UPLOAD_VALUE"
+dep_var_type_from_cfg <- cfg$dep_var_type %||% "revenue"
+
+# NEW: hyperparameter preset
+hyperparameter_preset <- cfg$hyperparameter_preset %||% "Meshed recommend"
+
 dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
 gcs_prefix <- file.path("robyn", revision, country, timestamp)
@@ -523,8 +534,7 @@ df <- df %>% mutate(
 )
 
 ## ---------- WINDOW / FLAGS ----------
-end_data_date <- max(df$date, na.rm = TRUE)
-start_data_date <- as.Date("2024-01-01")
+# Use dates from config instead of hardcoded values
 df <- df %>% filter(date >= start_data_date, date <= end_data_date)
 df$DOW <- wday(df$date, label = TRUE)
 df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
@@ -561,8 +571,8 @@ InputCollect <- tryCatch(
         robyn_inputs(
             dt_input = df,
             date_var = "date",
-            dep_var = "UPLOAD_VALUE",
-            dep_var_type = "revenue",
+            dep_var = dep_var_from_cfg,  # From config
+            dep_var_type = dep_var_type_from_cfg,  # From config
             prophet_vars = c("trend", "season", "holiday", "weekday"),
             prophet_country = toupper(country),
             paid_media_spends = paid_media_spends,
@@ -621,32 +631,79 @@ hyperparameters <- list()
 ## ---------- BUILD HYPERPARAMETERS FIRST ----------
 # BEFORE calling robyn_inputs(), build the hyperparameter list
 
-mk_hp <- function(v) {
-    if (v == "ORGANIC_TRAFFIC") {
-        list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
-    } else if (v == "TV_COST") {
-        list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
-    } else if (v == "PARTNERSHIP_COSTS") {
-        list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
+# Define hyperparameter presets
+get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
+    # Default ranges (for geometric adstock)
+    if (adstock_type == "geometric") {
+        if (preset == "Facebook recommend") {
+            # Facebook's recommended ranges for geometric
+            if (var_name == "ORGANIC_TRAFFIC") {
+                list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.3))
+            } else if (var_name == "TV_COST") {
+                list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0.3, 0.8))
+            } else {
+                list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.3))
+            }
+        } else if (preset == "Meshed recommend") {
+            # Meshed's customized ranges
+            if (var_name == "ORGANIC_TRAFFIC") {
+                list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
+            } else if (var_name == "TV_COST") {
+                list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
+            } else if (var_name == "PARTNERSHIP_COSTS") {
+                list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
+            } else {
+                list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
+            }
+        } else {
+            # Custom preset - use current values as defaults
+            if (var_name == "ORGANIC_TRAFFIC") {
+                list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
+            } else if (var_name == "TV_COST") {
+                list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
+            } else if (var_name == "PARTNERSHIP_COSTS") {
+                list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
+            } else {
+                list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
+            }
+        }
+    } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
+        # Weibull adstock ranges (from Robyn documentation)
+        if (preset == "Facebook recommend") {
+            list(alphas = c(0.5, 3), shapes = c(0.0001, 2), scales = c(0, 0.1))
+        } else if (preset == "Meshed recommend") {
+            # Meshed customizations for Weibull
+            list(alphas = c(0.5, 3), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
+        } else {
+            # Custom
+            list(alphas = c(0.5, 3), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
+        }
     } else {
-        list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
+        # Fallback
+        list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.5))
     }
 }
 
-# Build hyperparameters from the original paid_media_vars and organic_vars
-# (the ones you identified before robyn_inputs, not after)
-# hyper_vars <- c(paid_media_vars, organic_vars)
-# hyperparameters <- list()
+# Build hyperparameters using the preset
+hyper_vars <- c(InputCollect$paid_media_vars, InputCollect$organic_vars)
+hyperparameters <- list()
 
 for (v in hyper_vars) {
-    spec <- mk_hp(v)
+    spec <- get_hyperparameter_ranges(hyperparameter_preset, adstock, v)
     hyperparameters[[paste0(v, "_alphas")]] <- spec$alphas
-    hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
-    hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
+    
+    if (adstock == "geometric") {
+        hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
+        hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
+    } else {
+        # Weibull uses shapes and scales instead of gammas and thetas
+        hyperparameters[[paste0(v, "_shapes")]] <- spec$shapes
+        hyperparameters[[paste0(v, "_scales")]] <- spec$scales
+    }
 }
 hyperparameters[["train_size"]] <- train_size
 
-message("Pre-built hyperparameters: ", length(hyperparameters), " keys")
+message("Pre-built hyperparameters (", hyperparameter_preset, " preset): ", length(hyperparameters), " keys")
 
 log_hyperparameters(hyperparameters, dir_path)
 flush_and_ship_log("after hyperparameters build")
@@ -658,8 +715,8 @@ InputCollect <- tryCatch(
         robyn_inputs(
             dt_input = df,
             date_var = "date",
-            dep_var = "UPLOAD_VALUE",
-            dep_var_type = "revenue",
+            dep_var = dep_var_from_cfg,  # From config
+            dep_var_type = dep_var_type_from_cfg,  # From config
             prophet_vars = c("trend", "season", "holiday", "weekday"),
             prophet_country = toupper(country),
             paid_media_spends = paid_media_spends,
