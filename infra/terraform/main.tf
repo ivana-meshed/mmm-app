@@ -77,6 +77,11 @@ resource "google_secret_manager_secret_iam_member" "sf_private_key_persistent_ac
   member    = "serviceAccount:${google_service_account.web_service_sa.email}"
 }
 
+resource "google_project_iam_member" "sf_private_key_project_admin" {
+  project = var.project_id
+  role    = "roles/secretmanager.admin"
+  member  = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
 resource "google_secret_manager_secret_iam_member" "sf_private_key_persistent_version_adder" {
   secret_id = google_secret_manager_secret.sf_private_key_persistent.id
   role      = "roles/secretmanager.secretVersionAdder"
