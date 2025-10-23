@@ -493,7 +493,7 @@ with tab_single:
 
             # Helper function to organize columns hierarchically
             def organize_media_columns(columns, category_name):
-                """Organize media columns by metric type and channel."""
+                """Organize media columns by suffix (metric type) and channel."""
                 hierarchy = {}
                 
                 for col in columns:
@@ -507,14 +507,14 @@ with tab_single:
                         if col_cat != category_name:
                             continue
                     
-                    # Extract metric and channel from column name
-                    # Pattern: <CHANNEL>_<SUBCHANNEL>_<METRIC> or <CHANNEL>_<METRIC>
+                    # Extract suffix (metric) and channel from column name
+                    # Pattern: <CHANNEL>_<SUBCHANNEL>_<SUFFIX> or <CHANNEL>_<SUFFIX>
                     parts = col.split("_")
                     if len(parts) < 2:
                         continue
                     
-                    # Last part is the metric (COST, SESSIONS, IMPRESSIONS, CLICKS)
-                    metric = parts[-1].lower()
+                    # Last part is the suffix/metric (COST, SESSIONS, IMPRESSIONS, CLICKS)
+                    suffix = parts[-1].lower()
                     
                     # Find channel (usually first part, or look for known channels)
                     known_channels = ["ga", "bing", "meta", "partnership", "tv"]
@@ -526,34 +526,56 @@ with tab_single:
                     if not channel and len(parts) >= 2:
                         channel = parts[0].lower()
                     
-                    if metric not in hierarchy:
-                        hierarchy[metric] = {}
-                    if channel not in hierarchy[metric]:
-                        hierarchy[metric][channel] = []
-                    hierarchy[metric][channel].append(col)
+                    if suffix not in hierarchy:
+                        hierarchy[suffix] = {}
+                    if channel not in hierarchy[suffix]:
+                        hierarchy[suffix][channel] = []
+                    hierarchy[suffix][channel].append(col)
                 
                 return hierarchy
 
-            # Paid media spends - hierarchical multiselect
+            # Paid media spends - single suffix selection with hierarchical multiselect
             st.markdown("**paid_media_spends**")
+            st.caption("⚠️ Only one suffix category (cost/sessions/impressions/clicks) can be selected")
             spends_hierarchy = organize_media_columns(all_columns, "paid_media_spends")
             paid_media_spends_list = []
             
             if spends_hierarchy:
-                for metric, channels in sorted(spends_hierarchy.items()):
-                    with st.expander(f"📊 {metric.upper()}", expanded=False):
-                        for channel, cols in sorted(channels.items()):
-                            # Check if any defaults exist for this group
-                            defaults_in_group = [c for c in cols if c in default_values["paid_media_spends"]]
-                            
-                            selected = st.multiselect(
-                                f"{channel.upper()}",
-                                options=cols,
-                                default=defaults_in_group,
-                                key=f"spends_{metric}_{channel}",
-                                help=f"Select {channel.upper()} {metric.upper()} columns"
-                            )
-                            paid_media_spends_list.extend(selected)
+                # Determine default suffix based on defaults
+                default_suffix = None
+                for suffix, channels in spends_hierarchy.items():
+                    for channel, cols in channels.items():
+                        if any(c in default_values["paid_media_spends"] for c in cols):
+                            default_suffix = suffix
+                            break
+                    if default_suffix:
+                        break
+                
+                # Radio button to select suffix category
+                available_suffixes = sorted(spends_hierarchy.keys())
+                selected_suffix_spends = st.radio(
+                    "Select suffix category",
+                    options=available_suffixes,
+                    index=available_suffixes.index(default_suffix) if default_suffix in available_suffixes else 0,
+                    key="spends_suffix_selector",
+                    horizontal=True,
+                    help="Choose which metric type to use for paid media spends"
+                )
+                
+                # Show channels and columns for selected suffix
+                if selected_suffix_spends in spends_hierarchy:
+                    for channel, cols in sorted(spends_hierarchy[selected_suffix_spends].items()):
+                        # Check if any defaults exist for this group
+                        defaults_in_group = [c for c in cols if c in default_values["paid_media_spends"]]
+                        
+                        selected = st.multiselect(
+                            f"📍 {channel.upper()}",
+                            options=cols,
+                            default=defaults_in_group,
+                            key=f"spends_{selected_suffix_spends}_{channel}",
+                            help=f"Select {channel.upper()} {selected_suffix_spends.upper()} columns"
+                        )
+                        paid_media_spends_list.extend(selected)
             else:
                 # Fallback to simple multiselect if hierarchy can't be determined
                 paid_media_spends_list = st.multiselect(
@@ -563,26 +585,48 @@ with tab_single:
                     help="Select media spend columns",
                 )
 
-            # Paid media vars - hierarchical multiselect
+            # Paid media vars - single suffix selection with hierarchical multiselect
             st.markdown("**paid_media_vars**")
+            st.caption("⚠️ Only one suffix category (cost/sessions/impressions/clicks) can be selected")
             vars_hierarchy = organize_media_columns(all_columns, "paid_media_vars")
             paid_media_vars_list = []
             
             if vars_hierarchy:
-                for metric, channels in sorted(vars_hierarchy.items()):
-                    with st.expander(f"📊 {metric.upper()}", expanded=False):
-                        for channel, cols in sorted(channels.items()):
-                            # Check if any defaults exist for this group
-                            defaults_in_group = [c for c in cols if c in default_values["paid_media_vars"]]
-                            
-                            selected = st.multiselect(
-                                f"{channel.upper()}",
-                                options=cols,
-                                default=defaults_in_group,
-                                key=f"vars_{metric}_{channel}",
-                                help=f"Select {channel.upper()} {metric.upper()} columns"
-                            )
-                            paid_media_vars_list.extend(selected)
+                # Determine default suffix based on defaults
+                default_suffix = None
+                for suffix, channels in vars_hierarchy.items():
+                    for channel, cols in channels.items():
+                        if any(c in default_values["paid_media_vars"] for c in cols):
+                            default_suffix = suffix
+                            break
+                    if default_suffix:
+                        break
+                
+                # Radio button to select suffix category
+                available_suffixes = sorted(vars_hierarchy.keys())
+                selected_suffix_vars = st.radio(
+                    "Select suffix category",
+                    options=available_suffixes,
+                    index=available_suffixes.index(default_suffix) if default_suffix in available_suffixes else 0,
+                    key="vars_suffix_selector",
+                    horizontal=True,
+                    help="Choose which metric type to use for paid media vars"
+                )
+                
+                # Show channels and columns for selected suffix
+                if selected_suffix_vars in vars_hierarchy:
+                    for channel, cols in sorted(vars_hierarchy[selected_suffix_vars].items()):
+                        # Check if any defaults exist for this group
+                        defaults_in_group = [c for c in cols if c in default_values["paid_media_vars"]]
+                        
+                        selected = st.multiselect(
+                            f"📍 {channel.upper()}",
+                            options=cols,
+                            default=defaults_in_group,
+                            key=f"vars_{selected_suffix_vars}_{channel}",
+                            help=f"Select {channel.upper()} {selected_suffix_vars.upper()} columns"
+                        )
+                        paid_media_vars_list.extend(selected)
             else:
                 # Fallback to simple multiselect if hierarchy can't be determined
                 paid_media_vars_list = st.multiselect(
