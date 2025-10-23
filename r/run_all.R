@@ -534,7 +534,7 @@ df <- df %>% mutate(
 )
 
 ## ---------- WINDOW / FLAGS ----------
-# Use dates from config instead of hardcoded values
+# Dates are now sourced from config (start_data_date, end_data_date); previous hardcoded assignments have been removed.
 df <- df %>% filter(date >= start_data_date, date <= end_data_date)
 df$DOW <- wday(df$date, label = TRUE)
 df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
