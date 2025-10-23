@@ -1,0 +1,139 @@
+
+@copilot
+
+There are still some issues and changes I want to make.
+
+On the Connect your data page with the "TOTAL"/"OTHER" tags. I want to restructure that. Let's assume the columns names have following structure <CHANNEL_NAME>_<SUBCHANNEL>_<SUFFIX>.
+Each column can also have a  <CATEGORY> categorisation (paid_media_spends, paid_media_vars, context_vars, factor_vars, organic_vars) set by the user or automatically determined
+Instead of adding "OTHER" tag as we do now, I want to add <CUSTOM_TAGS> (multiple coma seperated custom tags (column Custom Tags (optional) as follows:
+<CHANNEL_NAME>_<CUSTOM_TAG_1>_<SUFFIX>_CUSTOM, <CHANNEL_NAME>_<CUSTOM_TAG_2>_<SUFFIX>_CUSTOM  etc. Those should be grouped by <CATEGORY> and aggregated by <AGGREGATION>.
+
+Lets, say we have the following mappings table and let's look at the mappings for BING.
+[2025-10-23T08-45_export.csv](https://github.com/user-attachments/files/23093666/2025-10-23T08-45_export.csv).
+
+With the values provided for BING, I want following in the "mapping" dict in the metadata.
+
+"mapping":{
+"paid_media_spends":[
+...
+6:"BING_SUPPLY_COST"
+7:"BING_DEMAND_COST"
+8:"BING_OTHER_COST"
+9:"BING_COMPETITOR_COST"
+10:"BING_BRAND_COST"
+11:"BING_APP_COST"
+12:"BING_TOTAL_COST" #(all columns aggregated by "agg_stategy", sum in this case)
+13:"BING_OTHER_COST_CUSTOM" # BING_OTHER_COST+ BING_COMPETITOR_COST + BING_BRAND_COST + BING_APP_COST
+14:"BING_CAMPAIGN_COST_CUSTOM" # BING_BRAND_COST + BING_APP_COST
+...
+]
+
+"paid_media_vars":[
+...
+6:"BING_SUPPLY_SESSIONS"
+7:"BING_DEMAND_SESSIONS"
+8:"BING_OTHER_SESSIONS"
+9:"BING_COMPETITOR_SESSIONS"
+10:"BING_BRAND_SESSIONS"
+11:"BING_APP_SESSIONS"
+12:"BING_TOTAL_SESSIONS" #(all columns aggregated by "agg_stategy", sum in this case)
+13:"BING_OTHER_COST_SESSIONS" # BING_OTHER_SESSIONS+ BING_COMPETITOR_SESSIONS + BING_BRAND_SESSIONS + BING_APP_SESSIONS
+14:"BING_CAMPAIGN_SESSIONS_CUSTOM" # BING_BRAND_SESSIONS + BING_APP_SESSIONS
+...
+21:"BING_SUPPLY_IMPRESSIONS"
+22:"BING_DEMAND_IMPRESSIONS"
+23:"BING_OTHER_IMPRESSIONS"
+24:"BING_COMPETITOR_IMPRESSIONS"
+25:"BING_BRAND_IMPRESSIONS"
+26:"BING_APP_IMPRESSIONS"
+27:"BING_TOTAL_IMPRESSIONS" #(all columns aggregated by "agg_stategy", sum in this case)
+28:"BING_OTHER_COST_IMPRESSIONS" # BING_OTHER_IMPRESSIONS+ BING_COMPETITOR_IMPRESSIONS + BING_BRAND_IMPRESSIONS + BING_APP_IMPRESSIONS
+29:"BING_CAMPAIGN_IMPRESSIONS_CUSTOM" # BING_BRAND_IMPRESSIONS + BING_APP_IMPRESSIONS
+...
+etc. (same for _CLICKS and so on)
+]
+
+
+When I later got to the Expariment page and do "Variable mapping". I want the paid_media_spends and paid_media_vars to be displayed as follows (with a nested multiselect dropdown, when I click the <SUFFIX> or <CHANNEL_NAME> select box- for example cost, impressions, ga, bing etc.- all values nested under are selected/deselected .
+paid_media_spends
+- cost
+- - ga
+- - -GA_SUPPLY_COST
+- - -GA_DEMAND_COST
+- - -GA_OTHER_COST
+- - - ...
+-  cost
+- - bing
+- - -BING_SUPPLY_COST
+- - -BING_DEMAND_COST
+- - -...
+- - -BING_OTHER_COST_CUSTOM
+- - -BING_CAMPAIGN_COST_CUSTOM
+- cost
+- -meta
+- -- ...
+- cost
+- -partnerships
+- - - ...
+paid_media_vars
+- cost
+- - ga
+- - -GA_SUPPLY_COST
+- - -GA_DEMAND_COST
+- - -GA_OTHER_COST
+- - -...
+-  cost
+- -bing
+- - - BING_SUPPLY_COST
+- - - BING_DEMAND_COST
+- - - ..
+- - -BING_OTHER_COST_CUSTOM
+- - -BING_CAMPAIGN_COST_CUSTOM
+- cost
+- - meta
+- - -...
+- cost
+- - partnerships
+- - -...
+-  impressions
+- - ga
+- - -GA_SUPPLY_IMPRESSIONS
+- - -GA_DEMAND_IMPRESSIONS
+- - -GA_OTHER_IMPRESSIONS
+- -  -...
+-  impressions
+- - bing
+- - -BING_SUPPLY_IMPRESSIONS
+- - -BING_DEMAND_IMPRESSIONS
+- - -..
+- - -BING_OTHER_COST_IMPRESSIONS
+- - -BING_CAMPAIGN_COST_IMPRESSIONS
+- impressions
+- - meta
+- - -...
+- impressions
+- -partnerships
+- -- ...
+-  sessions
+- - ga
+- - -GA_SUPPLY_SESSIONS
+- - -GA_DEMAND_SESSIONS
+- - -GA_OTHER_SESSIONS
+- -  -...
+-  sessions
+- - bing
+- - -BING_SUPPLY_SESSIONS
+- - -BING_DEMAND_SESSIONS
+- - -..
+- - -BING_OTHER_COST_SESSIONS
+- - -BING_CAMPAIGN_COST_SESSIONS
+- sessions
+- - meta
+- - -...
+- sessions
+- - partnerships
+- - -...
+
+Only one <SUFFIX> category can be selected per paid_media_spends and paid_media_vars.
+
+Use the best looking option to implement the nested multiselect drop down (streamlit-tree-select,
