@@ -152,7 +152,7 @@ jobs:
           echo "Disabling Cloud Run deletion protection..."
           gcloud run services update "${SERVICE_NAME}-web" \
             --region="$REGION" \
-            --no-deletion-protection || true
+            --clear-deletion-protection || true
 
           # Clear taints on Terraform resources
           echo "Clearing Terraform taints..."
