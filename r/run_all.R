@@ -17,7 +17,6 @@ suppressPackageStartupMessages({
     library(lubridate)
     library(readr)
     library(stringr)
-    # library(Robyn)
     library(googleCloudStorageR)
     library(mime)
     library(reticulate)
@@ -533,8 +532,10 @@ if ("BRAND_HEALTH" %in% names(df) && "TV_COST" %in% names(df)) {
 }
 if (!("ORGANIC_TRAFFIC" %in% names(df))) {
     # Fallback: create ORGANIC_TRAFFIC if not already present
-    organic_cols <- c("NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS", 
-                      "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS")
+    organic_cols <- c(
+        "NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS",
+        "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS"
+    )
     available_organic <- intersect(organic_cols, names(df))
     if (length(available_organic) > 0) {
         df$ORGANIC_TRAFFIC <- rowSums(select(df, any_of(available_organic)), na.rm = TRUE)
@@ -579,8 +580,8 @@ InputCollect <- tryCatch(
         robyn_inputs(
             dt_input = df,
             date_var = "date",
-            dep_var = dep_var_from_cfg,  # From config
-            dep_var_type = dep_var_type_from_cfg,  # From config
+            dep_var = dep_var_from_cfg, # From config
+            dep_var_type = dep_var_type_from_cfg, # From config
             prophet_vars = c("trend", "season", "holiday", "weekday"),
             prophet_country = toupper(country),
             paid_media_spends = paid_media_spends,
@@ -699,7 +700,7 @@ hyperparameters <- list()
 for (v in hyper_vars) {
     spec <- get_hyperparameter_ranges(hyperparameter_preset, adstock, v)
     hyperparameters[[paste0(v, "_alphas")]] <- spec$alphas
-    
+
     if (adstock == "geometric") {
         hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
         hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
@@ -723,8 +724,8 @@ InputCollect <- tryCatch(
         robyn_inputs(
             dt_input = df,
             date_var = "date",
-            dep_var = dep_var_from_cfg,  # From config
-            dep_var_type = dep_var_type_from_cfg,  # From config
+            dep_var = dep_var_from_cfg, # From config
+            dep_var_type = dep_var_type_from_cfg, # From config
             prophet_vars = c("trend", "season", "holiday", "weekday"),
             prophet_country = toupper(country),
             paid_media_spends = paid_media_spends,
