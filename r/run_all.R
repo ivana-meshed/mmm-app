@@ -521,17 +521,25 @@ if (length(zero_var)) {
 if (!"TV_IS_ON" %in% names(df)) df$TV_IS_ON <- 0
 
 ## ---------- FEATURE ENGINEERING ----------
-df <- df %>% mutate(
-    GA_OTHER_COST = rowSums(select(., tidyselect::matches("^GA_.*_COST$") & !any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE),
-    BING_TOTAL_COST = rowSums(select(., tidyselect::matches("^BING_.*_COST$")), na.rm = TRUE),
-    META_TOTAL_COST = rowSums(select(., tidyselect::matches("^META_.*_COST$")), na.rm = TRUE),
-    ORGANIC_TRAFFIC = rowSums(select(., any_of(c("NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS", "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS"))), na.rm = TRUE),
-    BRAND_HEALTH = coalesce(DIRECT_DAILY_SESSIONS, 0) + coalesce(SEO_DAILY_SESSIONS, 0),
-    ORGxTV = BRAND_HEALTH * coalesce(TV_COST, 0),
-    GA_OTHER_IMPRESSIONS = rowSums(select(., tidyselect::matches("^GA_.*_IMPRESSIONS$") & !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
-    BING_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE),
-    META_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE)
-)
+# Aggregated columns (TOTAL and CUSTOM) are now created dynamically in the Map Your Data page
+# and saved to GCS. They are loaded with the dataset and used directly.
+# Any additional feature engineering specific to the model can be added here.
+# Example: interaction terms, transformations, etc.
+if ("DIRECT_DAILY_SESSIONS" %in% names(df) && "SEO_DAILY_SESSIONS" %in% names(df)) {
+    df$BRAND_HEALTH <- coalesce(df$DIRECT_DAILY_SESSIONS, 0) + coalesce(df$SEO_DAILY_SESSIONS, 0)
+}
+if ("BRAND_HEALTH" %in% names(df) && "TV_COST" %in% names(df)) {
+    df$ORGxTV <- df$BRAND_HEALTH * coalesce(df$TV_COST, 0)
+}
+if (!("ORGANIC_TRAFFIC" %in% names(df))) {
+    # Fallback: create ORGANIC_TRAFFIC if not already present
+    organic_cols <- c("NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS", 
+                      "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS")
+    available_organic <- intersect(organic_cols, names(df))
+    if (length(available_organic) > 0) {
+        df$ORGANIC_TRAFFIC <- rowSums(select(df, any_of(available_organic)), na.rm = TRUE)
+    }
+}
 
 ## ---------- WINDOW / FLAGS ----------
 # Dates are now sourced from config (start_data_date, end_data_date); previous hardcoded assignments have been removed.
