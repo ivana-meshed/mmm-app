@@ -474,7 +474,9 @@ with tab_single:
                         if m.get("category") == cat and m.get("var")
                     ]
                     if vars_in_cat:
-                        default_values[cat] = vars_in_cat
+                        default_values[cat] = [
+                            v for v in vars_in_cat if v is not None
+                        ]
 
             # Filter defaults to only include columns that exist in the data
             if all_columns:
