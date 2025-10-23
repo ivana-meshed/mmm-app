@@ -662,7 +662,7 @@ def _extract_from_wide(df: pd.DataFrame) -> dict:
     return out
 
 
-def _try_read_csv(blob) -> pd.DataFrame | None:
+def _try_read_csv(blob) -> pd.DataFrame | None:  # type: ignore
     try:
         data = download_bytes_safe(blob)
         if data is None:
@@ -743,7 +743,7 @@ def rank_runs_for_country(
         )
 
     if not rows:
-        return None, pd.DataFrame()
+        return None, pd.DataFrame()  # type: ignore
 
     df = pd.DataFrame(rows)
 
@@ -760,9 +760,9 @@ def rank_runs_for_country(
             [w_train, w_val, w_test],
         )
 
-    df["r2_w"] = df.apply(lambda r: wavg_row(r, "r2"), axis=1)
-    df["nrmse_w"] = df.apply(lambda r: wavg_row(r, "nrmse"), axis=1)
-    df["drssd_w"] = df.apply(lambda r: wavg_row(r, "decomp_rssd"), axis=1)
+    df["r2_w"] = df.apply(lambda r: wavg_row(r, "r2"), axis=1)  # type: ignore
+    df["nrmse_w"] = df.apply(lambda r: wavg_row(r, "nrmse"), axis=1)  # type: ignore
+    df["drssd_w"] = df.apply(lambda r: wavg_row(r, "decomp_rssd"), axis=1)  # type: ignore
 
     # Normalize "lower is better" terms across candidates to [0,1]
     df["nrmse_w_norm"] = _minmax_norm(df["nrmse_w"])
@@ -1018,7 +1018,7 @@ if not auto_best:
     st.markdown(f"## Detailed View — revision `{rev}`")
     for ctry in countries_sel:
         with st.container():
-            render_run_for_country(bucket_name, rev, ctry)
+            render_run_for_country(bucket_name, rev, ctry)  # type: ignore
             st.divider()
 
 # ---------- Mode: auto best across all revisions ----------
