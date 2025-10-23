@@ -491,21 +491,106 @@ with tab_single:
                     "⚠️ Please load data first to see available columns for selection."
                 )
 
-            # Paid media spends - multiselect
-            paid_media_spends_list = st.multiselect(
-                "paid_media_spends",
-                options=all_columns,
-                default=default_values["paid_media_spends"],
-                help="Select media spend columns",
-            )
+            # Helper function to organize columns hierarchically
+            def organize_media_columns(columns, category_name):
+                """Organize media columns by metric type and channel."""
+                hierarchy = {}
+                
+                for col in columns:
+                    # Skip if not in the category from metadata
+                    if metadata and "mapping" in metadata:
+                        col_cat = None
+                        for m in normalized_mapping:
+                            if m.get("var") == col:
+                                col_cat = m.get("category")
+                                break
+                        if col_cat != category_name:
+                            continue
+                    
+                    # Extract metric and channel from column name
+                    # Pattern: <CHANNEL>_<SUBCHANNEL>_<METRIC> or <CHANNEL>_<METRIC>
+                    parts = col.split("_")
+                    if len(parts) < 2:
+                        continue
+                    
+                    # Last part is the metric (COST, SESSIONS, IMPRESSIONS, CLICKS)
+                    metric = parts[-1].lower()
+                    
+                    # Find channel (usually first part, or look for known channels)
+                    known_channels = ["ga", "bing", "meta", "partnership", "tv"]
+                    channel = None
+                    for part in parts:
+                        if part.lower() in known_channels:
+                            channel = part.lower()
+                            break
+                    if not channel and len(parts) >= 2:
+                        channel = parts[0].lower()
+                    
+                    if metric not in hierarchy:
+                        hierarchy[metric] = {}
+                    if channel not in hierarchy[metric]:
+                        hierarchy[metric][channel] = []
+                    hierarchy[metric][channel].append(col)
+                
+                return hierarchy
 
-            # Paid media vars - multiselect (will be made nested later based on clarification)
-            paid_media_vars_list = st.multiselect(
-                "paid_media_vars",
-                options=all_columns,
-                default=default_values["paid_media_vars"],
-                help="Select media variable columns (e.g., impressions, clicks)",
-            )
+            # Paid media spends - hierarchical multiselect
+            st.markdown("**paid_media_spends**")
+            spends_hierarchy = organize_media_columns(all_columns, "paid_media_spends")
+            paid_media_spends_list = []
+            
+            if spends_hierarchy:
+                for metric, channels in sorted(spends_hierarchy.items()):
+                    with st.expander(f"📊 {metric.upper()}", expanded=False):
+                        for channel, cols in sorted(channels.items()):
+                            # Check if any defaults exist for this group
+                            defaults_in_group = [c for c in cols if c in default_values["paid_media_spends"]]
+                            
+                            selected = st.multiselect(
+                                f"{channel.upper()}",
+                                options=cols,
+                                default=defaults_in_group,
+                                key=f"spends_{metric}_{channel}",
+                                help=f"Select {channel.upper()} {metric.upper()} columns"
+                            )
+                            paid_media_spends_list.extend(selected)
+            else:
+                # Fallback to simple multiselect if hierarchy can't be determined
+                paid_media_spends_list = st.multiselect(
+                    "Select columns",
+                    options=all_columns,
+                    default=default_values["paid_media_spends"],
+                    help="Select media spend columns",
+                )
+
+            # Paid media vars - hierarchical multiselect
+            st.markdown("**paid_media_vars**")
+            vars_hierarchy = organize_media_columns(all_columns, "paid_media_vars")
+            paid_media_vars_list = []
+            
+            if vars_hierarchy:
+                for metric, channels in sorted(vars_hierarchy.items()):
+                    with st.expander(f"📊 {metric.upper()}", expanded=False):
+                        for channel, cols in sorted(channels.items()):
+                            # Check if any defaults exist for this group
+                            defaults_in_group = [c for c in cols if c in default_values["paid_media_vars"]]
+                            
+                            selected = st.multiselect(
+                                f"{channel.upper()}",
+                                options=cols,
+                                default=defaults_in_group,
+                                key=f"vars_{metric}_{channel}",
+                                help=f"Select {channel.upper()} {metric.upper()} columns"
+                            )
+                            paid_media_vars_list.extend(selected)
+            else:
+                # Fallback to simple multiselect if hierarchy can't be determined
+                paid_media_vars_list = st.multiselect(
+                    "Select columns",
+                    options=all_columns,
+                    default=default_values["paid_media_vars"],
+                    help="Select media variable columns (e.g., impressions, clicks)",
+                )
 
             # Context vars - multiselect
             context_vars_list = st.multiselect(
