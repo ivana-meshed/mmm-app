@@ -39,7 +39,30 @@ docker/
 - Snowflake credentials for the data source
 - A GCS bucket (e.g. `mmm-app-output`) to store artifacts
 
-## Local Run (optional)
+## Local Development
+
+For detailed local development setup, testing, and troubleshooting, see **[DEVELOPMENT.md](DEVELOPMENT.md)**.
+
+Quick start for local development:
+```bash
+# Clone and setup
+git clone https://github.com/ivana-meshed/mmm-app.git
+cd mmm-app
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Configure GCP
+gcloud auth application-default login
+export PROJECT_ID=<your-project-id>
+export GCS_BUCKET=mmm-app-output
+export TRAINING_JOB_NAME=mmm-app-training
+
+# Run Streamlit
+streamlit run app/streamlit_app.py
+```
+
+## Local Run (Docker, optional)
 
 ```bash
 # Build the container locally
