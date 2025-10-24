@@ -1229,14 +1229,14 @@ if mapping_submit:
     st.success("Mapping updated.")
 
 # ──────────────────────────────────────────────────────────────
-# Channel Aggregation: TOTAL and Custom Tag-based columns
+# Channel Aggregation: OTHER and TOTAL columns
 # ──────────────────────────────────────────────────────────────
 st.subheader("Channel Aggregation (Optional)")
 st.markdown(
     """
 Add aggregated columns for each marketing channel:
-- **`<CHANNEL>_TOTAL_<METRIC>`**: Sum of all columns for each metric type (e.g., COST, SESSIONS, IMPRESSIONS)
-- **`<CHANNEL>_<TAG>_<METRIC>_CUSTOM`**: Sum of columns grouped by custom tags (e.g., OTHER, CAMPAIGN)
+- **`<CHANNEL>_OTHER`**: Sum of columns in the channel that lack a category
+- **`<CHANNEL>_TOTAL`**: Sum of all columns in the channel
 """
 )
 
@@ -1255,7 +1255,7 @@ if unique_channels:
         "Select channels to create aggregates for:",
         options=unique_channels,
         default=[],
-        help="For each selected channel, create TOTAL and custom tag-based aggregates",
+        help="For each selected channel, create _OTHER and _TOTAL columns",
     )
 
     if st.button("➕ Add Channel Aggregates", key="add_aggregates"):
@@ -1267,77 +1267,66 @@ if unique_channels:
 
             for channel in selected_channels:
                 # Get all columns for this channel
-                channel_rows = mapping_df_current[
+                channel_cols = mapping_df_current[
                     mapping_df_current["channel"].str.lower() == channel.lower()
-                ]
-                
-                if channel_rows.empty:
+                ]["var"].tolist()
+
+                if not channel_cols:
                     continue
 
                 # Filter to numeric columns only
-                numeric_channel_rows = channel_rows[
-                    channel_rows["var"].isin(df_current.columns) &
-                    channel_rows["var"].apply(
-                        lambda c: pd.api.types.is_numeric_dtype(df_current[c]) if c in df_current.columns else False
-                    )
+                numeric_channel_cols = [
+                    c
+                    for c in channel_cols
+                    if c in df_current.columns
+                    and pd.api.types.is_numeric_dtype(df_current[c])
                 ]
 
-                if numeric_channel_rows.empty:
+                if not numeric_channel_cols:
                     st.warning(
                         f"No numeric columns found for channel '{channel}'"
                     )
                     continue
 
-                # --- Create per-metric aggregates for this channel ---
+                # Get columns without category (for OTHER)
+                # --- Create per-suffix aggregates for this channel (TOTAL and OTHER) ---
                 import re
                 from collections import defaultdict
 
-                # Group columns by metric type (COST, SESSIONS, IMPRESSIONS, CLICKS, etc.)
-                # Extract metric from column name (last part after channel name)
-                metric_to_cols = defaultdict(lambda: {"all": [], "by_tag": defaultdict(list)})
-                
-                for _, row in numeric_channel_rows.iterrows():
-                    col = row["var"]
-                    custom_tags = str(row.get("custom_tags", "")).strip()
-                    
-                    if col not in df_current.columns:
+                # Build suffix → cols mapping for numeric columns in this channel.
+                # Suffix = part after the first underscore following the channel name,
+                # fallback to last token after last underscore if needed.
+                suffix_to_cols = defaultdict(list)
+                for c in channel_cols:
+                    if c not in df_current.columns:
                         continue
-                    
-                    # Extract metric type from column name
-                    # Pattern: <CHANNEL>_<SUBCHANNEL>_<METRIC> or <CHANNEL>_<METRIC>
-                    col_lower = col.lower()
-                    if col_lower.startswith(f"{channel.lower()}_"):
-                        # Get the last part as metric
-                        parts = col.split("_")
-                        metric = parts[-1].upper()  # COST, SESSIONS, IMPRESSIONS, etc.
+                    if not pd.api.types.is_numeric_dtype(df_current[c]):
+                        continue
+                    low = c.lower()
+                    if low.startswith(f"{channel.lower()}_"):
+                        suffix = low[len(channel) + 1 :]
                     else:
-                        metric = col.split("_")[-1].upper()
-                    
-                    # Add to "all" columns for TOTAL
-                    metric_to_cols[metric]["all"].append(col)
-                    
-                    # Add to custom tag groups
-                    if custom_tags:
-                        # Split by comma and clean up
-                        tags = [t.strip().lower() for t in custom_tags.split(",") if t.strip()]
-                        for tag in tags:
-                            metric_to_cols[metric]["by_tag"][tag].append(col)
+                        suffix = low.split("_")[-1] or low
+                    suffix_to_cols[suffix].append(c)
 
-                # Create aggregated columns
-                for metric, data in metric_to_cols.items():
-                    # Sanitize metric name
-                    safe_metric = re.sub(r"\W+", "_", metric).strip("_").upper()
-                    
-                    # Create TOTAL column
-                    total_col_name = f"{channel.upper()}_TOTAL_{safe_metric}"
-                    if total_col_name not in df_current.columns and data["all"]:
-                        df_current[total_col_name] = df_current[data["all"]].sum(axis=1)
+                for suffix, cols_in_suffix in suffix_to_cols.items():
+                    # sanitize suffix for column name
+                    safe_suffix = re.sub(r"\W+", "_", suffix).strip("_").upper()
+                    if not safe_suffix:
+                        continue
+
+                    # create TOTAL per suffix (sums all numeric columns in this suffix group)
+                    total_col_name = f"{channel.upper()}_TOTAL_{safe_suffix}"
+                    if total_col_name not in df_current.columns:
+                        df_current[total_col_name] = df_current[
+                            cols_in_suffix
+                        ].sum(axis=1)
                         new_cols_added.append(total_col_name)
 
-                        # Infer category for generated total
+                        # infer category for generated total using your auto_rules (fallback)
                         inferred_cat = (
                             _infer_category(
-                                f"_{safe_metric}", st.session_state["auto_rules"]
+                                f"_{suffix}", st.session_state["auto_rules"]
                             )
                             or "paid_media_spends"
                         )
@@ -1357,36 +1346,67 @@ if unique_channels:
                             [st.session_state["mapping_df"], new_row],
                             ignore_index=True,
                         )
-                    
-                    # Create custom tag-based columns
-                    for tag, tag_cols in data["by_tag"].items():
-                        if not tag_cols:
-                            continue
-                        
-                        # Sanitize tag name
-                        safe_tag = re.sub(r"\W+", "_", tag).strip("_").upper()
-                        custom_col_name = f"{channel.upper()}_{safe_tag}_{safe_metric}_CUSTOM"
-                        
-                        if custom_col_name not in df_current.columns:
-                            df_current[custom_col_name] = df_current[tag_cols].sum(axis=1)
-                            new_cols_added.append(custom_col_name)
 
-                            # Infer category
+                    # create OTHER per suffix: only sum columns in this suffix group that are uncategorized / marked as other
+                    # build mask restricting mapping rows to this channel+suffix group
+                    cols_in_suffix_lower = {ci.lower() for ci in cols_in_suffix}
+                    mask_suffix = (
+                        mapping_df_current["var"]
+                        .astype(str)
+                        .str.lower()
+                        .isin(cols_in_suffix_lower)
+                    )
+
+                    mask_uncategorized = mask_suffix & (
+                        mapping_df_current["category"]
+                        .astype(str)
+                        .str.strip()
+                        .eq("")
+                        | mapping_df_current["category"]
+                        .astype(str)
+                        .str.lower()
+                        .eq("other")
+                        | mapping_df_current["custom_tags"]
+                        .astype(str)
+                        .str.lower()
+                        .str.contains(r"\bother\b", regex=True)
+                    )
+
+                    uncategorized_cols = mapping_df_current.loc[
+                        mask_uncategorized, "var"
+                    ].tolist()
+                    numeric_uncategorized = [
+                        c
+                        for c in uncategorized_cols
+                        if c in df_current.columns
+                        and pd.api.types.is_numeric_dtype(df_current[c])
+                    ]
+
+                    if numeric_uncategorized:
+                        other_col_name = (
+                            f"{channel.upper()}_OTHER_{safe_suffix}"
+                        )
+                        if other_col_name not in df_current.columns:
+                            df_current[other_col_name] = df_current[
+                                numeric_uncategorized
+                            ].sum(axis=1)
+                            new_cols_added.append(other_col_name)
+
                             inferred_cat = (
                                 _infer_category(
-                                    f"_{safe_metric}", st.session_state["auto_rules"]
+                                    f"_{suffix}", st.session_state["auto_rules"]
                                 )
                                 or "paid_media_spends"
                             )
                             new_row = pd.DataFrame(
                                 [
                                     {
-                                        "var": custom_col_name,
+                                        "var": other_col_name,
                                         "category": inferred_cat,
                                         "channel": channel,
                                         "data_type": "numeric",
                                         "agg_strategy": "sum",
-                                        "custom_tags": f"auto_generated_{safe_tag}",
+                                        "custom_tags": "auto_generated_other",
                                     }
                                 ]
                             )
