@@ -21,8 +21,11 @@ RUN pip install --no-cache-dir \
     mime \
     altair>=5.0 \
     scikit-learn>=1.2 \
-    statsmodels>=0.13
-
+    statsmodels>=0.13 \
+    numpy \
+    warnings \
+    plotly \
+    scipy
 
 WORKDIR /app
 
