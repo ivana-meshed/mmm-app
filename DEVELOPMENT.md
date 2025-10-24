@@ -193,11 +193,11 @@ export REGION=europe-west1
 export GCS_BUCKET=mmm-app-output
 
 # Cloud Run Configuration
-export TRAINING_JOB_NAME=mmm-app-training
-export SERVICE_NAME=mmm-app
+export TRAINING_JOB_NAME=mmm-app-dev-training
+export SERVICE_NAME=mmm-app-dev
 
 # Optional: For local development
-export GOOGLE_APPLICATION_CREDENTIALS=""  # Uses ADC
+export GOOGLE_APPLICATION_CREDENTIALS="pat/to/cred.json"  # Uses ADC
 ```
 
 #### Create GCS Bucket (if needed)
@@ -241,12 +241,20 @@ export SNOWFLAKE_SCHEMA=your_schema
 Create `app/.streamlit/secrets.toml`:
 
 ```toml
+[auth]
+redirect_uri = "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
+cookie_secret = "xxx"
+client_id = "xxx"
+client_secret = "xxx"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+providers = ["google"]
+
 [snowflake]
-account = "your_account"
-user = "your_username"
-warehouse = "your_warehouse"
-database = "your_database"
-schema = "your_schema"
+account = "IPENC"
+user = "AMXUZTH-AWS_BRIDGE"
+warehouse = "SMALL_WH"
+database = "MESHED_BUYCYCLE"
+schema = "GROWTH"
 ```
 
 ⚠️ **Important**: Never commit secrets files! They're in `.gitignore`.
