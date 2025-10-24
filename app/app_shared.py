@@ -1012,6 +1012,8 @@ def build_job_config_from_params(
         ),
         "revision": params["revision"],
         "date_input": params.get("date_input") or time.strftime("%Y-%m-%d"),
+        "start_date": params.get("start_date", "2024-01-01"),  # NEW
+        "end_date": params.get("end_date", time.strftime("%Y-%m-%d")),  # NEW
         "gcs_bucket": params.get("gcs_bucket")
         or st.session_state["gcs_bucket"],
         "data_gcs_path": _normalize_gs_uri(data_gcs_path),
@@ -1043,8 +1045,10 @@ def build_job_config_from_params(
         ],
         "timestamp": timestamp,
         "dep_var": str(params.get("dep_var", "UPLOAD_VALUE")),  # NEW
+        "dep_var_type": str(params.get("dep_var_type", "revenue")),  # NEW
         "date_var": str(params.get("date_var", "date")),  # NEW
         "adstock": str(params.get("adstock", "geometric")),  # NEW
+        "hyperparameter_preset": str(params.get("hyperparameter_preset", "Meshed recommend")),  # NEW
         "use_parquet": True,
         "parallel_processing": True,
         "max_cores": 8,

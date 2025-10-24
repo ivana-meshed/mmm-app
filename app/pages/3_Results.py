@@ -309,7 +309,7 @@ def find_onepager_blob(blobs, best_id: str):
     return None
 
 
-def read_csv_blob_to_df(blob) -> pd.DataFrame | None:
+def read_csv_blob_to_df(blob) -> pd.DataFrame | None:  # type: ignore
     try:
         data = download_bytes_safe(blob)
         if data is None:
@@ -852,5 +852,5 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
 st.markdown(f"## Detailed View — revision `{rev}`")
 for ctry in countries_sel:
     with st.container():
-        render_run_for_country(bucket_name, rev, ctry)
+        render_run_for_country(bucket_name, rev, ctry)  # type: ignore
         st.divider()
