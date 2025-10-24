@@ -2,7 +2,7 @@ name: CI (dev)
 
 on:
   push:
-    branches: [copilot/*]
+    branches: [feat-*]
     paths:
         - 'docker/Dockerfile.training'
         - '.github/workflows/ci-dev.yml'
