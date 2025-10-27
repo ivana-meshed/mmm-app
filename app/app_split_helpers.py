@@ -1,4 +1,4 @@
-# 0_Connect_Your_Data.py — Streamlit front-end for launching & monitoring Robyn training jobs on Cloud Run Jobs
+# 0_Connect_Data.py — Streamlit front-end for launching & monitoring Robyn training jobs on Cloud Run Jobs
 import json
 import logging
 import os
@@ -154,7 +154,7 @@ st.session_state.setdefault("queue_saved_at", None)
 # ─────────────────────────────
 # One-time Snowflake init for this Streamlit session
 # ─────────────────────────────
-# 0_Connect_Your_Data.py
+# 0_Connect_Data.py
 
 
 def _init_sf_once():
