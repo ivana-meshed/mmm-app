@@ -530,51 +530,6 @@ if (!"TV_IS_ON" %in% names(df)) df$TV_IS_ON <- 0
 # Legacy aggregations below are kept for backward compatibility with older data
 # that doesn't have the new automatic aggregations.
 
-# Only create legacy aggregations if they don't already exist
-if (!"GA_OTHER_COST" %in% names(df)) {
-    df$GA_OTHER_COST <- rowSums(select(df, tidyselect::matches("^GA_.*_COST$") & !any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE)
-}
-if (!"BING_TOTAL_COST" %in% names(df)) {
-    df$BING_TOTAL_COST <- rowSums(select(df, tidyselect::matches("^BING_.*_COST$")), na.rm = TRUE)
-}
-if (!"META_TOTAL_COST" %in% names(df)) {
-    df$META_TOTAL_COST <- rowSums(select(df, tidyselect::matches("^META_.*_COST$")), na.rm = TRUE)
-}
-if (!"ORGANIC_TRAFFIC" %in% names(df)) {
-    df$ORGANIC_TRAFFIC <- rowSums(select(df, any_of(c("NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS", "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS", "ORGANIC_NL_DAILY_SESSIONS", "ORGANIC_SEO_DAILY_SESSIONS", "ORGANIC_DIRECT_DAILY_SESSIONS", "ORGANIC_CRM_OTHER_DAILY_SESSIONS", "ORGANIC_CRM_DAILY_SESSIONS", "ORGANIC_ORGANIC_SOCIAL_DAILY_SESSIONS", "ORGANIC_BLOG_DAILY_SESSIONS"))), na.rm = TRUE)
-}
-if (!"BRAND_HEALTH" %in% names(df)) {
-    # Handle both prefixed and non-prefixed versions
-    direct_col <- if ("ORGANIC_DIRECT_DAILY_SESSIONS" %in% names(df)) {
-        "ORGANIC_DIRECT_DAILY_SESSIONS"
-    } else if ("DIRECT_DAILY_SESSIONS" %in% names(df)) {
-        "DIRECT_DAILY_SESSIONS"
-    } else {
-        NULL
-    }
-    seo_col <- if ("ORGANIC_SEO_DAILY_SESSIONS" %in% names(df)) {
-        "ORGANIC_SEO_DAILY_SESSIONS"
-    } else if ("SEO_DAILY_SESSIONS" %in% names(df)) {
-        "SEO_DAILY_SESSIONS"
-    } else {
-        NULL
-    }
-    direct_val <- if (!is.null(direct_col)) coalesce(df[[direct_col]], 0) else 0
-    seo_val <- if (!is.null(seo_col)) coalesce(df[[seo_col]], 0) else 0
-    df$BRAND_HEALTH <- direct_val + seo_val
-}
-if (!"ORGxTV" %in% names(df)) {
-    df$ORGxTV <- df$BRAND_HEALTH * coalesce(df$TV_COST, 0)
-}
-if (!"GA_OTHER_IMPRESSIONS" %in% names(df)) {
-    df$GA_OTHER_IMPRESSIONS <- rowSums(select(df, tidyselect::matches("^GA_.*_IMPRESSIONS$") & !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE)
-}
-if (!"BING_TOTAL_IMPRESSIONS" %in% names(df)) {
-    df$BING_TOTAL_IMPRESSIONS <- rowSums(select(df, tidyselect::matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE)
-}
-if (!"META_TOTAL_IMPRESSIONS" %in% names(df)) {
-    df$META_TOTAL_IMPRESSIONS <- rowSums(select(df, tidyselect::matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE)
-}
 
 ## ---------- WINDOW / FLAGS ----------
 # Dates are now sourced from config (start_data_date, end_data_date); previous hardcoded assignments have been removed.
@@ -614,8 +569,8 @@ InputCollect <- tryCatch(
         robyn_inputs(
             dt_input = df,
             date_var = "date",
-            dep_var = dep_var_from_cfg,  # From config
-            dep_var_type = dep_var_type_from_cfg,  # From config
+            dep_var = dep_var_from_cfg, # From config
+            dep_var_type = dep_var_type_from_cfg, # From config
             prophet_vars = c("trend", "season", "holiday", "weekday"),
             prophet_country = toupper(country),
             paid_media_spends = paid_media_spends,
@@ -734,7 +689,7 @@ hyperparameters <- list()
 for (v in hyper_vars) {
     spec <- get_hyperparameter_ranges(hyperparameter_preset, adstock, v)
     hyperparameters[[paste0(v, "_alphas")]] <- spec$alphas
-    
+
     if (adstock == "geometric") {
         hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
         hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
@@ -758,8 +713,8 @@ InputCollect <- tryCatch(
         robyn_inputs(
             dt_input = df,
             date_var = "date",
-            dep_var = dep_var_from_cfg,  # From config
-            dep_var_type = dep_var_type_from_cfg,  # From config
+            dep_var = dep_var_from_cfg, # From config
+            dep_var_type = dep_var_type_from_cfg, # From config
             prophet_vars = c("trend", "season", "holiday", "weekday"),
             prophet_country = toupper(country),
             paid_media_spends = paid_media_spends,
