@@ -961,7 +961,7 @@ tab_load, tab_biz, tab_reg, tab_mkt, tab_rel, tab_diag = st.tabs(
         "Select Data",
         "Business, Overview",
         "Business, Regional",
-        "Marketing, Overview",
+        "Marketing",
         "Relationships",
         "Collinearity & PCA (by Country)",
     ]
@@ -1572,7 +1572,6 @@ with tab_mkt:
              good_when="down")
     ]
 
-    # per-platform totals (for tiles)
     if not plat_map_df.empty and not df_r.empty:
         long_sp = (
             df_r.melt(id_vars=[DATE_COL], value_vars=plat_map_df["col"].tolist(),
@@ -1603,22 +1602,59 @@ with tab_mkt:
 
     # ===== View selector =====
     st.markdown("#### View")
-    # Default option + platforms
     channel_options = ["All channels"] + platforms
     view_sel = st.selectbox("Channel view", channel_options, index=0)
 
-    # Prepare a filtered long df for charts based on view
+    # --- helpers to handle TOTAL columns cleanly ---
+    def _is_total_col(col: str, plat: str | None = None) -> bool:
+        if not isinstance(col, str):
+            return False
+        c = col.upper()
+        if plat:
+            p = str(plat).upper()
+            if c.startswith(p + "_"):
+                c = c[len(p) + 1 :]
+        # treat any *_TOTAL*, *_TOTAL_COST, *_TOTAL_SPEND and leading TOTAL as totals
+        if c.startswith("TOTAL"):
+            return True
+        total_suffixes = ["_TOTAL", "_TOTAL_COST", "_TOTAL_SPEND"]
+        if any(c.endswith(suf) for suf in total_suffixes):
+            return True
+        if "_TOTAL_" in c:
+            return True
+        return False
+
+    def _sub_label(col: str, plat: str) -> str:
+        if not isinstance(col, str):
+            return "Other"
+        c = col.upper()
+        p = str(plat).upper()
+        if c.startswith(p + "_"):
+            c = c[len(p) + 1 :]
+        for suf in ["_TOTAL_COST", "_TOTAL_SPEND", "_COST", "_SPEND", "_TOTAL"]:
+            if c.endswith(suf):
+                c = c[: -len(suf)]
+        c = c.split("_")[0].strip() or "Other"
+        return c.title()
+
+    # Prepare a filtered long df for charts based on view (exclude TOTAL sub-columns for single-channel view)
     def spend_long_filtered(dataframe: pd.DataFrame) -> pd.DataFrame:
         if plat_map_df.empty or dataframe.empty:
             return pd.DataFrame(columns=[DATE_COL, "col", "spend", "platform"])
         vm = plat_map_df.copy()
         if view_sel != "All channels":
             vm = vm[vm["platform"] == view_sel]
+            # drop total columns inside the chosen platform
+            vm = vm[~vm["col"].map(lambda c: _is_total_col(c, view_sel))]
         if vm.empty:
             return pd.DataFrame(columns=[DATE_COL, "col", "spend", "platform"])
         return (
-            dataframe.melt(id_vars=[DATE_COL], value_vars=vm["col"].tolist(),
-                           var_name="col", value_name="spend")
+            dataframe.melt(
+                id_vars=[DATE_COL],
+                value_vars=vm["col"].tolist(),
+                var_name="col",
+                value_name="spend",
+            )
             .merge(vm, on="col", how="left")
             .dropna(subset=["spend"])
         )
@@ -1626,230 +1662,192 @@ with tab_mkt:
     long_cur_view = spend_long_filtered(df_r)
     long_prev_view = spend_long_filtered(df_prev) if not df_prev.empty else pd.DataFrame()
 
-    # ----- Waterfall (spend by platform) — respects view -----
-    st.markdown("#### Change vs Previous — Waterfall (Spend by Platform)")
+    # ----- Waterfall — platform (all) OR sub-channel (single) -----
+    st.markdown("#### Change vs Previous — Waterfall")
     if not long_cur_view.empty:
-        cur_by_p = long_cur_view.groupby("platform")["spend"].sum()
-        prev_by_p = long_prev_view.groupby("platform")["spend"].sum() if not long_prev_view.empty else pd.Series(dtype=float)
+        if view_sel == "All channels":
+            cur_grp = long_cur_view.groupby("platform")["spend"].sum()
+            prev_grp = long_prev_view.groupby("platform")["spend"].sum() if not long_prev_view.empty else pd.Series(dtype=float)
+            name_series = cur_grp
+            title_suffix = "by Platform"
+        else:
+            sel_platform = view_sel
+            cur_sub = long_cur_view.copy()
+            cur_sub["sub"] = cur_sub["col"].map(lambda c: _sub_label(c, sel_platform))
+            # exclude any 'Total' bucket that might still slip through
+            cur_sub = cur_sub[cur_sub["sub"].str.upper() != "TOTAL"]
+            cur_grp = cur_sub.groupby("sub")["spend"].sum()
 
-        all_p = sorted(set(cur_by_p.index).union(prev_by_p.index),
-                       key=lambda x: cur_by_p.get(x, 0.0), reverse=True)
+            if not long_prev_view.empty:
+                prev_sub = long_prev_view.copy()
+                prev_sub["sub"] = prev_sub["col"].map(lambda c: _sub_label(c, sel_platform))
+                prev_sub = prev_sub[prev_sub["sub"].str.upper() != "TOTAL"]
+                prev_grp = prev_sub.groupby("sub")["spend"].sum()
+            else:
+                prev_grp = pd.Series(dtype=float)
+
+            name_series = cur_grp
+            title_suffix = f"{sel_platform} — by Sub-Channel"
+
+        all_keys = sorted(
+            set(cur_grp.index).union(prev_grp.index),
+            key=lambda x: name_series.get(x, 0.0),
+            reverse=True,
+        )
+
         steps, total_delta = [], 0.0
-        for p in all_p:
-            dv = cur_by_p.get(p, 0.0) - prev_by_p.get(p, 0.0)
+        for k in all_keys:
+            dv = cur_grp.get(k, 0.0) - prev_grp.get(k, 0.0)
             total_delta += dv
-            steps.append(dict(name=p, measure="relative", y=dv))
-        steps.insert(0, dict(name="Start (Prev Total)", measure="absolute", y=float(prev_by_p.sum())))
-        steps.append(dict(name="End (Current Total)", measure="total", y=float(prev_by_p.sum() + total_delta)))
+            steps.append(dict(name=k, measure="relative", y=float(dv)))
+        steps.insert(0, dict(name="Start (Prev Total)", measure="absolute", y=float(prev_grp.sum())))
+        steps.append(dict(name="End (Current Total)", measure="total", y=float(prev_grp.sum() + total_delta)))
 
-        fig_w = go.Figure(go.Waterfall(
-            name="Delta", orientation="v",
-            measure=[s["measure"] for s in steps],
-            x=[s["name"] for s in steps],
-            y=[s["y"] for s in steps],
-        ))
-        ttl_suffix = f" — {view_sel}" if view_sel != "All channels" else ""
-        fig_w.update_layout(title=f"Spend Change by Platform — Waterfall{ttl_suffix}", showlegend=False)
+        fig_w = go.Figure(
+            go.Waterfall(
+                name="Delta",
+                orientation="v",
+                measure=[s["measure"] for s in steps],
+                x=[s["name"] for s in steps],
+                y=[s["y"] for s in steps],
+            )
+        )
+        fig_w.update_layout(
+            title=f"Spend Change — Waterfall ({title_suffix})",
+            showlegend=False,
+        )
         st.plotly_chart(fig_w, use_container_width=True)
     else:
         st.info("No spend data for the selected view.")
     st.markdown("---")
 
-    # ----- Channel Mix (stacked) — respects view -----
+    # ----- Channel Mix (stacked) — platform (all) OR sub-channel (single) -----
     st.markdown("#### Channel Mix")
     if not long_cur_view.empty:
-        plat_freq = (
-            long_cur_view.set_index(DATE_COL)
-            .groupby("platform")["spend"]
-            .resample(RULE)
-            .sum(min_count=1)
-            .reset_index()
-            .rename(columns={DATE_COL: "DATE_PERIOD"})
-        )
-        plat_freq["PERIOD_LABEL"] = period_label(plat_freq["DATE_PERIOD"], RULE)
-        platform_order = (
-            plat_freq.groupby("platform")["spend"]
+        if view_sel == "All channels":
+            freq_df = (
+                long_cur_view.set_index(DATE_COL)
+                .groupby("platform")["spend"]
+                .resample(RULE)
+                .sum(min_count=1)
+                .reset_index()
+                .rename(columns={DATE_COL: "DATE_PERIOD"})
+            )
+            freq_df["series"] = freq_df["platform"]
+            chart_title = f"{spend_label} by Platform — {TIMEFRAME_LABEL}, {agg_label}"
+        else:
+            sel_platform = view_sel
+            sub_df = long_cur_view.copy()
+            sub_df["sub"] = sub_df["col"].map(lambda c: _sub_label(c, sel_platform))
+            # exclude TOTAL bucket
+            sub_df = sub_df[sub_df["sub"].str.upper() != "TOTAL"]
+            freq_df = (
+                sub_df.set_index(DATE_COL)
+                .groupby("sub")["spend"]
+                .resample(RULE)
+                .sum(min_count=1)
+                .reset_index()
+                .rename(columns={DATE_COL: "DATE_PERIOD"})
+            )
+            freq_df["series"] = freq_df["sub"]
+            chart_title = f"{spend_label} by Sub-Channel ({sel_platform}) — {TIMEFRAME_LABEL}, {agg_label}"
+
+        freq_df["PERIOD_LABEL"] = period_label(freq_df["DATE_PERIOD"], RULE)
+        order = (
+            freq_df.groupby("series")["spend"]
             .sum()
             .sort_values(ascending=False)
             .index.tolist()
         )
+
         fig2 = px.bar(
-            plat_freq, x="PERIOD_LABEL", y="spend", color="platform",
-            category_orders={"platform": platform_order},
-            color_discrete_map=PLATFORM_COLORS,
-            title=f"{spend_label} by Platform — {TIMEFRAME_LABEL}, {agg_label}"
-                  + (f" — {view_sel}" if view_sel != "All channels" else ""),
+            freq_df,
+            x="PERIOD_LABEL",
+            y="spend",
+            color="series",
+            category_orders={"series": order},
+            color_discrete_map=PLATFORM_COLORS,  # OK if some series use fallback colors
+            title=chart_title,
         )
-        fig2.update_layout(barmode="stack", xaxis_title="Date", yaxis_title=spend_label, legend=dict(orientation="h"))
+        fig2.update_layout(
+            barmode="stack",
+            xaxis_title="Date",
+            yaxis_title=spend_label,
+            legend=dict(orientation="h"),
+        )
         st.plotly_chart(fig2, use_container_width=True)
     else:
         st.info("No spend data for the selected view.")
     st.markdown("---")
 
-    # ----- Single Channel View -----
-    st.markdown("#### Single Channel View")
+    # ----- Funnels (INDEPENDENT from selector; always per platform) -----
+    st.markdown("#### Channel Funnels")
+    if not plat_map_df.empty:
 
-    # When 'All channels' → show a funnel per platform (as before)
-    if view_sel == "All channels":
-        if not plat_map_df.empty:
-            def find_metric_cols(token: str, keyword: str):
-                kw = keyword.upper()
-                return [c for c, u in ALL_COLS_UP.items() if token in u and kw in u]
-
-            for plat in platforms:
-                token = plat.upper()
-                spend_cols = plat_map_df.loc[plat_map_df["platform"] == plat, "col"].tolist()
-                spend_total = df_r[spend_cols].sum().sum() if spend_cols else 0.0
-                sess_cols = find_metric_cols(token, "SESSION")
-                click_cols = find_metric_cols(token, "CLICK")
-                impr_cols = find_metric_cols(token, "IMPRESSION")
-                installs_cols = [c for c in INSTALL_COLS if token in c.upper()]
-                sessions = df_r[sess_cols].sum().sum() if sess_cols else 0.0
-                clicks = df_r[click_cols].sum().sum() if click_cols else 0.0
-                imps = df_r[impr_cols].sum().sum() if impr_cols else 0.0
-                installs = df_r[installs_cols].sum().sum() if installs_cols else 0.0
-
-                cpm = (spend_total / imps * 1000) if imps > 0 else np.nan
-                cpc = (spend_total / clicks) if clicks > 0 else np.nan
-                cps = (spend_total / sessions) if sessions > 0 else np.nan
-
-                col_left, col_right = st.columns([2, 1])
-                with col_left:
-                    st.markdown(f"**{plat} Funnel**")
-                    steps = []
-                    if imps > 0: steps.append(("Impressions", imps))
-                    if clicks > 0: steps.append(("Clicks", clicks))
-                    if sessions > 0: steps.append(("Sessions", sessions))
-                    if installs > 0: steps.append(("Installs", installs))
-                    if steps:
-                        labels = [s[0] for s in steps]
-                        values = [s[1] for s in steps]
-                        figf = go.Figure(go.Funnel(
-                            y=labels, x=values,
-                            text=[fmt_num(v, nd=2) for v in values],
-                            textinfo="text+percent previous",
-                            hovertemplate="%{label}: %{value:,}",
-                        ))
-                        figf.update_layout(margin=dict(l=40, r=20, t=10, b=20))
-                        st.plotly_chart(figf, use_container_width=True)
-                    else:
-                        st.info("No funnel metrics found.")
-                with col_right:
-                    tbl = pd.DataFrame({
-                        "Metric": [
-                            "Total Spend", "Impressions", "Clicks", "Sessions",
-                            "Cost per 1k Impressions", "Cost per Click", "Cost per Session",
-                            "Impression→Click rate", "Click→Session rate",
-                        ],
-                        "Value": [
-                            fmt_num(spend_total), fmt_num(imps), fmt_num(clicks), fmt_num(sessions),
-                            (f"{cpm:.2f}" if pd.notna(cpm) else "–"),
-                            (f"{cpc:.2f}" if pd.notna(cpc) else "–"),
-                            (f"{cps:.2f}" if pd.notna(cps) else "–"),
-                            (f"{(clicks/imps):.2%}" if imps > 0 else "–"),
-                            (f"{(sessions/clicks):.2%}" if clicks > 0 else "–"),
-                        ],
-                    })
-                    st.dataframe(tbl, hide_index=True, use_container_width=True)
-                st.markdown("---")
-        else:
-            st.info("Platform mapping not available.")
-    else:
-        # Single selected channel → spend over time + sub-column breakdown + funnel
-        sel_platform = view_sel
-        vm = plat_map_df.loc[plat_map_df["platform"] == sel_platform]
-        sp_cols = vm["col"].tolist()
-
-        # Spend over time for selected channel
-        if sp_cols:
-            sp_series = df_r.set_index(DATE_COL)[sp_cols].sum(axis=1)
-            ts = (
-                sp_series.resample(RULE).sum(min_count=1).reset_index()
-                .rename(columns={DATE_COL: "DATE_PERIOD", sp_series.name: "spend"})
-            )
-            ts["PERIOD_LABEL"] = period_label(ts["DATE_PERIOD"], RULE)
-            fig_sc = go.Figure(go.Bar(x=ts["PERIOD_LABEL"], y=ts["spend"], name=f"{sel_platform} Spend"))
-            fig_sc.update_layout(
-                title=f"{sel_platform} {spend_label} Over Time — {TIMEFRAME_LABEL}, {agg_label}",
-                xaxis=dict(title="Date", title_standoff=8),
-                yaxis=dict(title=spend_label),
-                hovermode="x unified",
-                margin=dict(b=60),
-            )
-            st.plotly_chart(fig_sc, use_container_width=True)
-
-            # Sub-column breakdown (e.g., GA_OTHER, GA_DEMAND, ...)
-            det = (
-                df_r[sp_cols].sum(axis=0).reset_index()
-                .rename(columns={"index": "col", 0: "spend"})
-            )
-            det.columns = ["col", "spend"]
-            det = det.sort_values("spend", ascending=False)
-            det["Spend"] = det["spend"].map(fmt_num)
-            st.markdown(f"**{sel_platform} Spend Breakdown**")
-            st.dataframe(det[["col", "Spend"]], use_container_width=True)
-        else:
-            st.info("No mapped spend columns for the selected channel.")
-
-        # Funnel for selected channel (totals)
         def find_metric_cols(token: str, keyword: str):
             kw = keyword.upper()
             return [c for c, u in ALL_COLS_UP.items() if token in u and kw in u]
 
-        token = sel_platform.upper()
-        spend_total = df_r[sp_cols].sum().sum() if sp_cols else 0.0
-        sess_cols = find_metric_cols(token, "SESSION")
-        click_cols = find_metric_cols(token, "CLICK")
-        impr_cols = find_metric_cols(token, "IMPRESSION")
-        installs_cols = [c for c in INSTALL_COLS if token in c.upper()]
-        sessions = df_r[sess_cols].sum().sum() if sess_cols else 0.0
-        clicks = df_r[click_cols].sum().sum() if click_cols else 0.0
-        imps = df_r[impr_cols].sum().sum() if impr_cols else 0.0
-        installs = df_r[installs_cols].sum().sum() if installs_cols else 0.0
+        for plat in platforms:
+            token = plat.upper()
+            spend_cols = plat_map_df.loc[plat_map_df["platform"] == plat, "col"].tolist()
+            spend_total = df_r[spend_cols].sum().sum() if spend_cols else 0.0
+            sess_cols = find_metric_cols(token, "SESSION")
+            click_cols = find_metric_cols(token, "CLICK")
+            impr_cols = find_metric_cols(token, "IMPRESSION")
+            installs_cols = [c for c in INSTALL_COLS if token in c.upper()]
 
-        cpm = (spend_total / imps * 1000) if imps > 0 else np.nan
-        cpc = (spend_total / clicks) if clicks > 0 else np.nan
-        cps = (spend_total / sessions) if sessions > 0 else np.nan
+            sessions = df_r[sess_cols].sum().sum() if sess_cols else 0.0
+            clicks = df_r[click_cols].sum().sum() if click_cols else 0.0
+            imps = df_r[impr_cols].sum().sum() if impr_cols else 0.0
+            installs = df_r[installs_cols].sum().sum() if installs_cols else 0.0
 
-        col_left, col_right = st.columns([2, 1])
-        with col_left:
-            st.markdown(f"**{sel_platform} Funnel**")
-            steps = []
-            if imps > 0: steps.append(("Impressions", imps))
-            if clicks > 0: steps.append(("Clicks", clicks))
-            if sessions > 0: steps.append(("Sessions", sessions))
-            if installs > 0: steps.append(("Installs", installs))
-            if steps:
-                labels = [s[0] for s in steps]
-                values = [s[1] for s in steps]
-                figf = go.Figure(go.Funnel(
-                    y=labels, x=values,
-                    text=[fmt_num(v, nd=2) for v in values],
-                    textinfo="text+percent previous",
-                    hovertemplate="%{label}: %{value:,}",
-                ))
-                figf.update_layout(margin=dict(l=40, r=20, t=10, b=20))
-                st.plotly_chart(figf, use_container_width=True)
-            else:
-                st.info("No funnel metrics found.")
-        with col_right:
-            tbl = pd.DataFrame({
-                "Metric": [
-                    "Total Spend", "Impressions", "Clicks", "Sessions",
-                    "Cost per 1k Impressions", "Cost per Click", "Cost per Session",
-                    "Impression→Click rate", "Click→Session rate",
-                ],
-                "Value": [
-                    fmt_num(spend_total), fmt_num(imps), fmt_num(clicks), fmt_num(sessions),
-                    (f"{cpm:.2f}" if pd.notna(cpm) else "–"),
-                    (f"{cpc:.2f}" if pd.notna(cpc) else "–"),
-                    (f"{cps:.2f}" if pd.notna(cps) else "–"),
-                    (f"{(clicks/imps):.2%}" if imps > 0 else "–"),
-                    (f"{(sessions/clicks):.2%}" if clicks > 0 else "–"),
-                ],
-            })
-            st.dataframe(tbl, hide_index=True, use_container_width=True)
+            cpm = (spend_total / imps * 1000) if imps > 0 else np.nan
+            cpc = (spend_total / clicks) if clicks > 0 else np.nan
+            cps = (spend_total / sessions) if sessions > 0 else np.nan
 
+            col_left, col_right = st.columns([2, 1])
+            with col_left:
+                st.markdown(f"**{plat} Funnel**")
+                steps = []
+                if imps > 0: steps.append(("Impressions", imps))
+                if clicks > 0: steps.append(("Clicks", clicks))
+                if sessions > 0: steps.append(("Sessions", sessions))
+                if installs > 0: steps.append(("Installs", installs))
+                if steps:
+                    labels = [s[0] for s in steps]
+                    values = [s[1] for s in steps]
+                    figf = go.Figure(go.Funnel(
+                        y=labels, x=values,
+                        text=[fmt_num(v, nd=2) for v in values],
+                        textinfo="text+percent previous",
+                        hovertemplate="%{label}: %{value:,}",
+                    ))
+                    figf.update_layout(margin=dict(l=40, r=20, t=10, b=20))
+                    st.plotly_chart(figf, use_container_width=True)
+                else:
+                    st.info("No funnel metrics found.")
+            with col_right:
+                tbl = pd.DataFrame({
+                    "Metric": [
+                        "Total Spend", "Impressions", "Clicks", "Sessions",
+                        "Cost per 1k Impressions", "Cost per Click", "Cost per Session",
+                        "Impression→Click rate", "Click→Session rate",
+                    ],
+                    "Value": [
+                        fmt_num(spend_total), fmt_num(imps), fmt_num(clicks), fmt_num(sessions),
+                        (f"{cpm:.2f}" if pd.notna(cpm) else "–"),
+                        (f"{cpc:.2f}" if pd.notna(cpc) else "–"),
+                        (f"{cps:.2f}" if pd.notna(cps) else "–"),
+                        (f"{(clicks/imps):.2%}" if imps > 0 else "–"),
+                        (f"{(sessions/clicks):.2%}" if clicks > 0 else "–"),
+                    ],
+                })
+                st.dataframe(tbl, hide_index=True, use_container_width=True)
+            st.markdown("---")
+    else:
+        st.info("Platform mapping not available.")
+        
 # =============================
 # TAB 4 — RELATIONSHIPS 
 # =============================
