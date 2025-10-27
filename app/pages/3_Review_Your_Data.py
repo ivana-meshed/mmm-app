@@ -122,102 +122,111 @@ def _parse_date(df: pd.DataFrame, meta: dict) -> Tuple[pd.DataFrame, str]:
 
 def _validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
     """
-    Compare DF columns vs metadata (mapping + goals + date_field) in a case-insensitive way.
-    Also performs a coarse type check (numeric / categorical / date).
-    - "date_field" is treated as type 'date' for declared typing.
-    - If metadata provides dep_variable_type (e.g., revenue/conversion), they are treated as numeric.
+    Compare DF columns vs metadata in a case-insensitive way.
+
+    Declared set = union of:
+      - mapping.* arrays (paid_media_spends/vars, organic_vars, context_vars, factor_vars)
+      - goals[].var
+      - data.date_field
+      - keys(meta.data_types)
+      - keys(meta.channels)
+      - keys(meta.agg_strategies)
+
+    Also performs a coarse type check (numeric / categorical / date), with DATE forced to 'date'.
     Returns keys: missing_in_df, extra_in_df, type_mismatches (DataFrame), channels_map.
     """
-    # --- Gather all metadata-declared variables (mapping + goals + date_field) ---
-    mapping: Dict[str, List[str]] = (meta.get("mapping") or {}) if isinstance(meta, dict) else {}
-    goals_list = meta.get("goals", []) if isinstance(meta, dict) else []
-    meta_goals = [str(g.get("var")) for g in goals_list if g and g.get("var")]
+    if not isinstance(meta, dict):
+        meta = {}
 
-    # union of all mapping arrays
-    meta_vars_from_mapping: List[str] = []
-    for _, vars_ in (mapping or {}).items():
-        for v in vars_ or []:
-            meta_vars_from_mapping.append(str(v))
-
-    # date field
+    mapping: Dict[str, List[str]] = meta.get("mapping") or {}
+    goals_list = meta.get("goals") or []
+    data_types: Dict[str, str] = meta.get("data_types") or {}
+    channels_map: Dict[str, str] = meta.get("channels") or {}
+    agg_strat: Dict[str, str] = meta.get("agg_strategies") or {}
     date_declared = str(meta.get("data", {}).get("date_field") or "DATE")
 
-    # full declared set (strings)
-    meta_vars: List[str] = list(dict.fromkeys(meta_vars_from_mapping + meta_goals + [date_declared]))
+    # --- Collect declared variables from all sources ---
+    declared_vars = []
 
-    # --- Case-insensitive comparison sets ---
-    meta_vars_norm = {v.strip().lower() for v in meta_vars if v}
+    # mapping buckets
+    for _, arr in (mapping or {}).items():
+        if arr:
+            declared_vars.extend(map(str, arr))
+
+    # goals
+    declared_vars.extend([str(g.get("var")) for g in goals_list if g and g.get("var")])
+
+    # date field
+    declared_vars.append(date_declared)
+
+    # keys present in other maps (data_types / channels / agg_strategies)
+    declared_vars.extend(map(str, (data_types or {}).keys()))
+    declared_vars.extend(map(str, (channels_map or {}).keys()))
+    declared_vars.extend(map(str, (agg_strat or {}).keys()))
+
+    # de-dup preserving order
+    declared_vars = [v for i, v in enumerate(declared_vars) if v and v not in declared_vars[:i]]
+
+    # --- Case-insensitive sets for comparison ---
+    meta_vars_norm = {v.strip().lower() for v in declared_vars}
     df_cols = list(map(str, df.columns))
     df_cols_norm = {c.strip().lower() for c in df_cols}
 
-    # "missing" = declared in metadata but not present in df (case-insensitive)
-    # Return the *original* declared names for readability.
-    missing_in_df = sorted([v for v in meta_vars if v.strip().lower() not in df_cols_norm])
+    # Missing = declared but not in df (case-insensitive); show declared spelling
+    missing_in_df = sorted([v for v in declared_vars if v.strip().lower() not in df_cols_norm])
 
-    # "extra" = present in df but not declared in metadata (case-insensitive)
-    # Return the actual df column names for readability.
+    # Extra = in df but not declared anywhere (case-insensitive); show df spelling
     extra_in_df = sorted([c for c in df_cols if c.strip().lower() not in meta_vars_norm])
 
-    # --- Declared types (coarse) ---
-    # Prefer an explicit data_types map if present, otherwise:
-    #  - dep_variable_type (goals) are considered numeric
-    #  - date_field is 'date'
-    #  - everything else defaults to 'numeric' unless you add a rule here
+    # --- Declared type map (with DATE override to 'date') ---
     declared_types: Dict[str, str] = {}
-    explicit_types: Dict[str, str] = meta.get("data_types", {}) or {}
-
-    # normalize explicit types to use original-key casing where possible
-    for k, t in explicit_types.items():
+    for k, t in (data_types or {}).items():
         declared_types[str(k)] = str(t or "").strip().lower()
 
-    # dep_variable_type → treat as numeric (revenue/conversion)
-    dep_types = meta.get("dep_variable_type", {}) or {}
+    # dep_variable_type -> treat as numeric if not already set
+    dep_types = meta.get("dep_variable_type") or {}
     for k in dep_types.keys():
-        if k not in declared_types:
-            declared_types[str(k)] = "numeric"
+        declared_types.setdefault(str(k), "numeric")
 
-    # date field
+    # Force date field to 'date' regardless of what's in data_types
     declared_types[date_declared] = "date"
 
-    # --- Observed type helper (coarse) ---
-    def _observed_kind(col: str) -> str:
-        if col not in df.columns:
+    # --- Helper to check observed type (coarse) ---
+    def _observed_kind(colname: str) -> str:
+        if colname not in df.columns:
             return "missing"
-        s = df[col]
-        # date-like?
+        s = df[colname]
         if pd.api.types.is_datetime64_any_dtype(s):
             return "date"
-        # numeric?
         if pd.api.types.is_numeric_dtype(s):
             return "numeric"
-        # try parsing a sample for date if declared 'date' but dtype didn't come through
-        if declared_types.get(col, "") == "date":
-            try:
-                sample = pd.to_datetime(s, errors="coerce")
-                if sample.notna().sum() > 0:
-                    return "date"
-            except Exception:
-                pass
+        # If declared 'date' but dtype not datetime, try heuristics
+        # (useful when date parses later in the pipeline)
+        # Find declared key that matches this column case-insensitively
+        # and see if it's supposed to be 'date'
+        for dk, dt in declared_types.items():
+            if dk.lower() == colname.lower() and dt == "date":
+                try:
+                    probe = pd.to_datetime(s, errors="coerce")
+                    if probe.notna().sum() > 0:
+                        return "date"
+                except Exception:
+                    pass
         return "categorical"
 
-    # --- Build mismatches table (only for vars we have a declared or we can infer) ---
+    # --- Build mismatches table over the union of (declared_types keys ∪ declared_vars) ---
+    to_check = sorted(set(list(declared_types.keys()) + declared_vars), key=str.lower)
     rows = []
-    # Consider only variables that are either declared in types or in our meta_vars list
-    check_vars = sorted(set(list(declared_types.keys()) + meta_vars))
-    for v in check_vars:
-        # Resolve to *actual* df column name by case-insensitive mapping for observation
-        # but keep 'v' as the "variable" we display (declared name).
-        v_lower = v.lower()
-        actual_col = None
+    for v in to_check:
+        # find actual column name in df (case-insensitive)
+        actual = None
+        v_l = v.lower()
         for c in df.columns:
-            if c.lower() == v_lower:
-                actual_col = c
+            if c.lower() == v_l:
+                actual = c
                 break
-
-        declared = declared_types.get(v, "") or "numeric"  # default coarse assumption
-        observed = _observed_kind(actual_col) if actual_col is not None else "missing"
-
-        # Only flag when we have the column and it doesn't match
+        declared = declared_types.get(v, "") or "numeric"
+        observed = _observed_kind(actual) if actual is not None else "missing"
         if observed != "missing" and declared != observed:
             rows.append({"variable": v, "declared": declared, "observed": observed})
 
@@ -227,9 +236,8 @@ def _validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
         "missing_in_df": missing_in_df,
         "extra_in_df": extra_in_df,
         "type_mismatches": type_mismatches,
-        "channels_map": meta.get("channels", {}) or {},
+        "channels_map": channels_map,
     }
-
 
 # -----------------------------
 # Paths
