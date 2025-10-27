@@ -1,4 +1,4 @@
-# streamlit_app_overview.py (v2.21)
+# streamlit_app_overview.py (v2.22)
 import io
 import json
 import os
@@ -896,10 +896,10 @@ def total_with_prev(collist):
 # -----------------------------
 tab_load, tab_biz, tab_reg, tab_mkt, tab_rel, tab_diag = st.tabs(
     [
-        "Data & Metadata Loader",
-        "Business Overview",
-        "Regional Comparison",
-        "Marketing Overview",
+        "Select Data",
+        "Business, Overview",
+        "Business, Regional",
+        "Marketing, Overview",
         "Relationships",
         "Collinearity & PCA (by Country)",
     ]
@@ -1097,7 +1097,7 @@ with tab_biz:
 
     st.markdown("---")
 
-    # --- Custom metric over time (no spend overlay) ---
+     # --- Custom metric over time (optional spend overlay) ---
     st.markdown("## Custom Metric Over Time")
 
     numeric_candidates = df_r.select_dtypes(include=[np.number]).columns.tolist()
@@ -1112,7 +1112,6 @@ with tab_biz:
         counts = Counter(lbl for (lbl, _) in base_labels)
         labels = []
         for (lbl, col) in base_labels:
-            # if duplicate pretty labels, append " · <raw>"
             final = lbl if counts[lbl] == 1 else f"{lbl} · {col}"
             labels.append((final, col))
 
@@ -1122,8 +1121,13 @@ with tab_biz:
         # default to current target if available
         default_label = next((l for l, c in label_to_col.items() if c == target), None) or labels_sorted[0]
 
-        picked_label = st.selectbox("Metric", labels_sorted, index=labels_sorted.index(default_label))
+        c_sel, c_spend = st.columns([2, 1])
+        picked_label = c_sel.selectbox("Metric", labels_sorted, index=labels_sorted.index(default_label))
         picked_col = label_to_col[picked_label]
+
+        # Only show overlay toggle if we actually have _TOTAL_SPEND after resampling
+        can_overlay = True  # will verify after res_plot is built
+        want_overlay = c_spend.checkbox(f"Overlay Total {spend_label}", value=True)
 
         # ensure selected metric is in res; if not, add via same resample rule
         if picked_col not in res.columns and picked_col in df_r.columns:
@@ -1139,25 +1143,50 @@ with tab_biz:
         else:
             res_plot = res
 
+        can_overlay = "_TOTAL_SPEND" in res_plot.columns
+
         fig_custom = go.Figure()
         fig_custom.add_bar(
             x=res_plot["PERIOD_LABEL"],
             y=res_plot[picked_col],
             name=nice(picked_col),
         )
+
+        if want_overlay and can_overlay:
+            fig_custom.add_trace(
+                go.Scatter(
+                    x=res_plot["PERIOD_LABEL"],
+                    y=res_plot["_TOTAL_SPEND"],
+                    name=f"Total {spend_label}",
+                    yaxis="y2",
+                    mode="lines+markers",
+                    line=dict(color=RED),
+                )
+            )
+            fig_custom.update_layout(
+                yaxis=dict(title=nice(picked_col)),
+                yaxis2=dict(title=spend_label, overlaying="y", side="right"),
+            )
+        else:
+            fig_custom.update_layout(
+                yaxis=dict(title=nice(picked_col)),
+            )
+
         fig_custom.update_layout(
             title=f"{nice(picked_col)} Over Time — {TIMEFRAME_LABEL}, {agg_label}",
             xaxis=dict(title="Date", title_standoff=8),
-            yaxis=dict(title=nice(picked_col)),
             bargap=0.15,
             hovermode="x unified",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
             margin=dict(b=60),
         )
         st.plotly_chart(fig_custom, use_container_width=True)
-        
+
+        if want_overlay and not can_overlay:
+            st.caption(f"ℹ️ Overlay disabled: '_TOTAL_SPEND' not available for this selection.")
+
 # =============================
-# TAB 2 — REGIONAL COMPARISON (v2.8.2)
+# TAB 2 — REGIONAL COMPARISON (v2.9.0)
 # =============================
 with tab_reg:
     st.subheader("Regional Comparison")
@@ -1195,7 +1224,32 @@ with tab_reg:
         )
         st.plotly_chart(fig_cty, use_container_width=True)
 
-    # ---- Country comparison table (outcomes, spend, conversions) ----
+    # -----------------------------
+    # Channel mapping (from metadata)
+    # -----------------------------
+    # Build a mapping DataFrame of any df column -> channel (upper-cased for display)
+    if CHANNELS_MAP:
+        ch_map_all = (
+            pd.DataFrame(
+                [(col, CHANNELS_MAP[col]) for col in df.columns if col in CHANNELS_MAP],
+                columns=["col", "channel"],
+            )
+            .dropna()
+        )
+        ch_map_all["channel"] = ch_map_all["channel"].astype(str).str.upper()
+    else:
+        ch_map_all = pd.DataFrame(columns=["col", "channel"])
+
+    # Spend columns available & their channels
+    ch_map_spend = (
+        ch_map_all[ch_map_all["col"].isin(present_spend)].copy()
+        if not ch_map_all.empty
+        else pd.DataFrame(columns=["col", "channel"])
+    )
+
+    # -----------------------------
+    # Country comparison table (outcomes, spend & conversions) — unchanged logic
+    # -----------------------------
     if "COUNTRY" in df_r:
         g = df_r.groupby("COUNTRY", dropna=False)
         spend_s = g["_TOTAL_SPEND"].sum()
@@ -1231,15 +1285,9 @@ with tab_reg:
             }
         ).reset_index()
 
-        by_cty["Impression→Click"] = by_cty["clicks"] / by_cty["imps"].replace(
-            0, np.nan
-        )
-        by_cty["Click→Session"] = by_cty["sessions"] / by_cty["clicks"].replace(
-            0, np.nan
-        )
-        by_cty["Efficiency"] = by_cty["target"] / by_cty["spend"].replace(
-            0, np.nan
-        )
+        by_cty["Impression→Click"] = by_cty["clicks"] / by_cty["imps"].replace(0, np.nan)
+        by_cty["Click→Session"] = by_cty["sessions"] / by_cty["clicks"].replace(0, np.nan)
+        by_cty["Efficiency"] = by_cty["target"] / by_cty["spend"].replace(0, np.nan)
 
         disp = by_cty.sort_values("spend", ascending=False)
         disp_fmt = disp.copy()
@@ -1248,16 +1296,10 @@ with tab_reg:
         disp_fmt["Sessions"] = disp["sessions"].map(fmt_num)
         disp_fmt["Total Spend"] = disp["spend"].map(fmt_num)
         disp_fmt[f"Total {nice(target)}"] = disp["target"].map(fmt_num)
-        disp_fmt["Impression→Click"] = disp["Impression→Click"].map(
-            lambda x: f"{x:.2%}" if pd.notna(x) else "–"
-        )
-        disp_fmt["Click→Session"] = disp["Click→Session"].map(
-            lambda x: f"{x:.2%}" if pd.notna(x) else "–"
-        )
+        disp_fmt["Impression→Click"] = disp["Impression→Click"].map(lambda x: f"{x:.2%}" if pd.notna(x) else "–")
+        disp_fmt["Click→Session"] = disp["Click→Session"].map(lambda x: f"{x:.2%}" if pd.notna(x) else "–")
         perf_col_name = "ROAS" if target == "GMV" else f"{nice(target)}/Spend"
-        disp_fmt[perf_col_name] = disp["Efficiency"].map(
-            lambda x: f"{x:.2f}" if pd.notna(x) else "–"
-        )
+        disp_fmt[perf_col_name] = disp["Efficiency"].map(lambda x: f"{x:.2f}" if pd.notna(x) else "–")
 
         st.markdown("### Country Comparison — Outcomes, Spend & Conversions")
         st.dataframe(
@@ -1278,35 +1320,59 @@ with tab_reg:
         )
     st.markdown("---")
 
-    # ---- Platform KPIs table (by platform) ----
-    if not plat_map_df.empty:
+    # -----------------------------
+    # Channel KPIs (totals) + expanders per channel
+    # -----------------------------
+    if not ch_map_all.empty:
+        # Helper: for each channel, which columns of a given type belong to it?
+        ch_to_cols = ch_map_all.groupby("channel")["col"].apply(list).to_dict()
 
-        def sum_like(cols, token):
-            cols_tok = [c for c in cols if token in c.upper()]
-            return df_r[cols_tok].sum().sum() if cols_tok else 0.0
+        def _sum_cols(cols: list[str]) -> float:
+            return df_r[cols].sum().sum() if cols else 0.0
 
         rows = []
-        for p in platforms:
-            token = p.upper()
-            spend_cols = plat_map_df.loc[
-                plat_map_df["platform"] == p, "col"
-            ].tolist()
-            spend_total = df_r[spend_cols].sum().sum() if spend_cols else 0.0
-            imps = sum_like(IMPR_COLS, token)
-            clicks = sum_like(CLICK_COLS, token)
-            sessions = sum_like(SESSION_COLS, token)
-            installs = sum_like(INSTALL_COLS, token)
+        channels = sorted(ch_to_cols.keys())
+
+        # Pre-compute per-channel SPEND by using the spend mapping (present_spend only)
+        if not ch_map_spend.empty:
+            spend_long = (
+                df_r.melt(
+                    id_vars=[DATE_COL],
+                    value_vars=ch_map_spend["col"].tolist(),
+                    var_name="col",
+                    value_name="spend",
+                )
+                .merge(ch_map_spend, on="col", how="left")
+            )
+            ch_spend_tot = spend_long.groupby("channel")["spend"].sum()
+        else:
+            ch_spend_tot = pd.Series(dtype=float)
+
+        for ch in channels:
+            ch_cols_all = ch_to_cols.get(ch, [])
+            # Metric-specific columns for this channel (intersect with detected lists)
+            ch_impr = [c for c in IMPR_COLS if c in ch_cols_all]
+            ch_clicks = [c for c in CLICK_COLS if c in ch_cols_all]
+            ch_sessions = [c for c in SESSION_COLS if c in ch_cols_all]
+            ch_installs = [c for c in INSTALL_COLS if c in ch_cols_all]
+
+            imps = _sum_cols(ch_impr)
+            clicks = _sum_cols(ch_clicks)
+            sessions = _sum_cols(ch_sessions)
+            installs = _sum_cols(ch_installs)
+            spend_total = float(ch_spend_tot.get(ch, 0.0))
+
             cpm = (spend_total / imps * 1000) if imps > 0 else np.nan
             cpc = (spend_total / clicks) if clicks > 0 else np.nan
             cps = (spend_total / sessions) if sessions > 0 else np.nan
             cpi = (spend_total / installs) if installs > 0 else np.nan
-            rows.append(
-                [p, imps, clicks, sessions, spend_total, cpm, cpc, cps, cpi]
-            )
-        plat_cmp = pd.DataFrame(
+
+            rows.append([ch, imps, clicks, sessions, spend_total, cpm, cpc, cps, cpi])
+
+        ch_cmp = pd.DataFrame(
             rows,
             columns=[
-                "Platform",
+                "Channel",
                 "Impressions",
                 "Clicks",
                 "Sessions",
@@ -1318,42 +1384,60 @@ with tab_reg:
             ],
         ).sort_values("Spend", ascending=False)
 
-        plat_disp = plat_cmp.copy()
+        ch_disp = ch_cmp.copy()
         for c in ["Impressions", "Clicks", "Sessions", "Spend"]:
-            plat_disp[c] = plat_disp[c].map(fmt_num)
+            ch_disp[c] = ch_disp[c].map(fmt_num)
         for c in [
             "Cost per 1k Impressions",
             "Cost per Click",
             "Cost per Session",
             "Cost per Install",
         ]:
-            plat_disp[c] = plat_cmp[c].map(
-                lambda x: f"{x:.2f}" if pd.notna(x) else "–"
-            )
+            ch_disp[c] = ch_cmp[c].map(lambda x: f"{x:.2f}" if pd.notna(x) else "–")
 
-        st.markdown("### Platform KPIs — Outcomes & Costs")
-        st.dataframe(plat_disp, use_container_width=True)
+        st.markdown("### Channel KPIs — Outcomes & Costs")
+        st.dataframe(ch_disp, use_container_width=True)
+
+        # Expanders: per-channel breakdown of component spend columns
+        if not ch_map_spend.empty:
+            st.caption("Expand a channel to see its component spend columns.")
+            for ch in ch_cmp["Channel"].tolist():
+                with st.expander(f"{ch} breakdown"):
+                    det = (
+                        spend_long.loc[spend_long["channel"] == ch, ["col", "spend"]]
+                        .groupby("col", as_index=False)["spend"]
+                        .sum()
+                        .sort_values("spend", ascending=False)
+                    )
+                    det["Spend"] = det["spend"].map(fmt_num)
+                    st.dataframe(det[["col", "Spend"]].rename(columns={"col": "Column"}), use_container_width=True)
+    else:
+        st.info("No channel mapping available in metadata.")
+
     st.markdown("---")
 
-    # ---- Country × Platform Spend Matrix + CSV ----
-    st.markdown("### Country × Platform Spend Matrix")
-    if not plat_map_df.empty and "COUNTRY" in df_r.columns:
-        long = (
+    # -----------------------------
+    # Channel × Country Spend Matrix (transposed vs. old Platform matrix)
+    # -----------------------------
+    st.markdown("### Channel × Country Spend Matrix")
+    if not ch_map_spend.empty and "COUNTRY" in df_r.columns:
+        spend_long_cty = (
             df_r.melt(
                 id_vars=[DATE_COL, "COUNTRY"],
-                value_vars=plat_map_df["col"].tolist(),
+                value_vars=ch_map_spend["col"].tolist(),
                 var_name="col",
                 value_name="spend",
             )
-            .merge(plat_map_df, on="col", how="left")
+            .merge(ch_map_spend, on="col", how="left")
             .dropna(subset=["spend"])
         )
         mat = (
-            long.groupby(["COUNTRY", "platform"])["spend"]
+            spend_long_cty.groupby(["channel", "COUNTRY"])["spend"]
             .sum()
-            .unstack("platform")
+            .unstack("COUNTRY")
             .fillna(0.0)
         )
+        # Order rows by total spend desc
         mat = mat.loc[mat.sum(axis=1).sort_values(ascending=False).index]
         st.dataframe(mat.applymap(fmt_num), use_container_width=True)
 
@@ -1361,12 +1445,12 @@ with tab_reg:
         st.download_button(
             "Download CSV",
             data=csv,
-            file_name="country_platform_spend_matrix.csv",
+            file_name="channel_country_spend_matrix.csv",
             mime="text/csv",
-            key="dl_country_platform_matrix",
+            key="dl_channel_country_matrix",
         )
     else:
-        st.info("Platform mapping or COUNTRY column not available.")
+        st.info("Channel mapping or COUNTRY column not available.")
 
 # =============================
 # TAB 3 — MARKETING OVERVIEW
