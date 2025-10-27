@@ -686,7 +686,7 @@ with tab_mkt:
 
     # ----- KPI — Spend (TOTALS + per-platform tiles) -----
     st.markdown("#### Spend (Total)")
-    cur_spend, d_spend = total_with_prev(["_TOTAL_SPEND"])
+    cur_spend, d_spend = total_with_prev_local(["_TOTAL_SPEND"])
     spend_boxes = [
         dict(title="Total Spend", value=fmt_num(cur_spend),
              delta=(f"{'+' if (d_spend or 0)>=0 else ''}{fmt_num(d_spend)}" if d_spend is not None else None),
