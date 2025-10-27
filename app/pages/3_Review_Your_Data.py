@@ -2921,34 +2921,3 @@ with tab_diag:
                     st.info(
                         "No variables available in this bucket for the current selection."
                     )
-
-# -----------------------------
-# Metadata QA
-# -----------------------------
-with st.expander(
-    "Metadata QA — columns present in data but missing in metadata"
-):
-    if isinstance(meta, dict):
-        mapping = meta.get("mapping") or {}
-        meta_known = set()
-        for vals in mapping.values():
-            meta_known |= set(map(str, (vals or [])))
-        goals_list = meta.get("goals") or []
-        meta_known |= set(
-            g.get("var")
-            for g in goals_list
-            if isinstance(g, dict) and g.get("var")
-        )
-    else:
-        meta_known = (
-            set(meta["column_name"].astype(str).str.strip().unique())
-            if "column_name" in meta
-            else set()
-        )
-
-    data_cols = set(df.columns.astype(str))
-    missing = sorted(list(data_cols - meta_known))
-    st.write(
-        "Add these to metadata (at minimum `column_name`, `display_name`, `main_category`, and optional `platform`):"
-    )
-    st.code(", ".join(missing) or "None — looks good!")
