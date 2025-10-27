@@ -135,7 +135,8 @@ target = GOAL if (GOAL and GOAL in df.columns) else (goal_cols[0] if goal_cols e
 paid_spend_cols = [c for c in (mapping.get("paid_media_spends", []) or []) if c in df.columns]
 df["_TOTAL_SPEND"] = df[paid_spend_cols].sum(axis=1) if paid_spend_cols else 0.0
 
-paid_var_cols = metadata.get("Paid Media Variables", [])
+# paid media feature columns present in df (optional; safe if unused later)
+paid_var_cols = [c for c in (mapping.get("paid_media_vars", []) or []) if c in df.columns]
 
 RULE = freq_to_rule(FREQ)
 spend_label = ((meta.get("labels", {}) or {}).get("spend", "Spend") if isinstance(meta, dict) else "Spend")
