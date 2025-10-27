@@ -122,7 +122,10 @@ def _parse_date(df: pd.DataFrame, meta: dict) -> Tuple[pd.DataFrame, str]:
 
 def _validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
     """
-    Compare DF columns vs metadata in a case-insensitive way.
+    Minimal validator for Tab 0:
+      - Do NOT flag 'metadata but missing in data' (intentionally suppressed).
+      - DO flag 'data but not in metadata' (case-insensitive).
+      - DO run coarse type check and ensure the declared date column is treated as 'date'.
 
     Declared set = union of:
       - mapping.* arrays (paid_media_spends/vars, organic_vars, context_vars, factor_vars)
@@ -131,9 +134,6 @@ def _validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
       - keys(meta.data_types)
       - keys(meta.channels)
       - keys(meta.agg_strategies)
-
-    Also performs a coarse type check (numeric / categorical / date), with DATE forced to 'date'.
-    Returns keys: missing_in_df, extra_in_df, type_mismatches (DataFrame), channels_map.
     """
     if not isinstance(meta, dict):
         meta = {}
@@ -146,20 +146,14 @@ def _validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
     date_declared = str(meta.get("data", {}).get("date_field") or "DATE")
 
     # --- Collect declared variables from all sources ---
-    declared_vars = []
+    declared_vars: List[str] = []
 
-    # mapping buckets
     for _, arr in (mapping or {}).items():
         if arr:
             declared_vars.extend(map(str, arr))
 
-    # goals
     declared_vars.extend([str(g.get("var")) for g in goals_list if g and g.get("var")])
-
-    # date field
     declared_vars.append(date_declared)
-
-    # keys present in other maps (data_types / channels / agg_strategies)
     declared_vars.extend(map(str, (data_types or {}).keys()))
     declared_vars.extend(map(str, (channels_map or {}).keys()))
     declared_vars.extend(map(str, (agg_strat or {}).keys()))
@@ -167,31 +161,30 @@ def _validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
     # de-dup preserving order
     declared_vars = [v for i, v in enumerate(declared_vars) if v and v not in declared_vars[:i]]
 
-    # --- Case-insensitive sets for comparison ---
+    # Case-insensitive sets for comparison
     meta_vars_norm = {v.strip().lower() for v in declared_vars}
     df_cols = list(map(str, df.columns))
     df_cols_norm = {c.strip().lower() for c in df_cols}
 
-    # Missing = declared but not in df (case-insensitive); show declared spelling
-    missing_in_df = sorted([v for v in declared_vars if v.strip().lower() not in df_cols_norm])
+    # ---- We SUPPRESS the 'missing_in_df' list by returning it empty on purpose
+    missing_in_df: List[str] = []
 
     # Extra = in df but not declared anywhere (case-insensitive); show df spelling
     extra_in_df = sorted([c for c in df_cols if c.strip().lower() not in meta_vars_norm])
 
-    # --- Declared type map (with DATE override to 'date') ---
+    # ---- Declared type map (with DATE override to 'date') ----
     declared_types: Dict[str, str] = {}
     for k, t in (data_types or {}).items():
         declared_types[str(k)] = str(t or "").strip().lower()
 
-    # dep_variable_type -> treat as numeric if not already set
+    # dep_variable_type → assume numeric if not already typed
     dep_types = meta.get("dep_variable_type") or {}
     for k in dep_types.keys():
         declared_types.setdefault(str(k), "numeric")
 
-    # Force date field to 'date' regardless of what's in data_types
+    # Force declared date to 'date'
     declared_types[date_declared] = "date"
 
-    # --- Helper to check observed type (coarse) ---
     def _observed_kind(colname: str) -> str:
         if colname not in df.columns:
             return "missing"
@@ -200,10 +193,7 @@ def _validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
             return "date"
         if pd.api.types.is_numeric_dtype(s):
             return "numeric"
-        # If declared 'date' but dtype not datetime, try heuristics
-        # (useful when date parses later in the pipeline)
-        # Find declared key that matches this column case-insensitively
-        # and see if it's supposed to be 'date'
+        # Heuristic: if declared as 'date', consider parsability
         for dk, dt in declared_types.items():
             if dk.lower() == colname.lower() and dt == "date":
                 try:
@@ -214,17 +204,12 @@ def _validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
                     pass
         return "categorical"
 
-    # --- Build mismatches table over the union of (declared_types keys ∪ declared_vars) ---
+    # Build mismatches over union of declared keys and declared_vars
     to_check = sorted(set(list(declared_types.keys()) + declared_vars), key=str.lower)
     rows = []
     for v in to_check:
-        # find actual column name in df (case-insensitive)
-        actual = None
-        v_l = v.lower()
-        for c in df.columns:
-            if c.lower() == v_l:
-                actual = c
-                break
+        # match actual df column (case-insensitive)
+        actual = next((c for c in df.columns if c.lower() == v.lower()), None)
         declared = declared_types.get(v, "") or "numeric"
         observed = _observed_kind(actual) if actual is not None else "missing"
         if observed != "missing" and declared != observed:
@@ -233,7 +218,7 @@ def _validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
     type_mismatches = pd.DataFrame(rows, columns=["variable", "declared", "observed"])
 
     return {
-        "missing_in_df": missing_in_df,
+        "missing_in_df": missing_in_df,    # intentionally empty
         "extra_in_df": extra_in_df,
         "type_mismatches": type_mismatches,
         "channels_map": channels_map,
@@ -978,11 +963,8 @@ with tab_load:
                 f"and metadata gs://{GCS_BUCKET}/{meta_blob}"
             )
 
-            m1, m2 = st.columns([1, 1])
-            with m1:
-                st.markdown("**Columns in metadata but missing in data**")
-                st.write(report["missing_in_df"] or "— none —")
-            with m2:
+            c_extra, _ = st.columns([1, 1])
+            with c_extra:
                 st.markdown("**Columns in data but not in metadata**")
                 st.write(report["extra_in_df"] or "— none —")
 
