@@ -192,33 +192,19 @@ _fragment = getattr(
 
 
 def _guess_goal_type(col: str) -> str:
+    """
+    Guess goal type based on column name.
+    Only returns a type if we're very confident based on suffix patterns.
+    Returns empty string if uncertain - user must tag manually.
+    """
     s = col.lower()
-    revenue_keys = (
-        "rev",
-        "revenue",
-        "gmv",
-        "sales",
-        "bookings",
-        "turnover",
-        "profit",
-    )
-    conversion_keys = (
-        "conv",
-        "conversion",
-        "lead",
-        "signup",
-        "install",
-        "purchase",
-        "txn",
-        "transactions",
-        "orders",
-    )
-    if any(k in s for k in revenue_keys):
+    
+    # Very specific patterns we're confident about
+    if s.endswith("_gmv") or s.endswith("_revenue") or s.endswith("_rev"):
         return "revenue"
-    if any(k in s for k in conversion_keys):
-        return "conversion"
-    # fallback: numeric columns with common names
-    return "conversion"
+    
+    # For other cases, return empty string so user must tag manually
+    return ""
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1169,7 +1155,7 @@ with st.form("goals_form", clear_on_submit=False):
         )
 
     if st.session_state["goals_df"].empty:
-        # manual first, heuristics after, then drop dups keeping manual
+        # Only suggest goals on first load, don't merge with heuristics later
         heur = _initial_goals_from_columns(all_cols)
         manual = pd.concat(
             [_mk(primary_goals, "primary"), _mk(secondary_goals, "secondary")],
@@ -1178,7 +1164,7 @@ with st.form("goals_form", clear_on_submit=False):
         goals_src = pd.concat([manual, heur], ignore_index=True)
         goals_src = goals_src.drop_duplicates(subset=["var"], keep="first")
     else:
-        # keep whatever is already in session as the starting table
+        # Keep only what's in session - don't add heuristics if user has edited
         goals_src = st.session_state["goals_df"]
 
     goals_src = goals_src.fillna("").astype(
@@ -1202,31 +1188,23 @@ with st.form("goals_form", clear_on_submit=False):
     goals_submit = st.form_submit_button("✅ Apply goal changes")
 
 if goals_submit:
-    base = st.session_state.get("goals_df")
+    # Simply use what the user has in the editor - don't merge with old data
     edited = goals_edit.copy()
-
-    # keep only non-empty vars
+    
+    # Keep only non-empty vars
     edited = edited[edited["var"].astype(str).str.strip() != ""].astype(
         "object"
     )
-
-    if base is None or base.empty:
-        merged = edited
-    else:
-        # prefer edited rows on conflicts
-        base = base.astype("object")
-        base_no_dups = base[~base["var"].isin(edited["var"])]
-        merged = pd.concat([base_no_dups, edited], ignore_index=True)
-
-    # normalize dtypes & drop accidental duplicates
+    
+    # Drop duplicates and normalize
     merged = (
-        merged.drop_duplicates(subset=["var"], keep="last")
+        edited.drop_duplicates(subset=["var"], keep="last")
         .fillna("")
         .astype({"var": "object", "group": "object", "type": "object"})
     )
-
+    
     st.session_state["goals_df"] = merged
-    st.success("Goals appended & updated.")
+    st.success("Goals updated.")
 
 
 # ---- Custom channels UI ----
@@ -1558,15 +1536,6 @@ if mapping_submit:
         st.error(f"Failed to apply automatic aggregations: {e}")
         st.session_state["mapping_df"] = mapping_edit
         st.warning("Saved mapping without automatic aggregations.")
-
-# ──────────────────────────────────────────────────────────────
-# Channel Aggregation (Now Automated)
-# ──────────────────────────────────────────────────────────────
-# NOTE: Channel aggregation is now handled automatically when you click
-# "Apply mapping changes" above. The system will create:
-# - Custom tag aggregates (e.g., GA_SMALL_COST_CUSTOM)
-# - TOTAL columns for each channel/suffix grouping
-# - Proper prefixing for organic, context, and factor variables
 
 st.divider()
 
