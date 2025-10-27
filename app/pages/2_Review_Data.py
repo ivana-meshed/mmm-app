@@ -145,7 +145,7 @@ plat_map_df, platforms, PLATFORM_COLORS = build_plat_map_df(
 
 # -----------------------------
 # Timeframe & resample
-# -----------------------------
+# ----------------------------- 
 df_r = filter_range(df.copy(), DATE_COL, RANGE)
 df_prev = previous_window(df, df_r, DATE_COL, RANGE)
 
