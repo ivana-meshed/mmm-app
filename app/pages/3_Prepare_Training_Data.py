@@ -206,14 +206,31 @@ with tab_rel:
         return out
 
     # buckets & columns used
+    def _uniq_preserve(seq):
+        seen = set(); out = []
+        for x in seq:
+            if x not in seen:
+                out.append(x); seen.add(x)
+        return out
+
+    # add secondary goals into context (signal-only), but only those present in df
+    _secondary_goals = [
+        g.get("var")
+        for g in (meta.get("goals") or [])
+        if g and g.get("var")
+        and g.get("group","").strip().lower() in ("secondary","alt","secondary_goal")
+        and g.get("var") in df.columns
+    ]
+    context_all = _uniq_preserve((context_cols or []) + _secondary_goals)
+
     buckets = {
-        "Paid Media Spend": paid_spend_cols,
-        "Paid Media Variables": paid_var_cols,
-        "Organic Variables": organic_cols,
-        "Context Variables": context_cols,  # includes secondary goals
+        "Paid Media Spend":     paid_spend_cols or [],
+        "Paid Media Variables": paid_var_cols   or [],
+        "Organic Variables":    organic_cols    or [],
+        "Context Variables":    context_all,
     }
     all_driver_cols = [c for cols in buckets.values() for c in cols]
-    all_corr_cols = list(set(all_driver_cols + goal_cols))
+    all_corr_cols = list(set(all_driver_cols + (goal_cols or [])))
 
     # Apply winsorization (current + previous independently)
     df_r_w = winsorize_columns(df_r, all_corr_cols, wins_mode, wins_pct)
@@ -221,9 +238,7 @@ with tab_rel:
 
     # heatmap helpers: green=+1, red=−1, % labels
     def as_pct_text(df_vals: pd.DataFrame) -> pd.DataFrame:
-        return df_vals.applymap(
-            lambda v: (f"{v*100:.1f}%" if pd.notna(v) else "")
-        )
+        return df_vals.applymap(lambda v: (f"{v*100:.1f}%" if pd.notna(v) else ""))
 
     def heatmap_fig_from_matrix(mat: pd.DataFrame, title=None, zmin=-1, zmax=1):
         fig = go.Figure(
@@ -250,21 +265,22 @@ with tab_rel:
     if not goal_cols:
         st.info("No goals found in metadata.")
     else:
-        cats = [(title, cols) for title, cols in buckets.items() if cols]
-        for i in range(0, len(cats), 2):
-            row = cats[i : i + 2]
+        # render ALL buckets (even if empty) — two per row
+        items = list(buckets.items())
+        for i in range(0, len(items), 2):
+            row = items[i : i + 2]
             cols_ui = st.columns(len(row))
             for (title, cols_list), ui in zip(row, cols_ui):
                 with ui:
-                    mat = corr_matrix(df_r_w, cols_list, goal_cols)
                     st.markdown(f"**{title}**")
+                    if not cols_list:
+                        st.caption("No variables in this bucket for the current dataset.")
+                        continue
+                    mat = corr_matrix(df_r_w, cols_list, goal_cols)
                     if mat.empty or mat.isna().all().all():
                         st.info("Not enough data to compute correlations.")
                     else:
-                        st.plotly_chart(
-                            heatmap_fig_from_matrix(mat),
-                            use_container_width=True,
-                        )
+                        st.plotly_chart(heatmap_fig_from_matrix(mat), use_container_width=True)
         st.markdown("---")
 
     # ---------- (B) Change in correlation — paired rows ----------
