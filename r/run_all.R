@@ -521,17 +521,60 @@ if (length(zero_var)) {
 if (!"TV_IS_ON" %in% names(df)) df$TV_IS_ON <- 0
 
 ## ---------- FEATURE ENGINEERING ----------
-df <- df %>% mutate(
-    GA_OTHER_COST = rowSums(select(., tidyselect::matches("^GA_.*_COST$") & !any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE),
-    BING_TOTAL_COST = rowSums(select(., tidyselect::matches("^BING_.*_COST$")), na.rm = TRUE),
-    META_TOTAL_COST = rowSums(select(., tidyselect::matches("^META_.*_COST$")), na.rm = TRUE),
-    ORGANIC_TRAFFIC = rowSums(select(., any_of(c("NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS", "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS"))), na.rm = TRUE),
-    BRAND_HEALTH = coalesce(DIRECT_DAILY_SESSIONS, 0) + coalesce(SEO_DAILY_SESSIONS, 0),
-    ORGxTV = BRAND_HEALTH * coalesce(TV_COST, 0),
-    GA_OTHER_IMPRESSIONS = rowSums(select(., tidyselect::matches("^GA_.*_IMPRESSIONS$") & !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
-    BING_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE),
-    META_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE)
-)
+# NOTE: Custom tag aggregates (e.g., GA_SMALL_COST_CUSTOM, GA_CAMPAIGN_COST_CUSTOM)
+# and TOTAL columns (e.g., GA_TOTAL_COST, GA_TOTAL_SESSIONS) are now created
+# automatically in the Python mapping workflow (Map_Your_Data.py) when the user
+# clicks "Apply mapping changes". These columns should already exist in the
+# dataframe at this point.
+#
+# Legacy aggregations below are kept for backward compatibility with older data
+# that doesn't have the new automatic aggregations.
+
+# Only create legacy aggregations if they don't already exist
+if (!"GA_OTHER_COST" %in% names(df)) {
+    df$GA_OTHER_COST <- rowSums(select(df, tidyselect::matches("^GA_.*_COST$") & !any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE)
+}
+if (!"BING_TOTAL_COST" %in% names(df)) {
+    df$BING_TOTAL_COST <- rowSums(select(df, tidyselect::matches("^BING_.*_COST$")), na.rm = TRUE)
+}
+if (!"META_TOTAL_COST" %in% names(df)) {
+    df$META_TOTAL_COST <- rowSums(select(df, tidyselect::matches("^META_.*_COST$")), na.rm = TRUE)
+}
+if (!"ORGANIC_TRAFFIC" %in% names(df)) {
+    df$ORGANIC_TRAFFIC <- rowSums(select(df, any_of(c("NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS", "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS", "ORGANIC_NL_DAILY_SESSIONS", "ORGANIC_SEO_DAILY_SESSIONS", "ORGANIC_DIRECT_DAILY_SESSIONS", "ORGANIC_CRM_OTHER_DAILY_SESSIONS", "ORGANIC_CRM_DAILY_SESSIONS", "ORGANIC_ORGANIC_SOCIAL_DAILY_SESSIONS", "ORGANIC_BLOG_DAILY_SESSIONS"))), na.rm = TRUE)
+}
+if (!"BRAND_HEALTH" %in% names(df)) {
+    # Handle both prefixed and non-prefixed versions
+    direct_col <- if ("ORGANIC_DIRECT_DAILY_SESSIONS" %in% names(df)) {
+        "ORGANIC_DIRECT_DAILY_SESSIONS"
+    } else if ("DIRECT_DAILY_SESSIONS" %in% names(df)) {
+        "DIRECT_DAILY_SESSIONS"
+    } else {
+        NULL
+    }
+    seo_col <- if ("ORGANIC_SEO_DAILY_SESSIONS" %in% names(df)) {
+        "ORGANIC_SEO_DAILY_SESSIONS"
+    } else if ("SEO_DAILY_SESSIONS" %in% names(df)) {
+        "SEO_DAILY_SESSIONS"
+    } else {
+        NULL
+    }
+    direct_val <- if (!is.null(direct_col)) coalesce(df[[direct_col]], 0) else 0
+    seo_val <- if (!is.null(seo_col)) coalesce(df[[seo_col]], 0) else 0
+    df$BRAND_HEALTH <- direct_val + seo_val
+}
+if (!"ORGxTV" %in% names(df)) {
+    df$ORGxTV <- df$BRAND_HEALTH * coalesce(df$TV_COST, 0)
+}
+if (!"GA_OTHER_IMPRESSIONS" %in% names(df)) {
+    df$GA_OTHER_IMPRESSIONS <- rowSums(select(df, tidyselect::matches("^GA_.*_IMPRESSIONS$") & !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE)
+}
+if (!"BING_TOTAL_IMPRESSIONS" %in% names(df)) {
+    df$BING_TOTAL_IMPRESSIONS <- rowSums(select(df, tidyselect::matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE)
+}
+if (!"META_TOTAL_IMPRESSIONS" %in% names(df)) {
+    df$META_TOTAL_IMPRESSIONS <- rowSums(select(df, tidyselect::matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE)
+}
 
 ## ---------- WINDOW / FLAGS ----------
 # Dates are now sourced from config (start_data_date, end_data_date); previous hardcoded assignments have been removed.
