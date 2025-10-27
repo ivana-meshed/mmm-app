@@ -1656,7 +1656,7 @@ def kpi_grid_fixed(boxes: list, per_row: int = 3):
                         b.get("delta"),
                         b.get("good_when", "up"),
                     )
-                    
+
 # =========================
 # Formatting & small utils
 # =========================
@@ -2047,3 +2047,5 @@ def validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
         "type_mismatches": type_mismatches,
         "channels_map": channels_map,
     }
+
+    
