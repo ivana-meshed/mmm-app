@@ -1,4 +1,4 @@
-# streamlit_app_overview.py (v2.22)
+# streamlit_app_overview.py (v2.23)
 import io
 import json
 import os
@@ -49,8 +49,7 @@ def _meta_latest_blob(country: str) -> str:
 
 
 @st.cache_data(show_spinner=False)
-def _list_country_versions(bucket: str, country: str) -> List[str]:
-    """Return timestamp folder names available in datasets/<country>/<ts>/raw.parquet (desc)."""
+def _list_country_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
     client = storage.Client()
     prefix = f"{_data_root(country)}/"
     blobs = client.list_blobs(bucket, prefix=prefix)
@@ -59,9 +58,7 @@ def _list_country_versions(bucket: str, country: str) -> List[str]:
         parts = b.name.split("/")
         if len(parts) >= 4 and parts[-1] == "raw.parquet":
             ts.add(parts[-2])
-    # Normalize: dedupe and sort newest first
     out = sorted(ts, reverse=True)
-    # Ensure canonical single 'Latest' in pickers (we expose in UI later)
     return ["Latest"] + [v for v in out if str(v).lower() != "latest"]
 
 
@@ -934,26 +931,21 @@ tab_load, tab_biz, tab_reg, tab_mkt, tab_rel, tab_diag = st.tabs(
 # =============================
 with tab_load:
     st.markdown("### 📥 Load dataset & metadata from GCS")
+    c1, c2, c3, c4 = st.columns([1.2, 1, 1, 0.6])
 
-    c1, c2, c3 = st.columns([1.2, 1, 1])
-
-    country = (
-        c1.text_input("Country (ISO2)", value=st.session_state["country"])
-        .strip()
-        .lower()
-    )
+    country = (c1.text_input("Country (ISO2)", value=st.session_state["country"]).strip().lower())
     if country:
         st.session_state["country"] = country
 
-    versions = (
-        _list_country_versions(GCS_BUCKET, country) if country else ["Latest"]
-    )
-    data_ts = c2.selectbox(
-        "Data version", options=versions, index=0, key="picked_data_ts"
-    )
-    meta_ts = c3.selectbox(
-        "Metadata version", options=versions, index=0, key="picked_meta_ts"
-    )
+    refresh_clicked = c4.button("↻ Refresh")
+
+    refresh_key = ""
+    if refresh_clicked:
+        refresh_key = str(pd.Timestamp.utcnow().value)
+
+    versions = _list_country_versions(GCS_BUCKET, country, refresh_key) if country else ["Latest"]
+    data_ts = c2.selectbox("Data version", options=versions, index=0, key="picked_data_ts")
+    meta_ts = c3.selectbox("Metadata version", options=versions, index=0, key="picked_meta_ts")
 
     load_clicked = st.button("Load from GCS", type="primary")
 
@@ -1210,7 +1202,7 @@ with tab_biz:
             st.caption(f"ℹ️ Overlay disabled: '_TOTAL_SPEND' not available for this selection.")
 
 # =============================
-# TAB 2 — REGIONAL COMPARISON (v2.11.0)
+# TAB 2 — REGIONAL COMPARISON 
 # =============================
 with tab_reg:
     st.subheader("Regional Comparison")
@@ -1505,7 +1497,7 @@ with tab_reg:
         st.info("Channel mapping or COUNTRY column not available.")
 
 # =============================
-# TAB 3 — MARKETING OVERVIEW (fixed totals + single-channel section)
+# TAB 3 — MARKETING OVERVIEW 
 # =============================
 with tab_mkt:
     st.subheader(f"Spend & Channels — {TIMEFRAME_LABEL} · {agg_label}")
@@ -1518,24 +1510,15 @@ with tab_mkt:
 
     kpi_grid_fixed(
         [
-            dict(
-                title="Total Impressions",
-                value=fmt_num(cur_imps),
-                delta=(f"{'+' if (d_imps or 0)>=0 else ''}{fmt_num(d_imps)}" if d_imps is not None else None),
-                good_when="up",
-            ),
-            dict(
-                title="Total Clicks",
-                value=fmt_num(cur_clicks),
-                delta=(f"{'+' if (d_clicks or 0)>=0 else ''}{fmt_num(d_clicks)}" if d_clicks is not None else None),
-                good_when="up",
-            ),
-            dict(
-                title="Total Sessions",
-                value=fmt_num(cur_sessions),
-                delta=(f"{'+' if (d_sessions or 0)>=0 else ''}{fmt_num(d_sessions)}" if d_sessions is not None else None),
-                good_when="up",
-            ),
+            dict(title="Total Impressions", value=fmt_num(cur_imps),
+                 delta=(f"{'+' if (d_imps or 0)>=0 else ''}{fmt_num(d_imps)}" if d_imps is not None else None),
+                 good_when="up"),
+            dict(title="Total Clicks", value=fmt_num(cur_clicks),
+                 delta=(f"{'+' if (d_clicks or 0)>=0 else ''}{fmt_num(d_clicks)}" if d_clicks is not None else None),
+                 good_when="up"),
+            dict(title="Total Sessions", value=fmt_num(cur_sessions),
+                 delta=(f"{'+' if (d_sessions or 0)>=0 else ''}{fmt_num(d_sessions)}" if d_sessions is not None else None),
+                 good_when="up"),
         ],
         per_row=3,
     )
@@ -1544,93 +1527,74 @@ with tab_mkt:
     st.markdown("#### Spend (Total)")
     cur_spend, d_spend = total_with_prev(["_TOTAL_SPEND"])
     spend_boxes = [
-        dict(
-            title="Total Spend",
-            value=fmt_num(cur_spend),
-            delta=(f"{'+' if (d_spend or 0)>=0 else ''}{fmt_num(d_spend)}" if d_spend is not None else None),
-            good_when="down",
-        )
+        dict(title="Total Spend", value=fmt_num(cur_spend),
+             delta=(f"{'+' if (d_spend or 0)>=0 else ''}{fmt_num(d_spend)}" if d_spend is not None else None),
+             good_when="down")
     ]
 
+    # per-platform totals (for tiles)
     if not plat_map_df.empty and not df_r.empty:
         long_sp = (
-            df_r.melt(
-                id_vars=[DATE_COL],
-                value_vars=plat_map_df["col"].tolist(),
-                var_name="col",
-                value_name="spend",
-            )
+            df_r.melt(id_vars=[DATE_COL], value_vars=plat_map_df["col"].tolist(),
+                      var_name="col", value_name="spend")
             .merge(plat_map_df, on="col", how="left")
             .dropna(subset=["spend"])
         )
-        plat_tot_cur = long_sp.groupby("platform")["spend"].sum().sort_values(ascending=False)
+        cur_by_p_tiles = long_sp.groupby("platform")["spend"].sum().sort_values(ascending=False)
 
         if not df_prev.empty:
             long_prev = (
-                df_prev.melt(
-                    id_vars=[DATE_COL],
-                    value_vars=plat_map_df["col"].tolist(),
-                    var_name="col",
-                    value_name="spend",
-                )
+                df_prev.melt(id_vars=[DATE_COL], value_vars=plat_map_df["col"].tolist(),
+                             var_name="col", value_name="spend")
                 .merge(plat_map_df, on="col", how="left")
                 .dropna(subset=["spend"])
             )
-            plat_tot_prev = long_prev.groupby("platform")["spend"].sum()
+            prev_by_p_tiles = long_prev.groupby("platform")["spend"].sum()
         else:
-            plat_tot_prev = pd.Series(dtype=float)
+            prev_by_p_tiles = pd.Series(dtype=float)
 
-        for p, v in plat_tot_cur.items():
-            delta = None
-            if p in plat_tot_prev:
-                dv = v - plat_tot_prev.get(p, 0.0)
-                delta = f"{'+' if dv>=0 else ''}{fmt_num(dv)}"
-            spend_boxes.append(
-                dict(
-                    title=f"{p} Spend",
-                    value=fmt_num(v),
-                    delta=delta,
-                    good_when="down",
-                )
-            )
+        for p, v in cur_by_p_tiles.items():
+            dv = v - prev_by_p_tiles.get(p, 0.0) if p in prev_by_p_tiles else None
+            delta = (f"{'+' if (dv or 0)>=0 else ''}{fmt_num(dv)}") if dv is not None else None
+            spend_boxes.append(dict(title=f"{p} Spend", value=fmt_num(v), delta=delta, good_when="down"))
 
-    # fixed card widths via padding
     kpi_grid_fixed(spend_boxes, per_row=4)
     st.markdown("---")
 
-    # ----- Change vs Previous — Waterfall (always all platforms) -----
-    st.markdown("#### Change vs Previous — Waterfall (Spend by Platform)")
-    if not plat_map_df.empty and not df_r.empty:
-        long_cur = (
-            df_r.melt(
-                id_vars=[DATE_COL],
-                value_vars=plat_map_df["col"].tolist(),
-                var_name="col",
-                value_name="spend",
-            )
-            .merge(plat_map_df, on="col", how="left")
+    # ===== View selector =====
+    st.markdown("#### View")
+    # Default option + platforms
+    channel_options = ["All channels"] + platforms
+    view_sel = st.selectbox("Channel view", channel_options, index=0)
+
+    # Prepare a filtered long df for charts based on view
+    def spend_long_filtered(dataframe: pd.DataFrame) -> pd.DataFrame:
+        if plat_map_df.empty or dataframe.empty:
+            return pd.DataFrame(columns=[DATE_COL, "col", "spend", "platform"])
+        vm = plat_map_df.copy()
+        if view_sel != "All channels":
+            vm = vm[vm["platform"] == view_sel]
+        if vm.empty:
+            return pd.DataFrame(columns=[DATE_COL, "col", "spend", "platform"])
+        return (
+            dataframe.melt(id_vars=[DATE_COL], value_vars=vm["col"].tolist(),
+                           var_name="col", value_name="spend")
+            .merge(vm, on="col", how="left")
             .dropna(subset=["spend"])
         )
-        cur_by_p = long_cur.groupby("platform")["spend"].sum()
-        if not df_prev.empty:
-            long_prev = (
-                df_prev.melt(
-                    id_vars=[DATE_COL],
-                    value_vars=plat_map_df["col"].tolist(),
-                    var_name="col",
-                    value_name="spend",
-                )
-                .merge(plat_map_df, on="col", how="left")
-                .dropna(subset=["spend"])
-            )
-            prev_by_p = long_prev.groupby("platform")["spend"].sum()
-        else:
-            prev_by_p = pd.Series(dtype=float)
+
+    long_cur_view = spend_long_filtered(df_r)
+    long_prev_view = spend_long_filtered(df_prev) if not df_prev.empty else pd.DataFrame()
+
+    # ----- Waterfall (spend by platform) — respects view -----
+    st.markdown("#### Change vs Previous — Waterfall (Spend by Platform)")
+    if not long_cur_view.empty:
+        cur_by_p = long_cur_view.groupby("platform")["spend"].sum()
+        prev_by_p = long_prev_view.groupby("platform")["spend"].sum() if not long_prev_view.empty else pd.Series(dtype=float)
 
         all_p = sorted(set(cur_by_p.index).union(prev_by_p.index),
                        key=lambda x: cur_by_p.get(x, 0.0), reverse=True)
-        steps = []
-        total_delta = 0.0
+        steps, total_delta = [], 0.0
         for p in all_p:
             dv = cur_by_p.get(p, 0.0) - prev_by_p.get(p, 0.0)
             total_delta += dv
@@ -1639,33 +1603,23 @@ with tab_mkt:
         steps.append(dict(name="End (Current Total)", measure="total", y=float(prev_by_p.sum() + total_delta)))
 
         fig_w = go.Figure(go.Waterfall(
-            name="Delta",
-            orientation="v",
+            name="Delta", orientation="v",
             measure=[s["measure"] for s in steps],
             x=[s["name"] for s in steps],
             y=[s["y"] for s in steps],
         ))
-        fig_w.update_layout(title="Spend Change by Platform — Waterfall", showlegend=False)
+        ttl_suffix = f" — {view_sel}" if view_sel != "All channels" else ""
+        fig_w.update_layout(title=f"Spend Change by Platform — Waterfall{ttl_suffix}", showlegend=False)
         st.plotly_chart(fig_w, use_container_width=True)
     else:
-        st.info("Platform mapping not available for waterfall.")
+        st.info("No spend data for the selected view.")
     st.markdown("---")
 
-    # ----- Channel Mix (stacked, always all platforms) -----
+    # ----- Channel Mix (stacked) — respects view -----
     st.markdown("#### Channel Mix")
-    if not plat_map_df.empty and not df_r.empty:
-        long = (
-            df_r.melt(
-                id_vars=[DATE_COL],
-                value_vars=plat_map_df["col"].tolist(),
-                var_name="col",
-                value_name="spend",
-            )
-            .merge(plat_map_df, on="col", how="left")
-            .dropna(subset=["spend"])
-        )
+    if not long_cur_view.empty:
         plat_freq = (
-            long.set_index(DATE_COL)
+            long_cur_view.set_index(DATE_COL)
             .groupby("platform")["spend"]
             .resample(RULE)
             .sum(min_count=1)
@@ -1679,70 +1633,102 @@ with tab_mkt:
             .sort_values(ascending=False)
             .index.tolist()
         )
-
         fig2 = px.bar(
-            plat_freq,
-            x="PERIOD_LABEL",
-            y="spend",
-            color="platform",
+            plat_freq, x="PERIOD_LABEL", y="spend", color="platform",
             category_orders={"platform": platform_order},
             color_discrete_map=PLATFORM_COLORS,
-            title=f"{spend_label} by Platform — {TIMEFRAME_LABEL}, {agg_label}",
+            title=f"{spend_label} by Platform — {TIMEFRAME_LABEL}, {agg_label}"
+                  + (f" — {view_sel}" if view_sel != "All channels" else ""),
         )
-        fig2.update_layout(
-            barmode="stack",
-            xaxis_title="Date",
-            yaxis_title=spend_label,
-            legend=dict(orientation="h"),
-        )
+        fig2.update_layout(barmode="stack", xaxis_title="Date", yaxis_title=spend_label, legend=dict(orientation="h"))
         st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.info("No spend data for the selected view.")
     st.markdown("---")
 
-    # ----- Single Channel View (selector + spend over time + funnel) -----
+    # ----- Single Channel View -----
     st.markdown("#### Single Channel View")
 
-    # Choose default: highest current spend
-    sel_platform = None
-    if not plat_map_df.empty and not df_r.empty:
-        long_sp_tmp = (
-            df_r.melt(
-                id_vars=[DATE_COL],
-                value_vars=plat_map_df["col"].tolist(),
-                var_name="col",
-                value_name="spend",
-            )
-            .merge(plat_map_df, on="col", how="left")
-            .dropna(subset=["spend"])
-        )
-        cur_by_p_tmp = long_sp_tmp.groupby("platform")["spend"].sum().sort_values(ascending=False)
-        sel_platform = st.selectbox(
-            "Channel",
-            cur_by_p_tmp.index.tolist() if not cur_by_p_tmp.empty else platforms,
-            index=0 if not cur_by_p_tmp.empty else 0,
-        )
+    # When 'All channels' → show a funnel per platform (as before)
+    if view_sel == "All channels":
+        if not plat_map_df.empty:
+            def find_metric_cols(token: str, keyword: str):
+                kw = keyword.upper()
+                return [c for c, u in ALL_COLS_UP.items() if token in u and kw in u]
 
-    def _spend_cols_for_platform(plat: str) -> list[str]:
-        return plat_map_df.loc[plat_map_df["platform"] == plat, "col"].tolist()
+            for plat in platforms:
+                token = plat.upper()
+                spend_cols = plat_map_df.loc[plat_map_df["platform"] == plat, "col"].tolist()
+                spend_total = df_r[spend_cols].sum().sum() if spend_cols else 0.0
+                sess_cols = find_metric_cols(token, "SESSION")
+                click_cols = find_metric_cols(token, "CLICK")
+                impr_cols = find_metric_cols(token, "IMPRESSION")
+                installs_cols = [c for c in INSTALL_COLS if token in c.upper()]
+                sessions = df_r[sess_cols].sum().sum() if sess_cols else 0.0
+                clicks = df_r[click_cols].sum().sum() if click_cols else 0.0
+                imps = df_r[impr_cols].sum().sum() if impr_cols else 0.0
+                installs = df_r[installs_cols].sum().sum() if installs_cols else 0.0
 
-    if sel_platform:
-        # Spend over time for selected channel (fixes the KeyError)
-        sp_cols = _spend_cols_for_platform(sel_platform)
+                cpm = (spend_total / imps * 1000) if imps > 0 else np.nan
+                cpc = (spend_total / clicks) if clicks > 0 else np.nan
+                cps = (spend_total / sessions) if sessions > 0 else np.nan
+
+                col_left, col_right = st.columns([2, 1])
+                with col_left:
+                    st.markdown(f"**{plat} Funnel**")
+                    steps = []
+                    if imps > 0: steps.append(("Impressions", imps))
+                    if clicks > 0: steps.append(("Clicks", clicks))
+                    if sessions > 0: steps.append(("Sessions", sessions))
+                    if installs > 0: steps.append(("Installs", installs))
+                    if steps:
+                        labels = [s[0] for s in steps]
+                        values = [s[1] for s in steps]
+                        figf = go.Figure(go.Funnel(
+                            y=labels, x=values,
+                            text=[fmt_num(v, nd=2) for v in values],
+                            textinfo="text+percent previous",
+                            hovertemplate="%{label}: %{value:,}",
+                        ))
+                        figf.update_layout(margin=dict(l=40, r=20, t=10, b=20))
+                        st.plotly_chart(figf, use_container_width=True)
+                    else:
+                        st.info("No funnel metrics found.")
+                with col_right:
+                    tbl = pd.DataFrame({
+                        "Metric": [
+                            "Total Spend", "Impressions", "Clicks", "Sessions",
+                            "Cost per 1k Impressions", "Cost per Click", "Cost per Session",
+                            "Impression→Click rate", "Click→Session rate",
+                        ],
+                        "Value": [
+                            fmt_num(spend_total), fmt_num(imps), fmt_num(clicks), fmt_num(sessions),
+                            (f"{cpm:.2f}" if pd.notna(cpm) else "–"),
+                            (f"{cpc:.2f}" if pd.notna(cpc) else "–"),
+                            (f"{cps:.2f}" if pd.notna(cps) else "–"),
+                            (f"{(clicks/imps):.2%}" if imps > 0 else "–"),
+                            (f"{(sessions/clicks):.2%}" if clicks > 0 else "–"),
+                        ],
+                    })
+                    st.dataframe(tbl, hide_index=True, use_container_width=True)
+                st.markdown("---")
+        else:
+            st.info("Platform mapping not available.")
+    else:
+        # Single selected channel → spend over time + sub-column breakdown + funnel
+        sel_platform = view_sel
+        vm = plat_map_df.loc[plat_map_df["platform"] == sel_platform]
+        sp_cols = vm["col"].tolist()
+
+        # Spend over time for selected channel
         if sp_cols:
-            # build a single spend series before resetting — avoids missing columns on ts
             sp_series = df_r.set_index(DATE_COL)[sp_cols].sum(axis=1)
             ts = (
-                sp_series
-                .resample(RULE)
-                .sum(min_count=1)
-                .reset_index()
-                .rename(columns={DATE_COL: "DATE_PERIOD", 0: "spend"})
+                sp_series.resample(RULE).sum(min_count=1).reset_index()
+                .rename(columns={DATE_COL: "DATE_PERIOD", sp_series.name: "spend"})
             )
-            ts.rename(columns={sp_series.name: "spend"}, inplace=True)  # ensure column name
             ts["PERIOD_LABEL"] = period_label(ts["DATE_PERIOD"], RULE)
-
-            fig_sc = go.Figure(
-                go.Bar(x=ts["PERIOD_LABEL"], y=ts["spend"], name=f"{sel_platform} Spend")
-            )
+            fig_sc = go.Figure(go.Bar(x=ts["PERIOD_LABEL"], y=ts["spend"], name=f"{sel_platform} Spend"))
             fig_sc.update_layout(
                 title=f"{sel_platform} {spend_label} Over Time — {TIMEFRAME_LABEL}, {agg_label}",
                 xaxis=dict(title="Date", title_standoff=8),
@@ -1751,17 +1737,27 @@ with tab_mkt:
                 margin=dict(b=60),
             )
             st.plotly_chart(fig_sc, use_container_width=True)
+
+            # Sub-column breakdown (e.g., GA_OTHER, GA_DEMAND, ...)
+            det = (
+                df_r[sp_cols].sum(axis=0).reset_index()
+                .rename(columns={"index": "col", 0: "spend"})
+            )
+            det.columns = ["col", "spend"]
+            det = det.sort_values("spend", ascending=False)
+            det["Spend"] = det["spend"].map(fmt_num)
+            st.markdown(f"**{sel_platform} Spend Breakdown**")
+            st.dataframe(det[["col", "Spend"]], use_container_width=True)
         else:
             st.info("No mapped spend columns for the selected channel.")
 
-        # Funnel for selected channel
+        # Funnel for selected channel (totals)
         def find_metric_cols(token: str, keyword: str):
             kw = keyword.upper()
             return [c for c, u in ALL_COLS_UP.items() if token in u and kw in u]
 
         token = sel_platform.upper()
-        spend_cols_for_plat = _spend_cols_for_platform(sel_platform)
-        spend_total = df_r[spend_cols_for_plat].sum().sum() if spend_cols_for_plat else 0.0
+        spend_total = df_r[sp_cols].sum().sum() if sp_cols else 0.0
         sess_cols = find_metric_cols(token, "SESSION")
         click_cols = find_metric_cols(token, "CLICK")
         impr_cols = find_metric_cols(token, "IMPRESSION")
@@ -1786,52 +1782,36 @@ with tab_mkt:
             if steps:
                 labels = [s[0] for s in steps]
                 values = [s[1] for s in steps]
-                figf = go.Figure(
-                    go.Funnel(
-                        y=labels,
-                        x=values,
-                        text=[fmt_num(v, nd=2) for v in values],
-                        textinfo="text+percent previous",
-                        hovertemplate="%{label}: %{value:,}",
-                    )
-                )
+                figf = go.Figure(go.Funnel(
+                    y=labels, x=values,
+                    text=[fmt_num(v, nd=2) for v in values],
+                    textinfo="text+percent previous",
+                    hovertemplate="%{label}: %{value:,}",
+                ))
                 figf.update_layout(margin=dict(l=40, r=20, t=10, b=20))
                 st.plotly_chart(figf, use_container_width=True)
             else:
                 st.info("No funnel metrics found.")
         with col_right:
-            tbl = pd.DataFrame(
-                {
-                    "Metric": [
-                        "Total Spend",
-                        "Impressions",
-                        "Clicks",
-                        "Sessions",
-                        "Cost per 1k Impressions",
-                        "Cost per Click",
-                        "Cost per Session",
-                        "Impression→Click rate",
-                        "Click→Session rate",
-                    ],
-                    "Value": [
-                        fmt_num(spend_total),
-                        fmt_num(imps),
-                        fmt_num(clicks),
-                        fmt_num(sessions),
-                        (f"{cpm:.2f}" if pd.notna(cpm) else "–"),
-                        (f"{cpc:.2f}" if pd.notna(cpc) else "–"),
-                        (f"{cps:.2f}" if pd.notna(cps) else "–"),
-                        (f"{(clicks/imps):.2%}" if imps > 0 else "–"),
-                        (f"{(sessions/clicks):.2%}" if clicks > 0 else "–"),
-                    ],
-                }
-            )
+            tbl = pd.DataFrame({
+                "Metric": [
+                    "Total Spend", "Impressions", "Clicks", "Sessions",
+                    "Cost per 1k Impressions", "Cost per Click", "Cost per Session",
+                    "Impression→Click rate", "Click→Session rate",
+                ],
+                "Value": [
+                    fmt_num(spend_total), fmt_num(imps), fmt_num(clicks), fmt_num(sessions),
+                    (f"{cpm:.2f}" if pd.notna(cpm) else "–"),
+                    (f"{cpc:.2f}" if pd.notna(cpc) else "–"),
+                    (f"{cps:.2f}" if pd.notna(cps) else "–"),
+                    (f"{(clicks/imps):.2%}" if imps > 0 else "–"),
+                    (f"{(sessions/clicks):.2%}" if clicks > 0 else "–"),
+                ],
+            })
             st.dataframe(tbl, hide_index=True, use_container_width=True)
-    else:
-        st.info("Platform mapping not available for the single-channel view.")
 
 # =============================
-# TAB 4 — RELATIONSHIPS (v2.12 — liberal MMM exploration)
+# TAB 4 — RELATIONSHIPS 
 # =============================
 with tab_rel:
     warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -2438,7 +2418,7 @@ with tab_rel:
 
 
 # =============================
-# TAB 5 — COLLINEARITY & PCA (by Country) · MMM readiness (v9 — overall→adjust→mirrored details; leaner UI)
+# TAB 5 — COLLINEARITY & PCA 
 # =============================
 with tab_diag:
     # Local imports
