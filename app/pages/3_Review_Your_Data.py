@@ -613,60 +613,58 @@ with st.sidebar:
         st.caption("Dataset has no COUNTRY column — showing all rows.")
 
     # Goal picker
+        # Goal picker
     if not goal_cols:
         st.error("No goals found in metadata.")
         GOAL = None
         goal_label_to_col = {}
     else:
-        # Prefer JSON 'group' when available, else tabular CAT
-        _group_fallback = {}
-        if isinstance(meta, dict):
-            _group_fallback = {
-                g.get("var"): (g.get("group") or "primary")
-                for g in meta.get("goals", [])
-                if g.get("var")
-            }
+        # Prefer JSON 'group' when available
+        _group_fallback = {
+            g.get("var"): (g.get("group") or "primary")
+            for g in (meta.get("goals") or [])
+            if g.get("var")
+        }
 
         def _goal_tag_for(col: str) -> str:
             g = (_group_fallback.get(col, "") or "").strip().lower()
-            if g in ("primary", "main", "goal", ""):
-                return "Main"
             if g in ("secondary", "alt", "secondary_goal"):
                 return "Secondary"
-            # Fall back to tabular m[CAT]
-            if (COL in m.columns) and (CAT in m.columns):
-                try:
-                    cat = m.loc[m[COL].eq(col), CAT].iloc[0]
-                    return (
-                        "Main"
-                        if str(cat).lower() == "goal"
-                        else (
-                            "Secondary"
-                            if str(cat).lower() == "secondary_goal"
-                            else "Other"
-                        )
-                    )
-                except Exception:
-                    pass
-            return "Other"
+            return "Main"
 
-        def _goal_label(col: str) -> str:
-            return f"{nice(col)}  ·  {_goal_tag_for(col)}"
+        # Build labeled items: "<Pretty Name> · Main/Secondary"
+        items = []
+        for col in goal_cols:
+            tag = _goal_tag_for(col)
+            base = (nice(col) or str(col)).strip() or str(col)
+            items.append((f"{base} · {tag}", col, tag, base.lower()))
 
-        goal_label_to_col = {_goal_label(c): c for c in goal_cols}
-        labels_sorted = sorted(
-            goal_label_to_col.keys(), key=lambda s: s.lower()
+        # De-dup labels if needed (append raw col when duplicates exist)
+        from collections import Counter
+        counts = Counter([lbl for (lbl, _, _, _) in items])
+        fixed = []
+        for (lbl, col, tag, base_lower) in items:
+            if counts[lbl] > 1:
+                base_name = lbl.split(" · ")[0]
+                lbl = f"{base_name} [{col}] · {tag}"
+            fixed.append((lbl, col, tag, base_lower))
+
+        # Sort: Main first, then alpha by base name
+        fixed.sort(key=lambda x: (0 if x[2] == "Main" else 1, x[3]))
+
+        labels = [lbl for (lbl, _, _, _) in fixed]
+        label_to_col = {lbl: col for (lbl, col, _, _) in fixed}
+
+        # Default: dep_var if present → GMV → first
+        dep_var = (meta.get("dep_var") or "").strip()
+        default_col = (
+            dep_var if dep_var in goal_cols
+            else ("GMV" if "GMV" in goal_cols else goal_cols[0])
         )
+        default_label = next((l for l, c in label_to_col.items() if c == default_col), labels[0])
 
-        # Default to GMV if available, else first
-        default_label = (
-            _goal_label("GMV") if "GMV" in goal_cols else labels_sorted[0]
-        )
-
-        GOAL = goal_label_to_col[
-            st.selectbox(
-                "Goal", labels_sorted, index=labels_sorted.index(default_label)
-            )
+        GOAL = label_to_col[
+            st.selectbox("Goal", labels, index=labels.index(default_label))
         ]
 
     # Timeframe picker
