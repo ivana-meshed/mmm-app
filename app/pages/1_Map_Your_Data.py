@@ -1542,10 +1542,18 @@ if mapping_submit:
         )
         st.session_state["mapping_df"] = updated_mapping
         st.session_state["df_raw"] = updated_df
+        num_new = len(updated_mapping) - len(mapping_edit)
         st.success(
-            "Mapping updated with automatic aggregations applied. "
-            f"Total variables: {len(updated_mapping)}"
+            f"✅ Mapping updated! Added {num_new} new aggregated columns. "
+            f"Total: {len(updated_mapping)} variables."
         )
+        if num_new > 0:
+            st.info(
+                "💾 **Important:** Click 'Save this dataset to GCS' above to persist the new aggregated columns. "
+                "Then save the metadata below so the columns are available in the Experiment page."
+            )
+        # Trigger a rerun to refresh the UI with new columns
+        st.rerun()
     except Exception as e:
         st.error(f"Failed to apply automatic aggregations: {e}")
         st.session_state["mapping_df"] = mapping_edit
