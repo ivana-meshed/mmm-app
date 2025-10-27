@@ -3,6 +3,10 @@
 import os
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.preprocessing import PolynomialFeatures
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -679,7 +683,7 @@ with tab_mkt:
     cur_clicks, d_clicks = total_with_prev_local(CLICK_COLS)
     cur_sessions, d_sessions = total_with_prev_local(SESSION_COLS)
     cur_installs, d_installs = total_with_prev_local(INSTALL_COLS)
-
+    cur_spend, d_spend = total_with_prev_local(["_TOTAL_SPEND"])
     kpi_grid_fixed(
         [
             dict(title="Total Impressions", value=fmt_num(cur_imps),
