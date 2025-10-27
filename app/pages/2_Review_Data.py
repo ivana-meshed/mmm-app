@@ -6,7 +6,6 @@ import pandas as pd
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_absolute_error
-from sklearn.preprocessing import PolynomialFeatures
 from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
@@ -125,7 +124,8 @@ display_map, nice, goal_cols, mapping, m, ALL_COLS_UP, IMPR_COLS, CLICK_COLS, SE
 # Sidebar
 # -----------------------------
 GOAL, sel_countries, TIMEFRAME_LABEL, RANGE, agg_label, FREQ = render_sidebar(meta, df, nice, goal_cols)
-
+st.session_state["RANGE"] = RANGE
+st.session_state["FREQ"]  = FREQ
 # Country filter
 if sel_countries and "COUNTRY" in df:
     df = df[df["COUNTRY"].astype(str).isin(sel_countries)].copy()
