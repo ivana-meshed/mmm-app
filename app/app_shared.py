@@ -1592,103 +1592,71 @@ def load_data_from_gcs(bucket: str, country: str, data_ts: str, meta_ts: str) ->
     return df, meta, date_col
 
 # =========================
-# GCS: paths, listing, download
+# KPI tiles
 # =========================
+GREEN = "#2ca02c"
+RED = "#d62728"
+GREY = "#777"
+BORDER = "#eee"
 
-def data_root(country: str) -> str:
-    return f"datasets/{country.lower().strip()}"
+def kpi_box(title: str, value: str, delta: str | None = None, good_when: str = "up"):
+    color_pos, color_neg, color_neu = "#2e7d32", "#a94442", GREY
+    delta_color = ""
+    if delta:
+        is_up = delta.strip().startswith("+")
+        if good_when == "up":
+            delta_color = color_pos if is_up else color_neg
+        elif good_when == "down":
+            delta_color = color_pos if not is_up else color_neg
+        else:
+            delta_color = color_neu
+    st.markdown(
+        f"""
+        <div style="border:1px solid {BORDER};border-radius:10px;padding:12px;">
+          <div style="font-size:12px;color:{GREY};">{title}</div>
+          <div style="font-size:24px;font-weight:700;">{value}</div>
+          <div style="font-size:12px;color:{delta_color};">{delta or ""}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-def data_blob(country: str, ts: str) -> str:
-    return f"{data_root(country)}/{ts}/raw.parquet"
+def kpi_grid(boxes: list, per_row: int = 3):
+    if not boxes:
+        return
+    for i in range(0, len(boxes), per_row):
+        row = boxes[i:i + per_row]
+        cols = st.columns(len(row))
+        for c, b in zip(cols, row):
+            with c:
+                kpi_box(
+                    b.get("title", ""),
+                    b.get("value", "–"),
+                    b.get("delta"),
+                    b.get("good_when", "up"),
+                )
 
-def data_latest_blob(country: str) -> str:
-    return f"{data_root(country)}/latest/raw.parquet"
-
-def meta_blob(country: str, ts: str) -> str:
-    return f"metadata/{country.lower().strip()}/{ts}/mapping.json"
-
-def meta_latest_blob(country: str) -> str:
-    return f"metadata/{country.lower().strip()}/latest/mapping.json"
-
-@st.cache_data(show_spinner=False)
-def sorted_versions_newest_first(ts_list: List[str]) -> List[str]:
-    cleaned = [str(t).strip() for t in ts_list if str(t).strip()]
-    cleaned = [t for t in cleaned if t.lower() != "latest"]
-    # numeric?
-    try:
-        nums = [int(t) for t in cleaned]
-        return [t for _, t in sorted(zip(nums, cleaned), reverse=True)]
-    except Exception:
-        pass
-    # datetime-like?
-    try:
-        from dateutil import parser
-        parsed = [parser.parse(t) for t in cleaned]
-        return [t for _, t in sorted(zip(parsed, cleaned), reverse=True)]
-    except Exception:
-        pass
-    # fallback
-    return sorted(cleaned, reverse=True)
-
-@st.cache_data(show_spinner=False)
-def list_data_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
-    client = storage.Client()
-    prefix = f"{data_root(country)}/"
-    blobs = client.list_blobs(bucket, prefix=prefix)
-    ts = set()
-    for b in blobs:
-        parts = b.name.split("/")
-        if len(parts) >= 4 and parts[-1] == "raw.parquet":
-            ts.add(parts[-2])
-    out = sorted_versions_newest_first(list(ts))
-    return ["Latest"] + out
-
-@st.cache_data(show_spinner=False)
-def list_meta_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
-    client = storage.Client()
-    prefix = f"metadata/{country.lower().strip()}/"
-    blobs = client.list_blobs(bucket, prefix=prefix)
-    ts = set()
-    for b in blobs:
-        parts = b.name.split("/")
-        if len(parts) >= 4 and parts[-1] == "mapping.json":
-            ts.add(parts[-2])
-    out = sorted_versions_newest_first(list(ts))
-    return ["Latest"] + out
-
-def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
-    client = storage.Client()
-    blob = client.bucket(bucket).blob(blob_path)
-    if not blob.exists():
-        raise FileNotFoundError(f"gs://{bucket}/{blob_path} not found")
-    with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
-        blob.download_to_filename(tmp.name)
-        return pd.read_parquet(tmp.name)
-
-def _download_json_from_gcs(bucket: str, blob_path: str) -> dict:
-    client = storage.Client()
-    blob = client.bucket(bucket).blob(blob_path)
-    if not blob.exists():
-        raise FileNotFoundError(f"gs://{bucket}/{blob_path} not found")
-    return json.loads(blob.download_as_bytes())
-
-@st.cache_data(show_spinner=False)
-def download_parquet_from_gcs_cached(bucket: str, blob_path: str) -> pd.DataFrame:
-    return _download_parquet_from_gcs(bucket, blob_path)
-
-@st.cache_data(show_spinner=False)
-def download_json_from_gcs_cached(bucket: str, blob_path: str) -> dict:
-    return _download_json_from_gcs(bucket, blob_path)
-
-@st.cache_data(show_spinner=False)
-def load_data_from_gcs(bucket: str, country: str, data_ts: str, meta_ts: str) -> Tuple[pd.DataFrame, dict, str]:
-    db = data_latest_blob(country) if data_ts == "Latest" else data_blob(country, str(data_ts))
-    mb = meta_latest_blob(country) if meta_ts == "Latest" else meta_blob(country, str(meta_ts))
-    df = _download_parquet_from_gcs(bucket, db)
-    meta = _download_json_from_gcs(bucket, mb)
-    df, date_col = parse_date(df, meta)
-    return df, meta, date_col
-
+def kpi_grid_fixed(boxes: list, per_row: int = 3):
+    if not boxes:
+        return
+    rem = len(boxes) % per_row
+    if rem:
+        boxes = boxes + [dict(title="", value="")] * (per_row - rem)
+    for i in range(0, len(boxes), per_row):
+        row = boxes[i:i + per_row]
+        cols = st.columns(per_row)
+        for c, b in zip(cols, row):
+            with c:
+                if b.get("title") == "" and b.get("value") == "":
+                    st.markdown('<div style="height:0.01px;"></div>', unsafe_allow_html=True)
+                else:
+                    kpi_box(
+                        b.get("title", ""),
+                        b.get("value", "–"),
+                        b.get("delta"),
+                        b.get("good_when", "up"),
+                    )
+                    
 # =========================
 # Formatting & small utils
 # =========================
