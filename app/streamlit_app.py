@@ -23,26 +23,24 @@ with col1:
         if st.button("🧩 Connect your Data", use_container_width=True):
             import streamlit as stlib
 
-            stlib.switch_page("pages/0_Connect_Your_Data.py")
+            stlib.switch_page("pages/0_Connect_Data.py")
     except Exception:
-        st.page_link(
-            "pages/0_Connect_Your_Data.py", label="🧩 Connect your Data"
-        )
+        st.page_link("pages/0_Connect_Data.py", label="🧩 Connect your Data")
 
 with col2:
     try:
         if st.button("🗺️ Map Your Data", use_container_width=True):
             import streamlit as stlib
 
-            stlib.switch_page("pages/1_Map_Your_Data.py")
+            stlib.switch_page("pages/1_Map_Data.py")
     except Exception:
-        st.page_link("pages/1_Map_Your_Data.py", label="🗺️ Map Your Data")
+        st.page_link("pages/1_Map_Data.py", label="🗺️ Map Your Data")
 
 with col3:
     try:
         if st.button("🧪 Experiment", use_container_width=True):
             import streamlit as stlib
 
-            stlib.switch_page("pages/2_Experiment.py")
+            stlib.switch_page("pages/4_Experiment.py")
     except Exception:
-        st.page_link("pages/2_Experiment.py", label="🧪 Experiment")
+        st.page_link("pages/4_Experiment.py", label="🧪 Experiment")
