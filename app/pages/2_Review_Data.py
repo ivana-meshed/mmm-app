@@ -148,8 +148,6 @@ plat_map_df, platforms, PLATFORM_COLORS = build_plat_map_df(
 # -----------------------------
 df_r = filter_range(df.copy(), DATE_COL, RANGE)
 df_prev = previous_window(df, df_r, DATE_COL, RANGE)
-def total_with_prev_local(collist):
-    return total_with_prev(df_r, df_prev, collist)
 
 res = resample_numeric(df_r, DATE_COL, RULE, ensure_cols=[target, "_TOTAL_SPEND"])
 res["PERIOD_LABEL"] = period_label(res["DATE_PERIOD"], RULE)
