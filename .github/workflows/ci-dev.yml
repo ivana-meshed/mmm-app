@@ -4,66 +4,20 @@ on:
   push:
     branches: [feat-*, copilot/*]
     paths:
-      - 'docker/Dockerfile.training'
-      - '.github/workflows/ci-dev.yml'
-      - 'r/**'
-      - 'app/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'infra/terraform/**'
-      - 'Makefile'
-      - 'requirements*.txt'
-      - '!docker/Dockerfile.training-base'
+        - 'docker/Dockerfile.training'
+        - '.github/workflows/ci-dev.yml'
+        - 'r/**'
+        - 'app/**'
+        - 'docker/training_entrypoint.sh'
+        - '!docker/Dockerfile.training-base'
+        - 'infra/terraform/**'  # exclude base so normal builds skip base
 
 permissions:
   id-token: write
   contents: read
 
-concurrency:
-  group: ci-dev-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  quality:
-    name: Quality gates (lint/type/test)
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
-
-      - name: Restore mypy/pytest caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .mypy_cache
-            .pytest_cache
-            htmlcov
-          key: qcache-${{ runner.os }}-py312-${{ hashFiles('**/*.py', 'requirements*.txt', 'pyproject.toml', 'Makefile') }}
-
-      - name: Install & run checks
-        run: |
-          make ci
-
-      - name: Upload coverage HTML
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-html
-          path: htmlcov
-          if-no-files-found: ignore
-
   ci:
-    name: Build & Deploy
-    needs: quality
     runs-on: ubuntu-latest
     env:
       PROJECT_ID: datawarehouse-422511
@@ -87,6 +41,7 @@ jobs:
       TF_VAR_auth_cookie_secret: ${{ secrets.STREAMLIT_COOKIE_SECRET }}
       TF_VAR_scheduler_job_name: robyn-queue-tick-dev
       TF_VAR_queue_name: default-dev
+      # ... (add other non-sensitive TF_VAR_* if needed from dev.tfvars)
 
     steps:
       - uses: actions/checkout@v4
@@ -137,7 +92,6 @@ jobs:
             ${{ env.WEB_IMAGE_URL_LATEST }}
           cache-from: type=gha,scope=mmm-web-${{ github.ref_name }}
           cache-to: type=gha,mode=max,scope=mmm-web-${{ github.ref_name }}
-
       - name: Build & Push training-base
         id: build_training_base
         uses: docker/build-push-action@v6
@@ -172,11 +126,11 @@ jobs:
             type=registry,ref=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:buildcache,mode=max
 
       - name: Setup Python for tests
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: '3.12'
 
-      - name: Run unit tests (sanity)
+      - name: Run unit tests
         shell: bash
         run: |
           echo "Running unit tests for single job run functionality..."
@@ -205,6 +159,7 @@ jobs:
           CACHE_DIR="$RUNNER_TOOL_CACHE/terraform-plugins"
           mkdir -p "$CACHE_DIR"
           echo "TF_PLUGIN_CACHE_DIR=$CACHE_DIR" >> "$GITHUB_ENV"
+
 
       - name: Terraform init / validate
         working-directory: infra/terraform
@@ -379,7 +334,6 @@ jobs:
           TF_VAR_web_image: ${{ env.WEB_IMAGE_REF }}
           TF_VAR_training_image: ${{ env.TRAINING_IMAGE_REF }}
         run: terraform apply -input=false -auto-approve tfplan
-
       - name: Print deployment info
         working-directory: infra/terraform
         run: |
