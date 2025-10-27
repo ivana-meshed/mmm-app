@@ -416,7 +416,7 @@ with tab_reg:
         ch_map_all = pd.DataFrame(columns=["col", "channel"])
 
     ch_map_spend = (
-        ch_map_all[ch_map_all["col"].isin(present_spend)].copy()
+        ch_map_all[ch_map_all["col"].isin(paid_spend_cols)].copy()
         if not ch_map_all.empty
         else pd.DataFrame(columns=["col", "channel"])
     )
