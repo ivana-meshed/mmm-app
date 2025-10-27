@@ -384,22 +384,8 @@ with tab_single:
             metadata = st.session_state.get("loaded_metadata")
 
             default_values = {
-                "paid_media_spends": [
-                    "GA_SUPPLY_COST",
-                    "GA_DEMAND_COST",
-                    "BING_DEMAND_COST",
-                    "META_DEMAND_COST",
-                    "TV_COST",
-                    "PARTNERSHIP_COSTS",
-                ],
-                "paid_media_vars": [
-                    "GA_SUPPLY_COST",
-                    "GA_DEMAND_COST",
-                    "BING_DEMAND_COST",
-                    "META_DEMAND_COST",
-                    "TV_COST",
-                    "PARTNERSHIP_COSTS",
-                ],
+                "paid_media_spends": [],
+                "paid_media_vars": [],
                 "context_vars": ["IS_WEEKEND", "TV_IS_ON"],
                 "factor_vars": ["IS_WEEKEND", "TV_IS_ON"],
                 "organic_vars": ["ORGANIC_TRAFFIC"],
@@ -491,23 +477,124 @@ with tab_single:
                     "⚠️ Please load data first to see available columns for selection."
                 )
 
-            # Paid media spends - multiselect
-            paid_media_spends_list = st.multiselect(
-                "paid_media_spends",
-                options=all_columns,
-                default=default_values["paid_media_spends"],
-                help="Select media spend columns",
+            # Helper function to parse channel and subchannel from variable name
+            def _parse_var_components(var_name: str) -> dict:
+                """Parse variable name into channel, subchannel, suffix"""
+                parts = var_name.split("_")
+                if len(parts) >= 2:
+                    channel = parts[0]
+                    suffix = parts[-1]
+                    subchannel = "_".join(parts[1:-1]) if len(parts) > 2 else ""
+                    return {
+                        "channel": channel,
+                        "subchannel": subchannel,
+                        "suffix": suffix,
+                    }
+                return {"channel": "", "subchannel": "", "suffix": var_name}
+
+            # Initialize session state for spend-var mapping if not present
+            if "spend_var_mapping" not in st.session_state:
+                st.session_state["spend_var_mapping"] = {}
+
+            # Get all paid_media_spends from metadata
+            available_spends = [
+                v
+                for v in default_values["paid_media_spends"]
+                if v in all_columns
+            ]
+
+            # Display paid_media_spends first (all selected by default)
+            st.markdown("**Paid Media Configuration**")
+            st.caption(
+                "Select paid media spend channels. For each spend, you can choose the corresponding variable metric."
             )
 
-            # Paid media vars - multiselect (will be made nested later based on clarification)
-            paid_media_vars_list = st.multiselect(
-                "paid_media_vars",
-                options=all_columns,
-                default=default_values["paid_media_vars"],
-                help="Select media variable columns (e.g., impressions, clicks)",
+            paid_media_spends_list = st.multiselect(
+                "paid_media_spends (Select channels to include)",
+                options=available_spends,
+                default=available_spends,  # All selected by default
+                help="Select media spend columns to include in the model",
             )
+
+            # For each selected spend, show corresponding var options
+            paid_media_vars_list = []
+            spend_var_mapping = {}
+
+            if paid_media_spends_list:
+                st.markdown("**Variable Selection for Each Spend**")
+                st.caption(
+                    "For each spend channel, select the corresponding metric variable. "
+                    "If none selected, the spend column itself will be used."
+                )
+
+                for spend in paid_media_spends_list:
+                    # Parse the spend variable to get channel and subchannel
+                    parsed = _parse_var_components(spend)
+                    channel = parsed["channel"]
+                    subchannel = parsed["subchannel"]
+
+                    # Find all paid_media_vars with same channel and subchannel
+                    if subchannel:
+                        # Match pattern: CHANNEL_SUBCHANNEL_*
+                        pattern_prefix = f"{channel}_{subchannel}_"
+                        matching_vars = [
+                            v
+                            for v in default_values["paid_media_vars"]
+                            if v.startswith(pattern_prefix) and v in all_columns
+                        ]
+                    else:
+                        # Match pattern: CHANNEL_* (but not CHANNEL_CUSTOM or CHANNEL_TOTAL_*)
+                        matching_vars = [
+                            v
+                            for v in default_values["paid_media_vars"]
+                            if v.startswith(f"{channel}_")
+                            and v in all_columns
+                            and not v.endswith("_CUSTOM")
+                            and "_TOTAL_" not in v
+                        ]
+
+                    # Default to the first matching var or the spend itself
+                    default_var = (
+                        st.session_state["spend_var_mapping"].get(spend)
+                        or (matching_vars[0] if matching_vars else spend)
+                    )
+
+                    # Ensure default_var is in the options
+                    if default_var not in matching_vars and default_var != spend:
+                        default_var = matching_vars[0] if matching_vars else spend
+
+                    # Add the spend itself as an option
+                    var_options = matching_vars + [spend]
+                    var_options = sorted(set(var_options))
+
+                    # Find the index of the default
+                    try:
+                        default_idx = var_options.index(default_var)
+                    except ValueError:
+                        default_idx = 0
+
+                    # Use container with custom width to ensure full variable names are visible
+                    with st.container():
+                        selected_var = st.selectbox(
+                            f"**{spend}** → Variable:",
+                            options=var_options,
+                            index=default_idx,
+                            help=f"Select the metric variable for {spend}",
+                            key=f"var_for_{spend}",
+                        )
+
+                    spend_var_mapping[spend] = selected_var
+                    paid_media_vars_list.append(selected_var)
+
+                # Update session state
+                st.session_state["spend_var_mapping"] = spend_var_mapping
+            else:
+                st.info(
+                    "No paid media spends selected. Select at least one to configure variables."
+                )
 
             # Context vars - multiselect
+            st.markdown("**Context Variables**")
             context_vars_list = st.multiselect(
                 "context_vars",
                 options=all_columns,
@@ -516,6 +603,7 @@ with tab_single:
             )
 
             # Factor vars - multiselect
+            st.markdown("**Factor Variables**")
             factor_vars_list = st.multiselect(
                 "factor_vars",
                 options=all_columns,
@@ -524,6 +612,7 @@ with tab_single:
             )
 
             # Organic vars - multiselect
+            st.markdown("**Organic/Baseline Variables**")
             organic_vars_list = st.multiselect(
                 "organic_vars",
                 options=all_columns,

@@ -521,17 +521,15 @@ if (length(zero_var)) {
 if (!"TV_IS_ON" %in% names(df)) df$TV_IS_ON <- 0
 
 ## ---------- FEATURE ENGINEERING ----------
-df <- df %>% mutate(
-    GA_OTHER_COST = rowSums(select(., tidyselect::matches("^GA_.*_COST$") & !any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE),
-    BING_TOTAL_COST = rowSums(select(., tidyselect::matches("^BING_.*_COST$")), na.rm = TRUE),
-    META_TOTAL_COST = rowSums(select(., tidyselect::matches("^META_.*_COST$")), na.rm = TRUE),
-    ORGANIC_TRAFFIC = rowSums(select(., any_of(c("NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS", "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS"))), na.rm = TRUE),
-    BRAND_HEALTH = coalesce(DIRECT_DAILY_SESSIONS, 0) + coalesce(SEO_DAILY_SESSIONS, 0),
-    ORGxTV = BRAND_HEALTH * coalesce(TV_COST, 0),
-    GA_OTHER_IMPRESSIONS = rowSums(select(., tidyselect::matches("^GA_.*_IMPRESSIONS$") & !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
-    BING_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE),
-    META_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE)
-)
+# NOTE: Custom tag aggregates (e.g., GA_SMALL_COST_CUSTOM, GA_CAMPAIGN_COST_CUSTOM)
+# and TOTAL columns (e.g., GA_TOTAL_COST, GA_TOTAL_SESSIONS) are now created
+# automatically in the Python mapping workflow (Map_Your_Data.py) when the user
+# clicks "Apply mapping changes". These columns should already exist in the
+# dataframe at this point.
+#
+# Legacy aggregations below are kept for backward compatibility with older data
+# that doesn't have the new automatic aggregations.
+
 
 ## ---------- WINDOW / FLAGS ----------
 # Dates are now sourced from config (start_data_date, end_data_date); previous hardcoded assignments have been removed.
@@ -571,8 +569,8 @@ InputCollect <- tryCatch(
         robyn_inputs(
             dt_input = df,
             date_var = "date",
-            dep_var = dep_var_from_cfg,  # From config
-            dep_var_type = dep_var_type_from_cfg,  # From config
+            dep_var = dep_var_from_cfg, # From config
+            dep_var_type = dep_var_type_from_cfg, # From config
             prophet_vars = c("trend", "season", "holiday", "weekday"),
             prophet_country = toupper(country),
             paid_media_spends = paid_media_spends,
@@ -691,7 +689,7 @@ hyperparameters <- list()
 for (v in hyper_vars) {
     spec <- get_hyperparameter_ranges(hyperparameter_preset, adstock, v)
     hyperparameters[[paste0(v, "_alphas")]] <- spec$alphas
-    
+
     if (adstock == "geometric") {
         hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
         hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
@@ -715,8 +713,8 @@ InputCollect <- tryCatch(
         robyn_inputs(
             dt_input = df,
             date_var = "date",
-            dep_var = dep_var_from_cfg,  # From config
-            dep_var_type = dep_var_type_from_cfg,  # From config
+            dep_var = dep_var_from_cfg, # From config
+            dep_var_type = dep_var_type_from_cfg, # From config
             prophet_vars = c("trend", "season", "holiday", "weekday"),
             prophet_country = toupper(country),
             paid_media_spends = paid_media_spends,

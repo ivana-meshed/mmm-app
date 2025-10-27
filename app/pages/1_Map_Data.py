@@ -16,7 +16,6 @@ from app_shared import (
     PROJECT_ID,
     _require_sf_session,
     effective_sql,
-    ensure_sf_conn,
     get_data_processor,
     require_login_and_domain,
     run_sql,
@@ -192,33 +191,19 @@ _fragment = getattr(
 
 
 def _guess_goal_type(col: str) -> str:
+    """
+    Guess goal type based on column name.
+    Only returns a type if we're very confident based on suffix patterns.
+    Returns empty string if uncertain - user must tag manually.
+    """
     s = col.lower()
-    revenue_keys = (
-        "rev",
-        "revenue",
-        "gmv",
-        "sales",
-        "bookings",
-        "turnover",
-        "profit",
-    )
-    conversion_keys = (
-        "conv",
-        "conversion",
-        "lead",
-        "signup",
-        "install",
-        "purchase",
-        "txn",
-        "transactions",
-        "orders",
-    )
-    if any(k in s for k in revenue_keys):
+
+    # Very specific patterns we're confident about
+    if s.endswith("_gmv") or s.endswith("_revenue") or s.endswith("_rev"):
         return "revenue"
-    if any(k in s for k in conversion_keys):
-        return "conversion"
-    # fallback: numeric columns with common names
-    return "conversion"
+
+    # For other cases, return empty string so user must tag manually
+    return ""
 
 
 # ──────────────────────────────────────────────────────────────
@@ -396,6 +381,309 @@ def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
             if s.endswith(str(suf).lower()):
                 return cat
     return ""
+
+
+def _parse_variable_name(var_name: str) -> dict:
+    """
+    Parse a variable name into components: CHANNEL_SUBCHANNEL_SUFFIX
+    Returns dict with keys: channel, subchannel, suffix, original
+    """
+    parts = var_name.split("_")
+    if len(parts) >= 2:
+        channel = parts[0]
+        suffix = parts[-1]
+        subchannel = "_".join(parts[1:-1]) if len(parts) > 2 else ""
+        return {
+            "channel": channel,
+            "subchannel": subchannel,
+            "suffix": suffix,
+            "original": var_name,
+        }
+    return {
+        "channel": "",
+        "subchannel": "",
+        "suffix": var_name,
+        "original": var_name,
+    }
+
+
+def _apply_automatic_aggregations(
+    mapping_df: pd.DataFrame, df_raw: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Apply automatic aggregations based on custom tags and categories.
+    Returns: (updated_mapping_df, updated_df_raw)
+
+    This function:
+    1. Copies aggregations from paid_media_spends to paid_media_vars
+    2. Creates custom tag aggregates (e.g., GA_SMALL_COST_CUSTOM)
+    3. Prefixes organic, context, and factor variables
+    4. Creates TOTAL columns for each channel/suffix grouping
+    """
+    new_mapping_rows = []
+    new_columns = {}
+
+    # Group variables by category
+    paid_spends = mapping_df[
+        mapping_df["category"] == "paid_media_spends"
+    ].copy()
+    paid_vars = mapping_df[mapping_df["category"] == "paid_media_vars"].copy()
+    organic = mapping_df[mapping_df["category"] == "organic_vars"].copy()
+    context = mapping_df[mapping_df["category"] == "context_vars"].copy()
+    factor = mapping_df[mapping_df["category"] == "factor_vars"].copy()
+
+    # 1. Copy aggregations from paid_media_spends to paid_media_vars
+    for _, spend_row in paid_spends.iterrows():
+        var_name = str(spend_row["var"])
+        parsed = _parse_variable_name(var_name)
+        channel = parsed["channel"]
+        subchannel = parsed["subchannel"]
+        suffix = parsed["suffix"]
+
+        # Find corresponding paid_media_vars with same channel and subchannel
+        if subchannel:
+            pattern = f"{channel}_{subchannel}_"
+        else:
+            pattern = f"{channel}_"
+
+        # Copy custom tags and agg_strategy to matching paid_media_vars
+        matching_vars = paid_vars[
+            paid_vars["var"].str.startswith(pattern, na=False)
+        ]
+        for idx, var_row in matching_vars.iterrows():
+            if str(spend_row.get("custom_tags", "")).strip():
+                mapping_df.at[idx, "custom_tags"] = spend_row["custom_tags"]
+            if str(spend_row.get("agg_strategy", "")).strip():
+                mapping_df.at[idx, "agg_strategy"] = spend_row["agg_strategy"]
+
+    # Refresh after copying
+    paid_spends = mapping_df[
+        mapping_df["category"] == "paid_media_spends"
+    ].copy()
+    paid_vars = mapping_df[mapping_df["category"] == "paid_media_vars"].copy()
+
+    # 2. Create custom tag aggregates for paid_media_spends and paid_media_vars
+    for category in ["paid_media_spends", "paid_media_vars"]:
+        cat_df = mapping_df[mapping_df["category"] == category].copy()
+
+        # Group by channel and custom tags
+        for channel in cat_df["channel"].dropna().unique():
+            if not str(channel).strip():
+                continue
+
+            channel_rows = cat_df[cat_df["channel"] == channel]
+
+            # Collect all custom tags for this channel
+            all_tags = set()
+            for tags_str in channel_rows["custom_tags"].dropna():
+                tags = [
+                    t.strip() for t in str(tags_str).split(",") if t.strip()
+                ]
+                all_tags.update(tags)
+
+            # For each unique tag, create aggregates for each suffix
+            for tag in all_tags:
+                # Get rows with this tag
+                tag_rows = channel_rows[
+                    channel_rows["custom_tags"]
+                    .fillna("")
+                    .str.contains(
+                        r"\b" + str(tag) + r"\b", case=False, regex=True
+                    )
+                ]
+
+                # Group by suffix
+                suffixes = {}
+                for _, row in tag_rows.iterrows():
+                    parsed = _parse_variable_name(str(row["var"]))
+                    suffix = parsed["suffix"]
+                    if suffix not in suffixes:
+                        suffixes[suffix] = []
+                    suffixes[suffix].append(str(row["var"]))
+
+                # Create custom aggregate for each suffix
+                for suffix, vars_list in suffixes.items():
+                    custom_var_name = f"{channel.upper()}_{tag.upper()}_{suffix.upper()}_CUSTOM"
+
+                    # Only create if it doesn't already exist
+                    if custom_var_name not in mapping_df["var"].values:
+                        new_mapping_rows.append(
+                            {
+                                "var": custom_var_name,
+                                "category": category,
+                                "channel": channel,
+                                "data_type": "numeric",
+                                "agg_strategy": "sum",
+                                "custom_tags": tag,
+                            }
+                        )
+
+                        # Calculate the sum in df_raw
+                        if all(v in df_raw.columns for v in vars_list):
+                            new_columns[custom_var_name] = df_raw[
+                                vars_list
+                            ].sum(axis=1)
+
+    # 3. Create TOTAL columns for each category/channel/suffix grouping
+    for category in ["paid_media_spends", "paid_media_vars"]:
+        cat_df = mapping_df[mapping_df["category"] == category].copy()
+
+        # Group by channel and suffix
+        for channel in cat_df["channel"].dropna().unique():
+            if not str(channel).strip():
+                continue
+
+            channel_rows = cat_df[cat_df["channel"] == channel]
+
+            # Group by suffix (excluding _CUSTOM columns)
+            suffixes = {}
+            for _, row in channel_rows.iterrows():
+                var_name = str(row["var"])
+                if "_CUSTOM" in var_name:
+                    continue
+                parsed = _parse_variable_name(var_name)
+                suffix = parsed["suffix"]
+                if suffix not in suffixes:
+                    suffixes[suffix] = []
+                suffixes[suffix].append(var_name)
+
+            # Create TOTAL for each suffix
+            for suffix, vars_list in suffixes.items():
+                total_var_name = f"{channel.upper()}_TOTAL_{suffix.upper()}"
+
+                # Only create if it doesn't already exist
+                if total_var_name not in mapping_df["var"].values:
+                    new_mapping_rows.append(
+                        {
+                            "var": total_var_name,
+                            "category": category,
+                            "channel": channel,
+                            "data_type": "numeric",
+                            "agg_strategy": "",
+                            "custom_tags": "",
+                        }
+                    )
+
+                    # Calculate the sum in df_raw
+                    if all(v in df_raw.columns for v in vars_list):
+                        new_columns[total_var_name] = df_raw[vars_list].sum(
+                            axis=1
+                        )
+
+    # 4. For organic_vars category, create custom tag aggregates and TOTAL
+    if not organic.empty:
+        # Prefix all organic vars with ORGANIC_ if not already prefixed
+        for idx, row in organic.iterrows():
+            var_name = str(row["var"])
+            if not var_name.startswith("ORGANIC_"):
+                new_name = f"ORGANIC_{var_name}"
+                # Update in mapping
+                mapping_df.at[idx, "var"] = new_name
+                # Rename in df_raw if exists
+                if var_name in df_raw.columns:
+                    df_raw = df_raw.rename(columns={var_name: new_name})
+
+        # Re-fetch after renaming
+        organic = mapping_df[mapping_df["category"] == "organic_vars"].copy()
+
+        # Collect custom tags
+        all_tags = set()
+        for tags_str in organic["custom_tags"].dropna():
+            tags = [t.strip() for t in str(tags_str).split(",") if t.strip()]
+            all_tags.update(tags)
+
+        # Create custom tag aggregates
+        for tag in all_tags:
+            tag_rows = organic[
+                organic["custom_tags"]
+                .fillna("")
+                .str.contains(r"\b" + str(tag) + r"\b", case=False, regex=True)
+            ]
+            vars_list = tag_rows["var"].tolist()
+
+            if vars_list:
+                # Extract suffix from first variable (e.g., SESSIONS from ORGANIC_NL_DAILY_SESSIONS)
+                parsed = _parse_variable_name(vars_list[0])
+                suffix_parts = parsed["suffix"].split("_")
+                suffix = (
+                    suffix_parts[-1] if suffix_parts else "SESSIONS"
+                )  # Default to SESSIONS
+
+                custom_var_name = (
+                    f"ORGANIC_{tag.upper()}_{suffix.upper()}_CUSTOM"
+                )
+
+                if custom_var_name not in mapping_df["var"].values:
+                    new_mapping_rows.append(
+                        {
+                            "var": custom_var_name,
+                            "category": "organic_vars",
+                            "channel": "organic",
+                            "data_type": "numeric",
+                            "agg_strategy": "sum",
+                            "custom_tags": tag,
+                        }
+                    )
+
+                    # Calculate sum
+                    if all(v in df_raw.columns for v in vars_list):
+                        new_columns[custom_var_name] = df_raw[vars_list].sum(
+                            axis=1
+                        )
+
+        # Re-fetch organic again to get the updated list with prefixes
+        organic = mapping_df[mapping_df["category"] == "organic_vars"].copy()
+
+        # Create ORGANIC_TOTAL (sum of all organic vars excluding _CUSTOM)
+        organic_vars = [
+            str(v)
+            for v in organic["var"]
+            if "_CUSTOM" not in str(v) and str(v) in df_raw.columns
+        ]
+        if organic_vars and "ORGANIC_TOTAL" not in mapping_df["var"].values:
+            new_mapping_rows.append(
+                {
+                    "var": "ORGANIC_TOTAL",
+                    "category": "organic_vars",
+                    "channel": "organic",
+                    "data_type": "numeric",
+                    "agg_strategy": "",
+                    "custom_tags": "",
+                }
+            )
+            new_columns["ORGANIC_TOTAL"] = df_raw[organic_vars].sum(axis=1)
+
+    # 5. Prefix context_vars with CONTEXT_
+    if not context.empty:
+        for idx, row in context.iterrows():
+            var_name = str(row["var"])
+            if not var_name.startswith("CONTEXT_"):
+                new_name = f"CONTEXT_{var_name}"
+                mapping_df.at[idx, "var"] = new_name
+                if var_name in df_raw.columns:
+                    df_raw = df_raw.rename(columns={var_name: new_name})
+
+    # 6. Prefix factor_vars with FACTOR_
+    if not factor.empty:
+        for idx, row in factor.iterrows():
+            var_name = str(row["var"])
+            if not var_name.startswith("FACTOR_"):
+                new_name = f"FACTOR_{var_name}"
+                mapping_df.at[idx, "var"] = new_name
+                if var_name in df_raw.columns:
+                    df_raw = df_raw.rename(columns={var_name: new_name})
+
+    # Add new mapping rows
+    if new_mapping_rows:
+        new_df = pd.DataFrame(new_mapping_rows).astype("object")
+        mapping_df = pd.concat([mapping_df, new_df], ignore_index=True)
+
+    # Add new columns to df_raw
+    for col_name, col_data in new_columns.items():
+        if col_name not in df_raw.columns:
+            df_raw[col_name] = col_data
+
+    return mapping_df, df_raw
 
 
 def _apply_metadata_to_current_df(
@@ -860,7 +1148,7 @@ with st.form("goals_form", clear_on_submit=False):
         )
 
     if st.session_state["goals_df"].empty:
-        # manual first, heuristics after, then drop dups keeping manual
+        # Only suggest goals on first load, don't merge with heuristics later
         heur = _initial_goals_from_columns(all_cols)
         manual = pd.concat(
             [_mk(primary_goals, "primary"), _mk(secondary_goals, "secondary")],
@@ -869,7 +1157,7 @@ with st.form("goals_form", clear_on_submit=False):
         goals_src = pd.concat([manual, heur], ignore_index=True)
         goals_src = goals_src.drop_duplicates(subset=["var"], keep="first")
     else:
-        # keep whatever is already in session as the starting table
+        # Keep only what's in session - don't add heuristics if user has edited
         goals_src = st.session_state["goals_df"]
 
     goals_src = goals_src.fillna("").astype(
@@ -893,31 +1181,23 @@ with st.form("goals_form", clear_on_submit=False):
     goals_submit = st.form_submit_button("✅ Apply goal changes")
 
 if goals_submit:
-    base = st.session_state.get("goals_df")
+    # Simply use what the user has in the editor - don't merge with old data
     edited = goals_edit.copy()
 
-    # keep only non-empty vars
+    # Keep only non-empty vars
     edited = edited[edited["var"].astype(str).str.strip() != ""].astype(
         "object"
     )
 
-    if base is None or base.empty:
-        merged = edited
-    else:
-        # prefer edited rows on conflicts
-        base = base.astype("object")
-        base_no_dups = base[~base["var"].isin(edited["var"])]
-        merged = pd.concat([base_no_dups, edited], ignore_index=True)
-
-    # normalize dtypes & drop accidental duplicates
+    # Drop duplicates and normalize
     merged = (
-        merged.drop_duplicates(subset=["var"], keep="last")
+        edited.drop_duplicates(subset=["var"], keep="last")
         .fillna("")
         .astype({"var": "object", "group": "object", "type": "object"})
     )
 
     st.session_state["goals_df"] = merged
-    st.success("Goals appended & updated.")
+    st.success("Goals updated.")
 
 
 # ---- Custom channels UI ----
@@ -1226,210 +1506,29 @@ with st.form("mapping_form_main", clear_on_submit=False):
     mapping_submit = st.form_submit_button("✅ Apply mapping changes")
 
 if mapping_submit:
-    st.session_state["mapping_df"] = mapping_edit
-    st.success("Mapping updated.")
-
-# ──────────────────────────────────────────────────────────────
-# Channel Aggregation: OTHER and TOTAL columns
-# ──────────────────────────────────────────────────────────────
-st.subheader("Channel Aggregation (Optional)")
-st.markdown(
-    """
-Add aggregated columns for each marketing channel:
-- **`<CHANNEL>_OTHER`**: Sum of columns in the channel that lack a category
-- **`<CHANNEL>_TOTAL`**: Sum of all columns in the channel
-"""
-)
-
-# Get unique channels from mapping
-mapping_df_current = st.session_state["mapping_df"]
-unique_channels = sorted(
-    [
-        ch
-        for ch in mapping_df_current["channel"].dropna().unique()
-        if str(ch).strip() and str(ch).lower() != "nan"
-    ]
-)
-
-if unique_channels:
-    selected_channels = st.multiselect(
-        "Select channels to create aggregates for:",
-        options=unique_channels,
-        default=[],
-        help="For each selected channel, create _OTHER and _TOTAL columns",
-    )
-
-    if st.button("➕ Add Channel Aggregates", key="add_aggregates"):
-        if not selected_channels:
-            st.warning("Please select at least one channel")
-        else:
-            df_current = st.session_state["df_raw"].copy()
-            new_cols_added = []
-
-            for channel in selected_channels:
-                # Get all columns for this channel
-                channel_cols = mapping_df_current[
-                    mapping_df_current["channel"].str.lower() == channel.lower()
-                ]["var"].tolist()
-
-                if not channel_cols:
-                    continue
-
-                # Filter to numeric columns only
-                numeric_channel_cols = [
-                    c
-                    for c in channel_cols
-                    if c in df_current.columns
-                    and pd.api.types.is_numeric_dtype(df_current[c])
-                ]
-
-                if not numeric_channel_cols:
-                    st.warning(
-                        f"No numeric columns found for channel '{channel}'"
-                    )
-                    continue
-
-                # Get columns without category (for OTHER)
-                # --- Create per-suffix aggregates for this channel (TOTAL and OTHER) ---
-                import re
-                from collections import defaultdict
-
-                # Build suffix → cols mapping for numeric columns in this channel.
-                # Suffix = part after the first underscore following the channel name,
-                # fallback to last token after last underscore if needed.
-                suffix_to_cols = defaultdict(list)
-                for c in channel_cols:
-                    if c not in df_current.columns:
-                        continue
-                    if not pd.api.types.is_numeric_dtype(df_current[c]):
-                        continue
-                    low = c.lower()
-                    if low.startswith(f"{channel.lower()}_"):
-                        suffix = low[len(channel) + 1 :]
-                    else:
-                        suffix = low.split("_")[-1] or low
-                    suffix_to_cols[suffix].append(c)
-
-                for suffix, cols_in_suffix in suffix_to_cols.items():
-                    # sanitize suffix for column name
-                    safe_suffix = re.sub(r"\W+", "_", suffix).strip("_").upper()
-                    if not safe_suffix:
-                        continue
-
-                    # create TOTAL per suffix (sums all numeric columns in this suffix group)
-                    total_col_name = f"{channel.upper()}_TOTAL_{safe_suffix}"
-                    if total_col_name not in df_current.columns:
-                        df_current[total_col_name] = df_current[
-                            cols_in_suffix
-                        ].sum(axis=1)
-                        new_cols_added.append(total_col_name)
-
-                        # infer category for generated total using your auto_rules (fallback)
-                        inferred_cat = (
-                            _infer_category(
-                                f"_{suffix}", st.session_state["auto_rules"]
-                            )
-                            or "paid_media_spends"
-                        )
-                        new_row = pd.DataFrame(
-                            [
-                                {
-                                    "var": total_col_name,
-                                    "category": inferred_cat,
-                                    "channel": channel,
-                                    "data_type": "numeric",
-                                    "agg_strategy": "sum",
-                                    "custom_tags": "auto_generated_total",
-                                }
-                            ]
-                        )
-                        st.session_state["mapping_df"] = pd.concat(
-                            [st.session_state["mapping_df"], new_row],
-                            ignore_index=True,
-                        )
-
-                    # create OTHER per suffix: only sum columns in this suffix group that are uncategorized / marked as other
-                    # build mask restricting mapping rows to this channel+suffix group
-                    cols_in_suffix_lower = {ci.lower() for ci in cols_in_suffix}
-                    mask_suffix = (
-                        mapping_df_current["var"]
-                        .astype(str)
-                        .str.lower()
-                        .isin(cols_in_suffix_lower)
-                    )
-
-                    mask_uncategorized = mask_suffix & (
-                        mapping_df_current["category"]
-                        .astype(str)
-                        .str.strip()
-                        .eq("")
-                        | mapping_df_current["category"]
-                        .astype(str)
-                        .str.lower()
-                        .eq("other")
-                        | mapping_df_current["custom_tags"]
-                        .astype(str)
-                        .str.lower()
-                        .str.contains(r"\bother\b", regex=True)
-                    )
-
-                    uncategorized_cols = mapping_df_current.loc[
-                        mask_uncategorized, "var"
-                    ].tolist()
-                    numeric_uncategorized = [
-                        c
-                        for c in uncategorized_cols
-                        if c in df_current.columns
-                        and pd.api.types.is_numeric_dtype(df_current[c])
-                    ]
-
-                    if numeric_uncategorized:
-                        other_col_name = (
-                            f"{channel.upper()}_OTHER_{safe_suffix}"
-                        )
-                        if other_col_name not in df_current.columns:
-                            df_current[other_col_name] = df_current[
-                                numeric_uncategorized
-                            ].sum(axis=1)
-                            new_cols_added.append(other_col_name)
-
-                            inferred_cat = (
-                                _infer_category(
-                                    f"_{suffix}", st.session_state["auto_rules"]
-                                )
-                                or "paid_media_spends"
-                            )
-                            new_row = pd.DataFrame(
-                                [
-                                    {
-                                        "var": other_col_name,
-                                        "category": inferred_cat,
-                                        "channel": channel,
-                                        "data_type": "numeric",
-                                        "agg_strategy": "sum",
-                                        "custom_tags": "auto_generated_other",
-                                    }
-                                ]
-                            )
-                            st.session_state["mapping_df"] = pd.concat(
-                                [st.session_state["mapping_df"], new_row],
-                                ignore_index=True,
-                            )
-            # Update the raw dataframe
-            if new_cols_added:
-                st.session_state["df_raw"] = df_current
-                st.success(
-                    f"Added {len(new_cols_added)} aggregate column(s): {', '.join(new_cols_added)}"
-                )
-                st.rerun()
-            else:
-                st.info(
-                    "No new aggregate columns were created (they may already exist)"
-                )
-else:
-    st.info(
-        "No channels detected in the mapping. Add channel information to columns first."
-    )
+    # Apply automatic aggregations
+    try:
+        updated_mapping, updated_df = _apply_automatic_aggregations(
+            mapping_edit.copy(), st.session_state["df_raw"].copy()
+        )
+        st.session_state["mapping_df"] = updated_mapping
+        st.session_state["df_raw"] = updated_df
+        num_new = len(updated_mapping) - len(mapping_edit)
+        st.success(
+            f"✅ Mapping updated! Added {num_new} new aggregated columns. "
+            f"Total: {len(updated_mapping)} variables."
+        )
+        if num_new > 0:
+            st.info(
+                "💾 **Important:** Click 'Save this dataset to GCS' above to persist the new aggregated columns. "
+                "Then save the metadata below so the columns are available in the Experiment page."
+            )
+        # Trigger a rerun to refresh the UI with new columns
+        st.rerun()
+    except Exception as e:
+        st.error(f"Failed to apply automatic aggregations: {e}")
+        st.session_state["mapping_df"] = mapping_edit
+        st.warning("Saved mapping without automatic aggregations.")
 
 st.divider()
 
