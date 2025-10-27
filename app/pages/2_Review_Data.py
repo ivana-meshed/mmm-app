@@ -132,11 +132,19 @@ if sel_countries and "COUNTRY" in df:
 # -----------------------------
 target = GOAL if (GOAL and GOAL in df.columns) else (goal_cols[0] if goal_cols else None)
 
+# Spend + variables from metadata, restricted to columns present in df
 paid_spend_cols = [c for c in (mapping.get("paid_media_spends", []) or []) if c in df.columns]
 df["_TOTAL_SPEND"] = df[paid_spend_cols].sum(axis=1) if paid_spend_cols else 0.0
 
-# paid media feature columns present in df (optional; safe if unused later)
+# REPLACE the old 'paid_var_cols = metadata.get("Paid Media Variables", [])' with:
 paid_var_cols = [c for c in (mapping.get("paid_media_vars", []) or []) if c in df.columns]
+organic_cols  = [c for c in (mapping.get("organic_vars",    []) or []) if c in df.columns]
+context_cols  = [c for c in (mapping.get("context_vars",    []) or []) if c in df.columns]
+factor_cols   = [c for c in (mapping.get("factor_vars",     []) or []) if c in df.columns]
+
+# Convenience unions used later
+present_spend = paid_spend_cols
+present_vars  = paid_var_cols + organic_cols + context_cols + factor_cols
 
 RULE = freq_to_rule(FREQ)
 spend_label = ((meta.get("labels", {}) or {}).get("spend", "Spend") if isinstance(meta, dict) else "Spend")
