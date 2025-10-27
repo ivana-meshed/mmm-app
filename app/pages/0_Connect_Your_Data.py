@@ -1,26 +1,25 @@
-import os, io, json, tempfile
+import io
+import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
-from app_split_helpers import *  # bring in all helper functions/constants
-
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.backends import default_backend
-
 from app_shared import (
-    require_login_and_domain,
-    get_data_processor,
-    run_sql,
-    _require_sf_session,
     GCS_BUCKET,
-    _connect_snowflake,
     PROJECT_ID,
+    _connect_snowflake,
+    _require_sf_session,
+    get_data_processor,
+    require_login_and_domain,
+    run_sql,
 )
-
-from gcp_secrets import upsert_secret, access_secret
-
+from app_split_helpers import *  # bring in all helper functions/constants
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from gcp_secrets import access_secret, upsert_secret
 
 st.set_page_config(
     page_title="Connect your Data", page_icon="🧩", layout="wide"

@@ -17,9 +17,9 @@ from google.cloud import storage
 
 try:
     from app_shared import (
+        _sf_params_from_env,
         ensure_sf_conn,
         keepalive_ping,
-        _sf_params_from_env,
         require_login_and_domain,
     )
 except Exception:

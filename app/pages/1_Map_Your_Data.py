@@ -2,27 +2,28 @@
 # - Normalizes GCS "latest" vs "Latest" so the Source list shows only one entry.
 # - Replaces any "latest" items from _list_country_versions with canonical "Latest"
 #   and preserves ordering / uniqueness.
-import os, io, json, tempfile
+import io
+import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
-from app_split_helpers import *  # bring in all helper functions/constants
-from google.cloud import storage
-
 from app_shared import (
-    require_login_and_domain,
-    get_data_processor,
-    run_sql,
-    _require_sf_session,
-    ensure_sf_conn,
-    upload_to_gcs,
-    effective_sql,
     GCS_BUCKET,
     PROJECT_ID,
+    _require_sf_session,
+    effective_sql,
+    ensure_sf_conn,
+    get_data_processor,
     require_login_and_domain,
+    run_sql,
+    upload_to_gcs,
 )
+from app_split_helpers import *  # bring in all helper functions/constants
+from google.cloud import storage
 
 # ──────────────────────────────────────────────────────────────
 # Constants

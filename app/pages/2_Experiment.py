@@ -1,38 +1,38 @@
 # (full file contents)
-import os, io, json, tempfile, time, re
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
-from contextlib import contextmanager
-
-import logging
 import base64
+import io
+import json
+import logging
+import os
+import re
+import tempfile
+import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
-
-from google.cloud import storage
-
-
 from app_shared import (
-    require_login_and_domain,
-    get_data_processor,
-    run_sql,
-    _require_sf_session,
     GCS_BUCKET,
     PROJECT_ID,
     REGION,
     TRAINING_JOB_NAME,
-    upload_to_gcs,
-    parse_train_size,
-    timed_step,
+    _require_sf_session,
+    get_data_processor,
     get_job_manager,
+    parse_train_size,
+    require_login_and_domain,
+    run_sql,
+    timed_step,
+    upload_to_gcs,
 )
+from google.cloud import storage
 
 data_processor = get_data_processor()
 job_manager = get_job_manager()
 
 from app_split_helpers import *  # bring in all helper functions/constants
-
 
 st.set_page_config(page_title="Experiment", page_icon="🧪", layout="wide")
 

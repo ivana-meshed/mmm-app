@@ -8,6 +8,7 @@ import os
 import re
 from urllib.parse import quote
 
+
 def render_forecast_allocator_section(blobs, country, stamp):
     st.subheader("🗓️ Forecast allocations (next 3 months)")
 

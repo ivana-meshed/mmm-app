@@ -2,59 +2,57 @@
 import json
 import logging
 import os
-import time
 import tempfile
+import time
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import snowflake.connector as sf
 import streamlit as st
-from google.cloud import storage
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.backends import default_backend
-
-
+from app_shared import _queue_blob_path  # (kept for parity; not used below)
+from app_shared import _safe_tick_once  # (kept for parity; not used below
+from app_shared import _sanitize_queue_name  # (kept for parity; not used below)
 from app_shared import (
-    # Env / constants (already read from env in app_shared)
+    get_snowflake_connection,  # use shared connector for consistency with ensure_sf_conn
+)
+from app_shared import read_status_json  # (kept for parity; not used below)
+from app_shared import (  # Env / constants (already read from env in app_shared); Helpers
+    DEFAULT_QUEUE_NAME,
+    GCS_BUCKET,
+    JOB_HISTORY_COLUMNS,
     PROJECT_ID,
     REGION,
-    TRAINING_JOB_NAME,
-    GCS_BUCKET,
-    DEFAULT_QUEUE_NAME,
     SAFE_LAG_SECONDS_AFTER_RUNNING,
-    JOB_HISTORY_COLUMNS,
-    # Helpers
-    timed_step,
-    parse_train_size,
-    effective_sql,
-    _sf_params_from_env,
-    ensure_sf_conn,
-    run_sql,
-    upload_to_gcs,
-    read_status_json,  # (kept for parity; not used below)
-    build_job_config_from_params,
-    _sanitize_queue_name,  # (kept for parity; not used below)
-    _queue_blob_path,  # (kept for parity; not used below)
-    load_queue_from_gcs,
-    save_queue_to_gcs,
-    load_queue_payload,
-    queue_tick_once_headless,
-    handle_queue_tick_from_query_params,
-    get_job_manager,
-    get_data_processor,
-    _fmt_secs,
+    TRAINING_JOB_NAME,
     _connect_snowflake,
-    get_snowflake_connection,  # use shared connector for consistency with ensure_sf_conn
-    read_job_history_from_gcs,
-    save_job_history_to_gcs,
-    append_row_to_job_history,
-    require_login_and_domain,
-    _safe_tick_once,  # (kept for parity; not used below
+    _fmt_secs,
     _maybe_resample_df,
-    _normalize_resample_freq,
     _normalize_resample_agg,
+    _normalize_resample_freq,
+    _sf_params_from_env,
+    append_row_to_job_history,
+    build_job_config_from_params,
+    effective_sql,
+    ensure_sf_conn,
+    get_data_processor,
+    get_job_manager,
+    handle_queue_tick_from_query_params,
+    load_queue_from_gcs,
+    load_queue_payload,
+    parse_train_size,
+    queue_tick_once_headless,
+    read_job_history_from_gcs,
+    require_login_and_domain,
+    run_sql,
+    save_job_history_to_gcs,
+    save_queue_to_gcs,
+    timed_step,
+    upload_to_gcs,
 )
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from google.cloud import storage
 
 __all__ = [
     # public constants & classes...

@@ -4,18 +4,17 @@ import json
 import logging
 import os
 import re
-import time
 import tempfile
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import snowflake.connector as sf
 import streamlit as st
-from google.cloud import run_v2, storage
-
 from data_processor import DataProcessor
+from google.cloud import run_v2, storage
 
 # ─────────────────────────────
 # Page & logging setup

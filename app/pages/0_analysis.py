@@ -1,16 +1,16 @@
 # pages/01_Analysis.py
 import json
+
+import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
-import altair as alt
-
 from app_shared import (
+    _sf_params_from_env,
     effective_sql,
     ensure_sf_conn,
-    run_sql,
-    _sf_params_from_env,
     require_login_and_domain,
+    run_sql,
 )
 
 require_login_and_domain()

@@ -1,28 +1,31 @@
 # app_shared.py — shared helpers for Robyn Streamlit app
-import os, io, json, time, re
+import base64
+import io
+import json
+import logging
+import os
+import re
+import tempfile
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 # add to the existing imports at the top of app_shared.py
-from typing import Optional, List, Dict, Any
-from contextlib import contextmanager
-import logging
-import tempfile
-import base64
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-import pandas as pd
-import numpy as np
-import streamlit as st
-import snowflake.connector as sf
-from google.cloud import storage, run_v2, secretmanager
-
-from data_processor import DataProcessor
 from uuid import uuid4
-from google.api_core.exceptions import PreconditionFailed
 
-from cryptography.hazmat.primitives import serialization
+import numpy as np
+import pandas as pd
+import snowflake.connector as sf
+import streamlit as st
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from data_processor import DataProcessor
+from google.api_core.exceptions import PreconditionFailed
+from google.cloud import run_v2, secretmanager, storage
 
 # Environment constants
 PROJECT_ID = os.getenv("PROJECT_ID")
@@ -669,12 +672,15 @@ def ensure_sf_conn() -> sf.SnowflakeConnection:
 
     # Try to get key bytes from session state, or load from Secret Manager
     pk_bytes = st.session_state.get("_sf_private_key_bytes")
-    
+
     # If no key in session but we have params, try loading from persistent storage
     if not pk_bytes and params:
         try:
             from gcp_secrets import access_secret
-            PERSISTENT_KEY_SECRET_ID = os.getenv("SF_PERSISTENT_KEY_SECRET", "sf-private-key-persistent")
+
+            PERSISTENT_KEY_SECRET_ID = os.getenv(
+                "SF_PERSISTENT_KEY_SECRET", "sf-private-key-persistent"
+            )
             pem_bytes = access_secret(PERSISTENT_KEY_SECRET_ID, PROJECT_ID)
             if pem_bytes:
                 # Convert PEM -> PKCS#8 DER bytes
@@ -689,7 +695,7 @@ def ensure_sf_conn() -> sf.SnowflakeConnection:
                 st.session_state["_sf_private_key_bytes"] = pk_bytes
         except Exception:
             pass  # Fall through to other methods
-    
+
     if pk_bytes and params:
         conn = _connect_snowflake(
             user=params["user"],
@@ -912,6 +918,7 @@ def read_job_history_from_gcs(bucket_name: str) -> pd.DataFrame:
 
 def save_job_history_to_gcs(df, bucket_name: str):
     import io
+
     from google.cloud import storage
 
     df = normalize_job_history_df(df)
@@ -1048,7 +1055,9 @@ def build_job_config_from_params(
         "dep_var_type": str(params.get("dep_var_type", "revenue")),  # NEW
         "date_var": str(params.get("date_var", "date")),  # NEW
         "adstock": str(params.get("adstock", "geometric")),  # NEW
-        "hyperparameter_preset": str(params.get("hyperparameter_preset", "Meshed recommend")),  # NEW
+        "hyperparameter_preset": str(
+            params.get("hyperparameter_preset", "Meshed recommend")
+        ),  # NEW
         "use_parquet": True,
         "parallel_processing": True,
         "max_cores": 8,
