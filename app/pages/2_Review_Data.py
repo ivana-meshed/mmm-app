@@ -145,7 +145,7 @@ plat_map_df, platforms, PLATFORM_COLORS = build_plat_map_df(
 
 # -----------------------------
 # Timeframe & resample
-# -----------------------------
+# ----------------------------- 
 df_r = filter_range(df.copy(), DATE_COL, RANGE)
 df_prev = previous_window(df, df_r, DATE_COL, RANGE)
 
@@ -416,7 +416,7 @@ with tab_reg:
         ch_map_all = pd.DataFrame(columns=["col", "channel"])
 
     ch_map_spend = (
-        ch_map_all[ch_map_all["col"].isin(present_spend)].copy()
+        ch_map_all[ch_map_all["col"].isin(paid_spend_cols)].copy()
         if not ch_map_all.empty
         else pd.DataFrame(columns=["col", "channel"])
     )
@@ -664,9 +664,10 @@ with tab_mkt:
 
     # ----- KPI — Outcomes (TOTALS only) -----
     st.markdown("#### Outcomes (Total)")
-    cur_imps, d_imps = total_with_prev(IMPR_COLS)
-    cur_clicks, d_clicks = total_with_prev(CLICK_COLS)
-    cur_sessions, d_sessions = total_with_prev(SESSION_COLS)
+    cur_imps, d_imps = total_with_prev_local(IMPR_COLS)
+    cur_clicks, d_clicks = total_with_prev_local(CLICK_COLS)
+    cur_sessions, d_sessions = total_with_prev_local(SESSION_COLS)
+    cur_installs, d_installs = total_with_prev_local(INSTALL_COLS)
 
     kpi_grid_fixed(
         [
