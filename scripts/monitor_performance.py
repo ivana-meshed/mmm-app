@@ -232,7 +232,9 @@ class PerformanceMonitor:
 """
 
         if avg_cpu > 80:
-            report += "- ⚠️ High CPU usage detected - consider further scaling\n"
+            report += (
+                "- ⚠️ High CPU usage detected - consider further scaling\n"
+            )
         elif avg_cpu < 30:
             report += "- 💡 Low CPU usage - resources may be over-provisioned\n"
         else:
