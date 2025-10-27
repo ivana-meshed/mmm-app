@@ -999,7 +999,7 @@ with tab_biz:
                 delta_txt = f"{'+' if diff >= 0 else ''}{fmt_num(diff)}"
             kpis.append(
                 dict(
-                    title=f"Total {nice(g)}",
+                    title=f"{nice(g)}",
                     value=fmt_num(cur),
                     delta=delta_txt,
                     good_when="up",
@@ -1017,7 +1017,7 @@ with tab_biz:
             if pd.notna(cur_eff) and pd.notna(prev_eff):
                 diff = cur_eff - prev_eff
                 delta_txt = f"{'+' if diff >= 0 else ''}{diff:.2f}"
-            eff_title = "Avg ROAS" if str(g).upper() == "GMV" else f"Avg {nice(g)} / {spend_label}"
+            eff_title = "ROAS" if str(g).upper() == "GMV" else f"{nice(g)} / {spend_label}"
             kpis2.append(
                 dict(
                     title=eff_title,
@@ -1186,7 +1186,7 @@ with tab_biz:
             st.caption(f"ℹ️ Overlay disabled: '_TOTAL_SPEND' not available for this selection.")
 
 # =============================
-# TAB 2 — REGIONAL COMPARISON (v2.9.0)
+# TAB 2 — REGIONAL COMPARISON (v2.11.0)
 # =============================
 with tab_reg:
     st.subheader("Regional Comparison")
@@ -1227,7 +1227,6 @@ with tab_reg:
     # -----------------------------
     # Channel mapping (from metadata)
     # -----------------------------
-    # Build a mapping DataFrame of any df column -> channel (upper-cased for display)
     if CHANNELS_MAP:
         ch_map_all = (
             pd.DataFrame(
@@ -1240,7 +1239,6 @@ with tab_reg:
     else:
         ch_map_all = pd.DataFrame(columns=["col", "channel"])
 
-    # Spend columns available & their channels
     ch_map_spend = (
         ch_map_all[ch_map_all["col"].isin(present_spend)].copy()
         if not ch_map_all.empty
@@ -1248,28 +1246,16 @@ with tab_reg:
     )
 
     # -----------------------------
-    # Country comparison table (outcomes, spend & conversions) — unchanged logic
+    # Country comparison table (outcomes, spend & conversions)
     # -----------------------------
     if "COUNTRY" in df_r:
         g = df_r.groupby("COUNTRY", dropna=False)
         spend_s = g["_TOTAL_SPEND"].sum()
         target_s = g[target].sum() if (target in df_r.columns) else spend_s
 
-        imps_row = (
-            df_r[IMPR_COLS].sum(axis=1)
-            if IMPR_COLS
-            else pd.Series(0.0, index=df_r.index)
-        )
-        clicks_row = (
-            df_r[CLICK_COLS].sum(axis=1)
-            if CLICK_COLS
-            else pd.Series(0.0, index=df_r.index)
-        )
-        sessions_row = (
-            df_r[SESSION_COLS].sum(axis=1)
-            if SESSION_COLS
-            else pd.Series(0.0, index=df_r.index)
-        )
+        imps_row = df_r[IMPR_COLS].sum(axis=1) if IMPR_COLS else pd.Series(0.0, index=df_r.index)
+        clicks_row = df_r[CLICK_COLS].sum(axis=1) if CLICK_COLS else pd.Series(0.0, index=df_r.index)
+        sessions_row = df_r[SESSION_COLS].sum(axis=1) if SESSION_COLS else pd.Series(0.0, index=df_r.index)
 
         imps_s = imps_row.groupby(df_r["COUNTRY"]).sum()
         clicks_s = clicks_row.groupby(df_r["COUNTRY"]).sum()
@@ -1321,19 +1307,15 @@ with tab_reg:
     st.markdown("---")
 
     # -----------------------------
-    # Channel KPIs (totals) + expanders per channel
+    # Channel KPIs — Outcomes & Costs (totals, unchanged)
     # -----------------------------
     if not ch_map_all.empty:
-        # Helper: for each channel, which columns of a given type belong to it?
         ch_to_cols = ch_map_all.groupby("channel")["col"].apply(list).to_dict()
 
         def _sum_cols(cols: list[str]) -> float:
             return df_r[cols].sum().sum() if cols else 0.0
 
-        rows = []
-        channels = sorted(ch_to_cols.keys())
-
-        # Pre-compute per-channel SPEND by using the spend mapping (present_spend only)
+        # Precompute per-channel spend totals from mapped spend cols
         if not ch_map_spend.empty:
             spend_long = (
                 df_r.melt(
@@ -1348,13 +1330,14 @@ with tab_reg:
         else:
             ch_spend_tot = pd.Series(dtype=float)
 
+        rows = []
+        channels = sorted(ch_to_cols.keys())
         for ch in channels:
-            ch_cols_all = ch_to_cols.get(ch, [])
-            # Metric-specific columns for this channel (intersect with detected lists)
-            ch_impr = [c for c in IMPR_COLS if c in ch_cols_all]
-            ch_clicks = [c for c in CLICK_COLS if c in ch_cols_all]
-            ch_sessions = [c for c in SESSION_COLS if c in ch_cols_all]
-            ch_installs = [c for c in INSTALL_COLS if c in ch_cols_all]
+            cols_all = ch_to_cols.get(ch, [])
+            ch_impr = [c for c in IMPR_COLS if c in cols_all]
+            ch_clicks = [c for c in CLICK_COLS if c in cols_all]
+            ch_sessions = [c for c in SESSION_COLS if c in cols_all]
+            ch_installs = [c for c in INSTALL_COLS if c in cols_all]
 
             imps = _sum_cols(ch_impr)
             clicks = _sum_cols(ch_clicks)
@@ -1398,26 +1381,79 @@ with tab_reg:
         st.markdown("### Channel KPIs — Outcomes & Costs")
         st.dataframe(ch_disp, use_container_width=True)
 
-        # Expanders: per-channel breakdown of component spend columns
-        if not ch_map_spend.empty:
-            st.caption("Expand a channel to see its component spend columns.")
-            for ch in ch_cmp["Channel"].tolist():
-                with st.expander(f"{ch} breakdown"):
-                    det = (
-                        spend_long.loc[spend_long["channel"] == ch, ["col", "spend"]]
-                        .groupby("col", as_index=False)["spend"]
-                        .sum()
-                        .sort_values("spend", ascending=False)
-                    )
-                    det["Spend"] = det["spend"].map(fmt_num)
-                    st.dataframe(det[["col", "Spend"]].rename(columns={"col": "Column"}), use_container_width=True)
+        # -----------------------------
+        # Channel breakdown (selector → component table with same columns)
+        # -----------------------------
+        st.markdown("### Channel breakdown")
+        if not channels:
+            st.info("No channels found in metadata mapping.")
+        else:
+            sel_ch = st.selectbox("Channel", channels, index=0)
+
+            # Component spend cols mapped to the selected channel
+            comp_spend_cols = ch_map_spend.loc[ch_map_spend["channel"] == sel_ch, "col"].tolist()
+
+            if not comp_spend_cols:
+                st.caption("No component spend columns mapped for the selected channel.")
+            else:
+                # For component-level non-spend metrics, use a simple token heuristic:
+                # take the spend column's leading token (before first '_') to match IMPR/CLICK/SESSION cols.
+                def leading_token(colname: str) -> str:
+                    m0 = re.match(r"([A-Za-z0-9]+)_", str(colname))
+                    return (m0.group(1) if m0 else str(colname)).upper()
+
+                ch_cols_all = ch_to_cols.get(sel_ch, [])
+                ch_impr_all = [c for c in IMPR_COLS if c in ch_cols_all]
+                ch_click_all = [c for c in CLICK_COLS if c in ch_cols_all]
+                ch_sess_all = [c for c in SESSION_COLS if c in ch_cols_all]
+                ch_inst_all = [c for c in INSTALL_COLS if c in ch_cols_all]
+
+                rows_comp = []
+                for spend_col in comp_spend_cols:
+                    tok = leading_token(spend_col)
+                    spend_total = df_r[spend_col].sum()
+
+                    imps = df_r[[c for c in ch_impr_all if tok in c.upper()]].sum().sum() if ch_impr_all else 0.0
+                    clicks = df_r[[c for c in ch_click_all if tok in c.upper()]].sum().sum() if ch_click_all else 0.0
+                    sessions = df_r[[c for c in ch_sess_all if tok in c.upper()]].sum().sum() if ch_sess_all else 0.0
+                    installs = df_r[[c for c in ch_inst_all if tok in c.upper()]].sum().sum() if ch_inst_all else 0.0
+
+                    cpm = (spend_total / imps * 1000) if imps > 0 else np.nan
+                    cpc = (spend_total / clicks) if clicks > 0 else np.nan
+                    cps = (spend_total / sessions) if sessions > 0 else np.nan
+                    cpi = (spend_total / installs) if installs > 0 else np.nan
+
+                    rows_comp.append([spend_col, imps, clicks, sessions, spend_total, cpm, cpc, cps, cpi])
+
+                comp_df = pd.DataFrame(
+                    rows_comp,
+                    columns=[
+                        "Column",
+                        "Impressions",
+                        "Clicks",
+                        "Sessions",
+                        "Spend",
+                        "Cost per 1k Impressions",
+                        "Cost per Click",
+                        "Cost per Session",
+                        "Cost per Install",
+                    ],
+                ).sort_values("Spend", ascending=False)
+
+                comp_disp = comp_df.copy()
+                for c in ["Impressions", "Clicks", "Sessions", "Spend"]:
+                    comp_disp[c] = comp_disp[c].map(fmt_num)
+                for c in ["Cost per 1k Impressions", "Cost per Click", "Cost per Session", "Cost per Install"]:
+                    comp_disp[c] = comp_df[c].map(lambda x: f"{x:.2f}" if pd.notna(x) else "–")
+
+                st.dataframe(comp_disp, use_container_width=True)
     else:
         st.info("No channel mapping available in metadata.")
 
     st.markdown("---")
 
     # -----------------------------
-    # Channel × Country Spend Matrix (transposed vs. old Platform matrix)
+    # Channel × Country Spend Matrix (TRANSPOSED; no CSV download)
     # -----------------------------
     st.markdown("### Channel × Country Spend Matrix")
     if not ch_map_spend.empty and "COUNTRY" in df_r.columns:
@@ -1437,18 +1473,10 @@ with tab_reg:
             .unstack("COUNTRY")
             .fillna(0.0)
         )
-        # Order rows by total spend desc
+        # Order channels (rows) by total spend desc, then transpose to Country x Channel
         mat = mat.loc[mat.sum(axis=1).sort_values(ascending=False).index]
-        st.dataframe(mat.applymap(fmt_num), use_container_width=True)
-
-        csv = mat.to_csv().encode("utf-8")
-        st.download_button(
-            "Download CSV",
-            data=csv,
-            file_name="channel_country_spend_matrix.csv",
-            mime="text/csv",
-            key="dl_channel_country_matrix",
-        )
+        mat_t = mat.T  # TRANSPOSE: Countries as rows, Channels as columns
+        st.dataframe(mat_t.applymap(fmt_num), use_container_width=True)
     else:
         st.info("Channel mapping or COUNTRY column not available.")
 
