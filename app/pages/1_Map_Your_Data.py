@@ -652,11 +652,14 @@ def _apply_automatic_aggregations(
                             axis=1
                         )
 
+        # Re-fetch organic again to get the updated list with prefixes
+        organic = mapping_df[mapping_df["category"] == "organic_vars"].copy()
+
         # Create ORGANIC_TOTAL (sum of all organic vars excluding _CUSTOM)
         organic_vars = [
-            v
+            str(v)
             for v in organic["var"]
-            if "_CUSTOM" not in v and v in df_raw.columns
+            if "_CUSTOM" not in str(v) and str(v) in df_raw.columns
         ]
         if organic_vars and "ORGANIC_TOTAL" not in mapping_df["var"].values:
             new_mapping_rows.append(
