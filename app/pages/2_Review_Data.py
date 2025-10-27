@@ -961,7 +961,7 @@ tab_load, tab_biz, tab_reg, tab_mkt, tab_rel, tab_diag = st.tabs(
         "Select Data",
         "Business, Overview",
         "Business, Regional",
-        "Marketing, Overview",
+        "Marketing",
         "Relationships",
         "Collinearity & PCA (by Country)",
     ]
@@ -1607,6 +1607,27 @@ with tab_mkt:
     channel_options = ["All channels"] + platforms
     view_sel = st.selectbox("Channel view", channel_options, index=0)
 
+    # Helper: sub-channel label from spend col when a single platform is selected
+    def _sub_label(col: str, plat: str) -> str:
+        """
+        Take a raw spend column like 'GA_BRAND_COST' or 'GA_OTHER_SPEND'
+        and return a readable sub-channel label (e.g., 'BRAND', 'OTHER').
+        Robust to extra tokens; strips leading '<PLAT>_' and common spend suffixes.
+        """
+        if not isinstance(col, str):
+            return "Other"
+        c = col.upper()
+        p = str(plat).upper()
+        if c.startswith(p + "_"):
+            c = c[len(p) + 1 :]  # drop '<PLAT>_'
+        # strip common trailing tokens
+        for suf in ["_TOTAL_COST", "_TOTAL_SPEND", "_COST", "_SPEND", "_TOTAL"]:
+            if c.endswith(suf):
+                c = c[: -len(suf)]
+        # keep first token as the sub-channel "family" (e.g., BRAND, DEMAND, OTHER...)
+        c = c.split("_")[0].strip() or "Other"
+        return c.title()
+
     # Prepare a filtered long df for charts based on view
     def spend_long_filtered(dataframe: pd.DataFrame) -> pd.DataFrame:
         if plat_map_df.empty or dataframe.empty:
@@ -1617,8 +1638,12 @@ with tab_mkt:
         if vm.empty:
             return pd.DataFrame(columns=[DATE_COL, "col", "spend", "platform"])
         return (
-            dataframe.melt(id_vars=[DATE_COL], value_vars=vm["col"].tolist(),
-                           var_name="col", value_name="spend")
+            dataframe.melt(
+                id_vars=[DATE_COL],
+                value_vars=vm["col"].tolist(),
+                var_name="col",
+                value_name="spend",
+            )
             .merge(vm, on="col", how="left")
             .dropna(subset=["spend"])
         )
@@ -1626,61 +1651,113 @@ with tab_mkt:
     long_cur_view = spend_long_filtered(df_r)
     long_prev_view = spend_long_filtered(df_prev) if not df_prev.empty else pd.DataFrame()
 
-    # ----- Waterfall (spend by platform) — respects view -----
-    st.markdown("#### Change vs Previous — Waterfall (Spend by Platform)")
+    # ----- Waterfall — by platform (all) OR by sub-channel (single selection) -----
+    st.markdown("#### Change vs Previous — Waterfall")
     if not long_cur_view.empty:
-        cur_by_p = long_cur_view.groupby("platform")["spend"].sum()
-        prev_by_p = long_prev_view.groupby("platform")["spend"].sum() if not long_prev_view.empty else pd.Series(dtype=float)
+        if view_sel == "All channels":
+            # aggregate by platform
+            cur_grp = long_cur_view.groupby("platform")["spend"].sum()
+            prev_grp = long_prev_view.groupby("platform")["spend"].sum() if not long_prev_view.empty else pd.Series(dtype=float)
+            name_series = cur_grp
+            title_suffix = "by Platform"
+        else:
+            # aggregate by sub-channel inside the selected platform
+            sel_platform = view_sel
+            cur_sub = long_cur_view.copy()
+            cur_sub["sub"] = cur_sub["col"].map(lambda c: _sub_label(c, sel_platform))
+            cur_grp = cur_sub.groupby("sub")["spend"].sum()
+            if not long_prev_view.empty:
+                prev_sub = long_prev_view.copy()
+                prev_sub["sub"] = prev_sub["col"].map(lambda c: _sub_label(c, sel_platform))
+                prev_grp = prev_sub.groupby("sub")["spend"].sum()
+            else:
+                prev_grp = pd.Series(dtype=float)
+            name_series = cur_grp
+            title_suffix = f"{sel_platform} — by Sub-Channel"
 
-        all_p = sorted(set(cur_by_p.index).union(prev_by_p.index),
-                       key=lambda x: cur_by_p.get(x, 0.0), reverse=True)
+        all_keys = sorted(
+            set(cur_grp.index).union(prev_grp.index),
+            key=lambda x: name_series.get(x, 0.0),
+            reverse=True,
+        )
         steps, total_delta = [], 0.0
-        for p in all_p:
-            dv = cur_by_p.get(p, 0.0) - prev_by_p.get(p, 0.0)
+        for k in all_keys:
+            dv = cur_grp.get(k, 0.0) - prev_grp.get(k, 0.0)
             total_delta += dv
-            steps.append(dict(name=p, measure="relative", y=dv))
-        steps.insert(0, dict(name="Start (Prev Total)", measure="absolute", y=float(prev_by_p.sum())))
-        steps.append(dict(name="End (Current Total)", measure="total", y=float(prev_by_p.sum() + total_delta)))
+            steps.append(dict(name=k, measure="relative", y=float(dv)))
+        steps.insert(0, dict(name="Start (Prev Total)", measure="absolute", y=float(prev_grp.sum())))
+        steps.append(dict(name="End (Current Total)", measure="total", y=float(prev_grp.sum() + total_delta)))
 
-        fig_w = go.Figure(go.Waterfall(
-            name="Delta", orientation="v",
-            measure=[s["measure"] for s in steps],
-            x=[s["name"] for s in steps],
-            y=[s["y"] for s in steps],
-        ))
-        ttl_suffix = f" — {view_sel}" if view_sel != "All channels" else ""
-        fig_w.update_layout(title=f"Spend Change by Platform — Waterfall{ttl_suffix}", showlegend=False)
+        fig_w = go.Figure(
+            go.Waterfall(
+                name="Delta",
+                orientation="v",
+                measure=[s["measure"] for s in steps],
+                x=[s["name"] for s in steps],
+                y=[s["y"] for s in steps],
+            )
+        )
+        fig_w.update_layout(
+            title=f"Spend Change — Waterfall ({title_suffix})",
+            showlegend=False,
+        )
         st.plotly_chart(fig_w, use_container_width=True)
     else:
         st.info("No spend data for the selected view.")
     st.markdown("---")
 
-    # ----- Channel Mix (stacked) — respects view -----
+    # ----- Channel Mix (stacked) — platform (all) OR sub-channel (single) -----
     st.markdown("#### Channel Mix")
     if not long_cur_view.empty:
-        plat_freq = (
-            long_cur_view.set_index(DATE_COL)
-            .groupby("platform")["spend"]
-            .resample(RULE)
-            .sum(min_count=1)
-            .reset_index()
-            .rename(columns={DATE_COL: "DATE_PERIOD"})
-        )
-        plat_freq["PERIOD_LABEL"] = period_label(plat_freq["DATE_PERIOD"], RULE)
-        platform_order = (
-            plat_freq.groupby("platform")["spend"]
+        if view_sel == "All channels":
+            freq_df = (
+                long_cur_view.set_index(DATE_COL)
+                .groupby("platform")["spend"]
+                .resample(RULE)
+                .sum(min_count=1)
+                .reset_index()
+                .rename(columns={DATE_COL: "DATE_PERIOD"})
+            )
+            freq_df["series"] = freq_df["platform"]
+            chart_title = f"{spend_label} by Platform — {TIMEFRAME_LABEL}, {agg_label}"
+        else:
+            sel_platform = view_sel
+            sub_df = long_cur_view.copy()
+            sub_df["sub"] = sub_df["col"].map(lambda c: _sub_label(c, sel_platform))
+            freq_df = (
+                sub_df.set_index(DATE_COL)
+                .groupby("sub")["spend"]
+                .resample(RULE)
+                .sum(min_count=1)
+                .reset_index()
+                .rename(columns={DATE_COL: "DATE_PERIOD"})
+            )
+            freq_df["series"] = freq_df["sub"]
+            chart_title = f"{spend_label} by Sub-Channel ({sel_platform}) — {TIMEFRAME_LABEL}, {agg_label}"
+
+        freq_df["PERIOD_LABEL"] = period_label(freq_df["DATE_PERIOD"], RULE)
+        order = (
+            freq_df.groupby("series")["spend"]
             .sum()
             .sort_values(ascending=False)
             .index.tolist()
         )
+
         fig2 = px.bar(
-            plat_freq, x="PERIOD_LABEL", y="spend", color="platform",
-            category_orders={"platform": platform_order},
-            color_discrete_map=PLATFORM_COLORS,
-            title=f"{spend_label} by Platform — {TIMEFRAME_LABEL}, {agg_label}"
-                  + (f" — {view_sel}" if view_sel != "All channels" else ""),
+            freq_df,
+            x="PERIOD_LABEL",
+            y="spend",
+            color="series",
+            category_orders={"series": order},
+            color_discrete_map=PLATFORM_COLORS,  # fine: sub-channels re-use palette
+            title=chart_title,
         )
-        fig2.update_layout(barmode="stack", xaxis_title="Date", yaxis_title=spend_label, legend=dict(orientation="h"))
+        fig2.update_layout(
+            barmode="stack",
+            xaxis_title="Date",
+            yaxis_title=spend_label,
+            legend=dict(orientation="h"),
+        )
         st.plotly_chart(fig2, use_container_width=True)
     else:
         st.info("No spend data for the selected view.")
