@@ -49,17 +49,59 @@ def _meta_latest_blob(country: str) -> str:
 
 
 @st.cache_data(show_spinner=False)
-def _list_country_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
+def _sorted_versions_newest_first(ts_list: List[str]) -> List[str]:
+    # Try numeric sort, then datetime, else lexicographic
+    cleaned = [str(t).strip() for t in ts_list if str(t).strip()]
+    # drop 'latest' variants from the raw list
+    cleaned = [t for t in cleaned if t.lower() != "latest"]
+
+    # numeric?
+    try:
+        nums = [int(t) for t in cleaned]
+        return [t for _, t in sorted(zip(nums, cleaned), reverse=True)]
+    except Exception:
+        pass
+
+    # datetime-like?
+    from dateutil import parser
+    try:
+        parsed = [parser.parse(t) for t in cleaned]
+        return [t for _, t in sorted(zip(parsed, cleaned), reverse=True)]
+    except Exception:
+        pass
+
+    # fallback: reverse lexicographic
+    return sorted(cleaned, reverse=True)
+
+
+@st.cache_data(show_spinner=False)
+def _list_data_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
     client = storage.Client()
     prefix = f"{_data_root(country)}/"
     blobs = client.list_blobs(bucket, prefix=prefix)
     ts = set()
     for b in blobs:
         parts = b.name.split("/")
+        # datasets/<country>/<ts>/raw.parquet
         if len(parts) >= 4 and parts[-1] == "raw.parquet":
             ts.add(parts[-2])
-    out = sorted(ts, reverse=True)
-    return ["Latest"] + [v for v in out if str(v).lower() != "latest"]
+    out = _sorted_versions_newest_first(list(ts))
+    return ["Latest"] + out
+
+
+@st.cache_data(show_spinner=False)
+def _list_meta_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
+    client = storage.Client()
+    prefix = f"metadata/{country.lower().strip()}/"
+    blobs = client.list_blobs(bucket, prefix=prefix)
+    ts = set()
+    for b in blobs:
+        parts = b.name.split("/")
+        # metadata/<country>/<ts>/mapping.json
+        if len(parts) >= 4 and parts[-1] == "mapping.json":
+            ts.add(parts[-2])
+    out = _sorted_versions_newest_first(list(ts))
+    return ["Latest"] + out
 
 
 def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
@@ -226,7 +268,6 @@ def _validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
 st.session_state.setdefault("country", "de")
 st.session_state.setdefault("picked_data_ts", "Latest")
 st.session_state.setdefault("picked_meta_ts", "Latest")
-
 
 # -----------------------------
 # Utilities
@@ -938,14 +979,13 @@ with tab_load:
         st.session_state["country"] = country
 
     refresh_clicked = c4.button("↻ Refresh")
+    refresh_key = str(pd.Timestamp.utcnow().value) if refresh_clicked else ""
 
-    refresh_key = ""
-    if refresh_clicked:
-        refresh_key = str(pd.Timestamp.utcnow().value)
+    data_versions = _list_data_versions(GCS_BUCKET, country, refresh_key) if country else ["Latest"]
+    meta_versions = _list_meta_versions(GCS_BUCKET, country, refresh_key) if country else ["Latest"]
 
-    versions = _list_country_versions(GCS_BUCKET, country, refresh_key) if country else ["Latest"]
-    data_ts = c2.selectbox("Data version", options=versions, index=0, key="picked_data_ts")
-    meta_ts = c3.selectbox("Metadata version", options=versions, index=0, key="picked_meta_ts")
+    data_ts = c2.selectbox("Data version", options=data_versions, index=0, key="picked_data_ts")
+    meta_ts = c3.selectbox("Metadata version", options=meta_versions, index=0, key="picked_meta_ts")
 
     load_clicked = st.button("Load from GCS", type="primary")
 
