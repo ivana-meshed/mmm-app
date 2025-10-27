@@ -9,18 +9,16 @@ import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
-
-# add to the existing imports at the top of app_shared.py
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 from uuid import uuid4
-
 import numpy as np
 import pandas as pd
 import snowflake.connector as sf
 import streamlit as st
+import plotly.express as px
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from data_processor import DataProcessor
@@ -1471,3 +1469,668 @@ def _require_sf_session():
             "Please connect to Snowflake in Tab 1 and provide a private key."
         )
         st.stop()
+
+## FE additions below
+# =========================
+# GCS: paths, listing, download
+# =========================
+
+def data_root(country: str) -> str:
+    return f"datasets/{country.lower().strip()}"
+
+def data_blob(country: str, ts: str) -> str:
+    return f"{data_root(country)}/{ts}/raw.parquet"
+
+def data_latest_blob(country: str) -> str:
+    return f"{data_root(country)}/latest/raw.parquet"
+
+def meta_blob(country: str, ts: str) -> str:
+    return f"metadata/{country.lower().strip()}/{ts}/mapping.json"
+
+def meta_latest_blob(country: str) -> str:
+    return f"metadata/{country.lower().strip()}/latest/mapping.json"
+
+@st.cache_data(show_spinner=False)
+def sorted_versions_newest_first(ts_list: List[str]) -> List[str]:
+    cleaned = [str(t).strip() for t in ts_list if str(t).strip()]
+    cleaned = [t for t in cleaned if t.lower() != "latest"]
+    # numeric?
+    try:
+        nums = [int(t) for t in cleaned]
+        return [t for _, t in sorted(zip(nums, cleaned), reverse=True)]
+    except Exception:
+        pass
+    # datetime-like?
+    try:
+        from dateutil import parser
+        parsed = [parser.parse(t) for t in cleaned]
+        return [t for _, t in sorted(zip(parsed, cleaned), reverse=True)]
+    except Exception:
+        pass
+    # fallback
+    return sorted(cleaned, reverse=True)
+
+@st.cache_data(show_spinner=False)
+def list_data_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
+    client = storage.Client()
+    prefix = f"{data_root(country)}/"
+    blobs = client.list_blobs(bucket, prefix=prefix)
+    ts = set()
+    for b in blobs:
+        parts = b.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "raw.parquet":
+            ts.add(parts[-2])
+    out = sorted_versions_newest_first(list(ts))
+    return ["Latest"] + out
+
+@st.cache_data(show_spinner=False)
+def list_meta_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
+    client = storage.Client()
+    prefix = f"metadata/{country.lower().strip()}/"
+    blobs = client.list_blobs(bucket, prefix=prefix)
+    ts = set()
+    for b in blobs:
+        parts = b.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "mapping.json":
+            ts.add(parts[-2])
+    out = sorted_versions_newest_first(list(ts))
+    return ["Latest"] + out
+
+def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
+    client = storage.Client()
+    blob = client.bucket(bucket).blob(blob_path)
+    if not blob.exists():
+        raise FileNotFoundError(f"gs://{bucket}/{blob_path} not found")
+    with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
+        blob.download_to_filename(tmp.name)
+        return pd.read_parquet(tmp.name)
+
+def _download_json_from_gcs(bucket: str, blob_path: str) -> dict:
+    client = storage.Client()
+    blob = client.bucket(bucket).blob(blob_path)
+    if not blob.exists():
+        raise FileNotFoundError(f"gs://{bucket}/{blob_path} not found")
+    return json.loads(blob.download_as_bytes())
+
+@st.cache_data(show_spinner=False)
+def download_parquet_from_gcs_cached(bucket: str, blob_path: str) -> pd.DataFrame:
+    return _download_parquet_from_gcs(bucket, blob_path)
+
+@st.cache_data(show_spinner=False)
+def download_json_from_gcs_cached(bucket: str, blob_path: str) -> dict:
+    return _download_json_from_gcs(bucket, blob_path)
+
+@st.cache_data(show_spinner=False)
+def load_data_from_gcs(bucket: str, country: str, data_ts: str, meta_ts: str) -> Tuple[pd.DataFrame, dict, str]:
+    db = data_latest_blob(country) if data_ts == "Latest" else data_blob(country, str(data_ts))
+    mb = meta_latest_blob(country) if meta_ts == "Latest" else meta_blob(country, str(meta_ts))
+    df = _download_parquet_from_gcs(bucket, db)
+    meta = _download_json_from_gcs(bucket, mb)
+    df, date_col = parse_date(df, meta)
+    return df, meta, date_col
+
+# =========================
+# GCS: paths, listing, download
+# =========================
+
+def data_root(country: str) -> str:
+    return f"datasets/{country.lower().strip()}"
+
+def data_blob(country: str, ts: str) -> str:
+    return f"{data_root(country)}/{ts}/raw.parquet"
+
+def data_latest_blob(country: str) -> str:
+    return f"{data_root(country)}/latest/raw.parquet"
+
+def meta_blob(country: str, ts: str) -> str:
+    return f"metadata/{country.lower().strip()}/{ts}/mapping.json"
+
+def meta_latest_blob(country: str) -> str:
+    return f"metadata/{country.lower().strip()}/latest/mapping.json"
+
+@st.cache_data(show_spinner=False)
+def sorted_versions_newest_first(ts_list: List[str]) -> List[str]:
+    cleaned = [str(t).strip() for t in ts_list if str(t).strip()]
+    cleaned = [t for t in cleaned if t.lower() != "latest"]
+    # numeric?
+    try:
+        nums = [int(t) for t in cleaned]
+        return [t for _, t in sorted(zip(nums, cleaned), reverse=True)]
+    except Exception:
+        pass
+    # datetime-like?
+    try:
+        from dateutil import parser
+        parsed = [parser.parse(t) for t in cleaned]
+        return [t for _, t in sorted(zip(parsed, cleaned), reverse=True)]
+    except Exception:
+        pass
+    # fallback
+    return sorted(cleaned, reverse=True)
+
+@st.cache_data(show_spinner=False)
+def list_data_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
+    client = storage.Client()
+    prefix = f"{data_root(country)}/"
+    blobs = client.list_blobs(bucket, prefix=prefix)
+    ts = set()
+    for b in blobs:
+        parts = b.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "raw.parquet":
+            ts.add(parts[-2])
+    out = sorted_versions_newest_first(list(ts))
+    return ["Latest"] + out
+
+@st.cache_data(show_spinner=False)
+def list_meta_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
+    client = storage.Client()
+    prefix = f"metadata/{country.lower().strip()}/"
+    blobs = client.list_blobs(bucket, prefix=prefix)
+    ts = set()
+    for b in blobs:
+        parts = b.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "mapping.json":
+            ts.add(parts[-2])
+    out = sorted_versions_newest_first(list(ts))
+    return ["Latest"] + out
+
+def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
+    client = storage.Client()
+    blob = client.bucket(bucket).blob(blob_path)
+    if not blob.exists():
+        raise FileNotFoundError(f"gs://{bucket}/{blob_path} not found")
+    with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
+        blob.download_to_filename(tmp.name)
+        return pd.read_parquet(tmp.name)
+
+def _download_json_from_gcs(bucket: str, blob_path: str) -> dict:
+    client = storage.Client()
+    blob = client.bucket(bucket).blob(blob_path)
+    if not blob.exists():
+        raise FileNotFoundError(f"gs://{bucket}/{blob_path} not found")
+    return json.loads(blob.download_as_bytes())
+
+@st.cache_data(show_spinner=False)
+def download_parquet_from_gcs_cached(bucket: str, blob_path: str) -> pd.DataFrame:
+    return _download_parquet_from_gcs(bucket, blob_path)
+
+@st.cache_data(show_spinner=False)
+def download_json_from_gcs_cached(bucket: str, blob_path: str) -> dict:
+    return _download_json_from_gcs(bucket, blob_path)
+
+@st.cache_data(show_spinner=False)
+def load_data_from_gcs(bucket: str, country: str, data_ts: str, meta_ts: str) -> Tuple[pd.DataFrame, dict, str]:
+    db = data_latest_blob(country) if data_ts == "Latest" else data_blob(country, str(data_ts))
+    mb = meta_latest_blob(country) if meta_ts == "Latest" else meta_blob(country, str(meta_ts))
+    df = _download_parquet_from_gcs(bucket, db)
+    meta = _download_json_from_gcs(bucket, mb)
+    df, date_col = parse_date(df, meta)
+    return df, meta, date_col
+
+# =========================
+# Formatting & small utils
+# =========================
+
+def pretty(s: str) -> str:
+    if s is None:
+        return "–"
+    return s if s.isupper() else s.replace("_", " ").title()
+
+def fmt_num(x, nd=2):
+    if pd.isna(x): 
+        return "–"
+    a = abs(x)
+    if a >= 1e9: return f"{x/1e9:.{nd}f}B"
+    if a >= 1e6: return f"{x/1e6:.{nd}f}M"
+    if a >= 1e3: return f"{x/1e3:.{nd}f}k"
+    return f"{x:.0f}"
+
+def freq_to_rule(freq: str):
+    return {"D":"D", "W":"W-MON", "M":"MS", "Q":"QS-DEC", "YE":"YS"}[freq]
+
+def period_label(series: pd.Series, freq_code: str) -> pd.Series:
+    dt = pd.to_datetime(series)
+    if freq_code == "YE":
+        return dt.dt.year.astype(str)
+    if freq_code == "Q":
+        q = ((dt.dt.month - 1)//3 + 1).astype(str)
+        return dt.dt.year.astype(str) + " Q" + q
+    if freq_code == "M":
+        return dt.dt.strftime("%b %Y")
+    if freq_code in ("W-MON","W"):
+        return dt.dt.strftime("W%U %Y")
+    return dt.dt.strftime("%Y-%m-%d")
+
+def safe_eff(frame: pd.DataFrame, tgt: str):
+    if frame is None or frame.empty or "_TOTAL_SPEND" not in frame:
+        return np.nan
+    s = frame["_TOTAL_SPEND"].sum()
+    v = frame[tgt].sum() if tgt in frame else np.nan
+    return (v/s) if s > 0 else np.nan
+
+# =========================
+# Formatting & small utils
+# =========================
+
+def pretty(s: str) -> str:
+    if s is None:
+        return "–"
+    return s if s.isupper() else s.replace("_", " ").title()
+
+def fmt_num(x, nd=2):
+    if pd.isna(x): 
+        return "–"
+    a = abs(x)
+    if a >= 1e9: return f"{x/1e9:.{nd}f}B"
+    if a >= 1e6: return f"{x/1e6:.{nd}f}M"
+    if a >= 1e3: return f"{x/1e3:.{nd}f}k"
+    return f"{x:.0f}"
+
+def freq_to_rule(freq: str):
+    return {"D":"D", "W":"W-MON", "M":"MS", "Q":"QS-DEC", "YE":"YS"}[freq]
+
+def period_label(series: pd.Series, freq_code: str) -> pd.Series:
+    dt = pd.to_datetime(series)
+    if freq_code == "YE":
+        return dt.dt.year.astype(str)
+    if freq_code == "Q":
+        q = ((dt.dt.month - 1)//3 + 1).astype(str)
+        return dt.dt.year.astype(str) + " Q" + q
+    if freq_code == "M":
+        return dt.dt.strftime("%b %Y")
+    if freq_code in ("W-MON","W"):
+        return dt.dt.strftime("W%U %Y")
+    return dt.dt.strftime("%Y-%m-%d")
+
+def safe_eff(frame: pd.DataFrame, tgt: str):
+    if frame is None or frame.empty or "_TOTAL_SPEND" not in frame:
+        return np.nan
+    s = frame["_TOTAL_SPEND"].sum()
+    v = frame[tgt].sum() if tgt in frame else np.nan
+    return (v/s) if s > 0 else np.nan
+
+# =========================
+# Platform colors + mapping
+# =========================
+
+BASE_PLATFORM_COLORS = {
+    "GA": "#1f77b4", "META": "#e377c2", "BING": "#2ca02c",
+    "TV": "#ff7f0e", "PARTNERSHIP": "#17becf", "OTHER": "#7f7f7f",
+}
+QUAL_PALETTE = (
+    px.colors.qualitative.D3 + px.colors.qualitative.Bold
+    + px.colors.qualitative.Safe + px.colors.qualitative.Set2
+)
+
+def build_platform_colors(platforms: list):
+    cmap = {}
+    for p in platforms:
+        p_u = str(p).upper()
+        for k, col in BASE_PLATFORM_COLORS.items():
+            if k in p_u:
+                cmap[p] = col
+                break
+    i = 0
+    for p in platforms:
+        if p not in cmap:
+            cmap[p] = QUAL_PALETTE[i % len(QUAL_PALETTE)]
+            i += 1
+    return cmap
+
+def build_plat_map_df(
+    present_spend: List[str], 
+    df: pd.DataFrame, 
+    meta: dict, 
+    m: pd.DataFrame,
+    COL: str, 
+    PLAT: str, 
+    CHANNELS_MAP: Dict[str,str]
+) -> Tuple[pd.DataFrame, list, dict]:
+    plat_map_df = pd.DataFrame(columns=["col","platform"])
+    if present_spend:
+        pm_json = (meta.get("platform_map", {}) if isinstance(meta, dict) else {}) or {}
+        rows = [(c, str(pm_json[c])) for c in present_spend if pm_json.get(c)]
+        if rows:
+            plat_map_df = pd.DataFrame(rows, columns=["col","platform"])
+
+        if plat_map_df.empty and (PLAT in m.columns) and (COL in m.columns):
+            pm = m.loc[m[COL].isin(present_spend), [COL, PLAT]].dropna()
+            if not pm.empty:
+                plat_map_df = pm.rename(columns={COL:"col", PLAT:"platform"}).copy()
+
+        if plat_map_df.empty:
+            derived = []
+            for c in present_spend:
+                m0 = re.match(r"([A-Za-z0-9]+)_", c)
+                plat = m0.group(1).upper() if m0 else "OTHER"
+                derived.append((c, plat))
+            plat_map_df = pd.DataFrame(derived, columns=["col","platform"])
+
+    if not plat_map_df.empty and CHANNELS_MAP:
+        _norm = {str(k).upper(): str(v) for k, v in CHANNELS_MAP.items()}
+        plat_map_df["platform"] = plat_map_df["platform"].astype(str).map(lambda x: _norm.get(x.upper(), x))
+
+    platforms = (
+        plat_map_df["platform"].dropna().astype(str).unique().tolist()
+        if not plat_map_df.empty else []
+    )
+    palette = build_platform_colors(platforms)
+    return plat_map_df, platforms, palette
+
+# =========================
+# Meta & feature helpers
+# =========================
+
+def build_meta_views(meta: dict, df: pd.DataFrame):
+    """
+    Returns:
+      display_map, nice_fn, goal_cols, mapping_dict, m_df, ALL_COLS_UP,
+      IMPR_COLS, CLICK_COLS, SESSION_COLS, INSTALL_COLS
+    """
+    display_map = meta.get("display_name_map", {}) or {}
+
+    def nice(colname: str) -> str:
+        alias = (display_map.get(colname) or "").strip()
+        return alias if alias else pretty(colname)
+
+    mapping = meta.get("mapping", {}) if isinstance(meta, dict) else {}
+    mapping = mapping or {}
+    goal_vars = [g.get("var") for g in (meta.get("goals", []) if isinstance(meta, dict) else []) if g.get("var")]
+    goal_cols = [c for c in goal_vars if c in df.columns]
+
+    # Compatibility frame "m"
+    rows = []
+    bucket_to_cat = {
+        "paid_media_spends":"paid_media_spends",
+        "paid_media_vars":"paid_media_vars",
+        "organic_vars":"organic_vars",
+        "context_vars":"context_vars",
+    }
+    for k, vals in (mapping or {}).items():
+        cat = bucket_to_cat.get(k)
+        if not cat: 
+            continue
+        for v in vals or []:
+            rows.append(dict(column_name=str(v), main_category=cat))
+
+    for g in (meta.get("goals") or []):
+        v = g.get("var")
+        if not v: 
+            continue
+        grp = (g.get("group") or "").strip().lower()
+        cat = "goal" if grp in ("primary","main","goal","") else "secondary_goal"
+        rows.append(dict(column_name=str(v), main_category=cat))
+
+    platform_map = meta.get("platform_map", {}) if isinstance(meta, dict) else {}
+    platform_map = platform_map or {}
+
+    seen, rows_dedup = set(), []
+    for r in rows:
+        key = str(r["column_name"])
+        if key in seen: 
+            continue
+        seen.add(key)
+        r["platform"] = platform_map.get(key)
+        r["display_name"] = display_map.get(key)
+        rows_dedup.append(r)
+
+    m = pd.DataFrame(rows_dedup, columns=["column_name","main_category","platform","display_name"])
+    m.columns = [c.strip().lower() for c in m.columns]
+
+    ALL_COLS_UP = {c: str(c).upper() for c in df.columns}
+
+    def cols_like(keyword: str):
+        kw = keyword.upper()
+        return [c for c,u in ALL_COLS_UP.items() if kw in u]
+
+    IMPR_COLS = cols_like("IMPRESSION")
+    CLICK_COLS = cols_like("CLICK")
+    SESSION_COLS = cols_like("SESSION")
+    INSTALL_COLS = [c for c in cols_like("INSTALL") + cols_like("APP_INSTALL")]
+
+    return display_map, nice, goal_cols, mapping, m, ALL_COLS_UP, IMPR_COLS, CLICK_COLS, SESSION_COLS, INSTALL_COLS
+
+# =========================
+# Sidebar builder
+# =========================
+
+def render_sidebar(meta: dict, df: pd.DataFrame, nice, goal_cols: List[str]):
+    # Countries
+    if "COUNTRY" in df.columns:
+        country_list = sorted(df["COUNTRY"].dropna().astype(str).unique().tolist())
+        default_countries = country_list or []
+        sel_countries = st.sidebar.multiselect("Country (multi-select)", country_list, default=default_countries)
+    else:
+        sel_countries = []
+        st.sidebar.caption("Dataset has no COUNTRY column — showing all rows.")
+
+    # Goals
+    if not goal_cols:
+        st.sidebar.error("No goals found in metadata.")
+        GOAL = None
+    else:
+        group_fallback = {g.get("var"): (g.get("group") or "primary")
+                          for g in (meta.get("goals") or []) if g.get("var")}
+        def _goal_tag_for(col: str) -> str:
+            g = (group_fallback.get(col, "") or "").strip().lower()
+            return "Secondary" if g in ("secondary","alt","secondary_goal") else "Main"
+
+        items = []
+        for col in goal_cols:
+            tag = _goal_tag_for(col)
+            base = (nice(col) or str(col)).strip() or str(col)
+            items.append((f"{base} · {tag}", col, tag, base.lower()))
+
+        from collections import Counter
+        counts = Counter([lbl for (lbl, _, _, _) in items])
+        fixed = []
+        for (lbl, col, tag, base_lower) in items:
+            if counts[lbl] > 1:
+                base_name = lbl.split(" · ")[0]
+                lbl = f"{base_name} [{col}] · {tag}"
+            fixed.append((lbl, col, tag, base_lower))
+        fixed.sort(key=lambda x: (0 if x[2]=="Main" else 1, x[3]))
+
+        labels = [lbl for (lbl, _, _, _) in fixed]
+        label_to_col = {lbl: col for (lbl, col, _, _) in fixed}
+
+        dep_var = (meta.get("dep_var") or "").strip()
+        default_col = dep_var if dep_var in goal_cols else ("GMV" if "GMV" in goal_cols else goal_cols[0])
+        default_label = next((l for l,c in label_to_col.items() if c==default_col), labels[0])
+        GOAL = label_to_col[st.sidebar.selectbox("Goal", labels, index=labels.index(default_label))]
+
+    # Timeframe
+    tf_label_map = {
+        "LAST 6 MONTHS":"6m", "LAST 12 MONTHS":"12m", "CURRENT YEAR":"cy",
+        "LAST YEAR":"ly", "LAST 2 YEARS":"2y", "ALL":"all",
+    }
+    TIMEFRAME_LABEL = st.sidebar.selectbox("Timeframe", list(tf_label_map.keys()), index=0)
+    RANGE = tf_label_map[TIMEFRAME_LABEL]
+
+    # Aggregation
+    agg_map = {"Daily":"D", "Weekly":"W", "Monthly":"M", "Quarterly":"Q", "Yearly":"YE"}
+    agg_label = st.sidebar.selectbox("Aggregation", list(agg_map.keys()), index=2)
+    FREQ = agg_map[agg_label]
+
+    return GOAL, sel_countries, TIMEFRAME_LABEL, RANGE, agg_label, FREQ
+
+# =========================
+# Time filters / resampling
+# =========================
+
+def filter_range(df: pd.DataFrame, date_col: str, RANGE: str) -> pd.DataFrame:
+    if df.empty: 
+        return df
+    date_max = df[date_col].max()
+    if RANGE=="all": 
+        return df
+    if RANGE=="2y": 
+        return df[df[date_col] >= (date_max - pd.DateOffset(years=2))]
+    if RANGE=="ly":
+        today = pd.Timestamp.today().normalize()
+        start = pd.Timestamp(year=today.year-1, month=1, day=1)
+        end = pd.Timestamp(year=today.year-1, month=12, day=31, hour=23, minute=59, second=59)
+        return df[(df[date_col] >= start) & (df[date_col] <= end)]
+    if RANGE=="12m":
+        today = pd.Timestamp.today().normalize()
+        start_of_this_month = pd.Timestamp(year=today.year, month=today.month, day=1)
+        start = start_of_this_month - pd.DateOffset(months=11)
+        return df[df[date_col] >= start]
+    if RANGE=="cy":
+        start = pd.Timestamp(year=pd.Timestamp.today().year, month=1, day=1)
+        return df[df[date_col] >= start]
+    if RANGE=="6m":
+        today = pd.Timestamp.today().normalize()
+        start_of_this_month = pd.Timestamp(year=today.year, month=today.month, day=1)
+        start = start_of_this_month - pd.DateOffset(months=5)
+        return df[df[date_col] >= start]
+    # legacy 1y:
+    if RANGE=="1y":
+        return df[df[date_col] >= (date_max - pd.DateOffset(years=1))]
+    return df
+
+def previous_window(full_df: pd.DataFrame, current_df: pd.DataFrame, date_col: str, RANGE: str) -> pd.DataFrame:
+    if current_df.empty: 
+        return full_df.iloc[0:0]
+    cur_start, cur_end = current_df[date_col].min(), current_df[date_col].max()
+    span = cur_end - cur_start
+    if RANGE == "cy":
+        this_year = pd.Timestamp.today().year
+        start_prev = pd.Timestamp(year=this_year-1, month=1, day=1)
+        same_day_prev_year = pd.Timestamp(year=this_year-1, month=cur_end.month, day=cur_end.day)
+        end_prev = min(same_day_prev_year, full_df[date_col].max())
+        return full_df[(full_df[date_col] >= start_prev) & (full_df[date_col] <= end_prev)].copy()
+    if RANGE == "all": 
+        return full_df.iloc[0:0]
+    prev_end = cur_start - pd.Timedelta(days=1)
+    prev_start = prev_end - span
+    return full_df[(full_df[date_col] >= prev_start) & (full_df[date_col] <= prev_end)].copy()
+
+def resample_numeric(df_r: pd.DataFrame, date_col: str, RULE: str, ensure_cols: List[str] = None) -> pd.DataFrame:
+    ensure_cols = ensure_cols or []
+    num_cols = df_r.select_dtypes(include=[np.number]).columns
+    res = (
+        df_r.set_index(date_col)[num_cols]
+        .resample(RULE).sum(min_count=1).reset_index()
+        .rename(columns={date_col: "DATE_PERIOD"})
+    )
+    for must in ensure_cols:
+        if (must is not None) and (must in df_r.columns) and (must not in res.columns):
+            add = (
+                df_r.set_index(date_col)[[must]]
+                .resample(RULE).sum(min_count=1).reset_index()
+                .rename(columns={date_col: "DATE_PERIOD"})
+            )
+            res = res.merge(add, on="DATE_PERIOD", how="left")
+    return res
+
+def total_with_prev(df_r: pd.DataFrame, df_prev: pd.DataFrame, collist: List[str]):
+    cur = df_r[collist].sum().sum() if collist else np.nan
+    prev = (df_prev[collist].sum().sum()
+            if (not df_prev.empty and all(c in df_prev.columns for c in collist))
+            else np.nan)
+    return cur, (cur - prev) if pd.notna(prev) else None
+
+def validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
+    """
+    Minimal validator for the 'Select Data' tab:
+      - Do NOT flag 'metadata but missing in data' (intentionally suppressed).
+      - DO flag 'data but not in metadata' (case-insensitive).
+      - DO run a coarse type check and ensure the declared date column is treated as 'date'.
+
+    Declared set = union of:
+      - mapping.* arrays (paid_media_spends/vars, organic_vars, context_vars, factor_vars)
+      - goals[].var
+      - data.date_field
+      - keys(meta.data_types)
+      - keys(meta.channels)
+      - keys(meta.agg_strategies)
+    """
+    if not isinstance(meta, dict):
+        meta = {}
+
+    mapping: Dict[str, List[str]] = meta.get("mapping") or {}
+    goals_list = meta.get("goals") or []
+    data_types: Dict[str, str] = meta.get("data_types") or {}
+    channels_map: Dict[str, str] = meta.get("channels") or {}
+    agg_strat: Dict[str, str] = meta.get("agg_strategies") or {}
+    date_declared = str(meta.get("data", {}).get("date_field") or "DATE")
+
+    # --- Collect declared variables from all sources ---
+    declared_vars: List[str] = []
+
+    for _, arr in (mapping or {}).items():
+        if arr:
+            declared_vars.extend(map(str, arr))
+
+    declared_vars.extend([str(g.get("var")) for g in goals_list if g and g.get("var")])
+    declared_vars.append(date_declared)
+    declared_vars.extend(map(str, (data_types or {}).keys()))
+    declared_vars.extend(map(str, (channels_map or {}).keys()))
+    declared_vars.extend(map(str, (agg_strat or {}).keys()))
+
+    # de-dup while preserving order
+    declared_vars = [v for i, v in enumerate(declared_vars) if v and v not in declared_vars[:i]]
+
+    # Case-insensitive sets for comparison
+    meta_vars_norm = {v.strip().lower() for v in declared_vars}
+    df_cols = list(map(str, df.columns))
+    df_cols_norm = {c.strip().lower() for c in df_cols}
+
+    # We SUPPRESS the 'missing_in_df' list intentionally
+    missing_in_df: List[str] = []
+
+    # Extra = columns present in df but not declared anywhere (case-insensitive); show df spelling
+    extra_in_df = sorted([c for c in df_cols if c.strip().lower() not in meta_vars_norm])
+
+    # ---- Declared type map (with DATE override to 'date') ----
+    declared_types: Dict[str, str] = {}
+    for k, t in (data_types or {}).items():
+        declared_types[str(k)] = str(t or "").strip().lower()
+
+    # dep_variable_type → assume numeric if provided but not typed
+    dep_types = meta.get("dep_variable_type") or {}
+    for k in dep_types.keys():
+        declared_types.setdefault(str(k), "numeric")
+
+    # Force declared date to 'date'
+    declared_types[date_declared] = "date"
+
+    def _observed_kind(colname: str) -> str:
+        if colname not in df.columns:
+            return "missing"
+        s = df[colname]
+        if pd.api.types.is_datetime64_any_dtype(s):
+            return "date"
+        if pd.api.types.is_numeric_dtype(s):
+            return "numeric"
+        # Heuristic: if declared as 'date', consider parsability
+        for dk, dt in declared_types.items():
+            if dk.lower() == colname.lower() and dt == "date":
+                try:
+                    probe = pd.to_datetime(s, errors="coerce")
+                    if probe.notna().sum() > 0:
+                        return "date"
+                except Exception:
+                    pass
+        return "categorical"
+
+    # Build mismatches over union of declared keys and declared_vars
+    to_check = sorted(set(list(declared_types.keys()) + declared_vars), key=str.lower)
+    rows = []
+    for v in to_check:
+        # match actual df column (case-insensitive)
+        actual = next((c for c in df.columns if c.lower() == v.lower()), None)
+        declared = declared_types.get(v, "") or "numeric"
+        observed = _observed_kind(actual) if actual is not None else "missing"
+        if observed != "missing" and declared != observed:
+            rows.append({"variable": v, "declared": declared, "observed": observed})
+
+    type_mismatches = pd.DataFrame(rows, columns=["variable", "declared", "observed"])
+
+    return {
+        "missing_in_df": missing_in_df,    # intentionally empty
+        "extra_in_df": extra_in_df,
+        "type_mismatches": type_mismatches,
+        "channels_map": channels_map,
+    }
