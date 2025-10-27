@@ -1,0 +1,81 @@
+﻿var,category,channel,data_type,agg_strategy,custom_tags
+GA_SUPPLY_COST,paid_media_spends,ga,numeric,sum,
+GA_DEMAND_COST,paid_media_spends,ga,numeric,sum,
+GA_OTHER_COST,paid_media_spends,ga,numeric,sum,small
+GA_COMPETITOR_COST,paid_media_spends,ga,numeric,sum,small
+GA_BRAND_COST,paid_media_spends,ga,numeric,sum,small, campaign
+GA_APP_COST,paid_media_spends,ga,numeric,sum,small, campaign
+GA_SUPPLY_SESSIONS,paid_media_vars,ga,numeric,sum,
+GA_DEMAND_SESSIONS,paid_media_vars,ga,numeric,sum,
+GA_OTHER_SESSIONS,paid_media_vars,ga,numeric,sum,
+GA_COMPETITOR_SESSIONS,paid_media_vars,ga,numeric,sum,
+GA_BRAND_SESSIONS,paid_media_vars,ga,numeric,sum,
+GA_APP_SESSIONS,paid_media_vars,ga,numeric,sum,
+GA_SUPPLY_IMPRESSIONS,paid_media_vars,ga,numeric,sum,
+GA_DEMAND_IMPRESSIONS,paid_media_vars,ga,numeric,sum,
+GA_OTHER_IMPRESSIONS,paid_media_vars,ga,numeric,sum,
+GA_COMPETITOR_IMPRESSIONS,paid_media_vars,ga,numeric,sum,
+GA_BRAND_IMPRESSIONS,paid_media_vars,ga,numeric,sum,
+GA_APP_IMPRESSIONS,paid_media_vars,ga,numeric,sum,
+GA_SUPPLY_CLICKS,paid_media_vars,ga,numeric,sum,
+GA_DEMAND_CLICKS,paid_media_vars,ga,numeric,sum,
+GA_OTHER_CLICKS,paid_media_vars,ga,numeric,sum,
+GA_COMPETITOR_CLICKS,paid_media_vars,ga,numeric,sum,
+GA_BRAND_CLICKS,paid_media_vars,ga,numeric,sum,
+GA_APP_CLICKS,paid_media_vars,ga,numeric,sum,
+NL_DAILY_SESSIONS,organic_vars,organic,numeric,sum,engineering
+SEO_DAILY_SESSIONS,organic_vars,seo,numeric,sum,engineering
+DIRECT_DAILY_SESSIONS,organic_vars,direct,numeric,sum,content
+CRM_OTHER_DAILY_SESSIONS,organic_vars,,numeric,sum,engineering
+CRM_DAILY_SESSIONS,organic_vars,organic,numeric,sum,engineering
+ORGANIC_SOCIAL_DAILY_SESSIONS,organic_vars,organic,numeric,sum,content
+BLOG_DAILY_SESSIONS,organic_vars,organic,numeric,sum,content
+
+
+var,category,channel,data_type,agg_strategy,custom_tags
+GA_SUPPLY_COST,paid_media_spends,ga,numeric,sum,
+GA_DEMAND_COST,paid_media_spends,ga,numeric,sum,
+GA_OTHER_COST,paid_media_spends,ga,numeric,sum,small
+GA_COMPETITOR_COST,paid_media_spends,ga,numeric,sum,small
+GA_BRAND_COST,paid_media_spends,ga,numeric,sum,small, campaign
+GA_APP_COST,paid_media_spends,ga,numeric,sum,small, campaign
+GA_TOTAL_COST,paid_media_spends,ga,numeric,
+GA_SMALL_COST_CUSTOM,paid_media_spends,ga,numeric,sum,small
+GA_CAMPAIGN_COST_CUSTOM,paid_media_spends,ga,numeric,sum, campaign
+GA_SUPPLY_SESSIONS,paid_media_vars,ga,numeric,sum,
+GA_DEMAND_SESSIONS,paid_media_vars,ga,numeric,sum,
+GA_OTHER_SESSIONS,paid_media_vars,ga,numeric,sum,small
+GA_COMPETITOR_SESSIONS,paid_media_vars,ga,numeric,sum,small
+GA_BRAND_SESSIONS,paid_media_vars,ga,numeric,sum,small, campaign
+GA_APP_SESSIONS,paid_media_vars,ga,numeric,sum,small, campaign
+GA_TOTAL_SESSIONS,paid_media_vars,ga,numeric,
+GA_SMALL_SESSIONS_CUSTOM,paid_media_vars,ga,numeric,sum,small
+GA_CAMPAIGN_SESSIONS_CUSTOM,paid_media_vars,ga,numeric,sum, campaign
+GA_SUPPLY_IMPRESSIONS,paid_media_vars,ga,numeric,sum,
+GA_DEMAND_IMPRESSIONS,paid_media_vars,ga,numeric,sum,
+GA_OTHER_IMPRESSIONS,paid_media_vars,ga,numeric,sum,small
+GA_COMPETITOR_IMPRESSIONS,paid_media_vars,ga,numeric,sum,small
+GA_BRAND_IMPRESSIONS,paid_media_vars,ga,numeric,sum,small, campaign
+GA_APP_IMPRESSIONS,paid_media_vars,ga,numeric,sum,small, campaign
+GA_TOTAL_IMPRESSIONS,paid_media_vars,ga,numeric,
+GA_SMALL_IMPRESSIONS_CUSTOM,paid_media_vars,ga,numeric,sum,small
+GA_CAMPAIGN_IMPRESSIONS_CUSTOM,paid_media_vars,ga,numeric,sum, campaign
+GA_SUPPLY_CLICKS,paid_media_vars,ga,numeric,sum,
+GA_DEMAND_CLICKS,paid_media_vars,ga,numeric,sum,
+GA_OTHER_CLICKS,paid_media_vars,ga,numeric,sum,small
+GA_COMPETITOR_CLICKS,paid_media_vars,ga,numeric,sum,small
+GA_BRAND_CLICKS,paid_media_vars,ga,numeric,sum,small, campaign
+GA_APP_CLICKS,paid_media_vars,ga,numeric,sum,small, campaign
+GA_TOTAL_CLICKS,paid_media_vars,ga,numeric,
+GA_SMALL_CLICKS_CUSTOM,paid_media_vars,ga,numeric,sum,small
+GA_CAMPAIGN_CLICKS_CUSTOM,paid_media_vars,ga,numeric,sum, campaign
+ORGANIC_NL_DAILY_SESSIONS,organic_vars,organic,numeric,sum,engineering
+ORGANIC_SEO_DAILY_SESSIONS,organic_vars,seo,numeric,sum,engineering
+ORGANIC_DIRECT_DAILY_SESSIONS,organic_vars,direct,numeric,sum,content
+ORGANIC_CRM_OTHER_DAILY_SESSIONS,organic_vars,,numeric,sum,engineering
+ORGANIC_CRM_DAILY_SESSIONS,organic_vars,organic,numeric,sum,engineering
+ORGANIC_ORGANIC_SOCIAL_DAILY_SESSIONS,organic_vars,organic,numeric,sum,content
+ORGANIC_BLOG_DAILY_SESSIONS,organic_vars,organic,numeric,sum,content
+ORGANIC_ENGINEERING_SESSIONS_CUSTOM,organic_vars,organic,numeric,sum,engineering
+ORGANIC_CONTENT_SESSIONS_CUSTOM,organic_vars,organic,numeric,sum,content
+ORGANIC_TOTAL,organic_vars,organic,numeric,

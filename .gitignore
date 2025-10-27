@@ -38,6 +38,7 @@ app/deprecated/
 app/streamlit_app_old.py
 app/streamlit_app_backup.py
 app/streamlit_app_dev.py
+app/.streamlit/secrets.toml
 
 *.pdf
 docs/*.png
