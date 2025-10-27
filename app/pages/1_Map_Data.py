@@ -16,7 +16,6 @@ from app_shared import (
     PROJECT_ID,
     _require_sf_session,
     effective_sql,
-    ensure_sf_conn,
     get_data_processor,
     require_login_and_domain,
     run_sql,
@@ -198,11 +197,11 @@ def _guess_goal_type(col: str) -> str:
     Returns empty string if uncertain - user must tag manually.
     """
     s = col.lower()
-    
+
     # Very specific patterns we're confident about
     if s.endswith("_gmv") or s.endswith("_revenue") or s.endswith("_rev"):
         return "revenue"
-    
+
     # For other cases, return empty string so user must tag manually
     return ""
 
@@ -478,9 +477,7 @@ def _apply_automatic_aggregations(
             all_tags = set()
             for tags_str in channel_rows["custom_tags"].dropna():
                 tags = [
-                    t.strip()
-                    for t in str(tags_str).split(",")
-                    if t.strip()
+                    t.strip() for t in str(tags_str).split(",") if t.strip()
                 ]
                 all_tags.update(tags)
 
@@ -506,9 +503,7 @@ def _apply_automatic_aggregations(
 
                 # Create custom aggregate for each suffix
                 for suffix, vars_list in suffixes.items():
-                    custom_var_name = (
-                        f"{channel.upper()}_{tag.upper()}_{suffix.upper()}_CUSTOM"
-                    )
+                    custom_var_name = f"{channel.upper()}_{tag.upper()}_{suffix.upper()}_CUSTOM"
 
                     # Only create if it doesn't already exist
                     if custom_var_name not in mapping_df["var"].values:
@@ -602,9 +597,7 @@ def _apply_automatic_aggregations(
             tag_rows = organic[
                 organic["custom_tags"]
                 .fillna("")
-                .str.contains(
-                    r"\b" + str(tag) + r"\b", case=False, regex=True
-                )
+                .str.contains(r"\b" + str(tag) + r"\b", case=False, regex=True)
             ]
             vars_list = tag_rows["var"].tolist()
 
@@ -1190,19 +1183,19 @@ with st.form("goals_form", clear_on_submit=False):
 if goals_submit:
     # Simply use what the user has in the editor - don't merge with old data
     edited = goals_edit.copy()
-    
+
     # Keep only non-empty vars
     edited = edited[edited["var"].astype(str).str.strip() != ""].astype(
         "object"
     )
-    
+
     # Drop duplicates and normalize
     merged = (
         edited.drop_duplicates(subset=["var"], keep="last")
         .fillna("")
         .astype({"var": "object", "group": "object", "type": "object"})
     )
-    
+
     st.session_state["goals_df"] = merged
     st.success("Goals updated.")
 
