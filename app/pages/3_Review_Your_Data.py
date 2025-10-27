@@ -7,7 +7,6 @@ import tempfile
 import warnings
 from datetime import datetime
 from typing import Dict, List, Tuple
-
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -420,8 +419,9 @@ display_map: Dict[str, str] = meta.get("display_name_map", {}) or {}
 
 
 def nice(colname: str) -> str:
-    # pretty() is defined earlier in Utilities
-    return display_map.get(colname, pretty(colname))
+    # prefer display map, but fall back to pretty() if the alias is missing or empty
+    alias = (display_map.get(colname) or "").strip()
+    return alias if alias else pretty(colname)
 
 
 # 2) Goals (JSON-first, fallback to tabular if present)
@@ -683,7 +683,7 @@ with st.sidebar:
     # Aggregation picker
     agg_map = {
         "Daily": "D",
-        "Weekly (ISO Mon-start)": "W",
+        "Weekly": "W",
         "Monthly": "M",
         "Quarterly": "Q",
         "Yearly": "YE",
@@ -1017,12 +1017,7 @@ with tab_biz:
             if pd.notna(cur_eff) and pd.notna(prev_eff):
                 diff = cur_eff - prev_eff
                 delta_txt = f"{'+' if diff >= 0 else ''}{diff:.2f}"
-
-            if str(g).upper() == "GMV":
-                eff_title = "Avg ROAS"
-            else:
-                eff_title = f"Avg {nice(g)} / {spend_label}"
-
+            eff_title = "Avg ROAS" if str(g).upper() == "GMV" else f"Avg {nice(g)} / {spend_label}"
             kpis2.append(
                 dict(
                     title=eff_title,
@@ -1037,6 +1032,7 @@ with tab_biz:
     # --- Goal vs Spend (bar + line) ---
     st.markdown("## Goal vs Spend")
     cA, cB = st.columns(2)
+
     with cA:
         fig1 = go.Figure()
         if target and target in res:
@@ -1053,12 +1049,13 @@ with tab_biz:
         )
         fig1.update_layout(
             title=f"{nice(target) if target else 'Goal'} vs Total {spend_label} — {TIMEFRAME_LABEL}, {agg_label}",
-            xaxis_title="Date",
+            xaxis=dict(title="Date", title_standoff=8),
             yaxis=dict(title=nice(target) if target else "Goal"),
             yaxis2=dict(title=spend_label, overlaying="y", side="right"),
             bargap=0.15,
             hovermode="x unified",
-            legend=dict(orientation="h"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            margin=dict(b=60),
         )
         st.plotly_chart(fig1, use_container_width=True)
 
@@ -1088,48 +1085,47 @@ with tab_biz:
         )
         fig2e.update_layout(
             title=f"{nice(target) if target else 'Goal'} & {label_eff} Over Time — {TIMEFRAME_LABEL}, {agg_label}",
-            xaxis_title="Date",
+            xaxis=dict(title="Date", title_standoff=8),
             yaxis=dict(title=nice(target) if target else "Goal"),
             yaxis2=dict(title=label_eff, overlaying="y", side="right"),
             bargap=0.15,
             hovermode="x unified",
-            legend=dict(orientation="h"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            margin=dict(b=60),
         )
         st.plotly_chart(fig2e, use_container_width=True)
 
     st.markdown("---")
 
-    # --- Custom metric over time ---
+    # --- Custom metric over time (no spend overlay) ---
     st.markdown("## Custom Metric Over Time")
 
-    # Candidate metrics: any column that appears in df_r and can be resampled (numeric preferred)
     numeric_candidates = df_r.select_dtypes(include=[np.number]).columns.tolist()
-    # Keep _TOTAL_SPEND visible (optional); DATE col is time index, not a metric
     metrics = [c for c in numeric_candidates if c != "_TOTAL_SPEND"]
 
     if not metrics:
         st.info("No numeric columns available to plot.")
     else:
-        # Pretty, unique labels
-        label_map = {}
-        for c in metrics:
-            # include raw name in brackets to avoid collisions
-            label_map[f"{nice(c)} [{c}]"] = c
-        labels_sorted = sorted(label_map.keys(), key=lambda s: s.lower())
+        # Build simple, collision-safe labels (no brackets)
+        from collections import Counter
+        base_labels = [(nice(c), c) for c in metrics]
+        counts = Counter(lbl for (lbl, _) in base_labels)
+        labels = []
+        for (lbl, col) in base_labels:
+            # if duplicate pretty labels, append " · <raw>"
+            final = lbl if counts[lbl] == 1 else f"{lbl} · {col}"
+            labels.append((final, col))
 
-        # Default to currently selected target (if numeric) else first metric
-        default_metric = target if (target in metrics) else labels_sorted[0]
-        default_label = (
-            next((k for k, v in label_map.items() if v == target), None)
-            or labels_sorted[0]
-        )
+        labels_sorted = sorted([l for (l, _) in labels], key=lambda s: s.lower())
+        label_to_col = {l: c for (l, c) in labels}
 
-        c_sel, c_chk = st.columns([2, 1])
-        picked_label = c_sel.selectbox("Metric", labels_sorted, index=labels_sorted.index(default_label))
-        picked_col = label_map[picked_label]
-        overlay_spend = c_chk.checkbox(f"Overlay Total {spend_label}", value=True)
+        # default to current target if available
+        default_label = next((l for l, c in label_to_col.items() if c == target), None) or labels_sorted[0]
 
-        # Ensure the selected metric is present in res; if not, add via resample (same rule)
+        picked_label = st.selectbox("Metric", labels_sorted, index=labels_sorted.index(default_label))
+        picked_col = label_to_col[picked_label]
+
+        # ensure selected metric is in res; if not, add via same resample rule
         if picked_col not in res.columns and picked_col in df_r.columns:
             add = (
                 df_r.set_index(DATE_COL)[[picked_col]]
@@ -1149,27 +1145,17 @@ with tab_biz:
             y=res_plot[picked_col],
             name=nice(picked_col),
         )
-        if overlay_spend and "_TOTAL_SPEND" in res_plot:
-            fig_custom.add_trace(
-                go.Scatter(
-                    x=res_plot["PERIOD_LABEL"],
-                    y=res_plot["_TOTAL_SPEND"],
-                    name=f"Total {spend_label}",
-                    yaxis="y2",
-                    mode="lines+markers",
-                )
-            )
         fig_custom.update_layout(
             title=f"{nice(picked_col)} Over Time — {TIMEFRAME_LABEL}, {agg_label}",
-            xaxis_title="Date",
+            xaxis=dict(title="Date", title_standoff=8),
             yaxis=dict(title=nice(picked_col)),
-            yaxis2=dict(title=spend_label, overlaying="y", side="right"),
             bargap=0.15,
             hovermode="x unified",
-            legend=dict(orientation="h"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            margin=dict(b=60),
         )
         st.plotly_chart(fig_custom, use_container_width=True)
-
+        
 # =============================
 # TAB 2 — REGIONAL COMPARISON (v2.8.2)
 # =============================
