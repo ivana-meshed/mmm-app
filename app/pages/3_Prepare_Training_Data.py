@@ -22,7 +22,7 @@ DATE_COL = st.session_state.get("date_col", "DATE")
 CHANNELS_MAP = st.session_state.get("channels_map", {}) or {}
 
 if df.empty or not meta:
-    st.stop() 
+    st.stop()
 
 # ---- Build meta helpers & buckets ----
 display_map, nice, goal_cols, mapping, m, ALL_COLS_UP, IMPR_COLS, CLICK_COLS, SESSION_COLS, INSTALL_COLS = build_meta_views(meta, df)
