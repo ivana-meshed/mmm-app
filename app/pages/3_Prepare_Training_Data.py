@@ -317,7 +317,7 @@ with tab_rel:
         return df_vals.applymap(lambda v: (f"{v*100:.1f}%" if pd.notna(v) else ""))
 
     def heatmap_fig_from_matrix(mat: pd.DataFrame, title=None, zmin=-1, zmax=1):
-        """Render correlation heatmap with % text values (no undefined artefacts)."""
+        """Render correlation heatmap with readable text, no undefined artefacts."""
         if mat is None or mat.empty:
             return go.Figure()
 
@@ -326,7 +326,7 @@ with tab_rel:
         height = min(120 + 26 * rows, 1100)
         tick_size = 12 if rows <= 25 else (10 if rows <= 45 else 9)
 
-        text_vals = mat.applymap(lambda v: f"{v:.2f}" if pd.notna(v) else "")
+        text_vals = mat.applymap(lambda v: f"{v:.2f}" if pd.notna(v) else "\u00A0")  # non-breaking space
         fig = go.Figure(
             go.Heatmap(
                 z=mat.values,
@@ -346,7 +346,7 @@ with tab_rel:
             xaxis=dict(side="top"),
             height=height,
             margin=dict(l=8, r=8, t=40, b=8),
-            yaxis=dict(tickfont=dict(size=tick_size))
+            yaxis=dict(tickfont=dict(size=tick_size)),
         )
         return fig
 
@@ -919,11 +919,11 @@ with tab_deep:
         wins_pct = 99
 
     # --- Build driver universe (metadata-driven; uses current filtered window df_r) ---
-    paid_spend_cols = [c for c in (mapping.get("paid_media_spends", []) or []) if c in df_r.columns]
-    paid_var_cols   = [c for c in (mapping.get("paid_media_vars",   []) or []) if c in df_r.columns]
-    organic_cols    = [c for c in (mapping.get("organic_vars",      []) or []) if c in df_r.columns]
-    context_cols    = [c for c in (mapping.get("context_vars",      []) or []) if c in df_r.columns]
-    factor_cols     = [c for c in (mapping.get("factor_vars",       []) or []) if c in df_r.columns]  # NEW
+    paid_spend_cols = [c for c in (mp.get("paid_media_spends") or []) if c in df_r.columns]
+    paid_var_cols   = [c for c in (mp.get("paid_media_vars")   or []) if c in df_r.columns]
+    organic_cols    = [c for c in (mp.get("organic_vars")      or []) if c in df_r.columns]
+    context_cols    = [c for c in (mp.get("context_vars")      or []) if c in df_r.columns]
+    factor_cols     = [c for c in (mp.get("factor_vars")       or []) if c in df_r.columns]
 
     # Also include "other drivers" = numeric columns not in any metadata bucket, not goals/date/country/etc.
     EXCLUDE = set(paid_spend_cols + paid_var_cols + organic_cols + context_cols + factor_cols + (goal_cols or []))
