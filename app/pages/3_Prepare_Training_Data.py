@@ -58,37 +58,23 @@ elif goal_cols:
     target = goal_cols[0]
 
 # -------------------------------
-# Buckets (reuse precomputed lists; no auto-prefixing)
+# Buckets from metadata (single source of truth)
 # -------------------------------
-# Lists were built above from `mp = meta.get("mapping", {})`
-paid_spend_cols = [c for c in (paid_spend_cols or []) if c in df.columns]
-paid_var_cols   = [c for c in (paid_var_cols   or []) if c in df.columns]
-organic_cols    = [c for c in (organic_cols    or []) if c in df.columns]
-context_cols    = [c for c in (context_cols    or []) if c in df.columns]
-# If you decided to drop "Other Drivers" in this tab, just omit it from `buckets` here.
-buckets = {
-    "Paid Media Spend":     paid_spend_cols,
-    "Paid Media Variables": paid_var_cols,
-    "Organic Variables":    organic_cols,
-    "Context Variables":    context_cols,
-}
+mp = meta.get("mapping", {}) or {}
 
-# Other Drivers: numeric by metadata typing minus exclusions
-dt = meta.get("data_types") or {}
-numeric_from_meta = {c for c, t in dt.items() if t == "numeric" and c in df.columns}
-EXCLUDE = set().union(
-    paid_spend_cols, paid_var_cols, organic_cols, context_cols, factor_cols,
-    goal_cols, {DATE_COL, "_TOTAL_SPEND", "COUNTRY", "DATE_PERIOD", "PERIOD_LABEL"}
-)
-other_driver_cols = sorted(list(numeric_from_meta - EXCLUDE))
+# Build lists directly from metadata and keep only columns present in df
+paid_spend_cols = [c for c in (mp.get("paid_media_spends") or []) if c in df.columns]
+paid_var_cols   = [c for c in (mp.get("paid_media_vars")   or []) if c in df.columns]
+organic_cols    = [c for c in (mp.get("organic_vars")      or []) if c in df.columns]
+context_cols    = [c for c in (mp.get("context_vars")      or []) if c in df.columns]
+factor_cols     = [c for c in (mp.get("factor_vars")       or []) if c in df.columns]  # may be empty
 
 buckets = {
     "Paid Media Spend":     paid_spend_cols,
     "Paid Media Variables": paid_var_cols,
     "Organic Variables":    organic_cols,
     "Context Variables":    context_cols,
-    "Factor Flags":         factor_cols,
-    "Other Drivers":        other_driver_cols,
+    # "Factor Flags":       factor_cols,  # leave commented out for now if you don’t want them
 }
 
 # Total spend strictly from mapped spend cols
@@ -97,21 +83,21 @@ df["_TOTAL_SPEND"] = df[paid_spend_cols].sum(axis=1) if paid_spend_cols else 0.0
 # ---- Persist current selections for other pages (don’t overwrite local state) ----
 st.session_state["RANGE"]         = RANGE
 st.session_state["FREQ"]          = FREQ
-st.session_state["GOAL"]          = target  # store resolved target
+st.session_state["GOAL"]          = target
 st.session_state["SEL_COUNTRIES"] = sel_countries
 
 # ---- Windows from current sidebar values ----
-RULE   = freq_to_rule(FREQ)
-df_r   = filter_range(df.copy(), DATE_COL, RANGE)
+RULE    = freq_to_rule(FREQ)
+df_r    = filter_range(df.copy(), DATE_COL, RANGE)
 df_prev = previous_window(df, df_r, DATE_COL, RANGE)
 
 def total_with_prev_local(collist):
     return total_with_prev(df_r, df_prev, collist)
 
-# ---- Columns used for correlations / winsorization (skip factor flags for winsor) ----
+# ---- Columns used for correlations / winsorization (precompute candidates)
 all_driver_cols = [c for group in buckets.values() for c in group]
 all_corr_cols   = sorted(set(all_driver_cols + goal_cols))
-wins_cols       = [c for c in all_corr_cols if c not in factor_cols]
+wins_cols       = [c for c in all_corr_cols if c not in (factor_cols or [])]
 
 # -----------------------------
 # Tabs
@@ -171,25 +157,8 @@ with tab_rel:
                 dfw[c] = s.clip(lower=lo, upper=hi)
         return dfw
 
-    # -------------------------------
-    # Buckets (strictly from metadata; no auto-prefixing)
-    # -------------------------------
-    # IMPORTANT: no synthetic "other drivers" (removed per your note).
-    paid_spend_cols = [c for c in (mapping.get("paid_media_spends", []) or []) if c in df.columns]
-    paid_var_cols   = [c for c in (mapping.get("paid_media_vars",   []) or []) if c in df.columns]
-    organic_cols    = [c for c in (mapping.get("organic_vars",      []) or []) if c in df.columns]
-    context_cols    = [c for c in (mapping.get("context_vars",      []) or []) if c in df.columns]
-
-    buckets = {
-        "Paid Media Spend":     paid_spend_cols,
-        "Paid Media Variables": paid_var_cols,
-        "Organic Variables":    organic_cols,
-        "Context Variables":    context_cols,
-    }
-
-    # All correlation candidates = union(drivers, goals) found in df
-    all_driver_cols = [c for cols in buckets.values() for c in (cols or [])]
-    all_corr_cols = sorted(set([c for c in (all_driver_cols + (goal_cols or [])) if c in df.columns]))
+    # ---- Use precomputed bucket lists — do NOT rebuild them here ----
+    # buckets, paid_spend_cols, paid_var_cols, organic_cols, context_cols already exist
 
     # ---------------------------------
     # Winsorization (current & previous)
@@ -451,6 +420,7 @@ with tab_rel:
             else:
                 st.caption("—")
             st.markdown("---")
+
             
 # =============================
 # TAB 2 — COLLINEARITY & PCA
