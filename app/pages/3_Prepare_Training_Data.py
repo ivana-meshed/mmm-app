@@ -61,24 +61,64 @@ elif goal_cols:
 # Buckets from metadata (single source of truth)
 # -------------------------------
 mp = meta.get("mapping", {}) or {}
+auto = (meta.get("autotag_rules") or {})
 
-# Build lists directly from metadata and keep only columns present in df
+def _expand_with_rules(explicit_list, rule_tokens, dfcols):
+    """
+    Combine explicit mapping with rule-based matches.
+    Rule tokens are treated as case-insensitive 'contains' tokens.
+    """
+    dfu = [c for c in dfcols]  # preserve original case
+    dfu_l = [c.lower() for c in dfu]
+    out = set(c for c in (explicit_list or []) if c in dfu)
+    for tok in (rule_tokens or []):
+        tok_l = tok.lower()
+        for col, col_l in zip(dfu, dfu_l):
+            if tok_l in col_l:
+                out.add(col)
+    return sorted(out)
+
+# Build lists directly from metadata + autotag rules; keep only columns present in df
 paid_spend_cols = [c for c in (mp.get("paid_media_spends") or []) if c in df.columns]
 paid_var_cols   = [c for c in (mp.get("paid_media_vars")   or []) if c in df.columns]
-organic_cols    = [c for c in (mp.get("organic_vars")      or []) if c in df.columns]
-context_cols    = [c for c in (mp.get("context_vars")      or []) if c in df.columns]
-factor_cols     = [c for c in (mp.get("factor_vars")       or []) if c in df.columns]  # may be empty
 
+# Organic/context: include explicit mapping PLUS anything matching autotag rules
+organic_cols = _expand_with_rules(
+    explicit_list = [c for c in (mp.get("organic_vars") or []) if c in df.columns],
+    rule_tokens   = (auto.get("organic_vars") or []),
+    dfcols        = df.columns
+)
+
+context_cols = _expand_with_rules(
+    explicit_list = [c for c in (mp.get("context_vars") or []) if c in df.columns],
+    rule_tokens   = (auto.get("context_vars") or []),
+    dfcols        = df.columns
+)
+
+# Factor flags (explicit only)
+factor_cols = [c for c in (mp.get("factor_vars") or []) if c in df.columns]
+
+# ---- De-dup organic/context against paid & factor buckets ----
+_exclude = set(paid_spend_cols + paid_var_cols + factor_cols)
+organic_cols = [c for c in organic_cols if c not in _exclude]
+context_cols = [c for c in context_cols if c not in _exclude]
+
+# Buckets
 buckets = {
     "Paid Media Spend":     paid_spend_cols,
     "Paid Media Variables": paid_var_cols,
     "Organic Variables":    organic_cols,
     "Context Variables":    context_cols,
-    # "Factor Flags":       factor_cols,  # leave commented out for now if you don’t want them
+    # "Factor Flags":       factor_cols,
 }
 
 # Total spend strictly from mapped spend cols
 df["_TOTAL_SPEND"] = df[paid_spend_cols].sum(axis=1) if paid_spend_cols else 0.0
+
+# ---- Columns used for correlations / winsorization (precompute candidates)
+all_driver_cols = [c for group in buckets.values() for c in group]
+all_corr_cols   = sorted(set(all_driver_cols + goal_cols))
+wins_cols       = [c for c in all_corr_cols if c not in (factor_cols or [])]
 
 # ---- Persist current selections for other pages (don’t overwrite local state) ----
 st.session_state["RANGE"]         = RANGE
@@ -93,11 +133,6 @@ df_prev = previous_window(df, df_r, DATE_COL, RANGE)
 
 def total_with_prev_local(collist):
     return total_with_prev(df_r, df_prev, collist)
-
-# ---- Columns used for correlations / winsorization (precompute candidates)
-all_driver_cols = [c for group in buckets.values() for c in group]
-all_corr_cols   = sorted(set(all_driver_cols + goal_cols))
-wins_cols       = [c for c in all_corr_cols if c not in (factor_cols or [])]
 
 # -----------------------------
 # Tabs
@@ -280,7 +315,16 @@ with tab_rel:
         return df_vals.applymap(lambda v: (f"{v*100:.1f}%" if pd.notna(v) else ""))
 
     def heatmap_fig_from_matrix(mat: pd.DataFrame, title=None, zmin=-1, zmax=1):
-        # dynamic height & tick sizing for readability
+        """
+        Render correlation heatmap; rows sorted alphabetically DESC (top -> bottom).
+        Removes 'undefined' text artefacts by disabling texttemplate.
+        """
+        if mat is None or mat.empty:
+            return go.Figure()
+
+        # sort rows alphabetically descending ("down" visually from top to bottom)
+        mat = mat.sort_index(ascending=False)
+
         rows = max(1, mat.shape[0])
         height = min(120 + 26 * rows, 1100)
         tick_size = 12 if rows <= 25 else (10 if rows <= 45 else 9)
@@ -293,8 +337,7 @@ with tab_rel:
                 zmin=zmin,
                 zmax=zmax,
                 colorscale="RdYlGn",
-                text=as_pct_text(mat).values,
-                texttemplate="%{text}",
+                # Do NOT set text/texttemplate to avoid 'undefined' top-left artefact
                 hovertemplate="Driver: %{y}<br>Goal: %{x}<br>r: %{z:.2f}<extra></extra>",
                 colorbar=dict(title="r"),
             )
@@ -316,33 +359,28 @@ with tab_rel:
     if not goal_cols:
         st.info("No goals found in metadata.")
     else:
-        # preselect goal to sidebar choice if present
-        _goal_opts = [nice(g) for g in goal_cols]
-        _goal_default_idx = 0
-        if GOAL and GOAL in goal_cols:
-            try:
-                _goal_default_idx = _goal_opts.index(nice(GOAL))
-            except ValueError:
-                _goal_default_idx = 0
+        # Use the GOAL from the sidebar (resolved earlier to `target`) — no extra selector here
+        goal_sel_col = target
+        st.caption(f"Active goal (from sidebar): {nice(goal_sel_col)}")
 
-        goal_sel = st.selectbox(
-            "Goal for Δ and metrics table",
-            _goal_opts,
-            index=_goal_default_idx,
-            key="rel_bucket_goal"
-        )
-        goal_sel_col = {nice(g): g for g in goal_cols}[goal_sel]
+        # Winsorize once per current/previous windows
+        df_r_w    = winsorize_columns(df_r,    all_corr_cols, wins_mode, wins_pct)
+        df_prev_w = winsorize_columns(df_prev, all_corr_cols, wins_mode, wins_pct)
 
-        # Render each bucket block: [corr heatmap | delta bar] then metrics table
+        # helper functions (unchanged) are already defined above: _eligible_for_goal, corr_matrix, etc.
+
         for bucket_name, cols_list in buckets.items():
             st.markdown(f"#### {bucket_name}")
-            # Only keep columns that are eligible for ANY goal in current window
+
+            # Eligible = any correlation to any goal in current window
             eligible_cols = []
             for c in (cols_list or []):
                 for g in (goal_cols or []):
                     if _eligible_for_goal(df_r_w, c, g, min_n=8):
                         eligible_cols.append(c)
                         break
+
+            # Sort variable list alphabetically ASC for readability; heatmap rows will be DESC per helper
             eligible_cols = sorted(set(eligible_cols), key=lambda x: nice(x).lower())
 
             c1, c2 = st.columns(2)
@@ -367,7 +405,8 @@ with tab_rel:
                     prev = corr_with_target_safe(df_prev_w, eligible_cols, goal_sel_col)
 
                     joined = cur.join(prev, how="outer", lsuffix="_cur", rsuffix="_prev").fillna(np.nan)
-                    if "corr_cur" not in joined or "corr_prev" not in joined or joined.empty:
+                    # Ensure both cols exist before diff
+                    if ("corr_cur" not in joined.columns) or ("corr_prev" not in joined.columns) or joined.empty:
                         st.info("Not enough data to compute changes.")
                     else:
                         joined["delta"] = joined["corr_cur"] - joined["corr_prev"]
@@ -386,7 +425,6 @@ with tab_rel:
                                 hovertemplate="Δr: %{x:.2f}<br>Current r: %{customdata[0]:.2f}<br>Prev r: %{customdata[1]:.2f}<extra></extra>",
                             )
                         )
-                        # dynamic height for bar list
                         bar_rows = max(1, disp.shape[0])
                         bar_h = min(120 + 24 * bar_rows, 900)
                         figd.update_layout(
@@ -405,7 +443,6 @@ with tab_rel:
                 if tbl.empty:
                     st.info("Not enough data points to compute per-variable metrics.")
                 else:
-                    # nice compact rendering
                     st.dataframe(
                         tbl.style.format({
                             "R²": "{:.2f}",
@@ -419,8 +456,8 @@ with tab_rel:
                     )
             else:
                 st.caption("—")
-            st.markdown("---")
 
+            st.markdown("---")
             
 # =============================
 # TAB 2 — COLLINEARITY & PCA
