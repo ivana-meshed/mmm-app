@@ -1490,7 +1490,12 @@ with sort_col3:
 
 
 with st.form("mapping_form_main", clear_on_submit=False):
-    mapping_src = st.session_state["mapping_df"].fillna("")
+    # Filter out goal variables and date field from the mapping display
+    goals_df = st.session_state["goals_df"]
+    date_and_goal_vars_display = set([date_field] + goals_df["var"].tolist())
+    mapping_src = st.session_state["mapping_df"][
+        ~st.session_state["mapping_df"]["var"].isin(date_and_goal_vars_display)
+    ].copy().fillna("")
 
     # Ensure all expected columns exist
     expected_cols = [
@@ -1678,16 +1683,41 @@ for _, spend_row in paid_spends.iterrows():
     parsed = _parse_variable_name(spend_var)
     channel = parsed["channel"]
     subchannel = parsed["subchannel"]
-
-    # Find corresponding paid_media_vars with same channel and subchannel
-    if subchannel:
-        pattern = f"{channel}_{subchannel}_"
+    suffix = parsed["suffix"]
+    
+    # Check if this is a _CUSTOM column
+    if "_CUSTOM" in spend_var:
+        # For _CUSTOM columns, we need to match the exact pattern
+        # E.g., GA_SMALL_COST_CUSTOM should match GA_SMALL_*_CUSTOM
+        # Extract the pattern before the suffix
+        # Pattern: CHANNEL_TAG_SUFFIX_CUSTOM or CHANNEL_TOTAL_SUFFIX_CUSTOM
+        if "_TOTAL_" in spend_var:
+            # CHANNEL_TOTAL_SUFFIX_CUSTOM → CHANNEL_TOTAL_*_CUSTOM
+            base_pattern = spend_var.replace("_COST_CUSTOM", "")  # GA_TOTAL
+            matching_vars = [
+                str(v) for v in paid_vars["var"] 
+                if str(v).startswith(base_pattern + "_") and "_CUSTOM" in str(v)
+            ]
+        else:
+            # CHANNEL_TAG_SUFFIX_CUSTOM → CHANNEL_TAG_*_CUSTOM
+            # E.g., GA_SMALL_COST_CUSTOM → GA_SMALL_*_CUSTOM
+            base_pattern = spend_var.replace("_COST_CUSTOM", "")  # GA_SMALL
+            matching_vars = [
+                str(v) for v in paid_vars["var"] 
+                if str(v).startswith(base_pattern + "_") and "_CUSTOM" in str(v)
+            ]
     else:
-        pattern = f"{channel}_"
-
-    matching_vars = [
-        str(v) for v in paid_vars["var"] if str(v).startswith(pattern)
-    ]
+        # Regular columns (non-_CUSTOM)
+        # Find corresponding paid_media_vars with same channel and subchannel
+        if subchannel:
+            pattern = f"{channel}_{subchannel}_"
+        else:
+            pattern = f"{channel}_"
+        
+        matching_vars = [
+            str(v) for v in paid_vars["var"] 
+            if str(v).startswith(pattern) and "_CUSTOM" not in str(v)
+        ]
 
     if matching_vars:
         paid_media_mapping[spend_var] = matching_vars
