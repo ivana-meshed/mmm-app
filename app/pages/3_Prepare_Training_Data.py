@@ -15,7 +15,7 @@ from app_shared import (
     render_sidebar, filter_range, previous_window, resample_numeric, total_with_prev,
 )
 
-# ---- Pull state from the loader page ----
+# ---- Pull state from the loader page ---- 
 df = st.session_state.get("df", pd.DataFrame())
 meta = st.session_state.get("meta", {}) or {}
 DATE_COL = st.session_state.get("date_col", "DATE")
