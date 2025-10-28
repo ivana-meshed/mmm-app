@@ -205,7 +205,9 @@ with tab_rel:
                         out.loc[nice(d), nice(g)] = float(r)
         return out
 
-    # buckets & columns used
+    # -------------------------------
+    # Buckets & helpers (per-category)
+    # -------------------------------
     def _uniq_preserve(seq):
         seen = set(); out = []
         for x in seq:
@@ -213,30 +215,40 @@ with tab_rel:
                 out.append(x); seen.add(x)
         return out
 
-    # add secondary goals into context (signal-only), but only those present in df
-    _secondary_goals = [
-        g.get("var")
-        for g in (meta.get("goals") or [])
-        if g and g.get("var")
-        and g.get("group","").strip().lower() in ("secondary","alt","secondary_goal")
-        and g.get("var") in df.columns
-    ]
-    context_all = _uniq_preserve((context_cols or []) + _secondary_goals)
+    # 1) Base buckets from metadata (present in df)
+    paid_spend_cols = [c for c in (mapping.get("paid_media_spends", []) or []) if c in df.columns]
+    paid_var_cols   = [c for c in (mapping.get("paid_media_vars",   []) or []) if c in df.columns]
+    organic_cols    = [c for c in (mapping.get("organic_vars",      []) or []) if c in df.columns]
 
+    # 2) Other Drivers = numeric columns not in any of the above, not goals/date/country/etc.
+    EXCLUDE = set((paid_spend_cols or []) + (paid_var_cols or []) + (organic_cols or []) + (goal_cols or []))
+    for col in ["DATE", DATE_COL, "COUNTRY", "DATE_PERIOD", "PERIOD_LABEL", "_TOTAL_SPEND"]:
+        if col in df.columns: EXCLUDE.add(col)
+
+    # numeric-only candidates
+    numeric_df = df.select_dtypes(include=[np.number]).copy()
+    other_driver_cols = [c for c in numeric_df.columns if c not in EXCLUDE]
+
+    # final buckets (display order)
     buckets = {
-        "Paid Media Spend":     paid_spend_cols or [],
-        "Paid Media Variables": paid_var_cols   or [],
-        "Organic Variables":    organic_cols    or [],
-        "Context Variables":    context_all,
+        "Paid Media Spend":     paid_spend_cols,
+        "Paid Media Variables": paid_var_cols,
+        "Organic Variables":    organic_cols,
+        "Other Drivers":        other_driver_cols,
     }
-    all_driver_cols = [c for cols in buckets.values() for c in cols]
+
+    all_driver_cols = [c for cols in buckets.values() for c in (cols or [])]
     all_corr_cols = list(set(all_driver_cols + (goal_cols or [])))
 
-    # Apply winsorization (current + previous independently)
-    df_r_w = winsorize_columns(df_r, all_corr_cols, wins_mode, wins_pct)
+    # ---------------------------------
+    # Winsorization (current & previous)
+    # ---------------------------------
+    df_r_w    = winsorize_columns(df_r,    all_corr_cols, wins_mode, wins_pct)
     df_prev_w = winsorize_columns(df_prev, all_corr_cols, wins_mode, wins_pct)
 
-    # heatmap helpers: green=+1, red=−1, % labels
+    # ----------
+    # Heatmap UI
+    # ----------
     def as_pct_text(df_vals: pd.DataFrame) -> pd.DataFrame:
         return df_vals.applymap(lambda v: (f"{v*100:.1f}%" if pd.notna(v) else ""))
 
@@ -260,121 +272,173 @@ with tab_rel:
         fig.update_layout(xaxis=dict(side="top"))
         return fig
 
-    # ---------- (A) Correlations vs Goals ----------
-    st.markdown("### A) Correlations vs Goals")
+    # --------------------------
+    # Correlation calculations
+    # --------------------------
+    def corr_matrix(frame: pd.DataFrame, drivers: list, goals: list, min_n: int = 8) -> pd.DataFrame:
+        if frame.empty or not drivers or not goals:
+            return pd.DataFrame(index=[nice(c) for c in drivers], columns=[nice(g) for g in goals], dtype=float)
+        out = pd.DataFrame(index=[nice(c) for c in drivers], columns=[nice(g) for g in goals], dtype=float)
+        for d in drivers:
+            if d not in frame: 
+                continue
+            for g in goals:
+                if g not in frame:
+                    continue
+                if d == g:
+                    out.loc[nice(d), nice(g)] = np.nan
+                    continue
+                pair = frame[[d, g]].replace([np.inf, -np.inf], np.nan).dropna().copy()
+                pair.columns = ["drv", "goal"]
+                if len(pair) < min_n:
+                    out.loc[nice(d), nice(g)] = np.nan
+                else:
+                    sd = pair["drv"].std(ddof=1); sg = pair["goal"].std(ddof=1)
+                    if (pd.isna(sd) or pd.isna(sg)) or (sd <= 0 or sg <= 0):
+                        out.loc[nice(d), nice(g)] = np.nan
+                    else:
+                        r = np.corrcoef(pair["drv"].values, pair["goal"].values)[0, 1]
+                        out.loc[nice(d), nice(g)] = float(r)
+        return out
+
+    def corr_with_target_safe(frame, cols, tgt, min_n=8):
+        rows = []
+        if frame.empty or tgt not in frame:
+            return pd.DataFrame(columns=["col", "corr"])
+        for c in cols or []:
+            if c not in frame: 
+                continue
+            pair = frame[[tgt, c]].replace([np.inf, -np.inf], np.nan).dropna().copy()
+            pair.columns = (["goal", "drv"] if list(pair.columns)[0] == tgt else ["drv", "goal"])
+            if len(pair) < min_n:
+                continue
+            sx, sy = pair["goal"].std(ddof=1), pair["drv"].std(ddof=1)
+            if (pd.isna(sx) or pd.isna(sy)) or (sx <= 0 or sy <= 0):
+                continue
+            r = np.corrcoef(pair["goal"].values, pair["drv"].values)[0, 1]
+            if np.isfinite(r):
+                rows.append((c, float(r)))
+        return pd.DataFrame(rows, columns=["col", "corr"]).set_index("col")
+
+    # -----------------------------
+    # Per-variable metric (quadratic)
+    # -----------------------------
+    def _per_var_metrics(frame, x_col, y_col):
+        """Return dict with R2, NMAE, Rho, n for a single driver vs target."""
+        x_raw = pd.to_numeric(frame[x_col], errors="coerce")
+        y_raw = pd.to_numeric(frame[y_col], errors="coerce")
+        mask = x_raw.notna() & y_raw.notna()
+        x_f = x_raw[mask]; y_f = y_raw[mask]
+        n = int(len(x_f))
+        if n < 5:
+            return dict(R2=np.nan, NMAE=np.nan, Rho=np.nan, n=n)
+
+        # quadratic fit
+        X = np.array(x_f).reshape(-1, 1)
+        poly = PolynomialFeatures(degree=2)
+        Xp = poly.fit_transform(X)
+        mdl = LinearRegression().fit(Xp, y_f)
+        y_hat = mdl.predict(Xp)
+
+        r2  = r2_score(y_f, y_hat)
+        mae = mean_absolute_error(y_f, y_hat)
+        # relative MAE on 5–95% scale
+        if y_f.nunique() > 1:
+            y_p5, y_p95 = np.percentile(y_f, [5, 95])
+            y_scale = max(y_p95 - y_p5, 1e-9)
+        else:
+            y_scale = max(float(y_f.max() - y_f.min()), 1e-9)
+        nmae = mae / y_scale
+
+        rho, _ = stats.spearmanr(x_f, y_f, nan_policy="omit")
+        return dict(R2=float(r2), NMAE=float(nmae), Rho=(float(rho) if np.isfinite(rho) else np.nan), n=n)
+
+    def metrics_table_for_bucket(frame, cols, y_col):
+        if not cols or y_col not in frame:
+            return pd.DataFrame(columns=["Variable", "R²", "MAE (rel)", "Spearman ρ", "n"])
+        rows = []
+        for c in cols:
+            if c not in frame: 
+                continue
+            m = _per_var_metrics(frame, c, y_col)
+            rows.append([nice(c), m["R2"], m["NMAE"], m["Rho"], m["n"]])
+        out = pd.DataFrame(rows, columns=["Variable", "R²", "MAE (rel)", "Spearman ρ", "n"])
+        if not out.empty:
+            out = out.sort_values("R²", ascending=False)
+        return out
+
+    # ---------------------------------------------
+    # Explore Relationships — per bucket UI layout
+    # ---------------------------------------------
+    st.markdown("### Explore Relationships — Per Driver Category")
+
     if not goal_cols:
         st.info("No goals found in metadata.")
     else:
-        # render ALL buckets (even if empty) — two per row
-        items = list(buckets.items())
-        for i in range(0, len(items), 2):
-            row = items[i : i + 2]
-            cols_ui = st.columns(len(row))
-            for (title, cols_list), ui in zip(row, cols_ui):
-                with ui:
-                    st.markdown(f"**{title}**")
-                    if not cols_list:
-                        st.caption("No variables in this bucket for the current dataset.")
-                        continue
+        # single goal for Δ and metrics table
+        goal_sel = st.selectbox("Goal for Δ and metrics table", [nice(g) for g in goal_cols], index=0, key="rel_bucket_goal")
+        goal_sel_col = {nice(g): g for g in goal_cols}[goal_sel]
+
+        # Render each bucket block: [corr heatmap | delta bar] then metrics table
+        for bucket_name, cols_list in buckets.items():
+            st.markdown(f"#### {bucket_name}")
+            c1, c2 = st.columns(2)
+
+            with c1:
+                st.caption("Correlation matrix vs all goals")
+                if not cols_list:
+                    st.caption("No variables in this bucket for the current dataset.")
+                else:
                     mat = corr_matrix(df_r_w, cols_list, goal_cols)
                     if mat.empty or mat.isna().all().all():
                         st.info("Not enough data to compute correlations.")
                     else:
                         st.plotly_chart(heatmap_fig_from_matrix(mat), use_container_width=True)
-        st.markdown("---")
 
-    # ---------- (B) Change in correlation — paired rows ----------
-    st.markdown("### B) Change in Correlation This vs Previous Window")
-    if df_prev_w.empty:
-        st.info("Previous timeframe is empty — cannot compute deltas.")
-    elif not goal_cols:
-        st.info("No goals found in metadata.")
-    else:
-        goal_sel = st.selectbox(
-            "Goal for delta charts", [nice(g) for g in goal_cols], index=0
-        )
-        goal_sel_col = {nice(g): g for g in goal_cols}[goal_sel]
-
-        def corr_with_target_safe(frame, cols, tgt, min_n=8):
-            rows = []
-            if frame.empty or tgt not in frame:
-                return pd.DataFrame(columns=["col", "corr"])
-            for c in cols:
-                if c not in frame:
-                    continue
-                pair = (
-                    frame[[tgt, c]].replace([np.inf, -np.inf], np.nan).dropna()
-                ).copy()
-                pair.columns = (
-                    ["goal", "drv"]
-                    if list(pair.columns)[0] == tgt
-                    else ["drv", "goal"]
-                )
-                if len(pair) < min_n:
-                    continue
-                sx, sy = pair["goal"].std(ddof=1), pair["drv"].std(ddof=1)
-                if (pd.isna(sx) or pd.isna(sy)) or (sx <= 0 or sy <= 0):
-                    continue
-                r = np.corrcoef(pair["goal"].values, pair["drv"].values)[0, 1]
-                if np.isfinite(r):
-                    rows.append((c, float(r)))
-            return pd.DataFrame(rows, columns=["col", "corr"]).set_index("col")
-
-        cats = [
-            (title, cols_list)
-            for title, cols_list in buckets.items()
-            if cols_list
-        ]
-        for i in range(0, len(cats), 2):
-            row = cats[i : i + 2]
-            cols_ui = st.columns(len(row))
-            for (title, cols_list), ui in zip(row, cols_ui):
-                with ui:
-                    cur = corr_with_target_safe(df_r_w, cols_list, goal_sel_col)
-                    prev = corr_with_target_safe(
-                        df_prev_w, cols_list, goal_sel_col
-                    )
-                    joined = cur.join(
-                        prev, how="outer", lsuffix="_cur", rsuffix="_prev"
-                    ).fillna(np.nan)
-                    joined["delta"] = joined["corr_cur"] - joined["corr_prev"]
-
-                    st.markdown(f"**{title}**")
-                    if joined.empty or joined["delta"].dropna().empty:
+            with c2:
+                st.caption(f"Δ correlation vs previous window (goal: {nice(goal_sel_col)})")
+                if df_prev_w.empty or not cols_list:
+                    st.info("Previous timeframe empty or no variables.")
+                else:
+                    cur  = corr_with_target_safe(df_r_w,   cols_list, goal_sel_col)
+                    prev = corr_with_target_safe(df_prev_w, cols_list, goal_sel_col)
+                    joined = cur.join(prev, how="outer", lsuffix="_cur", rsuffix="_prev").fillna(np.nan)
+                    if "corr_cur" not in joined or "corr_prev" not in joined or joined.empty:
                         st.info("Not enough data to compute changes.")
                     else:
-                        disp = joined.reset_index().rename(
-                            columns={"col": "Variable"}
-                        )
-                        disp["Variable_nice"] = disp["Variable"].apply(nice)
+                        joined["delta"] = joined["corr_cur"] - joined["corr_prev"]
+                        disp = joined.reset_index().rename(columns={"col": "Variable"})
+                        disp["Variable_nice"] = disp["col"].apply(nice)
                         disp = disp.sort_values("delta", ascending=True)
-                        colors = disp["delta"].apply(
-                            lambda x: "#2e7d32" if x >= 0 else "#a94442"
-                        )
+                        colors = disp["delta"].apply(lambda x: "#2e7d32" if x >= 0 else "#a94442")
                         figd = go.Figure(
                             go.Bar(
                                 x=disp["delta"],
                                 y=disp["Variable_nice"],
                                 orientation="h",
                                 marker_color=colors,
-                                customdata=np.stack(
-                                    [disp["corr_cur"], disp["corr_prev"]],
-                                    axis=1,
-                                ),
+                                customdata=np.stack([disp["corr_cur"], disp["corr_prev"]], axis=1),
                                 hovertemplate="Δr: %{x:.2f}<br>Current r: %{customdata[0]:.2f}<br>Prev r: %{customdata[1]:.2f}<extra></extra>",
                             )
                         )
                         figd.update_layout(
-                            xaxis=dict(
-                                title="Δr (current - previous)",
-                                range=[-1, 1],
-                                zeroline=True,
-                            ),
+                            xaxis=dict(title="Δr (current - previous)", range=[-1, 1], zeroline=True),
                             yaxis=dict(title=""),
                             bargap=0.2,
                         )
                         st.plotly_chart(figd, use_container_width=True)
-        st.markdown("---")
+
+            # Metrics table (per variable → R² / MAE(rel) / Spearman ρ)
+            st.caption("Per-variable signal (quadratic fit)")
+            if cols_list:
+                tbl = metrics_table_for_bucket(df_r_w, cols_list, goal_sel_col)
+                if tbl.empty:
+                    st.info("Not enough data points to compute per-variable metrics.")
+                else:
+                    st.dataframe(tbl, hide_index=True, use_container_width=True)
+            else:
+                st.caption("—")
+            st.markdown("---")
 
     # ---------- (C) Explore Driver–Goal Relationship (signal check for MMM) ----------
 st.markdown("### C) Explore Driver–Goal Relationship (signal check for MMM)")
