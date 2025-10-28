@@ -57,13 +57,21 @@ elif DEP_VAR and DEP_VAR in df.columns:
 elif goal_cols:
     target = goal_cols[0]
 
-# ---- Buckets strictly from metadata mapping (+ factor_vars, + other drivers) ----
-mp = meta.get("mapping", {}) or {}
-paid_spend_cols = [c for c in (mp.get("paid_media_spends") or []) if c in df.columns]
-paid_var_cols   = [c for c in (mp.get("paid_media_vars")   or []) if c in df.columns]
-organic_cols    = [c for c in (mp.get("organic_vars")      or []) if c in df.columns]
-context_cols    = [c for c in (mp.get("context_vars")      or []) if c in df.columns]
-factor_cols     = [c for c in (mp.get("factor_vars")       or []) if c in df.columns]
+# -------------------------------
+# Buckets (reuse precomputed lists; no auto-prefixing)
+# -------------------------------
+# Lists were built above from `mp = meta.get("mapping", {})`
+paid_spend_cols = [c for c in (paid_spend_cols or []) if c in df.columns]
+paid_var_cols   = [c for c in (paid_var_cols   or []) if c in df.columns]
+organic_cols    = [c for c in (organic_cols    or []) if c in df.columns]
+context_cols    = [c for c in (context_cols    or []) if c in df.columns]
+# If you decided to drop "Other Drivers" in this tab, just omit it from `buckets` here.
+buckets = {
+    "Paid Media Spend":     paid_spend_cols,
+    "Paid Media Variables": paid_var_cols,
+    "Organic Variables":    organic_cols,
+    "Context Variables":    context_cols,
+}
 
 # Other Drivers: numeric by metadata typing minus exclusions
 dt = meta.get("data_types") or {}
