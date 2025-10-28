@@ -117,33 +117,31 @@ tab_rel, tab_diag, tab_deep = st.tabs(
 )
 
 # =============================
-# TAB 1 — RELATIONSHIPS
+# TAB 1 — RELATIONSHIPS 
 # =============================
 with tab_rel:
     warnings.filterwarnings("ignore", category=RuntimeWarning)
     st.subheader("Relationships")
 
-    # ----- Data conditioning (winsorization) -----
+    # ----- Winsorize controls (this tab only) -----
     st.markdown("##### Data Conditioning")
     wins_mode_label = st.selectbox(
         "Winsorize mode",
         ["No", "Upper only", "Upper and lower"],
         index=0,
-        help="Trim outliers for numeric drivers/goals (factor flags are never winsorized).",
-        key="rel_wins_mode",
+        help="Remove outliers",
     )
     _mode_map = {"No": "None", "Upper only": "Upper", "Upper and lower": "Both"}
     wins_mode = _mode_map[wins_mode_label]
-    wins_pct = 99
     if wins_mode != "None":
-        wins_pct = int(
-            st.selectbox(
-                "Winsorize level (keep up to this percentile)",
-                ["99", "98", "95"],
-                index=0,
-                key="rel_wins_pct",
-            )
+        wins_pct_label = st.selectbox(
+            "Winsorize level (keep up to this percentile)",
+            ["99", "98", "95"],
+            index=0,
         )
+        wins_pct = int(wins_pct_label)
+    else:
+        wins_pct = 99  # unused when "None"
 
     def winsorize_columns(frame: pd.DataFrame, cols: list, mode: str, pct: int) -> pd.DataFrame:
         if mode == "None" or not cols:
@@ -165,22 +163,158 @@ with tab_rel:
                 dfw[c] = s.clip(lower=lo, upper=hi)
         return dfw
 
-    # Apply winsorization on the current/previous windows
-    # Note: wins_cols was prepared pre-tabs = all numeric drivers+goals EXCLUDING factor_cols
-    df_r_w    = winsorize_columns(df_r,    wins_cols, wins_mode, wins_pct)
-    df_prev_w = winsorize_columns(df_prev, wins_cols, wins_mode, wins_pct)
+    # -------------------------------
+    # Buckets (strictly from metadata; no auto-prefixing)
+    # -------------------------------
+    # IMPORTANT: no synthetic "other drivers" (removed per your note).
+    paid_spend_cols = [c for c in (mapping.get("paid_media_spends", []) or []) if c in df.columns]
+    paid_var_cols   = [c for c in (mapping.get("paid_media_vars",   []) or []) if c in df.columns]
+    organic_cols    = [c for c in (mapping.get("organic_vars",      []) or []) if c in df.columns]
+    context_cols    = [c for c in (mapping.get("context_vars",      []) or []) if c in df.columns]
 
-    # ---------- Tiny helpers ----------
+    buckets = {
+        "Paid Media Spend":     paid_spend_cols,
+        "Paid Media Variables": paid_var_cols,
+        "Organic Variables":    organic_cols,
+        "Context Variables":    context_cols,
+    }
+
+    # All correlation candidates = union(drivers, goals) found in df
+    all_driver_cols = [c for cols in buckets.values() for c in (cols or [])]
+    all_corr_cols = sorted(set([c for c in (all_driver_cols + (goal_cols or [])) if c in df.columns]))
+
+    # ---------------------------------
+    # Winsorization (current & previous)
+    # ---------------------------------
+    df_r_w    = winsorize_columns(df_r,    all_corr_cols, wins_mode, wins_pct)
+    df_prev_w = winsorize_columns(df_prev, all_corr_cols, wins_mode, wins_pct)
+
+    # ----------
+    # Helpers
+    # ----------
+    def _eligible_for_goal(frame: pd.DataFrame, x_col: str, y_col: str, min_n: int = 8) -> bool:
+        """Eligible if both present, enough non-NA pairs, variation, and x has >0 after NA drop."""
+        if x_col not in frame or y_col not in frame:
+            return False
+        x = pd.to_numeric(frame[x_col], errors="coerce")
+        y = pd.to_numeric(frame[y_col], errors="coerce")
+        mask = x.notna() & y.notna()
+        if mask.sum() < min_n:
+            return False
+        x_f, y_f = x[mask], y[mask]
+        # Require variation
+        if x_f.std(ddof=1) <= 0 or y_f.std(ddof=1) <= 0:
+            return False
+        # Require some non-zero X (so we don't display dead channels)
+        if (x_f != 0).sum() == 0:
+            return False
+        return True
+
+    def corr_matrix(frame: pd.DataFrame, drivers: list, goals: list, min_n: int = 8) -> pd.DataFrame:
+        """Compute r only for eligible columns; drop rows with all-NA at the end."""
+        if frame.empty or not drivers or not goals:
+            return pd.DataFrame()
+        out_rows = []
+        row_names = []
+        col_names = [nice(g) for g in goals]
+        for d in drivers:
+            vals = []
+            used = False
+            for g in goals:
+                if _eligible_for_goal(frame, d, g, min_n=min_n):
+                    pair = frame[[d, g]].replace([np.inf, -np.inf], np.nan).dropna()
+                    r = np.corrcoef(pair[d].values, pair[g].values)[0, 1]
+                    vals.append(float(r))
+                    used = True
+                else:
+                    vals.append(np.nan)
+            if used:
+                out_rows.append(vals)
+                row_names.append(nice(d))
+        if not out_rows:
+            return pd.DataFrame()
+        return pd.DataFrame(out_rows, index=row_names, columns=col_names, dtype=float)
+
+    def corr_with_target_safe(frame, cols, tgt, min_n=8):
+        rows = []
+        if frame.empty or tgt not in frame:
+            return pd.DataFrame(columns=["col", "corr"])
+        for c in cols or []:
+            if not _eligible_for_goal(frame, c, tgt, min_n=min_n):
+                continue
+            pair = frame[[tgt, c]].replace([np.inf, -np.inf], np.nan).dropna().copy()
+            r = np.corrcoef(pair[tgt].values, pair[c].values)[0, 1]
+            if np.isfinite(r):
+                rows.append((c, float(r)))
+        return pd.DataFrame(rows, columns=["col", "corr"]).set_index("col")
+
+    def _rel_var(x: pd.Series) -> float:
+        """Relative variability on 5–95% goal-like scale to avoid CoV blow-ups."""
+        x = pd.to_numeric(x, errors="coerce").dropna()
+        if x.size < 2:
+            return np.nan
+        p5, p95 = np.percentile(x, [5, 95])
+        scale = max(p95 - p5, 1e-9)
+        return float(x.std(ddof=1) / scale)
+
+    def _per_var_metrics(frame, x_col, y_col):
+        """Return dict with R2, NMAE, Rho, n_pair (non-NA with X!=0), avg(X), relvar(X)."""
+        x_raw = pd.to_numeric(frame[x_col], errors="coerce")
+        y_raw = pd.to_numeric(frame[y_col], errors="coerce")
+        mask = x_raw.notna() & y_raw.notna() & (x_raw != 0)
+        x_f = x_raw[mask]; y_f = y_raw[mask]
+        n = int(len(x_f))
+        if n < 5 or x_f.std(ddof=1) <= 0 or y_f.std(ddof=1) <= 0:
+            return dict(R2=np.nan, NMAE=np.nan, Rho=np.nan, n=n, AVG=float(x_f.mean()) if n else np.nan, RV=_rel_var(x_f))
+
+        X = np.array(x_f).reshape(-1, 1)
+        poly = PolynomialFeatures(degree=2)
+        Xp = poly.fit_transform(X)
+        mdl = LinearRegression().fit(Xp, y_f)
+        y_hat = mdl.predict(Xp)
+
+        r2  = r2_score(y_f, y_hat)
+        mae = mean_absolute_error(y_f, y_hat)
+        # relative MAE on 5–95% scale of Y
+        if y_f.nunique() > 1:
+            y_p5, y_p95 = np.percentile(y_f, [5, 95])
+            y_scale = max(y_p95 - y_p5, 1e-9)
+        else:
+            y_scale = max(float(y_f.max() - y_f.min()), 1e-9)
+        nmae = mae / y_scale
+
+        rho, _ = stats.spearmanr(x_f, y_f, nan_policy="omit")
+        return dict(R2=float(r2), NMAE=float(nmae), Rho=(float(rho) if np.isfinite(rho) else np.nan),
+                    n=n, AVG=float(x_f.mean()), RV=_rel_var(x_f))
+
+    def metrics_table_for_bucket(frame, cols, y_col):
+        rows = []
+        for c in cols or []:
+            if not _eligible_for_goal(frame, c, y_col, min_n=8):
+                continue
+            m = _per_var_metrics(frame, c, y_col)
+            rows.append([nice(c), m["R2"], m["NMAE"], m["Rho"], m["n"], m["AVG"], m["RV"]])
+        out = pd.DataFrame(rows, columns=["Variable", "R²", "MAE (rel)", "Spearman ρ", "n (X>0, pair)", "Avg(X)", "RelVar(X)"])
+        if not out.empty:
+            out = out.sort_values(["R²", "RelVar(X)"], ascending=[False, False])
+        return out
+
     def as_pct_text(df_vals: pd.DataFrame) -> pd.DataFrame:
         return df_vals.applymap(lambda v: (f"{v*100:.1f}%" if pd.notna(v) else ""))
 
     def heatmap_fig_from_matrix(mat: pd.DataFrame, title=None, zmin=-1, zmax=1):
+        # dynamic height & tick sizing for readability
+        rows = max(1, mat.shape[0])
+        height = min(120 + 26 * rows, 1100)
+        tick_size = 12 if rows <= 25 else (10 if rows <= 45 else 9)
+
         fig = go.Figure(
             go.Heatmap(
                 z=mat.values,
                 x=list(mat.columns),
                 y=list(mat.index),
-                zmin=zmin, zmax=zmax,
+                zmin=zmin,
+                zmax=zmax,
                 colorscale="RdYlGn",
                 text=as_pct_text(mat).values,
                 texttemplate="%{text}",
@@ -188,180 +322,128 @@ with tab_rel:
                 colorbar=dict(title="r"),
             )
         )
-        if title:
-            fig.update_layout(title=title)
-        fig.update_layout(xaxis=dict(side="top"))
+        fig.update_layout(
+            title=title if title else None,
+            xaxis=dict(side="top"),
+            height=height,
+            margin=dict(l=8, r=8, t=40, b=8),
+            yaxis=dict(tickfont=dict(size=tick_size))
+        )
         return fig
 
-    def corr_matrix(frame: pd.DataFrame, drivers: list, goals: list, min_n: int = 8) -> pd.DataFrame:
-        if frame.empty or not drivers or not goals:
-            return pd.DataFrame(index=[nice(c) for c in drivers], columns=[nice(g) for g in goals], dtype=float)
-        out = pd.DataFrame(index=[nice(c) for c in drivers], columns=[nice(g) for g in goals], dtype=float)
-        for d in drivers:
-            if d not in frame:
-                continue
-            for g in goals:
-                if g not in frame:
-                    continue
-                if d == g:
-                    out.loc[nice(d), nice(g)] = np.nan
-                    continue
-                pair = frame[[d, g]].replace([np.inf, -np.inf], np.nan).dropna().copy()
-                if len(pair) < min_n:
-                    out.loc[nice(d), nice(g)] = np.nan
-                    continue
-                sd = pair[d].std(ddof=1); sg = pair[g].std(ddof=1)
-                if (pd.isna(sd) or pd.isna(sg)) or (sd <= 0 or sg <= 0):
-                    out.loc[nice(d), nice(g)] = np.nan
-                else:
-                    r = np.corrcoef(pair[d].values, pair[g].values)[0, 1]
-                    out.loc[nice(d), nice(g)] = float(r)
-        return out
-
-    def corr_with_target_safe(frame, cols, tgt, min_n=8):
-        if frame.empty or not cols or tgt not in frame:
-            return pd.DataFrame(columns=["col", "corr"]).set_index("col")
-        rows = []
-        for c in cols:
-            if c not in frame: 
-                continue
-            pair = frame[[tgt, c]].replace([np.inf, -np.inf], np.nan).dropna().copy()
-            if len(pair) < min_n:
-                continue
-            sx, sy = pair[tgt].std(ddof=1), pair[c].std(ddof=1)
-            if (pd.isna(sx) or pd.isna(sy)) or (sx <= 0 or sy <= 0):
-                continue
-            r = np.corrcoef(pair[tgt].values, pair[c].values)[0, 1]
-            if np.isfinite(r):
-                rows.append((c, float(r)))
-        return pd.DataFrame(rows, columns=["col", "corr"]).set_index("col")
-
-    def _per_var_metrics(frame, x_col, y_col):
-        """Return dict with R2, NMAE, Rho, n for a single driver vs target (quadratic fit)."""
-        x_raw = pd.to_numeric(frame[x_col], errors="coerce")
-        y_raw = pd.to_numeric(frame[y_col], errors="coerce")
-        mask = x_raw.notna() & y_raw.notna()
-        x_f = x_raw[mask]; y_f = y_raw[mask]
-        n = int(len(x_f))
-        if n < 5:
-            return dict(R2=np.nan, NMAE=np.nan, Rho=np.nan, n=n)
-        X = np.array(x_f).reshape(-1, 1)
-        Xp = PolynomialFeatures(degree=2).fit_transform(X)
-        mdl = LinearRegression().fit(Xp, y_f)
-        y_hat = mdl.predict(Xp)
-        r2  = r2_score(y_f, y_hat)
-        mae = mean_absolute_error(y_f, y_hat)
-        if y_f.nunique() > 1:
-            y_p5, y_p95 = np.percentile(y_f, [5, 95])
-            y_scale = max(y_p95 - y_p5, 1e-9)
-        else:
-            y_scale = max(float(y_f.max() - y_f.min()), 1e-9)
-        nmae = mae / y_scale
-        rho, _ = stats.spearmanr(x_f, y_f, nan_policy="omit")
-        return dict(R2=float(r2), NMAE=float(nmae), Rho=(float(rho) if np.isfinite(rho) else np.nan), n=n)
-
-    def metrics_table_for_bucket(frame, cols, y_col):
-        if not cols or y_col not in frame:
-            return pd.DataFrame(columns=["Variable", "R²", "MAE (rel)", "Spearman ρ", "n"])
-        rows = []
-        for c in cols:
-            if c not in frame: 
-                continue
-            m_ = _per_var_metrics(frame, c, y_col)
-            rows.append([nice(c), m_["R2"], m_["NMAE"], m_["Rho"], m_["n"]])
-        out = pd.DataFrame(rows, columns=["Variable", "R²", "MAE (rel)", "Spearman ρ", "n"])
-        return out.sort_values("R²", ascending=False) if not out.empty else out
-
-    # ---------- Goal selection (defaults to resolved target from session) ----------
-    if not goal_cols:
-        st.info("No goals found in metadata.")
-        st.stop()
-
-    _goal_opts = [nice(g) for g in goal_cols]
-    _goal_default_idx = 0
-    _resolved_target = st.session_state.get("GOAL")
-    if _resolved_target and _resolved_target in goal_cols:
-        try:
-            _goal_default_idx = _goal_opts.index(nice(_resolved_target))
-        except ValueError:
-            _goal_default_idx = 0
-
-    goal_sel = st.selectbox(
-        "Goal for Δ and metrics table",
-        _goal_opts,
-        index=_goal_default_idx,
-        key="rel_bucket_goal",
-    )
-    goal_sel_col = {nice(g): g for g in goal_cols}[goal_sel]
-
-    # ---------- Per-bucket UI ----------
+    # ---------------------------------------------
+    # Explore Relationships — per bucket UI layout
+    # ---------------------------------------------
     st.markdown("### Explore Relationships — Per Driver Category")
 
-    for bucket_name, cols_list in buckets.items():
-        st.markdown(f"#### {bucket_name}")
-        c1, c2 = st.columns(2)
+    if not goal_cols:
+        st.info("No goals found in metadata.")
+    else:
+        # preselect goal to sidebar choice if present
+        _goal_opts = [nice(g) for g in goal_cols]
+        _goal_default_idx = 0
+        if GOAL and GOAL in goal_cols:
+            try:
+                _goal_default_idx = _goal_opts.index(nice(GOAL))
+            except ValueError:
+                _goal_default_idx = 0
 
-        with c1:
-            st.caption("Correlation matrix vs all goals")
-            if not cols_list:
-                st.caption("No variables in this bucket for the current dataset.")
-            else:
-                mat = corr_matrix(df_r_w, cols_list, goal_cols)
-                if mat.empty or mat.isna().all().all():
-                    st.info("Not enough data to compute correlations.")
+        goal_sel = st.selectbox(
+            "Goal for Δ and metrics table",
+            _goal_opts,
+            index=_goal_default_idx,
+            key="rel_bucket_goal"
+        )
+        goal_sel_col = {nice(g): g for g in goal_cols}[goal_sel]
+
+        # Render each bucket block: [corr heatmap | delta bar] then metrics table
+        for bucket_name, cols_list in buckets.items():
+            st.markdown(f"#### {bucket_name}")
+            # Only keep columns that are eligible for ANY goal in current window
+            eligible_cols = []
+            for c in (cols_list or []):
+                for g in (goal_cols or []):
+                    if _eligible_for_goal(df_r_w, c, g, min_n=8):
+                        eligible_cols.append(c)
+                        break
+            eligible_cols = sorted(set(eligible_cols), key=lambda x: nice(x).lower())
+
+            c1, c2 = st.columns(2)
+
+            with c1:
+                st.caption("Correlation matrix vs all goals (auto-pruned by availability/variation)")
+                if not eligible_cols:
+                    st.caption("No variables in this bucket for the current timeframe.")
                 else:
-                    st.plotly_chart(heatmap_fig_from_matrix(mat), use_container_width=True)
+                    mat = corr_matrix(df_r_w, eligible_cols, goal_cols)
+                    if mat.empty or mat.isna().all().all():
+                        st.info("Not enough data to compute correlations.")
+                    else:
+                        st.plotly_chart(heatmap_fig_from_matrix(mat), use_container_width=True)
 
-        with c2:
-            st.caption(f"Δ correlation vs previous window (goal: {nice(goal_sel_col)})")
-            if df_prev_w.empty or not cols_list:
-                st.info("Previous timeframe empty or no variables.")
-            else:
-                cur  = corr_with_target_safe(df_r_w,    cols_list, goal_sel_col)
-                prev = corr_with_target_safe(df_prev_w, cols_list, goal_sel_col)
-                joined = cur.join(prev, how="outer", lsuffix="_cur", rsuffix="_prev").fillna(np.nan)
-
-                if joined.empty or "corr_cur" not in joined or "corr_prev" not in joined:
-                    st.info("Not enough data to compute changes.")
+            with c2:
+                st.caption(f"Δ correlation vs previous window (goal: {nice(goal_sel_col)})")
+                if df_prev_w.empty or not eligible_cols:
+                    st.info("Previous timeframe empty or no eligible variables.")
                 else:
-                    joined["delta"] = joined["corr_cur"] - joined["corr_prev"]
-                    disp = joined.reset_index()
-                    idx_col = "col" if "col" in disp.columns else disp.columns[0]
-                    disp = disp.rename(columns={idx_col: "Variable"})
-                    disp["Variable_nice"] = disp["Variable"].apply(nice)
-                    disp = disp.sort_values("delta", ascending=True)
+                    cur  = corr_with_target_safe(df_r_w,    eligible_cols, goal_sel_col)
+                    prev = corr_with_target_safe(df_prev_w, eligible_cols, goal_sel_col)
 
-                    colors = disp["delta"].apply(lambda x: "#2e7d32" if x >= 0 else "#a94442")
-                    figd = go.Figure(
-                        go.Bar(
-                            x=disp["delta"],
-                            y=disp["Variable_nice"],
-                            orientation="h",
-                            marker_color=colors,
-                            customdata=np.stack([disp["corr_cur"], disp["corr_prev"]], axis=1),
-                            hovertemplate="Δr: %{x:.2f}<br>Current r: %{customdata[0]:.2f}<br>Prev r: %{customdata[1]:.2f}<extra></extra>",
+                    joined = cur.join(prev, how="outer", lsuffix="_cur", rsuffix="_prev").fillna(np.nan)
+                    if "corr_cur" not in joined or "corr_prev" not in joined or joined.empty:
+                        st.info("Not enough data to compute changes.")
+                    else:
+                        joined["delta"] = joined["corr_cur"] - joined["corr_prev"]
+                        disp = joined.reset_index().rename(columns={"col":"Variable"})
+                        disp["Variable_nice"] = disp["Variable"].apply(nice)
+                        disp = disp.sort_values("delta", ascending=True)
+                        colors = disp["delta"].apply(lambda x: "#2e7d32" if x >= 0 else "#a94442")
+
+                        figd = go.Figure(
+                            go.Bar(
+                                x=disp["delta"],
+                                y=disp["Variable_nice"],
+                                orientation="h",
+                                marker_color=colors,
+                                customdata=np.stack([disp["corr_cur"], disp["corr_prev"]], axis=1),
+                                hovertemplate="Δr: %{x:.2f}<br>Current r: %{customdata[0]:.2f}<br>Prev r: %{customdata[1]:.2f}<extra></extra>",
+                            )
                         )
-                    )
-                    figd.update_layout(
-                        xaxis=dict(title="Δr (current - previous)", range=[-1, 1], zeroline=True),
-                        yaxis=dict(title=""),
-                        bargap=0.2,
-                    )
-                    st.plotly_chart(figd, use_container_width=True)
+                        # dynamic height for bar list
+                        bar_rows = max(1, disp.shape[0])
+                        bar_h = min(120 + 24 * bar_rows, 900)
+                        figd.update_layout(
+                            xaxis=dict(title="Δr (current - previous)", range=[-1, 1], zeroline=True),
+                            yaxis=dict(title="", tickfont=dict(size=(12 if bar_rows<=25 else 10))),
+                            bargap=0.2,
+                            height=bar_h,
+                            margin=dict(l=8, r=8, t=20, b=8),
+                        )
+                        st.plotly_chart(figd, use_container_width=True)
 
-        # Metrics table (per variable → R² / MAE(rel) / Spearman ρ)
-        st.caption("Per-variable signal (quadratic fit)")
-        if cols_list:
-            tbl = metrics_table_for_bucket(df_r_w, cols_list, goal_sel_col)
-            if tbl.empty:
-                st.info("Not enough data points to compute per-variable metrics.")
+            # Metrics table (adds Avg(X) & RelVar(X); n counts non-NA pairs with X>0)
+            st.caption("Per-variable signal (quadratic fit)")
+            if eligible_cols:
+                tbl = metrics_table_for_bucket(df_r_w, eligible_cols, goal_sel_col)
+                if tbl.empty:
+                    st.info("Not enough data points to compute per-variable metrics.")
+                else:
+                    # nice compact rendering
+                    st.dataframe(
+                        tbl.style.format({
+                            "R²": "{:.2f}",
+                            "MAE (rel)": "{:.1%}",
+                            "Spearman ρ": "{:+.2f}",
+                            "Avg(X)": "{:.2f}",
+                            "RelVar(X)": "{:.2f}",
+                        }),
+                        hide_index=True,
+                        use_container_width=True
+                    )
             else:
-                st.dataframe(tbl, hide_index=True, use_container_width=True)
-        else:
-            st.caption("—")
-
-        st.markdown("---")
-
+                st.caption("—")
+            st.markdown("---")
+            
 # =============================
 # TAB 2 — COLLINEARITY & PCA
 # =============================

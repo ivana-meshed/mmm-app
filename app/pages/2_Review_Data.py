@@ -162,6 +162,9 @@ plat_map_df, platforms, PLATFORM_COLORS = build_plat_map_df(
 # ----------------------------- 
 df_r = filter_range(df.copy(), DATE_COL, RANGE)
 df_prev = previous_window(df, df_r, DATE_COL, RANGE)
+# --- Backward-compat shim for total_with_prev calls expecting 1 arg ---
+def total_with_prev_shim(collist):
+    return total_with_prev(df_r, df_prev, collist)
 
 res = resample_numeric(df_r, DATE_COL, RULE, ensure_cols=[target, "_TOTAL_SPEND"])
 res["PERIOD_LABEL"] = period_label(res["DATE_PERIOD"], RULE)
@@ -682,7 +685,7 @@ with tab_mkt:
     cur_clicks, d_clicks = total_with_prev_local(CLICK_COLS)
     cur_sessions, d_sessions = total_with_prev_local(SESSION_COLS)
     cur_installs, d_installs = total_with_prev_local(INSTALL_COLS)
-    cur_spend, d_spend = total_with_prev_local(["_TOTAL_SPEND"])
+    cur_spend, d_spend = total_with_prev_shim(["_TOTAL_SPEND"])
     kpi_grid_fixed(
         [
             dict(title="Total Impressions", value=fmt_num(cur_imps),
