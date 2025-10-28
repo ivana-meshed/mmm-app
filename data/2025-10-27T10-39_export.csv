@@ -39,7 +39,7 @@ GA_OTHER_COST,paid_media_spends,ga,numeric,sum,small
 GA_COMPETITOR_COST,paid_media_spends,ga,numeric,sum,small
 GA_BRAND_COST,paid_media_spends,ga,numeric,sum,small, campaign
 GA_APP_COST,paid_media_spends,ga,numeric,sum,small, campaign
-GA_TOTAL_COST,paid_media_spends,ga,numeric,sum
+GA_TOTAL_COST_CUSTOM,paid_media_spends,ga,numeric,sum
 GA_SMALL_COST_CUSTOM,paid_media_spends,ga,numeric,sum,small
 GA_CAMPAIGN_COST_CUSTOM,paid_media_spends,ga,numeric,sum, campaign
 GA_SUPPLY_SESSIONS,paid_media_vars,ga,numeric,sum,
@@ -48,7 +48,7 @@ GA_OTHER_SESSIONS,paid_media_vars,ga,numeric,sum,small
 GA_COMPETITOR_SESSIONS,paid_media_vars,ga,numeric,sum,small
 GA_BRAND_SESSIONS,paid_media_vars,ga,numeric,sum,small, campaign
 GA_APP_SESSIONS,paid_media_vars,ga,numeric,sum,small, campaign
-GA_TOTAL_SESSIONS,paid_media_vars,ga,numeric,zum
+GA_TOTAL_SESSIONS_CUSTOM,paid_media_vars,ga,numeric,zum
 GA_SMALL_SESSIONS_CUSTOM,paid_media_vars,ga,numeric,sum,small
 GA_CAMPAIGN_SESSIONS_CUSTOM,paid_media_vars,ga,numeric,sum, campaign
 GA_SUPPLY_IMPRESSIONS,paid_media_vars,ga,numeric,sum,
@@ -57,7 +57,7 @@ GA_OTHER_IMPRESSIONS,paid_media_vars,ga,numeric,sum,small
 GA_COMPETITOR_IMPRESSIONS,paid_media_vars,ga,numeric,sum,small
 GA_BRAND_IMPRESSIONS,paid_media_vars,ga,numeric,sum,small, campaign
 GA_APP_IMPRESSIONS,paid_media_vars,ga,numeric,sum,small, campaign
-GA_TOTAL_IMPRESSIONS,paid_media_vars,ga,numeric,sum
+GA_TOTAL_IMPRESSIONS_CUSTOM,paid_media_vars,ga,numeric,sum
 GA_SMALL_IMPRESSIONS_CUSTOM,paid_media_vars,ga,numeric,sum,small
 GA_CAMPAIGN_IMPRESSIONS_CUSTOM,paid_media_vars,ga,numeric,sum, campaign
 GA_SUPPLY_CLICKS,paid_media_vars,ga,numeric,sum,
@@ -66,7 +66,7 @@ GA_OTHER_CLICKS,paid_media_vars,ga,numeric,sum,small
 GA_COMPETITOR_CLICKS,paid_media_vars,ga,numeric,sum,small
 GA_BRAND_CLICKS,paid_media_vars,ga,numeric,sum,small, campaign
 GA_APP_CLICKS,paid_media_vars,ga,numeric,sum,small, campaign
-GA_TOTAL_CLICKS,paid_media_vars,ga,numeric,sum
+GA_TOTAL_CLICKS_CUSTOM,paid_media_vars,ga,numeric,sum
 GA_SMALL_CLICKS_CUSTOM,paid_media_vars,ga,numeric,sum,small
 GA_CAMPAIGN_CLICKS_CUSTOM,paid_media_vars,ga,numeric,sum, campaign
 ORGANIC_NL_DAILY_SESSIONS,organic_vars,organic,numeric,sum,engineering
@@ -78,4 +78,4 @@ ORGANIC_ORGANIC_SOCIAL_DAILY_SESSIONS,organic_vars,organic,numeric,sum,content
 ORGANIC_BLOG_DAILY_SESSIONS,organic_vars,organic,numeric,sum,content
 ORGANIC_ENGINEERING_SESSIONS_CUSTOM,organic_vars,organic,numeric,sum,engineering
 ORGANIC_CONTENT_SESSIONS_CUSTOM,organic_vars,organic,numeric,sum,content
-ORGANIC_TOTAL,organic_vars,organic,numeric,sum
+ORGANIC_TOTAL_CUSTOM,organic_vars,organic,numeric,sum
