@@ -1498,6 +1498,33 @@ if rt2.button("♻️ Re-apply to ALL columns", key="retag_all"):
         "Re-applied rules to ALL columns (manual categories were overwritten)."
     )
 
+# Add sorting controls (user-controlled, not automatic)
+st.write("**Sort mapping table:**")
+sort_col1, sort_col2, sort_col3 = st.columns([2, 1, 1])
+with sort_col1:
+    sort_by = st.selectbox(
+        "Sort by",
+        options=["Original order", "var", "category", "channel", "data_type"],
+        index=0,
+        help="Choose a column to sort the mapping table",
+        key="sort_by_selector"
+    )
+with sort_col2:
+    sort_order = st.selectbox(
+        "Order",
+        options=["Ascending", "Descending"],
+        index=0,
+        key="sort_order_selector"
+    )
+with sort_col3:
+    if st.button("🔄 Apply Sort", key="apply_sort_btn"):
+        if sort_by != "Original order":
+            ascending = sort_order == "Ascending"
+            m = st.session_state["mapping_df"].copy()
+            st.session_state["mapping_df"] = m.sort_values(by=sort_by, ascending=ascending).reset_index(drop=True)
+            st.success(f"Sorted by {sort_by} ({sort_order})")
+            st.rerun()
+
 
 with st.form("mapping_form_main", clear_on_submit=False):
     mapping_src = st.session_state["mapping_df"].fillna("")
@@ -1516,11 +1543,6 @@ with st.form("mapping_form_main", clear_on_submit=False):
             mapping_src[col] = ""
 
     mapping_src = mapping_src.astype("object")
-
-    # Sort by variable name
-    mapping_src = mapping_src.sort_values(by="var", ascending=True).reset_index(
-        drop=True
-    )
 
     # Get all available channels for the dropdown
     all_available_channels = sorted(
