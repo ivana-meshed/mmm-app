@@ -11,6 +11,9 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+
+st.set_page_config(page_title="Map your data", layout="wide")
+
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -39,7 +42,6 @@ ALLOWED_CATEGORIES = [
 # ──────────────────────────────────────────────────────────────
 # Setup
 # ──────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Map your data", layout="wide")
 require_login_and_domain()
 ensure_session_defaults()
 
@@ -546,11 +548,11 @@ def _apply_automatic_aggregations(
                 parsed = _parse_variable_name(var_name)
                 suffix = parsed["suffix"]
                 subchannel = parsed["subchannel"]
-                
+
                 if suffix not in suffixes:
                     suffixes[suffix] = []
                     subchannels_by_suffix[suffix] = set()
-                    
+
                 suffixes[suffix].append(var_name)
                 if subchannel:  # Only track non-empty subchannels
                     subchannels_by_suffix[suffix].add(subchannel)
@@ -560,8 +562,10 @@ def _apply_automatic_aggregations(
                 # Don't create TOTAL if channel has only one subchannel
                 if len(subchannels_by_suffix.get(suffix, set())) <= 1:
                     continue
-                    
-                total_var_name = f"{channel.upper()}_TOTAL_{suffix.upper()}_CUSTOM"
+
+                total_var_name = (
+                    f"{channel.upper()}_TOTAL_{suffix.upper()}_CUSTOM"
+                )
 
                 # Only create if it doesn't already exist
                 if total_var_name not in mapping_df["var"].values:
@@ -652,7 +656,10 @@ def _apply_automatic_aggregations(
             for v in organic["var"]
             if "_CUSTOM" not in str(v) and str(v) in df_raw.columns
         ]
-        if organic_vars and "ORGANIC_TOTAL_CUSTOM" not in mapping_df["var"].values:
+        if (
+            organic_vars
+            and "ORGANIC_TOTAL_CUSTOM" not in mapping_df["var"].values
+        ):
             new_mapping_rows.append(
                 {
                     "var": "ORGANIC_TOTAL_CUSTOM",
@@ -663,7 +670,9 @@ def _apply_automatic_aggregations(
                     "custom_tags": "",
                 }
             )
-            new_columns["ORGANIC_TOTAL_CUSTOM"] = df_raw[organic_vars].sum(axis=1)
+            new_columns["ORGANIC_TOTAL_CUSTOM"] = df_raw[organic_vars].sum(
+                axis=1
+            )
 
     # 5. Prefix context_vars with CONTEXT_
     if not context.empty:
@@ -706,7 +715,9 @@ def _apply_metadata_to_current_df(
     g = (
         pd.DataFrame(meta_goals).astype("object")
         if meta_goals
-        else pd.DataFrame(columns=["var", "group", "type", "main"]).astype("object")
+        else pd.DataFrame(columns=["var", "group", "type", "main"]).astype(
+            "object"
+        )
     )
     # Add main column if it doesn't exist in loaded metadata
     if "main" not in g.columns:
@@ -844,8 +855,6 @@ def _iso2_countries_gcs_first(bucket: str) -> list[str]:
 # Page header & helper image
 # ──────────────────────────────────────────────────────────────
 st.title("Customize your analytics — map your data in 3 steps.")
-
-require_login_and_domain()
 
 # sensible defaults so we can read these anywhere
 st.session_state.setdefault("sf_table", "MMM_RAW")
@@ -1181,7 +1190,7 @@ with st.form("goals_form", clear_on_submit=False):
     if "main" not in goals_src.columns:
         goals_src["main"] = False
     goals_src["main"] = goals_src["main"].astype(bool)
-    
+
     goals_edit = st.data_editor(
         goals_src,
         use_container_width=True,
@@ -1199,7 +1208,7 @@ with st.form("goals_form", clear_on_submit=False):
             "main": st.column_config.CheckboxColumn(
                 "Main",
                 help="Select the main dependent variable for the model",
-                default=False
+                default=False,
             ),
         },
         key="goals_editor",
@@ -1214,17 +1223,21 @@ if goals_submit:
     edited = edited[edited["var"].astype(str).str.strip() != ""].astype(
         "object"
     )
-    
+
     # Validate that all goals have a type
     empty_types = edited[edited["type"].astype(str).str.strip() == ""]
     if not empty_types.empty:
-        st.error(f"⚠️ Please specify a type (revenue or conversion) for all goal variables. Missing types for: {', '.join(empty_types['var'].tolist())}")
+        st.error(
+            f"⚠️ Please specify a type (revenue or conversion) for all goal variables. Missing types for: {', '.join(empty_types['var'].tolist())}"
+        )
     else:
         # Ensure only one main is selected
         main_count = edited["main"].astype(bool).sum()
         if main_count > 1:
-            st.warning("⚠️ Multiple goals marked as 'Main'. Only the first one will be used as the main dependent variable.")
-        
+            st.warning(
+                "⚠️ Multiple goals marked as 'Main'. Only the first one will be used as the main dependent variable."
+            )
+
         # Drop duplicates and normalize
         merged = (
             edited.drop_duplicates(subset=["var"], keep="last")
@@ -1503,9 +1516,11 @@ with st.form("mapping_form_main", clear_on_submit=False):
             mapping_src[col] = ""
 
     mapping_src = mapping_src.astype("object")
-    
+
     # Sort by variable name
-    mapping_src = mapping_src.sort_values(by="var", ascending=True).reset_index(drop=True)
+    mapping_src = mapping_src.sort_values(by="var", ascending=True).reset_index(
+        drop=True
+    )
 
     # Get all available channels for the dropdown
     all_available_channels = sorted(
@@ -1599,8 +1614,12 @@ def _by_cat(df: pd.DataFrame, cat: str) -> list[str]:
 # Use allowed categories from constant, excluding empty string for by_cat
 # Also filter out date field and goal variables from the mapping
 date_and_goal_vars = set([date_field] + goals_df["var"].tolist())
-mapping_df_filtered = mapping_df[~mapping_df["var"].isin(date_and_goal_vars)].copy()
-by_cat = {cat: _by_cat(mapping_df_filtered, cat) for cat in ALLOWED_CATEGORIES if cat}
+mapping_df_filtered = mapping_df[
+    ~mapping_df["var"].isin(date_and_goal_vars)
+].copy()
+by_cat = {
+    cat: _by_cat(mapping_df_filtered, cat) for cat in ALLOWED_CATEGORIES if cat
+}
 
 # Get main dependent variable from goals_df
 dep_var = ""
@@ -1618,7 +1637,7 @@ if not goals_df.empty:
 save_country_specific = st.checkbox(
     f"Save only for {st.session_state['country'].upper()}",
     value=False,
-    help="By default, mappings are saved universally for all countries. Check this to save only for the current country."
+    help="By default, mappings are saved universally for all countries. Check this to save only for the current country.",
 )
 
 meta_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -1635,14 +1654,16 @@ for _, r in goals_df.iterrows():
             agg = "mean"
         else:
             agg = "sum"  # default
-        
-        goals_json.append({
-            "var": str(r["var"]),
-            "group": str(r["group"]),
-            "type": goal_type,
-            "agg_strategy": agg,
-            "main": bool(r.get("main", False))
-        })
+
+        goals_json.append(
+            {
+                "var": str(r["var"]),
+                "group": str(r["group"]),
+                "type": goal_type,
+                "agg_strategy": agg,
+                "main": bool(r.get("main", False)),
+            }
+        )
 
 # Extract channel, data_type, and agg_strategy mappings (excluding date and goals)
 channels_map = {
@@ -1672,25 +1693,26 @@ for _, spend_row in paid_spends.iterrows():
     parsed = _parse_variable_name(spend_var)
     channel = parsed["channel"]
     subchannel = parsed["subchannel"]
-    
+
     # Find corresponding paid_media_vars with same channel and subchannel
     if subchannel:
         pattern = f"{channel}_{subchannel}_"
     else:
         pattern = f"{channel}_"
-    
+
     matching_vars = [
-        str(v) for v in paid_vars["var"]
-        if str(v).startswith(pattern)
+        str(v) for v in paid_vars["var"] if str(v).startswith(pattern)
     ]
-    
+
     if matching_vars:
         paid_media_mapping[spend_var] = matching_vars
 
 payload = {
     "project_id": PROJECT_ID,
     "bucket": BUCKET,
-    "country": st.session_state["country"] if save_country_specific else "universal",
+    "country": (
+        st.session_state["country"] if save_country_specific else "universal"
+    ),
     "saved_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
     "data": {
         "origin": st.session_state["data_origin"],
@@ -1714,16 +1736,22 @@ payload = {
 def _save_metadata():
     try:
         # Determine the country for saving
-        save_country = st.session_state["country"] if save_country_specific else "universal"
-        
+        save_country = (
+            st.session_state["country"]
+            if save_country_specific
+            else "universal"
+        )
+
         vblob = _meta_blob(save_country, meta_ts)
         _safe_json_dump_to_gcs(payload, BUCKET, vblob)
-        _safe_json_dump_to_gcs(
-            payload, BUCKET, _meta_latest_blob(save_country)
-        )
+        _safe_json_dump_to_gcs(payload, BUCKET, _meta_latest_blob(save_country))
         st.session_state["last_saved_meta_path"] = f"gs://{BUCKET}/{vblob}"
         _list_country_versions_cached.clear()  # ⬅️ refresh loader pickers
-        location_msg = f"for {save_country.upper()}" if save_country_specific else "as universal mapping"
+        location_msg = (
+            f"for {save_country.upper()}"
+            if save_country_specific
+            else "as universal mapping"
+        )
         st.success(
             f"Saved metadata {location_msg} → gs://{BUCKET}/{vblob} (and updated latest)"
         )
@@ -1750,8 +1778,7 @@ if not st.session_state["mapping_df"].empty:
     ]
     # Use the filtered mapping for by_cat (excluding date and goals)
     by_cat_session = {
-        cat: _by_cat(mapping_df_filtered, cat)
-        for cat in allowed_categories
+        cat: _by_cat(mapping_df_filtered, cat) for cat in allowed_categories
     }
     st.session_state["mapped_by_cat"] = by_cat_session  # ← used by Experiment
     st.session_state["mapped_dep_var"] = dep_var or ""

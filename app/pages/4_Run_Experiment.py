@@ -13,6 +13,9 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+
+st.set_page_config(page_title="Experiment", page_icon="🧪", layout="wide")
+
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -34,7 +37,6 @@ job_manager = get_job_manager()
 
 from app_split_helpers import *  # bring in all helper functions/constants
 
-st.set_page_config(page_title="Experiment", page_icon="🧪", layout="wide")
 
 require_login_and_domain()
 ensure_session_defaults()
@@ -147,22 +149,29 @@ with tab_single:
             country_meta_versions = _list_country_versions(gcs_bucket, selected_country)  # type: ignore
             # Get universal metadata versions
             universal_meta_versions = _list_country_versions(gcs_bucket, "universal")  # type: ignore
-            
+
             # Combine and format metadata options
             metadata_options = []
             if universal_meta_versions:
                 # Add universal options first (default)
-                metadata_options.extend([f"Universal - {v}" for v in universal_meta_versions])
+                metadata_options.extend(
+                    [f"Universal - {v}" for v in universal_meta_versions]
+                )
             if country_meta_versions:
                 # Add country-specific options
-                metadata_options.extend([f"{selected_country.upper()} - {v}" for v in country_meta_versions])
-            
+                metadata_options.extend(
+                    [
+                        f"{selected_country.upper()} - {v}"
+                        for v in country_meta_versions
+                    ]
+                )
+
             if not metadata_options:
                 metadata_options = ["Universal - Latest"]
         except Exception as e:
             st.warning(f"Could not list metadata versions: {e}")
             metadata_options = ["Universal - Latest"]
-        
+
         # Metadata source selection (NEW - above data source)
         selected_metadata = st.selectbox(
             "Metadata source",
@@ -206,15 +215,23 @@ with tab_single:
 
                         # Parse metadata selection to get country and version
                         meta_parts = selected_metadata.split(" - ")
-                        meta_country = "universal" if meta_parts[0] == "Universal" else selected_country
-                        meta_version = meta_parts[1] if len(meta_parts) > 1 else "Latest"
-                        
+                        meta_country = (
+                            "universal"
+                            if meta_parts[0] == "Universal"
+                            else selected_country
+                        )
+                        meta_version = (
+                            meta_parts[1] if len(meta_parts) > 1 else "Latest"
+                        )
+
                         # Load metadata from selected source
                         metadata = _load_metadata_from_gcs(
                             gcs_bucket, meta_country, meta_version  # type: ignore
                         )
                         st.session_state["loaded_metadata"] = metadata
-                        st.session_state["selected_metadata"] = selected_metadata
+                        st.session_state["selected_metadata"] = (
+                            selected_metadata
+                        )
 
                         st.success(
                             f"✅ Loaded {len(df_prev)} rows, {len(df_prev.columns)} columns"
@@ -592,14 +609,18 @@ with tab_single:
                         ]
 
                     # Default to the first matching var or the spend itself
-                    default_var = (
-                        st.session_state["spend_var_mapping"].get(spend)
-                        or (matching_vars[0] if matching_vars else spend)
-                    )
+                    default_var = st.session_state["spend_var_mapping"].get(
+                        spend
+                    ) or (matching_vars[0] if matching_vars else spend)
 
                     # Ensure default_var is in the options
-                    if default_var not in matching_vars and default_var != spend:
-                        default_var = matching_vars[0] if matching_vars else spend
+                    if (
+                        default_var not in matching_vars
+                        and default_var != spend
+                    ):
+                        default_var = (
+                            matching_vars[0] if matching_vars else spend
+                        )
 
                     # Add the spend itself as an option
                     var_options = matching_vars + [spend]
@@ -668,35 +689,41 @@ with tab_single:
         # Training Configuration Management
         with st.expander("Save/Load Training Configuration", expanded=False):
             st.markdown("**Save Current Configuration**")
-            st.caption("Save the current training configuration to apply it later to other data sources or countries.")
-            
+            st.caption(
+                "Save the current training configuration to apply it later to other data sources or countries."
+            )
+
             col1, col2 = st.columns([3, 1])
             with col1:
                 config_name = st.text_input(
                     "Configuration name",
                     placeholder="e.g., baseline_config_v1",
-                    help="Name for this training configuration"
+                    help="Name for this training configuration",
                 )
             with col2:
                 save_for_multi = st.checkbox(
                     "Multi-country",
                     value=False,
-                    help="Save for multiple countries"
+                    help="Save for multiple countries",
                 )
-            
+
             if save_for_multi:
                 config_countries = st.multiselect(
                     "Select countries",
                     options=["fr", "de", "it", "es", "nl", "uk"],
                     default=[st.session_state.get("selected_country", "fr")],
-                    help="Countries this configuration applies to"
+                    help="Countries this configuration applies to",
                 )
             else:
-                config_countries = [st.session_state.get("selected_country", "fr")]
-            
+                config_countries = [
+                    st.session_state.get("selected_country", "fr")
+                ]
+
             if st.button("💾 Save Configuration"):
                 if not revision or not revision.strip():
-                    st.error("⚠️ Revision tag is required to save configuration.")
+                    st.error(
+                        "⚠️ Revision tag is required to save configuration."
+                    )
                 elif not config_name or not config_name.strip():
                     st.error("⚠️ Configuration name is required.")
                 else:
@@ -725,9 +752,9 @@ with tab_single:
                                 "hyperparameter_preset": hyperparameter_preset,
                                 "resample_freq": resample_freq,
                                 "resample_agg": resample_agg,
-                            }
+                            },
                         }
-                        
+
                         # Save to GCS
                         client = storage.Client()
                         for ctry in config_countries:
@@ -735,18 +762,24 @@ with tab_single:
                             blob = client.bucket(gcs_bucket).blob(blob_path)
                             blob.upload_from_string(
                                 json.dumps(config_payload, indent=2),
-                                content_type="application/json"
+                                content_type="application/json",
                             )
-                        
-                        countries_str = ", ".join([c.upper() for c in config_countries])
-                        st.success(f"✅ Configuration '{config_name}' saved for: {countries_str}")
+
+                        countries_str = ", ".join(
+                            [c.upper() for c in config_countries]
+                        )
+                        st.success(
+                            f"✅ Configuration '{config_name}' saved for: {countries_str}"
+                        )
                     except Exception as e:
                         st.error(f"Failed to save configuration: {e}")
-            
+
             st.divider()
             st.markdown("**Load Saved Configuration**")
-            st.caption("Load a previously saved configuration to apply to current data.")
-            
+            st.caption(
+                "Load a previously saved configuration to apply to current data."
+            )
+
             # List available configurations
             try:
                 client = storage.Client()
@@ -758,26 +791,30 @@ with tab_single:
                     for blob in blobs
                     if blob.name.endswith(".json")
                 ]
-                
+
                 if available_configs:
                     selected_config = st.selectbox(
                         "Select configuration to load",
                         options=available_configs,
-                        help=f"Configurations available for {current_country.upper()}"
+                        help=f"Configurations available for {current_country.upper()}",
                     )
-                    
+
                     if st.button("📥 Load Configuration"):
                         try:
                             blob_path = f"training-configs/saved/{current_country}/{selected_config}.json"
                             blob = client.bucket(gcs_bucket).blob(blob_path)
                             config_data = json.loads(blob.download_as_bytes())
-                            
-                            st.info(f"📋 Configuration '{selected_config}' loaded. Refresh the page to see the updated values.")
+
+                            st.info(
+                                f"📋 Configuration '{selected_config}' loaded. Refresh the page to see the updated values."
+                            )
                             st.json(config_data, expanded=False)
                         except Exception as e:
                             st.error(f"Failed to load configuration: {e}")
                 else:
-                    st.info(f"No saved configurations found for {current_country.upper()}")
+                    st.info(
+                        f"No saved configurations found for {current_country.upper()}"
+                    )
             except Exception as e:
                 st.warning(f"Could not list configurations: {e}")
 
@@ -880,7 +917,7 @@ with tab_single:
                     "⚠️ Revision tag is required. Please enter a revision identifier before starting training."
                 )
                 st.stop()
-            
+
             # Validate data is loaded
             if (
                 "preview_df" not in st.session_state
