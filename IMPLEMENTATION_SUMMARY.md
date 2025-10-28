@@ -15,8 +15,9 @@ This document summarizes the implementation of improvements to the MMM App's dat
 - **Autocomplete Selection**: The "Variable" field is now a SelectboxColumn instead of free text, providing autocomplete from available source data columns
 - **Type Validation**: Added validation to prevent saving goals without specifying a type (revenue/conversion)
 - **Aggregation Rules**: Goals automatically get aggregation strategies:
-  - Revenue goals: `sum`
-  - Conversion goals: `mean`
+  - Revenue goals: `sum` (enforced automatically)
+  - Conversion goals: `mean` (enforced automatically)
+  - These are applied when goals are saved and cannot be overridden in the metadata
 
 #### 1.2 Mapping Table Improvements
 - **Sorting**: Mapping DataFrame is now automatically sorted by column name (alphabetically)
@@ -27,7 +28,9 @@ This document summarizes the implementation of improvements to the MMM App's dat
 **Before:** TOTAL columns had no suffix (e.g., `GA_TOTAL_COST`)
 **After:** 
 - All TOTAL columns now have `_CUSTOM` suffix (e.g., `GA_TOTAL_COST_CUSTOM`, `ORGANIC_TOTAL_CUSTOM`)
-- TOTAL columns are only created when a channel has multiple subchannels (not for single-subchannel channels)
+- TOTAL columns are only created when a channel has multiple subchannels
+- **Example**: If channel `GA` has subchannels `SUPPLY`, `DEMAND`, and `OTHER`, TOTAL columns like `GA_TOTAL_COST_CUSTOM` will be created
+- **Counter-example**: If channel `TV` has only one subchannel or no subchannels, no `TV_TOTAL_COST_CUSTOM` is created
 
 #### 1.4 Metadata Enhancements
 **New Fields in mapping.json:**
@@ -83,6 +86,11 @@ This document summarizes the implementation of improvements to the MMM App's dat
   - Adstock and hyperparameters
   - Resampling options
 - Saved to GCS: `training-configs/saved/{country}/{config_name}.json`
+
+**Note on Main Goal Selection:**
+- Only one goal should be marked as "main"
+- If multiple goals are marked as main, a warning is displayed and the first one is used
+- If no goal is marked as main, the first primary goal is used as fallback
 
 **Load Configuration:**
 - Lists available configurations for current country
@@ -214,25 +222,35 @@ ORGANIC_TOTAL_CUSTOM,organic_vars,organic,numeric,sum
 ### Test Coverage
 Created comprehensive test suite in `tests/test_mapping_metadata.py`:
 
-1. **Metadata Structure Tests**
+1. **Metadata Structure Tests** (5 tests)
    - Validates all required fields present
    - Tests goals structure with new fields
    - Validates aggregation rules for goals
    - Tests paid_media_mapping structure
+   - Tests universal vs country-specific saves
 
-2. **Data Type Tests**
+2. **Data Type Tests** (3 tests)
    - Validates date field has data_type "date"
    - Tests custom column naming (_CUSTOM suffix)
    - Tests aggregation options exclude "auto" and None
 
-3. **Filtering Tests**
+3. **Filtering Tests** (1 test)
    - Validates filtering of empty category AND channel
-   - Tests universal vs country-specific saves
 
-4. **Training Configuration Tests**
+4. **Training Configuration Tests** (2 tests)
    - Tests saved configuration structure
    - Tests multi-country support
    - Validates revision requirement
+
+**Test Scenarios Covered:**
+- Metadata JSON structure validation
+- Goals aggregation rule enforcement
+- Paid media spend-to-var mapping
+- Custom column naming conventions
+- Empty field filtering
+- Universal vs country-specific saves
+- Training configuration save/load
+- Revision requirement validation
 
 ### Test Results
 - **New Tests**: 11 tests - All passing ✓
@@ -268,15 +286,21 @@ Created comprehensive test suite in `tests/test_mapping_metadata.py`:
 
 ## Migration Notes
 
+**Version:** January 2025 (v2.0)
+**Changes Introduced:** Complete rework of mapping and experiment configuration
+
 ### For Existing Metadata
 - Old metadata files will continue to work
 - New "main" field in goals defaults to false if missing
+- New "agg_strategy" field in goals will use defaults if missing
 - paid_media_mapping is optional and will be empty if not present
+- Metadata created before this version can be loaded but may not have all new fields
 
 ### For Users
 - First time users will see the universal mapping option by default
 - Existing country-specific mappings remain accessible
 - Training configurations are a new feature - no migration needed
+- Old workflows continue to work without changes
 
 ## Files Modified
 
