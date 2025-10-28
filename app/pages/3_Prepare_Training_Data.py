@@ -78,32 +78,34 @@ def _expand_with_rules(explicit_list, rule_tokens, dfcols):
                 out.add(col)
     return sorted(out)
 
-# Build lists directly from metadata + autotag rules; keep only columns present in df
+# ---- Build driver buckets (mapping + prefix handling) ----
+# Fix NameError: use mp (meta["mapping"]) instead of mapping
+
 paid_spend_cols = [c for c in (mp.get("paid_media_spends") or []) if c in df.columns]
 paid_var_cols   = [c for c in (mp.get("paid_media_vars")   or []) if c in df.columns]
 
-# Organic/context: include explicit mapping PLUS anything matching autotag rules
-organic_cols = _expand_with_rules(
-    explicit_list = [c for c in (mp.get("organic_vars") or []) if c in df.columns],
-    rule_tokens   = (auto.get("organic_vars") or []),
-    dfcols        = df.columns
-)
+# Strip prefixes like "ORGANIC_" or "CONTEXT_" before matching to df
+def _strip_prefix(lst, prefix):
+    prefix = prefix.lower()
+    out = []
+    for c in lst or []:
+        c_stripped = re.sub(rf"^{prefix}", "", c, flags=re.IGNORECASE)
+        if c_stripped in df.columns:
+            out.append(c_stripped)
+        elif c in df.columns:  # fallback to unstripped
+            out.append(c)
+    return sorted(set(out))
 
-context_cols = _expand_with_rules(
-    explicit_list = [c for c in (mp.get("context_vars") or []) if c in df.columns],
-    rule_tokens   = (auto.get("context_vars") or []),
-    dfcols        = df.columns
-)
+organic_cols = _strip_prefix(mp.get("organic_vars"), "ORGANIC_")
+context_cols = _strip_prefix(mp.get("context_vars"), "CONTEXT_")
+factor_cols  = [c for c in (mp.get("factor_vars") or []) if c in df.columns]
 
-# Factor flags (explicit only)
-factor_cols = [c for c in (mp.get("factor_vars") or []) if c in df.columns]
-
-# ---- De-dup organic/context against paid & factor buckets ----
+# ---- De-dup organic/context against paid & factor ----
 _exclude = set(paid_spend_cols + paid_var_cols + factor_cols)
 organic_cols = [c for c in organic_cols if c not in _exclude]
 context_cols = [c for c in context_cols if c not in _exclude]
 
-# Buckets
+# ---- Buckets ----
 buckets = {
     "Paid Media Spend":     paid_spend_cols,
     "Paid Media Variables": paid_var_cols,
@@ -315,20 +317,16 @@ with tab_rel:
         return df_vals.applymap(lambda v: (f"{v*100:.1f}%" if pd.notna(v) else ""))
 
     def heatmap_fig_from_matrix(mat: pd.DataFrame, title=None, zmin=-1, zmax=1):
-        """
-        Render correlation heatmap; rows sorted alphabetically DESC (top -> bottom).
-        Removes 'undefined' text artefacts by disabling texttemplate.
-        """
+        """Render correlation heatmap with % text values (no undefined artefacts)."""
         if mat is None or mat.empty:
             return go.Figure()
 
-        # sort rows alphabetically descending ("down" visually from top to bottom)
         mat = mat.sort_index(ascending=False)
-
         rows = max(1, mat.shape[0])
         height = min(120 + 26 * rows, 1100)
         tick_size = 12 if rows <= 25 else (10 if rows <= 45 else 9)
 
+        text_vals = mat.applymap(lambda v: f"{v:.2f}" if pd.notna(v) else "")
         fig = go.Figure(
             go.Heatmap(
                 z=mat.values,
@@ -337,7 +335,8 @@ with tab_rel:
                 zmin=zmin,
                 zmax=zmax,
                 colorscale="RdYlGn",
-                # Do NOT set text/texttemplate to avoid 'undefined' top-left artefact
+                text=text_vals.values,
+                texttemplate="%{text}",
                 hovertemplate="Driver: %{y}<br>Goal: %{x}<br>r: %{z:.2f}<extra></extra>",
                 colorbar=dict(title="r"),
             )
