@@ -16,10 +16,13 @@ This repository contains a Streamlit web application that orchestrates an R/Roby
 ```
 app/                    # Streamlit application and Python modules
   streamlit_app.py      # Main Streamlit UI
-  trainer.py            # Training orchestration logic
-  snowflake_utils.py    # Snowflake connection utilities
+  app_shared.py         # Shared application logic and utilities
   data_processor.py     # Data processing logic
+  snowflake_utils.py    # Snowflake connection utilities
   gcp_secrets.py        # GCP Secret Manager integration
+  health.py             # Health check endpoints
+  api_endpoint.py       # API endpoint handlers
+  warm_container.py     # Container warm-up logic
   pages/                # Streamlit multi-page components
 
 r/                      # R scripts for Robyn MMM
@@ -73,7 +76,7 @@ make test
 ### Python Dependencies
 
 Key dependencies include:
-- `streamlit>=1.36.0` - Web UI framework
+- `streamlit==1.36.0` - Web UI framework (pinned version)
 - `pandas` - Data manipulation
 - `snowflake-connector-python` - Snowflake database connector
 - `google-cloud-secret-manager` - GCP secrets management
