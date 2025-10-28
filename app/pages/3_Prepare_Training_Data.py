@@ -68,43 +68,29 @@ for c in (_context_base + _secondary_goals):
 # Total spend column for efficiency calcs if needed later
 df["_TOTAL_SPEND"] = df[paid_spend_cols].sum(axis=1) if paid_spend_cols else 0.0
 
-# ---- Timeframe & resample windows  ----
-RULE = freq_to_rule(FREQ)
-df_r   = filter_range(df.copy(), DATE_COL, RANGE)
-df_prev = previous_window(df, df_r, DATE_COL, RANGE)
 
-# If you need resampled series elsewhere on this page:
-# res = resample_numeric(df_r, DATE_COL, RULE, ensure_cols=[target, "_TOTAL_SPEND"])
+# ---- Reactivity & persistence: DO NOT overwrite with session copies ----
+# Persist current sidebar selections for other pages, but keep *current* values active here.
+st.session_state["RANGE"]         = RANGE
+st.session_state["FREQ"]          = FREQ
+st.session_state["GOAL"]          = GOAL
+st.session_state["SEL_COUNTRIES"] = sel_countries
 
-# Local wrapper to match older calls (if you use total_with_prev in this page)
-def total_with_prev_local(collist):
-    return total_with_prev(df_r, df_prev, collist)
-
-# ---- Pull data + settings from session (fallback to sane defaults) ----
-if "df" not in st.session_state or st.session_state["df"] is None or st.session_state["df"].empty:
-    st.warning("No dataset loaded. Go to **Review Data** and load a dataset first.")
-    st.stop()
-
-df = st.session_state["df"].copy()
-meta = st.session_state.get("meta", {}) or {}
-DATE_COL = st.session_state.get("date_col", "DATE")
-
-# carry over sidebar selections from Review Data if present
-RANGE = st.session_state.get("RANGE", "12m")
-FREQ  = st.session_state.get("FREQ",  "M")
-RULE  = freq_to_rule(FREQ)
-
-# rebuild helpers and buckets
+# Rebuild helpers/buckets on the *filtered* df (after country filter), not the raw session df.
 display_map, nice, goal_cols, mapping, m, ALL_COLS_UP, IMPR_COLS, CLICK_COLS, SESSION_COLS, INSTALL_COLS = build_meta_views(meta, df)
+
 paid_spend_cols = [c for c in (mapping.get("paid_media_spends", []) or []) if c in df.columns]
 paid_var_cols   = [c for c in (mapping.get("paid_media_vars",   []) or []) if c in df.columns]
 organic_cols    = [c for c in (mapping.get("organic_vars",      []) or []) if c in df.columns]
 context_cols    = [c for c in (mapping.get("context_vars",      []) or []) if c in df.columns]
 
-# resample windows used by Relationships tab
-df_r    = filter_range(df.copy(), DATE_COL, RANGE)
+# Recompute windows using the *current* RANGE/FREQ from the sidebar
+RULE   = freq_to_rule(FREQ)
+df_r   = filter_range(df.copy(), DATE_COL, RANGE)
 df_prev = previous_window(df, df_r, DATE_COL, RANGE)
-
+def total_with_prev_local(collist):
+    return total_with_prev(df_r, df_prev, collist)
+    
 # -----------------------------
 # Tabs
 # -----------------------------
@@ -164,47 +150,6 @@ with tab_rel:
                 lo = s.quantile(lower_q)
                 dfw[c] = s.clip(lower=lo, upper=hi)
         return dfw
-
-    # helper: correlation matrix (drivers x goals)
-    def corr_matrix(
-        frame: pd.DataFrame, drivers: list, goals: list, min_n: int = 8
-    ) -> pd.DataFrame:
-        if frame.empty or not drivers or not goals:
-            return pd.DataFrame(index=drivers, columns=goals, dtype=float)
-        out = pd.DataFrame(
-            index=[nice(c) for c in drivers],
-            columns=[nice(g) for g in goals],
-            dtype=float,
-        )
-        for d in drivers:
-            if d not in frame:
-                continue
-            for g in goals:
-                if g not in frame:
-                    continue
-                if d == g:
-                    out.loc[nice(d), nice(g)] = np.nan
-                    continue
-                pair = (
-                    frame[[d, g]]
-                    .replace([np.inf, -np.inf], np.nan)
-                    .dropna()
-                    .copy()
-                )
-                pair.columns = ["drv", "goal"]
-                if len(pair) < min_n:
-                    out.loc[nice(d), nice(g)] = np.nan
-                else:
-                    sd = pair["drv"].std(ddof=1)
-                    sg = pair["goal"].std(ddof=1)
-                    if (pd.isna(sd) or pd.isna(sg)) or (sd <= 0 or sg <= 0):
-                        out.loc[nice(d), nice(g)] = np.nan
-                    else:
-                        r = np.corrcoef(
-                            pair["drv"].values, pair["goal"].values
-                        )[0, 1]
-                        out.loc[nice(d), nice(g)] = float(r)
-        return out
 
     # -------------------------------
     # Buckets & helpers (per-category)
@@ -377,7 +322,20 @@ with tab_rel:
         st.info("No goals found in metadata.")
     else:
         # single goal for Δ and metrics table
-        goal_sel = st.selectbox("Goal for Δ and metrics table", [nice(g) for g in goal_cols], index=0, key="rel_bucket_goal")
+        _goal_opts = [nice(g) for g in goal_cols]
+        _goal_default_idx = 0
+        if GOAL and GOAL in goal_cols:
+            try:
+                _goal_default_idx = _goal_opts.index(nice(GOAL))
+            except ValueError:
+                _goal_default_idx = 0
+
+        goal_sel = st.selectbox(
+            "Goal for Δ and metrics table",
+            _goal_opts,
+            index=_goal_default_idx,
+            key="rel_bucket_goal"
+        )
         goal_sel_col = {nice(g): g for g in goal_cols}[goal_sel]
 
         # Render each bucket block: [corr heatmap | delta bar] then metrics table
