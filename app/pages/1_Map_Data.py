@@ -588,20 +588,6 @@ def _apply_automatic_aggregations(
 
     # 4. For organic_vars category, create custom tag aggregates and TOTAL
     if not organic.empty:
-        # Prefix all organic vars with ORGANIC_ if not already prefixed
-        for idx, row in organic.iterrows():
-            var_name = str(row["var"])
-            if not var_name.startswith("ORGANIC_"):
-                new_name = f"ORGANIC_{var_name}"
-                # Update in mapping
-                mapping_df.at[idx, "var"] = new_name
-                # Rename in df_raw if exists
-                if var_name in df_raw.columns:
-                    df_raw = df_raw.rename(columns={var_name: new_name})
-
-        # Re-fetch after renaming
-        organic = mapping_df[mapping_df["category"] == "organic_vars"].copy()
-
         # Collect custom tags
         all_tags = set()
         for tags_str in organic["custom_tags"].dropna():
@@ -618,7 +604,7 @@ def _apply_automatic_aggregations(
             vars_list = tag_rows["var"].tolist()
 
             if vars_list:
-                # Extract suffix from first variable (e.g., SESSIONS from ORGANIC_NL_DAILY_SESSIONS)
+                # Extract suffix from first variable (e.g., SESSIONS from NL_DAILY_SESSIONS)
                 parsed = _parse_variable_name(vars_list[0])
                 suffix_parts = parsed["suffix"].split("_")
                 suffix = (
@@ -647,9 +633,6 @@ def _apply_automatic_aggregations(
                             axis=1
                         )
 
-        # Re-fetch organic again to get the updated list with prefixes
-        organic = mapping_df[mapping_df["category"] == "organic_vars"].copy()
-
         # Create ORGANIC_TOTAL (sum of all organic vars excluding _CUSTOM)
         organic_vars = [
             str(v)
@@ -673,26 +656,6 @@ def _apply_automatic_aggregations(
             new_columns["ORGANIC_TOTAL_CUSTOM"] = df_raw[organic_vars].sum(
                 axis=1
             )
-
-    # 5. Prefix context_vars with CONTEXT_
-    if not context.empty:
-        for idx, row in context.iterrows():
-            var_name = str(row["var"])
-            if not var_name.startswith("CONTEXT_"):
-                new_name = f"CONTEXT_{var_name}"
-                mapping_df.at[idx, "var"] = new_name
-                if var_name in df_raw.columns:
-                    df_raw = df_raw.rename(columns={var_name: new_name})
-
-    # 6. Prefix factor_vars with FACTOR_
-    if not factor.empty:
-        for idx, row in factor.iterrows():
-            var_name = str(row["var"])
-            if not var_name.startswith("FACTOR_"):
-                new_name = f"FACTOR_{var_name}"
-                mapping_df.at[idx, "var"] = new_name
-                if var_name in df_raw.columns:
-                    df_raw = df_raw.rename(columns={var_name: new_name})
 
     # Add new mapping rows
     if new_mapping_rows:
