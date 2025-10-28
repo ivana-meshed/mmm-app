@@ -68,7 +68,7 @@ for c in (_context_base + _secondary_goals):
 # Total spend column for efficiency calcs if needed later
 df["_TOTAL_SPEND"] = df[paid_spend_cols].sum(axis=1) if paid_spend_cols else 0.0
 
-# ---- Timeframe & resample windows used in Tabs 4 & 5 ----
+# ---- Timeframe & resample windows  ----
 RULE = freq_to_rule(FREQ)
 df_r   = filter_range(df.copy(), DATE_COL, RANGE)
 df_prev = previous_window(df, df_r, DATE_COL, RANGE)
@@ -108,10 +108,11 @@ df_prev = previous_window(df, df_r, DATE_COL, RANGE)
 # -----------------------------
 # Tabs
 # -----------------------------
-tab_rel, tab_diag  = st.tabs(
+tab_rel, tab_diag, tab_deep  = st.tabs(
     [
         "Explore Relationships",
         "Prepare Dataset for Modeling",
+        "Deep Dive: Individual Driver"
     ]
 )
 
@@ -400,17 +401,24 @@ with tab_rel:
                 if df_prev_w.empty or not cols_list:
                     st.info("Previous timeframe empty or no variables.")
                 else:
-                    cur  = corr_with_target_safe(df_r_w,   cols_list, goal_sel_col)
+                    cur  = corr_with_target_safe(df_r_w,    cols_list, goal_sel_col)
                     prev = corr_with_target_safe(df_prev_w, cols_list, goal_sel_col)
+
                     joined = cur.join(prev, how="outer", lsuffix="_cur", rsuffix="_prev").fillna(np.nan)
                     if "corr_cur" not in joined or "corr_prev" not in joined or joined.empty:
                         st.info("Not enough data to compute changes.")
                     else:
                         joined["delta"] = joined["corr_cur"] - joined["corr_prev"]
-                        disp = joined.reset_index().rename(columns={"col": "Variable"})
-                        disp["Variable_nice"] = disp["col"].apply(nice)
+
+                        # robustly capture the index name after reset_index()
+                        disp = joined.reset_index()
+                        idx_col = "col" if "col" in disp.columns else ("index" if "index" in disp.columns else disp.columns[0])
+                        disp = disp.rename(columns={idx_col: "Variable"})
+                        disp["Variable_nice"] = disp["Variable"].apply(nice)
+
                         disp = disp.sort_values("delta", ascending=True)
                         colors = disp["delta"].apply(lambda x: "#2e7d32" if x >= 0 else "#a94442")
+
                         figd = go.Figure(
                             go.Bar(
                                 x=disp["delta"],
@@ -439,236 +447,6 @@ with tab_rel:
             else:
                 st.caption("—")
             st.markdown("---")
-
-    # ---------- (C) Explore Driver–Goal Relationship (signal check for MMM) ----------
-st.markdown("### C) Explore Driver–Goal Relationship (signal check for MMM)")
-st.caption("Quick, non-causal curve fit to gauge whether a driver has enough signal to justify inclusion/engineering in a future MMM.")
-
-if not goal_cols:
-    st.info("No goals found in metadata.")
-else:
-    # candidates present in the resampled/current window
-    driver_all = sorted(list(dict.fromkeys([c for c in all_driver_cols if c in df_r_w.columns])))
-    if not driver_all:
-        st.info("No driver columns available.")
-    else:
-        y_goal_label = st.selectbox(
-            "Goal (Y)",
-            [nice(g) for g in goal_cols],
-            index=0,
-            key="rel_c_goal",
-        )
-        y_col = {nice(g): g for g in goal_cols}[y_goal_label]
-
-        x_driver_label = st.selectbox(
-            "Driver (X)",
-            [nice(c) for c in driver_all if c != y_col],
-            index=0,
-            key="rel_c_drv",
-        )
-        x_col = {nice(c): c for c in driver_all}[x_driver_label]
-
-        exclude_zero = st.checkbox(
-            "Exclude zero values for driver",
-            value=(x_col.upper() != "TV_IS_ON"),
-            key="rel_c_exz",
-        )
-        outlier_method = st.selectbox(
-            "Outlier handling",
-            ["none", "percentile (top only)", "zscore (<3)"],
-            index=0,
-            help="Applies after the (optional) winsorization above. Percentile drops top ~2% of X; z-score drops |z(X)| ≥ 3.",
-            key="rel_c_outlier",
-        )
-
-        # Filter + outliers
-        x_raw = pd.to_numeric(df_r_w[x_col], errors="coerce")
-        y_raw = pd.to_numeric(df_r_w[y_col], errors="coerce")
-        mask = x_raw.notna() & y_raw.notna()
-        if exclude_zero and x_col.upper() != "TV_IS_ON":
-            mask &= x_raw != 0
-        x_f = x_raw[mask].copy()
-        y_f = y_raw[mask].copy()
-
-        if outlier_method.startswith("percentile") and len(x_f) >= 2:
-            upper = np.percentile(x_f, 98)
-            keep = x_f <= upper
-            x_f, y_f = x_f[keep], y_f[keep]
-        elif outlier_method.startswith("zscore") and len(x_f) >= 2:
-            z = np.abs(stats.zscore(x_f))
-            keep = z < 3
-            x_f, y_f = x_f[keep], y_f[keep]
-
-        if len(x_f) < 5:
-            st.info("Not enough data points after filtering to fit a curve.")
-        else:
-            # Quadratic fit
-            X = np.array(x_f).reshape(-1, 1)
-            poly = PolynomialFeatures(degree=2)
-            Xp = poly.fit_transform(X)
-            mdl = LinearRegression().fit(Xp, y_f)
-            y_hat = mdl.predict(Xp)
-
-            # Metrics
-            r2 = r2_score(y_f, y_hat)
-            mae = mean_absolute_error(y_f, y_hat)
-
-            # Normalize MAE to goal scale (5th–95th pct)
-            if y_f.nunique() > 1:
-                y_p5, y_p95 = np.percentile(y_f, [5, 95])
-                y_scale = max(y_p95 - y_p5, 1e-9)
-            else:
-                y_scale = max(float(y_f.max() - y_f.min()), 1e-9)
-            nmae = mae / y_scale
-
-            # Spearman rank correlation (ρ)
-            rho, _ = stats.spearmanr(x_f, y_f, nan_policy="omit")
-
-            # --- Style helpers (local) ---
-            SCORE_COLORS = {
-                "green": "#2e7d32",
-                "yellow": "#f9a825",
-                "red": "#a94442",
-                "bg": "#fafafa",
-                "ink": "#222",
-            }
-
-            def score_bar_metric_first(metric_title: str, tooltip_text: str, value_txt: str, level: str, percent: int):
-                def hex_to_rgba(hex_color: str, alpha: float) -> str:
-                    h = hex_color.lstrip("#")
-                    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-                    return f"rgba({r},{g},{b},{alpha})"
-                pct_css = max(percent, 6)
-                color = SCORE_COLORS[level]
-                title_html = (
-                    f'<span style="font-size:18px;font-weight:700;color:{SCORE_COLORS["ink"]};display:inline-flex;align-items:center;">'
-                    f"{metric_title}"
-                    f'<span class="tooltip-wrap"><span class="i-dot">i</span>'
-                    f'<span class="tooltip-text">{tooltip_text}</span></span></span>'
-                )
-                html = (
-                    f'<div style="border:1px solid #eee;border-radius:12px;padding:14px;background:{SCORE_COLORS["bg"]};">'
-                    f'<div style="display:flex;justify-content:space-between;align-items:baseline;">'
-                    f"{title_html}"
-                    f'<div style="font-size:18px;font-weight:700;color:{SCORE_COLORS["ink"]};">{value_txt}</div>'
-                    f"</div>"
-                    f'<div style="margin-top:10px;height:16px;border-radius:999px;background:#eee;overflow:hidden;">'
-                    f'<div style="width:{pct_css}%;height:100%;background:{color};"></div>'
-                    f"</div></div>"
-                )
-                st.markdown(html, unsafe_allow_html=True)
-
-            # Thresholds / labels
-            def classify_r2_card(val: float):
-                if val is None or not np.isfinite(val): return ("yellow", "Insufficient data — treat with caution.")
-                if val >= 0.35: return ("green", "Promising signal — likely meaningful; candidate for MMM.")
-                if val >= 0.15: return ("yellow", "Some signal — consider with transforms/lags or as part of a bundle.")
-                return ("red", "Weak/noisy — unlikely to add value without re-engineering.")
-
-            def classify_mae_card(val: float):
-                if val is None or not np.isfinite(val): return ("yellow", "Insufficient data — treat with caution.")
-                if val <= 0.10: return ("green", "Average error small vs goal scale — usable for exploration.")
-                if val <= 0.30: return ("yellow", "Average error moderate — interpret cautiously.")
-                return ("red", "Average error large — not reliable for exploration.")
-
-            def classify_rho_card(val: float):
-                if val is None or not np.isfinite(val): return ("yellow", "Insufficient data — treat with caution.")
-                s = abs(val)
-                if s >= 0.35: return ("green", "Clear monotonic pattern in ranks — usable signal.")
-                if s >= 0.15: return ("yellow", "Some monotonic pattern — consider with caution.")
-                return ("red", "Weak/none — ranks move inconsistently.")
-
-            TITLE_R2, TITLE_MAE, TITLE_RHO = ("R²", "MAE (relative)", "Spearman ρ")
-            TIP_R2 = "Explained variance (fit strength) between driver and goal. Higher is better."
-            TIP_MAE = "Average error vs goal’s typical scale (5th–95th pct). Smaller is better."
-            TIP_RHO = "Monotonic rank correlation (strength & direction). Farther from 0 is stronger."
-
-            def fill_from_r2(v):
-                if v is None or not np.isfinite(v): return 50
-                s = (v - (-0.2)) / (1.0 - (-0.2))  # map ~[-0.2..1.0] → 0..100
-                return int(max(0, min(1, s)) * 100)
-
-            def fill_from_mae(v):
-                if v is None or not np.isfinite(v): return 50
-                s = 1 - min(v / 0.30, 1.0)        # 0..0.30 → 100..0
-                return int(max(0, min(1, s)) * 100)
-
-            def fill_from_rho(v):
-                if v is None or not np.isfinite(v): return 50
-                return int(min(abs(v), 1.0) * 100)
-
-            # Build the three cards
-            lvl_r2, msg_r2 = classify_r2_card(r2)
-            lvl_mae, msg_mae = classify_mae_card(nmae)
-            lvl_rho, msg_rho = classify_rho_card(rho if np.isfinite(rho) else np.nan)
-
-            r2_txt  = f"{r2:.2f}" if np.isfinite(r2)  else "—"
-            mae_txt = f"{nmae*100:.1f}%" if np.isfinite(nmae) else "—"
-            rho_txt = f"{rho:+.2f}" if np.isfinite(rho) else "—"
-
-            p_r2  = fill_from_r2(r2)
-            p_mae = fill_from_mae(nmae)
-            p_rho = fill_from_rho(rho if np.isfinite(rho) else np.nan)
-
-            # One-time CSS (safe to repeat; tiny)
-            st.markdown("""
-<style>
-.tooltip-wrap { position: relative; display: inline-flex; align-items: center; cursor: help; }
-.tooltip-wrap .i-dot { font-size: 13px; border:1px solid #999; border-radius:50%; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; color:#666; margin-left:6px; line-height:1; }
-.tooltip-wrap .tooltip-text { visibility: hidden; opacity: 0; transition: opacity 0.08s ease-in-out;
-  position: absolute; bottom: 125%; left: 50%; transform: translateX(-50%);
-  background: #111; color: #fff; padding: 8px 10px; border-radius: 6px;
-  font-size: 12px; z-index: 9999; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-  max-width: 520px; width: max-content; white-space: normal; line-height: 1.35; overflow-wrap: anywhere; text-align: center; }
-.tooltip-wrap:hover .tooltip-text { visibility: visible; opacity: 1; }
-.tooltip-wrap .tooltip-text::after { content: ""; position: absolute; top: 100%; left: 50%;
-  transform: translateX(-50%); border-width: 6px; border-style: solid; border-color: #111 transparent transparent transparent; }
-</style>
-            """, unsafe_allow_html=True)
-
-            st.markdown("#### Model Fit — Scorecards (signal for MMM)")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                score_bar_metric_first("R²", TIP_R2, r2_txt, lvl_r2, p_r2)
-                st.caption(msg_r2)
-            with c2:
-                score_bar_metric_first("MAE (relative)", TIP_MAE, mae_txt, lvl_mae, p_mae)
-                st.caption(msg_mae)
-            with c3:
-                score_bar_metric_first("Spearman ρ", TIP_RHO, rho_txt, lvl_rho, p_rho)
-                if np.isfinite(rho):
-                    direction = "positive" if rho > 0 else ("negative" if rho < 0 else "no")
-                    st.caption(f"Ranks move in a {direction} monotonic pattern (ρ = {rho:+.2f}). {msg_rho}")
-                else:
-                    st.caption(msg_rho)
-
-            # ---- Fit visualization + marginal returns ----
-            pcts = [10, 25, 50, 75, 90]
-            x_pts = np.percentile(np.array(x_f), pcts)
-            dydx = mdl.coef_[1] + 2 * mdl.coef_[2] * x_pts
-            y_pts = mdl.predict(poly.transform(x_pts.reshape(-1, 1)))
-
-            xs = np.sort(np.array(x_f)).reshape(-1, 1)
-            ys = mdl.predict(poly.transform(xs))
-
-            figfit = go.Figure()
-            figfit.add_trace(go.Scatter(x=x_f.values, y=y_f.values, mode="markers", name="Actual", opacity=0.45))
-            figfit.add_trace(go.Scatter(x=xs.squeeze(), y=ys, mode="lines", name="Fitted Curve"))
-            figfit.add_trace(go.Scatter(x=x_pts, y=y_pts, mode="markers+text", name="Percentiles",
-                                        text=[f"{p}%" for p in pcts], textposition="top center"))
-            figfit.update_layout(
-                title=f"Fitted Curve for {nice(x_col)} → {nice(y_col)}",
-                xaxis_title=nice(x_col),
-                yaxis_title=nice(y_col),
-            )
-            st.plotly_chart(figfit, use_container_width=True)
-
-            mr_tbl = pd.DataFrame({
-                "Percentile": [f"{p}%" for p in pcts],
-                "Driver value": [f"{float(v):.2f}" for v in x_pts],
-                "Marginal return (dy/dx)": [f"{float(v):.4f}" for v in dydx],
-            })
-            st.dataframe(mr_tbl, hide_index=True, use_container_width=True)
 
 # =============================
 # TAB 2 — COLLINEARITY & PCA 
@@ -1398,3 +1176,300 @@ with tab_diag:
                         "No variables available in this bucket for the current selection."
                     )
  
+ # =============================
+# TAB 3 — DEEP DIVE (Individual Driver)
+# =============================
+with tab_deep:
+    warnings.filterwarnings("ignore", category=RuntimeWarning)
+    st.subheader("Deep Dive — Individual Driver")
+    st.caption("Quick, non-causal curve fit to gauge whether a driver has enough signal to justify inclusion/engineering in a future MMM.")
+
+    # --- Local winsorizer (self-contained; same behavior as Tab 1) ---
+    def winsorize_columns(frame: pd.DataFrame, cols: list, mode: str, pct: int) -> pd.DataFrame:
+        if mode == "None" or not cols:
+            return frame
+        dfw = frame.copy()
+        upper_q = pct / 100.0
+        lower_q = 1 - upper_q if mode == "Both" else None
+        for c in cols:
+            if c not in dfw.columns:
+                continue
+            s = pd.to_numeric(dfw[c], errors="coerce")
+            if s.notna().sum() == 0:
+                continue
+            hi = s.quantile(upper_q)
+            if mode == "Upper":
+                dfw[c] = np.where(s > hi, hi, s)
+            else:
+                lo = s.quantile(lower_q)
+                dfw[c] = s.clip(lower=lo, upper=hi)
+        return dfw
+
+    # --- Conditioning controls (independent of Tab 1) ---
+    st.markdown("##### Data Conditioning")
+    wins_mode_label = st.selectbox(
+        "Winsorize mode",
+        ["No", "Upper only", "Upper and lower"],
+        index=0,
+        key="deep_wins_mode",
+        help="Remove outliers",
+    )
+    _mode_map = {"No": "None", "Upper only": "Upper", "Upper and lower": "Both"}
+    wins_mode = _mode_map[wins_mode_label]
+    if wins_mode != "None":
+        wins_pct_label = st.selectbox(
+            "Winsorize level (keep up to this percentile)",
+            ["99", "98", "95"],
+            index=0,
+            key="deep_wins_pct",
+        )
+        wins_pct = int(wins_pct_label)
+    else:
+        wins_pct = 99
+
+    # --- Build driver universe (robust; does not rely on Tab 1 locals) ---
+    # Explicit buckets (already computed above this tabs section)
+    _paid_spend = [c for c in paid_spend_cols if c in df.columns]
+    _paid_vars  = [c for c in paid_var_cols   if c in df.columns]
+    _organic    = [c for c in organic_cols    if c in df.columns]
+    _context    = [c for c in context_cols    if c in df.columns]
+
+    # Also include "other drivers" = numeric columns not in the above nor goals/date/country/etc.
+    EXCLUDE = set(_paid_spend + _paid_vars + _organic + _context + (goal_cols or []))
+    for col in ["DATE", DATE_COL, "COUNTRY", "DATE_PERIOD", "PERIOD_LABEL", "_TOTAL_SPEND"]:
+        if col in df.columns:
+            EXCLUDE.add(col)
+    numeric_df = df.select_dtypes(include=[np.number]).copy()
+    _other = [c for c in numeric_df.columns if c not in EXCLUDE]
+
+    # Driver candidates present in current filtered window
+    driver_all = sorted(
+        dict.fromkeys([c for c in (_paid_spend + _paid_vars + _organic + _context + _other) if c in df_r.columns])
+    )
+
+    # Winsorize target + drivers used in this tab
+    all_corr_cols = list(set(driver_all + (goal_cols or [])))
+    df_r_w = winsorize_columns(df_r, all_corr_cols, wins_mode, wins_pct)
+
+    if not goal_cols:
+        st.info("No goals found in metadata.")
+    elif not driver_all:
+        st.info("No driver columns available.")
+    else:
+        # Selections
+        y_goal_label = st.selectbox(
+            "Goal (Y)",
+            [nice(g) for g in goal_cols],
+            index=0,
+            key="deep_goal",
+        )
+        y_col = {nice(g): g for g in goal_cols}[y_goal_label]
+
+        x_driver_label = st.selectbox(
+            "Driver (X)",
+            [nice(c) for c in driver_all if c != y_col],
+            index=0,
+            key="deep_drv",
+        )
+        x_col = {nice(c): c for c in driver_all}[x_driver_label]
+
+        exclude_zero = st.checkbox(
+            "Exclude zero values for driver",
+            value=(x_col.upper() != "TV_IS_ON"),
+            key="deep_exz",
+        )
+        outlier_method = st.selectbox(
+            "Outlier handling",
+            ["none", "percentile (top only)", "zscore (<3)"],
+            index=0,
+            key="deep_outlier",
+            help="Applies after the (optional) winsorization above. Percentile drops top ~2% of X; z-score drops |z(X)| ≥ 3.",
+        )
+
+        # Filter + outliers
+        x_raw = pd.to_numeric(df_r_w[x_col], errors="coerce")
+        y_raw = pd.to_numeric(df_r_w[y_col], errors="coerce")
+        mask = x_raw.notna() & y_raw.notna()
+        if exclude_zero and x_col.upper() != "TV_IS_ON":
+            mask &= x_raw != 0
+        x_f = x_raw[mask].copy()
+        y_f = y_raw[mask].copy()
+
+        if outlier_method.startswith("percentile") and len(x_f) >= 2:
+            upper = np.percentile(x_f, 98)
+            keep = x_f <= upper
+            x_f, y_f = x_f[keep], y_f[keep]
+        elif outlier_method.startswith("zscore") and len(x_f) >= 2:
+            z = np.abs(stats.zscore(x_f))
+            keep = z < 3
+            x_f, y_f = x_f[keep], y_f[keep]
+
+        if len(x_f) < 5:
+            st.info("Not enough data points after filtering to fit a curve.")
+        else:
+            # Quadratic fit
+            X = np.array(x_f).reshape(-1, 1)
+            poly = PolynomialFeatures(degree=2)
+            Xp = poly.fit_transform(X)
+            mdl = LinearRegression().fit(Xp, y_f)
+            y_hat = mdl.predict(Xp)
+
+            # Metrics
+            r2 = r2_score(y_f, y_hat)
+            mae = mean_absolute_error(y_f, y_hat)
+
+            # Normalize MAE to goal scale (5th–95th pct)
+            if y_f.nunique() > 1:
+                y_p5, y_p95 = np.percentile(y_f, [5, 95])
+                y_scale = max(y_p95 - y_p5, 1e-9)
+            else:
+                y_scale = max(float(y_f.max() - y_f.min()), 1e-9)
+            nmae = mae / y_scale
+
+            # Spearman rank correlation (ρ)
+            rho, _ = stats.spearmanr(x_f, y_f, nan_policy="omit")
+
+            # --- Tiny style helpers (local) ---
+            SCORE_COLORS = {
+                "green": "#2e7d32",
+                "yellow": "#f9a825",
+                "red": "#a94442",
+                "bg": "#fafafa",
+                "ink": "#222",
+            }
+
+            def score_bar_metric_first(metric_title: str, tooltip_text: str, value_txt: str, level: str, percent: int):
+                def hex_to_rgba(hex_color: str, alpha: float) -> str:
+                    h = hex_color.lstrip("#")
+                    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                    return f"rgba({r},{g},{b},{alpha})"
+                pct_css = max(percent, 6)
+                color = SCORE_COLORS[level]
+                title_html = (
+                    f'<span style="font-size:18px;font-weight:700;color:{SCORE_COLORS["ink"]};display:inline-flex;align-items:center;">'
+                    f"{metric_title}"
+                    f'<span class="tooltip-wrap"><span class="i-dot">i</span>'
+                    f'<span class="tooltip-text">{tooltip_text}</span></span></span>'
+                )
+                html = (
+                    f'<div style="border:1px solid #eee;border-radius:12px;padding:14px;background:{SCORE_COLORS["bg"]};">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:baseline;">'
+                    f"{title_html}"
+                    f'<div style="font-size:18px;font-weight:700;color:{SCORE_COLORS["ink"]};">{value_txt}</div>'
+                    f"</div>"
+                    f'<div style="margin-top:10px;height:16px;border-radius:999px;background:#eee;overflow:hidden;">'
+                    f'<div style="width:{pct_css}%;height:100%;background:{color};"></div>'
+                    f"</div></div>"
+                )
+                st.markdown(html, unsafe_allow_html=True)
+
+            def classify_r2_card(val: float):
+                if val is None or not np.isfinite(val): return ("yellow", "Insufficient data — treat with caution.")
+                if val >= 0.35: return ("green", "Promising signal — likely meaningful; candidate for MMM.")
+                if val >= 0.15: return ("yellow", "Some signal — consider with transforms/lags or as part of a bundle.")
+                return ("red", "Weak/noisy — unlikely to add value without re-engineering.")
+
+            def classify_mae_card(val: float):
+                if val is None or not np.isfinite(val): return ("yellow", "Insufficient data — treat with caution.")
+                if val <= 0.10: return ("green", "Average error small vs goal scale — usable for exploration.")
+                if val <= 0.30: return ("yellow", "Average error moderate — interpret cautiously.")
+                return ("red", "Average error large — not reliable for exploration.")
+
+            def classify_rho_card(val: float):
+                if val is None or not np.isfinite(val): return ("yellow", "Insufficient data — treat with caution.")
+                s = abs(val)
+                if s >= 0.35: return ("green", "Clear monotonic pattern in ranks — usable signal.")
+                if s >= 0.15: return ("yellow", "Some monotonic pattern — consider with caution.")
+                return ("red", "Weak/none — ranks move inconsistently.")
+
+            TITLE_R2, TITLE_MAE, TITLE_RHO = ("R²", "MAE (relative)", "Spearman ρ")
+            TIP_R2 = "Explained variance (fit strength) between driver and goal. Higher is better."
+            TIP_MAE = "Average error vs goal’s typical scale (5th–95th pct). Smaller is better."
+            TIP_RHO = "Monotonic rank correlation (strength & direction). Farther from 0 is stronger."
+
+            def fill_from_r2(v):
+                if v is None or not np.isfinite(v): return 50
+                s = (v - (-0.2)) / (1.0 - (-0.2))  # map ~[-0.2..1.0] → 0..100
+                return int(max(0, min(1, s)) * 100)
+
+            def fill_from_mae(v):
+                if v is None or not np.isfinite(v): return 50
+                s = 1 - min(v / 0.30, 1.0)        # 0..0.30 → 100..0
+                return int(max(0, min(1, s)) * 100)
+
+            def fill_from_rho(v):
+                if v is None or not np.isfinite(v): return 50
+                return int(min(abs(v), 1.0) * 100)
+
+            # Scorecards
+            lvl_r2, msg_r2 = classify_r2_card(r2)
+            lvl_mae, msg_mae = classify_mae_card(nmae)
+            lvl_rho, msg_rho = classify_rho_card(rho if np.isfinite(rho) else np.nan)
+
+            r2_txt  = f"{r2:.2f}" if np.isfinite(r2)  else "—"
+            mae_txt = f"{nmae*100:.1f}%" if np.isfinite(nmae) else "—"
+            rho_txt = f"{rho:+.2f}" if np.isfinite(rho) else "—"
+
+            p_r2  = fill_from_r2(r2)
+            p_mae = fill_from_mae(nmae)
+            p_rho = fill_from_rho(rho if np.isfinite(rho) else np.nan)
+
+            # One-time CSS (ok to repeat)
+            st.markdown("""
+<style>
+.tooltip-wrap { position: relative; display: inline-flex; align-items: center; cursor: help; }
+.tooltip-wrap .i-dot { font-size: 13px; border:1px solid #999; border-radius:50%; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; color:#666; margin-left:6px; line-height:1; }
+.tooltip-wrap .tooltip-text { visibility: hidden; opacity: 0; transition: opacity 0.08s ease-in-out;
+  position: absolute; bottom: 125%; left: 50%; transform: translateX(-50%);
+  background: #111; color: #fff; padding: 8px 10px; border-radius: 6px;
+  font-size: 12px; z-index: 9999; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  max-width: 520px; width: max-content; white-space: normal; line-height: 1.35; overflow-wrap: anywhere; text-align: center; }
+.tooltip-wrap:hover .tooltip-text { visibility: visible; opacity: 1; }
+.tooltip-wrap .tooltip-text::after { content: ""; position: absolute; top: 100%; left: 50%;
+  transform: translateX(-50%); border-width: 6px; border-style: solid; border-color: #111 transparent transparent transparent; }
+</style>
+            """, unsafe_allow_html=True)
+
+            st.markdown("#### Model Fit — Scorecards (signal for MMM)")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                score_bar_metric_first("R²", TIP_R2, r2_txt, lvl_r2, p_r2)
+                st.caption(msg_r2)
+            with c2:
+                score_bar_metric_first("MAE (relative)", TIP_MAE, mae_txt, lvl_mae, p_mae)
+                st.caption(msg_mae)
+            with c3:
+                score_bar_metric_first("Spearman ρ", TIP_RHO, rho_txt, lvl_rho, p_rho)
+                if np.isfinite(rho):
+                    direction = "positive" if rho > 0 else ("negative" if rho < 0 else "no")
+                    st.caption(f"Ranks move in a {direction} monotonic pattern (ρ = {rho:+.2f}). {msg_rho}")
+                else:
+                    st.caption(msg_rho)
+
+            # Fit visualization + marginal returns
+            pcts = [10, 25, 50, 75, 90]
+            x_pts = np.percentile(np.array(x_f), pcts)
+            dydx  = mdl.coef_[1] + 2 * mdl.coef_[2] * x_pts
+            y_pts = mdl.predict(poly.transform(x_pts.reshape(-1, 1)))
+
+            xs = np.sort(np.array(x_f)).reshape(-1, 1)
+            ys = mdl.predict(poly.transform(xs))
+
+            figfit = go.Figure()
+            figfit.add_trace(go.Scatter(x=x_f.values, y=y_f.values, mode="markers", name="Actual", opacity=0.45))
+            figfit.add_trace(go.Scatter(x=xs.squeeze(), y=ys, mode="lines", name="Fitted Curve"))
+            figfit.add_trace(go.Scatter(x=x_pts, y=y_pts, mode="markers+text", name="Percentiles",
+                                        text=[f"{p}%" for p in pcts], textposition="top center"))
+            figfit.update_layout(
+                title=f"Fitted Curve for {nice(x_col)} → {nice(y_col)}",
+                xaxis_title=nice(x_col),
+                yaxis_title=nice(y_col),
+            )
+            st.plotly_chart(figfit, use_container_width=True)
+
+            mr_tbl = pd.DataFrame({
+                "Percentile": [f"{p}%" for p in pcts],
+                "Driver value": [f"{float(v):.2f}" for v in x_pts],
+                "Marginal return (dy/dx)": [f"{float(v):.4f}" for v in dydx],
+            })
+            st.dataframe(mr_tbl, hide_index=True, use_container_width=True)
