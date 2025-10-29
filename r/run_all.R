@@ -362,6 +362,34 @@ dep_var_type_from_cfg <- cfg$dep_var_type %||% "revenue"
 # NEW: hyperparameter preset
 hyperparameter_preset <- cfg$hyperparameter_preset %||% "Meshed recommend"
 
+# NEW: resample parameters
+resample_freq <- cfg$resample_freq %||% "none"
+resample_agg <- cfg$resample_agg %||% "sum"
+
+# Helper function to parse comma-separated strings from config
+parse_csv_config <- function(x) {
+    if (is.null(x) || length(x) == 0 || all(is.na(x))) {
+        return(character(0))
+    }
+    if (is.list(x) || (is.character(x) && length(x) > 1)) {
+        # Already a list/vector
+        return(as.character(x))
+    }
+    if (is.character(x) && length(x) == 1) {
+        # Split comma-separated string
+        trimws(unlist(strsplit(x, ",")))
+    } else {
+        as.character(x)
+    }
+}
+
+# Parse variable lists from config (they come as comma-separated strings from Python)
+paid_media_spends_cfg <- parse_csv_config(cfg$paid_media_spends)
+paid_media_vars_cfg <- parse_csv_config(cfg$paid_media_vars)
+context_vars_cfg <- parse_csv_config(cfg$context_vars)
+factor_vars_cfg <- parse_csv_config(cfg$factor_vars)
+organic_vars_cfg <- parse_csv_config(cfg$organic_vars)
+
 dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
 gcs_prefix <- file.path("robyn", revision, country, timestamp)
@@ -542,17 +570,17 @@ df$DOW <- wday(df$date, label = TRUE)
 df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
 ## ---------- DRIVERS ----------
-paid_media_spends <- intersect(cfg$paid_media_spends, names(df))
-paid_media_vars <- intersect(cfg$paid_media_vars, names(df))
+paid_media_spends <- intersect(paid_media_spends_cfg, names(df))
+paid_media_vars <- intersect(paid_media_vars_cfg, names(df))
 stopifnot(length(paid_media_spends) == length(paid_media_vars))
 
 keep_idx <- vapply(seq_along(paid_media_spends), function(i) sum(df[[paid_media_spends[i]]], na.rm = TRUE) > 0, logical(1))
 paid_media_spends <- paid_media_spends[keep_idx]
 paid_media_vars <- paid_media_vars[keep_idx]
 
-context_vars <- intersect(cfg$context_vars %||% character(0), names(df))
-factor_vars <- intersect(cfg$factor_vars %||% character(0), names(df))
-org_base <- intersect(cfg$organic_vars %||% "ORGANIC_TRAFFIC", names(df))
+context_vars <- intersect(context_vars_cfg, names(df))
+factor_vars <- intersect(factor_vars_cfg, names(df))
+org_base <- intersect(organic_vars_cfg %||% "ORGANIC_TRAFFIC", names(df))
 organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES" %in% names(df)) unique(c(org_base, "N_SEARCHES")) else org_base
 
 adstock <- cfg$adstock %||% "geometric"
