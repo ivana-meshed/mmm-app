@@ -1703,7 +1703,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
                 for i, r in up_base.iterrows():
                     params = _normalize_row(r)
-                    if not (params.get("query") or params.get("table")):
+                    # Check for data source: query, table, or data_gcs_path
+                    if not (params.get("query") or params.get("table") or params.get("data_gcs_path")):
                         dup["missing_data_source"].append(i + 1)  # type: ignore
                         to_append_mask.append(False)
                         continue
@@ -1986,7 +1987,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
                 for i, row in st.session_state.qb_df.iterrows():
                     params = _normalize_row(row)
-                    if not (params.get("query") or params.get("table")):
+                    # Check for data source: query, table, or data_gcs_path
+                    if not (params.get("query") or params.get("table") or params.get("data_gcs_path")):
                         dup["missing_data_source"].append(i + 1)
                         continue
                     sig = json.dumps(params, sort_keys=True)
