@@ -769,9 +769,27 @@ with tab_single:
                 loaded_vars = loaded_config["paid_media_vars"]
                 if isinstance(loaded_vars, str):
                     loaded_vars = [s.strip() for s in loaded_vars.split(",") if s.strip()]
-                # Build mapping from paid_media_mapping if available in metadata
+                
+                # Build mapping: for each spend, find the corresponding var from loaded_vars
                 if metadata and "paid_media_mapping" in metadata:
-                    st.session_state["spend_var_mapping"] = metadata["paid_media_mapping"].copy()
+                    paid_media_mapping = metadata["paid_media_mapping"]
+                    # For each spend, find which loaded_var belongs to it
+                    for spend in loaded_spends:
+                        possible_vars = paid_media_mapping.get(spend, [])
+                        # Find which loaded_var is in the possible_vars for this spend
+                        matched = False
+                        for var in loaded_vars:
+                            if var in possible_vars:
+                                st.session_state["spend_var_mapping"][spend] = var
+                                matched = True
+                                break
+                        # If no match in possible_vars, check if the spend itself is in loaded_vars
+                        # (for configs where paid_media_vars == paid_media_spends)
+                        if not matched and spend in loaded_vars:
+                            st.session_state["spend_var_mapping"][spend] = spend
+                        # Otherwise fall back to the spend itself
+                        elif not matched:
+                            st.session_state["spend_var_mapping"][spend] = spend
                 else:
                     # Fallback: try to match by index
                     for i, spend in enumerate(loaded_spends):
