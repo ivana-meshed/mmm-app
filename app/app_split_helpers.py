@@ -180,47 +180,71 @@ def _init_sf_once():
 def prepare_and_launch_job(params: dict) -> dict:
     """
     One complete job: query SF -> parquet -> upload -> write config (timestamped + latest) -> run Cloud Run Job.
+    For GCS-based workflows, if data_gcs_path is provided, skip Snowflake query and use existing data.
     Returns exec_info dict with execution_name, timestamp, gcs_prefix, etc.
     """
-    # 0) Validate & resolve SQL
-    sql_eff = params.get("query") or effective_sql(
-        params.get("table", ""), params.get("query", "")
-    )
-    if not sql_eff:
-        raise ValueError("Missing SQL/Table for job.")
-
     gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
     timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
     gcs_prefix = f"robyn/{params['revision']}/{params['country']}/{timestamp}"
+    
+    # Check if data already exists in GCS (Issue #4 GCS-based workflow)
+    data_gcs_path_provided = params.get("data_gcs_path")
+    
+    if data_gcs_path_provided:
+        # GCS-based workflow: data already exists, no Snowflake query needed
+        logger.info(f"Using existing data from GCS: {data_gcs_path_provided}")
+        data_gcs_path = data_gcs_path_provided
+    else:
+        # Snowflake-based workflow: validate & query
+        sql_eff = params.get("query") or effective_sql(
+            params.get("table", ""), params.get("query", "")
+        )
+        if not sql_eff:
+            raise ValueError("Missing SQL/Table for job.")
 
+        with tempfile.TemporaryDirectory() as td:
+            timings: List[dict] = []
+
+            # 1) Query Snowflake
+            with timed_step("Query Snowflake", timings):
+                df = run_sql(sql_eff)
+            """with timed_step("Optional resample (queue job)", timings):
+                df = _maybe_resample_df(
+                    df,
+                    params.get("date_var"),
+                    params.get("resample_freq", "none"),
+                    params.get("resample_agg", "sum"),
+                )"""
+
+            # 2) Parquet
+            with timed_step("Convert to Parquet", timings):
+                parquet_path = os.path.join(td, "input_data.parquet")
+                data_processor.csv_to_parquet(df, parquet_path)
+
+            # 3) Upload data
+            with timed_step("Upload data to GCS", timings):
+                data_blob = f"training-data/{timestamp}/input_data.parquet"
+                data_gcs_path = upload_to_gcs(gcs_bucket, parquet_path, data_blob)
+                
+            # Seed timings.csv (web-side steps) if not present
+            if timings:
+                df_times = pd.DataFrame(timings)
+                dest_blob = f"{gcs_prefix}/timings.csv"
+                client = storage.Client()
+                blob = client.bucket(gcs_bucket).blob(dest_blob)
+                if not blob.exists():
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".csv", delete=False
+                    ) as tmp:
+                        df_times.to_csv(tmp.name, index=False)
+                        upload_to_gcs(gcs_bucket, tmp.name, dest_blob)
+
+    # Optional annotations (batch: pass a gs:// in params)
+    annotations_gcs_path = params.get("annotations_gcs_path") or None
+
+    # 4) Create config (timestamped + latest)
     with tempfile.TemporaryDirectory() as td:
         timings: List[dict] = []
-
-        # 1) Query Snowflake
-        with timed_step("Query Snowflake", timings):
-            df = run_sql(sql_eff)
-        """with timed_step("Optional resample (queue job)", timings):
-            df = _maybe_resample_df(
-                df,
-                params.get("date_var"),
-                params.get("resample_freq", "none"),
-                params.get("resample_agg", "sum"),
-            )"""
-
-        # 2) Parquet
-        with timed_step("Convert to Parquet", timings):
-            parquet_path = os.path.join(td, "input_data.parquet")
-            data_processor.csv_to_parquet(df, parquet_path)
-
-        # 3) Upload data
-        with timed_step("Upload data to GCS", timings):
-            data_blob = f"training-data/{timestamp}/input_data.parquet"
-            data_gcs_path = upload_to_gcs(gcs_bucket, parquet_path, data_blob)
-
-        # Optional annotations (batch: pass a gs:// in params)
-        annotations_gcs_path = params.get("annotations_gcs_path") or None
-
-        # 4) Create config (timestamped + latest)
         with timed_step("Create job configuration", timings):
             job_config = build_job_config_from_params(
                 params, data_gcs_path, timestamp, annotations_gcs_path
