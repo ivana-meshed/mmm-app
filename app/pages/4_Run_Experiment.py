@@ -43,6 +43,11 @@ ensure_session_defaults()
 
 st.title("Experiment")
 
+# Check if we should show a message to switch to Queue tab (Issue #5)
+if st.session_state.get("switch_to_queue_tab", False):
+    st.success("✅ Configuration added to queue! Please switch to the **Queue** tab to monitor progress.")
+    st.session_state["switch_to_queue_tab"] = False
+
 tab_single, tab_queue = st.tabs(["Single run", "Queue"])
 
 # Prefill fields from saved metadata if present (session_state keys should already be set by Map Your Data page).
@@ -263,7 +268,7 @@ with tab_single:
                         )
                         st.info(f"📋 Using metadata: **{selected_metadata}**")
                         
-                        # Display summary of loaded data (point 2)
+                        # Display summary of loaded data (Issue #1 fix: show goals details)
                         with st.expander("📊 Loaded Data Summary", expanded=True):
                             st.write(f"**Data Source:** {selected_country.upper()} - {selected_version}")
                             st.write(f"**Metadata Source:** {selected_metadata}")
@@ -271,8 +276,12 @@ with tab_single:
                             st.write(f"**Columns:** {len(df_prev.columns)}")
                             
                             if metadata:
-                                if "goals" in metadata:
+                                if "goals" in metadata and metadata["goals"]:
                                     st.write(f"**Goals:** {len(metadata['goals'])} goal(s)")
+                                    # Show detailed goals information
+                                    for g in metadata["goals"]:
+                                        main_indicator = " (Main)" if g.get("main", False) else ""
+                                        st.write(f"  - {g['var']}: {g.get('type', 'N/A')} ({g.get('group', 'N/A')}){main_indicator}")
                                 if "mapping" in metadata:
                                     total_vars = sum(len(v) for v in metadata['mapping'].values() if isinstance(v, list))
                                     st.write(f"**Mapped Variables:** {total_vars}")
@@ -748,6 +757,20 @@ with tab_single:
                 loaded_spends = [s.strip() for s in loaded_spends.split(",") if s.strip()]
             # Only include loaded spends that are in available_spends
             default_paid_media_spends = [s for s in loaded_spends if s in available_spends]
+            
+            # Initialize spend_var_mapping from loaded config (Issue #2 fix)
+            if "paid_media_vars" in loaded_config:
+                loaded_vars = loaded_config["paid_media_vars"]
+                if isinstance(loaded_vars, str):
+                    loaded_vars = [s.strip() for s in loaded_vars.split(",") if s.strip()]
+                # Build mapping from paid_media_mapping if available in metadata
+                if metadata and "paid_media_mapping" in metadata:
+                    st.session_state["spend_var_mapping"] = metadata["paid_media_mapping"].copy()
+                else:
+                    # Fallback: try to match by index
+                    for i, spend in enumerate(loaded_spends):
+                        if i < len(loaded_vars):
+                            st.session_state["spend_var_mapping"][spend] = loaded_vars[i]
 
         # Display paid_media_spends first (all selected by default)
         st.markdown("**Paid Media Configuration**")
@@ -949,7 +972,14 @@ with tab_single:
                 st.session_state.get("selected_country", "fr")
             ]
 
-        if st.button("💾 Save Configuration", use_container_width=True):
+        # Add action buttons (Issue #5 fix: add queue options)
+        col_btn1, col_btn2, col_btn3 = st.columns(3)
+        
+        save_config_clicked = col_btn1.button("💾 Save Configuration", use_container_width=True, key="save_config_btn")
+        add_to_queue_clicked = col_btn2.button("➕ Add to Queue", use_container_width=True, key="add_to_queue_btn")
+        add_and_start_clicked = col_btn3.button("▶️ Add to Queue & Start", use_container_width=True, key="add_and_start_btn")
+
+        if save_config_clicked:
             if not revision or not revision.strip():
                 st.error(
                     "⚠️ Revision tag is required to save configuration."
@@ -1003,6 +1033,95 @@ with tab_single:
                     )
                 except Exception as e:
                     st.error(f"Failed to save configuration: {e}")
+        
+        # Handle "Add to Queue" button (Issue #5 fix)
+        if add_to_queue_clicked or add_and_start_clicked:
+            if not revision or not revision.strip():
+                st.error("⚠️ Revision tag is required.")
+            else:
+                try:
+                    # Import helper from app_split_helpers
+                    from app_split_helpers import _normalize_row, save_queue_to_gcs, set_queue_running
+                    
+                    # Get next queue ID
+                    next_id = (
+                        max([e["id"] for e in st.session_state.job_queue], default=0) + 1
+                    )
+                    
+                    # Create queue entries for each country
+                    new_entries = []
+                    for i, ctry in enumerate(config_countries):
+                        # Get data source information
+                        # Use GCS path pattern from loaded data
+                        data_version = st.session_state.get("selected_version", "Latest")
+                        data_blob_path = _get_data_blob(ctry, data_version.lower())
+                        
+                        # Build params dict
+                        params = {
+                            "country": ctry,
+                            "revision": revision,
+                            "date_input": end_date_str,  # Use end date as date_input
+                            "iterations": int(iterations),
+                            "trials": int(trials),
+                            "train_size": train_size,
+                            "paid_media_spends": paid_media_spends,
+                            "paid_media_vars": paid_media_vars,
+                            "context_vars": context_vars,
+                            "factor_vars": factor_vars,
+                            "organic_vars": organic_vars,
+                            "gcs_bucket": gcs_bucket,
+                            "table": "",  # Using GCS, not Snowflake
+                            "query": "",  # Using GCS, not Snowflake
+                            "dep_var": dep_var,
+                            "dep_var_type": dep_var_type,
+                            "date_var": date_var,
+                            "adstock": adstock,
+                            "hyperparameter_preset": hyperparameter_preset,
+                            "resample_freq": resample_freq,
+                            "resample_agg": resample_agg,
+                            "annotations_gcs_path": "",
+                            "start_date": start_date_str,
+                            "end_date": end_date_str,
+                            "data_gcs_path": f"gs://{gcs_bucket}/{data_blob_path}",
+                        }
+                        
+                        new_entries.append({
+                            "id": next_id + i,
+                            "params": params,
+                            "status": "PENDING",
+                            "timestamp": None,
+                            "execution_name": None,
+                            "gcs_prefix": None,
+                            "message": "",
+                        })
+                    
+                    # Add to queue
+                    st.session_state.job_queue.extend(new_entries)
+                    
+                    # Save queue to GCS
+                    st.session_state.queue_saved_at = save_queue_to_gcs(
+                        st.session_state.queue_name,
+                        st.session_state.job_queue,
+                        queue_running=st.session_state.queue_running,
+                    )
+                    
+                    # Start queue if "Add & Start" was clicked
+                    if add_and_start_clicked:
+                        set_queue_running(st.session_state.queue_name, True)
+                        st.session_state.queue_running = True
+                    
+                    # Show success message
+                    countries_str = ", ".join([c.upper() for c in config_countries])
+                    st.success(f"✅ Added {len(new_entries)} job(s) to queue for: {countries_str}")
+                    
+                    # Set flag to switch to Queue tab
+                    st.session_state["switch_to_queue_tab"] = True
+                    
+                    # Rerun to refresh and switch tab
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"Failed to add to queue: {e}")
 
     # Outputs (moved outside Save Configuration expander)
     with st.expander("Outputs"):
@@ -1281,24 +1400,30 @@ with tab_queue:
             """
 Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country`, `revision`, and data source):
 
-- `country`, `revision`, `date_input`, `iterations`, `trials`, `train_size`
+- `country`, `revision`, `iterations`, `trials`, `train_size`
+- `start_date`, `end_date` — Training window dates (YYYY-MM-DD format)
 - `paid_media_spends`, `paid_media_vars`, `context_vars`, `factor_vars`, `organic_vars`
-- `dep_var`, `date_var`, `adstock`
-- `resample_freq` (none|W|M)
-- `resample_agg` (sum|mean|max|min) – used when resampling
+- `dep_var`, `dep_var_type` (revenue|conversion), `date_var`, `adstock`
+- `hyperparameter_preset` (Facebook recommend|Meshed recommend|Custom)
+- `resample_freq` (none|W|M), `resample_agg` (sum|mean|max|min)
 - `gcs_bucket` (optional override per row)
-- **Data**: one of `query` **or** `table`
+- **Data source (choose one):**
+  - `data_gcs_path` (gs:// path to parquet file) — **Recommended for GCS-based workflows**
+  - `query` or `table` — For Snowflake-based workflows
 - `annotations_gcs_path` (optional gs:// path)
+
+**Note:** For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows.
             """
         )
 
-        # Template & Example CSVs
+        # Template & Example CSVs (Issue #4 fix: align with Single run)
         template = pd.DataFrame(
             [
                 {
                     "country": "fr",
                     "revision": "r100",
-                    "date_input": time.strftime("%Y-%m-%d"),
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 200,
                     "trials": 5,
                     "train_size": "0.7,0.9",
@@ -1308,11 +1433,14 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "factor_vars": "IS_WEEKEND,TV_IS_ON",
                     "organic_vars": "ORGANIC_TRAFFIC",
                     "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
                     "table": "",
-                    "query": "SELECT * FROM MESHED_BUYCYCLE.GROWTH.SOME_TABLE",
+                    "query": "",
                     "dep_var": "UPLOAD_VALUE",
+                    "dep_var_type": "revenue",
                     "date_var": "date",
                     "adstock": "geometric",
+                    "hyperparameter_preset": "Meshed recommend",
                     "resample_freq": "none",
                     "resample_agg": "sum",
                     "annotations_gcs_path": "",
@@ -1325,7 +1453,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 {
                     "country": "fr",
                     "revision": "r101",
-                    "date_input": time.strftime("%Y-%m-%d"),
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 300,
                     "trials": 3,
                     "train_size": "0.7,0.9",
@@ -1335,11 +1464,14 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "factor_vars": "IS_WEEKEND,TV_IS_ON",
                     "organic_vars": "ORGANIC_TRAFFIC",
                     "gcs_bucket": st.session_state["gcs_bucket"],
-                    "table": "MESHED_BUYCYCLE.GROWTH.MMM_RAW",
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
+                    "table": "",
                     "query": "",
                     "dep_var": "UPLOAD_VALUE",
+                    "dep_var_type": "revenue",
                     "date_var": "date",
                     "adstock": "geometric",
+                    "hyperparameter_preset": "Meshed recommend",
                     "resample_freq": "none",
                     "resample_agg": "sum",
                     "annotations_gcs_path": "",
@@ -1347,7 +1479,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 {
                     "country": "de",
                     "revision": "r102",
-                    "date_input": time.strftime("%Y-%m-%d"),
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 200,
                     "trials": 5,
                     "train_size": "0.75,0.9",
@@ -1357,12 +1490,15 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "factor_vars": "IS_WEEKEND",
                     "organic_vars": "ORGANIC_TRAFFIC",
                     "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
                     "table": "",
-                    "query": "SELECT * FROM MESHED_BUYCYCLE.GROWTH.TABLE_B WHERE COUNTRY='DE'",
+                    "query": "",
                     "dep_var": "UPLOAD_VALUE",
+                    "dep_var_type": "conversion",
                     "date_var": "date",
-                    "adstock": "geometric",
-                    "resample_freq": "none",
+                    "adstock": "weibull_cdf",
+                    "hyperparameter_preset": "Facebook recommend",
+                    "resample_freq": "W",
                     "resample_agg": "sum",
                     "annotations_gcs_path": "",
                 },
@@ -1615,7 +1751,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             return {
                 "country": p.get("country", ""),
                 "revision": p.get("revision", ""),
-                "date_input": p.get("date_input", ""),
+                "start_date": p.get("start_date", ""),
+                "end_date": p.get("end_date", ""),
                 "iterations": p.get("iterations", ""),
                 "trials": p.get("trials", ""),
                 "train_size": _as_csv(p.get("train_size", "")),
@@ -1627,11 +1764,14 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 "gcs_bucket": p.get(
                     "gcs_bucket", st.session_state["gcs_bucket"]
                 ),
+                "data_gcs_path": p.get("data_gcs_path", ""),
                 "table": p.get("table", ""),
                 "query": p.get("query", ""),
                 "dep_var": p.get("dep_var", ""),
+                "dep_var_type": p.get("dep_var_type", "revenue"),
                 "date_var": p.get("date_var", ""),
                 "adstock": p.get("adstock", ""),
+                "hyperparameter_preset": p.get("hyperparameter_preset", "Meshed recommend"),
                 "resample_freq": p.get("resample_freq", "none"),
                 "resample_agg": p.get("resample_agg", "sum"),
                 "annotations_gcs_path": p.get("annotations_gcs_path", ""),
@@ -1643,7 +1783,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 columns=[
                     "country",
                     "revision",
-                    "date_input",
+                    "start_date",
+                    "end_date",
                     "iterations",
                     "trials",
                     "train_size",
@@ -1653,11 +1794,14 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "factor_vars",
                     "organic_vars",
                     "gcs_bucket",
+                    "data_gcs_path",
                     "table",
                     "query",
                     "dep_var",
+                    "dep_var_type",
                     "date_var",
                     "adstock",
+                    "hyperparameter_preset",
                     "resample_freq",
                     "resample_agg",
                     "annotations_gcs_path",

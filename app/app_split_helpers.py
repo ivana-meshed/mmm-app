@@ -509,12 +509,16 @@ _builder_defaults = dict(
     trials=5,
     train_size="0.7,0.9",
     revision="r100",
-    date_input=time.strftime("%Y-%m-%d"),
+    date_input=time.strftime("%Y-%m-%d"),  # Keep for backward compatibility
+    start_date="2024-01-01",  # New field
+    end_date=time.strftime("%Y-%m-%d"),  # New field
     dep_var="UPLOAD_VALUE",
+    dep_var_type="revenue",  # New field
     date_var="date",
     adstock="geometric",
+    hyperparameter_preset="Meshed recommend",  # New field
     resample_freq="none",
-    resample_agg="sum",  # NEW
+    resample_agg="sum",
     gcs_bucket=st.session_state.get("gcs_bucket", GCS_BUCKET),
 )
 
@@ -524,10 +528,23 @@ def _make_normalizer(defaults: dict):
         def _g(v, default):
             return row.get(v) if (v in row and pd.notna(row[v])) else default  # type: ignore
 
+        # Support backward compatibility: if start_date/end_date not present, use date_input
+        start_date_val = _g("start_date", defaults.get("start_date", "2024-01-01"))
+        end_date_val = _g("end_date", defaults.get("end_date", time.strftime("%Y-%m-%d")))
+        date_input_val = _g("date_input", defaults.get("date_input", time.strftime("%Y-%m-%d")))
+        
+        # If neither start_date nor end_date are provided, fall back to date_input
+        if not str(start_date_val).strip():
+            start_date_val = "2024-01-01"
+        if not str(end_date_val).strip():
+            end_date_val = date_input_val
+
         return {
             "country": str(_g("country", defaults["country"])),
             "revision": str(_g("revision", defaults["revision"])),
-            "date_input": str(_g("date_input", defaults["date_input"])),
+            "date_input": str(date_input_val),  # Keep for backward compatibility
+            "start_date": str(start_date_val),  # New field
+            "end_date": str(end_date_val),  # New field
             "iterations": (
                 int(float(_g("iterations", defaults["iterations"])))  # type: ignore
                 if str(_g("iterations", defaults["iterations"])).strip()
@@ -545,11 +562,14 @@ def _make_normalizer(defaults: dict):
             "factor_vars": str(_g("factor_vars", "")),
             "organic_vars": str(_g("organic_vars", "")),
             "gcs_bucket": str(_g("gcs_bucket", defaults["gcs_bucket"])),
+            "data_gcs_path": str(_g("data_gcs_path", "")),  # New field
             "table": str(_g("table", "")),
             "query": str(_g("query", "")),
             "dep_var": str(_g("dep_var", defaults["dep_var"])),
+            "dep_var_type": str(_g("dep_var_type", defaults.get("dep_var_type", "revenue"))),  # New field
             "date_var": str(_g("date_var", defaults["date_var"])),
             "adstock": str(_g("adstock", defaults["adstock"])),
+            "hyperparameter_preset": str(_g("hyperparameter_preset", defaults.get("hyperparameter_preset", "Meshed recommend"))),  # New field
             "resample_freq": _normalize_resample_freq(
                 str(_g("resample_freq", defaults["resample_freq"]))
             ),
