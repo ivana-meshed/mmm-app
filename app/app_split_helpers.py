@@ -680,18 +680,26 @@ def _hydrate_times_from_status(entry: dict) -> dict:
 
 def _queue_tick():
     # Advance the queue atomically (lease/launch OR update running)
-    res = queue_tick_once_headless(
-        st.session_state.queue_name,
-        st.session_state.get("gcs_bucket", GCS_BUCKET),
-        launcher=prepare_and_launch_job,
-    )
+    logger.info("Starting queue tick")
+    try:
+        res = queue_tick_once_headless(
+            st.session_state.queue_name,
+            st.session_state.get("gcs_bucket", GCS_BUCKET),
+            launcher=prepare_and_launch_job,
+        )
+        logger.info(f"Queue tick result: {res}")
+    except Exception as e:
+        logger.exception(f"Queue tick_once_headless failed: {e}")
+        raise
 
     # Always refresh local from GCS after a tick
     maybe_refresh_queue_from_gcs(force=True)
 
     # Sweep finished jobs into history and remove them from queue
     q = st.session_state.job_queue or []
+    logger.info(f"After tick: {len(q)} jobs in queue")
     if not q:
+        logger.info("Queue is now empty after tick")
         return
 
     remaining = []
@@ -757,11 +765,13 @@ def _queue_tick():
                 st.session_state.get("gcs_bucket", GCS_BUCKET),
             )
             moved += 1
+            logger.info(f"Moved job {entry.get('id')} to history with status {final_state}")
         else:
             remaining.append(entry)
 
     if moved:
         # Persist trimmed queue
+        logger.info(f"Moved {moved} finished job(s) to history, {len(remaining)} remaining in queue")
         st.session_state.job_queue = remaining
         st.session_state.queue_saved_at = save_queue_to_gcs(
             st.session_state.queue_name,
@@ -780,6 +790,7 @@ def _auto_refresh_and_tick(interval_ms: int = 2000):
     refresh so the page re-runs and we tick again.
     """
     if not st.session_state.get("queue_running"):
+        logger.debug("Queue not running, skipping auto-refresh")
         return
 
     # If there’s nothing left, stop auto-refreshing.

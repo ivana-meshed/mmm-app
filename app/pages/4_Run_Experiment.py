@@ -1373,8 +1373,6 @@ with tab_single:
 
     # ===================== BATCH QUEUE (CSV) =====================
 
-_queue_tick()
-
 
 # Extracted from streamlit_app.py tab_queue (Batch/Queue run):
 with tab_queue:
