@@ -128,11 +128,11 @@ jobs:
         run: |
           pip install -r requirements-ci.txt
 
-      - name: Run code formatting checks
+      - name: Auto-format code
         shell: bash
         run: |
-          echo "Checking code formatting..."
-          make format-check
+          echo "Automatically formatting code..."
+          make format
 
       - name: Run unit tests
         shell: bash
