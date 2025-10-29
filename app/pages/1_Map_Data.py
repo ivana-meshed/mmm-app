@@ -200,6 +200,9 @@ def _init_state():
     st.session_state.setdefault("custom_channels", [])
     st.session_state.setdefault("last_saved_raw_path", "")
     st.session_state.setdefault("last_saved_meta_path", "")
+    st.session_state.setdefault("organic_vars_prefix", "organic_")
+    st.session_state.setdefault("context_vars_prefix", "context_")
+    st.session_state.setdefault("factor_vars_prefix", "factor_")
 
 
 _init_state()
@@ -431,7 +434,7 @@ def _parse_variable_name(var_name: str) -> dict:
 
 
 def _apply_automatic_aggregations(
-    mapping_df: pd.DataFrame, df_raw: pd.DataFrame
+    mapping_df: pd.DataFrame, df_raw: pd.DataFrame, prefixes: dict = None
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Apply automatic aggregations based on custom tags and categories.
@@ -440,9 +443,17 @@ def _apply_automatic_aggregations(
     This function:
     1. Copies aggregations from paid_media_spends to paid_media_vars
     2. Creates custom tag aggregates (e.g., GA_SMALL_COST_CUSTOM)
-    3. Prefixes organic, context, and factor variables
+    3. Prefixes organic, context, and factor variables with configurable prefixes
     4. Creates TOTAL columns for each channel/suffix grouping
     """
+    # Default prefixes if not provided
+    if prefixes is None:
+        prefixes = {
+            "organic_vars": "ORGANIC_",
+            "context_vars": "CONTEXT_",
+            "factor_vars": "FACTOR_",
+        }
+    
     new_mapping_rows = []
     new_columns = {}
 
@@ -631,8 +642,10 @@ def _apply_automatic_aggregations(
                     suffix_parts[-1] if suffix_parts else "SESSIONS"
                 )  # Default to SESSIONS
 
+                # Use configurable prefix
+                organic_prefix = prefixes.get("organic_vars", "ORGANIC_").rstrip("_").upper()
                 custom_var_name = (
-                    f"ORGANIC_{tag.upper()}_{suffix.upper()}_CUSTOM"
+                    f"{organic_prefix}_{tag.upper()}_{suffix.upper()}_CUSTOM"
                 )
 
                 if custom_var_name not in mapping_df["var"].values:
@@ -659,13 +672,18 @@ def _apply_automatic_aggregations(
             for v in organic["var"]
             if "_CUSTOM" not in str(v) and str(v) in df_raw.columns
         ]
+        
+        # Use configurable prefix
+        organic_prefix = prefixes.get("organic_vars", "ORGANIC_").rstrip("_").upper()
+        total_var_name = f"{organic_prefix}_TOTAL_CUSTOM"
+        
         if (
             organic_vars
-            and "ORGANIC_TOTAL_CUSTOM" not in mapping_df["var"].values
+            and total_var_name not in mapping_df["var"].values
         ):
             new_mapping_rows.append(
                 {
-                    "var": "ORGANIC_TOTAL_CUSTOM",
+                    "var": total_var_name,
                     "category": "organic_vars",
                     "channel": "organic",
                     "data_type": "numeric",
@@ -673,7 +691,7 @@ def _apply_automatic_aggregations(
                     "custom_tags": "",
                 }
             )
-            new_columns["ORGANIC_TOTAL_CUSTOM"] = df_raw[organic_vars].sum(
+            new_columns[total_var_name] = df_raw[organic_vars].sum(
                 axis=1
             )
 
@@ -717,6 +735,13 @@ def _apply_metadata_to_current_df(
     # custom channels
     if isinstance(meta.get("custom_channels"), list):
         st.session_state["custom_channels"] = meta["custom_channels"]
+    
+    # variable prefixes
+    if isinstance(meta.get("variable_prefixes"), dict):
+        prefixes = meta["variable_prefixes"]
+        st.session_state["organic_vars_prefix"] = prefixes.get("organic_vars", "organic_")
+        st.session_state["context_vars_prefix"] = prefixes.get("context_vars", "context_")
+        st.session_state["factor_vars_prefix"] = prefixes.get("factor_vars", "factor_")
 
     # mapping → build a full mapping_df for current columns
     meta_map = meta.get("mapping", {}) or {}
@@ -1450,6 +1475,39 @@ with st.expander("🏷️ Auto-tag Rules", expanded=False):
             st.session_state["mapping_df"] = _build_mapping_df(
                 all_cols, df_raw, new_rules
             )
+    
+    # Prefix configuration for aggregated variables
+    st.divider()
+    st.write("**Prefixes for aggregated variables**")
+    st.caption("Define prefixes to use when creating aggregated columns for these categories")
+    
+    pcol1, pcol2, pcol3 = st.columns(3)
+    
+    organic_prefix = pcol1.text_input(
+        "organic_vars prefix",
+        value=st.session_state.get("organic_vars_prefix", "organic_"),
+        help="Prefix for aggregated organic variables (e.g., 'organic_')",
+        key="organic_vars_prefix_input"
+    )
+    
+    context_prefix = pcol2.text_input(
+        "context_vars prefix",
+        value=st.session_state.get("context_vars_prefix", "context_"),
+        help="Prefix for aggregated context variables (e.g., 'context_')",
+        key="context_vars_prefix_input"
+    )
+    
+    factor_prefix = pcol3.text_input(
+        "factor_vars prefix",
+        value=st.session_state.get("factor_vars_prefix", "factor_"),
+        help="Prefix for aggregated factor variables (e.g., 'factor_')",
+        key="factor_vars_prefix_input"
+    )
+    
+    # Update session state with new prefixes
+    st.session_state["organic_vars_prefix"] = organic_prefix
+    st.session_state["context_vars_prefix"] = context_prefix
+    st.session_state["factor_vars_prefix"] = factor_prefix
 
 
 # ---- Mapping editor (form) ----
@@ -1636,8 +1694,14 @@ with st.expander("🗺️ Variable Mapping", expanded=True):
     if mapping_submit:
         # Apply automatic aggregations
         try:
+            # Prepare prefixes dict
+            prefixes = {
+                "organic_vars": st.session_state.get("organic_vars_prefix", "ORGANIC_"),
+                "context_vars": st.session_state.get("context_vars_prefix", "CONTEXT_"),
+                "factor_vars": st.session_state.get("factor_vars_prefix", "FACTOR_"),
+            }
             updated_mapping, updated_df = _apply_automatic_aggregations(
-                mapping_edit.copy(), st.session_state["df_raw"].copy()
+                mapping_edit.copy(), st.session_state["df_raw"].copy(), prefixes
             )
             st.session_state["mapping_df"] = updated_mapping
             st.session_state["df_raw"] = updated_df
@@ -1835,6 +1899,11 @@ payload = {
     "agg_strategies": agg_strategies_map,
     "paid_media_mapping": paid_media_mapping,
     "dep_var": dep_var or "",
+    "variable_prefixes": {
+        "organic_vars": st.session_state.get("organic_vars_prefix", "organic_"),
+        "context_vars": st.session_state.get("context_vars_prefix", "context_"),
+        "factor_vars": st.session_state.get("factor_vars_prefix", "factor_"),
+    },
 }
 
 
