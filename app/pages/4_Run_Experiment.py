@@ -64,6 +64,22 @@ def _list_country_versions(bucket: str, country: str) -> List[str]:
     return ["Latest" if v.lower() == "latest" else v for v in versions]
 
 
+def _list_metadata_versions(bucket: str, country: str) -> List[str]:
+    """Return timestamp folder names available in metadata/<country>/."""
+    client = storage.Client()
+    prefix = f"metadata/{country.lower().strip()}/"
+    blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+    ts = set()
+    for blob in blobs:
+        parts = blob.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "mapping.json" and parts[-2] != "latest":
+            ts.add(parts[-2])
+    versions = sorted(ts, reverse=True)
+    # Replace "latest" with "Latest" if present
+    return ["Latest" if v.lower() == "latest" else v for v in versions]
+
+
+
 def _get_data_blob(country: str, version: str) -> str:
     """Get GCS blob path for data."""
     if version.lower() == "latest":
@@ -155,9 +171,9 @@ with tab_single:
         gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
         try:
             # Get country-specific metadata versions
-            country_meta_versions = _list_country_versions(gcs_bucket, selected_country)  # type: ignore
+            country_meta_versions = _list_metadata_versions(gcs_bucket, selected_country)  # type: ignore
             # Get universal metadata versions
-            universal_meta_versions = _list_country_versions(gcs_bucket, "universal")  # type: ignore
+            universal_meta_versions = _list_metadata_versions(gcs_bucket, "universal")  # type: ignore
 
             # Combine and format metadata options
             metadata_options = []
