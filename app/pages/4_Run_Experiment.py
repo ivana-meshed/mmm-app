@@ -709,14 +709,23 @@ with tab_single:
                         v for v in vars_in_cat if v is not None
                     ]
 
-        # Filter defaults to only include columns that exist in the data
-        if all_columns:
-            for cat in default_values:
-                default_values[cat] = [
-                    v for v in default_values[cat] if v in all_columns
-                ]
+        # Merge columns from preview data and metadata
+        # Include all columns from metadata even if not in preview (e.g., CUSTOM columns)
+        all_columns_set = set(all_columns) if all_columns else set()
+        
+        # Add all columns from metadata to the available columns
+        if metadata and "mapping" in metadata:
+            for cat_vars in metadata["mapping"].values():
+                if isinstance(cat_vars, list):
+                    all_columns_set.update(cat_vars)
+        
+        # Convert back to list
+        all_columns = list(all_columns_set)
+        
+        # Note: We don't filter default_values by all_columns anymore
+        # because metadata may contain CUSTOM columns not yet in preview data
 
-        # If no data is loaded, show a warning
+        # If no data is loaded and no metadata, show a warning
         if not all_columns:
             st.warning(
                 "⚠️ Please load data first to see available columns for selection."
@@ -741,12 +750,9 @@ with tab_single:
         if "spend_var_mapping" not in st.session_state:
             st.session_state["spend_var_mapping"] = {}
 
-        # Get all paid_media_spends from metadata
-        available_spends = [
-            v
-            for v in default_values["paid_media_spends"]
-            if v in all_columns
-        ]
+        # Get all paid_media_spends from metadata (including CUSTOM columns)
+        # Don't filter by all_columns since CUSTOM columns may not be in preview yet
+        available_spends = default_values["paid_media_spends"]
         
         # Determine default selections from loaded config
         default_paid_media_spends = available_spends  # All selected by default
@@ -802,22 +808,33 @@ with tab_single:
                 channel = parsed["channel"]
                 subchannel = parsed["subchannel"]
 
+                # Special handling for CUSTOM columns
+                is_custom_spend = "_CUSTOM" in spend
+                
                 # Find all paid_media_vars with same channel and subchannel
-                if subchannel:
+                if is_custom_spend:
+                    # For CUSTOM spends, match other CUSTOM vars with same prefix
+                    # E.g., GA_SMALL_COST_CUSTOM matches GA_SMALL_*_CUSTOM
+                    base_pattern = spend.replace("_COST_CUSTOM", "").replace("_COSTS_CUSTOM", "")
+                    matching_vars = [
+                        v
+                        for v in default_values["paid_media_vars"]
+                        if v.startswith(base_pattern + "_") and "_CUSTOM" in v
+                    ]
+                elif subchannel:
                     # Match pattern: CHANNEL_SUBCHANNEL_*
                     pattern_prefix = f"{channel}_{subchannel}_"
                     matching_vars = [
                         v
                         for v in default_values["paid_media_vars"]
-                        if v.startswith(pattern_prefix) and v in all_columns
+                        if v.startswith(pattern_prefix)
                     ]
                 else:
-                    # Match pattern: CHANNEL_* (but not CHANNEL_CUSTOM or CHANNEL_TOTAL_*)
+                    # Match pattern: CHANNEL_* (excluding CUSTOM when spend is not CUSTOM)
                     matching_vars = [
                         v
                         for v in default_values["paid_media_vars"]
                         if v.startswith(f"{channel}_")
-                        and v in all_columns
                         and not v.endswith("_CUSTOM")
                         and "_TOTAL_" not in v
                     ]
@@ -874,10 +891,7 @@ with tab_single:
             loaded_context = loaded_config["context_vars"]
             if isinstance(loaded_context, str):
                 loaded_context = [s.strip() for s in loaded_context.split(",") if s.strip()]
-            default_context_vars = [v for v in loaded_context if v in all_columns]
-        else:
-            # Filter defaults to only include vars that exist in all_columns
-            default_context_vars = [v for v in default_context_vars if v in all_columns]
+            default_context_vars = loaded_context
         
         context_vars_list = st.multiselect(
             "context_vars",
@@ -894,10 +908,7 @@ with tab_single:
             loaded_factor = loaded_config["factor_vars"]
             if isinstance(loaded_factor, str):
                 loaded_factor = [s.strip() for s in loaded_factor.split(",") if s.strip()]
-            default_factor_vars = [v for v in loaded_factor if v in all_columns]
-        else:
-            # Filter defaults to only include vars that exist in all_columns
-            default_factor_vars = [v for v in default_factor_vars if v in all_columns]
+            default_factor_vars = loaded_factor
         
         factor_vars_list = st.multiselect(
             "factor_vars",
@@ -919,10 +930,7 @@ with tab_single:
             loaded_organic = loaded_config["organic_vars"]
             if isinstance(loaded_organic, str):
                 loaded_organic = [s.strip() for s in loaded_organic.split(",") if s.strip()]
-            default_organic_vars = [v for v in loaded_organic if v in all_columns]
-        else:
-            # Filter defaults to only include vars that exist in all_columns
-            default_organic_vars = [v for v in default_organic_vars if v in all_columns]
+            default_organic_vars = loaded_organic
         
         organic_vars_list = st.multiselect(
             "organic_vars",
