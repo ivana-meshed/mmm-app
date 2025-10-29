@@ -1,0 +1,8 @@
+# CI/CD dependencies for linting and code quality checks
+black==24.1.1
+isort==5.13.2
+pylint==3.0.3
+flake8==7.0.0
+mypy==1.8.0
+pytest==7.4.4
+pytest-cov==4.1.0

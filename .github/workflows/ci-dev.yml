@@ -130,6 +130,17 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install CI dependencies
+        shell: bash
+        run: |
+          pip install -r requirements-ci.txt
+
+      - name: Run code formatting checks
+        shell: bash
+        run: |
+          echo "Checking code formatting..."
+          make format-check
+
       - name: Run unit tests
         shell: bash
         run: |
