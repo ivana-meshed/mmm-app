@@ -635,12 +635,21 @@ def _apply_automatic_aggregations(
             vars_list = tag_rows["var"].tolist()
 
             if vars_list:
-                # Extract suffix from first variable (e.g., SESSIONS from NL_DAILY_SESSIONS)
-                parsed = _parse_variable_name(vars_list[0])
-                suffix_parts = parsed["suffix"].split("_")
-                suffix = (
-                    suffix_parts[-1] if suffix_parts else "SESSIONS"
-                )  # Default to SESSIONS
+                # Extract common suffix from all variables in the group (Issue #3 fix)
+                # For example: NL_DAILY_SESSIONS, SEO_DAILY_SESSIONS -> suffix should be SESSIONS
+                # Find the longest common suffix across all variables
+                suffixes = []
+                for var in vars_list:
+                    parsed = _parse_variable_name(var)
+                    suffixes.append(parsed["suffix"])
+                
+                # Use the most common suffix (or first if all are different)
+                if suffixes:
+                    from collections import Counter
+                    suffix_counts = Counter(suffixes)
+                    suffix = suffix_counts.most_common(1)[0][0]
+                else:
+                    suffix = "SESSIONS"  # Default fallback
 
                 # Use configurable prefix
                 organic_prefix = prefixes.get("organic_vars", "ORGANIC_").rstrip("_").upper()

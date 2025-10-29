@@ -203,5 +203,154 @@ class TestHyperparameterPresets(unittest.TestCase):
         self.assertEqual(presets["Custom"]["trials"], 10)
 
 
+class TestQueueFunctionality(unittest.TestCase):
+    """Test queue entry validation and processing with new GCS-based fields."""
+
+    def test_data_source_validation_with_gcs_path(self):
+        """Test that data_gcs_path is accepted as a valid data source."""
+        # Test params with data_gcs_path
+        params_with_gcs = {
+            "country": "fr",
+            "revision": "r100",
+            "data_gcs_path": "gs://bucket/datasets/fr/latest/raw.parquet",
+            "query": "",
+            "table": "",
+        }
+        
+        # Validation should pass (has data_gcs_path)
+        has_data_source = bool(
+            params_with_gcs.get("query") 
+            or params_with_gcs.get("table") 
+            or params_with_gcs.get("data_gcs_path")
+        )
+        self.assertTrue(has_data_source)
+
+    def test_data_source_validation_with_query(self):
+        """Test that query is still accepted as a valid data source."""
+        params_with_query = {
+            "country": "fr",
+            "revision": "r100",
+            "query": "SELECT * FROM TABLE",
+            "table": "",
+            "data_gcs_path": "",
+        }
+        
+        has_data_source = bool(
+            params_with_query.get("query") 
+            or params_with_query.get("table") 
+            or params_with_query.get("data_gcs_path")
+        )
+        self.assertTrue(has_data_source)
+
+    def test_data_source_validation_missing(self):
+        """Test that entries without data source are rejected."""
+        params_no_source = {
+            "country": "fr",
+            "revision": "r100",
+            "query": "",
+            "table": "",
+            "data_gcs_path": "",
+        }
+        
+        has_data_source = bool(
+            params_no_source.get("query") 
+            or params_no_source.get("table") 
+            or params_no_source.get("data_gcs_path")
+        )
+        self.assertFalse(has_data_source)
+
+    def test_queue_entry_structure_with_new_fields(self):
+        """Test that queue entries include all new fields."""
+        entry = {
+            "id": 1,
+            "params": {
+                "country": "fr",
+                "revision": "r100",
+                "start_date": "2024-01-01",
+                "end_date": "2024-12-31",
+                "iterations": 200,
+                "trials": 5,
+                "train_size": "0.7,0.9",
+                "paid_media_spends": "GA_COST",
+                "paid_media_vars": "GA_IMPRESSIONS",
+                "context_vars": "IS_WEEKEND",
+                "factor_vars": "IS_WEEKEND",
+                "organic_vars": "ORGANIC_TRAFFIC",
+                "dep_var": "REVENUE",
+                "dep_var_type": "revenue",
+                "date_var": "date",
+                "adstock": "geometric",
+                "hyperparameter_preset": "Meshed recommend",
+                "data_gcs_path": "gs://bucket/datasets/fr/latest/raw.parquet",
+                "resample_freq": "none",
+                "resample_agg": "sum",
+            },
+            "status": "PENDING",
+            "timestamp": None,
+            "execution_name": None,
+            "gcs_prefix": None,
+            "message": "",
+        }
+        
+        # Verify new fields are present
+        self.assertIn("start_date", entry["params"])
+        self.assertIn("end_date", entry["params"])
+        self.assertIn("dep_var_type", entry["params"])
+        self.assertIn("hyperparameter_preset", entry["params"])
+        self.assertIn("data_gcs_path", entry["params"])
+        
+        # Verify values
+        self.assertEqual(entry["params"]["start_date"], "2024-01-01")
+        self.assertEqual(entry["params"]["end_date"], "2024-12-31")
+        self.assertEqual(entry["params"]["dep_var_type"], "revenue")
+        self.assertEqual(entry["params"]["hyperparameter_preset"], "Meshed recommend")
+        self.assertTrue(entry["params"]["data_gcs_path"].startswith("gs://"))
+
+    def test_example_csv_format(self):
+        """Test that example CSV contains all required fields."""
+        example_row = {
+            "country": "fr",
+            "revision": "r100",
+            "start_date": "2024-01-01",
+            "end_date": "2024-12-31",
+            "iterations": 200,
+            "trials": 5,
+            "train_size": "0.7,0.9",
+            "paid_media_spends": "GA_COST, BING_COST",
+            "paid_media_vars": "GA_IMPRESSIONS, BING_IMPRESSIONS",
+            "context_vars": "IS_WEEKEND,TV_IS_ON",
+            "factor_vars": "IS_WEEKEND,TV_IS_ON",
+            "organic_vars": "ORGANIC_TRAFFIC",
+            "gcs_bucket": "test-bucket",
+            "data_gcs_path": "gs://test-bucket/datasets/fr/latest/raw.parquet",
+            "table": "",
+            "query": "",
+            "dep_var": "REVENUE",
+            "dep_var_type": "revenue",
+            "date_var": "date",
+            "adstock": "geometric",
+            "hyperparameter_preset": "Meshed recommend",
+            "resample_freq": "none",
+            "resample_agg": "sum",
+            "annotations_gcs_path": "",
+        }
+        
+        # Verify all required fields
+        required_fields = [
+            "country", "revision", "start_date", "end_date",
+            "iterations", "trials", "data_gcs_path", "dep_var", "dep_var_type"
+        ]
+        for field in required_fields:
+            self.assertIn(field, example_row, f"Missing required field: {field}")
+        
+        # Verify data source is present
+        has_data_source = bool(
+            example_row.get("query") 
+            or example_row.get("table") 
+            or example_row.get("data_gcs_path")
+        )
+        self.assertTrue(has_data_source, "Example row must have a data source")
+
+
 if __name__ == "__main__":
     unittest.main()

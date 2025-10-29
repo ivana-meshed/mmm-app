@@ -180,47 +180,71 @@ def _init_sf_once():
 def prepare_and_launch_job(params: dict) -> dict:
     """
     One complete job: query SF -> parquet -> upload -> write config (timestamped + latest) -> run Cloud Run Job.
+    For GCS-based workflows, if data_gcs_path is provided, skip Snowflake query and use existing data.
     Returns exec_info dict with execution_name, timestamp, gcs_prefix, etc.
     """
-    # 0) Validate & resolve SQL
-    sql_eff = params.get("query") or effective_sql(
-        params.get("table", ""), params.get("query", "")
-    )
-    if not sql_eff:
-        raise ValueError("Missing SQL/Table for job.")
-
     gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
     timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
     gcs_prefix = f"robyn/{params['revision']}/{params['country']}/{timestamp}"
+    
+    # Check if data already exists in GCS (Issue #4 GCS-based workflow)
+    data_gcs_path_provided = params.get("data_gcs_path")
+    
+    if data_gcs_path_provided:
+        # GCS-based workflow: data already exists, no Snowflake query needed
+        logger.info(f"Using existing data from GCS: {data_gcs_path_provided}")
+        data_gcs_path = data_gcs_path_provided
+    else:
+        # Snowflake-based workflow: validate & query
+        sql_eff = params.get("query") or effective_sql(
+            params.get("table", ""), params.get("query", "")
+        )
+        if not sql_eff:
+            raise ValueError("Missing SQL/Table for job.")
 
+        with tempfile.TemporaryDirectory() as td:
+            timings: List[dict] = []
+
+            # 1) Query Snowflake
+            with timed_step("Query Snowflake", timings):
+                df = run_sql(sql_eff)
+            """with timed_step("Optional resample (queue job)", timings):
+                df = _maybe_resample_df(
+                    df,
+                    params.get("date_var"),
+                    params.get("resample_freq", "none"),
+                    params.get("resample_agg", "sum"),
+                )"""
+
+            # 2) Parquet
+            with timed_step("Convert to Parquet", timings):
+                parquet_path = os.path.join(td, "input_data.parquet")
+                data_processor.csv_to_parquet(df, parquet_path)
+
+            # 3) Upload data
+            with timed_step("Upload data to GCS", timings):
+                data_blob = f"training-data/{timestamp}/input_data.parquet"
+                data_gcs_path = upload_to_gcs(gcs_bucket, parquet_path, data_blob)
+                
+            # Seed timings.csv (web-side steps) if not present
+            if timings:
+                df_times = pd.DataFrame(timings)
+                dest_blob = f"{gcs_prefix}/timings.csv"
+                client = storage.Client()
+                blob = client.bucket(gcs_bucket).blob(dest_blob)
+                if not blob.exists():
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".csv", delete=False
+                    ) as tmp:
+                        df_times.to_csv(tmp.name, index=False)
+                        upload_to_gcs(gcs_bucket, tmp.name, dest_blob)
+
+    # Optional annotations (batch: pass a gs:// in params)
+    annotations_gcs_path = params.get("annotations_gcs_path") or None
+
+    # 4) Create config (timestamped + latest)
     with tempfile.TemporaryDirectory() as td:
         timings: List[dict] = []
-
-        # 1) Query Snowflake
-        with timed_step("Query Snowflake", timings):
-            df = run_sql(sql_eff)
-        """with timed_step("Optional resample (queue job)", timings):
-            df = _maybe_resample_df(
-                df,
-                params.get("date_var"),
-                params.get("resample_freq", "none"),
-                params.get("resample_agg", "sum"),
-            )"""
-
-        # 2) Parquet
-        with timed_step("Convert to Parquet", timings):
-            parquet_path = os.path.join(td, "input_data.parquet")
-            data_processor.csv_to_parquet(df, parquet_path)
-
-        # 3) Upload data
-        with timed_step("Upload data to GCS", timings):
-            data_blob = f"training-data/{timestamp}/input_data.parquet"
-            data_gcs_path = upload_to_gcs(gcs_bucket, parquet_path, data_blob)
-
-        # Optional annotations (batch: pass a gs:// in params)
-        annotations_gcs_path = params.get("annotations_gcs_path") or None
-
-        # 4) Create config (timestamped + latest)
         with timed_step("Create job configuration", timings):
             job_config = build_job_config_from_params(
                 params, data_gcs_path, timestamp, annotations_gcs_path
@@ -509,12 +533,16 @@ _builder_defaults = dict(
     trials=5,
     train_size="0.7,0.9",
     revision="r100",
-    date_input=time.strftime("%Y-%m-%d"),
+    date_input=time.strftime("%Y-%m-%d"),  # Keep for backward compatibility
+    start_date="2024-01-01",  # New field
+    end_date=time.strftime("%Y-%m-%d"),  # New field
     dep_var="UPLOAD_VALUE",
+    dep_var_type="revenue",  # New field
     date_var="date",
     adstock="geometric",
+    hyperparameter_preset="Meshed recommend",  # New field
     resample_freq="none",
-    resample_agg="sum",  # NEW
+    resample_agg="sum",
     gcs_bucket=st.session_state.get("gcs_bucket", GCS_BUCKET),
 )
 
@@ -524,10 +552,23 @@ def _make_normalizer(defaults: dict):
         def _g(v, default):
             return row.get(v) if (v in row and pd.notna(row[v])) else default  # type: ignore
 
+        # Support backward compatibility: if start_date/end_date not present, use date_input
+        start_date_val = _g("start_date", defaults.get("start_date", "2024-01-01"))
+        end_date_val = _g("end_date", defaults.get("end_date", time.strftime("%Y-%m-%d")))
+        date_input_val = _g("date_input", defaults.get("date_input", time.strftime("%Y-%m-%d")))
+        
+        # If neither start_date nor end_date are provided, fall back to date_input
+        if not str(start_date_val).strip():
+            start_date_val = "2024-01-01"
+        if not str(end_date_val).strip():
+            end_date_val = date_input_val
+
         return {
             "country": str(_g("country", defaults["country"])),
             "revision": str(_g("revision", defaults["revision"])),
-            "date_input": str(_g("date_input", defaults["date_input"])),
+            "date_input": str(date_input_val),  # Keep for backward compatibility
+            "start_date": str(start_date_val),  # New field
+            "end_date": str(end_date_val),  # New field
             "iterations": (
                 int(float(_g("iterations", defaults["iterations"])))  # type: ignore
                 if str(_g("iterations", defaults["iterations"])).strip()
@@ -545,11 +586,14 @@ def _make_normalizer(defaults: dict):
             "factor_vars": str(_g("factor_vars", "")),
             "organic_vars": str(_g("organic_vars", "")),
             "gcs_bucket": str(_g("gcs_bucket", defaults["gcs_bucket"])),
+            "data_gcs_path": str(_g("data_gcs_path", "")),  # New field
             "table": str(_g("table", "")),
             "query": str(_g("query", "")),
             "dep_var": str(_g("dep_var", defaults["dep_var"])),
+            "dep_var_type": str(_g("dep_var_type", defaults.get("dep_var_type", "revenue"))),  # New field
             "date_var": str(_g("date_var", defaults["date_var"])),
             "adstock": str(_g("adstock", defaults["adstock"])),
+            "hyperparameter_preset": str(_g("hyperparameter_preset", defaults.get("hyperparameter_preset", "Meshed recommend"))),  # New field
             "resample_freq": _normalize_resample_freq(
                 str(_g("resample_freq", defaults["resample_freq"]))
             ),
@@ -660,18 +704,26 @@ def _hydrate_times_from_status(entry: dict) -> dict:
 
 def _queue_tick():
     # Advance the queue atomically (lease/launch OR update running)
-    res = queue_tick_once_headless(
-        st.session_state.queue_name,
-        st.session_state.get("gcs_bucket", GCS_BUCKET),
-        launcher=prepare_and_launch_job,
-    )
+    logger.info("Starting queue tick")
+    try:
+        res = queue_tick_once_headless(
+            st.session_state.queue_name,
+            st.session_state.get("gcs_bucket", GCS_BUCKET),
+            launcher=prepare_and_launch_job,
+        )
+        logger.info(f"Queue tick result: {res}")
+    except Exception as e:
+        logger.exception(f"Queue tick_once_headless failed: {e}")
+        raise
 
     # Always refresh local from GCS after a tick
     maybe_refresh_queue_from_gcs(force=True)
 
     # Sweep finished jobs into history and remove them from queue
     q = st.session_state.job_queue or []
+    logger.info(f"After tick: {len(q)} jobs in queue")
     if not q:
+        logger.info("Queue is now empty after tick")
         return
 
     remaining = []
@@ -737,11 +789,13 @@ def _queue_tick():
                 st.session_state.get("gcs_bucket", GCS_BUCKET),
             )
             moved += 1
+            logger.info(f"Moved job {entry.get('id')} to history with status {final_state}")
         else:
             remaining.append(entry)
 
     if moved:
         # Persist trimmed queue
+        logger.info(f"Moved {moved} finished job(s) to history, {len(remaining)} remaining in queue")
         st.session_state.job_queue = remaining
         st.session_state.queue_saved_at = save_queue_to_gcs(
             st.session_state.queue_name,
@@ -760,6 +814,7 @@ def _auto_refresh_and_tick(interval_ms: int = 2000):
     refresh so the page re-runs and we tick again.
     """
     if not st.session_state.get("queue_running"):
+        logger.debug("Queue not running, skipping auto-refresh")
         return
 
     # If there’s nothing left, stop auto-refreshing.
