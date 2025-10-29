@@ -487,14 +487,18 @@ df <- as.data.frame(df)
 names(df) <- toupper(names(df))
 
 ## ---------- DATE & CLEAN ----------
-if ("DATE" %in% names(df)) {
+# Use date_input to find the date column name (convert to uppercase since all names are uppercase now)
+date_col_name <- toupper(date_input)
+
+if (date_col_name %in% names(df)) {
+    df$date <- if (inherits(df[[date_col_name]], "POSIXt")) as.Date(df[[date_col_name]]) else as.Date(as.character(df[[date_col_name]]))
+    df[[date_col_name]] <- NULL
+} else if ("DATE" %in% names(df)) {
+    # Fallback to DATE if date_input column not found
     df$date <- if (inherits(df$DATE, "POSIXt")) as.Date(df$DATE) else as.Date(as.character(df$DATE))
     df$DATE <- NULL
-} else if ("date" %in% names(df)) {
-    df$date <- as.Date(df[["date"]])
-    df[["date"]] <- NULL
 } else {
-    stop("No DATE/date column in data")
+    stop("No date column found. Expected column name: ", date_input, " (or DATE as fallback)")
 }
 
 df <- filter_by_country(df, country)

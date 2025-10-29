@@ -1120,7 +1120,7 @@ def _save_current_raw():
 
 csave1, csave2 = st.columns([1, 3])
 csave1.button(
-    "💾 Save this dataset to GCS (as new version)", on_click=_save_current_raw
+    "💾 Save this dataset to GCS (as new version)", on_click=_save_current_raw, use_container_width=True
 )
 if st.session_state["last_saved_raw_path"]:
     csave2.caption(f"Last saved: `{st.session_state['last_saved_raw_path']}`")
@@ -1262,7 +1262,7 @@ with ch_col1:
         help="Enter channel names that aren't in the default list",
     )
 with ch_col2:
-    if st.button("➕ Add Channel", key="add_channel_btn"):
+    if st.button("➕ Add Channel", key="add_channel_btn", use_container_width=True):
         if new_channel and new_channel.strip():
             custom_channels = st.session_state.get("custom_channels", [])
             channel_lower = new_channel.strip().lower()
@@ -1414,7 +1414,7 @@ with st.expander(
     version_opts = ["Latest"] + [v for v in meta_versions if v != "Latest"]
     picked_meta_ts = lc2.selectbox("Version", options=version_opts, index=0)
 
-    if lc3.button("Load & apply"):
+    if lc3.button("Load & apply", use_container_width=True):
         if not load_country.strip():
             st.warning("Please select a country first.")
         elif not picked_meta_ts:
@@ -1444,7 +1444,7 @@ if st.session_state["mapping_df"].empty:
 rt1, rt2 = st.columns([1, 1])
 
 # Only fill previously-untagged rows (preserves manual edits)
-if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing"):
+if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing", use_container_width=True):
     m = st.session_state["mapping_df"].copy()
     inferred = {
         c: _infer_category(c, st.session_state["auto_rules"]) for c in all_cols
@@ -1495,7 +1495,7 @@ if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing"):
     st.success("Filled categories for previously untagged columns.")
 
 # Overwrite everything from current rules (discard manual edits)
-if rt2.button("♻️ Re-apply to ALL columns", key="retag_all"):
+if rt2.button("♻️ Re-apply to ALL columns", key="retag_all", use_container_width=True):
     st.session_state["mapping_df"] = _build_mapping_df(
         all_cols, df_raw, st.session_state["auto_rules"]
     )
@@ -1505,7 +1505,12 @@ if rt2.button("♻️ Re-apply to ALL columns", key="retag_all"):
 
 
 with st.form("mapping_form_main", clear_on_submit=False):
-    mapping_src = st.session_state["mapping_df"].fillna("")
+    # Filter out goal variables and date field from the mapping display (requirement 6)
+    goals_df = st.session_state["goals_df"]
+    date_and_goal_vars_display = set([date_field] + goals_df["var"].tolist())
+    mapping_src = st.session_state["mapping_df"][
+        ~st.session_state["mapping_df"]["var"].isin(date_and_goal_vars_display)
+    ].copy().fillna("")
 
     # Ensure all expected columns exist
     expected_cols = [
@@ -1548,8 +1553,8 @@ with st.form("mapping_form_main", clear_on_submit=False):
             ),
             "agg_strategy": st.column_config.SelectboxColumn(
                 "Aggregation",
-                options=["sum", "mean", "max", "min", "auto", "mode"],
-                help="Strategy for aggregating when resampling. Numeric: sum/mean/max/min. Categorical: auto/mean/sum/max/mode",
+                options=["sum", "mean", "max", "min", "mode"],
+                help="Strategy for aggregating when resampling. Numeric: sum/mean/max/min. Categorical: mode",
             ),
             "custom_tags": st.column_config.TextColumn(
                 "Custom Tags (optional)"
@@ -1673,7 +1678,7 @@ def _save_metadata():
 
 
 cmeta1, cmeta2 = st.columns([1, 2])
-cmeta1.button("💾 Save metadata to GCS", on_click=_save_metadata)
+cmeta1.button("💾 Save metadata to GCS", on_click=_save_metadata, use_container_width=True)
 if st.session_state["last_saved_meta_path"]:
     cmeta2.caption(f"Last saved: `{st.session_state['last_saved_meta_path']}`")
 
