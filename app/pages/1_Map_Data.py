@@ -1128,250 +1128,8 @@ else:
     st.warning("⚪ No data loaded yet")
 
 all_cols = df_raw.columns.astype(str).tolist()
-date_candidates = sorted(
-    {
-        c
-        for c in all_cols
-        if c.lower() in ("date", "ds")
-        or "date" in c.lower()
-        or c.lower().endswith("_dt")
-    }
-)
-date_field = st.selectbox(
-    "Date field", options=(date_candidates or all_cols), index=0
-)
 
-# ---- Goals (form) ----
-with st.form("goals_form", clear_on_submit=False):
-    # Stack primary and secondary goals vertically
-    primary_goals = st.multiselect(
-        "Primary goal variables", options=all_cols, default=[]
-    )
-    secondary_goals = st.multiselect(
-        "Secondary goal variables", options=all_cols, default=[]
-    )
-
-    def _mk(selected, group):
-        return pd.DataFrame(
-            {
-                "var": pd.Series(selected, dtype="object"),
-                "group": pd.Series([group] * len(selected), dtype="object"),
-                "type": pd.Series(
-                    [_guess_goal_type(v) for v in selected], dtype="object"
-                ),
-                "main": pd.Series([False] * len(selected), dtype="object"),
-            }
-        )
-
-    if st.session_state["goals_df"].empty:
-        # Only suggest goals on first load, don't merge with heuristics later
-        heur = _initial_goals_from_columns(all_cols)
-        manual = pd.concat(
-            [_mk(primary_goals, "primary"), _mk(secondary_goals, "secondary")],
-            ignore_index=True,
-        )
-        goals_src = pd.concat([manual, heur], ignore_index=True)
-        goals_src = goals_src.drop_duplicates(subset=["var"], keep="first")
-    else:
-        # Keep only what's in session - don't add heuristics if user has edited
-        goals_src = st.session_state["goals_df"]
-
-    goals_src = goals_src.fillna("").astype(
-        {"var": "object", "group": "object", "type": "object"}
-    )
-    # Add main column if it doesn't exist
-    if "main" not in goals_src.columns:
-        goals_src["main"] = False
-    goals_src["main"] = goals_src["main"].astype(bool)
-
-    goals_edit = st.data_editor(
-        goals_src,
-        use_container_width=True,
-        num_rows="dynamic",
-        column_config={
-            "var": st.column_config.SelectboxColumn(
-                "Variable", options=all_cols
-            ),
-            "group": st.column_config.SelectboxColumn(
-                "Group", options=["primary", "secondary"]
-            ),
-            "type": st.column_config.SelectboxColumn(
-                "Type", options=["revenue", "conversion"], required=True
-            ),
-            "main": st.column_config.CheckboxColumn(
-                "Main",
-                help="Select the main dependent variable for the model",
-                default=False,
-            ),
-        },
-        key="goals_editor",
-    )
-    goals_submit = st.form_submit_button("✅ Apply goal changes")
-
-if goals_submit:
-    # Simply use what the user has in the editor - don't merge with old data
-    edited = goals_edit.copy()
-
-    # Keep only non-empty vars
-    edited = edited[edited["var"].astype(str).str.strip() != ""].astype(
-        "object"
-    )
-
-    # Validate that all goals have a type
-    empty_types = edited[edited["type"].astype(str).str.strip() == ""]
-    if not empty_types.empty:
-        st.error(
-            f"⚠️ Please specify a type (revenue or conversion) for all goal variables. Missing types for: {', '.join(empty_types['var'].tolist())}"
-        )
-    else:
-        # Ensure only one main is selected
-        main_count = edited["main"].astype(bool).sum()
-        if main_count > 1:
-            st.warning(
-                "⚠️ Multiple goals marked as 'Main'. Only the first one will be used as the main dependent variable."
-            )
-
-        # Drop duplicates and normalize
-        merged = (
-            edited.drop_duplicates(subset=["var"], keep="last")
-            .fillna({"var": "", "group": "", "type": "", "main": False})
-            .astype({"var": "object", "group": "object", "type": "object"})
-        )
-        merged["main"] = merged["main"].astype(bool)
-
-        st.session_state["goals_df"] = merged
-        st.success("Goals updated.")
-
-
-# ---- Custom channels UI ----
-st.subheader("Custom Marketing Channels")
-ch_col1, ch_col2 = st.columns([2, 1])
-with ch_col1:
-    new_channel = st.text_input(
-        "Add custom channel (e.g., 'spotify', 'podcast')",
-        key="new_channel_input",
-        help="Enter channel names that aren't in the default list",
-    )
-with ch_col2:
-    if st.button("➕ Add Channel", key="add_channel_btn", use_container_width=True):
-        if new_channel and new_channel.strip():
-            custom_channels = st.session_state.get("custom_channels", [])
-            channel_lower = new_channel.strip().lower()
-            if (
-                channel_lower not in custom_channels
-                and channel_lower not in _get_known_channels()
-            ):
-                custom_channels.append(channel_lower)
-                st.session_state["custom_channels"] = custom_channels
-                st.success(f"Added custom channel: {channel_lower}")
-                st.rerun()
-            elif channel_lower in custom_channels:
-                st.warning(
-                    f"Channel '{channel_lower}' already exists in custom channels"
-                )
-            else:
-                st.warning(
-                    f"Channel '{channel_lower}' already exists in known channels"
-                )
-
-# Display current custom channels
-if st.session_state.get("custom_channels"):
-    st.caption(
-        "Custom channels: " + ", ".join(st.session_state["custom_channels"])
-    )
-# Show recognized channels from mapping and inferred from column names
-mapping_channels = []
-if (
-    "mapping_df" in st.session_state
-    and not st.session_state["mapping_df"].empty
-):
-    mapping_channels = sorted(
-        {
-            str(ch).strip().lower()
-            for ch in st.session_state["mapping_df"]["channel"]
-            .dropna()
-            .astype(str)
-            if str(ch).strip()
-        }
-    )
-
-# infer channels directly from column names (uses same extractor as mapping)
-inferred_channels = sorted(
-    {
-        _extract_channel_from_column(c)
-        for c in all_cols
-        if _extract_channel_from_column(c)
-    }
-)
-
-# combine and dedupe
-recognized_channels = sorted(set(mapping_channels + inferred_channels))
-
-if recognized_channels:
-    st.caption(
-        "Recognized channels from data: " + ", ".join(recognized_channels)
-    )
-
-st.divider()
-
-# ---- Auto-tag rules (simple inputs update state immediately, but we only regenerate mapping when rules actually changed) ----
-rcol1, rcol2, rcol3 = st.columns(3)
-
-
-def _parse_sfx(s: str) -> list[str]:
-    return [x.strip() for x in s.split(",") if x.strip()]
-
-
-new_rules = {
-    "paid_media_spends": _parse_sfx(
-        rcol1.text_input(
-            "paid_media_spends suffixes",
-            value=", ".join(
-                st.session_state["auto_rules"]["paid_media_spends"]
-            ),
-        )
-    ),
-    "paid_media_vars": _parse_sfx(
-        rcol1.text_input(
-            "paid_media_vars suffixes",
-            value=", ".join(st.session_state["auto_rules"]["paid_media_vars"]),
-            key="paid_vars",
-        )
-    ),
-    "context_vars": _parse_sfx(
-        rcol2.text_input(
-            "context_vars suffixes",
-            value=", ".join(st.session_state["auto_rules"]["context_vars"]),
-        )
-    ),
-    "organic_vars": _parse_sfx(
-        rcol2.text_input(
-            "organic_vars suffixes",
-            value=", ".join(st.session_state["auto_rules"]["organic_vars"]),
-            key="org_vars",
-        )
-    ),
-    "factor_vars": _parse_sfx(
-        rcol3.text_input(
-            "factor_vars suffixes",
-            value=", ".join(st.session_state["auto_rules"]["factor_vars"]),
-        )
-    ),
-}
-rules_changed = json.dumps(new_rules, sort_keys=True) != json.dumps(
-    st.session_state["auto_rules"], sort_keys=True
-)
-if rules_changed:
-    st.session_state["auto_rules"] = new_rules
-    # seed mapping again only when rules change AND user hasn't started manual edits
-    if st.session_state["mapping_df"].empty:
-        st.session_state["mapping_df"] = _build_mapping_df(
-            all_cols, df_raw, new_rules
-        )
-
-
-# ---- Mapping editor (form) ----
-
+# ---- Load saved metadata (moved to beginning of Step 2) ----
 with st.expander(
     "📥 Load saved metadata & apply to current dataset", expanded=False
 ):
@@ -1449,209 +1207,458 @@ with st.expander(
             except Exception as e:
                 st.error(f"Failed to load metadata: {e}")
 
+# Date field selection
+date_candidates = sorted(
+    {
+        c
+        for c in all_cols
+        if c.lower() in ("date", "ds")
+        or "date" in c.lower()
+        or c.lower().endswith("_dt")
+    }
+)
+date_field = st.selectbox(
+    "Date field", options=(date_candidates or all_cols), index=0
+)
+
+# ---- Goals (form) ----
+with st.expander("🎯 Goals", expanded=True):
+    with st.form("goals_form", clear_on_submit=False):
+        # Stack primary and secondary goals vertically
+        primary_goals = st.multiselect(
+            "Primary goal variables", options=all_cols, default=[]
+        )
+        secondary_goals = st.multiselect(
+            "Secondary goal variables", options=all_cols, default=[]
+        )
+    
+        def _mk(selected, group):
+            return pd.DataFrame(
+                {
+                    "var": pd.Series(selected, dtype="object"),
+                    "group": pd.Series([group] * len(selected), dtype="object"),
+                    "type": pd.Series(
+                        [_guess_goal_type(v) for v in selected], dtype="object"
+                    ),
+                    "main": pd.Series([False] * len(selected), dtype="object"),
+                }
+            )
+    
+        if st.session_state["goals_df"].empty:
+        # Only suggest goals on first load, don't merge with heuristics later
+            heur = _initial_goals_from_columns(all_cols)
+            manual = pd.concat(
+                [_mk(primary_goals, "primary"), _mk(secondary_goals, "secondary")],
+                ignore_index=True,
+            )
+            goals_src = pd.concat([manual, heur], ignore_index=True)
+            goals_src = goals_src.drop_duplicates(subset=["var"], keep="first")
+        else:
+        # Keep only what's in session - don't add heuristics if user has edited
+            goals_src = st.session_state["goals_df"]
+    
+        goals_src = goals_src.fillna("").astype(
+            {"var": "object", "group": "object", "type": "object"}
+        )
+        # Add main column if it doesn't exist
+        if "main" not in goals_src.columns:
+            goals_src["main"] = False
+        goals_src["main"] = goals_src["main"].astype(bool)
+    
+        goals_edit = st.data_editor(
+            goals_src,
+            use_container_width=True,
+            num_rows="dynamic",
+            column_config={
+                "var": st.column_config.SelectboxColumn(
+                    "Variable", options=all_cols
+                ),
+                "group": st.column_config.SelectboxColumn(
+                    "Group", options=["primary", "secondary"]
+                ),
+                "type": st.column_config.SelectboxColumn(
+                    "Type", options=["revenue", "conversion"], required=True
+                ),
+                "main": st.column_config.CheckboxColumn(
+                    "Main",
+                    help="Select the main dependent variable for the model",
+                    default=False,
+                ),
+            },
+            key="goals_editor",
+        )
+        goals_submit = st.form_submit_button("✅ Apply goal changes")
+    
+    if goals_submit:
+        # Simply use what the user has in the editor - don't merge with old data
+        edited = goals_edit.copy()
+
+        # Keep only non-empty vars
+        edited = edited[edited["var"].astype(str).str.strip() != ""].astype(
+            "object"
+        )
+
+        # Validate that all goals have a type
+        empty_types = edited[edited["type"].astype(str).str.strip() == ""]
+        if not empty_types.empty:
+            st.error(
+                f"⚠️ Please specify a type (revenue or conversion) for all goal variables. Missing types for: {', '.join(empty_types['var'].tolist())}"
+            )
+        else:
+            # Ensure only one main is selected
+            main_count = edited["main"].astype(bool).sum()
+            if main_count > 1:
+                st.warning(
+                    "⚠️ Multiple goals marked as 'Main'. Only the first one will be used as the main dependent variable."
+                )
+
+            # Drop duplicates and normalize
+            merged = (
+                edited.drop_duplicates(subset=["var"], keep="last")
+                .fillna({"var": "", "group": "", "type": "", "main": False})
+                .astype({"var": "object", "group": "object", "type": "object"})
+            )
+            merged["main"] = merged["main"].astype(bool)
+
+            st.session_state["goals_df"] = merged
+            st.success("Goals updated.")
+
+
+# ---- Custom channels UI ----
+with st.expander("📺 Custom Marketing Channels", expanded=False):
+    ch_col1, ch_col2 = st.columns([2, 1])
+    with ch_col1:
+        new_channel = st.text_input(
+            "Add custom channel (e.g., 'spotify', 'podcast')",
+            key="new_channel_input",
+            help="Enter channel names that aren't in the default list",
+        )
+    with ch_col2:
+        if st.button("➕ Add Channel", key="add_channel_btn", use_container_width=True):
+            if new_channel and new_channel.strip():
+                custom_channels = st.session_state.get("custom_channels", [])
+                channel_lower = new_channel.strip().lower()
+                if (
+                    channel_lower not in custom_channels
+                    and channel_lower not in _get_known_channels()
+                ):
+                    custom_channels.append(channel_lower)
+                    st.session_state["custom_channels"] = custom_channels
+                    st.success(f"Added custom channel: {channel_lower}")
+                    st.rerun()
+                elif channel_lower in custom_channels:
+                    st.warning(
+                        f"Channel '{channel_lower}' already exists in custom channels"
+                    )
+                else:
+                    st.warning(
+                        f"Channel '{channel_lower}' already exists in known channels"
+                    )
+    
+    # Display current custom channels
+    if st.session_state.get("custom_channels"):
+        st.caption(
+            "Custom channels: " + ", ".join(st.session_state["custom_channels"])
+        )
+    # Show recognized channels from mapping and inferred from column names
+    mapping_channels = []
+    if (
+        "mapping_df" in st.session_state
+        and not st.session_state["mapping_df"].empty
+    ):
+        mapping_channels = sorted(
+            {
+                str(ch).strip().lower()
+                for ch in st.session_state["mapping_df"]["channel"]
+                .dropna()
+                .astype(str)
+                if str(ch).strip()
+            }
+        )
+    
+    # infer channels directly from column names (uses same extractor as mapping)
+    inferred_channels = sorted(
+        {
+            _extract_channel_from_column(c)
+            for c in all_cols
+            if _extract_channel_from_column(c)
+        }
+    )
+    
+    # combine and dedupe
+    recognized_channels = sorted(set(mapping_channels + inferred_channels))
+    
+    if recognized_channels:
+        st.caption(
+            "Recognized channels from data: " + ", ".join(recognized_channels)
+        )
+    
+    st.divider()
+
+# ---- Auto-tag rules ----
+with st.expander("🏷️ Auto-tag Rules", expanded=False):
+    rcol1, rcol2, rcol3 = st.columns(3)
+
+
+    def _parse_sfx(s: str) -> list[str]:
+        return [x.strip() for x in s.split(",") if x.strip()]
+
+
+    new_rules = {
+        "paid_media_spends": _parse_sfx(
+            rcol1.text_input(
+                "paid_media_spends suffixes",
+                value=", ".join(
+                    st.session_state["auto_rules"]["paid_media_spends"]
+                ),
+            )
+        ),
+        "paid_media_vars": _parse_sfx(
+            rcol1.text_input(
+                "paid_media_vars suffixes",
+                value=", ".join(st.session_state["auto_rules"]["paid_media_vars"]),
+                key="paid_vars",
+            )
+        ),
+        "context_vars": _parse_sfx(
+            rcol2.text_input(
+                "context_vars suffixes",
+                value=", ".join(st.session_state["auto_rules"]["context_vars"]),
+            )
+        ),
+        "organic_vars": _parse_sfx(
+            rcol2.text_input(
+                "organic_vars suffixes",
+                value=", ".join(st.session_state["auto_rules"]["organic_vars"]),
+                key="org_vars",
+            )
+        ),
+        "factor_vars": _parse_sfx(
+            rcol3.text_input(
+                "factor_vars suffixes",
+                value=", ".join(st.session_state["auto_rules"]["factor_vars"]),
+            )
+        ),
+    }
+    rules_changed = json.dumps(new_rules, sort_keys=True) != json.dumps(
+        st.session_state["auto_rules"], sort_keys=True
+    )
+    if rules_changed:
+        st.session_state["auto_rules"] = new_rules
+        # seed mapping again only when rules change AND user hasn't started manual edits
+        if st.session_state["mapping_df"].empty:
+            st.session_state["mapping_df"] = _build_mapping_df(
+                all_cols, df_raw, new_rules
+            )
+
+
+# ---- Mapping editor (form) ----
+
 # ✅ if still empty (first load), seed using current rules (outside the form)
 if st.session_state["mapping_df"].empty:
     st.session_state["mapping_df"] = _build_mapping_df(
         all_cols, df_raw, st.session_state["auto_rules"]
     )
 
-# --- Re-apply auto-tag rules on demand (outside any form) ---
-rt1, rt2 = st.columns([1, 1])
+# ---- Variable Mapping Editor ----
+with st.expander("🗺️ Variable Mapping", expanded=True):
+    # --- Re-apply auto-tag rules on demand (outside any form) ---
+    rt1, rt2 = st.columns([1, 1])
 
-# Only fill previously-untagged rows (preserves manual edits)
-if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing", use_container_width=True):
-    m = st.session_state["mapping_df"].copy()
-    inferred = {
-        c: _infer_category(c, st.session_state["auto_rules"]) for c in all_cols
-    }
-
-    # Ensure all columns exist
-    if "channel" not in m.columns:
-        m["channel"] = ""
-    if "data_type" not in m.columns:
-        m["data_type"] = "numeric"
-    if "agg_strategy" not in m.columns:
-        m["agg_strategy"] = "sum"
-
-    # Fill missing values
-    m["category"] = m.apply(
-        lambda r: (
-            r["category"]
-            if str(r["category"]).strip()
-            else inferred.get(r["var"], "")
-        ),
-        axis=1,
-    )
-    m["channel"] = m.apply(
-        lambda r: (
-            r["channel"]
-            if str(r.get("channel", "")).strip()
-            else _extract_channel_from_column(str(r["var"]))
-        ),
-        axis=1,
-    )
-    m["data_type"] = m.apply(
-        lambda r: (
-            r["data_type"]
-            if str(r.get("data_type", "")).strip()
-            else _detect_data_type(df_raw, str(r["var"]))
-        ),
-        axis=1,
-    )
-    m["agg_strategy"] = m.apply(
-        lambda r: (
-            r["agg_strategy"]
-            if str(r.get("agg_strategy", "")).strip()
-            else _default_agg_strategy(str(r.get("data_type", "numeric")))
-        ),
-        axis=1,
-    )
-    st.session_state["mapping_df"] = m.astype("object")
-    st.success("Filled categories for previously untagged columns.")
-
-# Overwrite everything from current rules (discard manual edits)
-if rt2.button("♻️ Re-apply to ALL columns", key="retag_all", use_container_width=True):
-    st.session_state["mapping_df"] = _build_mapping_df(
-        all_cols, df_raw, st.session_state["auto_rules"]
-    )
-    st.warning(
-        "Re-applied rules to ALL columns (manual categories were overwritten)."
-    )
-
-# Add sorting controls (user-controlled, not automatic)
-st.write("**Sort mapping table:**")
-sort_col1, sort_col2, sort_col3 = st.columns([2, 1, 1])
-with sort_col1:
-    sort_by = st.selectbox(
-        "Sort by",
-        options=["Original order", "var", "category", "channel", "channel_subchannel", "data_type"],
-        index=0,
-        help="Choose a column to sort the mapping table. 'channel_subchannel' sorts by CHANNEL_SUBCHANNEL pattern.",
-        key="sort_by_selector"
-    )
-with sort_col2:
-    sort_order = st.selectbox(
-        "Order",
-        options=["Ascending", "Descending"],
-        index=0,
-        key="sort_order_selector"
-    )
-with sort_col3:
-    if st.button("🔄 Apply Sort", key="apply_sort_btn", use_container_width=True):
-        if sort_by != "Original order":
-            ascending = sort_order == "Ascending"
-            m = st.session_state["mapping_df"].copy()
-            
-            # Handle channel_subchannel sorting
-            if sort_by == "channel_subchannel":
-                # Create a temporary column for sorting by channel_subchannel
-                def extract_channel_subchannel(var_name):
-                    parsed = _parse_variable_name(str(var_name))
-                    channel = parsed.get("channel", "")
-                    subchannel = parsed.get("subchannel", "")
-                    if channel and subchannel:
-                        return f"{channel}_{subchannel}"
-                    elif channel:
-                        return channel
-                    else:
-                        return ""
+    # Only fill previously-untagged rows (preserves manual edits)
+    if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing", use_container_width=True):
+        m = st.session_state["mapping_df"].copy()
+        inferred = {
+            c: _infer_category(c, st.session_state["auto_rules"]) for c in all_cols
+        }
+    
+        # Ensure all columns exist
+        if "channel" not in m.columns:
+            m["channel"] = ""
+        if "data_type" not in m.columns:
+            m["data_type"] = "numeric"
+        if "agg_strategy" not in m.columns:
+            m["agg_strategy"] = "sum"
+    
+        # Fill missing values
+        m["category"] = m.apply(
+            lambda r: (
+                r["category"]
+                if str(r["category"]).strip()
+                else inferred.get(r["var"], "")
+            ),
+            axis=1,
+        )
+        m["channel"] = m.apply(
+            lambda r: (
+                r["channel"]
+                if str(r.get("channel", "")).strip()
+                else _extract_channel_from_column(str(r["var"]))
+            ),
+            axis=1,
+        )
+        m["data_type"] = m.apply(
+            lambda r: (
+                r["data_type"]
+                if str(r.get("data_type", "")).strip()
+                else _detect_data_type(df_raw, str(r["var"]))
+            ),
+            axis=1,
+        )
+        m["agg_strategy"] = m.apply(
+            lambda r: (
+                r["agg_strategy"]
+                if str(r.get("agg_strategy", "")).strip()
+                else _default_agg_strategy(str(r.get("data_type", "numeric")))
+            ),
+            axis=1,
+        )
+        st.session_state["mapping_df"] = m.astype("object")
+        st.success("Filled categories for previously untagged columns.")
+    
+    # Overwrite everything from current rules (discard manual edits)
+    if rt2.button("♻️ Re-apply to ALL columns", key="retag_all", use_container_width=True):
+        st.session_state["mapping_df"] = _build_mapping_df(
+            all_cols, df_raw, st.session_state["auto_rules"]
+        )
+        st.warning(
+            "Re-applied rules to ALL columns (manual categories were overwritten)."
+        )
+    
+    # Add sorting controls (user-controlled, not automatic)
+    st.write("**Sort mapping table:**")
+    sort_col1, sort_col2, sort_col3 = st.columns([2, 1, 1])
+    with sort_col1:
+        sort_by = st.selectbox(
+            "Sort by",
+            options=["Original order", "var", "category", "channel", "channel_subchannel", "data_type"],
+            index=0,
+            help="Choose a column to sort the mapping table. 'channel_subchannel' sorts by CHANNEL_SUBCHANNEL pattern.",
+            key="sort_by_selector"
+        )
+    with sort_col2:
+        sort_order = st.selectbox(
+            "Order",
+            options=["Ascending", "Descending"],
+            index=0,
+            key="sort_order_selector"
+        )
+    with sort_col3:
+        if st.button("🔄 Apply Sort", key="apply_sort_btn", use_container_width=True):
+            if sort_by != "Original order":
+                ascending = sort_order == "Ascending"
+                m = st.session_state["mapping_df"].copy()
                 
-                m["_sort_key"] = m["var"].apply(extract_channel_subchannel)
-                st.session_state["mapping_df"] = m.sort_values(by="_sort_key", ascending=ascending).drop(columns=["_sort_key"]).reset_index(drop=True)
-            else:
-                st.session_state["mapping_df"] = m.sort_values(by=sort_by, ascending=ascending).reset_index(drop=True)
-            
-            st.success(f"Sorted by {sort_by} ({sort_order})")
-            st.rerun()
-
-
-with st.form("mapping_form_main", clear_on_submit=False):
-    # Filter out goal variables and date field from the mapping display
-    goals_df = st.session_state["goals_df"]
-    date_and_goal_vars_display = set([date_field] + goals_df["var"].tolist())
-    mapping_src = st.session_state["mapping_df"][
-        ~st.session_state["mapping_df"]["var"].isin(date_and_goal_vars_display)
-    ].copy().fillna("")
-
-    # Ensure all expected columns exist
-    expected_cols = [
-        "var",
-        "category",
-        "channel",
-        "data_type",
-        "agg_strategy",
-        "custom_tags",
-    ]
-    for col in expected_cols:
-        if col not in mapping_src.columns:
-            mapping_src[col] = ""
-
-    mapping_src = mapping_src.astype("object")
-
-    # Get all available channels for the dropdown
-    all_available_channels = sorted(
-        set(_get_known_channels() + st.session_state.get("custom_channels", []))
-    )
-
-    mapping_edit = st.data_editor(
-        mapping_src,
-        use_container_width=True,
-        num_rows="dynamic",
-        column_config={
-            "var": st.column_config.TextColumn("Column", disabled=True),
-            "category": st.column_config.SelectboxColumn(
-                "Category", options=ALLOWED_CATEGORIES
-            ),
-            "channel": st.column_config.SelectboxColumn(
-                "Channel",
-                options=[""] + all_available_channels,
-                help="Marketing channel for this column",
-            ),
-            "data_type": st.column_config.SelectboxColumn(
-                "Data Type",
-                options=["numeric", "categorical"],
-                help="Whether the column contains numeric or categorical data",
-            ),
-            "agg_strategy": st.column_config.SelectboxColumn(
-                "Aggregation",
-                options=["sum", "mean", "max", "min", "mode"],
-                help="Strategy for aggregating when resampling. Numeric: sum/mean/max/min. Categorical: mode",
-            ),
-            "custom_tags": st.column_config.TextColumn(
-                "Custom Tags (optional)"
-            ),
-        },
-        key="mapping_editor",
-    )
-
-    mapping_submit = st.form_submit_button("✅ Apply mapping changes")
-
-if mapping_submit:
-    # Apply automatic aggregations
-    try:
-        updated_mapping, updated_df = _apply_automatic_aggregations(
-            mapping_edit.copy(), st.session_state["df_raw"].copy()
+                # Handle channel_subchannel sorting
+                if sort_by == "channel_subchannel":
+                    # Create a temporary column for sorting by channel_subchannel
+                    def extract_channel_subchannel(var_name):
+                        parsed = _parse_variable_name(str(var_name))
+                        channel = parsed.get("channel", "")
+                        subchannel = parsed.get("subchannel", "")
+                        if channel and subchannel:
+                            return f"{channel}_{subchannel}"
+                        elif channel:
+                            return channel
+                        else:
+                            return ""
+                    
+                    m["_sort_key"] = m["var"].apply(extract_channel_subchannel)
+                    st.session_state["mapping_df"] = m.sort_values(by="_sort_key", ascending=ascending).drop(columns=["_sort_key"]).reset_index(drop=True)
+                else:
+                    st.session_state["mapping_df"] = m.sort_values(by=sort_by, ascending=ascending).reset_index(drop=True)
+                
+                st.success(f"Sorted by {sort_by} ({sort_order})")
+                st.rerun()
+    
+    
+    with st.form("mapping_form_main", clear_on_submit=False):
+        # Filter out goal variables and date field from the mapping display
+        goals_df = st.session_state["goals_df"]
+        date_and_goal_vars_display = set([date_field] + goals_df["var"].tolist())
+        mapping_src = st.session_state["mapping_df"][
+            ~st.session_state["mapping_df"]["var"].isin(date_and_goal_vars_display)
+        ].copy().fillna("")
+    
+        # Ensure all expected columns exist
+        expected_cols = [
+            "var",
+            "category",
+            "channel",
+            "data_type",
+            "agg_strategy",
+            "custom_tags",
+        ]
+        for col in expected_cols:
+            if col not in mapping_src.columns:
+                mapping_src[col] = ""
+    
+        mapping_src = mapping_src.astype("object")
+    
+        # Get all available channels for the dropdown
+        all_available_channels = sorted(
+            set(_get_known_channels() + st.session_state.get("custom_channels", []))
         )
-        st.session_state["mapping_df"] = updated_mapping
-        st.session_state["df_raw"] = updated_df
-        num_new = len(updated_mapping) - len(mapping_edit)
-        st.success(
-            f"✅ Mapping updated! Added {num_new} new aggregated columns. "
-            f"Total: {len(updated_mapping)} variables."
+    
+        mapping_edit = st.data_editor(
+            mapping_src,
+            use_container_width=True,
+            num_rows="dynamic",
+            column_config={
+                "var": st.column_config.TextColumn("Column", disabled=True),
+                "category": st.column_config.SelectboxColumn(
+                    "Category", options=ALLOWED_CATEGORIES
+                ),
+                "channel": st.column_config.SelectboxColumn(
+                    "Channel",
+                    options=[""] + all_available_channels,
+                    help="Marketing channel for this column",
+                ),
+                "data_type": st.column_config.SelectboxColumn(
+                    "Data Type",
+                    options=["numeric", "categorical"],
+                    help="Whether the column contains numeric or categorical data",
+                ),
+                "agg_strategy": st.column_config.SelectboxColumn(
+                    "Aggregation",
+                    options=["sum", "mean", "max", "min", "mode"],
+                    help="Strategy for aggregating when resampling. Numeric: sum/mean/max/min. Categorical: mode",
+                ),
+                "custom_tags": st.column_config.TextColumn(
+                    "Custom Tags (optional)"
+                ),
+            },
+            key="mapping_editor",
         )
-        if num_new > 0:
-            st.info(
-                "💾 **Important:** Click 'Save this dataset to GCS' above to persist the new aggregated columns. "
-                "Then save the metadata below so the columns are available in the Experiment page."
+    
+        mapping_submit = st.form_submit_button("✅ Apply mapping changes")
+    
+    if mapping_submit:
+        # Apply automatic aggregations
+        try:
+            updated_mapping, updated_df = _apply_automatic_aggregations(
+                mapping_edit.copy(), st.session_state["df_raw"].copy()
             )
-        # Trigger a rerun to refresh the UI with new columns
-        st.rerun()
-    except Exception as e:
-        st.error(f"Failed to apply automatic aggregations: {e}")
-        st.session_state["mapping_df"] = mapping_edit
-        st.warning("Saved mapping without automatic aggregations.")
-
-st.divider()
+            st.session_state["mapping_df"] = updated_mapping
+            st.session_state["df_raw"] = updated_df
+            num_new = len(updated_mapping) - len(mapping_edit)
+            st.success(
+                f"✅ Mapping updated! Added {num_new} new aggregated columns. "
+                f"Total: {len(updated_mapping)} variables."
+            )
+            if num_new > 0:
+                st.info(
+                    "💾 **Important:** Click 'Save this dataset to GCS' above to persist the new aggregated columns. "
+                    "Then save the metadata below so the columns are available in the Experiment page."
+                )
+            # Trigger a rerun to refresh the UI with new columns
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to apply automatic aggregations: {e}")
+            st.session_state["mapping_df"] = mapping_edit
+            st.warning("Saved mapping without automatic aggregations.")
+    
+    st.divider()
 
 # ──────────────────────────────────────────────────────────────
 # Step 3) Save your mapping
