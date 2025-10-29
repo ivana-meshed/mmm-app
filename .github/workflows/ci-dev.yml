@@ -35,6 +35,8 @@ jobs:
       TRAINING_RUNTIME_SA: mmm-training-job-sa@datawarehouse-422511.iam.gserviceaccount.com
       TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
       # TF_VAR_* for sensitive/default vars (preferred over -var flags)
+      # Sensitive data (secrets) passed via TF_VAR_* from GitHub Secrets
+      # Non-sensitive config (project_id, regions, etc.) in envs/dev.tfvars
       TF_VAR_sf_private_key: ${{ secrets.SF_PRIVATE_KEY }}
       TF_VAR_auth_client_id: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       TF_VAR_auth_client_secret: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
@@ -180,6 +182,15 @@ jobs:
           terraform init -input=false -reconfigure -backend-config="prefix=envs/dev"
           terraform -version
           terraform workspace new dev || terraform workspace select dev  # Create/select if needed
+          
+          # Verify we're in the correct workspace
+          CURRENT_WORKSPACE=$(terraform workspace show)
+          if [ "$CURRENT_WORKSPACE" != "dev" ]; then
+            echo "ERROR: Expected to be in 'dev' workspace but currently in '$CURRENT_WORKSPACE'"
+            exit 1
+          fi
+          echo "✓ Confirmed workspace: $CURRENT_WORKSPACE"
+          
           terraform fmt -check
           terraform validate
 
