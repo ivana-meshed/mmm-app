@@ -1687,6 +1687,13 @@ by_cat = {
     cat: _by_cat(mapping_df_filtered, cat) for cat in ALLOWED_CATEGORIES if cat
 }
 
+# Auto-add factor_vars to context_vars (requirement 6)
+if by_cat.get("factor_vars"):
+    context_vars_set = set(by_cat.get("context_vars", []))
+    context_vars_set.update(by_cat["factor_vars"])
+    by_cat["context_vars"] = sorted(list(context_vars_set))
+
+
 # Get main dependent variable from goals_df
 dep_var = ""
 if not goals_df.empty:

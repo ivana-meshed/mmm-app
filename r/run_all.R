@@ -580,6 +580,12 @@ paid_media_vars <- paid_media_vars[keep_idx]
 
 context_vars <- intersect(context_vars_cfg, names(df))
 factor_vars <- intersect(factor_vars_cfg, names(df))
+
+# Auto-add factor_vars to context_vars (requirement 6)
+if (length(factor_vars) > 0) {
+    context_vars <- unique(c(context_vars, factor_vars))
+}
+
 org_base <- intersect(organic_vars_cfg %||% "ORGANIC_TRAFFIC", names(df))
 organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES" %in% names(df)) unique(c(org_base, "N_SEARCHES")) else org_base
 

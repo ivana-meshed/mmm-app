@@ -815,6 +815,11 @@ with tab_single:
                 default=default_factor_vars,
                 help="Select factor/categorical variables",
             )
+            
+            # Auto-add factor_vars to context_vars (requirement 6)
+            if factor_vars_list:
+                context_vars_list = list(set(context_vars_list + factor_vars_list))
+
 
             # Organic vars - multiselect
             st.markdown("**Organic/Baseline Variables**")
