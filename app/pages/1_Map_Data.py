@@ -143,7 +143,7 @@ def _init_state():
     st.session_state.setdefault("picked_ts", "")
     st.session_state.setdefault(
         "goals_df",
-        pd.DataFrame(columns=["var", "group", "type"]).astype("object"),
+        pd.DataFrame(columns=["var", "group", "type", "main"]).astype("object"),
     )
     st.session_state.setdefault(
         "auto_rules",
@@ -362,6 +362,7 @@ def _initial_goals_from_columns(cols: list[str]) -> pd.DataFrame:
             "type": pd.Series(
                 [_guess_goal_type(c) for c in candidates], dtype="object"
             ),
+            "main": pd.Series([False] * len(candidates), dtype="object"),
         }
     )
 
@@ -1126,15 +1127,13 @@ date_field = st.selectbox(
 
 # ---- Goals (form) ----
 with st.form("goals_form", clear_on_submit=False):
-    g1, g2 = st.columns(2)
-    with g1:
-        primary_goals = st.multiselect(
-            "Primary goal variables", options=all_cols, default=[]
-        )
-    with g2:
-        secondary_goals = st.multiselect(
-            "Secondary goal variables", options=all_cols, default=[]
-        )
+    # Stack primary and secondary goals vertically (requirement from feedback)
+    primary_goals = st.multiselect(
+        "Primary goal variables", options=all_cols, default=[]
+    )
+    secondary_goals = st.multiselect(
+        "Secondary goal variables", options=all_cols, default=[]
+    )
 
     def _mk(selected, group):
         return pd.DataFrame(
@@ -1144,6 +1143,7 @@ with st.form("goals_form", clear_on_submit=False):
                 "type": pd.Series(
                     [_guess_goal_type(v) for v in selected], dtype="object"
                 ),
+                "main": pd.Series([False] * len(selected), dtype="object"),
             }
         )
 
@@ -1163,17 +1163,30 @@ with st.form("goals_form", clear_on_submit=False):
     goals_src = goals_src.fillna("").astype(
         {"var": "object", "group": "object", "type": "object"}
     )
+    # Add main column if it doesn't exist
+    if "main" not in goals_src.columns:
+        goals_src["main"] = False
+    goals_src["main"] = goals_src["main"].astype(bool)
+
     goals_edit = st.data_editor(
         goals_src,
         use_container_width=True,
         num_rows="dynamic",
+        hide_index=False,  # Show index (requirement 1)
         column_config={
-            "var": st.column_config.TextColumn("Variable"),
+            "var": st.column_config.SelectboxColumn(
+                "Variable", options=all_cols  # Autocomplete (requirement 4)
+            ),
             "group": st.column_config.SelectboxColumn(
                 "Group", options=["primary", "secondary"]
             ),
             "type": st.column_config.SelectboxColumn(
-                "Type", options=["revenue", "conversion"]
+                "Type", options=["revenue", "conversion"], required=True  # Required (requirement 3)
+            ),
+            "main": st.column_config.CheckboxColumn(
+                "Main",
+                help="Select the main dependent variable for the model",
+                default=False,
             ),
         },
         key="goals_editor",
@@ -1181,7 +1194,6 @@ with st.form("goals_form", clear_on_submit=False):
     goals_submit = st.form_submit_button("✅ Apply goal changes")
 
 if goals_submit:
-    # Simply use what the user has in the editor - don't merge with old data
     edited = goals_edit.copy()
 
     # Keep only non-empty vars
@@ -1189,15 +1201,30 @@ if goals_submit:
         "object"
     )
 
-    # Drop duplicates and normalize
-    merged = (
-        edited.drop_duplicates(subset=["var"], keep="last")
-        .fillna("")
-        .astype({"var": "object", "group": "object", "type": "object"})
-    )
+    # Validate that all goals have a type (requirement 3)
+    empty_types = edited[edited["type"].astype(str).str.strip() == ""]
+    if not empty_types.empty:
+        st.error(
+            f"⚠️ Please specify a type (revenue or conversion) for all goal variables. Missing types for: {', '.join(empty_types['var'].tolist())}"
+        )
+    else:
+        # Ensure only one main is selected (requirement 2)
+        main_count = edited["main"].astype(bool).sum()
+        if main_count > 1:
+            st.warning(
+                "⚠️ Multiple goals marked as 'Main'. Only the first one will be used as the main dependent variable."
+            )
 
-    st.session_state["goals_df"] = merged
-    st.success("Goals updated.")
+        # Drop duplicates and normalize
+        merged = (
+            edited.drop_duplicates(subset=["var"], keep="last")
+            .fillna({"var": "", "group": "", "type": "", "main": False})
+            .astype({"var": "object", "group": "object", "type": "object"})
+        )
+        merged["main"] = merged["main"].astype(bool)
+
+        st.session_state["goals_df"] = merged
+        st.success("Goals updated.")
 
 
 # ---- Custom channels UI ----
