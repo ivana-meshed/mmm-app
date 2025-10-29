@@ -258,6 +258,9 @@ with tab_single:
             # Country auto-filled from Data Selection
             country = st.session_state.get("selected_country", "fr")
             st.info(f"**Country:** {country.upper()} (from Data Selection)")
+            
+            # Check if there's a loaded configuration
+            loaded_config = st.session_state.get("loaded_training_config", {})
 
             # Iterations and Trials as presets
             preset_options = {
@@ -265,10 +268,25 @@ with tab_single:
                 "Production": {"iterations": 2000, "trials": 5},
                 "Custom": {"iterations": 5000, "trials": 10},
             }
+            
+            # Determine default preset based on loaded config
+            default_preset_index = 0
+            if loaded_config:
+                loaded_iterations = loaded_config.get("iterations", 200)
+                loaded_trials = loaded_config.get("trials", 3)
+                # Check if loaded values match a preset
+                for idx, (preset_name, preset_vals) in enumerate(preset_options.items()):
+                    if preset_vals["iterations"] == loaded_iterations and preset_vals["trials"] == loaded_trials:
+                        default_preset_index = idx
+                        break
+                else:
+                    # Doesn't match any preset, default to Custom
+                    default_preset_index = 2
+            
             preset_choice = st.selectbox(
                 "Training preset",
                 options=list(preset_options.keys()),
-                index=0,
+                index=default_preset_index,
                 help="Choose a training preset or use custom values",
             )
 
@@ -276,11 +294,17 @@ with tab_single:
                 col1, col2 = st.columns(2)
                 with col1:
                     iterations = st.number_input(
-                        "Iterations", value=5000, min_value=50, step=100
+                        "Iterations", 
+                        value=loaded_config.get("iterations", 5000) if loaded_config else 5000, 
+                        min_value=50, 
+                        step=100
                     )
                 with col2:
                     trials = st.number_input(
-                        "Trials", value=10, min_value=1, step=1
+                        "Trials", 
+                        value=loaded_config.get("trials", 10) if loaded_config else 10, 
+                        min_value=1, 
+                        step=1
                     )
             else:
                 iterations = preset_options[preset_choice]["iterations"]  # type: ignore
@@ -290,7 +314,7 @@ with tab_single:
             # Train size stays as is
             train_size = st.text_input(
                 "Train size",
-                value="0.7,0.9",
+                value=loaded_config.get("train_size", "0.7,0.9") if loaded_config else "0.7,0.9",
                 help="Comma-separated train/validation split ratios",
             )
 
@@ -298,7 +322,7 @@ with tab_single:
             latest_revision = _get_latest_revision(gcs_bucket, country)
             revision = st.text_input(
                 "Revision tag",
-                value="",
+                value=loaded_config.get("revision", "") if loaded_config else "",
                 placeholder=f"Latest revision for country: {latest_revision}",
                 help="Revision identifier for organizing outputs. Required before starting training.",
             )
@@ -306,15 +330,31 @@ with tab_single:
             # Training date range instead of single date tag
             col1, col2 = st.columns(2)
             with col1:
+                # Parse loaded start date if available
+                default_start_date = datetime(2024, 1, 1).date()
+                if loaded_config and "start_date" in loaded_config:
+                    try:
+                        default_start_date = datetime.strptime(loaded_config["start_date"], "%Y-%m-%d").date()
+                    except:
+                        pass
+                
                 start_data_date = st.date_input(
                     "Training start date",
-                    value=datetime(2024, 1, 1).date(),
+                    value=default_start_date,
                     help="Start date for training data window (start_data_date in R script)",
                 )
             with col2:
+                # Parse loaded end date if available
+                default_end_date = datetime.now().date()
+                if loaded_config and "end_date" in loaded_config:
+                    try:
+                        default_end_date = datetime.strptime(loaded_config["end_date"], "%Y-%m-%d").date()
+                    except:
+                        pass
+                
                 end_data_date = st.date_input(
                     "Training end date",
-                    value=datetime.now().date(),
+                    value=default_end_date,
                     help="End date for training data window (end_data_date in R script)",
                 )
 
@@ -331,10 +371,18 @@ with tab_single:
                     if g.get("group") == "primary"
                 ]
                 if goal_options:
+                    # Find default index for loaded dep_var
+                    default_dep_var_index = 0
+                    if loaded_config and "dep_var" in loaded_config:
+                        try:
+                            default_dep_var_index = goal_options.index(loaded_config["dep_var"])
+                        except (ValueError, KeyError):
+                            pass
+                    
                     dep_var = st.selectbox(
                         "Goal variable",
                         options=goal_options,
-                        index=0,
+                        index=default_dep_var_index,
                         help="Primary goal variable (dependent variable) for the model",
                     )
                     # Find the corresponding type
@@ -344,20 +392,21 @@ with tab_single:
                             for g in metadata["goals"]
                             if g["var"] == dep_var
                         ),
-                        "revenue",
+                        loaded_config.get("dep_var_type", "revenue") if loaded_config else "revenue",
                     )
                 else:
                     dep_var = st.text_input(
-                        "Goal variable", value="UPLOAD_VALUE"
+                        "Goal variable", 
+                        value=loaded_config.get("dep_var", "UPLOAD_VALUE") if loaded_config else "UPLOAD_VALUE"
                     )
-                    dep_var_type = "revenue"
+                    dep_var_type = loaded_config.get("dep_var_type", "revenue") if loaded_config else "revenue"
             else:
                 dep_var = st.text_input(
                     "Goal variable",
-                    value="UPLOAD_VALUE",
+                    value=loaded_config.get("dep_var", "UPLOAD_VALUE") if loaded_config else "UPLOAD_VALUE",
                     help="Dependent variable column in your data",
                 )
-                dep_var_type = "revenue"
+                dep_var_type = loaded_config.get("dep_var_type", "revenue") if loaded_config else "revenue"
 
             # Goals type - display and allow override
             dep_var_type = st.selectbox(
@@ -370,24 +419,40 @@ with tab_single:
             # Date variable
             date_var = st.text_input(
                 "date_var",
-                value="date",
+                value=loaded_config.get("date_var", "date") if loaded_config else "date",
                 help="Date column in your data (e.g., date)",
             )
 
             # Adstock selection
+            adstock_options = ["geometric", "weibull_cdf", "weibull_pdf"]
+            default_adstock_index = 0
+            if loaded_config and "adstock" in loaded_config:
+                try:
+                    default_adstock_index = adstock_options.index(loaded_config["adstock"])
+                except (ValueError, KeyError):
+                    pass
+            
             adstock = st.selectbox(
                 "adstock",
-                options=["geometric", "weibull_cdf", "weibull_pdf"],
-                index=0,
+                options=adstock_options,
+                index=default_adstock_index,
                 help="Robyn adstock function",
             )
 
             # Hyperparameters - conditional on adstock
             st.write("**Hyperparameters**")
+            hyperparameter_options = ["Facebook recommend", "Meshed recommend", "Custom"]
+            default_hyperparameter_index = 1
+            if loaded_config and "hyperparameter_preset" in loaded_config:
+                try:
+                    default_hyperparameter_index = hyperparameter_options.index(loaded_config["hyperparameter_preset"])
+                except (ValueError, KeyError):
+                    pass
+            
             hyperparameter_preset = st.selectbox(
                 "Hyperparameter preset",
-                options=["Facebook recommend", "Meshed recommend", "Custom"],
-                index=1,
+                options=hyperparameter_options,
+                index=default_hyperparameter_index,
                 help="Choose hyperparameter preset or define custom values",
             )
 
@@ -403,16 +468,38 @@ with tab_single:
                 index=0,
                 help="Aggregates the input before training.",
             )
+            
+            # Determine default resample freq from loaded config
+            resample_freq_map = {
+                "none": "None",
+                "W": "Weekly (W)",
+                "M": "Monthly (M)",
+            }
+            default_resample_freq = "None"
+            if loaded_config and "resample_freq" in loaded_config:
+                default_resample_freq = resample_freq_map.get(loaded_config["resample_freq"], "None")
+            
             resample_freq = {
                 "None": "none",
                 "Weekly (W)": "W",
                 "Monthly (M)": "M",
-            }.get(resample_freq_label or "None", "none")
+            }.get(resample_freq_label or default_resample_freq, "none")
 
+            # Determine default resample agg from loaded config
+            resample_agg_map = {
+                "sum": "sum",
+                "mean": "avg (mean)",
+                "max": "max",
+                "min": "min",
+            }
+            default_resample_agg = "sum"
+            if loaded_config and "resample_agg" in loaded_config:
+                default_resample_agg = resample_agg_map.get(loaded_config["resample_agg"], "sum")
+            
             resample_agg_label = c_rs2.selectbox(
                 "Aggregation for metrics (when resampling)",
                 ["sum", "avg (mean)", "max", "min"],
-                index=0,
+                index=["sum", "avg (mean)", "max", "min"].index(default_resample_agg) if default_resample_agg in ["sum", "avg (mean)", "max", "min"] else 0,
                 help="Applied to numeric columns during resample.",
             )
             resample_agg = {
@@ -557,6 +644,16 @@ with tab_single:
                 for v in default_values["paid_media_spends"]
                 if v in all_columns
             ]
+            
+            # Determine default selections from loaded config
+            default_paid_media_spends = available_spends  # All selected by default
+            if loaded_config and "paid_media_spends" in loaded_config:
+                # Parse loaded config (could be comma-separated string or list)
+                loaded_spends = loaded_config["paid_media_spends"]
+                if isinstance(loaded_spends, str):
+                    loaded_spends = [s.strip() for s in loaded_spends.split(",") if s.strip()]
+                # Only include loaded spends that are in available_spends
+                default_paid_media_spends = [s for s in loaded_spends if s in available_spends]
 
             # Display paid_media_spends first (all selected by default)
             st.markdown("**Paid Media Configuration**")
@@ -567,7 +664,7 @@ with tab_single:
             paid_media_spends_list = st.multiselect(
                 "paid_media_spends (Select channels to include)",
                 options=available_spends,
-                default=available_spends,  # All selected by default
+                default=default_paid_media_spends,
                 help="Select media spend columns to include in the model",
             )
 
@@ -654,28 +751,52 @@ with tab_single:
 
             # Context vars - multiselect
             st.markdown("**Context Variables**")
+            # Determine default from loaded config
+            default_context_vars = default_values["context_vars"]
+            if loaded_config and "context_vars" in loaded_config:
+                loaded_context = loaded_config["context_vars"]
+                if isinstance(loaded_context, str):
+                    loaded_context = [s.strip() for s in loaded_context.split(",") if s.strip()]
+                default_context_vars = [v for v in loaded_context if v in all_columns]
+            
             context_vars_list = st.multiselect(
                 "context_vars",
                 options=all_columns,
-                default=default_values["context_vars"],
+                default=default_context_vars,
                 help="Select contextual variables (e.g., seasonality, events)",
             )
 
             # Factor vars - multiselect
             st.markdown("**Factor Variables**")
+            # Determine default from loaded config
+            default_factor_vars = default_values["factor_vars"]
+            if loaded_config and "factor_vars" in loaded_config:
+                loaded_factor = loaded_config["factor_vars"]
+                if isinstance(loaded_factor, str):
+                    loaded_factor = [s.strip() for s in loaded_factor.split(",") if s.strip()]
+                default_factor_vars = [v for v in loaded_factor if v in all_columns]
+            
             factor_vars_list = st.multiselect(
                 "factor_vars",
                 options=all_columns,
-                default=default_values["factor_vars"],
+                default=default_factor_vars,
                 help="Select factor/categorical variables",
             )
 
             # Organic vars - multiselect
             st.markdown("**Organic/Baseline Variables**")
+            # Determine default from loaded config
+            default_organic_vars = default_values["organic_vars"]
+            if loaded_config and "organic_vars" in loaded_config:
+                loaded_organic = loaded_config["organic_vars"]
+                if isinstance(loaded_organic, str):
+                    loaded_organic = [s.strip() for s in loaded_organic.split(",") if s.strip()]
+                default_organic_vars = [v for v in loaded_organic if v in all_columns]
+            
             organic_vars_list = st.multiselect(
                 "organic_vars",
                 options=all_columns,
-                default=default_values["organic_vars"],
+                default=default_organic_vars,
                 help="Select organic/baseline variables",
             )
 
@@ -804,11 +925,16 @@ with tab_single:
                             blob_path = f"training-configs/saved/{current_country}/{selected_config}.json"
                             blob = client.bucket(gcs_bucket).blob(blob_path)
                             config_data = json.loads(blob.download_as_bytes())
-
-                            st.info(
-                                f"📋 Configuration '{selected_config}' loaded. Refresh the page to see the updated values."
+                            
+                            # Store loaded configuration in session state
+                            st.session_state["loaded_training_config"] = config_data.get("config", {})
+                            
+                            st.success(
+                                f"✅ Configuration '{selected_config}' loaded successfully!"
                             )
+                            st.info("The configuration values are now applied to the form above.")
                             st.json(config_data, expanded=False)
+                            st.rerun()
                         except Exception as e:
                             st.error(f"Failed to load configuration: {e}")
                 else:
