@@ -1101,7 +1101,7 @@ def _save_current_raw():
 
 csave1, csave2 = st.columns([1, 3])
 csave1.button(
-    "💾 Save this dataset to GCS (as new version)", on_click=_save_current_raw, use_container_width=True
+    "💾 Save this dataset to GCS (as new version)", on_click=_save_current_raw
 )
 if st.session_state["last_saved_raw_path"]:
     csave2.caption(f"Last saved: `{st.session_state['last_saved_raw_path']}`")
@@ -1253,7 +1253,7 @@ with ch_col1:
         help="Enter channel names that aren't in the default list",
     )
 with ch_col2:
-    if st.button("➕ Add Channel", key="add_channel_btn", use_container_width=True):
+    if st.button("➕ Add Channel", key="add_channel_btn"):
         if new_channel and new_channel.strip():
             custom_channels = st.session_state.get("custom_channels", [])
             channel_lower = new_channel.strip().lower()
@@ -1405,7 +1405,7 @@ with st.expander(
     version_opts = ["Latest"] + [v for v in meta_versions if v != "Latest"]
     picked_meta_ts = lc2.selectbox("Version", options=version_opts, index=0)
 
-    if lc3.button("Load & apply", use_container_width=True):
+    if lc3.button("Load & apply"):
         if not load_country or not load_country.strip():
             st.warning("Please select a country first.")
         elif not picked_meta_ts:
@@ -1459,7 +1459,7 @@ if st.session_state["mapping_df"].empty:
 rt1, rt2 = st.columns([1, 1])
 
 # Only fill previously-untagged rows (preserves manual edits)
-if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing", use_container_width=True):
+if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing"):
     m = st.session_state["mapping_df"].copy()
     inferred = {
         c: _infer_category(c, st.session_state["auto_rules"]) for c in all_cols
@@ -1510,7 +1510,7 @@ if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing", use_contain
     st.success("Filled categories for previously untagged columns.")
 
 # Overwrite everything from current rules (discard manual edits)
-if rt2.button("♻️ Re-apply to ALL columns", key="retag_all", use_container_width=True):
+if rt2.button("♻️ Re-apply to ALL columns", key="retag_all"):
     st.session_state["mapping_df"] = _build_mapping_df(
         all_cols, df_raw, st.session_state["auto_rules"]
     )
@@ -1537,7 +1537,7 @@ with sort_col2:
         key="sort_order_selector"
     )
 with sort_col3:
-    if st.button("🔄 Apply Sort", key="apply_sort_btn", use_container_width=True):
+    if st.button("🔄 Apply Sort", key="apply_sort_btn"):
         if sort_by != "Original order":
             ascending = sort_order == "Ascending"
             m = st.session_state["mapping_df"].copy()
@@ -1851,7 +1851,7 @@ def _save_metadata():
 
 
 cmeta1, cmeta2 = st.columns([1, 2])
-cmeta1.button("💾 Save metadata to GCS", on_click=_save_metadata, use_container_width=True)
+cmeta1.button("💾 Save metadata to GCS", on_click=_save_metadata)
 if st.session_state["last_saved_meta_path"]:
     cmeta2.caption(f"Last saved: `{st.session_state['last_saved_meta_path']}`")
 

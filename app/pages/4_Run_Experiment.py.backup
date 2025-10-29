@@ -207,7 +207,7 @@ with tab_single:
         )
 
         # Load data button with automatic preview
-        if st.button("Load selected data", type="primary", use_container_width=True):
+        if st.button("Load selected data", type="primary"):
             tmp_path = None
             try:
                 with st.spinner("Loading data from GCS..."):
@@ -876,7 +876,7 @@ with tab_single:
                     st.session_state.get("selected_country", "fr")
                 ]
 
-            if st.button("💾 Save Configuration", use_container_width=True):
+            if st.button("💾 Save Configuration"):
                 if not revision or not revision.strip():
                     st.error(
                         "⚠️ Revision tag is required to save configuration."
@@ -956,7 +956,7 @@ with tab_single:
                         help=f"Configurations available for {current_country.upper()}",
                     )
 
-                    if st.button("📥 Load Configuration", use_container_width=True):
+                    if st.button("📥 Load Configuration"):
                         try:
                             blob_path = f"training-configs/saved/{current_country}/{selected_config}.json"
                             blob = client.bucket(gcs_bucket).blob(blob_path)
@@ -1072,7 +1072,7 @@ with tab_single:
                 "data_gcs_path": "",  # Will be filled later
             }
 
-        if st.button("🚀 Start Training Job", type="primary", use_container_width=True):
+        if st.button("🚀 Start Training Job", type="primary"):
             # Validate revision is filled
             if not revision or not revision.strip():
                 st.error(
@@ -1863,7 +1863,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             f"{sum(e['status'] in ('RUNNING','LAUNCHING') for e in st.session_state.job_queue)} running"
         )
 
-        if st.button("🔁 Refresh from GCS", use_container_width=True):
+        if st.button("🔁 Refresh from GCS"):
             maybe_refresh_queue_from_gcs(force=True)
             st.success("Refreshed from GCS.")
             st.rerun()
