@@ -1166,7 +1166,8 @@ with st.expander(
         "Country (metadata source)", 
         options=country_options,
         index=1,  # Default to current country
-        help="Select 'universal' for universal mappings or a specific country"
+        help="Select 'universal' for universal mappings or a specific country",
+        key="load_metadata_country_selector"
     )
 
     # list available versions for chosen country
@@ -1186,7 +1187,12 @@ with st.expander(
 
     # Allow 'Latest' for metadata
     version_opts = ["Latest"] + [v for v in meta_versions if v != "Latest"]
-    picked_meta_ts = lc2.selectbox("Version", options=version_opts, index=0)
+    picked_meta_ts = lc2.selectbox(
+        "Version", 
+        options=version_opts, 
+        index=0,
+        key=f"load_metadata_version_selector_{load_country}"
+    )
 
     if lc3.button("Load & apply", use_container_width=True):
         if not load_country or not load_country.strip():
