@@ -777,6 +777,10 @@ with tab_single:
                     for i, spend in enumerate(loaded_spends):
                         if i < len(loaded_vars):
                             st.session_state["spend_var_mapping"][spend] = loaded_vars[i]
+        
+        # Filter defaults to only include items that exist in available_spends
+        # This prevents StreamlitAPIException when defaults aren't in options
+        default_paid_media_spends = [s for s in default_paid_media_spends if s in available_spends]
 
         # Display paid_media_spends first (all selected by default)
         st.markdown("**Paid Media Configuration**")
