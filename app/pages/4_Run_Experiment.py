@@ -893,6 +893,9 @@ with tab_single:
                 loaded_context = [s.strip() for s in loaded_context.split(",") if s.strip()]
             default_context_vars = loaded_context
         
+        # Filter defaults to only include items that exist in all_columns
+        default_context_vars = [v for v in default_context_vars if v in all_columns]
+        
         context_vars_list = st.multiselect(
             "context_vars",
             options=all_columns,
@@ -909,6 +912,9 @@ with tab_single:
             if isinstance(loaded_factor, str):
                 loaded_factor = [s.strip() for s in loaded_factor.split(",") if s.strip()]
             default_factor_vars = loaded_factor
+        
+        # Filter defaults to only include items that exist in all_columns
+        default_factor_vars = [v for v in default_factor_vars if v in all_columns]
         
         factor_vars_list = st.multiselect(
             "factor_vars",
@@ -931,6 +937,9 @@ with tab_single:
             if isinstance(loaded_organic, str):
                 loaded_organic = [s.strip() for s in loaded_organic.split(",") if s.strip()]
             default_organic_vars = loaded_organic
+        
+        # Filter defaults to only include items that exist in all_columns
+        default_organic_vars = [v for v in default_organic_vars if v in all_columns]
         
         organic_vars_list = st.multiselect(
             "organic_vars",
