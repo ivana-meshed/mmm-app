@@ -1097,6 +1097,16 @@ if df_raw.empty:
 # ──────────────────────────────────────────────────────────────
 st.header("Step 2) Map your data")
 
+# Show current data state (point 4 - UI representing actual state)
+data_origin = st.session_state.get("data_origin", "N/A")
+picked_ts = st.session_state.get("picked_ts", "N/A")
+country = st.session_state.get("country", "N/A")
+
+if df_raw is not None and not df_raw.empty:
+    st.info(f"🔵 **Currently Loaded:** {data_origin.upper()} | Country: {country.upper()} | Timestamp: {picked_ts} | Rows: {len(df_raw):,} | Columns: {len(df_raw.columns)}")
+else:
+    st.warning("⚪ No data loaded yet")
+
 all_cols = df_raw.columns.astype(str).tolist()
 date_candidates = sorted(
     {
@@ -1346,15 +1356,18 @@ with st.expander(
     "📥 Load saved metadata & apply to current dataset", expanded=False
 ):
     lc1, lc2, lc3 = st.columns([1.2, 1, 1])
-    load_country = (
-        lc1.text_input(
-            "Country (metadata source)", value=st.session_state["country"]
-        )
-        or ""
-    )  # ensure string, not None
+    
+    # Add "universal" as an option along with the current country
+    country_options = ["universal", st.session_state["country"]]
+    load_country = lc1.selectbox(
+        "Country (metadata source)", 
+        options=country_options,
+        index=1,  # Default to current country
+        help="Select 'universal' for universal mappings or a specific country"
+    )
 
     # list available versions for chosen country
-    if load_country.strip():
+    if load_country and load_country.strip():
         meta_versions_raw = _list_country_versions_cached(BUCKET, load_country)
     else:
         meta_versions_raw = []
@@ -1373,7 +1386,7 @@ with st.expander(
     picked_meta_ts = lc2.selectbox("Version", options=version_opts, index=0)
 
     if lc3.button("Load & apply"):
-        if not load_country.strip():
+        if not load_country or not load_country.strip():
             st.warning("Please select a country first.")
         elif not picked_meta_ts:
             st.warning("Please select a metadata version.")
@@ -1388,7 +1401,31 @@ with st.expander(
 
                 meta = _download_json_from_gcs(BUCKET, meta_blob)
                 _apply_metadata_to_current_df(meta, all_cols, df_raw)
-                st.success(f"Applied metadata from gs://{BUCKET}/{meta_blob}")
+                
+                # Show what was loaded (point 2)
+                st.success(f"✅ Loaded metadata from: **{load_country.upper()}** - {picked_meta_ts}")
+                st.info(f"📁 Source: gs://{BUCKET}/{meta_blob}")
+                
+                # Display summary of loaded data
+                with st.expander("📊 Loaded Metadata Summary", expanded=True):
+                    if "goals" in meta:
+                        st.write(f"**Goals:** {len(meta['goals'])} goal(s)")
+                        for g in meta['goals']:
+                            st.write(f"  - {g.get('var', 'N/A')} ({g.get('type', 'N/A')}, {g.get('group', 'N/A')})")
+                    
+                    if "mapping" in meta:
+                        st.write(f"**Variable Categories:**")
+                        for cat, vars_list in meta['mapping'].items():
+                            if vars_list:
+                                st.write(f"  - {cat}: {len(vars_list)} variable(s)")
+                    
+                    if "data" in meta:
+                        data_info = meta['data']
+                        st.write(f"**Data Info:**")
+                        st.write(f"  - Origin: {data_info.get('origin', 'N/A')}")
+                        st.write(f"  - Date field: {data_info.get('date_field', 'N/A')}")
+                        st.write(f"  - Row count: {data_info.get('row_count', 'N/A')}")
+                        
             except Exception as e:
                 st.error(f"Failed to load metadata: {e}")
 
@@ -1467,9 +1504,9 @@ sort_col1, sort_col2, sort_col3 = st.columns([2, 1, 1])
 with sort_col1:
     sort_by = st.selectbox(
         "Sort by",
-        options=["Original order", "var", "category", "channel", "data_type"],
+        options=["Original order", "var", "category", "channel", "channel_subchannel", "data_type"],
         index=0,
-        help="Choose a column to sort the mapping table",
+        help="Choose a column to sort the mapping table. 'channel_subchannel' sorts by CHANNEL_SUBCHANNEL pattern.",
         key="sort_by_selector"
     )
 with sort_col2:
@@ -1484,7 +1521,26 @@ with sort_col3:
         if sort_by != "Original order":
             ascending = sort_order == "Ascending"
             m = st.session_state["mapping_df"].copy()
-            st.session_state["mapping_df"] = m.sort_values(by=sort_by, ascending=ascending).reset_index(drop=True)
+            
+            # Handle channel_subchannel sorting
+            if sort_by == "channel_subchannel":
+                # Create a temporary column for sorting by channel_subchannel
+                def extract_channel_subchannel(var_name):
+                    parsed = _parse_variable_name(str(var_name))
+                    channel = parsed.get("channel", "")
+                    subchannel = parsed.get("subchannel", "")
+                    if channel and subchannel:
+                        return f"{channel}_{subchannel}"
+                    elif channel:
+                        return channel
+                    else:
+                        return ""
+                
+                m["_sort_key"] = m["var"].apply(extract_channel_subchannel)
+                st.session_state["mapping_df"] = m.sort_values(by="_sort_key", ascending=ascending).drop(columns=["_sort_key"]).reset_index(drop=True)
+            else:
+                st.session_state["mapping_df"] = m.sort_values(by=sort_by, ascending=ascending).reset_index(drop=True)
+            
             st.success(f"Sorted by {sort_by} ({sort_order})")
             st.rerun()
 

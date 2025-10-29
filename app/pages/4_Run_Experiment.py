@@ -133,6 +133,15 @@ with tab_single:
 
     # Data selection
     with st.expander("Data selection", expanded=True):
+        # Show current loaded state (point 4 - UI representing actual state)
+        if "preview_df" in st.session_state and st.session_state["preview_df"] is not None:
+            loaded_country = st.session_state.get("selected_country", "N/A")
+            loaded_version = st.session_state.get("selected_version", "N/A")
+            loaded_metadata_source = st.session_state.get("selected_metadata", "N/A")
+            st.info(f"🔵 **Currently Loaded:** Data: {loaded_country.upper()} - {loaded_version} | Metadata: {loaded_metadata_source}")
+        else:
+            st.warning("⚪ No data loaded yet")
+        
         # Country selection
         available_countries = ["fr", "de", "it", "es", "nl", "uk"]
         selected_country = st.selectbox(
@@ -234,9 +243,27 @@ with tab_single:
                         )
 
                         st.success(
-                            f"✅ Loaded {len(df_prev)} rows, {len(df_prev.columns)} columns"
+                            f"✅ Loaded {len(df_prev)} rows, {len(df_prev.columns)} columns from **{selected_country.upper()}** - {selected_version}"
                         )
-                        st.info(f"📋 Using metadata: {selected_metadata}")
+                        st.info(f"📋 Using metadata: **{selected_metadata}**")
+                        
+                        # Display summary of loaded data (point 2)
+                        with st.expander("📊 Loaded Data Summary", expanded=True):
+                            st.write(f"**Data Source:** {selected_country.upper()} - {selected_version}")
+                            st.write(f"**Metadata Source:** {selected_metadata}")
+                            st.write(f"**Rows:** {len(df_prev):,}")
+                            st.write(f"**Columns:** {len(df_prev.columns)}")
+                            
+                            if metadata:
+                                if "goals" in metadata:
+                                    st.write(f"**Goals:** {len(metadata['goals'])} goal(s)")
+                                if "mapping" in metadata:
+                                    total_vars = sum(len(v) for v in metadata['mapping'].values() if isinstance(v, list))
+                                    st.write(f"**Mapped Variables:** {total_vars}")
+                                if "data" in metadata:
+                                    data_info = metadata['data']
+                                    st.write(f"**Date Field:** {data_info.get('date_field', 'N/A')}")
+                                    
             except Exception as e:
                 st.error(f"Failed to load data: {e}")
             finally:
