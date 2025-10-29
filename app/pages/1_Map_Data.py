@@ -86,6 +86,21 @@ def _list_country_versions(bucket: str, country: str) -> List[str]:
     return sorted(ts, reverse=True)
 
 
+def _list_metadata_versions(bucket: str, country: str) -> List[str]:
+    """Return timestamp folder names available in metadata/<country>/."""
+    client = storage.Client()
+    prefix = f"metadata/{country.lower().strip()}/"
+    blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+    # Extract "<ts>/" directory part from metadata/country/<ts>/mapping.json
+    ts = set()
+    for blob in blobs:
+        # want metadata/country/<ts>/mapping.json
+        parts = blob.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "mapping.json" and parts[-2] != "latest":
+            ts.add(parts[-2])
+    return sorted(ts, reverse=True)
+
+
 def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
     client = storage.Client()
     b = client.bucket(gs_bucket)
@@ -122,6 +137,11 @@ def _safe_json_dump_to_gcs(payload: dict, bucket: str, dest_blob: str):
 @st.cache_data(show_spinner=False)
 def _list_country_versions_cached(bucket: str, country: str) -> list[str]:
     return _list_country_versions(bucket, country)
+
+
+@st.cache_data(show_spinner=False)
+def _list_metadata_versions_cached(bucket: str, country: str) -> list[str]:
+    return _list_metadata_versions(bucket, country)
 
 
 @st.cache_data(show_spinner=False)
@@ -1368,7 +1388,7 @@ with st.expander(
 
     # list available versions for chosen country
     if load_country and load_country.strip():
-        meta_versions_raw = _list_country_versions_cached(BUCKET, load_country)
+        meta_versions_raw = _list_metadata_versions_cached(BUCKET, load_country)
     else:
         meta_versions_raw = []
 
