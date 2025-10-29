@@ -123,7 +123,7 @@ TERMINAL_STATES = {"SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"}
 # ─────────────────────────────
 # Page & logging setup
 # ─────────────────────────────
-st.set_page_config(page_title="Robyn MMM Trainer", layout="wide")
+# st.set_page_config(page_title="Robyn MMM Trainer", layout="wide")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

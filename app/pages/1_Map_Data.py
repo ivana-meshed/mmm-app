@@ -11,6 +11,9 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+
+st.set_page_config(page_title="Map your data", layout="wide")
+
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -39,7 +42,6 @@ ALLOWED_CATEGORIES = [
 # ──────────────────────────────────────────────────────────────
 # Setup
 # ──────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Map your data", layout="wide")
 require_login_and_domain()
 ensure_session_defaults()
 
@@ -84,6 +86,21 @@ def _list_country_versions(bucket: str, country: str) -> List[str]:
     return sorted(ts, reverse=True)
 
 
+def _list_metadata_versions(bucket: str, country: str) -> List[str]:
+    """Return timestamp folder names available in metadata/<country>/."""
+    client = storage.Client()
+    prefix = f"metadata/{country.lower().strip()}/"
+    blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+    # Extract "<ts>/" directory part from metadata/country/<ts>/mapping.json
+    ts = set()
+    for blob in blobs:
+        # want metadata/country/<ts>/mapping.json
+        parts = blob.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "mapping.json" and parts[-2] != "latest":
+            ts.add(parts[-2])
+    return sorted(ts, reverse=True)
+
+
 def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
     client = storage.Client()
     b = client.bucket(gs_bucket)
@@ -123,6 +140,11 @@ def _list_country_versions_cached(bucket: str, country: str) -> list[str]:
 
 
 @st.cache_data(show_spinner=False)
+def _list_metadata_versions_cached(bucket: str, country: str) -> list[str]:
+    return _list_metadata_versions(bucket, country)
+
+
+@st.cache_data(show_spinner=False)
 def _download_parquet_from_gcs_cached(
     gs_bucket: str, blob_path: str
 ) -> pd.DataFrame:
@@ -143,7 +165,7 @@ def _init_state():
     st.session_state.setdefault("picked_ts", "")
     st.session_state.setdefault(
         "goals_df",
-        pd.DataFrame(columns=["var", "group", "type"]).astype("object"),
+        pd.DataFrame(columns=["var", "group", "type", "main"]).astype("object"),
     )
     st.session_state.setdefault(
         "auto_rules",
@@ -362,6 +384,7 @@ def _initial_goals_from_columns(cols: list[str]) -> pd.DataFrame:
             "type": pd.Series(
                 [_guess_goal_type(c) for c in candidates], dtype="object"
             ),
+            "main": pd.Series([False] * len(candidates), dtype="object"),
         }
     )
 
@@ -537,19 +560,32 @@ def _apply_automatic_aggregations(
 
             # Group by suffix (excluding _CUSTOM columns)
             suffixes = {}
+            subchannels_by_suffix = {}  # Track unique subchannels per suffix
             for _, row in channel_rows.iterrows():
                 var_name = str(row["var"])
                 if "_CUSTOM" in var_name:
                     continue
                 parsed = _parse_variable_name(var_name)
                 suffix = parsed["suffix"]
+                subchannel = parsed["subchannel"]
+
                 if suffix not in suffixes:
                     suffixes[suffix] = []
-                suffixes[suffix].append(var_name)
+                    subchannels_by_suffix[suffix] = set()
 
-            # Create TOTAL for each suffix
+                suffixes[suffix].append(var_name)
+                if subchannel:  # Only track non-empty subchannels
+                    subchannels_by_suffix[suffix].add(subchannel)
+
+            # Create TOTAL for each suffix (only if multiple subchannels exist)
             for suffix, vars_list in suffixes.items():
-                total_var_name = f"{channel.upper()}_TOTAL_{suffix.upper()}"
+                # Don't create TOTAL if channel has only one subchannel
+                if len(subchannels_by_suffix.get(suffix, set())) <= 1:
+                    continue
+
+                total_var_name = (
+                    f"{channel.upper()}_TOTAL_{suffix.upper()}_CUSTOM"
+                )
 
                 # Only create if it doesn't already exist
                 if total_var_name not in mapping_df["var"].values:
@@ -559,7 +595,7 @@ def _apply_automatic_aggregations(
                             "category": category,
                             "channel": channel,
                             "data_type": "numeric",
-                            "agg_strategy": "",
+                            "agg_strategy": "sum",
                             "custom_tags": "",
                         }
                     )
@@ -572,20 +608,6 @@ def _apply_automatic_aggregations(
 
     # 4. For organic_vars category, create custom tag aggregates and TOTAL
     if not organic.empty:
-        # Prefix all organic vars with ORGANIC_ if not already prefixed
-        for idx, row in organic.iterrows():
-            var_name = str(row["var"])
-            if not var_name.startswith("ORGANIC_"):
-                new_name = f"ORGANIC_{var_name}"
-                # Update in mapping
-                mapping_df.at[idx, "var"] = new_name
-                # Rename in df_raw if exists
-                if var_name in df_raw.columns:
-                    df_raw = df_raw.rename(columns={var_name: new_name})
-
-        # Re-fetch after renaming
-        organic = mapping_df[mapping_df["category"] == "organic_vars"].copy()
-
         # Collect custom tags
         all_tags = set()
         for tags_str in organic["custom_tags"].dropna():
@@ -602,7 +624,7 @@ def _apply_automatic_aggregations(
             vars_list = tag_rows["var"].tolist()
 
             if vars_list:
-                # Extract suffix from first variable (e.g., SESSIONS from ORGANIC_NL_DAILY_SESSIONS)
+                # Extract suffix from first variable (e.g., SESSIONS from NL_DAILY_SESSIONS)
                 parsed = _parse_variable_name(vars_list[0])
                 suffix_parts = parsed["suffix"].split("_")
                 suffix = (
@@ -631,47 +653,29 @@ def _apply_automatic_aggregations(
                             axis=1
                         )
 
-        # Re-fetch organic again to get the updated list with prefixes
-        organic = mapping_df[mapping_df["category"] == "organic_vars"].copy()
-
         # Create ORGANIC_TOTAL (sum of all organic vars excluding _CUSTOM)
         organic_vars = [
             str(v)
             for v in organic["var"]
             if "_CUSTOM" not in str(v) and str(v) in df_raw.columns
         ]
-        if organic_vars and "ORGANIC_TOTAL" not in mapping_df["var"].values:
+        if (
+            organic_vars
+            and "ORGANIC_TOTAL_CUSTOM" not in mapping_df["var"].values
+        ):
             new_mapping_rows.append(
                 {
-                    "var": "ORGANIC_TOTAL",
+                    "var": "ORGANIC_TOTAL_CUSTOM",
                     "category": "organic_vars",
                     "channel": "organic",
                     "data_type": "numeric",
-                    "agg_strategy": "",
+                    "agg_strategy": "sum",
                     "custom_tags": "",
                 }
             )
-            new_columns["ORGANIC_TOTAL"] = df_raw[organic_vars].sum(axis=1)
-
-    # 5. Prefix context_vars with CONTEXT_
-    if not context.empty:
-        for idx, row in context.iterrows():
-            var_name = str(row["var"])
-            if not var_name.startswith("CONTEXT_"):
-                new_name = f"CONTEXT_{var_name}"
-                mapping_df.at[idx, "var"] = new_name
-                if var_name in df_raw.columns:
-                    df_raw = df_raw.rename(columns={var_name: new_name})
-
-    # 6. Prefix factor_vars with FACTOR_
-    if not factor.empty:
-        for idx, row in factor.iterrows():
-            var_name = str(row["var"])
-            if not var_name.startswith("FACTOR_"):
-                new_name = f"FACTOR_{var_name}"
-                mapping_df.at[idx, "var"] = new_name
-                if var_name in df_raw.columns:
-                    df_raw = df_raw.rename(columns={var_name: new_name})
+            new_columns["ORGANIC_TOTAL_CUSTOM"] = df_raw[organic_vars].sum(
+                axis=1
+            )
 
     # Add new mapping rows
     if new_mapping_rows:
@@ -694,8 +698,13 @@ def _apply_metadata_to_current_df(
     g = (
         pd.DataFrame(meta_goals).astype("object")
         if meta_goals
-        else pd.DataFrame(columns=["var", "group", "type"]).astype("object")
+        else pd.DataFrame(columns=["var", "group", "type", "main"]).astype(
+            "object"
+        )
     )
+    # Add main column if it doesn't exist in loaded metadata
+    if "main" not in g.columns:
+        g["main"] = False
     g = g[g["var"].isin(current_cols)]
     st.session_state["goals_df"] = g
 
@@ -829,8 +838,6 @@ def _iso2_countries_gcs_first(bucket: str) -> list[str]:
 # Page header & helper image
 # ──────────────────────────────────────────────────────────────
 st.title("Customize your analytics — map your data in 3 steps.")
-
-require_login_and_domain()
 
 # sensible defaults so we can read these anywhere
 st.session_state.setdefault("sf_table", "MMM_RAW")
@@ -1094,7 +1101,7 @@ def _save_current_raw():
 
 csave1, csave2 = st.columns([1, 3])
 csave1.button(
-    "💾 Save this dataset to GCS (as new version)", on_click=_save_current_raw
+    "💾 Save this dataset to GCS (as new version)", on_click=_save_current_raw, use_container_width=True
 )
 if st.session_state["last_saved_raw_path"]:
     csave2.caption(f"Last saved: `{st.session_state['last_saved_raw_path']}`")
@@ -1109,6 +1116,16 @@ if df_raw.empty:
 # Step 2) Map your data
 # ──────────────────────────────────────────────────────────────
 st.header("Step 2) Map your data")
+
+# Show current data state (point 4 - UI representing actual state)
+data_origin = st.session_state.get("data_origin", "N/A")
+picked_ts = st.session_state.get("picked_ts", "N/A")
+country = st.session_state.get("country", "N/A")
+
+if df_raw is not None and not df_raw.empty:
+    st.info(f"🔵 **Currently Loaded:** {data_origin.upper()} | Country: {country.upper()} | Timestamp: {picked_ts} | Rows: {len(df_raw):,} | Columns: {len(df_raw.columns)}")
+else:
+    st.warning("⚪ No data loaded yet")
 
 all_cols = df_raw.columns.astype(str).tolist()
 date_candidates = sorted(
@@ -1126,15 +1143,13 @@ date_field = st.selectbox(
 
 # ---- Goals (form) ----
 with st.form("goals_form", clear_on_submit=False):
-    g1, g2 = st.columns(2)
-    with g1:
-        primary_goals = st.multiselect(
-            "Primary goal variables", options=all_cols, default=[]
-        )
-    with g2:
-        secondary_goals = st.multiselect(
-            "Secondary goal variables", options=all_cols, default=[]
-        )
+    # Stack primary and secondary goals vertically
+    primary_goals = st.multiselect(
+        "Primary goal variables", options=all_cols, default=[]
+    )
+    secondary_goals = st.multiselect(
+        "Secondary goal variables", options=all_cols, default=[]
+    )
 
     def _mk(selected, group):
         return pd.DataFrame(
@@ -1144,6 +1159,7 @@ with st.form("goals_form", clear_on_submit=False):
                 "type": pd.Series(
                     [_guess_goal_type(v) for v in selected], dtype="object"
                 ),
+                "main": pd.Series([False] * len(selected), dtype="object"),
             }
         )
 
@@ -1163,17 +1179,29 @@ with st.form("goals_form", clear_on_submit=False):
     goals_src = goals_src.fillna("").astype(
         {"var": "object", "group": "object", "type": "object"}
     )
+    # Add main column if it doesn't exist
+    if "main" not in goals_src.columns:
+        goals_src["main"] = False
+    goals_src["main"] = goals_src["main"].astype(bool)
+
     goals_edit = st.data_editor(
         goals_src,
         use_container_width=True,
         num_rows="dynamic",
         column_config={
-            "var": st.column_config.TextColumn("Variable"),
+            "var": st.column_config.SelectboxColumn(
+                "Variable", options=all_cols
+            ),
             "group": st.column_config.SelectboxColumn(
                 "Group", options=["primary", "secondary"]
             ),
             "type": st.column_config.SelectboxColumn(
-                "Type", options=["revenue", "conversion"]
+                "Type", options=["revenue", "conversion"], required=True
+            ),
+            "main": st.column_config.CheckboxColumn(
+                "Main",
+                help="Select the main dependent variable for the model",
+                default=False,
             ),
         },
         key="goals_editor",
@@ -1189,15 +1217,30 @@ if goals_submit:
         "object"
     )
 
-    # Drop duplicates and normalize
-    merged = (
-        edited.drop_duplicates(subset=["var"], keep="last")
-        .fillna("")
-        .astype({"var": "object", "group": "object", "type": "object"})
-    )
+    # Validate that all goals have a type
+    empty_types = edited[edited["type"].astype(str).str.strip() == ""]
+    if not empty_types.empty:
+        st.error(
+            f"⚠️ Please specify a type (revenue or conversion) for all goal variables. Missing types for: {', '.join(empty_types['var'].tolist())}"
+        )
+    else:
+        # Ensure only one main is selected
+        main_count = edited["main"].astype(bool).sum()
+        if main_count > 1:
+            st.warning(
+                "⚠️ Multiple goals marked as 'Main'. Only the first one will be used as the main dependent variable."
+            )
 
-    st.session_state["goals_df"] = merged
-    st.success("Goals updated.")
+        # Drop duplicates and normalize
+        merged = (
+            edited.drop_duplicates(subset=["var"], keep="last")
+            .fillna({"var": "", "group": "", "type": "", "main": False})
+            .astype({"var": "object", "group": "object", "type": "object"})
+        )
+        merged["main"] = merged["main"].astype(bool)
+
+        st.session_state["goals_df"] = merged
+        st.success("Goals updated.")
 
 
 # ---- Custom channels UI ----
@@ -1210,7 +1253,7 @@ with ch_col1:
         help="Enter channel names that aren't in the default list",
     )
 with ch_col2:
-    if st.button("➕ Add Channel", key="add_channel_btn"):
+    if st.button("➕ Add Channel", key="add_channel_btn", use_container_width=True):
         if new_channel and new_channel.strip():
             custom_channels = st.session_state.get("custom_channels", [])
             channel_lower = new_channel.strip().lower()
@@ -1333,16 +1376,19 @@ with st.expander(
     "📥 Load saved metadata & apply to current dataset", expanded=False
 ):
     lc1, lc2, lc3 = st.columns([1.2, 1, 1])
-    load_country = (
-        lc1.text_input(
-            "Country (metadata source)", value=st.session_state["country"]
-        )
-        or ""
-    )  # ensure string, not None
+    
+    # Add "universal" as an option along with the current country
+    country_options = ["universal", st.session_state["country"]]
+    load_country = lc1.selectbox(
+        "Country (metadata source)", 
+        options=country_options,
+        index=1,  # Default to current country
+        help="Select 'universal' for universal mappings or a specific country"
+    )
 
     # list available versions for chosen country
-    if load_country.strip():
-        meta_versions_raw = _list_country_versions_cached(BUCKET, load_country)
+    if load_country and load_country.strip():
+        meta_versions_raw = _list_metadata_versions_cached(BUCKET, load_country)
     else:
         meta_versions_raw = []
 
@@ -1359,8 +1405,8 @@ with st.expander(
     version_opts = ["Latest"] + [v for v in meta_versions if v != "Latest"]
     picked_meta_ts = lc2.selectbox("Version", options=version_opts, index=0)
 
-    if lc3.button("Load & apply"):
-        if not load_country.strip():
+    if lc3.button("Load & apply", use_container_width=True):
+        if not load_country or not load_country.strip():
             st.warning("Please select a country first.")
         elif not picked_meta_ts:
             st.warning("Please select a metadata version.")
@@ -1375,7 +1421,31 @@ with st.expander(
 
                 meta = _download_json_from_gcs(BUCKET, meta_blob)
                 _apply_metadata_to_current_df(meta, all_cols, df_raw)
-                st.success(f"Applied metadata from gs://{BUCKET}/{meta_blob}")
+                
+                # Show what was loaded (point 2)
+                st.success(f"✅ Loaded metadata from: **{load_country.upper()}** - {picked_meta_ts}")
+                st.info(f"📁 Source: gs://{BUCKET}/{meta_blob}")
+                
+                # Display summary of loaded data
+                with st.expander("📊 Loaded Metadata Summary", expanded=True):
+                    if "goals" in meta:
+                        st.write(f"**Goals:** {len(meta['goals'])} goal(s)")
+                        for g in meta['goals']:
+                            st.write(f"  - {g.get('var', 'N/A')} ({g.get('type', 'N/A')}, {g.get('group', 'N/A')})")
+                    
+                    if "mapping" in meta:
+                        st.write(f"**Variable Categories:**")
+                        for cat, vars_list in meta['mapping'].items():
+                            if vars_list:
+                                st.write(f"  - {cat}: {len(vars_list)} variable(s)")
+                    
+                    if "data" in meta:
+                        data_info = meta['data']
+                        st.write(f"**Data Info:**")
+                        st.write(f"  - Origin: {data_info.get('origin', 'N/A')}")
+                        st.write(f"  - Date field: {data_info.get('date_field', 'N/A')}")
+                        st.write(f"  - Row count: {data_info.get('row_count', 'N/A')}")
+                        
             except Exception as e:
                 st.error(f"Failed to load metadata: {e}")
 
@@ -1389,7 +1459,7 @@ if st.session_state["mapping_df"].empty:
 rt1, rt2 = st.columns([1, 1])
 
 # Only fill previously-untagged rows (preserves manual edits)
-if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing"):
+if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing", use_container_width=True):
     m = st.session_state["mapping_df"].copy()
     inferred = {
         c: _infer_category(c, st.session_state["auto_rules"]) for c in all_cols
@@ -1440,7 +1510,7 @@ if rt1.button("🔁 Auto-tag UNTAGGED columns", key="retag_missing"):
     st.success("Filled categories for previously untagged columns.")
 
 # Overwrite everything from current rules (discard manual edits)
-if rt2.button("♻️ Re-apply to ALL columns", key="retag_all"):
+if rt2.button("♻️ Re-apply to ALL columns", key="retag_all", use_container_width=True):
     st.session_state["mapping_df"] = _build_mapping_df(
         all_cols, df_raw, st.session_state["auto_rules"]
     )
@@ -1448,9 +1518,60 @@ if rt2.button("♻️ Re-apply to ALL columns", key="retag_all"):
         "Re-applied rules to ALL columns (manual categories were overwritten)."
     )
 
+# Add sorting controls (user-controlled, not automatic)
+st.write("**Sort mapping table:**")
+sort_col1, sort_col2, sort_col3 = st.columns([2, 1, 1])
+with sort_col1:
+    sort_by = st.selectbox(
+        "Sort by",
+        options=["Original order", "var", "category", "channel", "channel_subchannel", "data_type"],
+        index=0,
+        help="Choose a column to sort the mapping table. 'channel_subchannel' sorts by CHANNEL_SUBCHANNEL pattern.",
+        key="sort_by_selector"
+    )
+with sort_col2:
+    sort_order = st.selectbox(
+        "Order",
+        options=["Ascending", "Descending"],
+        index=0,
+        key="sort_order_selector"
+    )
+with sort_col3:
+    if st.button("🔄 Apply Sort", key="apply_sort_btn", use_container_width=True):
+        if sort_by != "Original order":
+            ascending = sort_order == "Ascending"
+            m = st.session_state["mapping_df"].copy()
+            
+            # Handle channel_subchannel sorting
+            if sort_by == "channel_subchannel":
+                # Create a temporary column for sorting by channel_subchannel
+                def extract_channel_subchannel(var_name):
+                    parsed = _parse_variable_name(str(var_name))
+                    channel = parsed.get("channel", "")
+                    subchannel = parsed.get("subchannel", "")
+                    if channel and subchannel:
+                        return f"{channel}_{subchannel}"
+                    elif channel:
+                        return channel
+                    else:
+                        return ""
+                
+                m["_sort_key"] = m["var"].apply(extract_channel_subchannel)
+                st.session_state["mapping_df"] = m.sort_values(by="_sort_key", ascending=ascending).drop(columns=["_sort_key"]).reset_index(drop=True)
+            else:
+                st.session_state["mapping_df"] = m.sort_values(by=sort_by, ascending=ascending).reset_index(drop=True)
+            
+            st.success(f"Sorted by {sort_by} ({sort_order})")
+            st.rerun()
+
 
 with st.form("mapping_form_main", clear_on_submit=False):
-    mapping_src = st.session_state["mapping_df"].fillna("")
+    # Filter out goal variables and date field from the mapping display
+    goals_df = st.session_state["goals_df"]
+    date_and_goal_vars_display = set([date_field] + goals_df["var"].tolist())
+    mapping_src = st.session_state["mapping_df"][
+        ~st.session_state["mapping_df"]["var"].isin(date_and_goal_vars_display)
+    ].copy().fillna("")
 
     # Ensure all expected columns exist
     expected_cols = [
@@ -1493,8 +1614,8 @@ with st.form("mapping_form_main", clear_on_submit=False):
             ),
             "agg_strategy": st.column_config.SelectboxColumn(
                 "Aggregation",
-                options=["sum", "mean", "max", "min", "auto", "mode"],
-                help="Strategy for aggregating when resampling. Numeric: sum/mean/max/min. Categorical: auto/mean/sum/max/mode",
+                options=["sum", "mean", "max", "min", "mode"],
+                help="Strategy for aggregating when resampling. Numeric: sum/mean/max/min. Categorical: mode",
             ),
             "custom_tags": st.column_config.TextColumn(
                 "Custom Tags (optional)"
@@ -1543,45 +1664,153 @@ auto_rules = st.session_state["auto_rules"]
 
 
 def _by_cat(df: pd.DataFrame, cat: str) -> list[str]:
-    return df.loc[df["category"] == cat, "var"].dropna().astype(str).tolist()
+    """Get variables for a category, excluding those with empty category AND channel."""
+    filtered_df = df[df["category"] == cat].copy()
+    # Exclude rows where both category and channel are empty
+    result = []
+    for _, r in filtered_df.iterrows():
+        cat_val = str(r.get("category", "")).strip()
+        ch_val = str(r.get("channel", "")).strip()
+        # Include if either category or channel is non-empty
+        if cat_val or ch_val:
+            result.append(str(r["var"]))
+    return result
 
 
 # Use allowed categories from constant, excluding empty string for by_cat
-by_cat = {cat: _by_cat(mapping_df, cat) for cat in ALLOWED_CATEGORIES if cat}
+# Also filter out date field and goal variables from the mapping
+date_and_goal_vars = set([date_field] + goals_df["var"].tolist())
+mapping_df_filtered = mapping_df[
+    ~mapping_df["var"].isin(date_and_goal_vars)
+].copy()
+by_cat = {
+    cat: _by_cat(mapping_df_filtered, cat) for cat in ALLOWED_CATEGORIES if cat
+}
 
-dep_options = goals_df["var"].tolist() or df_raw.columns.astype(str).tolist()
-dep_var = st.selectbox(
-    "Pick main dependent variable (optional)",
-    options=dep_options,
-    index=0 if dep_options else None,
+# Auto-add factor_vars to context_vars (requirement 6)
+if by_cat.get("factor_vars"):
+    context_vars_set = set(by_cat.get("context_vars", []))
+    context_vars_set.update(by_cat["factor_vars"])
+    by_cat["context_vars"] = sorted(list(context_vars_set))
+
+
+# Get main dependent variable from goals_df
+dep_var = ""
+if not goals_df.empty:
+    main_goals = goals_df[goals_df.get("main", False).astype(bool)]
+    if not main_goals.empty:
+        dep_var = str(main_goals.iloc[0]["var"])
+    elif not goals_df.empty:
+        # Fallback to first primary goal if no main is selected
+        primary_goals = goals_df[goals_df["group"] == "primary"]
+        if not primary_goals.empty:
+            dep_var = str(primary_goals.iloc[0]["var"])
+
+# Checkbox for universal vs country-specific mapping
+save_country_specific = st.checkbox(
+    f"Save only for {st.session_state['country'].upper()}",
+    value=False,
+    help="By default, mappings are saved universally for all countries. Check this to save only for the current country.",
 )
 
 meta_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-goals_json = [
-    {"var": str(r["var"]), "group": str(r["group"]), "type": str(r["type"])}
-    for _, r in goals_df.iterrows()
-    if str(r.get("var", "")).strip()
-]
 
-# Extract channel, data_type, and agg_strategy mappings
+# Build goals JSON with aggregation info based on type
+goals_json = []
+for _, r in goals_df.iterrows():
+    if str(r.get("var", "")).strip():
+        goal_type = str(r.get("type", ""))
+        # Define aggregation based on type
+        if goal_type == "revenue":
+            agg = "sum"
+        elif goal_type == "conversion":
+            agg = "mean"
+        else:
+            agg = "sum"  # default
+
+        goals_json.append(
+            {
+                "var": str(r["var"]),
+                "group": str(r["group"]),
+                "type": goal_type,
+                "agg_strategy": agg,
+                "main": bool(r.get("main", False)),
+            }
+        )
+
+# Extract channel, data_type, and agg_strategy mappings (excluding date and goals)
 channels_map = {
     str(r["var"]): str(r.get("channel", ""))
-    for _, r in mapping_df.iterrows()
+    for _, r in mapping_df_filtered.iterrows()
     if str(r.get("channel", "")).strip()
 }
 data_types_map = {
     str(r["var"]): str(r.get("data_type", "numeric"))
-    for _, r in mapping_df.iterrows()
+    for _, r in mapping_df_filtered.iterrows()
 }
+# Set date field data type to "date"
+data_types_map[date_field] = "date"
+
 agg_strategies_map = {
     str(r["var"]): str(r.get("agg_strategy", "sum"))
-    for _, r in mapping_df.iterrows()
+    for _, r in mapping_df_filtered.iterrows()
 }
+
+# Build paid_media_spends to paid_media_vars mapping
+paid_media_mapping = {}
+paid_spends = mapping_df[mapping_df["category"] == "paid_media_spends"].copy()
+paid_vars = mapping_df[mapping_df["category"] == "paid_media_vars"].copy()
+
+for _, spend_row in paid_spends.iterrows():
+    spend_var = str(spend_row["var"])
+    parsed = _parse_variable_name(spend_var)
+    channel = parsed["channel"]
+    subchannel = parsed["subchannel"]
+    suffix = parsed["suffix"]
+    
+    # Check if this is a _CUSTOM column
+    if "_CUSTOM" in spend_var:
+        # For _CUSTOM columns, we need to match the exact pattern
+        # E.g., GA_SMALL_COST_CUSTOM should match GA_SMALL_*_CUSTOM
+        # Extract the pattern before the suffix
+        # Pattern: CHANNEL_TAG_SUFFIX_CUSTOM or CHANNEL_TOTAL_SUFFIX_CUSTOM
+        if "_TOTAL_" in spend_var:
+            # CHANNEL_TOTAL_SUFFIX_CUSTOM → CHANNEL_TOTAL_*_CUSTOM
+            base_pattern = spend_var.replace("_COST_CUSTOM", "")  # GA_TOTAL
+            matching_vars = [
+                str(v) for v in paid_vars["var"] 
+                if str(v).startswith(base_pattern + "_") and "_CUSTOM" in str(v)
+            ]
+        else:
+            # CHANNEL_TAG_SUFFIX_CUSTOM → CHANNEL_TAG_*_CUSTOM
+            # E.g., GA_SMALL_COST_CUSTOM → GA_SMALL_*_CUSTOM
+            base_pattern = spend_var.replace("_COST_CUSTOM", "")  # GA_SMALL
+            matching_vars = [
+                str(v) for v in paid_vars["var"] 
+                if str(v).startswith(base_pattern + "_") and "_CUSTOM" in str(v)
+            ]
+    else:
+        # Regular columns (non-_CUSTOM)
+        # Find corresponding paid_media_vars with same channel and subchannel
+        if subchannel:
+            pattern = f"{channel}_{subchannel}_"
+        else:
+            pattern = f"{channel}_"
+        
+        matching_vars = [
+            str(v) for v in paid_vars["var"] 
+            if str(v).startswith(pattern) and "_CUSTOM" not in str(v)
+        ]
+
+    if matching_vars:
+        paid_media_mapping[spend_var] = matching_vars
 
 payload = {
     "project_id": PROJECT_ID,
     "bucket": BUCKET,
-    "country": st.session_state["country"],
+    "country": (
+        st.session_state["country"] if save_country_specific else "universal"
+    ),
     "saved_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
     "data": {
         "origin": st.session_state["data_origin"],
@@ -1597,28 +1826,39 @@ payload = {
     "channels": channels_map,
     "data_types": data_types_map,
     "agg_strategies": agg_strategies_map,
+    "paid_media_mapping": paid_media_mapping,
     "dep_var": dep_var or "",
 }
 
 
 def _save_metadata():
     try:
-        vblob = _meta_blob(st.session_state["country"], meta_ts)
-        _safe_json_dump_to_gcs(payload, BUCKET, vblob)
-        _safe_json_dump_to_gcs(
-            payload, BUCKET, _meta_latest_blob(st.session_state["country"])
+        # Determine the country for saving
+        save_country = (
+            st.session_state["country"]
+            if save_country_specific
+            else "universal"
         )
+
+        vblob = _meta_blob(save_country, meta_ts)
+        _safe_json_dump_to_gcs(payload, BUCKET, vblob)
+        _safe_json_dump_to_gcs(payload, BUCKET, _meta_latest_blob(save_country))
         st.session_state["last_saved_meta_path"] = f"gs://{BUCKET}/{vblob}"
         _list_country_versions_cached.clear()  # ⬅️ refresh loader pickers
+        location_msg = (
+            f"for {save_country.upper()}"
+            if save_country_specific
+            else "as universal mapping"
+        )
         st.success(
-            f"Saved metadata → gs://{BUCKET}/{vblob} (and updated latest)"
+            f"Saved metadata {location_msg} → gs://{BUCKET}/{vblob} (and updated latest)"
         )
     except Exception as e:
         st.error(f"Failed to save metadata: {e}")
 
 
 cmeta1, cmeta2 = st.columns([1, 2])
-cmeta1.button("💾 Save metadata to GCS", on_click=_save_metadata)
+cmeta1.button("💾 Save metadata to GCS", on_click=_save_metadata, use_container_width=True)
 if st.session_state["last_saved_meta_path"]:
     cmeta2.caption(f"Last saved: `{st.session_state['last_saved_meta_path']}`")
 
@@ -1634,12 +1874,12 @@ if not st.session_state["mapping_df"].empty:
         "organic_vars",
         "factor_vars",
     ]
-    by_cat = {
-        cat: _by_cat(st.session_state["mapping_df"], cat)
-        for cat in allowed_categories
+    # Use the filtered mapping for by_cat (excluding date and goals)
+    by_cat_session = {
+        cat: _by_cat(mapping_df_filtered, cat) for cat in allowed_categories
     }
-    st.session_state["mapped_by_cat"] = by_cat  # ← used by Experiment
-    st.session_state["mapped_dep_var"] = st.session_state.get("dep_var", "")
+    st.session_state["mapped_by_cat"] = by_cat_session  # ← used by Experiment
+    st.session_state["mapped_dep_var"] = dep_var or ""
 
 # --- Show Next only when we have metadata (either loaded or just saved)
 can_go_next = not st.session_state["mapping_df"].empty
