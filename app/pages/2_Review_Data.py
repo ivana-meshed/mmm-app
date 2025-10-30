@@ -127,7 +127,7 @@ GOAL, sel_countries, TIMEFRAME_LABEL, RANGE, agg_label, FREQ = render_sidebar(me
 st.session_state["RANGE"] = RANGE
 st.session_state["FREQ"]  = FREQ
 # Country filter
-if sel_countries and "COUNTRY" in df:
+if sel_countries and "COUNTRY" in df.columns:
     df = df[df["COUNTRY"].astype(str).isin(sel_countries)].copy()
 
 # -----------------------------
@@ -162,15 +162,12 @@ plat_map_df, platforms, PLATFORM_COLORS = build_plat_map_df(
 # ----------------------------- 
 df_r = filter_range(df.copy(), DATE_COL, RANGE)
 df_prev = previous_window(df, df_r, DATE_COL, RANGE)
-# --- Backward-compat shim for total_with_prev calls expecting 1 arg ---
-def total_with_prev_shim(collist):
+# --- Back-compat shim for total_with_prev (expects df_r, df_prev, collist) ---
+def total_with_prev_local(collist):
     return total_with_prev(df_r, df_prev, collist)
 
 res = resample_numeric(df_r, DATE_COL, RULE, ensure_cols=[target, "_TOTAL_SPEND"])
 res["PERIOD_LABEL"] = period_label(res["DATE_PERIOD"], RULE)
-
-def total_with_prev_local(collist):
-    return total_with_prev(df_r, df_prev, collist)
 
 # =============================
 # TAB 1 — BUSINESS OVERVIEW
@@ -184,8 +181,8 @@ with tab_biz:
     if goal_cols:
         kpis = []
         for g in goal_cols:
-            cur = df_r[g].sum() if g in df_r else np.nan
-            prev = df_prev[g].sum() if (has_prev and g in df_prev) else np.nan
+            cur = df_r[g].sum() if (g in df_r.columns) else np.nan
+            prev = df_prev[g].sum() if (has_prev and g in df_prev.columns) else np.nan
             delta_txt = None
             if pd.notna(prev):
                 diff = cur - prev
@@ -228,7 +225,7 @@ with tab_biz:
 
     with cA:
         fig1 = go.Figure()
-        if target and target in res:
+        if target and target in res.columns:
             fig1.add_bar(x=res["PERIOD_LABEL"], y=res[target], name=nice(target))
         fig1.add_trace(
             go.Scatter(
@@ -255,7 +252,7 @@ with tab_biz:
     with cB:
         eff_t = res.copy()
         label_eff = "ROAS" if (target and str(target).upper() == "GMV") else "Efficiency"
-        if target and target in eff_t.columns and "_TOTAL_SPEND" in eff_t:
+        if target and (target in eff_t.columns) and ("_TOTAL_SPEND" in eff_t.columns):
             eff_t["EFF"] = np.where(
                 eff_t["_TOTAL_SPEND"] > 0,
                 eff_t[target] / eff_t["_TOTAL_SPEND"],
@@ -264,7 +261,7 @@ with tab_biz:
         else:
             eff_t["EFF"] = np.nan
         fig2e = go.Figure()
-        if target and target in eff_t:
+        if target and target in eff_t.columns:
             fig2e.add_bar(x=eff_t["PERIOD_LABEL"], y=eff_t[target], name=nice(target))
         fig2e.add_trace(
             go.Scatter(
@@ -385,7 +382,7 @@ with tab_reg:
     st.subheader("Regional Comparison")
 
     # ---- Goal by country over time (stacked) ----
-    if "COUNTRY" in df_r.columns and target and target in df_r:
+    if ("COUNTRY" in df_r.columns) and target and (target in df_r.columns):
         agg = (
             df_r.set_index(DATE_COL)
             .groupby("COUNTRY")[target]
@@ -441,7 +438,7 @@ with tab_reg:
     # -----------------------------
     # Country comparison table (outcomes, spend & conversions)
     # -----------------------------
-    if "COUNTRY" in df_r:
+    if "COUNTRY" in df_r.columns:
         g = df_r.groupby("COUNTRY", dropna=False)
         spend_s = g["_TOTAL_SPEND"].sum()
         target_s = g[target].sum() if (target in df_r.columns) else spend_s
@@ -685,7 +682,7 @@ with tab_mkt:
     cur_clicks, d_clicks = total_with_prev_local(CLICK_COLS)
     cur_sessions, d_sessions = total_with_prev_local(SESSION_COLS)
     cur_installs, d_installs = total_with_prev_local(INSTALL_COLS)
-    cur_spend, d_spend = total_with_prev_shim(["_TOTAL_SPEND"])
+    cur_spend, d_spend = total_with_prev_local(["_TOTAL_SPEND"])
     kpi_grid_fixed(
         [
             dict(title="Total Impressions", value=fmt_num(cur_imps),
