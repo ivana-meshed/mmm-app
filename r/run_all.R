@@ -394,14 +394,20 @@ parse_csv_config <- function(x) {
         return(character(0))
     }
     if (is.list(x) || (is.character(x) && length(x) > 1)) {
-        # Already a list/vector
-        return(as.character(x))
+        # Already a list/vector - filter out NA and empty strings
+        result <- as.character(x)
+        result <- result[!is.na(result) & nzchar(trimws(result))]
+        return(result)
     }
     if (is.character(x) && length(x) == 1) {
-        # Split comma-separated string
-        trimws(unlist(strsplit(x, ",")))
+        # Split comma-separated string and filter out empty/NA values
+        result <- trimws(unlist(strsplit(x, ",")))
+        result <- result[!is.na(result) & nzchar(result)]
+        return(result)
     } else {
-        as.character(x)
+        result <- as.character(x)
+        result <- result[!is.na(result) & nzchar(trimws(result))]
+        return(result)
     }
 }
 
@@ -640,7 +646,7 @@ if (anyDuplicated(df$date)) {
 
     df <- df %>%
         dplyr::group_by(date) %>%
-        dplyr::summarise(dplyr::across(!dplyr::all_of("date"), sum_or_first), .groups = "drop")
+        dplyr::summarise(dplyr::across(everything(), sum_or_first), .groups = "drop")
 
     message("   After deduplication: ", nrow(df), " rows")
     message("   Columns after deduplication: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
