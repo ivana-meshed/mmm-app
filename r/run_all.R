@@ -524,15 +524,17 @@ message("   Available columns: ", paste(head(names(df), 20), collapse = ", "), i
 if (date_col_name %in% names(df)) {
     message("   Found column '", date_col_name, "', creating 'date' column")
     df$date <- if (inherits(df[[date_col_name]], "POSIXt")) as.Date(df[[date_col_name]]) else as.Date(as.character(df[[date_col_name]]))
-    # Only remove the original column if it's different from 'date'
-    if (date_col_name != "DATE" || !"date" %in% names(df)) {
+    # Only remove the original column if it's not already named 'date' (lowercase)
+    if (tolower(date_col_name) != "date") {
         df[[date_col_name]] <- NULL
+        message("   Removed original column '", date_col_name, "'")
     }
 } else if ("DATE" %in% names(df)) {
     # Fallback to DATE if date_var column not found
     message("   Column '", date_col_name, "' not found, using fallback 'DATE' column")
     df$date <- if (inherits(df$DATE, "POSIXt")) as.Date(df$DATE) else as.Date(as.character(df$DATE))
     df$DATE <- NULL
+    message("   Removed original 'DATE' column")
 } else {
     stop("No date column found. Expected column name: ", date_var_name, " (uppercased: ", date_col_name, "). Available columns: ", paste(names(df), collapse = ", "))
 }
