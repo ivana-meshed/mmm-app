@@ -1201,6 +1201,65 @@ with tab_single:
         save_config_clicked = col_btn1.button("💾 Save Configuration", use_container_width=True, key="save_config_btn")
         add_to_queue_clicked = col_btn2.button("➕ Add to Queue", use_container_width=True, key="add_to_queue_btn")
         add_and_start_clicked = col_btn3.button("▶️ Add to Queue & Start", use_container_width=True, key="add_and_start_btn")
+        
+        # Add Download as CSV button
+        st.markdown("---")
+        
+        # Helper function to convert custom_hyperparameters to CSV format
+        def convert_hyperparams_to_csv_format(custom_hp, adstock_type):
+            """Convert custom_hyperparameters dict to CSV column format"""
+            csv_cols = {}
+            if custom_hp:
+                for key, value in custom_hp.items():
+                    if isinstance(value, list) and len(value) == 2:
+                        # Per-variable format: VAR_NAME_alphas = [min, max]
+                        csv_cols[key] = str(value)
+            return csv_cols
+        
+        # Build CSV row for current configuration
+        csv_row = {
+            "country": country,
+            "revision": revision,
+            "start_date": start_date_str,
+            "end_date": end_date_str,
+            "iterations": int(iterations),
+            "trials": int(trials),
+            "train_size": train_size,
+            "paid_media_spends": paid_media_spends,
+            "paid_media_vars": paid_media_vars,
+            "context_vars": context_vars,
+            "factor_vars": factor_vars,
+            "organic_vars": organic_vars,
+            "gcs_bucket": gcs_bucket,
+            "data_gcs_path": f"gs://{gcs_bucket}/datasets/{country}/latest/raw.parquet",
+            "table": "",
+            "query": "",
+            "dep_var": dep_var,
+            "dep_var_type": dep_var_type,
+            "date_var": date_var,
+            "adstock": adstock,
+            "hyperparameter_preset": hyperparameter_preset,
+            "resample_freq": resample_freq,
+            "resample_agg": resample_agg,
+            "annotations_gcs_path": "",
+        }
+        
+        # Add custom hyperparameters to CSV row
+        if hyperparameter_preset == "Custom" and custom_hyperparameters:
+            csv_row.update(convert_hyperparams_to_csv_format(custom_hyperparameters, adstock))
+        
+        csv_df = pd.DataFrame([csv_row])
+        
+        st.download_button(
+            "📥 Download as CSV",
+            data=csv_df.to_csv(index=False),
+            file_name=f"robyn_config_{country}_{revision}_{time.strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            help="Download current configuration as CSV for batch processing"
+        )
+        
+        st.markdown("---")
 
         if save_config_clicked:
             if not revision or not revision.strip():
@@ -1773,16 +1832,22 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "geometric",
                     "hyperparameter_preset": "Custom",
-                    "alphas_min": "0.8",
-                    "alphas_max": "2.5",
-                    "gammas_min": "0.5",
-                    "gammas_max": "0.85",
-                    "thetas_min": "0.15",
-                    "thetas_max": "0.5",
-                    "shapes_min": "",
-                    "shapes_max": "",
-                    "scales_min": "",
-                    "scales_max": "",
+                    # Per-variable hyperparameters for Custom preset
+                    "GA_SUPPLY_COST_alphas": "[0.8, 2.5]",
+                    "GA_SUPPLY_COST_gammas": "[0.5, 0.85]",
+                    "GA_SUPPLY_COST_thetas": "[0.15, 0.5]",
+                    "GA_DEMAND_COST_alphas": "[1.0, 3.0]",
+                    "GA_DEMAND_COST_gammas": "[0.6, 0.9]",
+                    "GA_DEMAND_COST_thetas": "[0.1, 0.4]",
+                    "BING_DEMAND_COST_alphas": "[1.0, 3.0]",
+                    "BING_DEMAND_COST_gammas": "[0.6, 0.9]",
+                    "BING_DEMAND_COST_thetas": "[0.1, 0.4]",
+                    "META_DEMAND_COST_alphas": "[1.0, 3.0]",
+                    "META_DEMAND_COST_gammas": "[0.6, 0.9]",
+                    "META_DEMAND_COST_thetas": "[0.1, 0.4]",
+                    "ORGANIC_TRAFFIC_alphas": "[0.5, 2.0]",
+                    "ORGANIC_TRAFFIC_gammas": "[0.3, 0.7]",
+                    "ORGANIC_TRAFFIC_thetas": "[0.9, 0.99]",
                     "resample_freq": "none",
                     "resample_agg": "sum",
                     "annotations_gcs_path": "",

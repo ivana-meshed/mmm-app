@@ -568,15 +568,38 @@ def _make_normalizer(defaults: dict):
         custom_hyperparameters = {}
         
         if hyperparameter_preset_val == "Custom":
-            # Check for custom hyperparameter columns
-            for param in ["alphas_min", "alphas_max", "gammas_min", "gammas_max", "thetas_min", "thetas_max",
-                         "shapes_min", "shapes_max", "scales_min", "scales_max"]:
-                val = _g(param, "")
-                if val and str(val).strip():
-                    try:
-                        custom_hyperparameters[param] = float(val)
-                    except (ValueError, TypeError):
-                        pass
+            # Check for per-variable hyperparameter columns (new format)
+            # Pattern: {VAR_NAME}_alphas, {VAR_NAME}_gammas, {VAR_NAME}_thetas, etc.
+            for col in row.index:
+                if pd.notna(row[col]) and str(row[col]).strip():
+                    # Check if column matches per-variable pattern
+                    if col.endswith(('_alphas', '_gammas', '_thetas', '_shapes', '_scales')):
+                        try:
+                            # Parse the value - could be a list string like "[1.0, 3.0]" or comma-separated "1.0, 3.0"
+                            val_str = str(row[col]).strip()
+                            if val_str.startswith('[') and val_str.endswith(']'):
+                                # JSON-like list format
+                                import json
+                                custom_hyperparameters[col] = json.loads(val_str)
+                            elif ',' in val_str:
+                                # Comma-separated format
+                                custom_hyperparameters[col] = [float(x.strip()) for x in val_str.split(',')]
+                            else:
+                                # Single value or other format - skip
+                                pass
+                        except (ValueError, TypeError, json.JSONDecodeError):
+                            pass
+            
+            # Backward compatibility: check for old global format (alphas_min/max, etc.)
+            if not custom_hyperparameters:
+                for param in ["alphas_min", "alphas_max", "gammas_min", "gammas_max", "thetas_min", "thetas_max",
+                             "shapes_min", "shapes_max", "scales_min", "scales_max"]:
+                    val = _g(param, "")
+                    if val and str(val).strip():
+                        try:
+                            custom_hyperparameters[param] = float(val)
+                        except (ValueError, TypeError):
+                            pass
 
         result = {
             "country": str(_g("country", defaults["country"])),
