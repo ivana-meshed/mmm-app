@@ -345,7 +345,8 @@ cfg <- get_cfg_from_env()
 
 country <- cfg$country
 revision <- cfg$revision
-date_input <- cfg$date_input
+date_input <- cfg$date_input  # This is an actual date value, not a column name
+date_var_name <- cfg$date_var %||% "date"  # This is the column name to look for
 iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
@@ -515,18 +516,18 @@ df <- as.data.frame(df)
 names(df) <- toupper(names(df))
 
 ## ---------- DATE & CLEAN ----------
-# Use date_input to find the date column name (convert to uppercase since all names are uppercase now)
-date_col_name <- toupper(date_input)
+# Use date_var_name to find the date column name (convert to uppercase since all names are uppercase now)
+date_col_name <- toupper(date_var_name)
 
 if (date_col_name %in% names(df)) {
     df$date <- if (inherits(df[[date_col_name]], "POSIXt")) as.Date(df[[date_col_name]]) else as.Date(as.character(df[[date_col_name]]))
     df[[date_col_name]] <- NULL
 } else if ("DATE" %in% names(df)) {
-    # Fallback to DATE if date_input column not found
+    # Fallback to DATE if date_var column not found
     df$date <- if (inherits(df$DATE, "POSIXt")) as.Date(df$DATE) else as.Date(as.character(df$DATE))
     df$DATE <- NULL
 } else {
-    stop("No date column found. Expected column name: ", date_input, " (or DATE as fallback)")
+    stop("No date column found. Expected column name: ", date_var_name, " (or DATE as fallback)")
 }
 
 df <- filter_by_country(df, country)
