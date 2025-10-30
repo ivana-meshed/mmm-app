@@ -674,7 +674,26 @@ hyperparameters <- list()
 get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
     # Check if preset is "Custom" and custom_hyperparameters is provided
     if (preset == "Custom" && length(custom_hyperparameters) > 0) {
-        # Use custom hyperparameters from config
+        # First check for variable-specific custom hyperparameters (new format)
+        var_alphas_key <- paste0(var_name, "_alphas")
+        if (!is.null(custom_hyperparameters[[var_alphas_key]])) {
+            # Variable-specific hyperparameters found
+            if (adstock_type == "geometric") {
+                return(list(
+                    alphas = custom_hyperparameters[[var_alphas_key]],
+                    gammas = custom_hyperparameters[[paste0(var_name, "_gammas")]] %||% c(0.6, 0.9),
+                    thetas = custom_hyperparameters[[paste0(var_name, "_thetas")]] %||% c(0.1, 0.4)
+                ))
+            } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
+                return(list(
+                    alphas = custom_hyperparameters[[var_alphas_key]],
+                    shapes = custom_hyperparameters[[paste0(var_name, "_shapes")]] %||% c(0.5, 2.5),
+                    scales = custom_hyperparameters[[paste0(var_name, "_scales")]] %||% c(0.001, 0.15)
+                ))
+            }
+        }
+        
+        # Fall back to global custom hyperparameters (old format for backward compatibility)
         if (adstock_type == "geometric") {
             return(list(
                 alphas = c(

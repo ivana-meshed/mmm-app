@@ -563,111 +563,9 @@ with tab_single:
         st.session_state["hyperparameter_preset"] = hyperparameter_preset
         st.session_state["adstock_choice"] = adstock
 
-        # Custom hyperparameters input (when Custom is selected)
+        # Custom hyperparameters will be collected later after variables are selected
+        # We need to know which variables are selected before showing per-variable hyperparameters
         custom_hyperparameters = {}
-        if hyperparameter_preset == "Custom":
-            st.info("📝 **Custom Hyperparameters**: Define your own ranges for each parameter. Values are prefilled with Meshed recommend defaults.")
-            
-            # Helper function to get config value with default
-            def get_hyperparam_value(param_name, default_value):
-                """Get hyperparameter value from loaded config or return default"""
-                if loaded_config and "custom_hyperparameters" in loaded_config:
-                    return loaded_config["custom_hyperparameters"].get(param_name, default_value)
-                return default_value
-            
-            # Get Meshed recommend defaults based on adstock type
-            if adstock == "geometric":
-                st.markdown("**Geometric Adstock Parameters**")
-                st.caption("""
-                - **Alpha (saturation)**: Controls diminishing returns. Higher values = stronger saturation effect. Range: 0.5-3.0
-                - **Gamma (carryover strength)**: Retention rate of ad effect over time. Range: 0.3-1.0 (higher = longer lasting effect)
-                - **Theta (decay rate)**: Speed of effect decay. Range: 0-1.0 (higher = slower decay, longer carryover)
-                """)
-                
-                # Default ranges from Meshed recommend
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    custom_hyperparameters["alphas_min"] = st.number_input(
-                        "Alphas Min", value=get_hyperparam_value("alphas_min", 1.0),
-                        min_value=0.1, max_value=10.0, step=0.1, help="Minimum alpha value for all variables"
-                    )
-                with col2:
-                    custom_hyperparameters["alphas_max"] = st.number_input(
-                        "Alphas Max", value=get_hyperparam_value("alphas_max", 3.0),
-                        min_value=0.1, max_value=10.0, step=0.1, help="Maximum alpha value for all variables"
-                    )
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    custom_hyperparameters["gammas_min"] = st.number_input(
-                        "Gammas Min", value=get_hyperparam_value("gammas_min", 0.6),
-                        min_value=0.0, max_value=1.0, step=0.05, help="Minimum gamma value for all variables"
-                    )
-                with col2:
-                    custom_hyperparameters["gammas_max"] = st.number_input(
-                        "Gammas Max", value=get_hyperparam_value("gammas_max", 0.9),
-                        min_value=0.0, max_value=1.0, step=0.05, help="Maximum gamma value for all variables"
-                    )
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    custom_hyperparameters["thetas_min"] = st.number_input(
-                        "Thetas Min", value=get_hyperparam_value("thetas_min", 0.1),
-                        min_value=0.0, max_value=1.0, step=0.05, help="Minimum theta value for all variables"
-                    )
-                with col2:
-                    custom_hyperparameters["thetas_max"] = st.number_input(
-                        "Thetas Max", value=get_hyperparam_value("thetas_max", 0.4),
-                        min_value=0.0, max_value=1.0, step=0.05, help="Maximum theta value for all variables"
-                    )
-            
-            elif adstock in ["weibull_cdf", "weibull_pdf"]:
-                st.markdown("**Weibull Adstock Parameters**")
-                st.caption("""
-                - **Alpha (saturation)**: Controls diminishing returns. Higher values = stronger saturation effect. Range: 0.5-3.0
-                - **Shape**: Controls the shape of the decay curve. Range: 0.5-2.5 (higher = more S-shaped curve)
-                - **Scale**: Controls the speed of decay. Range: 0.001-0.15 (higher = faster initial decay)
-                """)
-                
-                # Default ranges from Meshed recommend for Weibull
-                col1, col2 = st.columns(2)
-                with col1:
-                    custom_hyperparameters["alphas_min"] = st.number_input(
-                        "Alphas Min", value=get_hyperparam_value("alphas_min", 0.5),
-                        min_value=0.1, max_value=10.0, step=0.1, help="Minimum alpha value for all variables"
-                    )
-                with col2:
-                    custom_hyperparameters["alphas_max"] = st.number_input(
-                        "Alphas Max", value=get_hyperparam_value("alphas_max", 3.0),
-                        min_value=0.1, max_value=10.0, step=0.1, help="Maximum alpha value for all variables"
-                    )
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    custom_hyperparameters["shapes_min"] = st.number_input(
-                        "Shapes Min", value=get_hyperparam_value("shapes_min", 0.5),
-                        min_value=0.0001, max_value=10.0, step=0.1, help="Minimum shape value for all variables"
-                    )
-                with col2:
-                    custom_hyperparameters["shapes_max"] = st.number_input(
-                        "Shapes Max", value=get_hyperparam_value("shapes_max", 2.5),
-                        min_value=0.0001, max_value=10.0, step=0.1, help="Maximum shape value for all variables"
-                    )
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    custom_hyperparameters["scales_min"] = st.number_input(
-                        "Scales Min", value=get_hyperparam_value("scales_min", 0.001),
-                        min_value=0.0, max_value=1.0, step=0.001, format="%.3f", help="Minimum scale value for all variables"
-                    )
-                with col2:
-                    custom_hyperparameters["scales_max"] = st.number_input(
-                        "Scales Max", value=get_hyperparam_value("scales_max", 0.15),
-                        min_value=0.0, max_value=1.0, step=0.01, format="%.3f", help="Maximum scale value for all variables"
-                    )
-        
-        # Store custom hyperparameters in session state
-        st.session_state["custom_hyperparameters"] = custom_hyperparameters
 
         # NEW: optional resampling
         c_rs1, c_rs2 = st.columns([1, 1])
@@ -1075,6 +973,182 @@ with tab_single:
             default=default_organic_vars,
             help="Select organic/baseline variables",
         )
+
+        # Custom hyperparameters per variable (when Custom preset is selected)
+        if hyperparameter_preset == "Custom":
+            st.markdown("---")
+            st.markdown("### 🎛️ Custom Hyperparameters per Variable")
+            st.info("📝 **Per-Variable Hyperparameters**: Define custom ranges for each paid media and organic variable. Values are prefilled with Meshed recommend defaults.")
+            
+            # Helper function to get variable-specific defaults based on preset
+            def get_var_defaults(var_name, adstock_type):
+                """Get default hyperparameter ranges for a variable"""
+                # Check if loaded config has this variable's hyperparameters
+                if loaded_config and "custom_hyperparameters" in loaded_config:
+                    var_alphas = loaded_config["custom_hyperparameters"].get(f"{var_name}_alphas")
+                    if var_alphas:
+                        # Loaded from config
+                        if adstock_type == "geometric":
+                            return {
+                                "alphas": var_alphas,
+                                "gammas": loaded_config["custom_hyperparameters"].get(f"{var_name}_gammas", [0.6, 0.9]),
+                                "thetas": loaded_config["custom_hyperparameters"].get(f"{var_name}_thetas", [0.1, 0.4])
+                            }
+                        else:
+                            return {
+                                "alphas": var_alphas,
+                                "shapes": loaded_config["custom_hyperparameters"].get(f"{var_name}_shapes", [0.5, 2.5]),
+                                "scales": loaded_config["custom_hyperparameters"].get(f"{var_name}_scales", [0.001, 0.15])
+                            }
+                
+                # Use Meshed recommend defaults
+                if adstock_type == "geometric":
+                    if "ORGANIC" in var_name.upper():
+                        return {"alphas": [0.5, 2.0], "gammas": [0.3, 0.7], "thetas": [0.9, 0.99]}
+                    elif "TV" in var_name.upper():
+                        return {"alphas": [0.8, 2.2], "gammas": [0.6, 0.99], "thetas": [0.7, 0.95]}
+                    elif "PARTNERSHIP" in var_name.upper():
+                        return {"alphas": [0.65, 2.25], "gammas": [0.45, 0.875], "thetas": [0.3, 0.625]}
+                    else:
+                        return {"alphas": [1.0, 3.0], "gammas": [0.6, 0.9], "thetas": [0.1, 0.4]}
+                else:  # weibull
+                    return {"alphas": [0.5, 3.0], "shapes": [0.5, 2.5], "scales": [0.001, 0.15]}
+            
+            # Combine all variables that need hyperparameters
+            all_hyper_vars = paid_media_vars_list + organic_vars_list
+            
+            if all_hyper_vars:
+                st.caption(f"Configuring hyperparameters for {len(all_hyper_vars)} variable(s)")
+                
+                # Use expander for each variable to keep UI manageable
+                for var in all_hyper_vars:
+                    with st.expander(f"**{var}**", expanded=False):
+                        defaults = get_var_defaults(var, adstock)
+                        
+                        if adstock == "geometric":
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                alphas_min = st.number_input(
+                                    "Alpha Min", 
+                                    value=float(defaults["alphas"][0]),
+                                    min_value=0.1, max_value=10.0, step=0.1,
+                                    key=f"{var}_alphas_min",
+                                    help=f"Minimum alpha for {var}"
+                                )
+                            with col2:
+                                alphas_max = st.number_input(
+                                    "Alpha Max",
+                                    value=float(defaults["alphas"][1]),
+                                    min_value=0.1, max_value=10.0, step=0.1,
+                                    key=f"{var}_alphas_max",
+                                    help=f"Maximum alpha for {var}"
+                                )
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                gammas_min = st.number_input(
+                                    "Gamma Min",
+                                    value=float(defaults["gammas"][0]),
+                                    min_value=0.0, max_value=1.0, step=0.05,
+                                    key=f"{var}_gammas_min",
+                                    help=f"Minimum gamma for {var}"
+                                )
+                            with col2:
+                                gammas_max = st.number_input(
+                                    "Gamma Max",
+                                    value=float(defaults["gammas"][1]),
+                                    min_value=0.0, max_value=1.0, step=0.05,
+                                    key=f"{var}_gammas_max",
+                                    help=f"Maximum gamma for {var}"
+                                )
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                thetas_min = st.number_input(
+                                    "Theta Min",
+                                    value=float(defaults["thetas"][0]),
+                                    min_value=0.0, max_value=1.0, step=0.05,
+                                    key=f"{var}_thetas_min",
+                                    help=f"Minimum theta for {var}"
+                                )
+                            with col2:
+                                thetas_max = st.number_input(
+                                    "Theta Max",
+                                    value=float(defaults["thetas"][1]),
+                                    min_value=0.0, max_value=1.0, step=0.05,
+                                    key=f"{var}_thetas_max",
+                                    help=f"Maximum theta for {var}"
+                                )
+                            
+                            # Store per-variable hyperparameters
+                            custom_hyperparameters[f"{var}_alphas"] = [alphas_min, alphas_max]
+                            custom_hyperparameters[f"{var}_gammas"] = [gammas_min, gammas_max]
+                            custom_hyperparameters[f"{var}_thetas"] = [thetas_min, thetas_max]
+                        
+                        else:  # weibull
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                alphas_min = st.number_input(
+                                    "Alpha Min",
+                                    value=float(defaults["alphas"][0]),
+                                    min_value=0.1, max_value=10.0, step=0.1,
+                                    key=f"{var}_alphas_min",
+                                    help=f"Minimum alpha for {var}"
+                                )
+                            with col2:
+                                alphas_max = st.number_input(
+                                    "Alpha Max",
+                                    value=float(defaults["alphas"][1]),
+                                    min_value=0.1, max_value=10.0, step=0.1,
+                                    key=f"{var}_alphas_max",
+                                    help=f"Maximum alpha for {var}"
+                                )
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                shapes_min = st.number_input(
+                                    "Shape Min",
+                                    value=float(defaults["shapes"][0]),
+                                    min_value=0.0001, max_value=10.0, step=0.1,
+                                    key=f"{var}_shapes_min",
+                                    help=f"Minimum shape for {var}"
+                                )
+                            with col2:
+                                shapes_max = st.number_input(
+                                    "Shape Max",
+                                    value=float(defaults["shapes"][1]),
+                                    min_value=0.0001, max_value=10.0, step=0.1,
+                                    key=f"{var}_shapes_max",
+                                    help=f"Maximum shape for {var}"
+                                )
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                scales_min = st.number_input(
+                                    "Scale Min",
+                                    value=float(defaults["scales"][0]),
+                                    min_value=0.0, max_value=1.0, step=0.001, format="%.3f",
+                                    key=f"{var}_scales_min",
+                                    help=f"Minimum scale for {var}"
+                                )
+                            with col2:
+                                scales_max = st.number_input(
+                                    "Scale Max",
+                                    value=float(defaults["scales"][1]),
+                                    min_value=0.0, max_value=1.0, step=0.01, format="%.3f",
+                                    key=f"{var}_scales_max",
+                                    help=f"Maximum scale for {var}"
+                                )
+                            
+                            # Store per-variable hyperparameters
+                            custom_hyperparameters[f"{var}_alphas"] = [alphas_min, alphas_max]
+                            custom_hyperparameters[f"{var}_shapes"] = [shapes_min, shapes_max]
+                            custom_hyperparameters[f"{var}_scales"] = [scales_min, scales_max]
+            else:
+                st.warning("⚠️ Please select paid media and/or organic variables first to configure their hyperparameters.")
+        
+        # Store custom hyperparameters in session state
+        st.session_state["custom_hyperparameters"] = custom_hyperparameters
 
         # Convert lists to comma-separated strings for backward compatibility
         paid_media_spends = ", ".join(paid_media_spends_list)
