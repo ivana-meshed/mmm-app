@@ -1021,7 +1021,7 @@ with tab_single:
                 st.caption(f"Configuring hyperparameters for {len(all_hyper_vars)} variable(s)")
                 
                 # Use expander for each variable to keep UI manageable
-                for var in all_hyper_vars:
+                for idx, var in enumerate(all_hyper_vars):
                     with st.expander(f"**{var}**", expanded=False):
                         defaults = get_var_defaults(var, adstock)
                         
@@ -1032,7 +1032,7 @@ with tab_single:
                                     "Alpha Min", 
                                     value=float(defaults["alphas"][0]),
                                     min_value=0.1, max_value=10.0, step=0.1,
-                                    key=f"{var}_alphas_min",
+                                    key=f"custom_hyper_{idx}_{var}_alphas_min",
                                     help=f"Minimum alpha for {var}"
                                 )
                             with col2:
@@ -1040,7 +1040,7 @@ with tab_single:
                                     "Alpha Max",
                                     value=float(defaults["alphas"][1]),
                                     min_value=0.1, max_value=10.0, step=0.1,
-                                    key=f"{var}_alphas_max",
+                                    key=f"custom_hyper_{idx}_{var}_alphas_max",
                                     help=f"Maximum alpha for {var}"
                                 )
                             
@@ -1050,7 +1050,7 @@ with tab_single:
                                     "Gamma Min",
                                     value=float(defaults["gammas"][0]),
                                     min_value=0.0, max_value=1.0, step=0.05,
-                                    key=f"{var}_gammas_min",
+                                    key=f"custom_hyper_{idx}_{var}_gammas_min",
                                     help=f"Minimum gamma for {var}"
                                 )
                             with col2:
@@ -1058,7 +1058,7 @@ with tab_single:
                                     "Gamma Max",
                                     value=float(defaults["gammas"][1]),
                                     min_value=0.0, max_value=1.0, step=0.05,
-                                    key=f"{var}_gammas_max",
+                                    key=f"custom_hyper_{idx}_{var}_gammas_max",
                                     help=f"Maximum gamma for {var}"
                                 )
                             
@@ -1068,7 +1068,7 @@ with tab_single:
                                     "Theta Min",
                                     value=float(defaults["thetas"][0]),
                                     min_value=0.0, max_value=1.0, step=0.05,
-                                    key=f"{var}_thetas_min",
+                                    key=f"custom_hyper_{idx}_{var}_thetas_min",
                                     help=f"Minimum theta for {var}"
                                 )
                             with col2:
@@ -1076,7 +1076,7 @@ with tab_single:
                                     "Theta Max",
                                     value=float(defaults["thetas"][1]),
                                     min_value=0.0, max_value=1.0, step=0.05,
-                                    key=f"{var}_thetas_max",
+                                    key=f"custom_hyper_{idx}_{var}_thetas_max",
                                     help=f"Maximum theta for {var}"
                                 )
                             
@@ -1092,7 +1092,7 @@ with tab_single:
                                     "Alpha Min",
                                     value=float(defaults["alphas"][0]),
                                     min_value=0.1, max_value=10.0, step=0.1,
-                                    key=f"{var}_alphas_min",
+                                    key=f"custom_hyper_{idx}_{var}_alphas_min",
                                     help=f"Minimum alpha for {var}"
                                 )
                             with col2:
@@ -1100,7 +1100,7 @@ with tab_single:
                                     "Alpha Max",
                                     value=float(defaults["alphas"][1]),
                                     min_value=0.1, max_value=10.0, step=0.1,
-                                    key=f"{var}_alphas_max",
+                                    key=f"custom_hyper_{idx}_{var}_alphas_max",
                                     help=f"Maximum alpha for {var}"
                                 )
                             
@@ -1110,7 +1110,7 @@ with tab_single:
                                     "Shape Min",
                                     value=float(defaults["shapes"][0]),
                                     min_value=0.0001, max_value=10.0, step=0.1,
-                                    key=f"{var}_shapes_min",
+                                    key=f"custom_hyper_{idx}_{var}_shapes_min",
                                     help=f"Minimum shape for {var}"
                                 )
                             with col2:
@@ -1118,7 +1118,7 @@ with tab_single:
                                     "Shape Max",
                                     value=float(defaults["shapes"][1]),
                                     min_value=0.0001, max_value=10.0, step=0.1,
-                                    key=f"{var}_shapes_max",
+                                    key=f"custom_hyper_{idx}_{var}_shapes_max",
                                     help=f"Maximum shape for {var}"
                                 )
                             
@@ -1128,7 +1128,7 @@ with tab_single:
                                     "Scale Min",
                                     value=float(defaults["scales"][0]),
                                     min_value=0.0, max_value=1.0, step=0.001, format="%.3f",
-                                    key=f"{var}_scales_min",
+                                    key=f"custom_hyper_{idx}_{var}_scales_min",
                                     help=f"Minimum scale for {var}"
                                 )
                             with col2:
@@ -1136,7 +1136,7 @@ with tab_single:
                                     "Scale Max",
                                     value=float(defaults["scales"][1]),
                                     min_value=0.0, max_value=1.0, step=0.01, format="%.3f",
-                                    key=f"{var}_scales_max",
+                                    key=f"custom_hyper_{idx}_{var}_scales_max",
                                     help=f"Maximum scale for {var}"
                                 )
                             
