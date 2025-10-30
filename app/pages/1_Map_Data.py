@@ -203,15 +203,9 @@ def _init_state():
     st.session_state.setdefault("organic_vars_prefix", "organic_")
     st.session_state.setdefault("context_vars_prefix", "context_")
     st.session_state.setdefault("factor_vars_prefix", "factor_")
-    # Track if this is the first time user enters this page
-    st.session_state.setdefault("map_data_page_visited", False)
 
 
 _init_state()
-
-# Mark page as visited after initialization
-if not st.session_state["map_data_page_visited"]:
-    st.session_state["map_data_page_visited"] = True
 
 # Optional: fragments if your Streamlit supports it (safe no-op fallback)
 _fragment = getattr(

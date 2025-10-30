@@ -41,11 +41,6 @@ from app_split_helpers import *  # bring in all helper functions/constants
 require_login_and_domain()
 ensure_session_defaults()
 
-# Track if this is the first time user enters this page
-st.session_state.setdefault("run_experiment_page_visited", False)
-if not st.session_state["run_experiment_page_visited"]:
-    st.session_state["run_experiment_page_visited"] = True
-
 st.title("Experiment")
 
 # Check if we should show a message to switch to Queue tab (Issue #5)
