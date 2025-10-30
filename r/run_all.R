@@ -524,8 +524,8 @@ message("   Available columns: ", paste(head(names(df), 20), collapse = ", "), i
 if (date_col_name %in% names(df)) {
     message("   Found column '", date_col_name, "', creating 'date' column")
     df$date <- if (inherits(df[[date_col_name]], "POSIXt")) as.Date(df[[date_col_name]]) else as.Date(as.character(df[[date_col_name]]))
-    # Only remove the original column if it's not already named 'date' (lowercase)
-    if (tolower(date_col_name) != "date") {
+    # Always remove the original column if it's not the lowercase 'date' we want
+    if (date_col_name != "date") {
         df[[date_col_name]] <- NULL
         message("   Removed original column '", date_col_name, "'")
     }
@@ -547,29 +547,33 @@ if (nrow(df) == 0) {
     stop("FATAL: Dataframe has 0 rows after date column creation")
 }
 message("✅ Date column created: ", nrow(df), " rows, range: ", min(df$date, na.rm = TRUE), " to ", max(df$date, na.rm = TRUE))
+message("   Columns after date creation: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
 
 df <- filter_by_country(df, country)
 
 # Verify date column still exists after filtering
 if (!"date" %in% names(df)) {
-    stop("FATAL: 'date' column disappeared after filter_by_country")
+    stop("FATAL: 'date' column disappeared after filter_by_country. Current columns: ", paste(names(df), collapse = ", "))
 }
 if (nrow(df) == 0) {
     stop("FATAL: No data remaining after filtering by country: ", country)
 }
 message("→ After country filter: ", nrow(df), " rows")
+message("   Columns after country filter: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
 
 if (anyDuplicated(df$date)) {
     message("→ Collapsing duplicated dates: ", sum(duplicated(df$date)))
     sum_or_first <- function(x) if (is.numeric(x)) sum(x, na.rm = TRUE) else dplyr::first(x)
     # Verify date column exists before trying to group by it
     if (!"date" %in% names(df)) {
-        stop("FATAL: 'date' column missing before deduplication")
+        stop("FATAL: 'date' column missing before deduplication. Current columns: ", paste(names(df), collapse = ", "))
     }
+    message("   Columns before deduplication: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
     df <- df %>%
         dplyr::group_by(date) %>%
         dplyr::summarise(dplyr::across(!dplyr::all_of("date"), sum_or_first), .groups = "drop")
     message("   After deduplication: ", nrow(df), " rows")
+    message("   Columns after deduplication: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
 }
 
 df <- fill_day(df)
