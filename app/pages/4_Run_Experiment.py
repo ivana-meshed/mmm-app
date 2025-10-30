@@ -41,6 +41,11 @@ from app_split_helpers import *  # bring in all helper functions/constants
 require_login_and_domain()
 ensure_session_defaults()
 
+# Track if this is the first time user enters this page
+st.session_state.setdefault("run_experiment_page_visited", False)
+if not st.session_state["run_experiment_page_visited"]:
+    st.session_state["run_experiment_page_visited"] = True
+
 st.title("Experiment")
 
 # Check if we should show a message to switch to Queue tab (Issue #5)
@@ -153,7 +158,7 @@ with tab_single:
     st.subheader("Robyn configuration & training")
 
     # Data selection
-    with st.expander("Data selection", expanded=True):
+    with st.expander("Data selection", expanded=False):
         # Show current loaded state (point 4 - UI representing actual state)
         if "preview_df" in st.session_state and st.session_state["preview_df"] is not None:
             loaded_country = st.session_state.get("selected_country", "N/A")
@@ -269,7 +274,7 @@ with tab_single:
                         st.info(f"📋 Using metadata: **{selected_metadata}**")
                         
                         # Display summary of loaded data (Issue #1 fix: show goals details)
-                        with st.expander("📊 Loaded Data Summary", expanded=True):
+                        with st.expander("📊 Loaded Data Summary", expanded=False):
                             st.write(f"**Data Source:** {selected_country.upper()} - {selected_version}")
                             st.write(f"**Metadata Source:** {selected_metadata}")
                             st.write(f"**Rows:** {len(df_prev):,}")
@@ -357,7 +362,7 @@ with tab_single:
             st.warning(f"Could not list configurations: {e}")
 
     # Robyn config (moved outside Data selection expander)
-    with st.expander("Robyn configuration", expanded=True):
+    with st.expander("Robyn configuration", expanded=False):
         # Country auto-filled from Data Selection
         country = st.session_state.get("selected_country", "fr")
         st.info(f"**Country:** {country.upper()} (from Data Selection)")
@@ -621,7 +626,7 @@ with tab_single:
         }.get(resample_agg_label or "sum", "sum")
 
     # Variables (moved outside Data selection expander)
-    with st.expander("Variable mapping", expanded=True):
+    with st.expander("Variable mapping", expanded=False):
         # Get available columns from loaded data
         preview_df = st.session_state.get("preview_df")
         if preview_df is not None and not preview_df.empty:

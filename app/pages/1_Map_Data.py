@@ -203,9 +203,15 @@ def _init_state():
     st.session_state.setdefault("organic_vars_prefix", "organic_")
     st.session_state.setdefault("context_vars_prefix", "context_")
     st.session_state.setdefault("factor_vars_prefix", "factor_")
+    # Track if this is the first time user enters this page
+    st.session_state.setdefault("map_data_page_visited", False)
 
 
 _init_state()
+
+# Mark page as visited after initialization
+if not st.session_state["map_data_page_visited"]:
+    st.session_state["map_data_page_visited"] = True
 
 # Optional: fragments if your Streamlit supports it (safe no-op fallback)
 _fragment = getattr(
@@ -884,7 +890,7 @@ st.session_state.setdefault("source_mode", "Latest (GCS)")
 # ──────────────────────────────────────────────────────────────
 st.header("Step 1) Choose your dataset")
 
-with st.expander("📊 Data Selection", expanded=True):
+with st.expander("📊 Data Selection", expanded=False):
     # Country picker (ISO2, GCS-first). Keep this OUTSIDE the form.
     c1, c2 = st.columns([1.2, 2])
     with c1:
@@ -1233,7 +1239,7 @@ with st.expander(
             st.info(f"📁 Source: gs://{BUCKET}/{meta_blob}")
             
             # Display summary of loaded data
-            with st.expander("📊 Loaded Metadata Summary", expanded=True):
+            with st.expander("📊 Loaded Metadata Summary", expanded=False):
                 if "goals" in meta:
                     st.write(f"**Goals:** {len(meta['goals'])} goal(s)")
                     for g in meta['goals']:
@@ -1256,7 +1262,7 @@ with st.expander(
             st.error(f"Failed to load metadata: {e}")
 
 # ---- Goals (form) ----
-with st.expander("🎯 Goals", expanded=True):
+with st.expander("🎯 Goals", expanded=False):
     # Date field selection (moved into Goals expander)
     date_candidates = sorted(
         {
@@ -1544,7 +1550,7 @@ if st.session_state["mapping_df"].empty:
     )
 
 # ---- Variable Mapping Editor ----
-with st.expander("🗺️ Variable Mapping", expanded=True):
+with st.expander("🗺️ Variable Mapping", expanded=False):
     # --- Re-apply auto-tag rules on demand (outside any form) ---
     rt1, rt2 = st.columns([1, 1])
 
@@ -1754,7 +1760,7 @@ with st.expander("🗺️ Variable Mapping", expanded=True):
 # ──────────────────────────────────────────────────────────────
 st.header("Step 3) Save your mapping")
 
-with st.expander("💾 Save Mapping Configuration", expanded=True):
+with st.expander("💾 Save Mapping Configuration", expanded=False):
     goals_df = st.session_state["goals_df"]
     mapping_df = st.session_state["mapping_df"]
     auto_rules = st.session_state["auto_rules"]
