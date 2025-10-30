@@ -562,6 +562,10 @@ with tab_single:
         # Store the hyperparameter choice for later use
         st.session_state["hyperparameter_preset"] = hyperparameter_preset
         st.session_state["adstock_choice"] = adstock
+        
+        # Show info message when Custom is selected
+        if hyperparameter_preset == "Custom":
+            st.info("📌 **Custom Hyperparameters Selected**: Scroll down to the **Variable mapping** section below to configure per-variable hyperparameter ranges for each paid media and organic variable.")
 
         # Custom hyperparameters will be collected later after variables are selected
         # We need to know which variables are selected before showing per-variable hyperparameters
