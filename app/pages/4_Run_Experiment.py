@@ -563,6 +563,105 @@ with tab_single:
         st.session_state["hyperparameter_preset"] = hyperparameter_preset
         st.session_state["adstock_choice"] = adstock
 
+        # Custom hyperparameters input (when Custom is selected)
+        custom_hyperparameters = {}
+        if hyperparameter_preset == "Custom":
+            st.info("📝 **Custom Hyperparameters**: Define your own ranges for each parameter. Values are prefilled with Meshed recommend defaults.")
+            
+            # Get Meshed recommend defaults based on adstock type
+            if adstock == "geometric":
+                st.markdown("**Geometric Adstock Parameters**")
+                st.caption("""
+                - **Alpha (saturation)**: Controls diminishing returns. Higher values = stronger saturation effect. Range: 0.5-3.0
+                - **Gamma (carryover strength)**: Retention rate of ad effect over time. Range: 0.3-1.0 (higher = longer lasting effect)
+                - **Theta (decay rate)**: Speed of effect decay. Range: 0-1.0 (higher = slower decay, longer carryover)
+                """)
+                
+                # Default ranges from Meshed recommend
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    custom_hyperparameters["alphas_min"] = st.number_input(
+                        "Alphas Min", value=loaded_config.get("custom_hyperparameters", {}).get("alphas_min", 1.0) if loaded_config else 1.0,
+                        min_value=0.1, max_value=10.0, step=0.1, help="Minimum alpha value for all variables"
+                    )
+                with col2:
+                    custom_hyperparameters["alphas_max"] = st.number_input(
+                        "Alphas Max", value=loaded_config.get("custom_hyperparameters", {}).get("alphas_max", 3.0) if loaded_config else 3.0,
+                        min_value=0.1, max_value=10.0, step=0.1, help="Maximum alpha value for all variables"
+                    )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    custom_hyperparameters["gammas_min"] = st.number_input(
+                        "Gammas Min", value=loaded_config.get("custom_hyperparameters", {}).get("gammas_min", 0.6) if loaded_config else 0.6,
+                        min_value=0.0, max_value=1.0, step=0.05, help="Minimum gamma value for all variables"
+                    )
+                with col2:
+                    custom_hyperparameters["gammas_max"] = st.number_input(
+                        "Gammas Max", value=loaded_config.get("custom_hyperparameters", {}).get("gammas_max", 0.9) if loaded_config else 0.9,
+                        min_value=0.0, max_value=1.0, step=0.05, help="Maximum gamma value for all variables"
+                    )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    custom_hyperparameters["thetas_min"] = st.number_input(
+                        "Thetas Min", value=loaded_config.get("custom_hyperparameters", {}).get("thetas_min", 0.1) if loaded_config else 0.1,
+                        min_value=0.0, max_value=1.0, step=0.05, help="Minimum theta value for all variables"
+                    )
+                with col2:
+                    custom_hyperparameters["thetas_max"] = st.number_input(
+                        "Thetas Max", value=loaded_config.get("custom_hyperparameters", {}).get("thetas_max", 0.4) if loaded_config else 0.4,
+                        min_value=0.0, max_value=1.0, step=0.05, help="Maximum theta value for all variables"
+                    )
+            
+            elif adstock in ["weibull_cdf", "weibull_pdf"]:
+                st.markdown("**Weibull Adstock Parameters**")
+                st.caption("""
+                - **Alpha (saturation)**: Controls diminishing returns. Higher values = stronger saturation effect. Range: 0.5-3.0
+                - **Shape**: Controls the shape of the decay curve. Range: 0.5-2.5 (higher = more S-shaped curve)
+                - **Scale**: Controls the speed of decay. Range: 0.001-0.15 (higher = faster initial decay)
+                """)
+                
+                # Default ranges from Meshed recommend for Weibull
+                col1, col2 = st.columns(2)
+                with col1:
+                    custom_hyperparameters["alphas_min"] = st.number_input(
+                        "Alphas Min", value=loaded_config.get("custom_hyperparameters", {}).get("alphas_min", 0.5) if loaded_config else 0.5,
+                        min_value=0.1, max_value=10.0, step=0.1, help="Minimum alpha value for all variables"
+                    )
+                with col2:
+                    custom_hyperparameters["alphas_max"] = st.number_input(
+                        "Alphas Max", value=loaded_config.get("custom_hyperparameters", {}).get("alphas_max", 3.0) if loaded_config else 3.0,
+                        min_value=0.1, max_value=10.0, step=0.1, help="Maximum alpha value for all variables"
+                    )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    custom_hyperparameters["shapes_min"] = st.number_input(
+                        "Shapes Min", value=loaded_config.get("custom_hyperparameters", {}).get("shapes_min", 0.5) if loaded_config else 0.5,
+                        min_value=0.0001, max_value=10.0, step=0.1, help="Minimum shape value for all variables"
+                    )
+                with col2:
+                    custom_hyperparameters["shapes_max"] = st.number_input(
+                        "Shapes Max", value=loaded_config.get("custom_hyperparameters", {}).get("shapes_max", 2.5) if loaded_config else 2.5,
+                        min_value=0.0001, max_value=10.0, step=0.1, help="Maximum shape value for all variables"
+                    )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    custom_hyperparameters["scales_min"] = st.number_input(
+                        "Scales Min", value=loaded_config.get("custom_hyperparameters", {}).get("scales_min", 0.001) if loaded_config else 0.001,
+                        min_value=0.0, max_value=1.0, step=0.001, format="%.3f", help="Minimum scale value for all variables"
+                    )
+                with col2:
+                    custom_hyperparameters["scales_max"] = st.number_input(
+                        "Scales Max", value=loaded_config.get("custom_hyperparameters", {}).get("scales_max", 0.15) if loaded_config else 0.15,
+                        min_value=0.0, max_value=1.0, step=0.01, format="%.3f", help="Maximum scale value for all variables"
+                    )
+        
+        # Store custom hyperparameters in session state
+        st.session_state["custom_hyperparameters"] = custom_hyperparameters
+
         # NEW: optional resampling
         c_rs1, c_rs2 = st.columns([1, 1])
         resample_freq_label = c_rs1.selectbox(
@@ -1049,6 +1148,7 @@ with tab_single:
                             "date_var": date_var,
                             "adstock": adstock,
                             "hyperparameter_preset": hyperparameter_preset,
+                            "custom_hyperparameters": custom_hyperparameters if hyperparameter_preset == "Custom" else {},
                             "resample_freq": resample_freq,
                             "resample_agg": resample_agg,
                         },
@@ -1116,6 +1216,7 @@ with tab_single:
                             "date_var": date_var,
                             "adstock": adstock,
                             "hyperparameter_preset": hyperparameter_preset,
+                            "custom_hyperparameters": custom_hyperparameters if hyperparameter_preset == "Custom" else {},
                             "resample_freq": resample_freq,
                             "resample_agg": resample_agg,
                             "annotations_gcs_path": "",
@@ -1198,8 +1299,9 @@ with tab_single:
                 date_var,
                 adstock,
                 hyperparameter_preset,
-                resample_freq,  # NEW
-                resample_agg,  # NEW
+                custom_hyperparameters,  # NEW
+                resample_freq,
+                resample_agg,
             ),
             data_gcs_path,
             timestamp,
@@ -1225,6 +1327,7 @@ with tab_single:
         date_var,
         adstock,
         hyperparameter_preset,
+        custom_hyperparameters,  # NEW
         resample_freq,
         resample_agg,
     ) -> dict:
@@ -1249,6 +1352,7 @@ with tab_single:
             "date_var": date_var,
             "adstock": adstock,
             "hyperparameter_preset": hyperparameter_preset,
+            "custom_hyperparameters": custom_hyperparameters,  # NEW
             "resample_freq": resample_freq,
             "resample_agg": resample_agg,
             "data_gcs_path": "",  # Will be filled later
@@ -1442,6 +1546,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 - `paid_media_spends`, `paid_media_vars`, `context_vars`, `factor_vars`, `organic_vars`
 - `dep_var`, `dep_var_type` (revenue|conversion), `date_var`, `adstock`
 - `hyperparameter_preset` (Facebook recommend|Meshed recommend|Custom)
+- **Custom hyperparameters** (only when hyperparameter_preset=Custom):
+  - For geometric adstock: `alphas_min`, `alphas_max`, `gammas_min`, `gammas_max`, `thetas_min`, `thetas_max`
+  - For weibull adstock: `alphas_min`, `alphas_max`, `shapes_min`, `shapes_max`, `scales_min`, `scales_max`
 - `resample_freq` (none|W|M), `resample_agg` (sum|mean|max|min)
 - `gcs_bucket` (optional override per row)
 - **Data source (choose one):**
@@ -1509,6 +1616,16 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "geometric",
                     "hyperparameter_preset": "Meshed recommend",
+                    "alphas_min": "",
+                    "alphas_max": "",
+                    "gammas_min": "",
+                    "gammas_max": "",
+                    "thetas_min": "",
+                    "thetas_max": "",
+                    "shapes_min": "",
+                    "shapes_max": "",
+                    "scales_min": "",
+                    "scales_max": "",
                     "resample_freq": "none",
                     "resample_agg": "sum",
                     "annotations_gcs_path": "",
@@ -1535,7 +1652,53 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "weibull_cdf",
                     "hyperparameter_preset": "Facebook recommend",
+                    "alphas_min": "",
+                    "alphas_max": "",
+                    "gammas_min": "",
+                    "gammas_max": "",
+                    "thetas_min": "",
+                    "thetas_max": "",
+                    "shapes_min": "",
+                    "shapes_max": "",
+                    "scales_min": "",
+                    "scales_max": "",
                     "resample_freq": "W",
+                    "resample_agg": "sum",
+                    "annotations_gcs_path": "",
+                },
+                {
+                    "country": "it",
+                    "revision": "r103",
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
+                    "iterations": 250,
+                    "trials": 4,
+                    "train_size": "0.7,0.9",
+                    "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST",
+                    "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST",
+                    "context_vars": "IS_WEEKEND",
+                    "factor_vars": "IS_WEEKEND",
+                    "organic_vars": "ORGANIC_TRAFFIC",
+                    "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/it/latest/raw.parquet",
+                    "table": "",
+                    "query": "",
+                    "dep_var": "UPLOAD_VALUE",
+                    "dep_var_type": "revenue",
+                    "date_var": "date",
+                    "adstock": "geometric",
+                    "hyperparameter_preset": "Custom",
+                    "alphas_min": "0.8",
+                    "alphas_max": "2.5",
+                    "gammas_min": "0.5",
+                    "gammas_max": "0.85",
+                    "thetas_min": "0.15",
+                    "thetas_max": "0.5",
+                    "shapes_min": "",
+                    "shapes_max": "",
+                    "scales_min": "",
+                    "scales_max": "",
+                    "resample_freq": "none",
                     "resample_agg": "sum",
                     "annotations_gcs_path": "",
                 },
@@ -1550,7 +1713,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             mime="text/csv",
         )
         col_dl2.download_button(
-            "Download example CSV (2 jobs)",
+            "Download example CSV (3 jobs)",
             data=example.to_csv(index=False),
             file_name="robyn_batch_example.csv",
             mime="text/csv",

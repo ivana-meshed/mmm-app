@@ -562,8 +562,23 @@ def _make_normalizer(defaults: dict):
             start_date_val = "2024-01-01"
         if not str(end_date_val).strip():
             end_date_val = date_input_val
+        
+        # Parse custom hyperparameters if hyperparameter_preset is "Custom"
+        hyperparameter_preset_val = str(_g("hyperparameter_preset", defaults.get("hyperparameter_preset", "Meshed recommend")))
+        custom_hyperparameters = {}
+        
+        if hyperparameter_preset_val == "Custom":
+            # Check for custom hyperparameter columns
+            for param in ["alphas_min", "alphas_max", "gammas_min", "gammas_max", "thetas_min", "thetas_max",
+                         "shapes_min", "shapes_max", "scales_min", "scales_max"]:
+                val = _g(param, "")
+                if val and str(val).strip():
+                    try:
+                        custom_hyperparameters[param] = float(val)
+                    except (ValueError, TypeError):
+                        pass
 
-        return {
+        result = {
             "country": str(_g("country", defaults["country"])),
             "revision": str(_g("revision", defaults["revision"])),
             "date_input": str(date_input_val),  # Keep for backward compatibility
@@ -593,7 +608,7 @@ def _make_normalizer(defaults: dict):
             "dep_var_type": str(_g("dep_var_type", defaults.get("dep_var_type", "revenue"))),  # New field
             "date_var": str(_g("date_var", defaults["date_var"])),
             "adstock": str(_g("adstock", defaults["adstock"])),
-            "hyperparameter_preset": str(_g("hyperparameter_preset", defaults.get("hyperparameter_preset", "Meshed recommend"))),  # New field
+            "hyperparameter_preset": hyperparameter_preset_val,
             "resample_freq": _normalize_resample_freq(
                 str(_g("resample_freq", defaults["resample_freq"]))
             ),
@@ -602,6 +617,12 @@ def _make_normalizer(defaults: dict):
             ),
             "annotations_gcs_path": str(_g("annotations_gcs_path", "")),
         }
+        
+        # Add custom_hyperparameters if present
+        if custom_hyperparameters:
+            result["custom_hyperparameters"] = custom_hyperparameters
+        
+        return result
 
     return _normalize_row
 

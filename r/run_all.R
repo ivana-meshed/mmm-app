@@ -362,6 +362,9 @@ dep_var_type_from_cfg <- cfg$dep_var_type %||% "revenue"
 # NEW: hyperparameter preset
 hyperparameter_preset <- cfg$hyperparameter_preset %||% "Meshed recommend"
 
+# NEW: custom hyperparameters (if preset is "Custom")
+custom_hyperparameters <- cfg$custom_hyperparameters %||% list()
+
 # NEW: resample parameters
 resample_freq <- cfg$resample_freq %||% "none"
 resample_agg <- cfg$resample_agg %||% "sum"
@@ -669,6 +672,42 @@ hyperparameters <- list()
 
 # Define hyperparameter presets
 get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
+    # Check if preset is "Custom" and custom_hyperparameters is provided
+    if (preset == "Custom" && length(custom_hyperparameters) > 0) {
+        # Use custom hyperparameters from config
+        if (adstock_type == "geometric") {
+            return(list(
+                alphas = c(
+                    custom_hyperparameters$alphas_min %||% 1.0,
+                    custom_hyperparameters$alphas_max %||% 3.0
+                ),
+                gammas = c(
+                    custom_hyperparameters$gammas_min %||% 0.6,
+                    custom_hyperparameters$gammas_max %||% 0.9
+                ),
+                thetas = c(
+                    custom_hyperparameters$thetas_min %||% 0.1,
+                    custom_hyperparameters$thetas_max %||% 0.4
+                )
+            ))
+        } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
+            return(list(
+                alphas = c(
+                    custom_hyperparameters$alphas_min %||% 0.5,
+                    custom_hyperparameters$alphas_max %||% 3.0
+                ),
+                shapes = c(
+                    custom_hyperparameters$shapes_min %||% 0.5,
+                    custom_hyperparameters$shapes_max %||% 2.5
+                ),
+                scales = c(
+                    custom_hyperparameters$scales_min %||% 0.001,
+                    custom_hyperparameters$scales_max %||% 0.15
+                )
+            ))
+        }
+    }
+    
     # Default ranges (for geometric adstock)
     if (adstock_type == "geometric") {
         if (preset == "Facebook recommend") {
@@ -692,7 +731,7 @@ get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
                 list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
             }
         } else {
-            # Custom preset - use current values as defaults
+            # Custom preset fallback - use Meshed defaults
             if (var_name == "ORGANIC_TRAFFIC") {
                 list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
             } else if (var_name == "TV_COST") {
@@ -711,7 +750,7 @@ get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
             # Meshed customizations for Weibull
             list(alphas = c(0.5, 3), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
         } else {
-            # Custom
+            # Custom fallback
             list(alphas = c(0.5, 3), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
         }
     } else {
