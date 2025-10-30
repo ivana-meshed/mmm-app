@@ -227,12 +227,14 @@ with tab_explore:
     st.markdown("### Pick candidates per bucket")
     c1, c2 = st.columns([1.2, 1])
 
+    # --- REPLACE this helper entirely ---
     def multi_pick(label, options, key):
-        nice_opts = [(nice(c), c) for c in options]
-        nice_opts = sorted(nice_opts, key=lambda t: t[0].lower())
-        default = [nice(c) for c in options]  # default: all preselected
-        sel_nice = st.multiselect(label, [n for n,_ in nice_opts], default=default, key=key)
-        return [dict(nice=n, raw=dict(nice=c, raw=r)["raw"])["raw"] for n,c in nice_opts if n in sel_nice]
+        # options: list[str] of raw column names
+        nice_opts = sorted([(nice(c), c) for c in options], key=lambda t: t[0].lower())
+        default = [nice(c) for c in options]  # preselect all
+        sel_nice = st.multiselect(label, [n for n, _ in nice_opts], default=default, key=key)
+        # return raw names for the selected nice labels
+        return [raw for n, raw in nice_opts if n in sel_nice]
 
     with c1:
         sel_paid_vars = multi_pick("Paid media variables (exposure candidates)", paid_var_cols, "pick_paid_vars")
