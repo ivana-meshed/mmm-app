@@ -517,28 +517,39 @@ names(df) <- toupper(names(df))
 
 ## ---------- DATE & CLEAN ----------
 # Use date_var_name to find the date column name (convert to uppercase since all names are uppercase now)
-date_col_name <- toupper(date_var_name)
-message("→ Looking for date column: date_var_name='", date_var_name, "', uppercased='", date_col_name, "'")
+# If date_var is not in config, try to find a date column automatically
+date_var_name_upper <- toupper(date_var_name)
+message("→ Looking for date column: date_var_name='", date_var_name, "', uppercased='", date_var_name_upper, "'")
 message("   Available columns (all uppercase): ", paste(head(names(df), 20), collapse = ", "), if (length(names(df)) > 20) "..." else "")
 
-if (date_col_name %in% names(df)) {
-    message("   Found column '", date_col_name, "', converting to Date type")
-    # Convert the date column in place
-    df[[date_col_name]] <- if (inherits(df[[date_col_name]], "POSIXt")) as.Date(df[[date_col_name]]) else as.Date(as.character(df[[date_col_name]]))
-    # Now rename it to lowercase 'date' if it's not already lowercase 'date'
-    if (date_col_name != "date") {
-        names(df)[names(df) == date_col_name] <- "date"
-        message("   Renamed '", date_col_name, "' to 'date'")
-    }
-} else if ("DATE" %in% names(df)) {
-    # Fallback to DATE if date_var column not found
-    message("   Column '", date_col_name, "' not found, using fallback 'DATE' column")
-    df$DATE <- if (inherits(df$DATE, "POSIXt")) as.Date(df$DATE) else as.Date(as.character(df$DATE))
-    names(df)[names(df) == "DATE"] <- "date"
-    message("   Renamed 'DATE' to 'date'")
+# Try to find the date column - check in order of preference
+date_col_found <- NULL
+if (date_var_name_upper %in% names(df)) {
+    date_col_found <- date_var_name_upper
+    message("   Found exact match: '", date_col_found, "'")
 } else {
-    stop("No date column found. Expected column name: ", date_var_name, " (uppercased: ", date_col_name, "). Available columns: ", paste(names(df), collapse = ", "))
+    # Try common date column names
+    common_date_names <- c("DATE", "DS", "DATUM", "FECHA", "DATA")
+    for (name in common_date_names) {
+        if (name %in% names(df)) {
+            date_col_found <- name
+            message("   Found date column by common name: '", date_col_found, "'")
+            break
+        }
+    }
 }
+
+if (is.null(date_col_found)) {
+    stop("No date column found. Expected: ", date_var_name_upper, ". Tried common names: DATE, DS, DATUM, FECHA, DATA. Available columns: ", paste(names(df), collapse = ", "))
+}
+
+# Convert the date column in place
+message("   Converting '", date_col_found, "' to Date type")
+df[[date_col_found]] <- if (inherits(df[[date_col_found]], "POSIXt")) as.Date(df[[date_col_found]]) else as.Date(as.character(df[[date_col_found]]))
+
+# Rename to lowercase 'date'
+names(df)[names(df) == date_col_found] <- "date"
+message("   Renamed '", date_col_found, "' to 'date'")
 
 # Verify date column exists and has valid data
 if (!"date" %in% names(df)) {
