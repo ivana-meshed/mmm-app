@@ -568,6 +568,13 @@ with tab_single:
         if hyperparameter_preset == "Custom":
             st.info("📝 **Custom Hyperparameters**: Define your own ranges for each parameter. Values are prefilled with Meshed recommend defaults.")
             
+            # Helper function to get config value with default
+            def get_hyperparam_value(param_name, default_value):
+                """Get hyperparameter value from loaded config or return default"""
+                if loaded_config and "custom_hyperparameters" in loaded_config:
+                    return loaded_config["custom_hyperparameters"].get(param_name, default_value)
+                return default_value
+            
             # Get Meshed recommend defaults based on adstock type
             if adstock == "geometric":
                 st.markdown("**Geometric Adstock Parameters**")
@@ -581,36 +588,36 @@ with tab_single:
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     custom_hyperparameters["alphas_min"] = st.number_input(
-                        "Alphas Min", value=loaded_config.get("custom_hyperparameters", {}).get("alphas_min", 1.0) if loaded_config else 1.0,
+                        "Alphas Min", value=get_hyperparam_value("alphas_min", 1.0),
                         min_value=0.1, max_value=10.0, step=0.1, help="Minimum alpha value for all variables"
                     )
                 with col2:
                     custom_hyperparameters["alphas_max"] = st.number_input(
-                        "Alphas Max", value=loaded_config.get("custom_hyperparameters", {}).get("alphas_max", 3.0) if loaded_config else 3.0,
+                        "Alphas Max", value=get_hyperparam_value("alphas_max", 3.0),
                         min_value=0.1, max_value=10.0, step=0.1, help="Maximum alpha value for all variables"
                     )
                 
                 col1, col2 = st.columns(2)
                 with col1:
                     custom_hyperparameters["gammas_min"] = st.number_input(
-                        "Gammas Min", value=loaded_config.get("custom_hyperparameters", {}).get("gammas_min", 0.6) if loaded_config else 0.6,
+                        "Gammas Min", value=get_hyperparam_value("gammas_min", 0.6),
                         min_value=0.0, max_value=1.0, step=0.05, help="Minimum gamma value for all variables"
                     )
                 with col2:
                     custom_hyperparameters["gammas_max"] = st.number_input(
-                        "Gammas Max", value=loaded_config.get("custom_hyperparameters", {}).get("gammas_max", 0.9) if loaded_config else 0.9,
+                        "Gammas Max", value=get_hyperparam_value("gammas_max", 0.9),
                         min_value=0.0, max_value=1.0, step=0.05, help="Maximum gamma value for all variables"
                     )
                 
                 col1, col2 = st.columns(2)
                 with col1:
                     custom_hyperparameters["thetas_min"] = st.number_input(
-                        "Thetas Min", value=loaded_config.get("custom_hyperparameters", {}).get("thetas_min", 0.1) if loaded_config else 0.1,
+                        "Thetas Min", value=get_hyperparam_value("thetas_min", 0.1),
                         min_value=0.0, max_value=1.0, step=0.05, help="Minimum theta value for all variables"
                     )
                 with col2:
                     custom_hyperparameters["thetas_max"] = st.number_input(
-                        "Thetas Max", value=loaded_config.get("custom_hyperparameters", {}).get("thetas_max", 0.4) if loaded_config else 0.4,
+                        "Thetas Max", value=get_hyperparam_value("thetas_max", 0.4),
                         min_value=0.0, max_value=1.0, step=0.05, help="Maximum theta value for all variables"
                     )
             
@@ -626,36 +633,36 @@ with tab_single:
                 col1, col2 = st.columns(2)
                 with col1:
                     custom_hyperparameters["alphas_min"] = st.number_input(
-                        "Alphas Min", value=loaded_config.get("custom_hyperparameters", {}).get("alphas_min", 0.5) if loaded_config else 0.5,
+                        "Alphas Min", value=get_hyperparam_value("alphas_min", 0.5),
                         min_value=0.1, max_value=10.0, step=0.1, help="Minimum alpha value for all variables"
                     )
                 with col2:
                     custom_hyperparameters["alphas_max"] = st.number_input(
-                        "Alphas Max", value=loaded_config.get("custom_hyperparameters", {}).get("alphas_max", 3.0) if loaded_config else 3.0,
+                        "Alphas Max", value=get_hyperparam_value("alphas_max", 3.0),
                         min_value=0.1, max_value=10.0, step=0.1, help="Maximum alpha value for all variables"
                     )
                 
                 col1, col2 = st.columns(2)
                 with col1:
                     custom_hyperparameters["shapes_min"] = st.number_input(
-                        "Shapes Min", value=loaded_config.get("custom_hyperparameters", {}).get("shapes_min", 0.5) if loaded_config else 0.5,
+                        "Shapes Min", value=get_hyperparam_value("shapes_min", 0.5),
                         min_value=0.0001, max_value=10.0, step=0.1, help="Minimum shape value for all variables"
                     )
                 with col2:
                     custom_hyperparameters["shapes_max"] = st.number_input(
-                        "Shapes Max", value=loaded_config.get("custom_hyperparameters", {}).get("shapes_max", 2.5) if loaded_config else 2.5,
+                        "Shapes Max", value=get_hyperparam_value("shapes_max", 2.5),
                         min_value=0.0001, max_value=10.0, step=0.1, help="Maximum shape value for all variables"
                     )
                 
                 col1, col2 = st.columns(2)
                 with col1:
                     custom_hyperparameters["scales_min"] = st.number_input(
-                        "Scales Min", value=loaded_config.get("custom_hyperparameters", {}).get("scales_min", 0.001) if loaded_config else 0.001,
+                        "Scales Min", value=get_hyperparam_value("scales_min", 0.001),
                         min_value=0.0, max_value=1.0, step=0.001, format="%.3f", help="Minimum scale value for all variables"
                     )
                 with col2:
                     custom_hyperparameters["scales_max"] = st.number_input(
-                        "Scales Max", value=loaded_config.get("custom_hyperparameters", {}).get("scales_max", 0.15) if loaded_config else 0.15,
+                        "Scales Max", value=get_hyperparam_value("scales_max", 0.15),
                         min_value=0.0, max_value=1.0, step=0.01, format="%.3f", help="Maximum scale value for all variables"
                     )
         
