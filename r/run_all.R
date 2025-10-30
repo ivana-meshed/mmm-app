@@ -368,7 +368,25 @@ custom_hyperparameters <- cfg$custom_hyperparameters %||% list()
 
 # NEW: resample parameters
 resample_freq <- cfg$resample_freq %||% "none"
-resample_agg <- cfg$resample_agg %||% "sum"
+# Column aggregation strategies from metadata (passed as JSON string or dict)
+column_agg_strategies <- cfg$column_agg_strategies %||% list()
+
+# Parse column_agg_strategies if it's a JSON string
+if (is.character(column_agg_strategies) && nzchar(column_agg_strategies)) {
+    tryCatch({
+        column_agg_strategies <- jsonlite::fromJSON(column_agg_strategies)
+    }, error = function(e) {
+        message("Warning: Could not parse column_agg_strategies JSON: ", conditionMessage(e))
+        column_agg_strategies <- list()
+    })
+}
+
+message("→ Column aggregation strategies loaded: ", length(column_agg_strategies), " columns")
+if (length(column_agg_strategies) > 0) {
+    # Count aggregations by type
+    agg_counts <- table(unlist(column_agg_strategies))
+    message("   Aggregations by type: ", paste(names(agg_counts), "=", agg_counts, collapse = ", "))
+}
 
 # Helper function to parse comma-separated strings from config
 parse_csv_config <- function(x) {
@@ -663,9 +681,9 @@ df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
 ## ---------- RESAMPLING ----------
 # Apply resampling if configured (Weekly or Monthly aggregation)
-message("→ Resampling configuration: freq=", resample_freq, ", agg=", resample_agg)
+message("→ Resampling configuration: freq=", resample_freq)
 if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
-    message("→ Applying resampling to data...")
+    message("→ Applying resampling to data with per-column aggregations from metadata...")
 
     # Log pre-resample state
     pre_resample_rows <- nrow(df)
@@ -679,19 +697,6 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
             numeric_cols <- names(df)[sapply(df, is.numeric)]
             non_numeric_cols <- setdiff(names(df), c(date_col, numeric_cols))
 
-            # Determine aggregation function with explicit handling of invalid types
-            agg_func <- switch(resample_agg,
-                "sum" = sum,
-                "mean" = mean,
-                "max" = max,
-                "min" = min,
-                {
-                    # Default case: unsupported aggregation type
-                    message("   ⚠️ WARNING: Unsupported aggregation type '", resample_agg, "', defaulting to 'sum'")
-                    sum
-                }
-            )
-
             # Create time period grouping based on frequency
             if (resample_freq == "W") {
                 # Weekly aggregation (week starts on Monday)
@@ -703,7 +708,7 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
                 df$resample_period <- floor_date(df$date, unit = "month")
             }
 
-            # Aggregate numeric columns
+            # Aggregate numeric columns using per-column strategies
             # Note: na.rm=TRUE removes missing values during aggregation. This is intentional
             # to handle gaps in data, but be aware that this silently removes NAs.
             # Count NAs before aggregation for logging
@@ -717,12 +722,48 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
                 }
             }
 
+            # Build per-column aggregation expressions
+            # For each numeric column, use the aggregation strategy from metadata or default to sum
+            agg_exprs <- list()
+            agg_summary <- list()
+            
+            for (col in numeric_cols) {
+                # Get aggregation strategy from metadata, default to "sum"
+                agg_strategy <- column_agg_strategies[[col]] %||% "sum"
+                
+                # Map aggregation strategy to R function
+                agg_func <- switch(agg_strategy,
+                    "sum" = sum,
+                    "mean" = mean,
+                    "max" = max,
+                    "min" = min,
+                    "auto" = first,  # For categorical/flag columns, take first value
+                    {
+                        # Default case: unsupported aggregation type, default to sum
+                        message("   ⚠️ WARNING: Unsupported aggregation type '", agg_strategy, "' for column '", col, "', defaulting to 'sum'")
+                        sum
+                    }
+                )
+                
+                # Create aggregation expression for this column
+                agg_exprs[[col]] <- quo(agg_func(!!sym(col), na.rm = TRUE))
+                
+                # Track aggregation types for summary
+                agg_summary[[agg_strategy]] <- (agg_summary[[agg_strategy]] %||% 0) + 1
+            }
+
+            # Log aggregation summary
+            if (length(agg_summary) > 0) {
+                agg_summary_str <- paste(names(agg_summary), "=", agg_summary, collapse = ", ")
+                message("   Column aggregations: ", agg_summary_str)
+            } else {
+                message("   Using default 'sum' aggregation for all numeric columns")
+            }
+
+            # Apply aggregations using the dynamically built expressions
             df_resampled <- df %>%
                 group_by(resample_period) %>%
-                summarise(
-                    across(all_of(numeric_cols), ~ agg_func(.x, na.rm = TRUE)),
-                    .groups = "drop"
-                )
+                summarise(!!!agg_exprs, .groups = "drop")
 
             # Handle non-numeric columns (take first value in each period)
             if (length(non_numeric_cols) > 0) {
@@ -750,7 +791,6 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
             post_resample_date_range <- paste(min(df$date), "to", max(df$date))
             message("✅ Resampling complete:")
             message("   Post-resample: ", post_resample_rows, " rows, date range: ", post_resample_date_range)
-            message("   Aggregation: ", resample_agg, " applied to numeric columns")
             message(
                 "   Rows reduced from ", pre_resample_rows, " to ", post_resample_rows,
                 " (", round(100 * (1 - post_resample_rows / pre_resample_rows), 1), "% reduction)"
@@ -770,7 +810,6 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
                 "RESAMPLING ERROR",
                 paste0("When: ", Sys.time()),
                 paste0("Frequency: ", resample_freq),
-                paste0("Aggregation: ", resample_agg),
                 paste0("Message: ", conditionMessage(e)),
                 "",
                 "Stack trace:",
