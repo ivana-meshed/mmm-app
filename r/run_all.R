@@ -581,33 +581,49 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
     message("   Pre-resample: ", pre_resample_rows, " rows, date range: ", pre_resample_date_range)
     
     tryCatch({
-        # Determine aggregation period
-        period <- if (resample_freq == "W") "week" else "month"
-        
         # Separate numeric and non-numeric columns
         date_col <- "date"
         numeric_cols <- names(df)[sapply(df, is.numeric)]
         non_numeric_cols <- setdiff(names(df), c(date_col, numeric_cols))
         
-        # Determine aggregation function
+        # Determine aggregation function with explicit handling of invalid types
         agg_func <- switch(resample_agg,
             "sum" = sum,
             "mean" = mean,
             "max" = max,
             "min" = min,
-            sum  # default to sum
+            {
+                # Default case: unsupported aggregation type
+                message("   ⚠️ WARNING: Unsupported aggregation type '", resample_agg, "', defaulting to 'sum'")
+                sum
+            }
         )
         
-        # Create time period grouping
+        # Create time period grouping based on frequency
         if (resample_freq == "W") {
             # Weekly aggregation (week starts on Monday)
+            message("   Using weekly aggregation (weeks start on Monday)")
             df$resample_period <- floor_date(df$date, unit = "week", week_start = 1)
         } else {
             # Monthly aggregation  
+            message("   Using monthly aggregation")
             df$resample_period <- floor_date(df$date, unit = "month")
         }
         
         # Aggregate numeric columns
+        # Note: na.rm=TRUE removes missing values during aggregation. This is intentional
+        # to handle gaps in data, but be aware that this silently removes NAs.
+        # Count NAs before aggregation for logging
+        na_counts_before <- colSums(is.na(df[numeric_cols]))
+        total_nas <- sum(na_counts_before)
+        if (total_nas > 0) {
+            message("   ℹ️ Note: ", total_nas, " NA values found in numeric columns before resampling")
+            top_na_cols <- head(sort(na_counts_before[na_counts_before > 0], decreasing = TRUE), 5)
+            if (length(top_na_cols) > 0) {
+                message("   Top columns with NAs: ", paste(names(top_na_cols), "=", top_na_cols, collapse = ", "))
+            }
+        }
+        
         df_resampled <- df %>%
             group_by(resample_period) %>%
             summarise(
