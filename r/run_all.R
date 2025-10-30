@@ -518,26 +518,56 @@ names(df) <- toupper(names(df))
 ## ---------- DATE & CLEAN ----------
 # Use date_var_name to find the date column name (convert to uppercase since all names are uppercase now)
 date_col_name <- toupper(date_var_name)
+message("→ Looking for date column: date_var_name='", date_var_name, "', uppercased='", date_col_name, "'")
+message("   Available columns: ", paste(head(names(df), 20), collapse = ", "), if (length(names(df)) > 20) "..." else "")
 
 if (date_col_name %in% names(df)) {
+    message("   Found column '", date_col_name, "', creating 'date' column")
     df$date <- if (inherits(df[[date_col_name]], "POSIXt")) as.Date(df[[date_col_name]]) else as.Date(as.character(df[[date_col_name]]))
-    df[[date_col_name]] <- NULL
+    # Only remove the original column if it's different from 'date'
+    if (date_col_name != "DATE" || !"date" %in% names(df)) {
+        df[[date_col_name]] <- NULL
+    }
 } else if ("DATE" %in% names(df)) {
     # Fallback to DATE if date_var column not found
+    message("   Column '", date_col_name, "' not found, using fallback 'DATE' column")
     df$date <- if (inherits(df$DATE, "POSIXt")) as.Date(df$DATE) else as.Date(as.character(df$DATE))
     df$DATE <- NULL
 } else {
-    stop("No date column found. Expected column name: ", date_var_name, " (or DATE as fallback)")
+    stop("No date column found. Expected column name: ", date_var_name, " (uppercased: ", date_col_name, "). Available columns: ", paste(names(df), collapse = ", "))
 }
 
+# Verify date column exists and has valid data
+if (!"date" %in% names(df)) {
+    stop("FATAL: 'date' column was not created successfully")
+}
+if (nrow(df) == 0) {
+    stop("FATAL: Dataframe has 0 rows after date column creation")
+}
+message("✅ Date column created: ", nrow(df), " rows, range: ", min(df$date, na.rm = TRUE), " to ", max(df$date, na.rm = TRUE))
+
 df <- filter_by_country(df, country)
+
+# Verify date column still exists after filtering
+if (!"date" %in% names(df)) {
+    stop("FATAL: 'date' column disappeared after filter_by_country")
+}
+if (nrow(df) == 0) {
+    stop("FATAL: No data remaining after filtering by country: ", country)
+}
+message("→ After country filter: ", nrow(df), " rows")
 
 if (anyDuplicated(df$date)) {
     message("→ Collapsing duplicated dates: ", sum(duplicated(df$date)))
     sum_or_first <- function(x) if (is.numeric(x)) sum(x, na.rm = TRUE) else dplyr::first(x)
+    # Verify date column exists before trying to group by it
+    if (!"date" %in% names(df)) {
+        stop("FATAL: 'date' column missing before deduplication")
+    }
     df <- df %>%
         dplyr::group_by(date) %>%
         dplyr::summarise(dplyr::across(!dplyr::all_of("date"), sum_or_first), .groups = "drop")
+    message("   After deduplication: ", nrow(df), " rows")
 }
 
 df <- fill_day(df)
