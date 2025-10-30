@@ -519,22 +519,23 @@ names(df) <- toupper(names(df))
 # Use date_var_name to find the date column name (convert to uppercase since all names are uppercase now)
 date_col_name <- toupper(date_var_name)
 message("→ Looking for date column: date_var_name='", date_var_name, "', uppercased='", date_col_name, "'")
-message("   Available columns: ", paste(head(names(df), 20), collapse = ", "), if (length(names(df)) > 20) "..." else "")
+message("   Available columns (all uppercase): ", paste(head(names(df), 20), collapse = ", "), if (length(names(df)) > 20) "..." else "")
 
 if (date_col_name %in% names(df)) {
-    message("   Found column '", date_col_name, "', creating 'date' column")
-    df$date <- if (inherits(df[[date_col_name]], "POSIXt")) as.Date(df[[date_col_name]]) else as.Date(as.character(df[[date_col_name]]))
-    # Always remove the original column if it's not the lowercase 'date' we want
+    message("   Found column '", date_col_name, "', converting to Date type")
+    # Convert the date column in place
+    df[[date_col_name]] <- if (inherits(df[[date_col_name]], "POSIXt")) as.Date(df[[date_col_name]]) else as.Date(as.character(df[[date_col_name]]))
+    # Now rename it to lowercase 'date' if it's not already lowercase 'date'
     if (date_col_name != "date") {
-        df[[date_col_name]] <- NULL
-        message("   Removed original column '", date_col_name, "'")
+        names(df)[names(df) == date_col_name] <- "date"
+        message("   Renamed '", date_col_name, "' to 'date'")
     }
 } else if ("DATE" %in% names(df)) {
     # Fallback to DATE if date_var column not found
     message("   Column '", date_col_name, "' not found, using fallback 'DATE' column")
-    df$date <- if (inherits(df$DATE, "POSIXt")) as.Date(df$DATE) else as.Date(as.character(df$DATE))
-    df$DATE <- NULL
-    message("   Removed original 'DATE' column")
+    df$DATE <- if (inherits(df$DATE, "POSIXt")) as.Date(df$DATE) else as.Date(as.character(df$DATE))
+    names(df)[names(df) == "DATE"] <- "date"
+    message("   Renamed 'DATE' to 'date'")
 } else {
     stop("No date column found. Expected column name: ", date_var_name, " (uppercased: ", date_col_name, "). Available columns: ", paste(names(df), collapse = ", "))
 }
