@@ -1269,14 +1269,57 @@ gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "Inp
 
 ## ---------- OUTPUTS & ONEPAGERS ----------
 flush_and_ship_log("before robyn_outputs")
-OutputCollect <- robyn_outputs(
-    InputCollect, OutputModels,
-    pareto_fronts = 2, csv_out = "pareto",
-    min_candidates = 5, clusters = FALSE,
-    export = TRUE, plot_folder = dir_path,
-    plot_pareto = FALSE, cores = NULL
+OutputCollect <- tryCatch(
+    {
+        robyn_outputs(
+            InputCollect, OutputModels,
+            pareto_fronts = 2, csv_out = "pareto",
+            min_candidates = 5, clusters = FALSE,
+            export = TRUE, plot_folder = dir_path,
+            plot_pareto = FALSE, cores = NULL
+        )
+    },
+    error = function(e) {
+        msg <- conditionMessage(e)
+        message("❌ robyn_outputs() FAILED: ", msg)
+        
+        # Write error file
+        err_file <- file.path(dir_path, "robyn_outputs_error.txt")
+        writeLines(c(
+            "robyn_outputs() FAILED",
+            paste0("When: ", Sys.time()),
+            paste0("Message: ", msg),
+            "",
+            "Stack trace:",
+            paste(capture.output(traceback()), collapse = "\n")
+        ), err_file)
+        gcs_put_safe(err_file, file.path(gcs_prefix, basename(err_file)))
+        
+        return(NULL)
+    }
 )
 flush_and_ship_log("after robyn_outputs")
+
+# Check if robyn_outputs succeeded
+if (is.null(OutputCollect)) {
+    err_msg <- "robyn_outputs() returned NULL or failed"
+    message("FATAL: ", err_msg)
+    
+    writeLines(
+        jsonlite::toJSON(list(
+            state = "FAILED",
+            step = "robyn_outputs",
+            start_time = as.character(job_started),
+            end_time = as.character(Sys.time()),
+            error = err_msg
+        ), auto_unbox = TRUE, pretty = TRUE),
+        status_json
+    )
+    gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+    cleanup()
+    quit(status = 1)
+}
+
 saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
 
