@@ -1006,7 +1006,7 @@ def build_job_config_from_params(
     timestamp: str,
     annotations_gcs_path: Optional[str],
 ) -> dict:
-    return {
+    config = {
         "country": params["country"],
         "iterations": int(params["iterations"]),
         "trials": int(params["trials"]),
@@ -1060,6 +1060,12 @@ def build_job_config_from_params(
         "parallel_processing": True,
         "max_cores": 8,
     }
+    
+    # Add custom_hyperparameters if present
+    if "custom_hyperparameters" in params and params["custom_hyperparameters"]:
+        config["custom_hyperparameters"] = params["custom_hyperparameters"]
+    
+    return config
 
 
 def _sanitize_queue_name(name: str) -> str:
