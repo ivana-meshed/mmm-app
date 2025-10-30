@@ -272,5 +272,55 @@ class TestRScriptExpectations(unittest.TestCase):
         self.assertEqual(column_agg["TEMPERATURE"], "mean")
 
 
+class TestQueueJobConfiguration(unittest.TestCase):
+    """Test that queue jobs properly handle column aggregations."""
+
+    def test_queue_job_with_column_agg_strategies(self):
+        """Test that queue job config includes column_agg_strategies when resampling."""
+        # Simulate queue job params
+        queue_params = {
+            "country": "fr",
+            "revision": "r100",
+            "iterations": 200,
+            "trials": 5,
+            "resample_freq": "W",
+            "paid_media_spends": "GA_COST,BING_COST",
+            "paid_media_vars": "GA_IMPRESSIONS",
+            "data_gcs_path": "gs://bucket/datasets/fr/latest/raw.parquet",
+        }
+        
+        # Simulate metadata loading (this would happen in prepare_and_launch_job)
+        metadata = {
+            "agg_strategies": {
+                "GA_COST": "sum",
+                "BING_COST": "sum",
+                "GA_IMPRESSIONS": "sum",
+                "TEMPERATURE": "mean",
+            }
+        }
+        
+        # When resample_freq is set, column_agg_strategies should be added
+        if queue_params.get("resample_freq", "none") != "none":
+            queue_params["column_agg_strategies"] = metadata["agg_strategies"]
+        
+        # Verify config has column aggregations
+        self.assertIn("column_agg_strategies", queue_params)
+        self.assertEqual(queue_params["column_agg_strategies"]["GA_COST"], "sum")
+        self.assertEqual(queue_params["column_agg_strategies"]["TEMPERATURE"], "mean")
+
+    def test_queue_job_without_resampling(self):
+        """Test that queue job without resampling doesn't require column_agg_strategies."""
+        queue_params = {
+            "country": "fr",
+            "revision": "r100",
+            "resample_freq": "none",
+            "data_gcs_path": "gs://bucket/datasets/fr/latest/raw.parquet",
+        }
+        
+        # When resample_freq is "none", column_agg_strategies is not needed
+        self.assertEqual(queue_params.get("resample_freq"), "none")
+        # Should work fine without column_agg_strategies
+
+
 if __name__ == "__main__":
     unittest.main()

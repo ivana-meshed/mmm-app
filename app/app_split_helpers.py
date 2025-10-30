@@ -241,6 +241,32 @@ def prepare_and_launch_job(params: dict) -> dict:
 
     # Optional annotations (batch: pass a gs:// in params)
     annotations_gcs_path = params.get("annotations_gcs_path") or None
+    
+    # Load metadata to get column_agg_strategies for resampling
+    # This ensures queue jobs use per-column aggregations from metadata
+    if params.get("resample_freq", "none") != "none":
+        try:
+            from google.cloud import storage
+            country = params.get("country", "").lower()
+            # Try to load latest metadata for this country
+            client = storage.Client()
+            bucket = client.bucket(gcs_bucket)
+            metadata_blob_path = f"metadata/{country}/latest/mapping.json"
+            blob = bucket.blob(metadata_blob_path)
+            
+            if blob.exists():
+                metadata = json.loads(blob.download_as_bytes())
+                column_agg_strategies = metadata.get("agg_strategies", {})
+                if column_agg_strategies:
+                    params["column_agg_strategies"] = column_agg_strategies
+                    logger.info(f"Loaded {len(column_agg_strategies)} column aggregation strategies from metadata for country {country}")
+                else:
+                    logger.warning(f"No column_agg_strategies found in metadata for country {country}")
+            else:
+                logger.warning(f"Metadata not found at {metadata_blob_path}, using default aggregations")
+        except Exception as e:
+            logger.warning(f"Could not load metadata for column aggregations: {e}")
+            # Continue without column_agg_strategies - R script will default to sum
 
     # 4) Create config (timestamped + latest)
     with tempfile.TemporaryDirectory() as td:
