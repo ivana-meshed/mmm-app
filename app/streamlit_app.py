@@ -1,10 +1,10 @@
 # streamlit_app.py (proposed new Home)
 import streamlit as st
-from app_split_helpers import *
 
 st.set_page_config(
     page_title="Robyn MMM Trainer", page_icon="📊", layout="wide"
 )
+from app_split_helpers import *
 
 st.title("Robyn MMM Trainer")
 

@@ -13,6 +13,9 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+
+st.set_page_config(page_title="Experiment", page_icon="🧪", layout="wide")
+
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -34,12 +37,16 @@ job_manager = get_job_manager()
 
 from app_split_helpers import *  # bring in all helper functions/constants
 
-st.set_page_config(page_title="Experiment", page_icon="🧪", layout="wide")
 
 require_login_and_domain()
 ensure_session_defaults()
 
 st.title("Experiment")
+
+# Check if we should show a message to switch to Queue tab (Issue #5)
+if st.session_state.get("switch_to_queue_tab", False):
+    st.success("✅ Configuration added to queue! Please switch to the **Queue** tab to monitor progress.")
+    st.session_state["switch_to_queue_tab"] = False
 
 tab_single, tab_queue = st.tabs(["Single run", "Queue"])
 
@@ -60,6 +67,22 @@ def _list_country_versions(bucket: str, country: str) -> List[str]:
     versions = sorted(ts, reverse=True)
     # Replace "latest" with "Latest" if present
     return ["Latest" if v.lower() == "latest" else v for v in versions]
+
+
+def _list_metadata_versions(bucket: str, country: str) -> List[str]:
+    """Return timestamp folder names available in metadata/<country>/."""
+    client = storage.Client()
+    prefix = f"metadata/{country.lower().strip()}/"
+    blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+    ts = set()
+    for blob in blobs:
+        parts = blob.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "mapping.json" and parts[-2] != "latest":
+            ts.add(parts[-2])
+    versions = sorted(ts, reverse=True)
+    # Replace "latest" with "Latest" if present
+    return ["Latest" if v.lower() == "latest" else v for v in versions]
+
 
 
 def _get_data_blob(country: str, version: str) -> str:
@@ -131,6 +154,15 @@ with tab_single:
 
     # Data selection
     with st.expander("Data selection", expanded=True):
+        # Show current loaded state (point 4 - UI representing actual state)
+        if "preview_df" in st.session_state and st.session_state["preview_df"] is not None:
+            loaded_country = st.session_state.get("selected_country", "N/A")
+            loaded_version = st.session_state.get("selected_version", "N/A")
+            loaded_metadata_source = st.session_state.get("selected_metadata", "N/A")
+            st.info(f"🔵 **Currently Loaded:** Data: {loaded_country.upper()} - {loaded_version} | Metadata: {loaded_metadata_source}")
+        else:
+            st.warning("⚪ No data loaded yet")
+        
         # Country selection
         available_countries = ["fr", "de", "it", "es", "nl", "uk"]
         selected_country = st.selectbox(
@@ -140,8 +172,45 @@ with tab_single:
             help="Select the country for which to load data",
         )
 
-        # Get available data versions for selected country
+        # Get available metadata versions (including universal)
         gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
+        try:
+            # Get country-specific metadata versions
+            country_meta_versions = _list_metadata_versions(gcs_bucket, selected_country)  # type: ignore
+            # Get universal metadata versions
+            universal_meta_versions = _list_metadata_versions(gcs_bucket, "universal")  # type: ignore
+
+            # Combine and format metadata options
+            metadata_options = []
+            if universal_meta_versions:
+                # Add universal options first (default)
+                metadata_options.extend(
+                    [f"Universal - {v}" for v in universal_meta_versions]
+                )
+            if country_meta_versions:
+                # Add country-specific options
+                metadata_options.extend(
+                    [
+                        f"{selected_country.upper()} - {v}"
+                        for v in country_meta_versions
+                    ]
+                )
+
+            if not metadata_options:
+                metadata_options = ["Universal - Latest"]
+        except Exception as e:
+            st.warning(f"Could not list metadata versions: {e}")
+            metadata_options = ["Universal - Latest"]
+
+        # Metadata source selection (NEW - above data source)
+        selected_metadata = st.selectbox(
+            "Metadata source",
+            options=metadata_options,
+            index=0,
+            help="Select metadata configuration. Universal mappings work for all countries. Latest = most recently saved metadata.",
+        )
+
+        # Get available data versions for selected country
         try:
             available_versions = _list_country_versions(gcs_bucket, selected_country)  # type: ignore
             if not available_versions:
@@ -159,7 +228,7 @@ with tab_single:
         )
 
         # Load data button with automatic preview
-        if st.button("Load selected data", type="primary"):
+        if st.button("Load selected data", type="primary", use_container_width=True):
             tmp_path = None
             try:
                 with st.spinner("Loading data from GCS..."):
@@ -174,15 +243,52 @@ with tab_single:
                         st.session_state["selected_country"] = selected_country
                         st.session_state["selected_version"] = selected_version
 
-                        # Load metadata
+                        # Parse metadata selection to get country and version
+                        meta_parts = selected_metadata.split(" - ")
+                        meta_country = (
+                            "universal"
+                            if meta_parts[0] == "Universal"
+                            else selected_country
+                        )
+                        meta_version = (
+                            meta_parts[1] if len(meta_parts) > 1 else "Latest"
+                        )
+
+                        # Load metadata from selected source
                         metadata = _load_metadata_from_gcs(
-                            gcs_bucket, selected_country, selected_version  # type: ignore
+                            gcs_bucket, meta_country, meta_version  # type: ignore
                         )
                         st.session_state["loaded_metadata"] = metadata
+                        st.session_state["selected_metadata"] = (
+                            selected_metadata
+                        )
 
                         st.success(
-                            f"✅ Loaded {len(df_prev)} rows, {len(df_prev.columns)} columns"
+                            f"✅ Loaded {len(df_prev)} rows, {len(df_prev.columns)} columns from **{selected_country.upper()}** - {selected_version}"
                         )
+                        st.info(f"📋 Using metadata: **{selected_metadata}**")
+                        
+                        # Display summary of loaded data (Issue #1 fix: show goals details)
+                        with st.expander("📊 Loaded Data Summary", expanded=True):
+                            st.write(f"**Data Source:** {selected_country.upper()} - {selected_version}")
+                            st.write(f"**Metadata Source:** {selected_metadata}")
+                            st.write(f"**Rows:** {len(df_prev):,}")
+                            st.write(f"**Columns:** {len(df_prev.columns)}")
+                            
+                            if metadata:
+                                if "goals" in metadata and metadata["goals"]:
+                                    st.write(f"**Goals:** {len(metadata['goals'])} goal(s)")
+                                    # Show detailed goals information
+                                    for g in metadata["goals"]:
+                                        main_indicator = " (Main)" if g.get("main", False) else ""
+                                        st.write(f"  - {g['var']}: {g.get('type', 'N/A')} ({g.get('group', 'N/A')}){main_indicator}")
+                                if "mapping" in metadata:
+                                    total_vars = sum(len(v) for v in metadata['mapping'].values() if isinstance(v, list))
+                                    st.write(f"**Mapped Variables:** {total_vars}")
+                                if "data" in metadata:
+                                    data_info = metadata['data']
+                                    st.write(f"**Date Field:** {data_info.get('date_field', 'N/A')}")
+                                    
             except Exception as e:
                 st.error(f"Failed to load data: {e}")
             finally:
@@ -199,657 +305,1091 @@ with tab_single:
                 st.session_state["preview_df"].head(5), use_container_width=True
             )
 
-        # Robyn config
-        with st.expander("Robyn configuration", expanded=True):
-            # Country auto-filled from Data Selection
-            country = st.session_state.get("selected_country", "fr")
-            st.info(f"**Country:** {country.upper()} (from Data Selection)")
+    # Load Configuration (moved outside Data selection expander)
+    with st.expander("📥 Load Training Configuration", expanded=False):
+        st.caption(
+            "Load a previously saved configuration to apply to current data."
+        )
 
-            # Iterations and Trials as presets
-            preset_options = {
-                "Test run": {"iterations": 200, "trials": 3},
-                "Production": {"iterations": 2000, "trials": 5},
-                "Custom": {"iterations": 5000, "trials": 10},
-            }
-            preset_choice = st.selectbox(
-                "Training preset",
-                options=list(preset_options.keys()),
-                index=0,
-                help="Choose a training preset or use custom values",
-            )
+        gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
 
-            if preset_choice == "Custom":
-                col1, col2 = st.columns(2)
-                with col1:
-                    iterations = st.number_input(
-                        "Iterations", value=5000, min_value=50, step=100
-                    )
-                with col2:
-                    trials = st.number_input(
-                        "Trials", value=10, min_value=1, step=1
-                    )
-            else:
-                iterations = preset_options[preset_choice]["iterations"]  # type: ignore
-                trials = preset_options[preset_choice]["trials"]  # type: ignore
-                st.info(f"**Iterations:** {iterations}, **Trials:** {trials}")
-
-            # Train size stays as is
-            train_size = st.text_input(
-                "Train size",
-                value="0.7,0.9",
-                help="Comma-separated train/validation split ratios",
-            )
-
-            # Revision tag - auto-prefilled with latest
-            default_revision = _get_latest_revision(gcs_bucket, country)
-            revision = st.text_input(
-                "Revision tag",
-                value=default_revision,
-                help="Revision identifier for organizing outputs",
-            )
-
-            # Training date range instead of single date tag
-            col1, col2 = st.columns(2)
-            with col1:
-                start_data_date = st.date_input(
-                    "Training start date",
-                    value=datetime(2024, 1, 1).date(),
-                    help="Start date for training data window (start_data_date in R script)",
-                )
-            with col2:
-                end_data_date = st.date_input(
-                    "Training end date",
-                    value=datetime.now().date(),
-                    help="End date for training data window (end_data_date in R script)",
-                )
-
-            # Convert dates to strings for config
-            start_date_str = start_data_date.strftime("%Y-%m-%d")  # type: ignore
-            end_date_str = end_data_date.strftime("%Y-%m-%d")  # type: ignore
-
-            # Goal variable from metadata
-            metadata = st.session_state.get("loaded_metadata")
-            if metadata and "goals" in metadata:
-                goal_options = [
-                    g["var"]
-                    for g in metadata["goals"]
-                    if g.get("group") == "primary"
-                ]
-                if goal_options:
-                    dep_var = st.selectbox(
-                        "Goal variable",
-                        options=goal_options,
-                        index=0,
-                        help="Primary goal variable (dependent variable) for the model",
-                    )
-                    # Find the corresponding type
-                    dep_var_type = next(
-                        (
-                            g["type"]
-                            for g in metadata["goals"]
-                            if g["var"] == dep_var
-                        ),
-                        "revenue",
-                    )
-                else:
-                    dep_var = st.text_input(
-                        "Goal variable", value="UPLOAD_VALUE"
-                    )
-                    dep_var_type = "revenue"
-            else:
-                dep_var = st.text_input(
-                    "Goal variable",
-                    value="UPLOAD_VALUE",
-                    help="Dependent variable column in your data",
-                )
-                dep_var_type = "revenue"
-
-            # Goals type - display and allow override
-            dep_var_type = st.selectbox(
-                "Goals type",
-                options=["revenue", "conversion"],
-                index=0 if dep_var_type == "revenue" else 1,
-                help="Type of the goal variable: revenue (monetary) or conversion (count)",
-            )
-
-            # Date variable
-            date_var = st.text_input(
-                "date_var",
-                value="date",
-                help="Date column in your data (e.g., date)",
-            )
-
-            # Adstock selection
-            adstock = st.selectbox(
-                "adstock",
-                options=["geometric", "weibull_cdf", "weibull_pdf"],
-                index=0,
-                help="Robyn adstock function",
-            )
-
-            # Hyperparameters - conditional on adstock
-            st.write("**Hyperparameters**")
-            hyperparameter_preset = st.selectbox(
-                "Hyperparameter preset",
-                options=["Facebook recommend", "Meshed recommend", "Custom"],
-                index=1,
-                help="Choose hyperparameter preset or define custom values",
-            )
-
-            # Store the hyperparameter choice for later use
-            st.session_state["hyperparameter_preset"] = hyperparameter_preset
-            st.session_state["adstock_choice"] = adstock
-
-            # NEW: optional resampling
-            c_rs1, c_rs2 = st.columns([1, 1])
-            resample_freq_label = c_rs1.selectbox(
-                "Resample input data (optional)",
-                ["None", "Weekly (W)", "Monthly (M)"],
-                index=0,
-                help="Aggregates the input before training.",
-            )
-            resample_freq = {
-                "None": "none",
-                "Weekly (W)": "W",
-                "Monthly (M)": "M",
-            }.get(resample_freq_label or "None", "none")
-
-            resample_agg_label = c_rs2.selectbox(
-                "Aggregation for metrics (when resampling)",
-                ["sum", "avg (mean)", "max", "min"],
-                index=0,
-                help="Applied to numeric columns during resample.",
-            )
-            resample_agg = {
-                "sum": "sum",
-                "avg (mean)": "mean",
-                "max": "max",
-                "min": "min",
-            }.get(resample_agg_label or "sum", "sum")
-
-        # Variables
-        with st.expander("Variable mapping", expanded=True):
-            # Get available columns from loaded data
-            preview_df = st.session_state.get("preview_df")
-            if preview_df is not None and not preview_df.empty:
-                # Get all columns except date column
-                all_columns = [
-                    col for col in preview_df.columns if col.lower() != "date"
-                ]
-            else:
-                # Fallback to empty list if no data loaded yet
-                all_columns = []
-
-            # Auto-populate from metadata if available
-            metadata = st.session_state.get("loaded_metadata")
-
-            default_values = {
-                "paid_media_spends": [],
-                "paid_media_vars": [],
-                "context_vars": ["IS_WEEKEND", "TV_IS_ON"],
-                "factor_vars": ["IS_WEEKEND", "TV_IS_ON"],
-                "organic_vars": ["ORGANIC_TRAFFIC"],
-            }
-
-            # Extract values from metadata if available
-            if metadata and "mapping" in metadata:
-                mapping_raw = metadata["mapping"]
-
-                # Normalize mapping into a list of dicts with keys 'var' and 'category'
-                normalized_mapping: List[Dict[str, Optional[str]]] = []
-                try:
-                    if isinstance(mapping_raw, dict):
-                        # Two common shapes:
-                        # 1) { category: [var1, var2, ...], ... }
-                        # 2) { var_name: { "category": "...", ... }, ... } OR { var_name: "category" }
-                        values_are_lists = all(
-                            isinstance(v, list) for v in mapping_raw.values()
-                        )
-                        if values_are_lists:
-                            # keys are categories
-                            for cat_key, vars_list in mapping_raw.items():
-                                for v in vars_list:
-                                    normalized_mapping.append(
-                                        {"var": v, "category": cat_key}
-                                    )
-                        else:
-                            # keys are var names
-                            for var_name, val in mapping_raw.items():
-                                if isinstance(val, dict):
-                                    category = val.get("category")
-                                elif isinstance(val, str):
-                                    category = val
-                                else:
-                                    category = None
-                                normalized_mapping.append(
-                                    {"var": var_name, "category": category}
-                                )
-                    elif isinstance(mapping_raw, list):
-                        # List may contain dicts or strings
-                        for item in mapping_raw:
-                            if isinstance(item, dict):
-                                # Expect item to have 'var' and maybe 'category'
-                                normalized_mapping.append(
-                                    {
-                                        "var": item.get("var")
-                                        or item.get("name")
-                                        or None,
-                                        "category": item.get("category"),
-                                    }
-                                )
-                            elif isinstance(item, str):
-                                # Bare var name with unknown category
-                                normalized_mapping.append(
-                                    {"var": item, "category": None}
-                                )
-                    # Fallback: if normalization yielded nothing, leave mapping_empty
-                except Exception:
-                    normalized_mapping = []
-
-                # Use normalized mapping to fill defaults per category when possible
-                for cat in [
-                    "paid_media_spends",
-                    "paid_media_vars",
-                    "context_vars",
-                    "factor_vars",
-                    "organic_vars",
-                ]:
-                    vars_in_cat = [
-                        m.get("var")
-                        for m in normalized_mapping
-                        if m.get("category") == cat and m.get("var")
-                    ]
-                    if vars_in_cat:
-                        default_values[cat] = [
-                            v for v in vars_in_cat if v is not None
-                        ]
-
-            # Filter defaults to only include columns that exist in the data
-            if all_columns:
-                for cat in default_values:
-                    default_values[cat] = [
-                        v for v in default_values[cat] if v in all_columns
-                    ]
-
-            # If no data is loaded, show a warning
-            if not all_columns:
-                st.warning(
-                    "⚠️ Please load data first to see available columns for selection."
-                )
-
-            # Helper function to parse channel and subchannel from variable name
-            def _parse_var_components(var_name: str) -> dict:
-                """Parse variable name into channel, subchannel, suffix"""
-                parts = var_name.split("_")
-                if len(parts) >= 2:
-                    channel = parts[0]
-                    suffix = parts[-1]
-                    subchannel = "_".join(parts[1:-1]) if len(parts) > 2 else ""
-                    return {
-                        "channel": channel,
-                        "subchannel": subchannel,
-                        "suffix": suffix,
-                    }
-                return {"channel": "", "subchannel": "", "suffix": var_name}
-
-            # Initialize session state for spend-var mapping if not present
-            if "spend_var_mapping" not in st.session_state:
-                st.session_state["spend_var_mapping"] = {}
-
-            # Get all paid_media_spends from metadata
-            available_spends = [
-                v
-                for v in default_values["paid_media_spends"]
-                if v in all_columns
+        # List available configurations
+        try:
+            client = storage.Client()
+            current_country = st.session_state.get("selected_country", "fr")
+            prefix = f"training-configs/saved/{current_country}/"
+            blobs = client.list_blobs(gcs_bucket, prefix=prefix)
+            available_configs = [
+                blob.name.split("/")[-1].replace(".json", "")
+                for blob in blobs
+                if blob.name.endswith(".json")
             ]
 
-            # Display paid_media_spends first (all selected by default)
-            st.markdown("**Paid Media Configuration**")
-            st.caption(
-                "Select paid media spend channels. For each spend, you can choose the corresponding variable metric."
-            )
-
-            paid_media_spends_list = st.multiselect(
-                "paid_media_spends (Select channels to include)",
-                options=available_spends,
-                default=available_spends,  # All selected by default
-                help="Select media spend columns to include in the model",
-            )
-
-            # For each selected spend, show corresponding var options
-            paid_media_vars_list = []
-            spend_var_mapping = {}
-
-            if paid_media_spends_list:
-                st.markdown("**Variable Selection for Each Spend**")
-                st.caption(
-                    "For each spend channel, select the corresponding metric variable. "
-                    "If none selected, the spend column itself will be used."
+            if available_configs:
+                selected_config = st.selectbox(
+                    "Select configuration to load",
+                    options=available_configs,
+                    help=f"Configurations available for {current_country.upper()}",
                 )
 
-                for spend in paid_media_spends_list:
-                    # Parse the spend variable to get channel and subchannel
-                    parsed = _parse_var_components(spend)
-                    channel = parsed["channel"]
-                    subchannel = parsed["subchannel"]
-
-                    # Find all paid_media_vars with same channel and subchannel
-                    if subchannel:
-                        # Match pattern: CHANNEL_SUBCHANNEL_*
-                        pattern_prefix = f"{channel}_{subchannel}_"
-                        matching_vars = [
-                            v
-                            for v in default_values["paid_media_vars"]
-                            if v.startswith(pattern_prefix) and v in all_columns
-                        ]
-                    else:
-                        # Match pattern: CHANNEL_* (but not CHANNEL_CUSTOM or CHANNEL_TOTAL_*)
-                        matching_vars = [
-                            v
-                            for v in default_values["paid_media_vars"]
-                            if v.startswith(f"{channel}_")
-                            and v in all_columns
-                            and not v.endswith("_CUSTOM")
-                            and "_TOTAL_" not in v
-                        ]
-
-                    # Default to the first matching var or the spend itself
-                    default_var = (
-                        st.session_state["spend_var_mapping"].get(spend)
-                        or (matching_vars[0] if matching_vars else spend)
-                    )
-
-                    # Ensure default_var is in the options
-                    if default_var not in matching_vars and default_var != spend:
-                        default_var = matching_vars[0] if matching_vars else spend
-
-                    # Add the spend itself as an option
-                    var_options = matching_vars + [spend]
-                    var_options = sorted(set(var_options))
-
-                    # Find the index of the default
+                if st.button("📥 Load Configuration", use_container_width=True):
                     try:
-                        default_idx = var_options.index(default_var)
-                    except ValueError:
-                        default_idx = 0
-
-                    # Use container with custom width to ensure full variable names are visible
-                    with st.container():
-                        selected_var = st.selectbox(
-                            f"**{spend}** → Variable:",
-                            options=var_options,
-                            index=default_idx,
-                            help=f"Select the metric variable for {spend}",
-                            key=f"var_for_{spend}",
+                        blob_path = f"training-configs/saved/{current_country}/{selected_config}.json"
+                        blob = client.bucket(gcs_bucket).blob(blob_path)
+                        config_data = json.loads(blob.download_as_bytes())
+                        
+                        # Store loaded configuration in session state
+                        st.session_state["loaded_training_config"] = config_data.get("config", {})
+                        
+                        st.success(
+                            f"✅ Configuration '{selected_config}' loaded successfully!"
                         )
-
-                    spend_var_mapping[spend] = selected_var
-                    paid_media_vars_list.append(selected_var)
-
-                # Update session state
-                st.session_state["spend_var_mapping"] = spend_var_mapping
+                        st.info("The configuration values are now applied to the form below.")
+                        st.json(config_data, expanded=False)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to load configuration: {e}")
             else:
                 st.info(
-                    "No paid media spends selected. Select at least one to configure variables."
+                    f"No saved configurations found for {current_country.upper()}"
                 )
+        except Exception as e:
+            st.warning(f"Could not list configurations: {e}")
 
-            # Context vars - multiselect
-            st.markdown("**Context Variables**")
-            context_vars_list = st.multiselect(
+    # Robyn config (moved outside Data selection expander)
+    with st.expander("Robyn configuration", expanded=True):
+        # Country auto-filled from Data Selection
+        country = st.session_state.get("selected_country", "fr")
+        st.info(f"**Country:** {country.upper()} (from Data Selection)")
+            
+        # Check if there's a loaded configuration
+        loaded_config = st.session_state.get("loaded_training_config", {})
+
+        # Iterations and Trials as presets
+        preset_options = {
+            "Test run": {"iterations": 200, "trials": 3},
+            "Production": {"iterations": 2000, "trials": 5},
+            "Custom": {"iterations": 5000, "trials": 10},
+        }
+        
+        # Determine default preset based on loaded config
+        default_preset_index = 0
+        if loaded_config:
+            loaded_iterations = loaded_config.get("iterations", 200)
+            loaded_trials = loaded_config.get("trials", 3)
+            # Check if loaded values match a preset
+            for idx, (preset_name, preset_vals) in enumerate(preset_options.items()):
+                if preset_vals["iterations"] == loaded_iterations and preset_vals["trials"] == loaded_trials:
+                    default_preset_index = idx
+                    break
+            else:
+                # Doesn't match any preset, default to Custom
+                default_preset_index = 2
+        
+        preset_choice = st.selectbox(
+            "Training preset",
+            options=list(preset_options.keys()),
+            index=default_preset_index,
+            help="Choose a training preset or use custom values",
+        )
+
+        if preset_choice == "Custom":
+            col1, col2 = st.columns(2)
+            with col1:
+                iterations = st.number_input(
+                    "Iterations", 
+                    value=loaded_config.get("iterations", 5000) if loaded_config else 5000, 
+                    min_value=50, 
+                    step=100
+                )
+            with col2:
+                trials = st.number_input(
+                    "Trials", 
+                    value=loaded_config.get("trials", 10) if loaded_config else 10, 
+                    min_value=1, 
+                    step=1
+                )
+        else:
+            iterations = preset_options[preset_choice]["iterations"]  # type: ignore
+            trials = preset_options[preset_choice]["trials"]  # type: ignore
+            st.info(f"**Iterations:** {iterations}, **Trials:** {trials}")
+
+        # Train size stays as is
+        train_size = st.text_input(
+            "Train size",
+            value=loaded_config.get("train_size", "0.7,0.9") if loaded_config else "0.7,0.9",
+            help="Comma-separated train/validation split ratios",
+        )
+
+        # Revision tag - with placeholder showing latest
+        latest_revision = _get_latest_revision(gcs_bucket, country)
+        revision = st.text_input(
+            "Revision tag",
+            value=loaded_config.get("revision", "") if loaded_config else "",
+            placeholder=f"Latest revision for country: {latest_revision}",
+            help="Revision identifier for organizing outputs. Required before starting training.",
+        )
+
+        # Training date range instead of single date tag
+        col1, col2 = st.columns(2)
+        with col1:
+            # Parse loaded start date if available
+            default_start_date = datetime(2024, 1, 1).date()
+            if loaded_config and "start_date" in loaded_config:
+                try:
+                    default_start_date = datetime.strptime(loaded_config["start_date"], "%Y-%m-%d").date()
+                except:
+                    pass
+            
+            start_data_date = st.date_input(
+                "Training start date",
+                value=default_start_date,
+                help="Start date for training data window (start_data_date in R script)",
+            )
+        with col2:
+            # Parse loaded end date if available
+            default_end_date = datetime.now().date()
+            if loaded_config and "end_date" in loaded_config:
+                try:
+                    default_end_date = datetime.strptime(loaded_config["end_date"], "%Y-%m-%d").date()
+                except:
+                    pass
+            
+            end_data_date = st.date_input(
+                "Training end date",
+                value=default_end_date,
+                help="End date for training data window (end_data_date in R script)",
+            )
+
+        # Convert dates to strings for config
+        start_date_str = start_data_date.strftime("%Y-%m-%d")  # type: ignore
+        end_date_str = end_data_date.strftime("%Y-%m-%d")  # type: ignore
+
+        # Goal variable from metadata
+        metadata = st.session_state.get("loaded_metadata")
+        if metadata and "goals" in metadata:
+            goal_options = [
+                g["var"]
+                for g in metadata["goals"]
+                if g.get("group") == "primary"
+            ]
+            if goal_options:
+                # Find default index for loaded dep_var
+                default_dep_var_index = 0
+                if loaded_config and "dep_var" in loaded_config:
+                    try:
+                        default_dep_var_index = goal_options.index(loaded_config["dep_var"])
+                    except (ValueError, KeyError):
+                        pass
+                
+                dep_var = st.selectbox(
+                    "Goal variable",
+                    options=goal_options,
+                    index=default_dep_var_index,
+                    help="Primary goal variable (dependent variable) for the model",
+                )
+                # Find the corresponding type
+                dep_var_type = next(
+                    (
+                        g["type"]
+                        for g in metadata["goals"]
+                        if g["var"] == dep_var
+                    ),
+                    loaded_config.get("dep_var_type", "revenue") if loaded_config else "revenue",
+                )
+            else:
+                dep_var = st.text_input(
+                    "Goal variable", 
+                    value=loaded_config.get("dep_var", "UPLOAD_VALUE") if loaded_config else "UPLOAD_VALUE"
+                )
+                dep_var_type = loaded_config.get("dep_var_type", "revenue") if loaded_config else "revenue"
+        else:
+            dep_var = st.text_input(
+                "Goal variable",
+                value=loaded_config.get("dep_var", "UPLOAD_VALUE") if loaded_config else "UPLOAD_VALUE",
+                help="Dependent variable column in your data",
+            )
+            dep_var_type = loaded_config.get("dep_var_type", "revenue") if loaded_config else "revenue"
+
+        # Goals type - display and allow override
+        dep_var_type = st.selectbox(
+            "Goals type",
+            options=["revenue", "conversion"],
+            index=0 if dep_var_type == "revenue" else 1,
+            help="Type of the goal variable: revenue (monetary) or conversion (count)",
+        )
+
+        # Date variable
+        date_var = st.text_input(
+            "date_var",
+            value=loaded_config.get("date_var", "date") if loaded_config else "date",
+            help="Date column in your data (e.g., date)",
+        )
+
+        # Adstock selection
+        adstock_options = ["geometric", "weibull_cdf", "weibull_pdf"]
+        default_adstock_index = 0
+        if loaded_config and "adstock" in loaded_config:
+            try:
+                default_adstock_index = adstock_options.index(loaded_config["adstock"])
+            except (ValueError, KeyError):
+                pass
+        
+        adstock = st.selectbox(
+            "adstock",
+            options=adstock_options,
+            index=default_adstock_index,
+            help="Robyn adstock function",
+        )
+
+        # Hyperparameters - conditional on adstock
+        st.write("**Hyperparameters**")
+        hyperparameter_options = ["Facebook recommend", "Meshed recommend", "Custom"]
+        default_hyperparameter_index = 1
+        if loaded_config and "hyperparameter_preset" in loaded_config:
+            try:
+                default_hyperparameter_index = hyperparameter_options.index(loaded_config["hyperparameter_preset"])
+            except (ValueError, KeyError):
+                pass
+        
+        hyperparameter_preset = st.selectbox(
+            "Hyperparameter preset",
+            options=hyperparameter_options,
+            index=default_hyperparameter_index,
+            help="Choose hyperparameter preset or define custom values",
+        )
+
+        # Store the hyperparameter choice for later use
+        st.session_state["hyperparameter_preset"] = hyperparameter_preset
+        st.session_state["adstock_choice"] = adstock
+
+        # NEW: optional resampling
+        c_rs1, c_rs2 = st.columns([1, 1])
+        resample_freq_label = c_rs1.selectbox(
+            "Resample input data (optional)",
+            ["None", "Weekly (W)", "Monthly (M)"],
+            index=0,
+            help="Aggregates the input before training.",
+        )
+        
+        # Determine default resample freq from loaded config
+        resample_freq_map = {
+            "none": "None",
+            "W": "Weekly (W)",
+            "M": "Monthly (M)",
+        }
+        default_resample_freq = "None"
+        if loaded_config and "resample_freq" in loaded_config:
+            default_resample_freq = resample_freq_map.get(loaded_config["resample_freq"], "None")
+        
+        resample_freq = {
+            "None": "none",
+            "Weekly (W)": "W",
+            "Monthly (M)": "M",
+        }.get(resample_freq_label or default_resample_freq, "none")
+
+        # Determine default resample agg from loaded config
+        resample_agg_map = {
+            "sum": "sum",
+            "mean": "avg (mean)",
+            "max": "max",
+            "min": "min",
+        }
+        default_resample_agg = "sum"
+        if loaded_config and "resample_agg" in loaded_config:
+            default_resample_agg = resample_agg_map.get(loaded_config["resample_agg"], "sum")
+        
+        resample_agg_label = c_rs2.selectbox(
+            "Aggregation for metrics (when resampling)",
+            ["sum", "avg (mean)", "max", "min"],
+            index=["sum", "avg (mean)", "max", "min"].index(default_resample_agg) if default_resample_agg in ["sum", "avg (mean)", "max", "min"] else 0,
+            help="Applied to numeric columns during resample.",
+        )
+        resample_agg = {
+            "sum": "sum",
+            "avg (mean)": "mean",
+            "max": "max",
+            "min": "min",
+        }.get(resample_agg_label or "sum", "sum")
+
+    # Variables (moved outside Data selection expander)
+    with st.expander("Variable mapping", expanded=True):
+        # Get available columns from loaded data
+        preview_df = st.session_state.get("preview_df")
+        if preview_df is not None and not preview_df.empty:
+            # Get all columns except date column
+            all_columns = [
+                col for col in preview_df.columns if col.lower() != "date"
+            ]
+        else:
+            # Fallback to empty list if no data loaded yet
+            all_columns = []
+
+        # Auto-populate from metadata if available
+        metadata = st.session_state.get("loaded_metadata")
+
+        default_values = {
+            "paid_media_spends": [],
+            "paid_media_vars": [],
+            "context_vars": ["IS_WEEKEND", "TV_IS_ON"],
+            "factor_vars": ["IS_WEEKEND", "TV_IS_ON"],
+            "organic_vars": ["ORGANIC_TRAFFIC"],
+        }
+
+        # Extract values from metadata if available
+        if metadata and "mapping" in metadata:
+            mapping_raw = metadata["mapping"]
+
+            # Normalize mapping into a list of dicts with keys 'var' and 'category'
+            normalized_mapping: List[Dict[str, Optional[str]]] = []
+            try:
+                if isinstance(mapping_raw, dict):
+                    # Two common shapes:
+                    # 1) { category: [var1, var2, ...], ... }
+                    # 2) { var_name: { "category": "...", ... }, ... } OR { var_name: "category" }
+                    values_are_lists = all(
+                        isinstance(v, list) for v in mapping_raw.values()
+                    )
+                    if values_are_lists:
+                        # keys are categories
+                        for cat_key, vars_list in mapping_raw.items():
+                            for v in vars_list:
+                                normalized_mapping.append(
+                                    {"var": v, "category": cat_key}
+                                )
+                    else:
+                        # keys are var names
+                        for var_name, val in mapping_raw.items():
+                            if isinstance(val, dict):
+                                category = val.get("category")
+                            elif isinstance(val, str):
+                                category = val
+                            else:
+                                category = None
+                            normalized_mapping.append(
+                                {"var": var_name, "category": category}
+                            )
+                elif isinstance(mapping_raw, list):
+                    # List may contain dicts or strings
+                    for item in mapping_raw:
+                        if isinstance(item, dict):
+                            # Expect item to have 'var' and maybe 'category'
+                            normalized_mapping.append(
+                                {
+                                    "var": item.get("var")
+                                    or item.get("name")
+                                    or None,
+                                    "category": item.get("category"),
+                                }
+                            )
+                        elif isinstance(item, str):
+                            # Bare var name with unknown category
+                            normalized_mapping.append(
+                                {"var": item, "category": None}
+                            )
+                # Fallback: if normalization yielded nothing, leave mapping_empty
+            except Exception:
+                normalized_mapping = []
+
+            # Use normalized mapping to fill defaults per category when possible
+            for cat in [
+                "paid_media_spends",
+                "paid_media_vars",
                 "context_vars",
-                options=all_columns,
-                default=default_values["context_vars"],
-                help="Select contextual variables (e.g., seasonality, events)",
-            )
-
-            # Factor vars - multiselect
-            st.markdown("**Factor Variables**")
-            factor_vars_list = st.multiselect(
                 "factor_vars",
-                options=all_columns,
-                default=default_values["factor_vars"],
-                help="Select factor/categorical variables",
-            )
-
-            # Organic vars - multiselect
-            st.markdown("**Organic/Baseline Variables**")
-            organic_vars_list = st.multiselect(
                 "organic_vars",
-                options=all_columns,
-                default=default_values["organic_vars"],
-                help="Select organic/baseline variables",
+            ]:
+                vars_in_cat = [
+                    m.get("var")
+                    for m in normalized_mapping
+                    if m.get("category") == cat and m.get("var")
+                ]
+                if vars_in_cat:
+                    default_values[cat] = [
+                        v for v in vars_in_cat if v is not None
+                    ]
+
+        # Merge columns from preview data and metadata
+        # Include all columns from metadata even if not in preview (e.g., CUSTOM columns)
+        all_columns_set = set(all_columns) if all_columns else set()
+        
+        # Add all columns from metadata to the available columns
+        if metadata and "mapping" in metadata:
+            for cat_vars in metadata["mapping"].values():
+                if isinstance(cat_vars, list):
+                    all_columns_set.update(cat_vars)
+        
+        # Convert back to list
+        all_columns = list(all_columns_set)
+        
+        # Note: We don't filter default_values by all_columns anymore
+        # because metadata may contain CUSTOM columns not yet in preview data
+
+        # If no data is loaded and no metadata, show a warning
+        if not all_columns:
+            st.warning(
+                "⚠️ Please load data first to see available columns for selection."
             )
 
-            # Convert lists to comma-separated strings for backward compatibility
-            paid_media_spends = ", ".join(paid_media_spends_list)
-            paid_media_vars = ", ".join(paid_media_vars_list)
-            context_vars = ", ".join(context_vars_list)
-            factor_vars = ", ".join(factor_vars_list)
-            organic_vars = ", ".join(organic_vars_list)
+        # Helper function to parse channel and subchannel from variable name
+        def _parse_var_components(var_name: str) -> dict:
+            """Parse variable name into channel, subchannel, suffix"""
+            parts = var_name.split("_")
+            if len(parts) >= 2:
+                channel = parts[0]
+                suffix = parts[-1]
+                subchannel = "_".join(parts[1:-1]) if len(parts) > 2 else ""
+                return {
+                    "channel": channel,
+                    "subchannel": subchannel,
+                    "suffix": suffix,
+                }
+            return {"channel": "", "subchannel": "", "suffix": var_name}
 
-        # Outputs
-        with st.expander("Outputs"):
-            gcs_bucket = st.text_input(
-                "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
-            )
-            st.session_state["gcs_bucket"] = gcs_bucket
-            ann_file = st.file_uploader(
-                "Optional: enriched_annotations.csv", type=["csv"]
+        # Initialize session state for spend-var mapping if not present
+        if "spend_var_mapping" not in st.session_state:
+            st.session_state["spend_var_mapping"] = {}
+
+        # Get all paid_media_spends from metadata (including CUSTOM columns)
+        # Don't filter by all_columns since CUSTOM columns may not be in preview yet
+        available_spends = default_values["paid_media_spends"]
+        
+        # Determine default selections from loaded config
+        default_paid_media_spends = available_spends  # All selected by default
+        if loaded_config and "paid_media_spends" in loaded_config:
+            # Parse loaded config (could be comma-separated string or list)
+            loaded_spends = loaded_config["paid_media_spends"]
+            if isinstance(loaded_spends, str):
+                loaded_spends = [s.strip() for s in loaded_spends.split(",") if s.strip()]
+            # Only include loaded spends that are in available_spends
+            default_paid_media_spends = [s for s in loaded_spends if s in available_spends]
+            
+            # Initialize spend_var_mapping from loaded config (Issue #2 fix)
+            if "paid_media_vars" in loaded_config:
+                loaded_vars = loaded_config["paid_media_vars"]
+                if isinstance(loaded_vars, str):
+                    loaded_vars = [s.strip() for s in loaded_vars.split(",") if s.strip()]
+                
+                # Build mapping: for each spend, find the corresponding var from loaded_vars
+                if metadata and "paid_media_mapping" in metadata:
+                    paid_media_mapping = metadata["paid_media_mapping"]
+                    # For each spend, find which loaded_var belongs to it
+                    for spend in loaded_spends:
+                        possible_vars = paid_media_mapping.get(spend, [])
+                        # Find which loaded_var is in the possible_vars for this spend
+                        matched = False
+                        for var in loaded_vars:
+                            if var in possible_vars:
+                                st.session_state["spend_var_mapping"][spend] = var
+                                matched = True
+                                break
+                        # If no match in possible_vars, check if the spend itself is in loaded_vars
+                        # (for configs where paid_media_vars == paid_media_spends)
+                        if not matched and spend in loaded_vars:
+                            st.session_state["spend_var_mapping"][spend] = spend
+                        # Otherwise fall back to the spend itself
+                        elif not matched:
+                            st.session_state["spend_var_mapping"][spend] = spend
+                else:
+                    # Fallback: try to match by index
+                    for i, spend in enumerate(loaded_spends):
+                        if i < len(loaded_vars):
+                            st.session_state["spend_var_mapping"][spend] = loaded_vars[i]
+        
+        # Filter defaults to only include items that exist in available_spends
+        # This prevents StreamlitAPIException when defaults aren't in options
+        default_paid_media_spends = [s for s in default_paid_media_spends if s in available_spends]
+
+        # Display paid_media_spends first (all selected by default)
+        st.markdown("**Paid Media Configuration**")
+        st.caption(
+            "Select paid media spend channels. For each spend, you can choose the corresponding variable metric."
+        )
+
+        paid_media_spends_list = st.multiselect(
+            "paid_media_spends (Select channels to include)",
+            options=available_spends,
+            default=default_paid_media_spends,
+            help="Select media spend columns to include in the model",
+        )
+
+        # For each selected spend, show corresponding var options
+        paid_media_vars_list = []
+        spend_var_mapping = {}
+
+        if paid_media_spends_list:
+            st.markdown("**Variable Selection for Each Spend**")
+            st.caption(
+                "For each spend channel, select the corresponding metric variable. "
+                "If none selected, the spend column itself will be used."
             )
 
-        # =============== Single-run button ===============
-        def create_job_config_single(
-            data_gcs_path: str,
-            timestamp: str,
-            annotations_gcs_path: Optional[str],
-        ) -> Dict[str, Any]:
-            return build_job_config_from_params(
-                params_from_ui_single(
-                    country,
-                    iterations,
-                    trials,
-                    train_size,
-                    revision,
-                    start_date_str,
-                    end_date_str,
-                    paid_media_spends,
-                    paid_media_vars,
-                    context_vars,
-                    factor_vars,
-                    organic_vars,
-                    gcs_bucket,
-                    dep_var,
-                    dep_var_type,
-                    date_var,
-                    adstock,
-                    hyperparameter_preset,
-                    resample_freq,  # NEW
-                    resample_agg,  # NEW
-                ),
-                data_gcs_path,
-                timestamp,
-                annotations_gcs_path,
+            for spend in paid_media_spends_list:
+                # Parse the spend variable to get channel and subchannel
+                parsed = _parse_var_components(spend)
+                channel = parsed["channel"]
+                subchannel = parsed["subchannel"]
+
+                # Special handling for CUSTOM columns
+                is_custom_spend = "_CUSTOM" in spend
+                
+                # Find all paid_media_vars with same channel and subchannel
+                if is_custom_spend:
+                    # For CUSTOM spends, match other CUSTOM vars with same prefix
+                    # E.g., GA_SMALL_COST_CUSTOM matches GA_SMALL_*_CUSTOM
+                    base_pattern = spend.replace("_COST_CUSTOM", "").replace("_COSTS_CUSTOM", "")
+                    matching_vars = [
+                        v
+                        for v in default_values["paid_media_vars"]
+                        if v.startswith(base_pattern + "_") and "_CUSTOM" in v
+                    ]
+                elif subchannel:
+                    # Match pattern: CHANNEL_SUBCHANNEL_*
+                    pattern_prefix = f"{channel}_{subchannel}_"
+                    matching_vars = [
+                        v
+                        for v in default_values["paid_media_vars"]
+                        if v.startswith(pattern_prefix)
+                    ]
+                else:
+                    # Match pattern: CHANNEL_* (excluding CUSTOM when spend is not CUSTOM)
+                    matching_vars = [
+                        v
+                        for v in default_values["paid_media_vars"]
+                        if v.startswith(f"{channel}_")
+                        and not v.endswith("_CUSTOM")
+                        and "_TOTAL_" not in v
+                    ]
+
+                # Default to the first matching var or the spend itself
+                default_var = st.session_state["spend_var_mapping"].get(
+                    spend
+                ) or (matching_vars[0] if matching_vars else spend)
+
+                # Ensure default_var is in the options
+                if (
+                    default_var not in matching_vars
+                    and default_var != spend
+                ):
+                    default_var = (
+                        matching_vars[0] if matching_vars else spend
+                    )
+
+                # Add the spend itself as an option
+                var_options = matching_vars + [spend]
+                var_options = sorted(set(var_options))
+
+                # Find the index of the default
+                try:
+                    default_idx = var_options.index(default_var)
+                except ValueError:
+                    default_idx = 0
+
+                # Use container with custom width to ensure full variable names are visible
+                with st.container():
+                    selected_var = st.selectbox(
+                        f"**{spend}** → Variable:",
+                        options=var_options,
+                        index=default_idx,
+                        help=f"Select the metric variable for {spend}",
+                        key=f"var_for_{spend}",
+                    )
+
+                spend_var_mapping[spend] = selected_var
+                paid_media_vars_list.append(selected_var)
+
+            # Update session state
+            st.session_state["spend_var_mapping"] = spend_var_mapping
+        else:
+            st.info(
+                "No paid media spends selected. Select at least one to configure variables."
             )
 
-        def params_from_ui_single(
-            country,
-            iterations,
-            trials,
-            train_size,
-            revision,
-            start_date_str,
-            end_date_str,
-            paid_media_spends,
-            paid_media_vars,
-            context_vars,
-            factor_vars,
-            organic_vars,
-            gcs_bucket,
-            dep_var,
-            dep_var_type,
-            date_var,
-            adstock,
-            hyperparameter_preset,
-            resample_freq,
-            resample_agg,
-        ) -> dict:
-            return {
-                "country": country,
-                "iterations": int(iterations),
-                "trials": int(trials),
-                "train_size": parse_train_size(train_size),
+        # Context vars - multiselect
+        st.markdown("**Context Variables**")
+        # Determine default from loaded config
+        default_context_vars = default_values["context_vars"]
+        if loaded_config and "context_vars" in loaded_config:
+            loaded_context = loaded_config["context_vars"]
+            if isinstance(loaded_context, str):
+                loaded_context = [s.strip() for s in loaded_context.split(",") if s.strip()]
+            default_context_vars = loaded_context
+        
+        # Filter defaults to only include items that exist in all_columns
+        default_context_vars = [v for v in default_context_vars if v in all_columns]
+        
+        context_vars_list = st.multiselect(
+            "context_vars",
+            options=all_columns,
+            default=default_context_vars,
+            help="Select contextual variables (e.g., seasonality, events)",
+        )
+
+        # Factor vars - multiselect
+        st.markdown("**Factor Variables**")
+        # Determine default from loaded config
+        default_factor_vars = default_values["factor_vars"]
+        if loaded_config and "factor_vars" in loaded_config:
+            loaded_factor = loaded_config["factor_vars"]
+            if isinstance(loaded_factor, str):
+                loaded_factor = [s.strip() for s in loaded_factor.split(",") if s.strip()]
+            default_factor_vars = loaded_factor
+        
+        # Filter defaults to only include items that exist in all_columns
+        default_factor_vars = [v for v in default_factor_vars if v in all_columns]
+        
+        factor_vars_list = st.multiselect(
+            "factor_vars",
+            options=all_columns,
+            default=default_factor_vars,
+            help="Select factor/categorical variables",
+        )
+        
+        # Auto-add factor_vars to context_vars (requirement 6)
+        if factor_vars_list:
+            context_vars_list = list(set(context_vars_list + factor_vars_list))
+
+
+        # Organic vars - multiselect
+        st.markdown("**Organic/Baseline Variables**")
+        # Determine default from loaded config
+        default_organic_vars = default_values["organic_vars"]
+        if loaded_config and "organic_vars" in loaded_config:
+            loaded_organic = loaded_config["organic_vars"]
+            if isinstance(loaded_organic, str):
+                loaded_organic = [s.strip() for s in loaded_organic.split(",") if s.strip()]
+            default_organic_vars = loaded_organic
+        
+        # Filter defaults to only include items that exist in all_columns
+        default_organic_vars = [v for v in default_organic_vars if v in all_columns]
+        
+        organic_vars_list = st.multiselect(
+            "organic_vars",
+            options=all_columns,
+            default=default_organic_vars,
+            help="Select organic/baseline variables",
+        )
+
+        # Convert lists to comma-separated strings for backward compatibility
+        paid_media_spends = ", ".join(paid_media_spends_list)
+        paid_media_vars = ", ".join(paid_media_vars_list)
+        context_vars = ", ".join(context_vars_list)
+        factor_vars = ", ".join(factor_vars_list)
+        organic_vars = ", ".join(organic_vars_list)
+
+    # Save Configuration (moved outside Data selection expander, after Variable mapping)
+    with st.expander("💾 Save Training Configuration", expanded=False):
+        st.caption(
+            "Save the current training configuration to apply it later to other data sources or countries."
+        )
+
+        gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            config_name = st.text_input(
+                "Configuration name",
+                placeholder="e.g., baseline_config_v1",
+                help="Name for this training configuration",
+            )
+        with col2:
+            save_for_multi = st.checkbox(
+                "Multi-country",
+                value=False,
+                help="Save for multiple countries",
+            )
+
+        if save_for_multi:
+            config_countries = st.multiselect(
+                "Select countries",
+                options=["fr", "de", "it", "es", "nl", "uk"],
+                default=[st.session_state.get("selected_country", "fr")],
+                help="Countries this configuration applies to",
+            )
+        else:
+            config_countries = [
+                st.session_state.get("selected_country", "fr")
+            ]
+
+        # Add action buttons (Issue #5 fix: add queue options)
+        col_btn1, col_btn2, col_btn3 = st.columns(3)
+        
+        save_config_clicked = col_btn1.button("💾 Save Configuration", use_container_width=True, key="save_config_btn")
+        add_to_queue_clicked = col_btn2.button("➕ Add to Queue", use_container_width=True, key="add_to_queue_btn")
+        add_and_start_clicked = col_btn3.button("▶️ Add to Queue & Start", use_container_width=True, key="add_and_start_btn")
+
+        if save_config_clicked:
+            if not revision or not revision.strip():
+                st.error(
+                    "⚠️ Revision tag is required to save configuration."
+                )
+            elif not config_name or not config_name.strip():
+                st.error("⚠️ Configuration name is required.")
+            else:
+                try:
+                    # Build configuration payload
+                    config_payload = {
+                        "name": config_name,
+                        "created_at": datetime.utcnow().isoformat(),
+                        "countries": config_countries,
+                        "config": {
+                            "iterations": int(iterations),
+                            "trials": int(trials),
+                            "train_size": train_size,
+                            "revision": revision,
+                            "start_date": start_date_str,
+                            "end_date": end_date_str,
+                            "paid_media_spends": paid_media_spends,
+                            "paid_media_vars": paid_media_vars,
+                            "context_vars": context_vars,
+                            "factor_vars": factor_vars,
+                            "organic_vars": organic_vars,
+                            "dep_var": dep_var,
+                            "dep_var_type": dep_var_type,
+                            "date_var": date_var,
+                            "adstock": adstock,
+                            "hyperparameter_preset": hyperparameter_preset,
+                            "resample_freq": resample_freq,
+                            "resample_agg": resample_agg,
+                        },
+                    }
+
+                    # Save to GCS
+                    client = storage.Client()
+                    for ctry in config_countries:
+                        blob_path = f"training-configs/saved/{ctry}/{config_name}.json"
+                        blob = client.bucket(gcs_bucket).blob(blob_path)
+                        blob.upload_from_string(
+                            json.dumps(config_payload, indent=2),
+                            content_type="application/json",
+                        )
+
+                    countries_str = ", ".join(
+                        [c.upper() for c in config_countries]
+                    )
+                    st.success(
+                        f"✅ Configuration '{config_name}' saved for: {countries_str}"
+                    )
+                except Exception as e:
+                    st.error(f"Failed to save configuration: {e}")
+        
+        # Handle "Add to Queue" button (Issue #5 fix)
+        if add_to_queue_clicked or add_and_start_clicked:
+            if not revision or not revision.strip():
+                st.error("⚠️ Revision tag is required.")
+            else:
+                try:
+                    # Import helper from app_split_helpers
+                    from app_split_helpers import _normalize_row, save_queue_to_gcs, set_queue_running
+                    
+                    # Get next queue ID
+                    next_id = (
+                        max([e["id"] for e in st.session_state.job_queue], default=0) + 1
+                    )
+                    
+                    # Create queue entries for each country
+                    new_entries = []
+                    for i, ctry in enumerate(config_countries):
+                        # Get data source information
+                        # Use GCS path pattern from loaded data
+                        data_version = st.session_state.get("selected_version", "Latest")
+                        data_blob_path = _get_data_blob(ctry, data_version.lower())
+                        
+                        # Build params dict
+                        params = {
+                            "country": ctry,
+                            "revision": revision,
+                            "date_input": end_date_str,  # Use end date as date_input
+                            "iterations": int(iterations),
+                            "trials": int(trials),
+                            "train_size": train_size,
+                            "paid_media_spends": paid_media_spends,
+                            "paid_media_vars": paid_media_vars,
+                            "context_vars": context_vars,
+                            "factor_vars": factor_vars,
+                            "organic_vars": organic_vars,
+                            "gcs_bucket": gcs_bucket,
+                            "table": "",  # Using GCS, not Snowflake
+                            "query": "",  # Using GCS, not Snowflake
+                            "dep_var": dep_var,
+                            "dep_var_type": dep_var_type,
+                            "date_var": date_var,
+                            "adstock": adstock,
+                            "hyperparameter_preset": hyperparameter_preset,
+                            "resample_freq": resample_freq,
+                            "resample_agg": resample_agg,
+                            "annotations_gcs_path": "",
+                            "start_date": start_date_str,
+                            "end_date": end_date_str,
+                            "data_gcs_path": f"gs://{gcs_bucket}/{data_blob_path}",
+                        }
+                        
+                        new_entries.append({
+                            "id": next_id + i,
+                            "params": params,
+                            "status": "PENDING",
+                            "timestamp": None,
+                            "execution_name": None,
+                            "gcs_prefix": None,
+                            "message": "",
+                        })
+                    
+                    # Add to queue
+                    st.session_state.job_queue.extend(new_entries)
+                    
+                    # Save queue to GCS
+                    st.session_state.queue_saved_at = save_queue_to_gcs(
+                        st.session_state.queue_name,
+                        st.session_state.job_queue,
+                        queue_running=st.session_state.queue_running,
+                    )
+                    
+                    # Start queue if "Add & Start" was clicked
+                    if add_and_start_clicked:
+                        set_queue_running(st.session_state.queue_name, True)
+                        st.session_state.queue_running = True
+                    
+                    # Show success message
+                    countries_str = ", ".join([c.upper() for c in config_countries])
+                    st.success(f"✅ Added {len(new_entries)} job(s) to queue for: {countries_str}")
+                    
+                    # Set flag to switch to Queue tab
+                    st.session_state["switch_to_queue_tab"] = True
+                    
+                    # Rerun to refresh and switch tab
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"Failed to add to queue: {e}")
+
+    # Outputs (moved outside Save Configuration expander)
+    with st.expander("Outputs"):
+        gcs_bucket = st.text_input(
+            "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
+        )
+        st.session_state["gcs_bucket"] = gcs_bucket
+        ann_file = st.file_uploader(
+            "Optional: enriched_annotations.csv", type=["csv"]
+        )
+
+    # =============== Single-run button ===============
+    def create_job_config_single(
+        data_gcs_path: str,
+        timestamp: str,
+        annotations_gcs_path: Optional[str],
+    ) -> Dict[str, Any]:
+        return build_job_config_from_params(
+            params_from_ui_single(
+                country,
+                iterations,
+                trials,
+                train_size,
+                revision,
+                start_date_str,
+                end_date_str,
+                paid_media_spends,
+                paid_media_vars,
+                context_vars,
+                factor_vars,
+                organic_vars,
+                gcs_bucket,
+                dep_var,
+                dep_var_type,
+                date_var,
+                adstock,
+                hyperparameter_preset,
+                resample_freq,  # NEW
+                resample_agg,  # NEW
+            ),
+            data_gcs_path,
+            timestamp,
+            annotations_gcs_path,
+        )
+
+    def params_from_ui_single(
+        country,
+        iterations,
+        trials,
+        train_size,
+        revision,
+        start_date_str,
+        end_date_str,
+        paid_media_spends,
+        paid_media_vars,
+        context_vars,
+        factor_vars,
+        organic_vars,
+        gcs_bucket,
+        dep_var,
+        dep_var_type,
+        date_var,
+        adstock,
+        hyperparameter_preset,
+        resample_freq,
+        resample_agg,
+    ) -> dict:
+        return {
+            "country": country,
+            "iterations": int(iterations),
+            "trials": int(trials),
+            "train_size": parse_train_size(train_size),
+            "revision": revision,
+            "start_date": start_date_str,
+            "end_date": end_date_str,
+            "paid_media_spends": paid_media_spends,
+            "paid_media_vars": paid_media_vars,
+            "context_vars": context_vars,
+            "factor_vars": factor_vars,
+            "organic_vars": organic_vars,
+            "gcs_bucket": gcs_bucket,
+            "table": "",  # Not used in GCS mode
+            "query": "",  # Not used in GCS mode
+            "dep_var": dep_var,
+            "dep_var_type": dep_var_type,
+            "date_var": date_var,
+            "adstock": adstock,
+            "hyperparameter_preset": hyperparameter_preset,
+            "resample_freq": resample_freq,
+            "resample_agg": resample_agg,
+            "data_gcs_path": "",  # Will be filled later
+        }
+
+    if st.button("🚀 Start Training Job", type="primary", use_container_width=True):
+        # Validate revision is filled
+        if not revision or not revision.strip():
+            st.error(
+                "⚠️ Revision tag is required. Please enter a revision identifier before starting training."
+            )
+            st.stop()
+
+        # Validate data is loaded
+        if (
+            "preview_df" not in st.session_state
+            or st.session_state["preview_df"] is None
+        ):
+            st.error(
+                "Please load data first using the 'Load selected data' button."
+            )
+            st.stop()
+
+        if not all([PROJECT_ID, REGION, TRAINING_JOB_NAME]):
+            st.error(
+                "Missing configuration. Check environment variables on the web service."
+            )
+            st.stop()
+
+        timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+        gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
+        timings: List[Dict[str, float]] = []
+
+        try:
+            with st.spinner("Preparing and launching training job..."):
+                with tempfile.TemporaryDirectory() as td:
+                    data_gcs_path = None
+                    annotations_gcs_path = None
+
+                    # Use the already loaded GCS data
+                    blob_path = _get_data_blob(selected_country, selected_version)  # type: ignore
+                    data_gcs_path = f"gs://{gcs_bucket}/{blob_path}"
+
+                    # No need to query and upload - data is already in GCS
+                    st.info(f"Using data from: {data_gcs_path}")
+
+                    if ann_file is not None:
+                        with timed_step(
+                            "Upload annotations to GCS", timings
+                        ):
+                            annotations_path = os.path.join(
+                                td, "enriched_annotations.csv"
+                            )
+                            with open(annotations_path, "wb") as f:
+                                f.write(ann_file.read())
+                            annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
+                            annotations_gcs_path = upload_to_gcs(
+                                gcs_bucket,  # type: ignore
+                                annotations_path,
+                                annotations_blob,
+                            )
+
+                    # 4) Create job config
+                    with timed_step("Create job configuration", timings):
+                        job_config = create_job_config_single(
+                            data_gcs_path, timestamp, annotations_gcs_path
+                        )
+                        config_path = os.path.join(td, "job_config.json")
+                        with open(config_path, "w") as f:
+                            json.dump(job_config, f, indent=2)
+                        config_blob = (
+                            f"training-configs/{timestamp}/job_config.json"
+                        )
+                        config_gcs_path = upload_to_gcs(
+                            gcs_bucket, config_path, config_blob  # type: ignore
+                        )
+                        _ = upload_to_gcs(
+                            gcs_bucket,  # type: ignore
+                            config_path,
+                            "training-configs/latest/job_config.json",
+                        )
+
+                    # 5) Launch Cloud Run Job
+                    with timed_step("Launch training job", timings):
+                        assert TRAINING_JOB_NAME is not None
+                        execution_name = job_manager.create_execution(
+                            TRAINING_JOB_NAME
+                        )
+                        exec_info = {
+                            "execution_name": execution_name,
+                            "timestamp": timestamp,
+                            "status": "LAUNCHED",
+                            "config_path": config_gcs_path,
+                            "data_path": data_gcs_path,
+                            "revision": revision,
+                            "country": country,
+                            "gcs_prefix": gcs_prefix,
+                            "gcs_bucket": gcs_bucket,
+                        }
+                        st.session_state.job_executions.append(exec_info)
+                        st.success("🎉 Training job launched!")
+                        st.info(
+                            f"**Execution ID**: `{execution_name.split('/')[-1]}`"
+                        )
+
+        finally:
+            if timings:
+                df_times = pd.DataFrame(timings)
+                try:
+                    client = storage.Client()
+                    dest_blob = f"{gcs_prefix}/timings.csv"
+                    blob = client.bucket(gcs_bucket).blob(dest_blob)
+                    if not blob.exists():
+                        with tempfile.NamedTemporaryFile(
+                            mode="w", suffix=".csv", delete=False
+                        ) as tmp:
+                            df_times.to_csv(tmp.name, index=False)
+                            gcs_bucket = st.session_state["gcs_bucket"]
+
+                            upload_to_gcs(gcs_bucket, tmp.name, dest_blob)
+                        st.success(
+                            f"Timings CSV uploaded to gs://{gcs_bucket}/{dest_blob}"
+                        )
+                    else:
+                        st.info(
+                            "`timings.csv` already exists — job will append the R row."
+                        )
+                except Exception as e:
+                    st.warning(f"Failed to upload timings: {e}")
+
+            st.session_state.last_timings = {
+                "df": pd.DataFrame(timings),
+                "timestamp": timestamp,
                 "revision": revision,
-                "start_date": start_date_str,
-                "end_date": end_date_str,
-                "paid_media_spends": paid_media_spends,
-                "paid_media_vars": paid_media_vars,
-                "context_vars": context_vars,
-                "factor_vars": factor_vars,
-                "organic_vars": organic_vars,
+                "country": country,
                 "gcs_bucket": gcs_bucket,
-                "table": "",  # Not used in GCS mode
-                "query": "",  # Not used in GCS mode
-                "dep_var": dep_var,
-                "dep_var_type": dep_var_type,
-                "date_var": date_var,
-                "adstock": adstock,
-                "hyperparameter_preset": hyperparameter_preset,
-                "resample_freq": resample_freq,
-                "resample_agg": resample_agg,
-                "data_gcs_path": "",  # Will be filled later
             }
 
-        if st.button("🚀 Start Training Job", type="primary"):
-            # Validate data is loaded
-            if (
-                "preview_df" not in st.session_state
-                or st.session_state["preview_df"] is None
-            ):
-                st.error(
-                    "Please load data first using the 'Load selected data' button."
-                )
-                st.stop()
-
-            if not all([PROJECT_ID, REGION, TRAINING_JOB_NAME]):
-                st.error(
-                    "Missing configuration. Check environment variables on the web service."
-                )
-                st.stop()
-
-            timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
-            gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
-            timings: List[Dict[str, float]] = []
-
-            try:
-                with st.spinner("Preparing and launching training job..."):
-                    with tempfile.TemporaryDirectory() as td:
-                        data_gcs_path = None
-                        annotations_gcs_path = None
-
-                        # Use the already loaded GCS data
-                        blob_path = _get_data_blob(selected_country, selected_version)  # type: ignore
-                        data_gcs_path = f"gs://{gcs_bucket}/{blob_path}"
-
-                        # No need to query and upload - data is already in GCS
-                        st.info(f"Using data from: {data_gcs_path}")
-
-                        if ann_file is not None:
-                            with timed_step(
-                                "Upload annotations to GCS", timings
-                            ):
-                                annotations_path = os.path.join(
-                                    td, "enriched_annotations.csv"
-                                )
-                                with open(annotations_path, "wb") as f:
-                                    f.write(ann_file.read())
-                                annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
-                                annotations_gcs_path = upload_to_gcs(
-                                    gcs_bucket,  # type: ignore
-                                    annotations_path,
-                                    annotations_blob,
-                                )
-
-                        # 4) Create job config
-                        with timed_step("Create job configuration", timings):
-                            job_config = create_job_config_single(
-                                data_gcs_path, timestamp, annotations_gcs_path
-                            )
-                            config_path = os.path.join(td, "job_config.json")
-                            with open(config_path, "w") as f:
-                                json.dump(job_config, f, indent=2)
-                            config_blob = (
-                                f"training-configs/{timestamp}/job_config.json"
-                            )
-                            config_gcs_path = upload_to_gcs(
-                                gcs_bucket, config_path, config_blob  # type: ignore
-                            )
-                            _ = upload_to_gcs(
-                                gcs_bucket,  # type: ignore
-                                config_path,
-                                "training-configs/latest/job_config.json",
-                            )
-
-                        # 5) Launch Cloud Run Job
-                        with timed_step("Launch training job", timings):
-                            assert TRAINING_JOB_NAME is not None
-                            execution_name = job_manager.create_execution(
-                                TRAINING_JOB_NAME
-                            )
-                            exec_info = {
-                                "execution_name": execution_name,
-                                "timestamp": timestamp,
-                                "status": "LAUNCHED",
-                                "config_path": config_gcs_path,
-                                "data_path": data_gcs_path,
-                                "revision": revision,
-                                "country": country,
-                                "gcs_prefix": gcs_prefix,
-                                "gcs_bucket": gcs_bucket,
-                            }
-                            st.session_state.job_executions.append(exec_info)
-                            st.success("🎉 Training job launched!")
-                            st.info(
-                                f"**Execution ID**: `{execution_name.split('/')[-1]}`"
-                            )
-
-            finally:
-                if timings:
-                    df_times = pd.DataFrame(timings)
-                    try:
-                        client = storage.Client()
-                        dest_blob = f"{gcs_prefix}/timings.csv"
-                        blob = client.bucket(gcs_bucket).blob(dest_blob)
-                        if not blob.exists():
-                            with tempfile.NamedTemporaryFile(
-                                mode="w", suffix=".csv", delete=False
-                            ) as tmp:
-                                df_times.to_csv(tmp.name, index=False)
-                                gcs_bucket = st.session_state["gcs_bucket"]
-
-                                upload_to_gcs(gcs_bucket, tmp.name, dest_blob)
-                            st.success(
-                                f"Timings CSV uploaded to gs://{gcs_bucket}/{dest_blob}"
-                            )
-                        else:
-                            st.info(
-                                "`timings.csv` already exists — job will append the R row."
-                            )
-                    except Exception as e:
-                        st.warning(f"Failed to upload timings: {e}")
-
-                st.session_state.last_timings = {
-                    "df": pd.DataFrame(timings),
-                    "timestamp": timestamp,
-                    "revision": revision,
-                    "country": country,
-                    "gcs_bucket": gcs_bucket,
-                }
-
-        render_jobs_job_history(key_prefix="single")
+    render_jobs_job_history(key_prefix="single")
 
     # ===================== BATCH QUEUE (CSV) =====================
-
-_queue_tick()
 
 
 # Extracted from streamlit_app.py tab_queue (Batch/Queue run):
@@ -897,24 +1437,30 @@ with tab_queue:
             """
 Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country`, `revision`, and data source):
 
-- `country`, `revision`, `date_input`, `iterations`, `trials`, `train_size`
+- `country`, `revision`, `iterations`, `trials`, `train_size`
+- `start_date`, `end_date` — Training window dates (YYYY-MM-DD format)
 - `paid_media_spends`, `paid_media_vars`, `context_vars`, `factor_vars`, `organic_vars`
-- `dep_var`, `date_var`, `adstock`
-- `resample_freq` (none|W|M)
-- `resample_agg` (sum|mean|max|min) – used when resampling
+- `dep_var`, `dep_var_type` (revenue|conversion), `date_var`, `adstock`
+- `hyperparameter_preset` (Facebook recommend|Meshed recommend|Custom)
+- `resample_freq` (none|W|M), `resample_agg` (sum|mean|max|min)
 - `gcs_bucket` (optional override per row)
-- **Data**: one of `query` **or** `table`
+- **Data source (choose one):**
+  - `data_gcs_path` (gs:// path to parquet file) — **Recommended for GCS-based workflows**
+  - `query` or `table` — For Snowflake-based workflows
 - `annotations_gcs_path` (optional gs:// path)
+
+**Note:** For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows.
             """
         )
 
-        # Template & Example CSVs
+        # Template & Example CSVs (Issue #4 fix: align with Single run)
         template = pd.DataFrame(
             [
                 {
                     "country": "fr",
                     "revision": "r100",
-                    "date_input": time.strftime("%Y-%m-%d"),
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 200,
                     "trials": 5,
                     "train_size": "0.7,0.9",
@@ -924,11 +1470,14 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "factor_vars": "IS_WEEKEND,TV_IS_ON",
                     "organic_vars": "ORGANIC_TRAFFIC",
                     "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
                     "table": "",
-                    "query": "SELECT * FROM MESHED_BUYCYCLE.GROWTH.SOME_TABLE",
+                    "query": "",
                     "dep_var": "UPLOAD_VALUE",
+                    "dep_var_type": "revenue",
                     "date_var": "date",
                     "adstock": "geometric",
+                    "hyperparameter_preset": "Meshed recommend",
                     "resample_freq": "none",
                     "resample_agg": "sum",
                     "annotations_gcs_path": "",
@@ -941,7 +1490,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 {
                     "country": "fr",
                     "revision": "r101",
-                    "date_input": time.strftime("%Y-%m-%d"),
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 300,
                     "trials": 3,
                     "train_size": "0.7,0.9",
@@ -951,11 +1501,14 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "factor_vars": "IS_WEEKEND,TV_IS_ON",
                     "organic_vars": "ORGANIC_TRAFFIC",
                     "gcs_bucket": st.session_state["gcs_bucket"],
-                    "table": "MESHED_BUYCYCLE.GROWTH.MMM_RAW",
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
+                    "table": "",
                     "query": "",
                     "dep_var": "UPLOAD_VALUE",
+                    "dep_var_type": "revenue",
                     "date_var": "date",
                     "adstock": "geometric",
+                    "hyperparameter_preset": "Meshed recommend",
                     "resample_freq": "none",
                     "resample_agg": "sum",
                     "annotations_gcs_path": "",
@@ -963,7 +1516,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 {
                     "country": "de",
                     "revision": "r102",
-                    "date_input": time.strftime("%Y-%m-%d"),
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 200,
                     "trials": 5,
                     "train_size": "0.75,0.9",
@@ -973,12 +1527,15 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "factor_vars": "IS_WEEKEND",
                     "organic_vars": "ORGANIC_TRAFFIC",
                     "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
                     "table": "",
-                    "query": "SELECT * FROM MESHED_BUYCYCLE.GROWTH.TABLE_B WHERE COUNTRY='DE'",
+                    "query": "",
                     "dep_var": "UPLOAD_VALUE",
+                    "dep_var_type": "conversion",
                     "date_var": "date",
-                    "adstock": "geometric",
-                    "resample_freq": "none",
+                    "adstock": "weibull_cdf",
+                    "hyperparameter_preset": "Facebook recommend",
+                    "resample_freq": "W",
                     "resample_agg": "sum",
                     "annotations_gcs_path": "",
                 },
@@ -1166,7 +1723,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
                 for i, r in up_base.iterrows():
                     params = _normalize_row(r)
-                    if not (params.get("query") or params.get("table")):
+                    # Check for data source: query, table, or data_gcs_path
+                    if not (params.get("query") or params.get("table") or params.get("data_gcs_path")):
                         dup["missing_data_source"].append(i + 1)  # type: ignore
                         to_append_mask.append(False)
                         continue
@@ -1231,7 +1789,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             return {
                 "country": p.get("country", ""),
                 "revision": p.get("revision", ""),
-                "date_input": p.get("date_input", ""),
+                "start_date": p.get("start_date", ""),
+                "end_date": p.get("end_date", ""),
                 "iterations": p.get("iterations", ""),
                 "trials": p.get("trials", ""),
                 "train_size": _as_csv(p.get("train_size", "")),
@@ -1243,11 +1802,14 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 "gcs_bucket": p.get(
                     "gcs_bucket", st.session_state["gcs_bucket"]
                 ),
+                "data_gcs_path": p.get("data_gcs_path", ""),
                 "table": p.get("table", ""),
                 "query": p.get("query", ""),
                 "dep_var": p.get("dep_var", ""),
+                "dep_var_type": p.get("dep_var_type", "revenue"),
                 "date_var": p.get("date_var", ""),
                 "adstock": p.get("adstock", ""),
+                "hyperparameter_preset": p.get("hyperparameter_preset", "Meshed recommend"),
                 "resample_freq": p.get("resample_freq", "none"),
                 "resample_agg": p.get("resample_agg", "sum"),
                 "annotations_gcs_path": p.get("annotations_gcs_path", ""),
@@ -1259,7 +1821,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 columns=[
                     "country",
                     "revision",
-                    "date_input",
+                    "start_date",
+                    "end_date",
                     "iterations",
                     "trials",
                     "train_size",
@@ -1269,11 +1832,14 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "factor_vars",
                     "organic_vars",
                     "gcs_bucket",
+                    "data_gcs_path",
                     "table",
                     "query",
                     "dep_var",
+                    "dep_var_type",
                     "date_var",
                     "adstock",
+                    "hyperparameter_preset",
                     "resample_freq",
                     "resample_agg",
                     "annotations_gcs_path",
@@ -1441,7 +2007,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
                 for i, row in st.session_state.qb_df.iterrows():
                     params = _normalize_row(row)
-                    if not (params.get("query") or params.get("table")):
+                    # Check for data source: query, table, or data_gcs_path
+                    if not (params.get("query") or params.get("table") or params.get("data_gcs_path")):
                         dup["missing_data_source"].append(i + 1)
                         continue
                     sig = json.dumps(params, sort_keys=True)
@@ -1503,7 +2070,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             f"{sum(e['status'] in ('RUNNING','LAUNCHING') for e in st.session_state.job_queue)} running"
         )
 
-        if st.button("🔁 Refresh from GCS"):
+        if st.button("🔁 Refresh from GCS", use_container_width=True):
             maybe_refresh_queue_from_gcs(force=True)
             st.success("Refreshed from GCS.")
             st.rerun()
