@@ -60,7 +60,7 @@ safe_write <- function(txt, path) {
 flush_and_ship_log <- function(step = NULL) {
     if (!is.null(step)) message(sprintf("📌 LOG SNAPSHOT @ %s: %s", Sys.time(), step))
     try(flush.console(), silent = TRUE)
-    try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+    try(gcs_put_safe(log_file, file.path(gcs_prefix, "console.log")), silent = TRUE)
 }
 
 log_df_snapshot <- function(df, root, max_rows = 20) {
@@ -345,8 +345,8 @@ cfg <- get_cfg_from_env()
 
 country <- cfg$country
 revision <- cfg$revision
-date_input <- cfg$date_input  # This is an actual date value, not a column name
-date_var_name <- cfg$date_var %||% "date"  # This is the column name to look for
+date_input <- cfg$date_input # This is an actual date value, not a column name
+date_var_name <- cfg$date_var %||% "date" # This is the column name to look for
 iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
@@ -409,7 +409,7 @@ gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
 
 
 ## ---------- LOGGING ----------
-log_file <- file.path(dir_path, "robyn_console.log")
+log_file <- file.path(dir_path, "console.log")
 dir.create(dirname(log_file), recursive = TRUE, showWarnings = FALSE)
 log_con_out <- file(log_file, open = "wt")
 log_con_err <- file(log_file, open = "at")
@@ -421,7 +421,7 @@ cleanup <- function() {
     try(sink(), silent = TRUE)
     try(close(log_con_err), silent = TRUE)
     try(close(log_con_out), silent = TRUE)
-    try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+    try(gcs_put_safe(log_file, file.path(gcs_prefix, "console.log")), silent = TRUE)
 }
 
 ## Global panic trap: log any uncaught error before the process exits
@@ -448,7 +448,7 @@ install_panic_trap <- function() {
         try(gcs_put_safe(ptxt, file.path(gcs_prefix, "panic_error.txt")), silent = TRUE)
         try(gcs_put_safe(pjson, file.path(gcs_prefix, "panic_error.json")), silent = TRUE)
         try(gcs_put_safe(status_json, file.path(gcs_prefix, "status.json")), silent = TRUE)
-        try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+        try(gcs_put_safe(log_file, file.path(gcs_prefix, "console.log")), silent = TRUE)
     })
 }
 
@@ -606,21 +606,21 @@ message("→ STEP 5: Checking for duplicated dates")
 if (anyDuplicated(df$date)) {
     message("   Found ", sum(duplicated(df$date)), " duplicated dates - will collapse")
     sum_or_first <- function(x) if (is.numeric(x)) sum(x, na.rm = TRUE) else dplyr::first(x)
-    
+
     # Verify date column exists before trying to group by it
     if (!"date" %in% names(df)) {
         message("   ✗✗✗ FATAL: 'date' column missing before deduplication!")
         message("   Current columns: ", paste(names(df), collapse = ", "))
         stop("FATAL: 'date' column missing before deduplication. Current columns: ", paste(names(df), collapse = ", "))
     }
-    
+
     message("   Columns before deduplication: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
     message("   About to call: df %>% dplyr::group_by(date) %>% dplyr::summarise(...)")
-    
+
     df <- df %>%
         dplyr::group_by(date) %>%
         dplyr::summarise(dplyr::across(!dplyr::all_of("date"), sum_or_first), .groups = "drop")
-    
+
     message("   After deduplication: ", nrow(df), " rows")
     message("   Columns after deduplication: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
     message("   'date' exists after deduplication: ", "date" %in% names(df))
@@ -663,118 +663,122 @@ df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 message("→ Resampling configuration: freq=", resample_freq, ", agg=", resample_agg)
 if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
     message("→ Applying resampling to data...")
-    
+
     # Log pre-resample state
     pre_resample_rows <- nrow(df)
     pre_resample_date_range <- paste(min(df$date), "to", max(df$date))
     message("   Pre-resample: ", pre_resample_rows, " rows, date range: ", pre_resample_date_range)
-    
-    tryCatch({
-        # Separate numeric and non-numeric columns
-        date_col <- "date"
-        numeric_cols <- names(df)[sapply(df, is.numeric)]
-        non_numeric_cols <- setdiff(names(df), c(date_col, numeric_cols))
-        
-        # Determine aggregation function with explicit handling of invalid types
-        agg_func <- switch(resample_agg,
-            "sum" = sum,
-            "mean" = mean,
-            "max" = max,
-            "min" = min,
-            {
-                # Default case: unsupported aggregation type
-                message("   ⚠️ WARNING: Unsupported aggregation type '", resample_agg, "', defaulting to 'sum'")
-                sum
-            }
-        )
-        
-        # Create time period grouping based on frequency
-        if (resample_freq == "W") {
-            # Weekly aggregation (week starts on Monday)
-            message("   Using weekly aggregation (weeks start on Monday)")
-            df$resample_period <- floor_date(df$date, unit = "week", week_start = 1)
-        } else {
-            # Monthly aggregation  
-            message("   Using monthly aggregation")
-            df$resample_period <- floor_date(df$date, unit = "month")
-        }
-        
-        # Aggregate numeric columns
-        # Note: na.rm=TRUE removes missing values during aggregation. This is intentional
-        # to handle gaps in data, but be aware that this silently removes NAs.
-        # Count NAs before aggregation for logging
-        na_counts_before <- colSums(is.na(df[numeric_cols]))
-        total_nas <- sum(na_counts_before)
-        if (total_nas > 0) {
-            message("   ℹ️ Note: ", total_nas, " NA values found in numeric columns before resampling")
-            top_na_cols <- head(sort(na_counts_before[na_counts_before > 0], decreasing = TRUE), 5)
-            if (length(top_na_cols) > 0) {
-                message("   Top columns with NAs: ", paste(names(top_na_cols), "=", top_na_cols, collapse = ", "))
-            }
-        }
-        
-        df_resampled <- df %>%
-            group_by(resample_period) %>%
-            summarise(
-                across(all_of(numeric_cols), ~agg_func(.x, na.rm = TRUE)),
-                .groups = "drop"
+
+    tryCatch(
+        {
+            # Separate numeric and non-numeric columns
+            date_col <- "date"
+            numeric_cols <- names(df)[sapply(df, is.numeric)]
+            non_numeric_cols <- setdiff(names(df), c(date_col, numeric_cols))
+
+            # Determine aggregation function with explicit handling of invalid types
+            agg_func <- switch(resample_agg,
+                "sum" = sum,
+                "mean" = mean,
+                "max" = max,
+                "min" = min,
+                {
+                    # Default case: unsupported aggregation type
+                    message("   ⚠️ WARNING: Unsupported aggregation type '", resample_agg, "', defaulting to 'sum'")
+                    sum
+                }
             )
-        
-        # Handle non-numeric columns (take first value in each period)
-        if (length(non_numeric_cols) > 0) {
-            df_non_numeric <- df %>%
+
+            # Create time period grouping based on frequency
+            if (resample_freq == "W") {
+                # Weekly aggregation (week starts on Monday)
+                message("   Using weekly aggregation (weeks start on Monday)")
+                df$resample_period <- floor_date(df$date, unit = "week", week_start = 1)
+            } else {
+                # Monthly aggregation
+                message("   Using monthly aggregation")
+                df$resample_period <- floor_date(df$date, unit = "month")
+            }
+
+            # Aggregate numeric columns
+            # Note: na.rm=TRUE removes missing values during aggregation. This is intentional
+            # to handle gaps in data, but be aware that this silently removes NAs.
+            # Count NAs before aggregation for logging
+            na_counts_before <- colSums(is.na(df[numeric_cols]))
+            total_nas <- sum(na_counts_before)
+            if (total_nas > 0) {
+                message("   ℹ️ Note: ", total_nas, " NA values found in numeric columns before resampling")
+                top_na_cols <- head(sort(na_counts_before[na_counts_before > 0], decreasing = TRUE), 5)
+                if (length(top_na_cols) > 0) {
+                    message("   Top columns with NAs: ", paste(names(top_na_cols), "=", top_na_cols, collapse = ", "))
+                }
+            }
+
+            df_resampled <- df %>%
                 group_by(resample_period) %>%
                 summarise(
-                    across(all_of(non_numeric_cols), ~first(.x)),
+                    across(all_of(numeric_cols), ~ agg_func(.x, na.rm = TRUE)),
                     .groups = "drop"
                 )
-            df_resampled <- left_join(df_resampled, df_non_numeric, by = "resample_period")
+
+            # Handle non-numeric columns (take first value in each period)
+            if (length(non_numeric_cols) > 0) {
+                df_non_numeric <- df %>%
+                    group_by(resample_period) %>%
+                    summarise(
+                        across(all_of(non_numeric_cols), ~ first(.x)),
+                        .groups = "drop"
+                    )
+                df_resampled <- left_join(df_resampled, df_non_numeric, by = "resample_period")
+            }
+
+            # Rename period column back to date
+            df_resampled <- df_resampled %>%
+                rename(date = resample_period)
+
+            # Ensure date is Date type
+            df_resampled$date <- as.Date(df_resampled$date)
+
+            # Replace original dataframe
+            df <- df_resampled
+
+            # Log post-resample state
+            post_resample_rows <- nrow(df)
+            post_resample_date_range <- paste(min(df$date), "to", max(df$date))
+            message("✅ Resampling complete:")
+            message("   Post-resample: ", post_resample_rows, " rows, date range: ", post_resample_date_range)
+            message("   Aggregation: ", resample_agg, " applied to numeric columns")
+            message(
+                "   Rows reduced from ", pre_resample_rows, " to ", post_resample_rows,
+                " (", round(100 * (1 - post_resample_rows / pre_resample_rows), 1), "% reduction)"
+            )
+
+            # Log snapshot after resampling
+            log_df_snapshot(df, dir_path, max_rows = 20)
+            flush_and_ship_log("after resampling")
+        },
+        error = function(e) {
+            msg <- paste("Resampling failed:", conditionMessage(e))
+            message("❌ ", msg)
+
+            # Log the error
+            resample_err_file <- file.path(dir_path, "resample_error.txt")
+            writeLines(c(
+                "RESAMPLING ERROR",
+                paste0("When: ", Sys.time()),
+                paste0("Frequency: ", resample_freq),
+                paste0("Aggregation: ", resample_agg),
+                paste0("Message: ", conditionMessage(e)),
+                "",
+                "Stack trace:",
+                paste(capture.output(traceback()), collapse = "\n")
+            ), resample_err_file)
+            gcs_put_safe(resample_err_file, file.path(gcs_prefix, basename(resample_err_file)))
+
+            # Continue without resampling (use original data)
+            message("⚠️ Continuing with original (non-resampled) data")
         }
-        
-        # Rename period column back to date
-        df_resampled <- df_resampled %>%
-            rename(date = resample_period)
-        
-        # Ensure date is Date type
-        df_resampled$date <- as.Date(df_resampled$date)
-        
-        # Replace original dataframe
-        df <- df_resampled
-        
-        # Log post-resample state
-        post_resample_rows <- nrow(df)
-        post_resample_date_range <- paste(min(df$date), "to", max(df$date))
-        message("✅ Resampling complete:")
-        message("   Post-resample: ", post_resample_rows, " rows, date range: ", post_resample_date_range)
-        message("   Aggregation: ", resample_agg, " applied to numeric columns")
-        message("   Rows reduced from ", pre_resample_rows, " to ", post_resample_rows, 
-                " (", round(100 * (1 - post_resample_rows/pre_resample_rows), 1), "% reduction)")
-        
-        # Log snapshot after resampling
-        log_df_snapshot(df, dir_path, max_rows = 20)
-        flush_and_ship_log("after resampling")
-        
-    }, error = function(e) {
-        msg <- paste("Resampling failed:", conditionMessage(e))
-        message("❌ ", msg)
-        
-        # Log the error
-        resample_err_file <- file.path(dir_path, "resample_error.txt")
-        writeLines(c(
-            "RESAMPLING ERROR",
-            paste0("When: ", Sys.time()),
-            paste0("Frequency: ", resample_freq),
-            paste0("Aggregation: ", resample_agg),
-            paste0("Message: ", conditionMessage(e)),
-            "",
-            "Stack trace:",
-            paste(capture.output(traceback()), collapse = "\n")
-        ), resample_err_file)
-        gcs_put_safe(resample_err_file, file.path(gcs_prefix, basename(resample_err_file)))
-        
-        # Continue without resampling (use original data)
-        message("⚠️ Continuing with original (non-resampled) data")
-    })
+    )
 } else {
     message("→ No resampling applied (freq=", resample_freq, ")")
 }
@@ -1370,7 +1374,7 @@ OutputCollect <- tryCatch(
     error = function(e) {
         msg <- conditionMessage(e)
         message("❌ robyn_outputs() FAILED: ", msg)
-        
+
         # Write error file
         err_file <- file.path(dir_path, "robyn_outputs_error.txt")
         writeLines(c(
@@ -1382,7 +1386,7 @@ OutputCollect <- tryCatch(
             paste(capture.output(traceback()), collapse = "\n")
         ), err_file)
         gcs_put_safe(err_file, file.path(gcs_prefix, basename(err_file)))
-        
+
         return(NULL)
     }
 )
@@ -1392,7 +1396,7 @@ flush_and_ship_log("after robyn_outputs")
 if (is.null(OutputCollect)) {
     err_msg <- "robyn_outputs() returned NULL or failed"
     message("FATAL: ", err_msg)
-    
+
     writeLines(
         jsonlite::toJSON(list(
             state = "FAILED",
@@ -1525,9 +1529,11 @@ best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == b
 message("   best_row extracted, nrow=", nrow(best_row), ", ncol=", ncol(best_row))
 
 alloc_tbl <- if (!inherits(AllocatorCollect, "try-error")) AllocatorCollect$result_allocator else NULL
-message("   AllocatorCollect status: ", 
-        if (inherits(AllocatorCollect, "try-error")) "ERROR" else "OK",
-        ", alloc_tbl is NULL: ", is.null(alloc_tbl))
+message(
+    "   AllocatorCollect status: ",
+    if (inherits(AllocatorCollect, "try-error")) "ERROR" else "OK",
+    ", alloc_tbl is NULL: ", is.null(alloc_tbl)
+)
 
 total_response <- to_scalar(if (!is.null(alloc_tbl)) alloc_tbl$total_response else NA_real_)
 total_spend <- to_scalar(if (!is.null(alloc_tbl)) alloc_tbl$total_spend else NA_real_)
@@ -1555,58 +1561,61 @@ gcs_put_safe(metrics_txt, file.path(gcs_prefix, "allocator_metrics.txt"))
 message("✅ Metrics text file written")
 
 message("→ Creating metrics dataframe...")
-tryCatch({
-    metrics_df <- data.frame(
-        model_id = best_id,
-        training_time_mins = round(training_time, 2),
-        max_cores_used = max_cores,
-        r2_train = round(best_row$rsq_train %||% NA_real_, 4),
-        nrmse_train = round(best_row$nrmse_train %||% NA_real_, 4),
-        r2_val = round(best_row$rsq_val %||% NA_real_, 4),
-        nrmse_val = round(best_row$nrmse_val %||% NA_real_, 4),
-        r2_test = round(best_row$rsq_test %||% NA_real_, 4),
-        nrmse_test = round(best_row$nrmse_test %||% NA_real_, 4),
-        decomp_rssd_train = round(best_row$decomp.rssd %||% NA_real_, 4),
-        allocator_total_response = round(total_response, 2),
-        allocator_total_spend = round(total_spend, 2),
-        stringsAsFactors = FALSE
-    )
-    message("✅ metrics_df created successfully, dimensions: ", nrow(metrics_df), " x ", ncol(metrics_df))
-    
-    message("→ Writing metrics CSV...")
-    write.csv(metrics_df, metrics_csv, row.names = FALSE)
-    message("✅ Metrics CSV written to: ", metrics_csv)
-    
-    gcs_put_safe(metrics_csv, file.path(gcs_prefix, "allocator_metrics.csv"))
-    message("✅ Metrics CSV uploaded to GCS")
-}, error = function(e) {
-    msg <- paste("Failed to create or write metrics_df:", conditionMessage(e))
-    message("❌ ", msg)
-    
-    # Log detailed error
-    metrics_err_file <- file.path(dir_path, "metrics_error.txt")
-    writeLines(c(
-        "METRICS ERROR",
-        paste0("When: ", Sys.time()),
-        paste0("Message: ", conditionMessage(e)),
-        paste0("best_id: ", best_id),
-        paste0("best_row class: ", class(best_row)),
-        paste0("best_row nrow: ", nrow(best_row)),
-        paste0("best_row ncol: ", if (is.data.frame(best_row)) ncol(best_row) else "N/A"),
-        paste0("training_time: ", training_time),
-        paste0("max_cores: ", max_cores),
-        "",
-        "Stack trace:",
-        paste(capture.output(traceback()), collapse = "\n"),
-        "",
-        "best_row structure:",
-        paste(capture.output(str(best_row)), collapse = "\n")
-    ), metrics_err_file)
-    gcs_put_safe(metrics_err_file, file.path(gcs_prefix, basename(metrics_err_file)))
-    
-    # Continue despite error (don't fail the entire job)
-    message("⚠️ Continuing without metrics CSV")
-})
+tryCatch(
+    {
+        metrics_df <- data.frame(
+            model_id = best_id,
+            training_time_mins = round(training_time, 2),
+            max_cores_used = max_cores,
+            r2_train = round(best_row$rsq_train %||% NA_real_, 4),
+            nrmse_train = round(best_row$nrmse_train %||% NA_real_, 4),
+            r2_val = round(best_row$rsq_val %||% NA_real_, 4),
+            nrmse_val = round(best_row$nrmse_val %||% NA_real_, 4),
+            r2_test = round(best_row$rsq_test %||% NA_real_, 4),
+            nrmse_test = round(best_row$nrmse_test %||% NA_real_, 4),
+            decomp_rssd_train = round(best_row$decomp.rssd %||% NA_real_, 4),
+            allocator_total_response = round(total_response, 2),
+            allocator_total_spend = round(total_spend, 2),
+            stringsAsFactors = FALSE
+        )
+        message("✅ metrics_df created successfully, dimensions: ", nrow(metrics_df), " x ", ncol(metrics_df))
+
+        message("→ Writing metrics CSV...")
+        write.csv(metrics_df, metrics_csv, row.names = FALSE)
+        message("✅ Metrics CSV written to: ", metrics_csv)
+
+        gcs_put_safe(metrics_csv, file.path(gcs_prefix, "allocator_metrics.csv"))
+        message("✅ Metrics CSV uploaded to GCS")
+    },
+    error = function(e) {
+        msg <- paste("Failed to create or write metrics_df:", conditionMessage(e))
+        message("❌ ", msg)
+
+        # Log detailed error
+        metrics_err_file <- file.path(dir_path, "metrics_error.txt")
+        writeLines(c(
+            "METRICS ERROR",
+            paste0("When: ", Sys.time()),
+            paste0("Message: ", conditionMessage(e)),
+            paste0("best_id: ", best_id),
+            paste0("best_row class: ", class(best_row)),
+            paste0("best_row nrow: ", nrow(best_row)),
+            paste0("best_row ncol: ", if (is.data.frame(best_row)) ncol(best_row) else "N/A"),
+            paste0("training_time: ", training_time),
+            paste0("max_cores: ", max_cores),
+            "",
+            "Stack trace:",
+            paste(capture.output(traceback()), collapse = "\n"),
+            "",
+            "best_row structure:",
+            paste(capture.output(str(best_row)), collapse = "\n")
+        ), metrics_err_file)
+        gcs_put_safe(metrics_err_file, file.path(gcs_prefix, basename(metrics_err_file)))
+
+        # Continue despite error (don't fail the entire job)
+        message("⚠️ Continuing without metrics CSV")
+    }
+)
 
 # Allocator plot (restored)
 alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
