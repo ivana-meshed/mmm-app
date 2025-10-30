@@ -5,7 +5,6 @@ Tests the end-to-end flow from metadata to training configuration.
 
 import json
 import unittest
-from datetime import datetime, timedelta
 
 
 class TestResamplingIntegration(unittest.TestCase):
