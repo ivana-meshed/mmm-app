@@ -519,73 +519,113 @@ names(df) <- toupper(names(df))
 # Use date_var_name to find the date column name (convert to uppercase since all names are uppercase now)
 # If date_var is not in config, try to find a date column automatically
 date_var_name_upper <- toupper(date_var_name)
-message("→ Looking for date column: date_var_name='", date_var_name, "', uppercased='", date_var_name_upper, "'")
-message("   Available columns (all uppercase): ", paste(head(names(df), 20), collapse = ", "), if (length(names(df)) > 20) "..." else "")
+message("========================================")
+message("→ STEP 1: Looking for date column")
+message("   date_var from config: '", date_var_name, "'")
+message("   date_var uppercased: '", date_var_name_upper, "'")
+message("   Total columns in df: ", ncol(df))
+message("   Total rows in df: ", nrow(df))
+message("   First 30 column names: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+message("   Checking if 'date' (lowercase) already exists: ", "date" %in% names(df))
+message("   Checking if 'DATE' (uppercase) exists: ", "DATE" %in% names(df))
 
 # Try to find the date column - check in order of preference
 date_col_found <- NULL
 if (date_var_name_upper %in% names(df)) {
     date_col_found <- date_var_name_upper
-    message("   Found exact match: '", date_col_found, "'")
+    message("   ✓ Found exact match: '", date_col_found, "'")
 } else {
+    message("   ✗ Configured date column '", date_var_name_upper, "' not found")
     # Try common date column names
     common_date_names <- c("DATE", "DS", "DATUM", "FECHA", "DATA")
+    message("   Trying common date column names: ", paste(common_date_names, collapse = ", "))
     for (name in common_date_names) {
         if (name %in% names(df)) {
             date_col_found <- name
-            message("   Found date column by common name: '", date_col_found, "'")
+            message("   ✓ Found date column by common name: '", date_col_found, "'")
             break
         }
     }
 }
 
 if (is.null(date_col_found)) {
+    message("   ✗✗✗ FATAL: No date column found!")
+    message("   Expected: '", date_var_name_upper, "'")
+    message("   Tried common names: DATE, DS, DATUM, FECHA, DATA")
+    message("   ALL available columns: ", paste(names(df), collapse = ", "))
     stop("No date column found. Expected: ", date_var_name_upper, ". Tried common names: DATE, DS, DATUM, FECHA, DATA. Available columns: ", paste(names(df), collapse = ", "))
 }
 
 # Convert the date column in place
-message("   Converting '", date_col_found, "' to Date type")
+message("→ STEP 2: Converting '", date_col_found, "' to Date type")
+message("   Column class before: ", paste(class(df[[date_col_found]]), collapse = ", "))
+message("   First 3 values: ", paste(head(df[[date_col_found]], 3), collapse = ", "))
 df[[date_col_found]] <- if (inherits(df[[date_col_found]], "POSIXt")) as.Date(df[[date_col_found]]) else as.Date(as.character(df[[date_col_found]]))
+message("   Column class after: ", paste(class(df[[date_col_found]]), collapse = ", "))
+message("   First 3 values after: ", paste(head(df[[date_col_found]], 3), collapse = ", "))
 
 # Rename to lowercase 'date'
+message("→ STEP 3: Renaming '", date_col_found, "' to 'date'")
+message("   Columns before rename: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
 names(df)[names(df) == date_col_found] <- "date"
-message("   Renamed '", date_col_found, "' to 'date'")
+message("   Columns after rename: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+message("   Verification: 'date' in names(df) = ", "date" %in% names(df))
+message("   Verification: 'DATE' in names(df) = ", "DATE" %in% names(df))
 
 # Verify date column exists and has valid data
 if (!"date" %in% names(df)) {
-    stop("FATAL: 'date' column was not created successfully")
+    message("   ✗✗✗ FATAL: 'date' column was not created successfully!")
+    message("   Current columns: ", paste(names(df), collapse = ", "))
+    stop("FATAL: 'date' column was not created successfully. Current columns: ", paste(names(df), collapse = ", "))
 }
 if (nrow(df) == 0) {
     stop("FATAL: Dataframe has 0 rows after date column creation")
 }
-message("✅ Date column created: ", nrow(df), " rows, range: ", min(df$date, na.rm = TRUE), " to ", max(df$date, na.rm = TRUE))
-message("   Columns after date creation: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+message("✅ Date column created successfully: ", nrow(df), " rows, range: ", min(df$date, na.rm = TRUE), " to ", max(df$date, na.rm = TRUE))
+message("   Final columns after date processing: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+message("========================================")
 
+message("→ STEP 4: Filtering by country: ", country)
 df <- filter_by_country(df, country)
 
 # Verify date column still exists after filtering
+message("   After filter_by_country:")
+message("   - Rows: ", nrow(df))
+message("   - 'date' exists: ", "date" %in% names(df))
+message("   - Columns: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
 if (!"date" %in% names(df)) {
+    message("   ✗✗✗ FATAL: 'date' column disappeared after filter_by_country!")
+    message("   Current columns: ", paste(names(df), collapse = ", "))
     stop("FATAL: 'date' column disappeared after filter_by_country. Current columns: ", paste(names(df), collapse = ", "))
 }
 if (nrow(df) == 0) {
     stop("FATAL: No data remaining after filtering by country: ", country)
 }
-message("→ After country filter: ", nrow(df), " rows")
-message("   Columns after country filter: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
 
+message("→ STEP 5: Checking for duplicated dates")
 if (anyDuplicated(df$date)) {
-    message("→ Collapsing duplicated dates: ", sum(duplicated(df$date)))
+    message("   Found ", sum(duplicated(df$date)), " duplicated dates - will collapse")
     sum_or_first <- function(x) if (is.numeric(x)) sum(x, na.rm = TRUE) else dplyr::first(x)
+    
     # Verify date column exists before trying to group by it
     if (!"date" %in% names(df)) {
+        message("   ✗✗✗ FATAL: 'date' column missing before deduplication!")
+        message("   Current columns: ", paste(names(df), collapse = ", "))
         stop("FATAL: 'date' column missing before deduplication. Current columns: ", paste(names(df), collapse = ", "))
     }
+    
     message("   Columns before deduplication: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+    message("   About to call: df %>% dplyr::group_by(date) %>% dplyr::summarise(...)")
+    
     df <- df %>%
         dplyr::group_by(date) %>%
         dplyr::summarise(dplyr::across(!dplyr::all_of("date"), sum_or_first), .groups = "drop")
+    
     message("   After deduplication: ", nrow(df), " rows")
     message("   Columns after deduplication: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+    message("   'date' exists after deduplication: ", "date" %in% names(df))
+} else {
+    message("   No duplicated dates found")
 }
 
 df <- fill_day(df)
