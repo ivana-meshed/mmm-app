@@ -929,12 +929,30 @@ message("Preflight InputCollect is NULL? ", is.null(InputCollect))
 log_ic_snapshot_files(InputCollect, dir_path, tag = "preflight")
 flush_and_ship_log("after preflight robyn_inputs")
 
+# Check if preflight robyn_inputs succeeded - if not, exit early
+if (is.null(InputCollect)) {
+    err_msg <- "Preflight robyn_inputs() returned NULL - cannot build hyperparameters"
+    message("FATAL: ", err_msg)
+    
+    writeLines(
+        jsonlite::toJSON(list(
+            state = "FAILED",
+            step = "preflight_robyn_inputs",
+            start_time = as.character(job_started),
+            end_time = as.character(Sys.time()),
+            error = err_msg
+        ), auto_unbox = TRUE, pretty = TRUE),
+        status_json
+    )
+    gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+    cleanup()
+    quit(status = 1)
+}
+
 # Breadcrumb before hyper_vars access (does not change behavior)
 message("About to build hyper_vars; InputCollect NULL? ", is.null(InputCollect))
-if (!is.null(InputCollect)) {
-    message("paid_media_vars (preflight): ", paste(InputCollect$paid_media_vars, collapse = ", "))
-    message("organic_vars (preflight): ", paste(InputCollect$organic_vars, collapse = ", "))
-}
+message("paid_media_vars (preflight): ", paste(InputCollect$paid_media_vars, collapse = ", "))
+message("organic_vars (preflight): ", paste(InputCollect$organic_vars, collapse = ", "))
 
 # Now build hyperparameters based on what Robyn ACTUALLY has
 hyper_vars <- c(InputCollect$paid_media_vars, InputCollect$organic_vars)
@@ -1054,7 +1072,6 @@ get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
 }
 
 # Build hyperparameters using the preset
-hyper_vars <- c(InputCollect$paid_media_vars, InputCollect$organic_vars)
 hyperparameters <- list()
 
 for (v in hyper_vars) {
