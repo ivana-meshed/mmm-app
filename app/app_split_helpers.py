@@ -241,6 +241,32 @@ def prepare_and_launch_job(params: dict) -> dict:
 
     # Optional annotations (batch: pass a gs:// in params)
     annotations_gcs_path = params.get("annotations_gcs_path") or None
+    
+    # Load metadata to get column_agg_strategies for resampling
+    # This ensures queue jobs use per-column aggregations from metadata
+    if params.get("resample_freq", "none") != "none":
+        try:
+            from google.cloud import storage
+            country = params.get("country", "").lower()
+            # Try to load latest metadata for this country
+            client = storage.Client()
+            bucket = client.bucket(gcs_bucket)
+            metadata_blob_path = f"metadata/{country}/latest/mapping.json"
+            blob = bucket.blob(metadata_blob_path)
+            
+            if blob.exists():
+                metadata = json.loads(blob.download_as_bytes())
+                column_agg_strategies = metadata.get("agg_strategies", {})
+                if column_agg_strategies:
+                    params["column_agg_strategies"] = column_agg_strategies
+                    logger.info(f"Loaded {len(column_agg_strategies)} column aggregation strategies from metadata for country {country}")
+                else:
+                    logger.warning(f"No column_agg_strategies found in metadata for country {country}")
+            else:
+                logger.warning(f"Metadata not found at {metadata_blob_path}, using default aggregations")
+        except Exception as e:
+            logger.warning(f"Could not load metadata for column aggregations: {e}")
+            # Continue without column_agg_strategies - R script will default to sum
 
     # 4) Create config (timestamped + latest)
     with tempfile.TemporaryDirectory() as td:
@@ -562,8 +588,46 @@ def _make_normalizer(defaults: dict):
             start_date_val = "2024-01-01"
         if not str(end_date_val).strip():
             end_date_val = date_input_val
+        
+        # Parse custom hyperparameters if hyperparameter_preset is "Custom"
+        hyperparameter_preset_val = str(_g("hyperparameter_preset", defaults.get("hyperparameter_preset", "Meshed recommend")))
+        custom_hyperparameters = {}
+        
+        if hyperparameter_preset_val == "Custom":
+            # Check for per-variable hyperparameter columns (new format)
+            # Pattern: {VAR_NAME}_alphas, {VAR_NAME}_gammas, {VAR_NAME}_thetas, etc.
+            for col in row.index:
+                if pd.notna(row[col]) and str(row[col]).strip():
+                    # Check if column matches per-variable pattern
+                    if col.endswith(('_alphas', '_gammas', '_thetas', '_shapes', '_scales')):
+                        try:
+                            # Parse the value - could be a list string like "[1.0, 3.0]" or comma-separated "1.0, 3.0"
+                            val_str = str(row[col]).strip()
+                            if val_str.startswith('[') and val_str.endswith(']'):
+                                # JSON-like list format
+                                import json
+                                custom_hyperparameters[col] = json.loads(val_str)
+                            elif ',' in val_str:
+                                # Comma-separated format
+                                custom_hyperparameters[col] = [float(x.strip()) for x in val_str.split(',')]
+                            else:
+                                # Single value or other format - skip
+                                pass
+                        except (ValueError, TypeError, json.JSONDecodeError):
+                            pass
+            
+            # Backward compatibility: check for old global format (alphas_min/max, etc.)
+            if not custom_hyperparameters:
+                for param in ["alphas_min", "alphas_max", "gammas_min", "gammas_max", "thetas_min", "thetas_max",
+                             "shapes_min", "shapes_max", "scales_min", "scales_max"]:
+                    val = _g(param, "")
+                    if val and str(val).strip():
+                        try:
+                            custom_hyperparameters[param] = float(val)
+                        except (ValueError, TypeError):
+                            pass
 
-        return {
+        result = {
             "country": str(_g("country", defaults["country"])),
             "revision": str(_g("revision", defaults["revision"])),
             "date_input": str(date_input_val),  # Keep for backward compatibility
@@ -593,7 +657,7 @@ def _make_normalizer(defaults: dict):
             "dep_var_type": str(_g("dep_var_type", defaults.get("dep_var_type", "revenue"))),  # New field
             "date_var": str(_g("date_var", defaults["date_var"])),
             "adstock": str(_g("adstock", defaults["adstock"])),
-            "hyperparameter_preset": str(_g("hyperparameter_preset", defaults.get("hyperparameter_preset", "Meshed recommend"))),  # New field
+            "hyperparameter_preset": hyperparameter_preset_val,
             "resample_freq": _normalize_resample_freq(
                 str(_g("resample_freq", defaults["resample_freq"]))
             ),
@@ -602,6 +666,12 @@ def _make_normalizer(defaults: dict):
             ),
             "annotations_gcs_path": str(_g("annotations_gcs_path", "")),
         }
+        
+        # Add custom_hyperparameters if present
+        if custom_hyperparameters:
+            result["custom_hyperparameters"] = custom_hyperparameters
+        
+        return result
 
     return _normalize_row
 

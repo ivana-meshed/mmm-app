@@ -1,4 +1,3 @@
-# (full file contents)
 import base64
 import io
 import json
@@ -10,12 +9,9 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-
 import pandas as pd
 import streamlit as st
-
 st.set_page_config(page_title="Experiment", page_icon="🧪", layout="wide")
-
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -31,10 +27,8 @@ from app_shared import (
     upload_to_gcs,
 )
 from google.cloud import storage
-
 data_processor = get_data_processor()
 job_manager = get_job_manager()
-
 from app_split_helpers import *  # bring in all helper functions/constants
 
 
@@ -51,7 +45,6 @@ if st.session_state.get("switch_to_queue_tab", False):
 tab_single, tab_queue = st.tabs(["Single run", "Queue"])
 
 # Prefill fields from saved metadata if present (session_state keys should already be set by Map Your Data page).
-
 
 # Helper functions for GCS data loading
 def _list_country_versions(bucket: str, country: str) -> List[str]:
@@ -82,7 +75,6 @@ def _list_metadata_versions(bucket: str, country: str) -> List[str]:
     versions = sorted(ts, reverse=True)
     # Replace "latest" with "Latest" if present
     return ["Latest" if v.lower() == "latest" else v for v in versions]
-
 
 
 def _get_data_blob(country: str, version: str) -> str:
@@ -153,7 +145,7 @@ with tab_single:
     st.subheader("Robyn configuration & training")
 
     # Data selection
-    with st.expander("Data selection", expanded=True):
+    with st.expander("📊 Data selection", expanded=False):
         # Show current loaded state (point 4 - UI representing actual state)
         if "preview_df" in st.session_state and st.session_state["preview_df"] is not None:
             loaded_country = st.session_state.get("selected_country", "N/A")
@@ -269,7 +261,7 @@ with tab_single:
                         st.info(f"📋 Using metadata: **{selected_metadata}**")
                         
                         # Display summary of loaded data (Issue #1 fix: show goals details)
-                        with st.expander("📊 Loaded Data Summary", expanded=True):
+                        with st.expander("📊 Loaded Data Summary", expanded=False):
                             st.write(f"**Data Source:** {selected_country.upper()} - {selected_version}")
                             st.write(f"**Metadata Source:** {selected_metadata}")
                             st.write(f"**Rows:** {len(df_prev):,}")
@@ -357,7 +349,7 @@ with tab_single:
             st.warning(f"Could not list configurations: {e}")
 
     # Robyn config (moved outside Data selection expander)
-    with st.expander("Robyn configuration", expanded=True):
+    with st.expander("⚙️ Robyn configuration", expanded=False):
         # Country auto-filled from Data Selection
         country = st.session_state.get("selected_country", "fr")
         st.info(f"**Country:** {country.upper()} (from Data Selection)")
@@ -562,14 +554,21 @@ with tab_single:
         # Store the hyperparameter choice for later use
         st.session_state["hyperparameter_preset"] = hyperparameter_preset
         st.session_state["adstock_choice"] = adstock
+        
+        # Show info message when Custom is selected
+        if hyperparameter_preset == "Custom":
+            st.info("📌 **Custom Hyperparameters Selected**: Scroll down to the **Variable mapping** section below to configure per-variable hyperparameter ranges for each paid media and organic variable.")
+
+        # Custom hyperparameters will be collected later after variables are selected
+        # We need to know which variables are selected before showing per-variable hyperparameters
+        custom_hyperparameters = {}
 
         # NEW: optional resampling
-        c_rs1, c_rs2 = st.columns([1, 1])
-        resample_freq_label = c_rs1.selectbox(
+        resample_freq_label = st.selectbox(
             "Resample input data (optional)",
             ["None", "Weekly (W)", "Monthly (M)"],
             index=0,
-            help="Aggregates the input before training.",
+            help="Aggregates the input before training. Column aggregations from metadata will be used.",
         )
         
         # Determine default resample freq from loaded config
@@ -588,32 +587,26 @@ with tab_single:
             "Monthly (M)": "M",
         }.get(resample_freq_label or default_resample_freq, "none")
 
-        # Determine default resample agg from loaded config
-        resample_agg_map = {
-            "sum": "sum",
-            "mean": "avg (mean)",
-            "max": "max",
-            "min": "min",
-        }
-        default_resample_agg = "sum"
-        if loaded_config and "resample_agg" in loaded_config:
-            default_resample_agg = resample_agg_map.get(loaded_config["resample_agg"], "sum")
+        # Get column aggregations from metadata
+        # These will be passed to R for per-column resampling
+        column_agg_strategies = {}
+        if metadata and "agg_strategies" in metadata:
+            column_agg_strategies = metadata["agg_strategies"]
         
-        resample_agg_label = c_rs2.selectbox(
-            "Aggregation for metrics (when resampling)",
-            ["sum", "avg (mean)", "max", "min"],
-            index=["sum", "avg (mean)", "max", "min"].index(default_resample_agg) if default_resample_agg in ["sum", "avg (mean)", "max", "min"] else 0,
-            help="Applied to numeric columns during resample.",
-        )
-        resample_agg = {
-            "sum": "sum",
-            "avg (mean)": "mean",
-            "max": "max",
-            "min": "min",
-        }.get(resample_agg_label or "sum", "sum")
+        # Display info about column aggregations if resampling is enabled
+        if resample_freq != "none" and column_agg_strategies:
+            # Count aggregations by type
+            agg_counts = {}
+            for agg in column_agg_strategies.values():
+                agg_counts[agg] = agg_counts.get(agg, 0) + 1
+            
+            agg_summary = ", ".join([f"{count} {agg}" for agg, count in sorted(agg_counts.items())])
+            st.info(f"ℹ️ Using column aggregations from metadata: {agg_summary}")
+        elif resample_freq != "none" and not column_agg_strategies:
+            st.warning("⚠️ No column aggregations found in metadata. Default 'sum' will be used for all numeric columns.")
 
     # Variables (moved outside Data selection expander)
-    with st.expander("Variable mapping", expanded=True):
+    with st.expander("🗺️ Variable mapping", expanded=False):
         # Get available columns from loaded data
         preview_df = st.session_state.get("preview_df")
         if preview_df is not None and not preview_df.empty:
@@ -970,6 +963,182 @@ with tab_single:
             help="Select organic/baseline variables",
         )
 
+        # Custom hyperparameters per variable (when Custom preset is selected)
+        if hyperparameter_preset == "Custom":
+            st.markdown("---")
+            st.markdown("### 🎛️ Custom Hyperparameters per Variable")
+            st.info("📝 **Per-Variable Hyperparameters**: Define custom ranges for each paid media and organic variable. Values are prefilled with Meshed recommend defaults.")
+            
+            # Helper function to get variable-specific defaults based on preset
+            def get_var_defaults(var_name, adstock_type):
+                """Get default hyperparameter ranges for a variable"""
+                # Check if loaded config has this variable's hyperparameters
+                if loaded_config and "custom_hyperparameters" in loaded_config:
+                    var_alphas = loaded_config["custom_hyperparameters"].get(f"{var_name}_alphas")
+                    if var_alphas:
+                        # Loaded from config
+                        if adstock_type == "geometric":
+                            return {
+                                "alphas": var_alphas,
+                                "gammas": loaded_config["custom_hyperparameters"].get(f"{var_name}_gammas", [0.6, 0.9]),
+                                "thetas": loaded_config["custom_hyperparameters"].get(f"{var_name}_thetas", [0.1, 0.4])
+                            }
+                        else:
+                            return {
+                                "alphas": var_alphas,
+                                "shapes": loaded_config["custom_hyperparameters"].get(f"{var_name}_shapes", [0.5, 2.5]),
+                                "scales": loaded_config["custom_hyperparameters"].get(f"{var_name}_scales", [0.001, 0.15])
+                            }
+                
+                # Use Meshed recommend defaults
+                if adstock_type == "geometric":
+                    if "ORGANIC" in var_name.upper():
+                        return {"alphas": [0.5, 2.0], "gammas": [0.3, 0.7], "thetas": [0.9, 0.99]}
+                    elif "TV" in var_name.upper():
+                        return {"alphas": [0.8, 2.2], "gammas": [0.6, 0.99], "thetas": [0.7, 0.95]}
+                    elif "PARTNERSHIP" in var_name.upper():
+                        return {"alphas": [0.65, 2.25], "gammas": [0.45, 0.875], "thetas": [0.3, 0.625]}
+                    else:
+                        return {"alphas": [1.0, 3.0], "gammas": [0.6, 0.9], "thetas": [0.1, 0.4]}
+                else:  # weibull
+                    return {"alphas": [0.5, 3.0], "shapes": [0.5, 2.5], "scales": [0.001, 0.15]}
+            
+            # Combine all variables that need hyperparameters
+            all_hyper_vars = paid_media_vars_list + organic_vars_list
+            
+            if all_hyper_vars:
+                st.caption(f"Configuring hyperparameters for {len(all_hyper_vars)} variable(s)")
+                
+                # Use expander for each variable to keep UI manageable
+                for idx, var in enumerate(all_hyper_vars):
+                    with st.expander(f"📈 **{var}**", expanded=False):
+                        defaults = get_var_defaults(var, adstock)
+                        
+                        if adstock == "geometric":
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                alphas_min = st.number_input(
+                                    "Alpha Min", 
+                                    value=float(defaults["alphas"][0]),
+                                    min_value=0.1, max_value=10.0, step=0.1,
+                                    key=f"custom_hyper_{idx}_{var}_alphas_min",
+                                    help=f"Minimum alpha for {var}"
+                                )
+                            with col2:
+                                alphas_max = st.number_input(
+                                    "Alpha Max",
+                                    value=float(defaults["alphas"][1]),
+                                    min_value=0.1, max_value=10.0, step=0.1,
+                                    key=f"custom_hyper_{idx}_{var}_alphas_max",
+                                    help=f"Maximum alpha for {var}"
+                                )
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                gammas_min = st.number_input(
+                                    "Gamma Min",
+                                    value=float(defaults["gammas"][0]),
+                                    min_value=0.0, max_value=1.0, step=0.05,
+                                    key=f"custom_hyper_{idx}_{var}_gammas_min",
+                                    help=f"Minimum gamma for {var}"
+                                )
+                            with col2:
+                                gammas_max = st.number_input(
+                                    "Gamma Max",
+                                    value=float(defaults["gammas"][1]),
+                                    min_value=0.0, max_value=1.0, step=0.05,
+                                    key=f"custom_hyper_{idx}_{var}_gammas_max",
+                                    help=f"Maximum gamma for {var}"
+                                )
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                thetas_min = st.number_input(
+                                    "Theta Min",
+                                    value=float(defaults["thetas"][0]),
+                                    min_value=0.0, max_value=1.0, step=0.05,
+                                    key=f"custom_hyper_{idx}_{var}_thetas_min",
+                                    help=f"Minimum theta for {var}"
+                                )
+                            with col2:
+                                thetas_max = st.number_input(
+                                    "Theta Max",
+                                    value=float(defaults["thetas"][1]),
+                                    min_value=0.0, max_value=1.0, step=0.05,
+                                    key=f"custom_hyper_{idx}_{var}_thetas_max",
+                                    help=f"Maximum theta for {var}"
+                                )
+                            
+                            # Store per-variable hyperparameters
+                            custom_hyperparameters[f"{var}_alphas"] = [alphas_min, alphas_max]
+                            custom_hyperparameters[f"{var}_gammas"] = [gammas_min, gammas_max]
+                            custom_hyperparameters[f"{var}_thetas"] = [thetas_min, thetas_max]
+                        
+                        else:  # weibull
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                alphas_min = st.number_input(
+                                    "Alpha Min",
+                                    value=float(defaults["alphas"][0]),
+                                    min_value=0.1, max_value=10.0, step=0.1,
+                                    key=f"custom_hyper_{idx}_{var}_alphas_min",
+                                    help=f"Minimum alpha for {var}"
+                                )
+                            with col2:
+                                alphas_max = st.number_input(
+                                    "Alpha Max",
+                                    value=float(defaults["alphas"][1]),
+                                    min_value=0.1, max_value=10.0, step=0.1,
+                                    key=f"custom_hyper_{idx}_{var}_alphas_max",
+                                    help=f"Maximum alpha for {var}"
+                                )
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                shapes_min = st.number_input(
+                                    "Shape Min",
+                                    value=float(defaults["shapes"][0]),
+                                    min_value=0.0001, max_value=10.0, step=0.1,
+                                    key=f"custom_hyper_{idx}_{var}_shapes_min",
+                                    help=f"Minimum shape for {var}"
+                                )
+                            with col2:
+                                shapes_max = st.number_input(
+                                    "Shape Max",
+                                    value=float(defaults["shapes"][1]),
+                                    min_value=0.0001, max_value=10.0, step=0.1,
+                                    key=f"custom_hyper_{idx}_{var}_shapes_max",
+                                    help=f"Maximum shape for {var}"
+                                )
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                scales_min = st.number_input(
+                                    "Scale Min",
+                                    value=float(defaults["scales"][0]),
+                                    min_value=0.0, max_value=1.0, step=0.001, format="%.3f",
+                                    key=f"custom_hyper_{idx}_{var}_scales_min",
+                                    help=f"Minimum scale for {var}"
+                                )
+                            with col2:
+                                scales_max = st.number_input(
+                                    "Scale Max",
+                                    value=float(defaults["scales"][1]),
+                                    min_value=0.0, max_value=1.0, step=0.01, format="%.3f",
+                                    key=f"custom_hyper_{idx}_{var}_scales_max",
+                                    help=f"Maximum scale for {var}"
+                                )
+                            
+                            # Store per-variable hyperparameters
+                            custom_hyperparameters[f"{var}_alphas"] = [alphas_min, alphas_max]
+                            custom_hyperparameters[f"{var}_shapes"] = [shapes_min, shapes_max]
+                            custom_hyperparameters[f"{var}_scales"] = [scales_min, scales_max]
+            else:
+                st.warning("⚠️ Please select paid media and/or organic variables first to configure their hyperparameters.")
+        
+        # Store custom hyperparameters in session state
+        st.session_state["custom_hyperparameters"] = custom_hyperparameters
+
         # Convert lists to comma-separated strings for backward compatibility
         paid_media_spends = ", ".join(paid_media_spends_list)
         paid_media_vars = ", ".join(paid_media_vars_list)
@@ -1017,6 +1186,65 @@ with tab_single:
         save_config_clicked = col_btn1.button("💾 Save Configuration", use_container_width=True, key="save_config_btn")
         add_to_queue_clicked = col_btn2.button("➕ Add to Queue", use_container_width=True, key="add_to_queue_btn")
         add_and_start_clicked = col_btn3.button("▶️ Add to Queue & Start", use_container_width=True, key="add_and_start_btn")
+        
+        # Add Download as CSV button
+        st.markdown("---")
+        
+        # Helper function to convert custom_hyperparameters to CSV format
+        def convert_hyperparams_to_csv_format(custom_hp, adstock_type):
+            """Convert custom_hyperparameters dict to CSV column format"""
+            csv_cols = {}
+            if custom_hp:
+                for key, value in custom_hp.items():
+                    if isinstance(value, list) and len(value) == 2:
+                        # Per-variable format: VAR_NAME_alphas = [min, max]
+                        csv_cols[key] = str(value)
+            return csv_cols
+        
+        # Build CSV row for current configuration
+        csv_row = {
+            "country": country,
+            "revision": revision,
+            "start_date": start_date_str,
+            "end_date": end_date_str,
+            "iterations": int(iterations),
+            "trials": int(trials),
+            "train_size": train_size,
+            "paid_media_spends": paid_media_spends,
+            "paid_media_vars": paid_media_vars,
+            "context_vars": context_vars,
+            "factor_vars": factor_vars,
+            "organic_vars": organic_vars,
+            "gcs_bucket": gcs_bucket,
+            "data_gcs_path": f"gs://{gcs_bucket}/datasets/{country}/latest/raw.parquet",
+            "table": "",
+            "query": "",
+            "dep_var": dep_var,
+            "dep_var_type": dep_var_type,
+            "date_var": date_var,
+            "adstock": adstock,
+            "hyperparameter_preset": hyperparameter_preset,
+            "resample_freq": resample_freq,
+            "column_agg_strategies": json.dumps(column_agg_strategies) if column_agg_strategies else "",
+            "annotations_gcs_path": "",
+        }
+        
+        # Add custom hyperparameters to CSV row
+        if hyperparameter_preset == "Custom" and custom_hyperparameters:
+            csv_row.update(convert_hyperparams_to_csv_format(custom_hyperparameters, adstock))
+        
+        csv_df = pd.DataFrame([csv_row])
+        
+        st.download_button(
+            "📥 Download as CSV",
+            data=csv_df.to_csv(index=False),
+            file_name=f"robyn_config_{country}_{revision}_{time.strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            help="Download current configuration as CSV for batch processing"
+        )
+        
+        st.markdown("---")
 
         if save_config_clicked:
             if not revision or not revision.strip():
@@ -1049,8 +1277,9 @@ with tab_single:
                             "date_var": date_var,
                             "adstock": adstock,
                             "hyperparameter_preset": hyperparameter_preset,
+                            "custom_hyperparameters": custom_hyperparameters if hyperparameter_preset == "Custom" else {},
                             "resample_freq": resample_freq,
-                            "resample_agg": resample_agg,
+                            "column_agg_strategies": column_agg_strategies,
                         },
                     }
 
@@ -1116,8 +1345,9 @@ with tab_single:
                             "date_var": date_var,
                             "adstock": adstock,
                             "hyperparameter_preset": hyperparameter_preset,
+                            "custom_hyperparameters": custom_hyperparameters if hyperparameter_preset == "Custom" else {},
                             "resample_freq": resample_freq,
-                            "resample_agg": resample_agg,
+                            "column_agg_strategies": column_agg_strategies,
                             "annotations_gcs_path": "",
                             "start_date": start_date_str,
                             "end_date": end_date_str,
@@ -1163,7 +1393,7 @@ with tab_single:
                     st.error(f"Failed to add to queue: {e}")
 
     # Outputs (moved outside Save Configuration expander)
-    with st.expander("Outputs"):
+    with st.expander("📤 Outputs"):
         gcs_bucket = st.text_input(
             "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
         )
@@ -1198,8 +1428,9 @@ with tab_single:
                 date_var,
                 adstock,
                 hyperparameter_preset,
-                resample_freq,  # NEW
-                resample_agg,  # NEW
+                custom_hyperparameters,  # NEW
+                resample_freq,
+                column_agg_strategies,
             ),
             data_gcs_path,
             timestamp,
@@ -1225,8 +1456,9 @@ with tab_single:
         date_var,
         adstock,
         hyperparameter_preset,
+        custom_hyperparameters,  # NEW
         resample_freq,
-        resample_agg,
+        column_agg_strategies,
     ) -> dict:
         return {
             "country": country,
@@ -1249,8 +1481,9 @@ with tab_single:
             "date_var": date_var,
             "adstock": adstock,
             "hyperparameter_preset": hyperparameter_preset,
+            "custom_hyperparameters": custom_hyperparameters,  # NEW
             "resample_freq": resample_freq,
-            "resample_agg": resample_agg,
+            "column_agg_strategies": column_agg_strategies,
             "data_gcs_path": "",  # Will be filled later
         }
 
@@ -1442,14 +1675,17 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 - `paid_media_spends`, `paid_media_vars`, `context_vars`, `factor_vars`, `organic_vars`
 - `dep_var`, `dep_var_type` (revenue|conversion), `date_var`, `adstock`
 - `hyperparameter_preset` (Facebook recommend|Meshed recommend|Custom)
-- `resample_freq` (none|W|M), `resample_agg` (sum|mean|max|min)
+- **Custom hyperparameters** (only when hyperparameter_preset=Custom):
+  - For geometric adstock: `alphas_min`, `alphas_max`, `gammas_min`, `gammas_max`, `thetas_min`, `thetas_max`
+  - For weibull adstock: `alphas_min`, `alphas_max`, `shapes_min`, `shapes_max`, `scales_min`, `scales_max`
+- `resample_freq` (none|W|M) - Column aggregations from metadata will be used when resampling
 - `gcs_bucket` (optional override per row)
 - **Data source (choose one):**
   - `data_gcs_path` (gs:// path to parquet file) — **Recommended for GCS-based workflows**
   - `query` or `table` — For Snowflake-based workflows
 - `annotations_gcs_path` (optional gs:// path)
 
-**Note:** For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows.
+**Note:** For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows. Column aggregations are automatically loaded from metadata.json when resampling is enabled.
             """
         )
 
@@ -1479,7 +1715,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "adstock": "geometric",
                     "hyperparameter_preset": "Meshed recommend",
                     "resample_freq": "none",
-                    "resample_agg": "sum",
                     "annotations_gcs_path": "",
                 }
             ]
@@ -1509,8 +1744,17 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "geometric",
                     "hyperparameter_preset": "Meshed recommend",
+                    "alphas_min": "",
+                    "alphas_max": "",
+                    "gammas_min": "",
+                    "gammas_max": "",
+                    "thetas_min": "",
+                    "thetas_max": "",
+                    "shapes_min": "",
+                    "shapes_max": "",
+                    "scales_min": "",
+                    "scales_max": "",
                     "resample_freq": "none",
-                    "resample_agg": "sum",
                     "annotations_gcs_path": "",
                 },
                 {
@@ -1535,8 +1779,58 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "weibull_cdf",
                     "hyperparameter_preset": "Facebook recommend",
+                    "alphas_min": "",
+                    "alphas_max": "",
+                    "gammas_min": "",
+                    "gammas_max": "",
+                    "thetas_min": "",
+                    "thetas_max": "",
+                    "shapes_min": "",
+                    "shapes_max": "",
+                    "scales_min": "",
+                    "scales_max": "",
                     "resample_freq": "W",
-                    "resample_agg": "sum",
+                    "annotations_gcs_path": "",
+                },
+                {
+                    "country": "it",
+                    "revision": "r103",
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
+                    "iterations": 250,
+                    "trials": 4,
+                    "train_size": "0.7,0.9",
+                    "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST",
+                    "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST",
+                    "context_vars": "IS_WEEKEND",
+                    "factor_vars": "IS_WEEKEND",
+                    "organic_vars": "ORGANIC_TRAFFIC",
+                    "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/it/latest/raw.parquet",
+                    "table": "",
+                    "query": "",
+                    "dep_var": "UPLOAD_VALUE",
+                    "dep_var_type": "revenue",
+                    "date_var": "date",
+                    "adstock": "geometric",
+                    "hyperparameter_preset": "Custom",
+                    # Per-variable hyperparameters for Custom preset
+                    "GA_SUPPLY_COST_alphas": "[0.8, 2.5]",
+                    "GA_SUPPLY_COST_gammas": "[0.5, 0.85]",
+                    "GA_SUPPLY_COST_thetas": "[0.15, 0.5]",
+                    "GA_DEMAND_COST_alphas": "[1.0, 3.0]",
+                    "GA_DEMAND_COST_gammas": "[0.6, 0.9]",
+                    "GA_DEMAND_COST_thetas": "[0.1, 0.4]",
+                    "BING_DEMAND_COST_alphas": "[1.0, 3.0]",
+                    "BING_DEMAND_COST_gammas": "[0.6, 0.9]",
+                    "BING_DEMAND_COST_thetas": "[0.1, 0.4]",
+                    "META_DEMAND_COST_alphas": "[1.0, 3.0]",
+                    "META_DEMAND_COST_gammas": "[0.6, 0.9]",
+                    "META_DEMAND_COST_thetas": "[0.1, 0.4]",
+                    "ORGANIC_TRAFFIC_alphas": "[0.5, 2.0]",
+                    "ORGANIC_TRAFFIC_gammas": "[0.3, 0.7]",
+                    "ORGANIC_TRAFFIC_thetas": "[0.9, 0.99]",
+                    "resample_freq": "none",
                     "annotations_gcs_path": "",
                 },
             ]
@@ -1550,7 +1844,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             mime="text/csv",
         )
         col_dl2.download_button(
-            "Download example CSV (2 jobs)",
+            "Download example CSV (3 jobs)",
             data=example.to_csv(index=False),
             file_name="robyn_batch_example.csv",
             mime="text/csv",
@@ -1811,7 +2105,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 "adstock": p.get("adstock", ""),
                 "hyperparameter_preset": p.get("hyperparameter_preset", "Meshed recommend"),
                 "resample_freq": p.get("resample_freq", "none"),
-                "resample_agg": p.get("resample_agg", "sum"),
                 "annotations_gcs_path": p.get("annotations_gcs_path", ""),
             }
 
@@ -1841,7 +2134,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "adstock",
                     "hyperparameter_preset",
                     "resample_freq",
-                    "resample_agg",
                     "annotations_gcs_path",
                 ]
             )

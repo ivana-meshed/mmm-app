@@ -1006,7 +1006,7 @@ def build_job_config_from_params(
     timestamp: str,
     annotations_gcs_path: Optional[str],
 ) -> dict:
-    return {
+    config = {
         "country": params["country"],
         "iterations": int(params["iterations"]),
         "trials": int(params["trials"]),
@@ -1056,10 +1056,21 @@ def build_job_config_from_params(
         "hyperparameter_preset": str(
             params.get("hyperparameter_preset", "Meshed recommend")
         ),  # NEW
+        "resample_freq": str(params.get("resample_freq", "none")),  # Resampling frequency
         "use_parquet": True,
         "parallel_processing": True,
         "max_cores": 8,
     }
+    
+    # Add custom_hyperparameters if present
+    if "custom_hyperparameters" in params and params["custom_hyperparameters"]:
+        config["custom_hyperparameters"] = params["custom_hyperparameters"]
+    
+    # Add column_agg_strategies if present (for resampling)
+    if "column_agg_strategies" in params and params["column_agg_strategies"]:
+        config["column_agg_strategies"] = params["column_agg_strategies"]
+    
+    return config
 
 
 def _sanitize_queue_name(name: str) -> str:
