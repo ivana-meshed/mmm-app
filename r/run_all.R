@@ -863,107 +863,8 @@ cat(
     "  adstock          :", adstock, "\n"
 )
 
-# Log data dimensions before robyn_inputs
-message("→ Data ready for robyn_inputs:")
-message("   Rows: ", nrow(df))
-message("   Columns: ", ncol(df))
-message("   Date range: ", min(df$date), " to ", max(df$date))
-message("   dep_var: ", dep_var_from_cfg, " (type: ", dep_var_type_from_cfg, ")")
-message("   Checking if all driver variables exist in data:")
-all_drivers <- unique(c(paid_media_spends, paid_media_vars, context_vars, factor_vars, organic_vars))
-missing_drivers <- setdiff(all_drivers, names(df))
-if (length(missing_drivers) > 0) {
-    message("   ⚠️ WARNING: Missing variables in data: ", paste(missing_drivers, collapse = ", "))
-} else {
-    message("   ✅ All driver variables found in data")
-}
-
-# First: call robyn_inputs WITHOUT hyperparameters
-message("→ Calling robyn_inputs (preflight, without hyperparameters)...")
-InputCollect <- tryCatch(
-    {
-        robyn_inputs(
-            dt_input = df,
-            date_var = "date",
-            dep_var = dep_var_from_cfg, # From config
-            dep_var_type = dep_var_type_from_cfg, # From config
-            prophet_vars = c("trend", "season", "holiday", "weekday"),
-            prophet_country = toupper(country),
-            paid_media_spends = paid_media_spends,
-            paid_media_vars = paid_media_vars,
-            context_vars = context_vars,
-            factor_vars = factor_vars,
-            organic_vars = organic_vars,
-            window_start = start_data_date,
-            window_end = end_data_date,
-            adstock = adstock
-            # hyperparameters = hyperparameters
-        )
-    },
-    error = function(e) {
-        msg <- conditionMessage(e)
-        message("❌ robyn_inputs() FAILED: ", msg)
-        message("Call: ", paste(deparse(conditionCall(e)), collapse = " "))
-
-        # Write error file
-        err_file <- file.path(dir_path, "robyn_inputs_error.txt")
-        writeLines(c(
-            "robyn_inputs() FAILED",
-            paste0("When: ", Sys.time()),
-            paste0("Message: ", msg),
-            paste0("Call: ", paste(deparse(conditionCall(e)), collapse = " ")),
-            paste0("Class: ", paste(class(e), collapse = ", ")),
-            "",
-            "Stack trace:",
-            paste(capture.output(traceback()), collapse = "\n")
-        ), err_file)
-        gcs_put_safe(err_file, file.path(gcs_prefix, basename(err_file)))
-
-        # Return NULL so we can check it below
-        return(NULL)
-    }
-)
-
-# Preflight IC snapshot (NULL-friendly)
-message("Preflight InputCollect is NULL? ", is.null(InputCollect))
-log_ic_snapshot_files(InputCollect, dir_path, tag = "preflight")
-flush_and_ship_log("after preflight robyn_inputs")
-
-# Check if preflight robyn_inputs succeeded - if not, exit early
-if (is.null(InputCollect)) {
-    err_msg <- "Preflight robyn_inputs() returned NULL - cannot build hyperparameters"
-    message("FATAL: ", err_msg)
-    
-    writeLines(
-        jsonlite::toJSON(list(
-            state = "FAILED",
-            step = "preflight_robyn_inputs",
-            start_time = as.character(job_started),
-            end_time = as.character(Sys.time()),
-            error = err_msg
-        ), auto_unbox = TRUE, pretty = TRUE),
-        status_json
-    )
-    gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
-    cleanup()
-    quit(status = 1)
-}
-
-# Breadcrumb before hyper_vars access (does not change behavior)
-message("About to build hyper_vars; InputCollect NULL? ", is.null(InputCollect))
-message("paid_media_vars (preflight): ", paste(InputCollect$paid_media_vars, collapse = ", "))
-message("organic_vars (preflight): ", paste(InputCollect$organic_vars, collapse = ", "))
-
-# Now build hyperparameters based on what Robyn ACTUALLY has
-hyper_vars <- c(InputCollect$paid_media_vars, InputCollect$organic_vars)
-hyperparameters <- list()
-
-
-# Now attach to InputCollect
-## ---------- BUILD HYPERPARAMETERS FIRST ----------
-# BEFORE calling robyn_inputs(), build the hyperparameter list
-
-# Define hyperparameter presets
+## ---------- DEFINE HYPERPARAMETER PRESETS FUNCTION ----------
+# Define this function before we use it
 get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
     # Check if preset is "Custom" and custom_hyperparameters is provided
     if (preset == "Custom" && length(custom_hyperparameters) > 0) {
@@ -1071,24 +972,131 @@ get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
     }
 }
 
-# Build hyperparameters using the preset
-hyperparameters <- list()
+# Log data dimensions before robyn_inputs
+message("→ Data ready for robyn_inputs:")
+message("   Rows: ", nrow(df))
+message("   Columns: ", ncol(df))
+message("   Date range: ", min(df$date), " to ", max(df$date))
+message("   dep_var: ", dep_var_from_cfg, " (type: ", dep_var_type_from_cfg, ")")
+message("   Checking if all driver variables exist in data:")
+all_drivers <- unique(c(paid_media_spends, paid_media_vars, context_vars, factor_vars, organic_vars))
+missing_drivers <- setdiff(all_drivers, names(df))
+if (length(missing_drivers) > 0) {
+    message("   ⚠️ WARNING: Missing variables in data: ", paste(missing_drivers, collapse = ", "))
+} else {
+    message("   ✅ All driver variables found in data")
+}
 
-for (v in hyper_vars) {
+# IMPORTANT: Rebuild hyperparameters based on ACTUAL filtered variables
+# This ensures hyperparameters match the variables after zero-variance filtering
+message("→ Rebuilding hyperparameters for filtered variables...")
+hyper_vars_filtered <- c(paid_media_vars, organic_vars)
+message("   Variables for hyperparameters: ", paste(hyper_vars_filtered, collapse = ", "))
+
+# Rebuild hyperparameters list for the filtered variables
+hyperparameters_filtered <- list()
+for (v in hyper_vars_filtered) {
     spec <- get_hyperparameter_ranges(hyperparameter_preset, adstock, v)
-    hyperparameters[[paste0(v, "_alphas")]] <- spec$alphas
+    hyperparameters_filtered[[paste0(v, "_alphas")]] <- spec$alphas
 
     if (adstock == "geometric") {
-        hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
-        hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
+        hyperparameters_filtered[[paste0(v, "_gammas")]] <- spec$gammas
+        hyperparameters_filtered[[paste0(v, "_thetas")]] <- spec$thetas
     } else {
         # Weibull uses shapes and scales instead of gammas and thetas
-        hyperparameters[[paste0(v, "_shapes")]] <- spec$shapes
-        hyperparameters[[paste0(v, "_scales")]] <- spec$scales
+        hyperparameters_filtered[[paste0(v, "_shapes")]] <- spec$shapes
+        hyperparameters_filtered[[paste0(v, "_scales")]] <- spec$scales
     }
 }
-hyperparameters[["train_size"]] <- train_size
+hyperparameters_filtered[["train_size"]] <- train_size
 
+message("   Rebuilt hyperparameters: ", length(hyperparameters_filtered), " keys")
+message("   Expected hyperparameters for ", length(hyper_vars_filtered), " variables")
+
+# First: call robyn_inputs WITHOUT hyperparameters
+message("→ Calling robyn_inputs (preflight, without hyperparameters)...")
+InputCollect <- tryCatch(
+    {
+        robyn_inputs(
+            dt_input = df,
+            date_var = "date",
+            dep_var = dep_var_from_cfg, # From config
+            dep_var_type = dep_var_type_from_cfg, # From config
+            prophet_vars = c("trend", "season", "holiday", "weekday"),
+            prophet_country = toupper(country),
+            paid_media_spends = paid_media_spends,
+            paid_media_vars = paid_media_vars,
+            context_vars = context_vars,
+            factor_vars = factor_vars,
+            organic_vars = organic_vars,
+            window_start = start_data_date,
+            window_end = end_data_date,
+            adstock = adstock
+            # hyperparameters = hyperparameters
+        )
+    },
+    error = function(e) {
+        msg <- conditionMessage(e)
+        message("❌ robyn_inputs() FAILED: ", msg)
+        message("Call: ", paste(deparse(conditionCall(e)), collapse = " "))
+
+        # Write error file
+        err_file <- file.path(dir_path, "robyn_inputs_error.txt")
+        writeLines(c(
+            "robyn_inputs() FAILED",
+            paste0("When: ", Sys.time()),
+            paste0("Message: ", msg),
+            paste0("Call: ", paste(deparse(conditionCall(e)), collapse = " ")),
+            paste0("Class: ", paste(class(e), collapse = ", ")),
+            "",
+            "Stack trace:",
+            paste(capture.output(traceback()), collapse = "\n")
+        ), err_file)
+        gcs_put_safe(err_file, file.path(gcs_prefix, basename(err_file)))
+
+        # Return NULL so we can check it below
+        return(NULL)
+    }
+)
+
+# Preflight IC snapshot (NULL-friendly)
+message("Preflight InputCollect is NULL? ", is.null(InputCollect))
+log_ic_snapshot_files(InputCollect, dir_path, tag = "preflight")
+flush_and_ship_log("after preflight robyn_inputs")
+
+# Preflight is used only for validation - hyperparameters are already built
+# using the filtered variables before the preflight
+message("Preflight InputCollect is NULL? ", is.null(InputCollect))
+
+# Check if preflight robyn_inputs succeeded - if not, exit early
+if (is.null(InputCollect)) {
+    err_msg <- "Preflight robyn_inputs() returned NULL"
+    message("FATAL: ", err_msg)
+    
+    writeLines(
+        jsonlite::toJSON(list(
+            state = "FAILED",
+            step = "preflight_robyn_inputs",
+            start_time = as.character(job_started),
+            end_time = as.character(Sys.time()),
+            error = err_msg
+        ), auto_unbox = TRUE, pretty = TRUE),
+        status_json
+    )
+    gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+    cleanup()
+    quit(status = 1)
+}
+
+log_ic_snapshot_files(InputCollect, dir_path, tag = "preflight")
+message("paid_media_vars (preflight): ", paste(InputCollect$paid_media_vars, collapse = ", "))
+message("organic_vars (preflight): ", paste(InputCollect$organic_vars, collapse = ", "))
+
+# Use the filtered hyperparameters built earlier
+hyperparameters <- hyperparameters_filtered
+
+# Hyperparameters were already built earlier using hyperparameters_filtered
+# Log them here for reference
 message("Pre-built hyperparameters (", hyperparameter_preset, " preset): ", length(hyperparameters), " keys")
 
 log_hyperparameters(hyperparameters, dir_path)
