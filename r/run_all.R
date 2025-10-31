@@ -990,8 +990,18 @@ if (length(missing_drivers) > 0) {
 # IMPORTANT: Rebuild hyperparameters based on ACTUAL filtered variables
 # This ensures hyperparameters match the variables after zero-variance filtering
 message("→ Rebuilding hyperparameters for filtered variables...")
-hyper_vars_filtered <- c(paid_media_vars, organic_vars)
+
+# For weibull_cdf/weibull_pdf, Robyn also requires hyperparameters for prophet_vars
+# For geometric, prophet_vars don't need explicit hyperparameters (they use defaults)
+prophet_vars_list <- if (adstock %in% c("weibull_cdf", "weibull_pdf")) {
+    c("trend", "season", "holiday", "weekday")
+} else {
+    character(0)
+}
+
+hyper_vars_filtered <- c(paid_media_vars, organic_vars, prophet_vars_list)
 message("   Variables for hyperparameters: ", paste(hyper_vars_filtered, collapse = ", "))
+message("   Adstock type: ", adstock)
 
 # Rebuild hyperparameters list for the filtered variables
 hyperparameters_filtered <- list()
@@ -1011,7 +1021,10 @@ for (v in hyper_vars_filtered) {
 hyperparameters_filtered[["train_size"]] <- train_size
 
 message("   Rebuilt hyperparameters: ", length(hyperparameters_filtered), " keys")
-message("   Expected hyperparameters for ", length(hyper_vars_filtered), " variables")
+message("   Expected hyperparameters for ", length(hyper_vars_filtered), " variables (", 
+        length(paid_media_vars), " paid_media + ", length(organic_vars), " organic",
+        if (length(prophet_vars_list) > 0) paste(" +", length(prophet_vars_list), "prophet") else "",
+        ")")
 
 # First: call robyn_inputs WITHOUT hyperparameters
 message("→ Calling robyn_inputs (preflight, without hyperparameters)...")
