@@ -8,142 +8,24 @@ import os
 import re
 from urllib.parse import quote
 
-def render_forecast_allocator_section(blobs, country, stamp):
-    st.subheader("🗓️ Forecast allocations (next 3 months)")
-
-    # Prefer the index CSV for metadata + deterministic ordering
-    idx_blob = find_blob(blobs, "/forecast_allocator_index.csv") or find_blob(
-        blobs, "forecast_allocator_index.csv"
-    )
-    if idx_blob:
-        df_idx = read_csv_blob_to_df(idx_blob)
-        if df_idx is not None and not df_idx.empty:
-            # Gentle normalization
-            cols = {c.lower(): c for c in df_idx.columns}
-            month_col = cols.get("month") or "month"
-            # Sort by month if it looks like YYYY-MM
-            try:
-                df_idx["_sort"] = pd.to_datetime(
-                    df_idx[month_col] + "-01", errors="coerce"
-                )
-                df_idx = df_idx.sort_values("_sort", kind="mergesort")
-            except Exception:
-                pass
-
-            st.caption("Plan summary from `forecast_allocator_index.csv`")
-            preview_cols = [
-                c
-                for c in df_idx.columns
-                if c.lower()
-                in {
-                    "month",
-                    "budget",
-                    "baseline",
-                    "incremental",
-                    "forecast_total",
-                }
-            ]
-            if preview_cols:
-                st.dataframe(df_idx[preview_cols], use_container_width=True)
-
-            download_link_for_blob(
-                idx_blob,
-                label="📥 Download forecast index (CSV)",
-                mime_hint="text/csv",
-                key_suffix=f"forecast_idx|{country}|{stamp}",
-            )
-
-            # Display images with captions
-            st.markdown("---")
-            for i, row in df_idx.iterrows():
-                image_key = row.get("image_key") or row.get("image_gs") or ""
-                image_fn = os.path.basename(str(image_key))
-                b = (
-                    find_blob(blobs, f"/{image_key}")
-                    or find_blob(blobs, image_key)
-                    or find_blob(blobs, image_fn)
-                )
-                if not b:
-                    st.warning(
-                        f"Image not found for month {row.get('month', '?')}: `{image_key}`"
-                    )
-                    continue
-
-                try:
-                    img = download_bytes_safe(b)
-                    if not img:
-                        st.warning(f"Empty image data for {image_fn}")
-                        continue
-                    b64 = base64.b64encode(img).decode()
-                    caption_bits = []
-                    if "month" in row:
-                        caption_bits.append(f"**{row['month']}**")
-                    if "budget" in row:
-                        caption_bits.append(f"budget={row['budget']:,}")
-                    if "incremental" in row:
-                        caption_bits.append(
-                            f"incremental={row['incremental']:,}"
-                        )
-                    if "forecast_total" in row:
-                        caption_bits.append(f"total={row['forecast_total']:,}")
-                    caption = (
-                        " · ".join(caption_bits) if caption_bits else image_fn
-                    )
-
-                    with st.container(border=True):
-                        st.markdown(
-                            f'<img src="data:image/png;base64,{b64}" '
-                            f'style="width: 100%; height: auto;" alt="{image_fn}">',
-                            unsafe_allow_html=True,
-                        )
-                        st.caption(caption)
-                        download_link_for_blob(
-                            b,
-                            label=f"Download {image_fn}",
-                            mime_hint="image/png",
-                            key_suffix=f"pred_alloc|{country}|{stamp}|{i}",
-                        )
-                except Exception as e:
-                    st.error(f"Could not display {image_fn}: {e}")
-            return
-
-    # Fallback: no index → try to list pred plots directly
-    pred_plots = find_pred_allocator_plots(blobs)
-    if not pred_plots:
-        st.info("No forecast allocator plots found.")
-        return
-
-    st.success(f"Found {len(pred_plots)} forecast allocator plot(s)")
-    for i, b in enumerate(pred_plots):
-        fn = os.path.basename(b.name)
-        img = download_bytes_safe(b)
-        if not img:
-            st.warning(f"Empty image data for {fn}")
-            continue
-        b64 = base64.b64encode(img).decode()
-        with st.container(border=True):
-            st.markdown(
-                f'<img src="data:image/png;base64,{b64}" '
-                f'style="width: 100%; height: auto;" alt="{fn}">',
-                unsafe_allow_html=True,
-            )
-            download_link_for_blob(
-                b,
-                label=f"Download {fn}",
-                mime_hint="image/png",
-                key_suffix=f"pred_alloc|{country}|{stamp}|{i}",
-            )
-
-
-
-
-
 import pandas as pd
 import streamlit as st
 from google.auth import default as google_auth_default
 from google.auth.iam import Signer as IAMSigner
 from google.auth.transport.requests import Request
 from google.cloud import storage
+
+try:
+    from app_shared import (
+        ensure_sf_conn,
+        keepalive_ping,
+        require_login_and_domain,
+    )
+except Exception:
+    ensure_sf_conn = None
+    keepalive_ping = None
+
+require_login_and_domain()
 
 # ---------- Page ----------
 st.set_page_config(
@@ -165,6 +47,30 @@ DEFAULT_BETA = 1.0
 st.session_state.setdefault("weights", DEFAULT_WEIGHTS)
 st.session_state.setdefault("alpha", DEFAULT_ALPHA)
 st.session_state.setdefault("beta", DEFAULT_BETA)
+
+
+def _sf_keepalive(throttle_sec: int = 60) -> None:
+    """Ping the shared Snowflake session so it stays warm while users browse."""
+    if ensure_sf_conn is None or keepalive_ping is None:
+        return
+    try:
+        import time
+
+        now = time.time()
+        last = st.session_state.get("_sf_last_ping", 0)
+        if now - last < throttle_sec:
+            return
+        conn = ensure_sf_conn()  # reuses st.session_state["sf_conn"] if present
+        if conn:
+            keepalive_ping(conn)  # cheap SELECT 1 / ping
+            st.session_state["_sf_last_ping"] = now
+            st.session_state["sf_connected"] = True
+    except Exception:
+        # Never block/break this page if Snowflake isn't configured/available
+        pass
+
+
+_sf_keepalive()
 
 
 # ---------- Clients / cached ----------
@@ -756,7 +662,7 @@ def _extract_from_wide(df: pd.DataFrame) -> dict:
     return out
 
 
-def _try_read_csv(blob) -> pd.DataFrame | None:
+def _try_read_csv(blob) -> pd.DataFrame | None:  # type: ignore
     try:
         data = download_bytes_safe(blob)
         if data is None:
@@ -837,7 +743,7 @@ def rank_runs_for_country(
         )
 
     if not rows:
-        return None, pd.DataFrame()
+        return None, pd.DataFrame()  # type: ignore
 
     df = pd.DataFrame(rows)
 
@@ -854,9 +760,9 @@ def rank_runs_for_country(
             [w_train, w_val, w_test],
         )
 
-    df["r2_w"] = df.apply(lambda r: wavg_row(r, "r2"), axis=1)
-    df["nrmse_w"] = df.apply(lambda r: wavg_row(r, "nrmse"), axis=1)
-    df["drssd_w"] = df.apply(lambda r: wavg_row(r, "decomp_rssd"), axis=1)
+    df["r2_w"] = df.apply(lambda r: wavg_row(r, "r2"), axis=1)  # type: ignore
+    df["nrmse_w"] = df.apply(lambda r: wavg_row(r, "nrmse"), axis=1)  # type: ignore
+    df["drssd_w"] = df.apply(lambda r: wavg_row(r, "decomp_rssd"), axis=1)  # type: ignore
 
     # Normalize "lower is better" terms across candidates to [0,1]
     df["nrmse_w_norm"] = _minmax_norm(df["nrmse_w"])
@@ -962,13 +868,6 @@ with st.sidebar:
         st.session_state["beta"],
         0.1,
     )
-
-
-# Forecast allocations (next 3 months)
-try:
-    render_forecast_allocator_section(blobs, country, stamp)
-except Exception as e:
-    st.info(f"No forecast allocations found: {e}")
 
     # Storage self-test
     if st.button("Run storage self-test"):
@@ -1119,7 +1018,7 @@ if not auto_best:
     st.markdown(f"## Detailed View — revision `{rev}`")
     for ctry in countries_sel:
         with st.container():
-            render_run_for_country(bucket_name, rev, ctry)
+            render_run_for_country(bucket_name, rev, ctry)  # type: ignore
             st.divider()
 
 # ---------- Mode: auto best across all revisions ----------

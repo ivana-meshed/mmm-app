@@ -19,6 +19,43 @@ else
     WARMUP_PID=""
 fi
 
+# --- Build Streamlit secrets.toml for OIDC auth ---
+mkdir -p /app/.streamlit
+
+# Fetch secret payloads via Secret Manager only if env holds resource names.
+# If you inject raw values as envs instead, just write them directly.
+
+get_secret_payload () {
+  local resource="$1"
+  if [[ "$resource" == projects/*/secrets/*/versions/* ]]; then
+    # Requires the Cloud Run SA to have roles/secretmanager.secretAccessor
+    gcloud secrets versions access "$resource" || true
+  else
+    # Treat as raw value
+    echo -n "$resource"
+  fi
+}
+
+AUTH_CLIENT_ID="$(get_secret_payload "${AUTH_CLIENT_ID_SECRET:-$AUTH_CLIENT_ID}")"
+AUTH_CLIENT_SECRET="$(get_secret_payload "${AUTH_CLIENT_SECRET_SECRET:-$AUTH_CLIENT_SECRET}")"
+AUTH_COOKIE_SECRET="$(get_secret_payload "${AUTH_COOKIE_SECRET_SECRET:-$AUTH_COOKIE_SECRET}")"
+
+# Default Google OIDC discovery URL
+OIDC_META_URL="https://accounts.google.com/.well-known/openid-configuration"
+
+cat >/app/.streamlit/secrets.toml <<EOF
+[auth]
+redirect_uri = "${AUTH_REDIRECT_URI}"
+cookie_secret = "${AUTH_COOKIE_SECRET}"
+client_id = "${AUTH_CLIENT_ID}"
+client_secret = "${AUTH_CLIENT_SECRET}"
+server_metadata_url = "${OIDC_META_URL}"
+# Hint Google for a hosted domain. Not a security boundary — we'll check in code too.
+client_kwargs = { hd = "mesheddata.com" }
+EOF
+# --- end secrets.toml creation ---
+
+
 # Start the main application
 echo "🌐 Starting Streamlit application..."
 test -f streamlit_app.py || { echo 'Missing /app/streamlit_app.py'; ls -la; exit 1; }

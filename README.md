@@ -29,7 +29,7 @@ infra/terraform/
 docker/
   Dockerfile           # Multi-arch capable; installs R pkgs & Python deps
 ```
- 
+
 ## Prerequisites
 
 - Google Cloud project with billing enabled
@@ -39,7 +39,30 @@ docker/
 - Snowflake credentials for the data source
 - A GCS bucket (e.g. `mmm-app-output`) to store artifacts
 
-## Local Run (optional)
+## Local Development
+
+For detailed local development setup, testing, and troubleshooting, see **[DEVELOPMENT.md](DEVELOPMENT.md)**.
+
+Quick start for local development:
+```bash
+# Clone and setup
+git clone https://github.com/ivana-meshed/mmm-app.git
+cd mmm-app
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Configure GCP
+gcloud auth application-default login
+export PROJECT_ID=<your-project-id>
+export GCS_BUCKET=mmm-app-output
+export TRAINING_JOB_NAME=mmm-app-training
+
+# Run Streamlit
+streamlit run app/streamlit_app.py
+```
+
+## Local Run (Docker, optional)
 
 ```bash
 # Build the container locally
@@ -86,7 +109,12 @@ terraform apply -var-file="terraform.tfvars"
 - Grant roles:
   - `roles/artifactregistry.reader` to pull images
   - `roles/storage.objectAdmin` on the artifact bucket (to upload Robyn outputs)
+  - `roles/secretmanager.secretAccessor` to read persistent private keys
+  - `roles/secretmanager.secretVersionAdder` to save persistent private keys
+  - `roles/secretmanager.admin` to delete persistent private keys (optional, for "Clear Saved Key" feature)
 - Terraform in `main.tf` configures these bindings.
+
+For more details on persistent private key storage, see [docs/persistent_private_key.md](docs/persistent_private_key.md).
 
 ### Verifying SA on the revision
 
@@ -99,10 +127,14 @@ gcloud run services describe mmm-trainer \
 
 1. Open the Cloud Run URL shown by Terraform.
 2. Fill in **Snowflake** connection info.
-3. Provide either a **table** (`DB.SCHEMA.TABLE`) or a **SQL query**.
-4. (Optional) Upload `enriched_annotations.csv`.
-5. Review/adjust variable mapping (spends/vars/context/factors/organic).
-6. Click **Train**:
+3. Provide your Snowflake private key (PEM format):
+   - Upload a `.pem` file, or paste the key directly
+   - Optionally check **"Save this key for future sessions"** to persist it in Google Secret Manager
+   - In future sessions, saved keys are loaded automatically
+4. Provide either a **table** (`DB.SCHEMA.TABLE`) or a **SQL query**.
+5. (Optional) Upload `enriched_annotations.csv`.
+6. Review/adjust variable mapping (spends/vars/context/factors/organic).
+7. Click **Train**:
    - App pulls data → writes `/tmp/input_snapshot.csv` → invokes `Rscript r/run_all.R job_cfg=...`.
    - R uploads artifacts into `gs://<bucket>/robyn/<revision>/<country>/<timestamp>/`.
 

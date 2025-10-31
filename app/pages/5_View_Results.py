@@ -15,6 +15,19 @@ from google.auth.iam import Signer as IAMSigner
 from google.auth.transport.requests import Request
 from google.cloud import storage
 
+try:
+    from app_shared import (
+        _sf_params_from_env,
+        ensure_sf_conn,
+        keepalive_ping,
+        require_login_and_domain,
+    )
+except Exception:
+    ensure_sf_conn = None
+    keepalive_ping = None
+    _sf_params_from_env = None
+
+require_login_and_domain()
 # ---------- Page ----------
 st.set_page_config(page_title="Results: Robyn MMM", layout="wide")
 st.title("Results browser (GCS)")
@@ -24,6 +37,26 @@ DEFAULT_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 DEFAULT_PREFIX = "robyn/"
 DATA_URI_MAX_BYTES = int(os.getenv("DATA_URI_MAX_BYTES", str(8 * 1024 * 1024)))
 IS_CLOUDRUN = bool(os.getenv("K_SERVICE"))
+
+
+def _try_keep_sf_alive():
+    if ensure_sf_conn is None or keepalive_ping is None:
+        return
+    try:
+        # Reuse an existing session if present; if not configured, this may raise — we swallow it.
+        conn = ensure_sf_conn()
+        if conn:
+            keepalive_ping(
+                conn
+            )  # cheap ping so switching pages doesn't let SF idle out
+            # Optional: reflect status for a tiny sidebar badge if you want
+            st.session_state.setdefault("sf_connected", True)
+    except Exception:
+        # Do not surface errors here; Results should work fine without Snowflake.
+        pass
+
+
+_try_keep_sf_alive()
 
 
 # ---------- Clients / cached ----------
@@ -276,7 +309,7 @@ def find_onepager_blob(blobs, best_id: str):
     return None
 
 
-def read_csv_blob_to_df(blob) -> pd.DataFrame | None:
+def read_csv_blob_to_df(blob) -> pd.DataFrame | None:  # type: ignore
     try:
         data = download_bytes_safe(blob)
         if data is None:
@@ -819,5 +852,5 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
 st.markdown(f"## Detailed View — revision `{rev}`")
 for ctry in countries_sel:
     with st.container():
-        render_run_for_country(bucket_name, rev, ctry)
+        render_run_for_country(bucket_name, rev, ctry)  # type: ignore
         st.divider()

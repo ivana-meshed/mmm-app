@@ -1,0 +1,13 @@
+.git
+infra/
+*.ipynb
+*.parquet
+*.csv
+__pycache__/
+.Rhistory
+.Rproj.user
+.venv/
+.env
+dist/
+build/
+.cache/

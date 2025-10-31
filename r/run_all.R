@@ -60,7 +60,7 @@ safe_write <- function(txt, path) {
 flush_and_ship_log <- function(step = NULL) {
     if (!is.null(step)) message(sprintf("📌 LOG SNAPSHOT @ %s: %s", Sys.time(), step))
     try(flush.console(), silent = TRUE)
-    try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+    try(gcs_put_safe(log_file, file.path(gcs_prefix, "console.log")), silent = TRUE)
 }
 
 log_df_snapshot <- function(df, root, max_rows = 20) {
@@ -345,11 +345,54 @@ cfg <- get_cfg_from_env()
 
 country <- cfg$country
 revision <- cfg$revision
-date_input <- cfg$date_input
+date_input <- cfg$date_input # This is an actual date value, not a column name
+date_var_name <- cfg$date_var %||% "date" # This is the column name to look for
 iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
 timestamp <- cfg$timestamp %||% format(Sys.time(), "%m%d_%H%M%S")
+
+# NEW: Training date range
+start_data_date <- as.Date(cfg$start_date %||% "2024-01-01")
+end_data_date <- as.Date(cfg$end_date %||% Sys.Date())
+
+# NEW: dep_var and dep_var_type from config
+dep_var_from_cfg <- cfg$dep_var %||% "UPLOAD_VALUE"
+dep_var_type_from_cfg <- cfg$dep_var_type %||% "revenue"
+
+# NEW: hyperparameter preset
+hyperparameter_preset <- cfg$hyperparameter_preset %||% "Meshed recommend"
+
+# NEW: custom hyperparameters (if preset is "Custom")
+custom_hyperparameters <- cfg$custom_hyperparameters %||% list()
+
+# NEW: resample parameters
+resample_freq <- cfg$resample_freq %||% "none"
+resample_agg <- cfg$resample_agg %||% "sum"
+
+# Helper function to parse comma-separated strings from config
+parse_csv_config <- function(x) {
+    if (is.null(x) || length(x) == 0 || all(is.na(x))) {
+        return(character(0))
+    }
+    if (is.list(x) || (is.character(x) && length(x) > 1)) {
+        # Already a list/vector
+        return(as.character(x))
+    }
+    if (is.character(x) && length(x) == 1) {
+        # Split comma-separated string
+        trimws(unlist(strsplit(x, ",")))
+    } else {
+        as.character(x)
+    }
+}
+
+# Parse variable lists from config (they come as comma-separated strings from Python)
+paid_media_spends_cfg <- parse_csv_config(cfg$paid_media_spends)
+paid_media_vars_cfg <- parse_csv_config(cfg$paid_media_vars)
+context_vars_cfg <- parse_csv_config(cfg$context_vars)
+factor_vars_cfg <- parse_csv_config(cfg$factor_vars)
+organic_vars_cfg <- parse_csv_config(cfg$organic_vars)
 
 dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
@@ -369,7 +412,7 @@ gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
 
 
 ## ---------- LOGGING ----------
-log_file <- file.path(dir_path, "robyn_console.log")
+log_file <- file.path(dir_path, "console.log")
 dir.create(dirname(log_file), recursive = TRUE, showWarnings = FALSE)
 log_con_out <- file(log_file, open = "wt")
 log_con_err <- file(log_file, open = "at")
@@ -381,7 +424,7 @@ cleanup <- function() {
     try(sink(), silent = TRUE)
     try(close(log_con_err), silent = TRUE)
     try(close(log_con_out), silent = TRUE)
-    try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+    try(gcs_put_safe(log_file, file.path(gcs_prefix, "console.log")), silent = TRUE)
 }
 
 ## Global panic trap: log any uncaught error before the process exits
@@ -408,7 +451,7 @@ install_panic_trap <- function() {
         try(gcs_put_safe(ptxt, file.path(gcs_prefix, "panic_error.txt")), silent = TRUE)
         try(gcs_put_safe(pjson, file.path(gcs_prefix, "panic_error.json")), silent = TRUE)
         try(gcs_put_safe(status_json, file.path(gcs_prefix, "status.json")), silent = TRUE)
-        try(gcs_put_safe(log_file, file.path(gcs_prefix, "robyn_console.log")), silent = TRUE)
+        try(gcs_put_safe(log_file, file.path(gcs_prefix, "console.log")), silent = TRUE)
     })
 }
 
@@ -476,24 +519,116 @@ df <- as.data.frame(df)
 names(df) <- toupper(names(df))
 
 ## ---------- DATE & CLEAN ----------
-if ("DATE" %in% names(df)) {
-    df$date <- if (inherits(df$DATE, "POSIXt")) as.Date(df$DATE) else as.Date(as.character(df$DATE))
-    df$DATE <- NULL
-} else if ("date" %in% names(df)) {
-    df$date <- as.Date(df[["date"]])
-    df[["date"]] <- NULL
+# Use date_var_name to find the date column name (convert to uppercase since all names are uppercase now)
+# If date_var is not in config, try to find a date column automatically
+date_var_name_upper <- toupper(date_var_name)
+message("========================================")
+message("→ STEP 1: Looking for date column")
+message("   date_var from config: '", date_var_name, "'")
+message("   date_var uppercased: '", date_var_name_upper, "'")
+message("   Total columns in df: ", ncol(df))
+message("   Total rows in df: ", nrow(df))
+message("   First 30 column names: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+message("   Checking if 'date' (lowercase) already exists: ", "date" %in% names(df))
+message("   Checking if 'DATE' (uppercase) exists: ", "DATE" %in% names(df))
+
+# Try to find the date column - check in order of preference
+date_col_found <- NULL
+if (date_var_name_upper %in% names(df)) {
+    date_col_found <- date_var_name_upper
+    message("   ✓ Found exact match: '", date_col_found, "'")
 } else {
-    stop("No DATE/date column in data")
+    message("   ✗ Configured date column '", date_var_name_upper, "' not found")
+    # Try common date column names
+    common_date_names <- c("DATE", "DS", "DATUM", "FECHA", "DATA")
+    message("   Trying common date column names: ", paste(common_date_names, collapse = ", "))
+    for (name in common_date_names) {
+        if (name %in% names(df)) {
+            date_col_found <- name
+            message("   ✓ Found date column by common name: '", date_col_found, "'")
+            break
+        }
+    }
 }
 
+if (is.null(date_col_found)) {
+    message("   ✗✗✗ FATAL: No date column found!")
+    message("   Expected: '", date_var_name_upper, "'")
+    message("   Tried common names: DATE, DS, DATUM, FECHA, DATA")
+    message("   ALL available columns: ", paste(names(df), collapse = ", "))
+    stop("No date column found. Expected: ", date_var_name_upper, ". Tried common names: DATE, DS, DATUM, FECHA, DATA. Available columns: ", paste(names(df), collapse = ", "))
+}
+
+# Convert the date column in place
+message("→ STEP 2: Converting '", date_col_found, "' to Date type")
+message("   Column class before: ", paste(class(df[[date_col_found]]), collapse = ", "))
+message("   First 3 values: ", paste(head(df[[date_col_found]], 3), collapse = ", "))
+df[[date_col_found]] <- if (inherits(df[[date_col_found]], "POSIXt")) as.Date(df[[date_col_found]]) else as.Date(as.character(df[[date_col_found]]))
+message("   Column class after: ", paste(class(df[[date_col_found]]), collapse = ", "))
+message("   First 3 values after: ", paste(head(df[[date_col_found]], 3), collapse = ", "))
+
+# Rename to lowercase 'date'
+message("→ STEP 3: Renaming '", date_col_found, "' to 'date'")
+message("   Columns before rename: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+names(df)[names(df) == date_col_found] <- "date"
+message("   Columns after rename: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+message("   Verification: 'date' in names(df) = ", "date" %in% names(df))
+message("   Verification: 'DATE' in names(df) = ", "DATE" %in% names(df))
+
+# Verify date column exists and has valid data
+if (!"date" %in% names(df)) {
+    message("   ✗✗✗ FATAL: 'date' column was not created successfully!")
+    message("   Current columns: ", paste(names(df), collapse = ", "))
+    stop("FATAL: 'date' column was not created successfully. Current columns: ", paste(names(df), collapse = ", "))
+}
+if (nrow(df) == 0) {
+    stop("FATAL: Dataframe has 0 rows after date column creation")
+}
+message("✅ Date column created successfully: ", nrow(df), " rows, range: ", min(df$date, na.rm = TRUE), " to ", max(df$date, na.rm = TRUE))
+message("   Final columns after date processing: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+message("========================================")
+
+message("→ STEP 4: Filtering by country: ", country)
 df <- filter_by_country(df, country)
 
+# Verify date column still exists after filtering
+message("   After filter_by_country:")
+message("   - Rows: ", nrow(df))
+message("   - 'date' exists: ", "date" %in% names(df))
+message("   - Columns: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+if (!"date" %in% names(df)) {
+    message("   ✗✗✗ FATAL: 'date' column disappeared after filter_by_country!")
+    message("   Current columns: ", paste(names(df), collapse = ", "))
+    stop("FATAL: 'date' column disappeared after filter_by_country. Current columns: ", paste(names(df), collapse = ", "))
+}
+if (nrow(df) == 0) {
+    stop("FATAL: No data remaining after filtering by country: ", country)
+}
+
+message("→ STEP 5: Checking for duplicated dates")
 if (anyDuplicated(df$date)) {
-    message("→ Collapsing duplicated dates: ", sum(duplicated(df$date)))
+    message("   Found ", sum(duplicated(df$date)), " duplicated dates - will collapse")
     sum_or_first <- function(x) if (is.numeric(x)) sum(x, na.rm = TRUE) else dplyr::first(x)
+
+    # Verify date column exists before trying to group by it
+    if (!"date" %in% names(df)) {
+        message("   ✗✗✗ FATAL: 'date' column missing before deduplication!")
+        message("   Current columns: ", paste(names(df), collapse = ", "))
+        stop("FATAL: 'date' column missing before deduplication. Current columns: ", paste(names(df), collapse = ", "))
+    }
+
+    message("   Columns before deduplication: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+    message("   About to call: df %>% dplyr::group_by(date) %>% dplyr::summarise(...)")
+
     df <- df %>%
         dplyr::group_by(date) %>%
         dplyr::summarise(dplyr::across(!dplyr::all_of("date"), sum_or_first), .groups = "drop")
+
+    message("   After deduplication: ", nrow(df), " rows")
+    message("   Columns after deduplication: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
+    message("   'date' exists after deduplication: ", "date" %in% names(df))
+} else {
+    message("   No duplicated dates found")
 }
 
 df <- fill_day(df)
@@ -510,37 +645,165 @@ if (length(zero_var)) {
 if (!"TV_IS_ON" %in% names(df)) df$TV_IS_ON <- 0
 
 ## ---------- FEATURE ENGINEERING ----------
-df <- df %>% mutate(
-    GA_OTHER_COST = rowSums(select(., tidyselect::matches("^GA_.*_COST$") & !any_of(c("GA_SUPPLY_COST", "GA_BRAND_COST", "GA_DEMAND_COST"))), na.rm = TRUE),
-    BING_TOTAL_COST = rowSums(select(., tidyselect::matches("^BING_.*_COST$")), na.rm = TRUE),
-    META_TOTAL_COST = rowSums(select(., tidyselect::matches("^META_.*_COST$")), na.rm = TRUE),
-    ORGANIC_TRAFFIC = rowSums(select(., any_of(c("NL_DAILY_SESSIONS", "SEO_DAILY_SESSIONS", "DIRECT_DAILY_SESSIONS", "TV_DAILY_SESSIONS", "CRM_OTHER_DAILY_SESSIONS", "CRM_DAILY_SESSIONS"))), na.rm = TRUE),
-    BRAND_HEALTH = coalesce(DIRECT_DAILY_SESSIONS, 0) + coalesce(SEO_DAILY_SESSIONS, 0),
-    ORGxTV = BRAND_HEALTH * coalesce(TV_COST, 0),
-    GA_OTHER_IMPRESSIONS = rowSums(select(., tidyselect::matches("^GA_.*_IMPRESSIONS$") & !any_of(c("GA_SUPPLY_IMPRESSIONS", "GA_BRAND_IMPRESSIONS", "GA_DEMAND_IMPRESSIONS"))), na.rm = TRUE),
-    BING_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^BING_.*_IMPRESSIONS$")), na.rm = TRUE),
-    META_TOTAL_IMPRESSIONS = rowSums(select(., tidyselect::matches("^META_.*_IMPRESSIONS$")), na.rm = TRUE)
-)
+# NOTE: Custom tag aggregates (e.g., GA_SMALL_COST_CUSTOM, GA_CAMPAIGN_COST_CUSTOM)
+# and TOTAL columns (e.g., GA_TOTAL_COST, GA_TOTAL_SESSIONS) are now created
+# automatically in the Python mapping workflow (Map_Your_Data.py) when the user
+# clicks "Apply mapping changes". These columns should already exist in the
+# dataframe at this point.
+#
+# Legacy aggregations below are kept for backward compatibility with older data
+# that doesn't have the new automatic aggregations.
+
 
 ## ---------- WINDOW / FLAGS ----------
-end_data_date <- max(df$date, na.rm = TRUE)
-start_data_date <- as.Date("2024-01-01")
+# Dates are now sourced from config (start_data_date, end_data_date); previous hardcoded assignments have been removed.
 df <- df %>% filter(date >= start_data_date, date <= end_data_date)
 df$DOW <- wday(df$date, label = TRUE)
 df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
+## ---------- RESAMPLING ----------
+# Apply resampling if configured (Weekly or Monthly aggregation)
+message("→ Resampling configuration: freq=", resample_freq, ", agg=", resample_agg)
+if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
+    message("→ Applying resampling to data...")
+
+    # Log pre-resample state
+    pre_resample_rows <- nrow(df)
+    pre_resample_date_range <- paste(min(df$date), "to", max(df$date))
+    message("   Pre-resample: ", pre_resample_rows, " rows, date range: ", pre_resample_date_range)
+
+    tryCatch(
+        {
+            # Separate numeric and non-numeric columns
+            date_col <- "date"
+            numeric_cols <- names(df)[sapply(df, is.numeric)]
+            non_numeric_cols <- setdiff(names(df), c(date_col, numeric_cols))
+
+            # Determine aggregation function with explicit handling of invalid types
+            agg_func <- switch(resample_agg,
+                "sum" = sum,
+                "mean" = mean,
+                "max" = max,
+                "min" = min,
+                {
+                    # Default case: unsupported aggregation type
+                    message("   ⚠️ WARNING: Unsupported aggregation type '", resample_agg, "', defaulting to 'sum'")
+                    sum
+                }
+            )
+
+            # Create time period grouping based on frequency
+            if (resample_freq == "W") {
+                # Weekly aggregation (week starts on Monday)
+                message("   Using weekly aggregation (weeks start on Monday)")
+                df$resample_period <- floor_date(df$date, unit = "week", week_start = 1)
+            } else {
+                # Monthly aggregation
+                message("   Using monthly aggregation")
+                df$resample_period <- floor_date(df$date, unit = "month")
+            }
+
+            # Aggregate numeric columns
+            # Note: na.rm=TRUE removes missing values during aggregation. This is intentional
+            # to handle gaps in data, but be aware that this silently removes NAs.
+            # Count NAs before aggregation for logging
+            na_counts_before <- colSums(is.na(df[numeric_cols]))
+            total_nas <- sum(na_counts_before)
+            if (total_nas > 0) {
+                message("   ℹ️ Note: ", total_nas, " NA values found in numeric columns before resampling")
+                top_na_cols <- head(sort(na_counts_before[na_counts_before > 0], decreasing = TRUE), 5)
+                if (length(top_na_cols) > 0) {
+                    message("   Top columns with NAs: ", paste(names(top_na_cols), "=", top_na_cols, collapse = ", "))
+                }
+            }
+
+            df_resampled <- df %>%
+                group_by(resample_period) %>%
+                summarise(
+                    across(all_of(numeric_cols), ~ agg_func(.x, na.rm = TRUE)),
+                    .groups = "drop"
+                )
+
+            # Handle non-numeric columns (take first value in each period)
+            if (length(non_numeric_cols) > 0) {
+                df_non_numeric <- df %>%
+                    group_by(resample_period) %>%
+                    summarise(
+                        across(all_of(non_numeric_cols), ~ first(.x)),
+                        .groups = "drop"
+                    )
+                df_resampled <- left_join(df_resampled, df_non_numeric, by = "resample_period")
+            }
+
+            # Rename period column back to date
+            df_resampled <- df_resampled %>%
+                rename(date = resample_period)
+
+            # Ensure date is Date type
+            df_resampled$date <- as.Date(df_resampled$date)
+
+            # Replace original dataframe
+            df <- df_resampled
+
+            # Log post-resample state
+            post_resample_rows <- nrow(df)
+            post_resample_date_range <- paste(min(df$date), "to", max(df$date))
+            message("✅ Resampling complete:")
+            message("   Post-resample: ", post_resample_rows, " rows, date range: ", post_resample_date_range)
+            message("   Aggregation: ", resample_agg, " applied to numeric columns")
+            message(
+                "   Rows reduced from ", pre_resample_rows, " to ", post_resample_rows,
+                " (", round(100 * (1 - post_resample_rows / pre_resample_rows), 1), "% reduction)"
+            )
+
+            # Log snapshot after resampling
+            log_df_snapshot(df, dir_path, max_rows = 20)
+            flush_and_ship_log("after resampling")
+        },
+        error = function(e) {
+            msg <- paste("Resampling failed:", conditionMessage(e))
+            message("❌ ", msg)
+
+            # Log the error
+            resample_err_file <- file.path(dir_path, "resample_error.txt")
+            writeLines(c(
+                "RESAMPLING ERROR",
+                paste0("When: ", Sys.time()),
+                paste0("Frequency: ", resample_freq),
+                paste0("Aggregation: ", resample_agg),
+                paste0("Message: ", conditionMessage(e)),
+                "",
+                "Stack trace:",
+                paste(capture.output(traceback()), collapse = "\n")
+            ), resample_err_file)
+            gcs_put_safe(resample_err_file, file.path(gcs_prefix, basename(resample_err_file)))
+
+            # Continue without resampling (use original data)
+            message("⚠️ Continuing with original (non-resampled) data")
+        }
+    )
+} else {
+    message("→ No resampling applied (freq=", resample_freq, ")")
+}
+
 ## ---------- DRIVERS ----------
-paid_media_spends <- intersect(cfg$paid_media_spends, names(df))
-paid_media_vars <- intersect(cfg$paid_media_vars, names(df))
+paid_media_spends <- intersect(paid_media_spends_cfg, names(df))
+paid_media_vars <- intersect(paid_media_vars_cfg, names(df))
 stopifnot(length(paid_media_spends) == length(paid_media_vars))
 
 keep_idx <- vapply(seq_along(paid_media_spends), function(i) sum(df[[paid_media_spends[i]]], na.rm = TRUE) > 0, logical(1))
 paid_media_spends <- paid_media_spends[keep_idx]
 paid_media_vars <- paid_media_vars[keep_idx]
 
-context_vars <- intersect(cfg$context_vars %||% character(0), names(df))
-factor_vars <- intersect(cfg$factor_vars %||% character(0), names(df))
-org_base <- intersect(cfg$organic_vars %||% "ORGANIC_TRAFFIC", names(df))
+context_vars <- intersect(context_vars_cfg, names(df))
+factor_vars <- intersect(factor_vars_cfg, names(df))
+
+# Auto-add factor_vars to context_vars (requirement 6)
+if (length(factor_vars) > 0) {
+    context_vars <- unique(c(context_vars, factor_vars))
+}
+
+org_base <- intersect(organic_vars_cfg %||% "ORGANIC_TRAFFIC", names(df))
 organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES" %in% names(df)) unique(c(org_base, "N_SEARCHES")) else org_base
 
 adstock <- cfg$adstock %||% "geometric"
@@ -555,14 +818,30 @@ cat(
     "  adstock          :", adstock, "\n"
 )
 
+# Log data dimensions before robyn_inputs
+message("→ Data ready for robyn_inputs:")
+message("   Rows: ", nrow(df))
+message("   Columns: ", ncol(df))
+message("   Date range: ", min(df$date), " to ", max(df$date))
+message("   dep_var: ", dep_var_from_cfg, " (type: ", dep_var_type_from_cfg, ")")
+message("   Checking if all driver variables exist in data:")
+all_drivers <- unique(c(paid_media_spends, paid_media_vars, context_vars, factor_vars, organic_vars))
+missing_drivers <- setdiff(all_drivers, names(df))
+if (length(missing_drivers) > 0) {
+    message("   ⚠️ WARNING: Missing variables in data: ", paste(missing_drivers, collapse = ", "))
+} else {
+    message("   ✅ All driver variables found in data")
+}
+
 # First: call robyn_inputs WITHOUT hyperparameters
+message("→ Calling robyn_inputs (preflight, without hyperparameters)...")
 InputCollect <- tryCatch(
     {
         robyn_inputs(
             dt_input = df,
             date_var = "date",
-            dep_var = "UPLOAD_VALUE",
-            dep_var_type = "revenue",
+            dep_var = dep_var_from_cfg, # From config
+            dep_var_type = dep_var_type_from_cfg, # From config
             prophet_vars = c("trend", "season", "holiday", "weekday"),
             prophet_country = toupper(country),
             paid_media_spends = paid_media_spends,
@@ -621,32 +900,134 @@ hyperparameters <- list()
 ## ---------- BUILD HYPERPARAMETERS FIRST ----------
 # BEFORE calling robyn_inputs(), build the hyperparameter list
 
-mk_hp <- function(v) {
-    if (v == "ORGANIC_TRAFFIC") {
-        list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
-    } else if (v == "TV_COST") {
-        list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
-    } else if (v == "PARTNERSHIP_COSTS") {
-        list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
+# Define hyperparameter presets
+get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
+    # Check if preset is "Custom" and custom_hyperparameters is provided
+    if (preset == "Custom" && length(custom_hyperparameters) > 0) {
+        # First check for variable-specific custom hyperparameters (new format)
+        var_alphas_key <- paste0(var_name, "_alphas")
+        if (!is.null(custom_hyperparameters[[var_alphas_key]])) {
+            # Variable-specific hyperparameters found
+            if (adstock_type == "geometric") {
+                return(list(
+                    alphas = custom_hyperparameters[[var_alphas_key]],
+                    gammas = custom_hyperparameters[[paste0(var_name, "_gammas")]] %||% c(0.6, 0.9),
+                    thetas = custom_hyperparameters[[paste0(var_name, "_thetas")]] %||% c(0.1, 0.4)
+                ))
+            } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
+                return(list(
+                    alphas = custom_hyperparameters[[var_alphas_key]],
+                    shapes = custom_hyperparameters[[paste0(var_name, "_shapes")]] %||% c(0.5, 2.5),
+                    scales = custom_hyperparameters[[paste0(var_name, "_scales")]] %||% c(0.001, 0.15)
+                ))
+            }
+        }
+        
+        # Fall back to global custom hyperparameters (old format for backward compatibility)
+        if (adstock_type == "geometric") {
+            return(list(
+                alphas = c(
+                    custom_hyperparameters$alphas_min %||% 1.0,
+                    custom_hyperparameters$alphas_max %||% 3.0
+                ),
+                gammas = c(
+                    custom_hyperparameters$gammas_min %||% 0.6,
+                    custom_hyperparameters$gammas_max %||% 0.9
+                ),
+                thetas = c(
+                    custom_hyperparameters$thetas_min %||% 0.1,
+                    custom_hyperparameters$thetas_max %||% 0.4
+                )
+            ))
+        } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
+            return(list(
+                alphas = c(
+                    custom_hyperparameters$alphas_min %||% 0.5,
+                    custom_hyperparameters$alphas_max %||% 3.0
+                ),
+                shapes = c(
+                    custom_hyperparameters$shapes_min %||% 0.5,
+                    custom_hyperparameters$shapes_max %||% 2.5
+                ),
+                scales = c(
+                    custom_hyperparameters$scales_min %||% 0.001,
+                    custom_hyperparameters$scales_max %||% 0.15
+                )
+            ))
+        }
+    }
+    
+    # Default ranges (for geometric adstock)
+    if (adstock_type == "geometric") {
+        if (preset == "Facebook recommend") {
+            # Facebook's recommended ranges for geometric
+            if (var_name == "ORGANIC_TRAFFIC") {
+                list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.3))
+            } else if (var_name == "TV_COST") {
+                list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0.3, 0.8))
+            } else {
+                list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.3))
+            }
+        } else if (preset == "Meshed recommend") {
+            # Meshed's customized ranges
+            if (var_name == "ORGANIC_TRAFFIC") {
+                list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
+            } else if (var_name == "TV_COST") {
+                list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
+            } else if (var_name == "PARTNERSHIP_COSTS") {
+                list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
+            } else {
+                list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
+            }
+        } else {
+            # Custom preset fallback - use Meshed defaults
+            if (var_name == "ORGANIC_TRAFFIC") {
+                list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
+            } else if (var_name == "TV_COST") {
+                list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
+            } else if (var_name == "PARTNERSHIP_COSTS") {
+                list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
+            } else {
+                list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
+            }
+        }
+    } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
+        # Weibull adstock ranges (from Robyn documentation)
+        if (preset == "Facebook recommend") {
+            list(alphas = c(0.5, 3), shapes = c(0.0001, 2), scales = c(0, 0.1))
+        } else if (preset == "Meshed recommend") {
+            # Meshed customizations for Weibull
+            list(alphas = c(0.5, 3), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
+        } else {
+            # Custom fallback
+            list(alphas = c(0.5, 3), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
+        }
     } else {
-        list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
+        # Fallback
+        list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.5))
     }
 }
 
-# Build hyperparameters from the original paid_media_vars and organic_vars
-# (the ones you identified before robyn_inputs, not after)
-# hyper_vars <- c(paid_media_vars, organic_vars)
-# hyperparameters <- list()
+# Build hyperparameters using the preset
+hyper_vars <- c(InputCollect$paid_media_vars, InputCollect$organic_vars)
+hyperparameters <- list()
 
 for (v in hyper_vars) {
-    spec <- mk_hp(v)
+    spec <- get_hyperparameter_ranges(hyperparameter_preset, adstock, v)
     hyperparameters[[paste0(v, "_alphas")]] <- spec$alphas
-    hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
-    hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
+
+    if (adstock == "geometric") {
+        hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
+        hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
+    } else {
+        # Weibull uses shapes and scales instead of gammas and thetas
+        hyperparameters[[paste0(v, "_shapes")]] <- spec$shapes
+        hyperparameters[[paste0(v, "_scales")]] <- spec$scales
+    }
 }
 hyperparameters[["train_size"]] <- train_size
 
-message("Pre-built hyperparameters: ", length(hyperparameters), " keys")
+message("Pre-built hyperparameters (", hyperparameter_preset, " preset): ", length(hyperparameters), " keys")
 
 log_hyperparameters(hyperparameters, dir_path)
 flush_and_ship_log("after hyperparameters build")
@@ -658,8 +1039,8 @@ InputCollect <- tryCatch(
         robyn_inputs(
             dt_input = df,
             date_var = "date",
-            dep_var = "UPLOAD_VALUE",
-            dep_var_type = "revenue",
+            dep_var = dep_var_from_cfg, # From config
+            dep_var_type = dep_var_type_from_cfg, # From config
             prophet_vars = c("trend", "season", "holiday", "weekday"),
             prophet_country = toupper(country),
             paid_media_spends = paid_media_spends,
@@ -1038,14 +1419,57 @@ gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "Inp
 
 ## ---------- OUTPUTS & ONEPAGERS ----------
 flush_and_ship_log("before robyn_outputs")
-OutputCollect <- robyn_outputs(
-    InputCollect, OutputModels,
-    pareto_fronts = 2, csv_out = "pareto",
-    min_candidates = 5, clusters = FALSE,
-    export = TRUE, plot_folder = dir_path,
-    plot_pareto = FALSE, cores = NULL
+OutputCollect <- tryCatch(
+    {
+        robyn_outputs(
+            InputCollect, OutputModels,
+            pareto_fronts = 2, csv_out = "pareto",
+            min_candidates = 5, clusters = FALSE,
+            export = TRUE, plot_folder = dir_path,
+            plot_pareto = FALSE, cores = NULL
+        )
+    },
+    error = function(e) {
+        msg <- conditionMessage(e)
+        message("❌ robyn_outputs() FAILED: ", msg)
+
+        # Write error file
+        err_file <- file.path(dir_path, "robyn_outputs_error.txt")
+        writeLines(c(
+            "robyn_outputs() FAILED",
+            paste0("When: ", Sys.time()),
+            paste0("Message: ", msg),
+            "",
+            "Stack trace:",
+            paste(capture.output(traceback()), collapse = "\n")
+        ), err_file)
+        gcs_put_safe(err_file, file.path(gcs_prefix, basename(err_file)))
+
+        return(NULL)
+    }
 )
 flush_and_ship_log("after robyn_outputs")
+
+# Check if robyn_outputs succeeded
+if (is.null(OutputCollect)) {
+    err_msg <- "robyn_outputs() returned NULL or failed"
+    message("FATAL: ", err_msg)
+
+    writeLines(
+        jsonlite::toJSON(list(
+            state = "FAILED",
+            step = "robyn_outputs",
+            start_time = as.character(job_started),
+            end_time = as.character(Sys.time()),
+            error = err_msg
+        ), auto_unbox = TRUE, pretty = TRUE),
+        status_json
+    )
+    gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+    cleanup()
+    quit(status = 1)
+}
+
 saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
 
@@ -1158,15 +1582,25 @@ AllocatorCollect <- try(
 )
 flush_and_ship_log("after robyn_allocator")
 ## ---------- METRICS + PLOT ----------
+message("→ Extracting metrics from best model: ", best_id)
 best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == best_id, ]
+message("   best_row extracted, nrow=", nrow(best_row), ", ncol=", ncol(best_row))
+
 alloc_tbl <- if (!inherits(AllocatorCollect, "try-error")) AllocatorCollect$result_allocator else NULL
+message(
+    "   AllocatorCollect status: ",
+    if (inherits(AllocatorCollect, "try-error")) "ERROR" else "OK",
+    ", alloc_tbl is NULL: ", is.null(alloc_tbl)
+)
 
 total_response <- to_scalar(if (!is.null(alloc_tbl)) alloc_tbl$total_response else NA_real_)
 total_spend <- to_scalar(if (!is.null(alloc_tbl)) alloc_tbl$total_spend else NA_real_)
+message("   Allocator metrics: total_response=", total_response, ", total_spend=", total_spend)
 
 metrics_txt <- file.path(dir_path, "allocator_metrics.txt")
 metrics_csv <- file.path(dir_path, "allocator_metrics.csv")
 
+message("→ Writing metrics text file...")
 writeLines(c(
     paste("Model ID:", best_id),
     paste("Training Time (mins):", round(training_time, 2)),
@@ -1182,24 +1616,64 @@ writeLines(c(
     paste("Allocator Total Spend:", round(total_spend, 2))
 ), con = metrics_txt)
 gcs_put_safe(metrics_txt, file.path(gcs_prefix, "allocator_metrics.txt"))
+message("✅ Metrics text file written")
 
-metrics_df <- data.frame(
-    model_id = best_id,
-    training_time_mins = round(training_time, 2),
-    max_cores_used = max_cores,
-    r2_train = round(best_row$rsq_train %||% NA_real_, 4),
-    nrmse_train = round(best_row$nrmse_train %||% NA_real_, 4),
-    r2_val = round(best_row$rsq_val %||% NA_real_, 4),
-    nrmse_val = round(best_row$nrmse_val %||% NA_real_, 4),
-    r2_test = round(best_row$rsq_test %||% NA_real_, 4),
-    nrmse_test = round(best_row$nrmse_test %||% NA_real_, 4),
-    decomp_rssd_train = round(best_row$decomp.rssd %||% NA_real_, 4),
-    allocator_total_response = round(total_response, 2),
-    allocator_total_spend = round(total_spend, 2),
-    stringsAsFactors = FALSE
+message("→ Creating metrics dataframe...")
+tryCatch(
+    {
+        metrics_df <- data.frame(
+            model_id = best_id,
+            training_time_mins = round(training_time, 2),
+            max_cores_used = max_cores,
+            r2_train = round(best_row$rsq_train %||% NA_real_, 4),
+            nrmse_train = round(best_row$nrmse_train %||% NA_real_, 4),
+            r2_val = round(best_row$rsq_val %||% NA_real_, 4),
+            nrmse_val = round(best_row$nrmse_val %||% NA_real_, 4),
+            r2_test = round(best_row$rsq_test %||% NA_real_, 4),
+            nrmse_test = round(best_row$nrmse_test %||% NA_real_, 4),
+            decomp_rssd_train = round(best_row$decomp.rssd %||% NA_real_, 4),
+            allocator_total_response = round(total_response, 2),
+            allocator_total_spend = round(total_spend, 2),
+            stringsAsFactors = FALSE
+        )
+        message("✅ metrics_df created successfully, dimensions: ", nrow(metrics_df), " x ", ncol(metrics_df))
+
+        message("→ Writing metrics CSV...")
+        write.csv(metrics_df, metrics_csv, row.names = FALSE)
+        message("✅ Metrics CSV written to: ", metrics_csv)
+
+        gcs_put_safe(metrics_csv, file.path(gcs_prefix, "allocator_metrics.csv"))
+        message("✅ Metrics CSV uploaded to GCS")
+    },
+    error = function(e) {
+        msg <- paste("Failed to create or write metrics_df:", conditionMessage(e))
+        message("❌ ", msg)
+
+        # Log detailed error
+        metrics_err_file <- file.path(dir_path, "metrics_error.txt")
+        writeLines(c(
+            "METRICS ERROR",
+            paste0("When: ", Sys.time()),
+            paste0("Message: ", conditionMessage(e)),
+            paste0("best_id: ", best_id),
+            paste0("best_row class: ", class(best_row)),
+            paste0("best_row nrow: ", nrow(best_row)),
+            paste0("best_row ncol: ", if (is.data.frame(best_row)) ncol(best_row) else "N/A"),
+            paste0("training_time: ", training_time),
+            paste0("max_cores: ", max_cores),
+            "",
+            "Stack trace:",
+            paste(capture.output(traceback()), collapse = "\n"),
+            "",
+            "best_row structure:",
+            paste(capture.output(str(best_row)), collapse = "\n")
+        ), metrics_err_file)
+        gcs_put_safe(metrics_err_file, file.path(gcs_prefix, basename(metrics_err_file)))
+
+        # Continue despite error (don't fail the entire job)
+        message("⚠️ Continuing without metrics CSV")
+    }
 )
-write.csv(metrics_df, metrics_csv, row.names = FALSE)
-gcs_put_safe(metrics_csv, file.path(gcs_prefix, "allocator_metrics.csv"))
 
 # Allocator plot (restored)
 alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))

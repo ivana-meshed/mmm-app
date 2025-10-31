@@ -8,10 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Python dependencies for web interface
 RUN pip install --no-cache-dir \
-    streamlit \
+    "streamlit[auth]>=1.43" \
     snowflake-connector-python \
     google-cloud-storage \
     google-cloud-run \
+    google-cloud-secret-manager \
+    cryptography \
     pandas \
     pyarrow \
     fastparquet \
@@ -19,12 +21,18 @@ RUN pip install --no-cache-dir \
     mime \
     altair>=5.0 \
     scikit-learn>=1.2 \
-    statsmodels>=0.13
-
+    statsmodels>=0.13 \
+    numpy==1.26.4 \
+    plotly \
+    scipy
 
 WORKDIR /app
 
 # Copy only web application files
+ARG GIT_SHA
+ENV GIT_SHA=$GIT_SHA
+LABEL org.opencontainers.image.revision=$GIT_SHA
+
 COPY app/ /app/
 COPY requirements.txt /app/requirements.txt
 COPY docker/web_entrypoint.sh /app/entrypoint.sh

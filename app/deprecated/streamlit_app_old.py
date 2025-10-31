@@ -4,18 +4,17 @@ import json
 import logging
 import os
 import re
-import time
 import tempfile
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import snowflake.connector as sf
 import streamlit as st
-from google.cloud import run_v2, storage
-
 from data_processor import DataProcessor
+from google.cloud import run_v2, storage
 
 # ─────────────────────────────
 # Page & logging setup
@@ -27,7 +26,8 @@ logger = logging.getLogger(__name__)
 
 query_params = st.query_params
 logger.info(
-    "Starting app/streamlit_app.py", extra={"query_params": dict(query_params)}
+    "Starting app/streamlit_app.py",
+    extra={"query_params": dict(query_params)},
 )
 
 # Health check endpoint (returns JSON, does not render UI)
