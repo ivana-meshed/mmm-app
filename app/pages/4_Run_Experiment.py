@@ -153,7 +153,7 @@ with tab_single:
     st.subheader("Robyn configuration & training")
 
     # Data selection
-    with st.expander("Data selection", expanded=False):
+    with st.expander("📊 Data selection", expanded=False):
         # Show current loaded state (point 4 - UI representing actual state)
         if "preview_df" in st.session_state and st.session_state["preview_df"] is not None:
             loaded_country = st.session_state.get("selected_country", "N/A")
@@ -357,7 +357,7 @@ with tab_single:
             st.warning(f"Could not list configurations: {e}")
 
     # Robyn config (moved outside Data selection expander)
-    with st.expander("Robyn configuration", expanded=False):
+    with st.expander("⚙️ Robyn configuration", expanded=False):
         # Country auto-filled from Data Selection
         country = st.session_state.get("selected_country", "fr")
         st.info(f"**Country:** {country.upper()} (from Data Selection)")
@@ -614,7 +614,7 @@ with tab_single:
             st.warning("⚠️ No column aggregations found in metadata. Default 'sum' will be used for all numeric columns.")
 
     # Variables (moved outside Data selection expander)
-    with st.expander("Variable mapping", expanded=False):
+    with st.expander("🗺️ Variable mapping", expanded=False):
         # Get available columns from loaded data
         preview_df = st.session_state.get("preview_df")
         if preview_df is not None and not preview_df.empty:
@@ -1019,7 +1019,7 @@ with tab_single:
                 
                 # Use expander for each variable to keep UI manageable
                 for idx, var in enumerate(all_hyper_vars):
-                    with st.expander(f"**{var}**", expanded=False):
+                    with st.expander(f"📈 **{var}**", expanded=False):
                         defaults = get_var_defaults(var, adstock)
                         
                         if adstock == "geometric":
@@ -1401,7 +1401,7 @@ with tab_single:
                     st.error(f"Failed to add to queue: {e}")
 
     # Outputs (moved outside Save Configuration expander)
-    with st.expander("Outputs"):
+    with st.expander("📤 Outputs"):
         gcs_bucket = st.text_input(
             "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
         )

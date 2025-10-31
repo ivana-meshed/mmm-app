@@ -6,6 +6,9 @@ st.set_page_config(
 )
 from app_split_helpers import *
 
+# Customize sidebar title
+st.sidebar.markdown("# Robyn MMM Trainer")
+
 st.title("Robyn MMM Trainer")
 
 st.write(
