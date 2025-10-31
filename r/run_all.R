@@ -991,15 +991,11 @@ if (length(missing_drivers) > 0) {
 # This ensures hyperparameters match the variables after zero-variance filtering
 message("→ Rebuilding hyperparameters for filtered variables...")
 
-# For weibull_cdf/weibull_pdf, Robyn also requires hyperparameters for prophet_vars
-# For geometric, prophet_vars don't need explicit hyperparameters (they use defaults)
-prophet_vars_list <- if (adstock %in% c("weibull_cdf", "weibull_pdf")) {
-    c("trend", "season", "holiday", "weekday")
-} else {
-    character(0)
-}
-
-hyper_vars_filtered <- c(paid_media_vars, organic_vars, prophet_vars_list)
+# According to Robyn documentation:
+# - Paid media & organic variables need hyperparameters (alphas + gammas/thetas or shapes/scales)
+# - Prophet variables DO NOT need hyperparameters (handled separately by Prophet)
+# - Context variables typically do NOT need hyperparameters (unless lagged effect)
+hyper_vars_filtered <- c(paid_media_vars, organic_vars)
 message("   Variables for hyperparameters: ", paste(hyper_vars_filtered, collapse = ", "))
 message("   Adstock type: ", adstock)
 
@@ -1021,10 +1017,12 @@ for (v in hyper_vars_filtered) {
 hyperparameters_filtered[["train_size"]] <- train_size
 
 message("   Rebuilt hyperparameters: ", length(hyperparameters_filtered), " keys")
-message("   Expected hyperparameters for ", length(hyper_vars_filtered), " variables (", 
-        length(paid_media_vars), " paid_media + ", length(organic_vars), " organic",
-        if (length(prophet_vars_list) > 0) paste(" +", length(prophet_vars_list), "prophet") else "",
-        ")")
+message("   Expected: ", length(hyper_vars_filtered), " variables × ", 
+        if (adstock == "geometric") "3" else "3", " params + train_size")
+message("   Calculation: ", length(hyper_vars_filtered), " vars (", 
+        length(paid_media_vars), " paid_media + ", length(organic_vars), " organic) × ",
+        if (adstock == "geometric") "3 (alphas,gammas,thetas)" else "3 (alphas,shapes,scales)",
+        " + 1 (train_size) = ", length(hyper_vars_filtered) * 3 + 1)
 
 # First: call robyn_inputs WITHOUT hyperparameters
 message("→ Calling robyn_inputs (preflight, without hyperparameters)...")
