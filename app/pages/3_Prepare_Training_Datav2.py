@@ -96,7 +96,9 @@ plat_map_df, platforms, _ = build_plat_map_df(
     PLAT="platform",
     CHANNELS_MAP=CHANNELS_MAP,
 )
-
+# Normalize field names coming back from build_plat_map_df
+PLAT_FIELD = next((c for c in plat_map_df.columns if c.lower() in ("platform", "plat")), plat_map_df.columns[0])
+SPEND_FIELD = next((c for c in plat_map_df.columns if c.lower() in ("column_name", "col", "spend_col", "spend")), plat_map_df.columns[-1])
 # ---------- Sidebar (timeframe etc.) ----------
 GOAL, sel_countries, TIMEFRAME_LABEL, RANGE, agg_label, FREQ = render_sidebar(
     meta, df, nice, goal_cols
@@ -480,11 +482,9 @@ if step >= 2 and st.session_state.get("pool_step1"):
             pool = [c for c in pool_step2_base if _has_token(c, tok)]
             candidates = dict(
                 Impressions=[c for c in pool if c in IMPR_COLS],
-                Clicks=[c for c in pool if c in CLICK_COLS],
-                Sessions=[c for c in pool if c in SESSION_COLS],
-                Spend=plat_map_df.loc[
-                    plat_map_df["platform"].eq(plat), "col"
-                ].tolist(),
+                Clicks     =[c for c in pool if c in CLICK_COLS],
+                Sessions   =[c for c in pool if c in SESSION_COLS],
+                Spend      = plat_map_df.loc[plat_map_df[PLAT_FIELD].eq(plat), SPEND_FIELD].tolist()
             )
             best_kind, best_col = "None", None
             best_key = (
@@ -911,9 +911,7 @@ if step >= 5 and st.session_state.get("drivers_post_rules") is not None:
         st.markdown("#### Spend map per platform")
         spend_map = st.session_state.get("spend_map", {}) or {}
         for plat in platforms:
-            spend_cols = plat_map_df.loc[
-                plat_map_df["platform"].eq(plat), "col"
-            ].tolist()
+            spend_cols = plat_map_df.loc[plat_map_df[PLAT_FIELD].eq(plat), SPEND_FIELD].tolist()
             current = spend_map.get(plat)
             idx = 0
             if current in spend_cols:
