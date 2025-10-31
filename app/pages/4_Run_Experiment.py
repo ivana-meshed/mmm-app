@@ -145,7 +145,7 @@ with tab_single:
     st.subheader("Robyn configuration & training")
 
     # Data selection
-    with st.expander("Data selection", expanded=False):
+    with st.expander("📊 Data selection", expanded=False):
         # Show current loaded state (point 4 - UI representing actual state)
         if "preview_df" in st.session_state and st.session_state["preview_df"] is not None:
             loaded_country = st.session_state.get("selected_country", "N/A")
@@ -349,7 +349,7 @@ with tab_single:
             st.warning(f"Could not list configurations: {e}")
 
     # Robyn config (moved outside Data selection expander)
-    with st.expander("Robyn configuration", expanded=False):
+    with st.expander("⚙️ Robyn configuration", expanded=False):
         # Country auto-filled from Data Selection
         country = st.session_state.get("selected_country", "fr")
         st.info(f"**Country:** {country.upper()} (from Data Selection)")
@@ -564,12 +564,11 @@ with tab_single:
         custom_hyperparameters = {}
 
         # NEW: optional resampling
-        c_rs1, c_rs2 = st.columns([1, 1])
-        resample_freq_label = c_rs1.selectbox(
+        resample_freq_label = st.selectbox(
             "Resample input data (optional)",
             ["None", "Weekly (W)", "Monthly (M)"],
             index=0,
-            help="Aggregates the input before training.",
+            help="Aggregates the input before training. Column aggregations from metadata will be used.",
         )
         
         # Determine default resample freq from loaded config
@@ -588,32 +587,26 @@ with tab_single:
             "Monthly (M)": "M",
         }.get(resample_freq_label or default_resample_freq, "none")
 
-        # Determine default resample agg from loaded config
-        resample_agg_map = {
-            "sum": "sum",
-            "mean": "avg (mean)",
-            "max": "max",
-            "min": "min",
-        }
-        default_resample_agg = "sum"
-        if loaded_config and "resample_agg" in loaded_config:
-            default_resample_agg = resample_agg_map.get(loaded_config["resample_agg"], "sum")
+        # Get column aggregations from metadata
+        # These will be passed to R for per-column resampling
+        column_agg_strategies = {}
+        if metadata and "agg_strategies" in metadata:
+            column_agg_strategies = metadata["agg_strategies"]
         
-        resample_agg_label = c_rs2.selectbox(
-            "Aggregation for metrics (when resampling)",
-            ["sum", "avg (mean)", "max", "min"],
-            index=["sum", "avg (mean)", "max", "min"].index(default_resample_agg) if default_resample_agg in ["sum", "avg (mean)", "max", "min"] else 0,
-            help="Applied to numeric columns during resample.",
-        )
-        resample_agg = {
-            "sum": "sum",
-            "avg (mean)": "mean",
-            "max": "max",
-            "min": "min",
-        }.get(resample_agg_label or "sum", "sum")
+        # Display info about column aggregations if resampling is enabled
+        if resample_freq != "none" and column_agg_strategies:
+            # Count aggregations by type
+            agg_counts = {}
+            for agg in column_agg_strategies.values():
+                agg_counts[agg] = agg_counts.get(agg, 0) + 1
+            
+            agg_summary = ", ".join([f"{count} {agg}" for agg, count in sorted(agg_counts.items())])
+            st.info(f"ℹ️ Using column aggregations from metadata: {agg_summary}")
+        elif resample_freq != "none" and not column_agg_strategies:
+            st.warning("⚠️ No column aggregations found in metadata. Default 'sum' will be used for all numeric columns.")
 
     # Variables (moved outside Data selection expander)
-    with st.expander("Variable mapping", expanded=False):
+    with st.expander("🗺️ Variable mapping", expanded=False):
         # Get available columns from loaded data
         preview_df = st.session_state.get("preview_df")
         if preview_df is not None and not preview_df.empty:
@@ -1018,7 +1011,7 @@ with tab_single:
                 
                 # Use expander for each variable to keep UI manageable
                 for idx, var in enumerate(all_hyper_vars):
-                    with st.expander(f"**{var}**", expanded=False):
+                    with st.expander(f"📈 **{var}**", expanded=False):
                         defaults = get_var_defaults(var, adstock)
                         
                         if adstock == "geometric":
@@ -1232,7 +1225,7 @@ with tab_single:
             "adstock": adstock,
             "hyperparameter_preset": hyperparameter_preset,
             "resample_freq": resample_freq,
-            "resample_agg": resample_agg,
+            "column_agg_strategies": json.dumps(column_agg_strategies) if column_agg_strategies else "",
             "annotations_gcs_path": "",
         }
         
@@ -1286,7 +1279,7 @@ with tab_single:
                             "hyperparameter_preset": hyperparameter_preset,
                             "custom_hyperparameters": custom_hyperparameters if hyperparameter_preset == "Custom" else {},
                             "resample_freq": resample_freq,
-                            "resample_agg": resample_agg,
+                            "column_agg_strategies": column_agg_strategies,
                         },
                     }
 
@@ -1354,7 +1347,7 @@ with tab_single:
                             "hyperparameter_preset": hyperparameter_preset,
                             "custom_hyperparameters": custom_hyperparameters if hyperparameter_preset == "Custom" else {},
                             "resample_freq": resample_freq,
-                            "resample_agg": resample_agg,
+                            "column_agg_strategies": column_agg_strategies,
                             "annotations_gcs_path": "",
                             "start_date": start_date_str,
                             "end_date": end_date_str,
@@ -1400,7 +1393,7 @@ with tab_single:
                     st.error(f"Failed to add to queue: {e}")
 
     # Outputs (moved outside Save Configuration expander)
-    with st.expander("Outputs"):
+    with st.expander("📤 Outputs"):
         gcs_bucket = st.text_input(
             "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
         )
@@ -1437,7 +1430,7 @@ with tab_single:
                 hyperparameter_preset,
                 custom_hyperparameters,  # NEW
                 resample_freq,
-                resample_agg,
+                column_agg_strategies,
             ),
             data_gcs_path,
             timestamp,
@@ -1465,7 +1458,7 @@ with tab_single:
         hyperparameter_preset,
         custom_hyperparameters,  # NEW
         resample_freq,
-        resample_agg,
+        column_agg_strategies,
     ) -> dict:
         return {
             "country": country,
@@ -1490,7 +1483,7 @@ with tab_single:
             "hyperparameter_preset": hyperparameter_preset,
             "custom_hyperparameters": custom_hyperparameters,  # NEW
             "resample_freq": resample_freq,
-            "resample_agg": resample_agg,
+            "column_agg_strategies": column_agg_strategies,
             "data_gcs_path": "",  # Will be filled later
         }
 
@@ -1685,14 +1678,14 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 - **Custom hyperparameters** (only when hyperparameter_preset=Custom):
   - For geometric adstock: `alphas_min`, `alphas_max`, `gammas_min`, `gammas_max`, `thetas_min`, `thetas_max`
   - For weibull adstock: `alphas_min`, `alphas_max`, `shapes_min`, `shapes_max`, `scales_min`, `scales_max`
-- `resample_freq` (none|W|M), `resample_agg` (sum|mean|max|min)
+- `resample_freq` (none|W|M) - Column aggregations from metadata will be used when resampling
 - `gcs_bucket` (optional override per row)
 - **Data source (choose one):**
   - `data_gcs_path` (gs:// path to parquet file) — **Recommended for GCS-based workflows**
   - `query` or `table` — For Snowflake-based workflows
 - `annotations_gcs_path` (optional gs:// path)
 
-**Note:** For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows.
+**Note:** For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows. Column aggregations are automatically loaded from metadata.json when resampling is enabled.
             """
         )
 
@@ -1722,7 +1715,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "adstock": "geometric",
                     "hyperparameter_preset": "Meshed recommend",
                     "resample_freq": "none",
-                    "resample_agg": "sum",
                     "annotations_gcs_path": "",
                 }
             ]
@@ -1763,7 +1755,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "scales_min": "",
                     "scales_max": "",
                     "resample_freq": "none",
-                    "resample_agg": "sum",
                     "annotations_gcs_path": "",
                 },
                 {
@@ -1799,7 +1790,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "scales_min": "",
                     "scales_max": "",
                     "resample_freq": "W",
-                    "resample_agg": "sum",
                     "annotations_gcs_path": "",
                 },
                 {
@@ -1841,7 +1831,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "ORGANIC_TRAFFIC_gammas": "[0.3, 0.7]",
                     "ORGANIC_TRAFFIC_thetas": "[0.9, 0.99]",
                     "resample_freq": "none",
-                    "resample_agg": "sum",
                     "annotations_gcs_path": "",
                 },
             ]
@@ -2116,7 +2105,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 "adstock": p.get("adstock", ""),
                 "hyperparameter_preset": p.get("hyperparameter_preset", "Meshed recommend"),
                 "resample_freq": p.get("resample_freq", "none"),
-                "resample_agg": p.get("resample_agg", "sum"),
                 "annotations_gcs_path": p.get("annotations_gcs_path", ""),
             }
 
@@ -2146,7 +2134,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "adstock",
                     "hyperparameter_preset",
                     "resample_freq",
-                    "resample_agg",
                     "annotations_gcs_path",
                 ]
             )
