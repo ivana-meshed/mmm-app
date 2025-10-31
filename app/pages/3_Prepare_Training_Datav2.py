@@ -1,4 +1,3 @@
-# 3_Prepare_Training_Datav2.py — Single-page wizard: Qualify → Signal → Map Exposures → Pick Buckets → Rules+VIF
 import io
 import json
 import numpy as np
@@ -12,10 +11,6 @@ from app_shared import (
     build_plat_map_df,
     render_sidebar,
     filter_range,
-    previous_window,
-    freq_to_rule,
-    fmt_num,
-    GREEN, RED,
 )
 
 st.set_page_config(page_title="Prepare Training Data (v2)", layout="wide")
@@ -52,7 +47,7 @@ context_cols    = [c for c in (mapping.get("context_vars",      []) or []) if c 
 factor_cols     = [c for c in (mapping.get("factor_vars",       []) or []) if c in df.columns]
 
 # Platform/color map (for paid spend columns)
-plat_map_df, platforms, PLATFORM_COLORS = build_plat_map_df(
+plat_map_df, platforms, _ = build_plat_map_df(
     present_spend=paid_spend_cols,
     df=df, meta=meta, m=m,
     COL="column_name", PLAT="platform",
@@ -61,7 +56,6 @@ plat_map_df, platforms, PLATFORM_COLORS = build_plat_map_df(
 
 # ---------- Sidebar (timeframe etc.) ----------
 GOAL, sel_countries, TIMEFRAME_LABEL, RANGE, agg_label, FREQ = render_sidebar(meta, df, nice, goal_cols)
-RULE = freq_to_rule(FREQ)
 
 # Filter by country (if provided)
 if sel_countries and "COUNTRY" in df.columns:
@@ -69,7 +63,6 @@ if sel_countries and "COUNTRY" in df.columns:
 
 # Windowed frames
 df_r = filter_range(df.copy(), DATE_COL, RANGE)
-df_prev = previous_window(df, df_r, DATE_COL, RANGE)
 
 # =========================
 # Helpers (local, lightweight)
@@ -202,16 +195,18 @@ _step_header()
 st.markdown("---")
 
 # =========================
-# STEP 1 — Column stats → qualify
+# STEP 1 — Column stats → qualify (inline checkboxes)
 # =========================
 if step >= 1:
     with st.expander("Step 1 — Column stats & qualification", expanded=(step == 1)):
         num_cols = df_r.select_dtypes(include=[np.number]).columns.tolist()
 
-        profile = st.selectbox("Profile", ["Strict","Balanced","Lenient","Custom"],
-                               index=["Strict","Balanced","Lenient","Custom"].index(
-                                   st.session_state["rules_profile"]["profile"] if step==1 else "Balanced"
-                               ))
+        profile = st.selectbox(
+            "Profile", ["Strict","Balanced","Lenient","Custom"],
+            index=["Strict","Balanced","Lenient","Custom"].index(
+                st.session_state["rules_profile"]["profile"] if step==1 else "Balanced"
+            )
+        )
         defaults = dict(
             Strict  = dict(min_nonnull=0.85, min_nonzero=0.60, max_spike=0.25),
             Balanced= dict(min_nonnull=0.75, min_nonzero=0.50, max_spike=0.35),
@@ -226,14 +221,12 @@ if step >= 1:
             p = defaults[profile]
             min_nonnull, min_nonzero, max_spike = p["min_nonnull"], p["min_nonzero"], p["max_spike"]
 
-        st.caption("We preselect columns that pass thresholds; you can adjust below.")
-
-        stats_rows = []
-        passing = []
+        # Build stats table + default "use" flag based on thresholds
+        rows = []
         for c in num_cols:
             s = pd.to_numeric(df_r[c], errors="coerce")
-            non_null = s.notna().mean()
-            non_zero = (s.fillna(0) != 0).mean()
+            nn = s.notna().mean()
+            nz = (s.fillna(0) != 0).mean()
             if s.notna().sum() >= 10:
                 q1, q3 = np.nanpercentile(s, [25, 75])
                 iqr = q3 - q1
@@ -241,30 +234,51 @@ if step >= 1:
                 spike = (s > hi).mean()
             else:
                 spike = 0.0
-            if (non_null >= min_nonnull) and (non_zero >= min_nonzero) and (spike <= max_spike):
-                passing.append(c)
-            stats_rows.append(dict(
-                column=c, non_null=f"{non_null:.2%}", non_zero=f"{non_zero:.2%}", spike=f"{spike:.2%}"
+            use_default = (nn >= min_nonnull) and (nz >= min_nonzero) and (spike <= max_spike)
+            rows.append(dict(
+                column=c,
+                non_null=float(nn),
+                non_zero=float(nz),
+                spike=float(spike),
+                use=use_default
             ))
-        st.dataframe(pd.DataFrame(stats_rows), use_container_width=True, hide_index=True)
+        stat_df = pd.DataFrame(rows)
 
-        nice_map = {nice(c): c for c in num_cols}
-        default_labels = [nice(c) for c in passing]
-        sel_labels = st.multiselect("Qualified columns", list(nice_map.keys()), default=default_labels, key="step1_multiselect")
-        pool_step1 = [nice_map[lbl] for lbl in sel_labels]
+        # Present as editable table with a checkbox
+        edited = st.data_editor(
+            stat_df.assign(
+                non_null_pct = stat_df["non_null"].map(lambda v: f"{v:.2%}"),
+                non_zero_pct = stat_df["non_zero"].map(lambda v: f"{v:.2%}"),
+                spike_pct    = stat_df["spike"].map(lambda v: f"{v:.2%}"),
+                nice         = stat_df["column"].map(nice),
+            )[["use","nice","column","non_null_pct","non_zero_pct","spike_pct"]],
+            use_container_width=True,
+            hide_index=True,
+            key="step1_editor",
+            column_config={
+                "use": st.column_config.CheckboxColumn("Use", help="Include this column in the qualified pool"),
+                "nice": st.column_config.TextColumn("Name"),
+                "column": st.column_config.TextColumn("Raw column"),
+                "non_null_pct": st.column_config.TextColumn("Non-null"),
+                "non_zero_pct": st.column_config.TextColumn("Non-zero"),
+                "spike_pct": st.column_config.TextColumn("Spike (>1.5×IQR)"),
+            }
+        )
+
+        pool_step1 = edited.loc[edited["use"], "column"].tolist()
 
         cA, cB = st.columns([1,1])
         if cA.button("Continue → Step 2 (Signal & Exposures)", type="primary"):
             st.session_state["pool_step1"] = pool_step1
-            st.session_state["rules_profile"] = dict(profile=profile, min_nonnull=min_nonnull, min_nonzero=min_nonzero, max_spike=max_spike)
+            st.session_state["rules_profile"] = dict(
+                profile=profile, min_nonnull=min_nonnull, min_nonzero=min_nonzero, max_spike=max_spike
+            )
             st.session_state["wizard_step"] = 2
-            st.experimental_rerun()
+            st.rerun()
         if cB.button("Reset Step 1"):
             st.session_state["pool_step1"] = None
             st.session_state["wizard_step"] = 1
-            st.experimental_rerun()
-
-st.markdown("---")
+            st.rerun()
 
 # =========================
 # STEP 2 — Signal vs goal + exposure recommendation/mapping
@@ -306,18 +320,18 @@ if step >= 2 and st.session_state.get("pool_step1"):
                 Sessions   =[c for c in pool if c in SESSION_COLS],
                 Spend      =plat_map_df.loc[plat_map_df["platform"].eq(plat), "col"].tolist()
             )
-            best_kind, best_col, best_key = "None", None, (1e9, 1e9, 1e9)
+            best_kind, best_col = "None", None
+            best_key = (float("inf"), float("inf"), float("inf"))  # lower is better
+
             for kind, cols in candidates.items():
                 for col in cols:
                     s = _signal_trio(df_r, col, y_col)
-                    # sort key: lower is better
-                    key = (-(abs(s["rho"])) if pd.notna(s["rho"]) else -0.0,
-                           -(s["r2"]) if pd.notna(s["r2"]) else -0.0,
-                           (s["nmae"]) if pd.notna(s["nmae"]) else 1e9)
-                    # because we want max rho/r2, min nmae → use negative for max
-                    key_conv = (-key[0], -key[1], key[2])
-                    if key_conv < best_key:
-                        best_key = key_conv
+                    # want: maximize |rho|, maximize r2, minimize nmae  → negate the first two
+                    key = (-(abs(s["rho"])) if pd.notna(s["rho"]) else 0.0,
+                        -(s["r2"])       if pd.notna(s["r2"])   else 0.0,
+                        (s["nmae"])      if pd.notna(s["nmae"]) else float("inf"))
+                    if key < best_key:
+                        best_key = key
                         best_kind, best_col = kind, col
             return best_kind, best_col, candidates
 
@@ -368,10 +382,10 @@ if step >= 2 and st.session_state.get("pool_step1"):
             extra = [cfg["column"] for cfg in exp_choice.values() if cfg.get("column")]
             st.session_state["pool_step2"] = list(dict.fromkeys(st.session_state["pool_step1"] + extra))
             st.session_state["wizard_step"] = 3
-            st.experimental_rerun()
+            st.rerun()
         if cB.button("Back to Step 1"):
             st.session_state["wizard_step"] = 1
-            st.experimental_rerun()
+            st.rerun()
 
 st.markdown("---")
 
@@ -381,20 +395,31 @@ st.markdown("---")
 if step >= 3 and st.session_state.get("pool_step2"):
     with st.expander("Step 3 — Pick candidates per bucket", expanded=(step == 3)):
         pool = set(st.session_state["pool_step2"])
-        def _picker(label, options, key):
+
+        def _editor_picker(label, options, key, pool):
             opts = sorted([c for c in options if c in pool])
             if not opts:
-                st.caption(f"— no variables mapped to **{label}** by metadata or qualified earlier —")
+                st.caption(f"— no variables mapped to **{label}** —")
                 return []
-            nice_opts = sorted([(nice(c), c) for c in opts], key=lambda t: t[0].lower())
-            default = [n for n,_ in nice_opts]  # preselect all that survived
-            sel = st.multiselect(label, [n for n,_ in nice_opts], default=default, key=key)
-            return [raw for n, raw in nice_opts if n in sel]
+            dfp = pd.DataFrame({"use": True, "nice": [nice(c) for c in opts], "column": opts})
+            edited = st.data_editor(
+                dfp[["use","nice","column"]],
+                use_container_width=True,
+                hide_index=True,
+                key=key,
+                column_config={
+                    "use": st.column_config.CheckboxColumn("Use"),
+                    "nice": st.column_config.TextColumn("Name"),
+                    "column": st.column_config.TextColumn("Raw column"),
+                }
+            )
+            return edited.loc[edited["use"], "column"].tolist()
 
-        sel_paid_vars = _picker("Paid media variables (exposure candidates)", paid_var_cols, "pick_paid_vars_v2")
-        sel_org_vars  = _picker("Organic variables", organic_cols, "pick_org_vars_v2")
-        sel_ctx_vars  = _picker("Context variables", context_cols, "pick_ctx_vars_v2")
-        sel_fct_vars  = _picker("Factor variables (optional)", factor_cols, "pick_fct_vars_v2")
+        # pick inside expander
+        sel_paid_vars = _editor_picker("Paid media variables (exposure candidates)", paid_var_cols, "pick_paid_vars_v2", pool)
+        sel_org_vars  = _editor_picker("Organic variables",  organic_cols,          "pick_org_vars_v2",  pool)
+        sel_ctx_vars  = _editor_picker("Context variables",  context_cols,          "pick_ctx_vars_v2",  pool)
+        sel_fct_vars  = _editor_picker("Factor variables",   factor_cols,           "pick_fct_vars_v2",  pool)
 
         cA, cB = st.columns([1,1])
         if cA.button("Continue → Step 4 (Rules)", type="primary"):
@@ -405,10 +430,10 @@ if step >= 3 and st.session_state.get("pool_step2"):
                 "factors":   sel_fct_vars,
             }
             st.session_state["wizard_step"] = 4
-            st.experimental_rerun()
+            st.rerun()
         if cB.button("Back to Step 2"):
             st.session_state["wizard_step"] = 2
-            st.experimental_rerun()
+            st.rerun()
 
 st.markdown("---")
 
@@ -461,10 +486,10 @@ if step >= 4 and st.session_state.get("bucket_picks"):
         cA, cB = st.columns([1,1])
         if cA.button("Continue → Step 5 (VIF & Export)", type="primary"):
             st.session_state["wizard_step"] = 5
-            st.experimental_rerun()
+            st.rerun()
         if cB.button("Back to Step 3"):
             st.session_state["wizard_step"] = 3
-            st.experimental_rerun()
+            st.rerun()
 
 st.markdown("---")
 
@@ -563,10 +588,10 @@ if step >= 5 and st.session_state.get("drivers_post_rules") is not None:
         cA, cB = st.columns([1,1])
         if cA.button("Back to Step 4"):
             st.session_state["wizard_step"] = 4
-            st.experimental_rerun()
+            st.rerun()
         if cB.button("Restart Wizard"):
             for k in ["pool_step1","goal_step2","exposure_metric_choice","pool_step2","bucket_picks",
                       "drivers_post_rules","vif_keep","spend_map","drivers_final"]:
                 st.session_state[k] = None if k != "exposure_metric_choice" else {}
             st.session_state["wizard_step"] = 1
-            st.experimental_rerun()
+            st.rerun()
