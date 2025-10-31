@@ -1,4 +1,3 @@
-# (full file contents)
 import base64
 import io
 import json
@@ -10,12 +9,9 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-
 import pandas as pd
 import streamlit as st
-
 st.set_page_config(page_title="Experiment", page_icon="🧪", layout="wide")
-
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -31,10 +27,8 @@ from app_shared import (
     upload_to_gcs,
 )
 from google.cloud import storage
-
 data_processor = get_data_processor()
 job_manager = get_job_manager()
-
 from app_split_helpers import *  # bring in all helper functions/constants
 
 
@@ -51,7 +45,6 @@ if st.session_state.get("switch_to_queue_tab", False):
 tab_single, tab_queue = st.tabs(["Single run", "Queue"])
 
 # Prefill fields from saved metadata if present (session_state keys should already be set by Map Your Data page).
-
 
 # Helper functions for GCS data loading
 def _list_country_versions(bucket: str, country: str) -> List[str]:
@@ -82,7 +75,6 @@ def _list_metadata_versions(bucket: str, country: str) -> List[str]:
     versions = sorted(ts, reverse=True)
     # Replace "latest" with "Latest" if present
     return ["Latest" if v.lower() == "latest" else v for v in versions]
-
 
 
 def _get_data_blob(country: str, version: str) -> str:
