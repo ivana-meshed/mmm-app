@@ -881,6 +881,7 @@ get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
             } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
                 return(list(
                     alphas = custom_hyperparameters[[var_alphas_key]],
+                    gammas = custom_hyperparameters[[paste0(var_name, "_gammas")]] %||% c(0.3, 1),
                     shapes = custom_hyperparameters[[paste0(var_name, "_shapes")]] %||% c(0.5, 2.5),
                     scales = custom_hyperparameters[[paste0(var_name, "_scales")]] %||% c(0.001, 0.15)
                 ))
@@ -908,6 +909,10 @@ get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
                 alphas = c(
                     custom_hyperparameters$alphas_min %||% 0.5,
                     custom_hyperparameters$alphas_max %||% 3.0
+                ),
+                gammas = c(
+                    custom_hyperparameters$gammas_min %||% 0.3,
+                    custom_hyperparameters$gammas_max %||% 1.0
                 ),
                 shapes = c(
                     custom_hyperparameters$shapes_min %||% 0.5,
@@ -957,14 +962,15 @@ get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
         }
     } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
         # Weibull adstock ranges (from Robyn documentation)
+        # Weibull needs: alphas, gammas (for Hill saturation), shapes, scales (for Weibull adstock)
         if (preset == "Facebook recommend") {
-            list(alphas = c(0.5, 3), shapes = c(0.0001, 2), scales = c(0, 0.1))
+            list(alphas = c(0.5, 3), gammas = c(0.3, 1), shapes = c(0.0001, 2), scales = c(0, 0.1))
         } else if (preset == "Meshed recommend") {
             # Meshed customizations for Weibull
-            list(alphas = c(0.5, 3), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
+            list(alphas = c(0.5, 3), gammas = c(0.3, 1), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
         } else {
             # Custom fallback
-            list(alphas = c(0.5, 3), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
+            list(alphas = c(0.5, 3), gammas = c(0.3, 1), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
         }
     } else {
         # Fallback
@@ -1009,7 +1015,8 @@ for (v in hyper_vars_filtered) {
         hyperparameters_filtered[[paste0(v, "_gammas")]] <- spec$gammas
         hyperparameters_filtered[[paste0(v, "_thetas")]] <- spec$thetas
     } else {
-        # Weibull uses shapes and scales instead of gammas and thetas
+        # Weibull uses alphas, gammas, shapes and scales (4 params per variable)
+        hyperparameters_filtered[[paste0(v, "_gammas")]] <- spec$gammas
         hyperparameters_filtered[[paste0(v, "_shapes")]] <- spec$shapes
         hyperparameters_filtered[[paste0(v, "_scales")]] <- spec$scales
     }
@@ -1018,11 +1025,11 @@ hyperparameters_filtered[["train_size"]] <- train_size
 
 message("   Rebuilt hyperparameters: ", length(hyperparameters_filtered), " keys")
 message("   Expected: ", length(hyper_vars_filtered), " variables × ", 
-        if (adstock == "geometric") "3" else "3", " params + train_size")
+        if (adstock == "geometric") "3" else "4", " params + train_size")
 message("   Calculation: ", length(hyper_vars_filtered), " vars (", 
         length(paid_media_vars), " paid_media + ", length(organic_vars), " organic) × ",
-        if (adstock == "geometric") "3 (alphas,gammas,thetas)" else "3 (alphas,shapes,scales)",
-        " + 1 (train_size) = ", length(hyper_vars_filtered) * 3 + 1)
+        if (adstock == "geometric") "3 (alphas,gammas,thetas)" else "4 (alphas,gammas,shapes,scales)",
+        " + 1 (train_size) = ", length(hyper_vars_filtered) * (if (adstock == "geometric") 3 else 4) + 1)
 
 # First: call robyn_inputs WITHOUT hyperparameters
 message("→ Calling robyn_inputs (preflight, without hyperparameters)...")
