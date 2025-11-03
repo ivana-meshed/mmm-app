@@ -511,15 +511,16 @@ with tab_biz:
 
         if want_overlay and not can_overlay:
             st.caption(f"ℹ️ Overlay disabled: '_TOTAL_SPEND' not available for this selection.")
-            
+
+
 # =============================
-# TAB 2 — MARKETING OVERVIEW
+# TAB 3 — MARKETING OVERVIEW
 # =============================
 with tab_mkt:
     st.subheader(f"Spend & Channels — {TIMEFRAME_LABEL} · {agg_label}")
 
     # ----- KPI — Outcomes (TOTALS only) -----
-    st.markdown("#### Outcomes (Goals)")
+    st.markdown("#### Outcomes (Total)")
     cur_imps, d_imps = total_with_prev_local(IMPR_COLS)
     cur_clicks, d_clicks = total_with_prev_local(CLICK_COLS)
     cur_sessions, d_sessions = total_with_prev_local(SESSION_COLS)
@@ -531,7 +532,7 @@ with tab_mkt:
                 title="Total Impressions",
                 value=fmt_num(cur_imps),
                 delta=(
-                    (f"{'+' if (d_imps or 0)>=0 else ''}{fmt_num(d_imps)}")
+                    f"{'+' if (d_imps or 0)>=0 else ''}{fmt_num(d_imps)}"
                     if d_imps is not None
                     else None
                 ),
@@ -541,7 +542,7 @@ with tab_mkt:
                 title="Total Clicks",
                 value=fmt_num(cur_clicks),
                 delta=(
-                    (f"{'+' if (d_clicks or 0)>=0 else ''}{fmt_num(d_clicks)}")
+                    f"{'+' if (d_clicks or 0)>=0 else ''}{fmt_num(d_clicks)}"
                     if d_clicks is not None
                     else None
                 ),
@@ -551,9 +552,7 @@ with tab_mkt:
                 title="Total Sessions",
                 value=fmt_num(cur_sessions),
                 delta=(
-                    (
-                        f"{'+' if (d_sessions or 0)>=0 else ''}{fmt_num(d_sessions)}"
-                    )
+                    f"{'+' if (d_sessions or 0)>=0 else ''}{fmt_num(d_sessions)}"
                     if d_sessions is not None
                     else None
                 ),
@@ -563,16 +562,15 @@ with tab_mkt:
         per_row=3,
     )
 
-
     # ----- KPI — Spend (TOTALS + per-platform tiles) -----
-    st.markdown("#### Spend Overview")
+    st.markdown("#### Spend (Total)")
     cur_spend, d_spend = total_with_prev_local(["_TOTAL_SPEND"])
     spend_boxes = [
         dict(
             title="Total Spend",
             value=fmt_num(cur_spend),
             delta=(
-                (f"{'+' if (d_spend or 0)>=0 else ''}{fmt_num(d_spend)}")
+                f"{'+' if (d_spend or 0)>=0 else ''}{fmt_num(d_spend)}"
                 if d_spend is not None
                 else None
             ),
@@ -635,260 +633,12 @@ with tab_mkt:
     kpi_grid_fixed(spend_boxes, per_row=4)
     st.markdown("---")
 
-    # ─────────────────────────────────────────────────────────────
-    # Channel KPIs (Outcomes & Costs)  +  Channel breakdown  (SIDE BY SIDE)
-    # ─────────────────────────────────────────────────────────────
-    import re
-
-    def _mk_long_marketing(frame: pd.DataFrame) -> pd.DataFrame:
-        """
-        Parse wide marketing columns shaped like:
-          <channel>_<subchannel>_<metric>
-        where metric ∈ {cost, impressions|impr, clicks, sessions} (case-insensitive).
-        Returns long DF: [channel, subchannel, metric, value] summed over the selected window.
-        """
-        cols = []
-        pat = re.compile(
-            r"^(?P<channel>[A-Za-z0-9]+)_(?P<sub>[A-Za-z0-9]+)_(?P<m>cost|impressions?|impr|clicks?|sessions?)$",
-            re.IGNORECASE,
-        )
-        for c in df_r.columns:
-            m = pat.match(str(c))
-            if m:
-                d = m.groupdict()
-                met = d["m"].lower()
-                met = (
-                    "impressions"
-                    if met in ("impression", "impressions", "impr")
-                    else met
-                )
-                met = "clicks" if met in ("click", "clicks") else met
-                met = "sessions" if met in ("session", "sessions") else met
-                cols.append((c, d["channel"].lower(), d["sub"].lower(), met))
-        if not cols:
-            return pd.DataFrame(
-                columns=["channel", "subchannel", "metric", "value"]
-            )
-        data = []
-        for col, ch, sub, met in cols:
-            s = pd.to_numeric(df_r[col], errors="coerce").fillna(0.0)
-            data.append((ch, sub, met, float(s.sum())))
-        return pd.DataFrame(
-            data, columns=["channel", "subchannel", "metric", "value"]
-        )
-
-    def _pivot_kpis(df_long: pd.DataFrame, by: list[str]) -> pd.DataFrame:
-        base_cols = ["cost", "impressions", "clicks", "sessions"]
-        if df_long.empty:
-            return pd.DataFrame(
-                columns=by
-                + base_cols
-                + ["CPM", "CPC", "CPS", "Impr→Click", "Click→Session"]
-            )
-        pvt = df_long.pivot_table(
-            index=by,
-            columns="metric",
-            values="value",
-            aggfunc="sum",
-            fill_value=0.0,
-        )
-        for need in base_cols:
-            if need not in pvt.columns:
-                pvt[need] = 0.0
-        pvt = pvt.reset_index()
-        # Derived KPIs
-        pvt["CPM"] = (pvt["cost"] / pvt["impressions"] * 1000).replace(
-            [np.inf, -np.inf], np.nan
-        )
-        pvt["CPC"] = (pvt["cost"] / pvt["clicks"]).replace(
-            [np.inf, -np.inf], np.nan
-        )
-        pvt["CPS"] = (pvt["cost"] / pvt["sessions"]).replace(
-            [np.inf, -np.inf], np.nan
-        )
-        pvt["Impr→Click"] = (pvt["clicks"] / pvt["impressions"]).replace(
-            [np.inf, -np.inf], np.nan
-        )
-        pvt["Click→Session"] = (pvt["sessions"] / pvt["clicks"]).replace(
-            [np.inf, -np.inf], np.nan
-        )
-        return pvt[
-            by
-            + base_cols
-            + ["CPM", "CPC", "CPS", "Impr→Click", "Click→Session"]
-        ]
-
-    # Build parsed long (then filter to paid channels only)
-    mkt_long_all = _mk_long_marketing(df_r)
-    paid_tokens = {p.lower() for p in platforms}
-    mkt_long = mkt_long_all[mkt_long_all["channel"].isin(paid_tokens)].copy()
-
-    # Override/ensure COST using plat_map_df (fixes TV etc.)
-    paid_spend_total = {}
-    if not plat_map_df.empty and not df_r.empty:
-        sp = (
-            df_r.melt(
-                id_vars=[DATE_COL],
-                value_vars=plat_map_df["col"].tolist(),
-                var_name="col",
-                value_name="spend",
-            )
-            .merge(plat_map_df, on="col", how="left")
-            .dropna(subset=["spend"])
-        )
-        paid_spend_total = (
-            sp.groupby(sp["platform"].str.lower())["spend"].sum().to_dict()
-        )
-    # LEFT / RIGHT columns
-    st.markdown("### Channels")
-    colL, colR = st.columns([1, 1])
-
-    # LEFT: Channel KPIs — Outcomes & Costs
-    with colL:
-        st.markdown("#### Channel KPIs")
-        if mkt_long.empty and not paid_spend_total:
-            st.info(
-                "No paid channel metrics found (expected `<channel>_<subchannel>_(cost|impressions|clicks|sessions)`)."
-            )
-        else:
-            ch_kpis = _pivot_kpis(mkt_long, by=["channel"]).copy()
-            # Apply spend override from plat map (case-insensitive)
-            if not ch_kpis.empty:
-                ch_kpis["channel_lc"] = ch_kpis["channel"].str.lower()
-                ch_kpis["cost"] = ch_kpis.apply(
-                    lambda r: paid_spend_total.get(r["channel_lc"], r["cost"]),
-                    axis=1,
-                )
-                ch_kpis.drop(columns=["channel_lc"], inplace=True)
-            else:
-                # If only spend exists (no parsed metrics), build from spend map
-                ch_kpis = pd.DataFrame(
-                    [
-                        {
-                            "channel": k,
-                            "cost": v,
-                            "impressions": 0.0,
-                            "clicks": 0.0,
-                            "sessions": 0.0,
-                        }
-                        for k, v in paid_spend_total.items()
-                    ]
-                )
-                ch_kpis = _pivot_kpis(
-                    ch_kpis.melt(
-                        id_vars=["channel"],
-                        var_name="metric",
-                        value_name="value",
-                    ).assign(subchannel="total"),
-                    by=["channel"],
-                )
-
-            disp = ch_kpis.copy()
-            disp["channel"] = disp["channel"].str.upper()
-
-            # Format large numbers with thousand separators
-            def _fmt_int(x):
-                return "–" if pd.isna(x) else f"{x:,.0f}"
-            def _fmt_float(x):
-                return "–" if pd.isna(x) else f"{x:,.2f}"
-            def _fmt_pct(x):
-                return "–" if pd.isna(x) else f"{x:.2%}"
-
-            num_cols = [
-                "cost", "impressions", "clicks", "sessions",
-                "CPM", "CPC", "CPS", "Impr→Click", "Click→Session",
-            ]
-            for c in [col for col in num_cols if c in disp]:
-                if c in ["Impr→Click", "Click→Session"]:
-                    disp[c] = disp[c].map(_fmt_pct)
-                elif c in ["CPM", "CPC", "CPS"]:
-                    disp[c] = disp[c].map(_fmt_float)
-                else:
-                    disp[c] = disp[c].map(_fmt_int)
-
-            st.dataframe(
-                disp.rename(
-                    columns={
-                        "channel": "Channel",
-                        "cost": "Spend",
-                        "impressions": "Impressions",
-                        "clicks": "Clicks",
-                        "sessions": "Sessions",
-                        "CPM": "Cost per 1 k Impr",
-                        "CPC": "Cost per Click",
-                        "CPS": "Cost per Session",
-                        "Impr→Click": "Impr→Click Rate",
-                        "Click→Session": "Click→Session Rate",
-                    }
-                ),
-                use_container_width=True,
-                hide_index=True,
-                key="marketing_channel_kpis_v4",
-            )
-
-    # RIGHT: Channel breakdown (paid only)
-    with colR:
-        st.markdown("#### Channel breakdown")
-        channels_parsed = sorted(mkt_long["channel"].unique().tolist())
-        if not channels_parsed and paid_spend_total:
-            channels_parsed = sorted(paid_spend_total.keys())
-        if not channels_parsed:
-            st.info("No paid channels found for breakdown.")
-        else:
-            sel_breakdown_channel = st.selectbox(
-                "Channel (breakdown)",
-                options=[c.upper() for c in channels_parsed],
-                index=0,
-                key="marketing_channel_selector_v4",
-            )
-            sel_lc = sel_breakdown_channel.lower()
-            sub_long = mkt_long[mkt_long["channel"].eq(sel_lc)]
-            sub_kpis = _pivot_kpis(sub_long, by=["channel", "subchannel"]).copy()
-
-            if sub_kpis.empty:
-                st.info("No subchannel metrics found for this channel.")
-            else:
-                sub_disp = sub_kpis.drop(columns=["channel"]).copy()
-                sub_disp["subchannel"] = sub_disp["subchannel"].str.upper()
-
-                # Apply same formatting
-                for c in [col for col in num_cols if c in sub_disp]:
-                    if c in ["Impr→Click", "Click→Session"]:
-                        sub_disp[c] = sub_disp[c].map(_fmt_pct)
-                    elif c in ["CPM", "CPC", "CPS"]:
-                        sub_disp[c] = sub_disp[c].map(_fmt_float)
-                    else:
-                        sub_disp[c] = sub_disp[c].map(_fmt_int)
-
-                st.dataframe(
-                    sub_disp.rename(
-                        columns={
-                            "subchannel": "Subchannel",
-                            "cost": "Spend",
-                            "impressions": "Impressions",
-                            "clicks": "Clicks",
-                            "sessions": "Sessions",
-                            "CPM": "Cost per 1 k Impr",
-                            "CPC": "Cost per Click",
-                            "CPS": "Cost per Session",
-                            "Impr→Click": "Impr→Click Rate",
-                            "Click→Session": "Click→Session Rate",
-                        }
-                    ),
-                    use_container_width=True,
-                    hide_index=True,
-                    key="marketing_channel_breakdown_v4",
-                )
-    
-
-    st.markdown("---")
-
-    # ===== View selector (kept) =====
+    # ===== View selector =====
     st.markdown("#### View")
     channel_options = ["All channels"] + platforms
     view_sel = st.selectbox("Channel view", channel_options, index=0)
 
-    # --- helpers ---
+    # --- helpers to handle TOTAL columns cleanly ---
     def _is_total_col(col: str, plat: str | None = None) -> bool:
         if not isinstance(col, str):
             return False
@@ -897,6 +647,7 @@ with tab_mkt:
             p = str(plat).upper()
             if c.startswith(p + "_"):
                 c = c[len(p) + 1 :]
+        # treat any *_TOTAL*, *_TOTAL_COST, *_TOTAL_SPEND and leading TOTAL as totals
         if c.startswith("TOTAL"):
             return True
         total_suffixes = ["_TOTAL", "_TOTAL_COST", "_TOTAL_SPEND"]
@@ -919,379 +670,177 @@ with tab_mkt:
         c = c.split("_")[0].strip() or "Other"
         return c.title()
 
-    # A unified long builder for Channel Mix by selected metric
-    metric_label_map = {
-        "Costs": "spend",
-        "Impressions": "impressions",
-        "Clicks": "clicks",
-        "Sessions": "sessions",
-    }
-    mix_metric = st.selectbox(
-        "Metric for Channel Mix", list(metric_label_map.keys()), index=0
-    )
-    mix_field = metric_label_map[mix_metric]
-
-    def metric_long_filtered(dataframe: pd.DataFrame) -> pd.DataFrame:
-        """
-        Returns long df: [DATE_COL, 'value', 'platform'] for the selected metric.
-        - Costs: uses spend columns from plat_map_df (paid only)
-        - Other metrics: map columns to platform by token in ALL_COLS_UP
-          and exclude *_TOTAL* inside a platform.
-        Also adds 'ORGANIC' bucket if such metric columns exist and do not belong to any paid platform.
-        """
-        if dataframe.empty:
-            return pd.DataFrame(columns=[DATE_COL, "value", "platform"])
-
-        if mix_field == "spend":
-            if plat_map_df.empty:
-                return pd.DataFrame(columns=[DATE_COL, "value", "platform"])
-            vm = plat_map_df.copy()
-            if view_sel != "All channels":
-                vm = vm[vm["platform"] == view_sel]
-                vm = vm[~vm["col"].map(lambda c: _is_total_col(c, view_sel))]
-            if vm.empty:
-                return pd.DataFrame(columns=[DATE_COL, "value", "platform"])
-            return (
-                dataframe.melt(
-                    id_vars=[DATE_COL],
-                    value_vars=vm["col"].tolist(),
-                    var_name="col",
-                    value_name="value",
-                )
-                .merge(vm, on="col", how="left")
-                .dropna(subset=["value"])
-                .rename(columns={"platform": "platform"})[
-                    [DATE_COL, "value", "platform"]
-                ]
-            )
-        else:
-            # Map candidate columns for the metric
-            metric_cols = {
-                "impressions": IMPR_COLS,
-                "clicks": CLICK_COLS,
-                "sessions": SESSION_COLS,
-            }[mix_field]
-
-            rows = []
-            paid_up = [p.upper() for p in platforms]
-            used_cols = set()
-
-            # Paid platforms
-            for p in platforms:
-                pu = p.upper()
-                cols_p = [
-                    c
-                    for c in metric_cols
-                    if pu in ALL_COLS_UP.get(c, c.upper())
-                    and not _is_total_col(c, p)
-                ]
-                if cols_p:
-                    used_cols.update(cols_p)
-                    tmp = dataframe[[DATE_COL] + cols_p].melt(
-                        id_vars=[DATE_COL],
-                        value_vars=cols_p,
-                        var_name="col",
-                        value_name="value",
-                    )
-                    tmp["platform"] = p
-                    rows.append(tmp[[DATE_COL, "value", "platform"]])
-
-            # Organic bucket (if present & requested to include in pie)
-            organic_cols = [
-                c
-                for c in metric_cols
-                if ("ORGANIC" in ALL_COLS_UP.get(c, c.upper()))
-                and c not in used_cols
-            ]
-            if organic_cols:
-                tmp = dataframe[[DATE_COL] + organic_cols].melt(
-                    id_vars=[DATE_COL],
-                    value_vars=organic_cols,
-                    var_name="col",
-                    value_name="value",
-                )
-                tmp["platform"] = "Organic"
-                rows.append(tmp[[DATE_COL, "value", "platform"]])
-
-            if not rows:
-                return pd.DataFrame(columns=[DATE_COL, "value", "platform"])
-            out = pd.concat(rows, ignore_index=True)
-            if view_sel != "All channels":
-                out = out[out["platform"] == view_sel]
-            return out
-
-    long_cur_view = metric_long_filtered(df_r)
-    long_prev_view = (
-        metric_long_filtered(df_prev) if not df_prev.empty else pd.DataFrame()
-    )
-
-    # ----- Change vs Previous — Waterfall (fixed) -----
-    st.markdown("#### Change vs Previous — Waterfall")
-
-    def _metric_cols_for_field(field: str) -> list[str]:
-        if field == "spend":
-            # handled separately via plat_map_df
-            return []
-        return {
-            "impressions": IMPR_COLS,
-            "clicks": CLICK_COLS,
-            "sessions": SESSION_COLS,
-        }[field]
-
-    def _long_for_view(frame: pd.DataFrame, field: str, view: str) -> pd.DataFrame:
-        """
-        Returns long df with columns: [series, value]
-        - All channels: series = platform
-        - Single channel: series = subchannel (derived)
-        """
-        if frame.empty:
-            return pd.DataFrame(columns=["series", "value"])
-
-        if view == "All channels":
-            # Use already-built long_cur_view/long_prev_view (platform-level)
-            return (
-                frame.groupby("platform")["value"]
-                .sum()
-                .reset_index()
-                .rename(columns={"platform": "series", "value": "value"})
-            )
-
-        # Single channel:
-        sel_platform = view
-        if field == "spend":
-            # Use plat_map_df to get spend columns for this platform, exclude totals
-            vm = plat_map_df.copy()
-            vm = vm[vm["platform"] == sel_platform]
-            vm = vm[~vm["col"].map(lambda c: _is_total_col(c, sel_platform))]
-            if vm.empty:
-                return pd.DataFrame(columns=["series", "value"])
-            tmp = (
-                frame.melt(
-                    id_vars=[DATE_COL],
-                    value_vars=vm["col"].tolist(),
-                    var_name="col",
-                    value_name="value",
-                )
-                .merge(vm, on="col", how="left")
-                .dropna(subset=["value"])
-            )
-            tmp["series"] = tmp["col"].map(lambda c: _sub_label(c, sel_platform))
-            tmp = tmp[tmp["series"].str.upper() != "TOTAL"]
-            return tmp.groupby("series")["value"].sum().reset_index()
-        else:
-            # Non-spend metrics: impressions/clicks/sessions
-            metric_cols = _metric_cols_for_field(field)
-            pu = sel_platform.upper()
-            # Pick only columns that belong to this platform and are not *_TOTAL*
-            cols_p = [
-                c for c in metric_cols
-                if pu in ALL_COLS_UP.get(c, c.upper())
-                and not _is_total_col(c, sel_platform)
-            ]
-            if not cols_p:
-                return pd.DataFrame(columns=["series", "value"])
-            tmp = frame[[DATE_COL] + cols_p].melt(
+    # Prepare a filtered long df for charts based on view (exclude TOTAL sub-columns for single-channel view)
+    def spend_long_filtered(dataframe: pd.DataFrame) -> pd.DataFrame:
+        if plat_map_df.empty or dataframe.empty:
+            return pd.DataFrame(columns=[DATE_COL, "col", "spend", "platform"])
+        vm = plat_map_df.copy()
+        if view_sel != "All channels":
+            vm = vm[vm["platform"] == view_sel]
+            # drop total columns inside the chosen platform
+            vm = vm[~vm["col"].map(lambda c: _is_total_col(c, view_sel))]
+        if vm.empty:
+            return pd.DataFrame(columns=[DATE_COL, "col", "spend", "platform"])
+        return (
+            dataframe.melt(
                 id_vars=[DATE_COL],
-                value_vars=cols_p,
+                value_vars=vm["col"].tolist(),
                 var_name="col",
-                value_name="value",
+                value_name="spend",
             )
-            tmp["series"] = tmp["col"].map(lambda c: _sub_label(c, sel_platform))
-            tmp = tmp[tmp["series"].str.upper() != "TOTAL"]
-            return tmp.groupby("series")["value"].sum().reset_index()
-
-    if not long_cur_view.empty:
-        # Build current & previous grouped series (platforms or subchannels)
-        cur_series = _long_for_view(
-            long_cur_view if view_sel == "All channels" else df_r,
-            mix_field,
-            view_sel,
+            .merge(vm, on="col", how="left")
+            .dropna(subset=["spend"])
         )
-        if not long_prev_view.empty:
-            prev_series = _long_for_view(
-                long_prev_view if view_sel == "All channels" else df_prev,
-                mix_field,
-                view_sel,
+
+    long_cur_view = spend_long_filtered(df_r)
+    long_prev_view = (
+        spend_long_filtered(df_prev) if not df_prev.empty else pd.DataFrame()
+    )
+
+    # ----- Waterfall — platform (all) OR sub-channel (single) -----
+    st.markdown("#### Change vs Previous — Waterfall")
+    if not long_cur_view.empty:
+        if view_sel == "All channels":
+            cur_grp = long_cur_view.groupby("platform")["spend"].sum()
+            prev_grp = (
+                long_prev_view.groupby("platform")["spend"].sum()
+                if not long_prev_view.empty
+                else pd.Series(dtype=float)
             )
+            name_series = cur_grp
+            title_suffix = "by Platform"
         else:
-            prev_series = pd.DataFrame(columns=["series", "value"])
-
-        if cur_series.empty and prev_series.empty:
-            st.info("No data for the selected view/metric.")
-        else:
-            # Align keys
-            cur_map = dict(zip(cur_series["series"], cur_series["value"]))
-            prev_map = dict(zip(prev_series["series"], prev_series["value"]))
-            all_keys = sorted(
-                set(cur_map) | set(prev_map),
-                key=lambda k: cur_map.get(k, 0.0),
-                reverse=True,
+            sel_platform = view_sel
+            cur_sub = long_cur_view.copy()
+            cur_sub["sub"] = cur_sub["col"].map(
+                lambda c: _sub_label(c, sel_platform)
             )
+            # exclude any 'Total' bucket that might still slip through
+            cur_sub = cur_sub[cur_sub["sub"].str.upper() != "TOTAL"]
+            cur_grp = cur_sub.groupby("sub")["spend"].sum()
 
-            steps, total_delta = [], 0.0
-            for k in all_keys:
-                dv = cur_map.get(k, 0.0) - prev_map.get(k, 0.0)
-                total_delta += dv
-                steps.append(dict(name=k, measure="relative", y=float(dv)))
-            start_total = float(sum(prev_map.values()))
-            steps.insert(0, dict(name="Start (Prev Total)", measure="absolute", y=start_total))
-            steps.append(dict(name="End (Current Total)", measure="total", y=float(start_total + total_delta)))
-
-            suffix = "by Platform" if view_sel == "All channels" else f"{view_sel} — by Sub-Channel"
-            fig_w = go.Figure(
-                go.Waterfall(
-                    name="Delta",
-                    orientation="v",
-                    measure=[s["measure"] for s in steps],
-                    x=[s["name"] for s in steps],
-                    y=[s["y"] for s in steps],
+            if not long_prev_view.empty:
+                prev_sub = long_prev_view.copy()
+                prev_sub["sub"] = prev_sub["col"].map(
+                    lambda c: _sub_label(c, sel_platform)
                 )
+                prev_sub = prev_sub[prev_sub["sub"].str.upper() != "TOTAL"]
+                prev_grp = prev_sub.groupby("sub")["spend"].sum()
+            else:
+                prev_grp = pd.Series(dtype=float)
+
+            name_series = cur_grp
+            title_suffix = f"{sel_platform} — by Sub-Channel"
+
+        all_keys = sorted(
+            set(cur_grp.index).union(prev_grp.index),
+            key=lambda x: name_series.get(x, 0.0),
+            reverse=True,
+        )
+
+        steps, total_delta = [], 0.0
+        for k in all_keys:
+            dv = cur_grp.get(k, 0.0) - prev_grp.get(k, 0.0)
+            total_delta += dv
+            steps.append(dict(name=k, measure="relative", y=float(dv)))
+        steps.insert(
+            0,
+            dict(
+                name="Start (Prev Total)",
+                measure="absolute",
+                y=float(prev_grp.sum()),
+            ),
+        )
+        steps.append(
+            dict(
+                name="End (Current Total)",
+                measure="total",
+                y=float(prev_grp.sum() + total_delta),
             )
-            fig_w.update_layout(
-                title=f"{mix_metric} Change — Waterfall ({suffix})",
-                showlegend=False,
+        )
+
+        fig_w = go.Figure(
+            go.Waterfall(
+                name="Delta",
+                orientation="v",
+                measure=[s["measure"] for s in steps],
+                x=[s["name"] for s in steps],
+                y=[s["y"] for s in steps],
             )
-            st.plotly_chart(fig_w, use_container_width=True)
+        )
+        fig_w.update_layout(
+            title=f"Spend Change — Waterfall ({title_suffix})",
+            showlegend=False,
+        )
+        st.plotly_chart(fig_w, use_container_width=True)
     else:
-        st.info(f"No data for the selected view/metric ({mix_metric}).")
+        st.info("No spend data for the selected view.")
     st.markdown("---")
 
-
-    # ----- Channel Mix: PIE (overall) + STACKED (time) (fixed) -----
+    # ----- Channel Mix (stacked) — platform (all) OR sub-channel (single) -----
     st.markdown("#### Channel Mix")
-
-    def _long_time_series(frame: pd.DataFrame, field: str, view: str) -> pd.DataFrame:
-        """
-        Returns long df with columns: [DATE_PERIOD, PERIOD_LABEL, value, series]
-        series = platform (All channels) or subchannel (single channel).
-        """
-        if frame.empty:
-            return pd.DataFrame(columns=["DATE_PERIOD", "PERIOD_LABEL", "value", "series"])
-
-        if view == "All channels":
-            # already have platform-level long in long_cur_view
-            tmp = (
-                frame.set_index(DATE_COL)
-                .groupby("platform")["value"]
+    if not long_cur_view.empty:
+        if view_sel == "All channels":
+            freq_df = (
+                long_cur_view.set_index(DATE_COL)
+                .groupby("platform")["spend"]
                 .resample(RULE)
                 .sum(min_count=1)
                 .reset_index()
-                .rename(columns={DATE_COL: "DATE_PERIOD", "platform": "series"})
+                .rename(columns={DATE_COL: "DATE_PERIOD"})
             )
-            tmp["PERIOD_LABEL"] = period_label(tmp["DATE_PERIOD"], RULE)
-            return tmp[["DATE_PERIOD", "PERIOD_LABEL", "value", "series"]]
-
-        sel_platform = view
-        if field == "spend":
-            vm = plat_map_df.copy()
-            vm = vm[vm["platform"] == sel_platform]
-            vm = vm[~vm["col"].map(lambda c: _is_total_col(c, sel_platform))]
-            if vm.empty:
-                return pd.DataFrame(columns=["DATE_PERIOD", "PERIOD_LABEL", "value", "series"])
-            melted = (
-                df_r.melt(
-                    id_vars=[DATE_COL],
-                    value_vars=vm["col"].tolist(),
-                    var_name="col",
-                    value_name="value",
-                )
-                .merge(vm, on="col", how="left")
-                .dropna(subset=["value"])
+            freq_df["series"] = freq_df["platform"]
+            chart_title = (
+                f"{spend_label} by Platform — {TIMEFRAME_LABEL}, {agg_label}"
             )
-            melted["series"] = melted["col"].map(lambda c: _sub_label(c, sel_platform))
         else:
-            metric_cols = _metric_cols_for_field(field)
-            pu = sel_platform.upper()
-            cols_p = [
-                c for c in metric_cols
-                if pu in ALL_COLS_UP.get(c, c.upper())
-                and not _is_total_col(c, sel_platform)
-            ]
-            if not cols_p:
-                return pd.DataFrame(columns=["DATE_PERIOD", "PERIOD_LABEL", "value", "series"])
-            melted = df_r[[DATE_COL] + cols_p].melt(
-                id_vars=[DATE_COL],
-                value_vars=cols_p,
-                var_name="col",
-                value_name="value",
+            sel_platform = view_sel
+            sub_df = long_cur_view.copy()
+            sub_df["sub"] = sub_df["col"].map(
+                lambda c: _sub_label(c, sel_platform)
             )
-            melted["series"] = melted["col"].map(lambda c: _sub_label(c, sel_platform))
-
-        # resample by series
-        out = (
-            melted.set_index(DATE_COL)
-            .groupby("series")["value"]
-            .resample(RULE)
-            .sum(min_count=1)
-            .reset_index()
-            .rename(columns={DATE_COL: "DATE_PERIOD"})
-        )
-        out["PERIOD_LABEL"] = period_label(out["DATE_PERIOD"], RULE)
-        return out[["DATE_PERIOD", "PERIOD_LABEL", "value", "series"]]
-
-    if not long_cur_view.empty:
-        # PIE — overall mix
-        if view_sel == "All channels":
-            tot = (
-                long_cur_view.groupby("platform")["value"]
-                .sum()
+            # exclude TOTAL bucket
+            sub_df = sub_df[sub_df["sub"].str.upper() != "TOTAL"]
+            freq_df = (
+                sub_df.set_index(DATE_COL)
+                .groupby("sub")["spend"]
+                .resample(RULE)
+                .sum(min_count=1)
                 .reset_index()
-                .rename(columns={"platform": "series", "value": "total"})
+                .rename(columns={DATE_COL: "DATE_PERIOD"})
             )
-            pie_title = f"Overall {mix_metric} Mix — {TIMEFRAME_LABEL}"
-            color_map = PLATFORM_COLORS  # keep your platform colors
-        else:
-            ser = _long_for_view(df_r, mix_field, view_sel)
-            tot = ser.rename(columns={"series": "series", "value": "total"})
-            pie_title = f"Overall {mix_metric} Mix — {view_sel} (Sub-Channels)"
-            color_map = None  # let Plotly choose for subchannels
+            freq_df["series"] = freq_df["sub"]
+            chart_title = f"{spend_label} by Sub-Channel ({sel_platform}) — {TIMEFRAME_LABEL}, {agg_label}"
 
-        if tot.empty or tot["total"].sum() == 0:
-            st.info("No data to plot for Channel Mix (pie).")
-        else:
-            fig_pie = px.pie(
-                tot,
-                names="series",
-                values="total",
-                title=pie_title,
-                color="series",
-                color_discrete_map=(color_map or {}),
-            )
-            st.plotly_chart(fig_pie, use_container_width=True)
+        freq_df["PERIOD_LABEL"] = period_label(freq_df["DATE_PERIOD"], RULE)
+        order = (
+            freq_df.groupby("series")["spend"]
+            .sum()
+            .sort_values(ascending=False)
+            .index.tolist()
+        )
 
-        # STACKED — by period
-        freq_df = _long_time_series(df_r if view_sel != "All channels" else long_cur_view, mix_field, view_sel)
-        if freq_df.empty:
-            st.info("No data to plot for Channel Mix (stacked).")
-        else:
-            order = (
-                freq_df.groupby("series")["value"]
-                .sum()
-                .sort_values(ascending=False)
-                .index.tolist()
-            )
-            title_suffix = "by Platform" if view_sel == "All channels" else f"{view_sel} — by Sub-Channel"
-            fig2 = px.bar(
-                freq_df,
-                x="PERIOD_LABEL",
-                y="value",
-                color="series",
-                category_orders={"series": order},
-                color_discrete_map=(PLATFORM_COLORS if view_sel == "All channels" else {}),
-                title=f"{mix_metric} — {title_suffix} — {TIMEFRAME_LABEL}, {agg_label}",
-            )
-            fig2.update_layout(
-                barmode="stack",
-                xaxis_title="Date",
-                yaxis_title=mix_metric,
-                legend=dict(orientation="h"),
-            )
-            st.plotly_chart(fig2, use_container_width=True)
+        fig2 = px.bar(
+            freq_df,
+            x="PERIOD_LABEL",
+            y="spend",
+            color="series",
+            category_orders={"series": order},
+            color_discrete_map=PLATFORM_COLORS,  # OK if some series use fallback colors
+            title=chart_title,
+        )
+        fig2.update_layout(
+            barmode="stack",
+            xaxis_title="Date",
+            yaxis_title=spend_label,
+            legend=dict(orientation="h"),
+        )
+        st.plotly_chart(fig2, use_container_width=True)
     else:
-        st.info(f"No data for Channel Mix ({mix_metric}).")
-    st.markdown("---")    
+        st.info("No spend data for the selected view.")
+    st.markdown("---")
 
-    # ----- Channel Funnels (unchanged) -----
+    # ----- Funnels (INDEPENDENT from selector; always per platform) -----
     st.markdown("#### Channel Funnels")
     if not plat_map_df.empty:
 
