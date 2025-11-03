@@ -75,18 +75,18 @@ tab_load, tab_biz, tab_reg, tab_mkt = st.tabs(
 # TAB 0 — DATA & METADATA LOADER
 # =============================
 with tab_load:
-    st.markdown("### 📥 Load dataset & metadata from GCS")
+    st.markdown("### Select country and data versions to analyze")
     c1, c2, c3, c4 = st.columns([1.2, 1, 1, 0.6])
 
     country = (
-        c1.text_input("Country (ISO2)", value=st.session_state["country"])
+        c1.text_input("Country", value=st.session_state["country"])
         .strip()
         .lower()
     )
     if country:
         st.session_state["country"] = country
 
-    refresh_clicked = c4.button("↻ Refresh")
+    refresh_clicked = c4.button("↻ Refresh Lists")
     refresh_key = str(pd.Timestamp.utcnow().value) if refresh_clicked else ""
 
     data_versions = (
@@ -107,30 +107,37 @@ with tab_load:
         "Metadata version", options=meta_versions, index=0, key="picked_meta_ts"
     )
 
-    load_clicked = st.button("Load from GCS", type="primary")
+    load_clicked = st.button("Select & Load", type="primary")
 
     if load_clicked:
         try:
+            # Resolve DATA path (unchanged)
             db = (
                 data_latest_blob(country)
                 if data_ts == "Latest"
                 else data_blob(country, str(data_ts))
             )
-            mb = (
-                meta_latest_blob(country)
-                if meta_ts == "Latest"
-                else meta_blob(country, str(meta_ts))
+
+            # Resolve META path from the UI label safely:
+            # "Latest", "Universal - <ts>", "<CC> - <ts>", or bare "<ts>"
+            mb = resolve_meta_blob_from_selection(
+                GCS_BUCKET, country, str(meta_ts)
             )
 
+            # Download
             df = download_parquet_from_gcs_cached(GCS_BUCKET, db)
             meta = download_json_from_gcs_cached(GCS_BUCKET, mb)
+
+            # Parse dates using metadata
             df, date_col = parse_date(df, meta)
 
+            # Persist in session
             st.session_state["df"] = df
             st.session_state["meta"] = meta
             st.session_state["date_col"] = date_col
             st.session_state["channels_map"] = meta.get("channels", {}) or {}
 
+            # Validate & notify
             report = validate_against_metadata(df, meta)
             st.success(
                 f"Loaded {len(df):,} rows from gs://{GCS_BUCKET}/{db} and metadata gs://{GCS_BUCKET}/{mb}"
@@ -150,9 +157,9 @@ with tab_load:
                 )
             else:
                 st.caption("No type mismatches detected (coarse check).")
-
         except Exception as e:
             st.error(f"Load failed: {e}")
+
 
 # -----------------------------
 # State
