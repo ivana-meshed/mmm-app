@@ -269,6 +269,64 @@ For Snowflake private key authentication:
 
 ---
 
+### Local Development: Example Secret and Env Files
+
+To simplify local development setup, the repository includes template files for secrets and environment variables.
+
+#### Using Template Files
+
+**1. Streamlit Secrets Template**
+
+Copy the example secrets file and fill in your credentials:
+
+```bash
+# Copy the template
+cp app/.streamlit/secrets.example.toml app/.streamlit/secrets.toml
+
+# Edit the file and replace all REPLACE_ME values with your actual credentials
+# The file is gitignored and will not be committed
+```
+
+The `secrets.toml` file should contain:
+- **OAuth configuration** (`auth` section): `redirect_uri`, `cookie_secret`, `client_id`, `client_secret`, `server_metadata_url`, `providers`
+- **Snowflake configuration** (`snowflake` section): `account`, `user`, `warehouse`, `database`, `schema`, optional `password`
+
+**2. Environment Variables Template**
+
+Copy the example .env file and configure for your environment:
+
+```bash
+# Copy the template
+cp .env.example .env
+
+# Edit the file and replace REPLACE_ME values with your configuration
+
+# Load environment variables into your shell
+set -a; source .env; set +a
+```
+
+Alternatively, use with tools like:
+- **docker-compose**: Automatically loaded if `.env` exists in the same directory
+- **direnv**: Configure `.envrc` to source `.env` file
+- **VSCode**: Use `.env` file in launch configurations
+
+**3. Security Notes**
+
+⚠️ **Sensitive values that should NEVER be committed:**
+- `SF_PASSWORD` - Snowflake password (use private key auth when possible)
+- Private key files (`.pem` files)
+- `AUTH_CLIENT_SECRET` - OAuth client secret
+- `AUTH_COOKIE_SECRET` - Cookie encryption secret
+
+✅ **For deployed environments (Cloud Run), use:**
+- **Google Secret Manager** for secrets like private keys, passwords, OAuth credentials
+- **GitHub Secrets** for CI/CD pipeline secrets
+- **Environment variables in Cloud Run** for non-sensitive configuration
+
+Both `app/.streamlit/secrets.toml` and `.env` are already in `.gitignore` to prevent accidental commits.
+
+---
+
 ### 5. Running Locally
 
 #### Start the Web Interface

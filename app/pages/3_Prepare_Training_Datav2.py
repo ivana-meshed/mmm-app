@@ -1,3 +1,4 @@
+# 3_Prepare_Training_Datav2.py
 import io
 import json
 
@@ -40,21 +41,50 @@ if df.empty or not meta:
     INSTALL_COLS,
 ) = build_meta_views(meta, df)
 
-paid_spend_cols = [
-    c for c in (mapping.get("paid_media_spends", []) or []) if c in df.columns
-]
-paid_var_cols = [
-    c for c in (mapping.get("paid_media_vars", []) or []) if c in df.columns
-]
-organic_cols = [
-    c for c in (mapping.get("organic_vars", []) or []) if c in df.columns
-]
-context_cols = [
-    c for c in (mapping.get("context_vars", []) or []) if c in df.columns
-]
-factor_cols = [
-    c for c in (mapping.get("factor_vars", []) or []) if c in df.columns
-]
+
+# --- name resolver that tolerates prefixes like ORGANIC_ / CONTEXT_ / PAID_
+def _resolve_meta_cols(
+    meta_list,
+    df_cols,
+    strip_prefixes=("ORGANIC_", "CONTEXT_", "PAID_", "FACTOR_"),
+):
+    out = []
+    df_up = {c.upper(): c for c in df_cols}
+    for name in meta_list or []:
+        cand = df_up.get(name.upper())
+        if cand:
+            out.append(cand)
+            continue
+        # try without prefixes
+        base = name
+        for p in strip_prefixes:
+            if base.upper().startswith(p):
+                base = base[len(p) :]
+                break
+        cand = df_up.get(base.upper())
+        if cand:
+            out.append(cand)
+    # dedup while preserving DF order
+    seen = set()
+    res = []
+    want = {x.upper() for x in out}
+    for c in df_cols:
+        cu = c.upper()
+        if cu in want and cu not in seen:
+            seen.add(cu)
+            res.append(c)
+    return res
+
+
+paid_spend_cols = _resolve_meta_cols(
+    mapping.get("paid_media_spends", []), df.columns
+)
+paid_var_cols = _resolve_meta_cols(
+    mapping.get("paid_media_vars", []), df.columns
+)
+organic_cols = _resolve_meta_cols(mapping.get("organic_vars", []), df.columns)
+context_cols = _resolve_meta_cols(mapping.get("context_vars", []), df.columns)
+factor_cols = _resolve_meta_cols(mapping.get("factor_vars", []), df.columns)
 
 # Platform/color map (for paid spend columns)
 plat_map_df, platforms, _ = build_plat_map_df(
@@ -191,9 +221,12 @@ st.session_state.setdefault("pool_step1", None)
 # 2
 st.session_state.setdefault("goal_step2", None)
 st.session_state.setdefault(
+    "pool_step2_base", None
+)  # NEW: manual narrowing in Step 2
+st.session_state.setdefault(
     "exposure_metric_choice", {}
 )  # {plat: {"kind": str, "column": or None}}
-st.session_state.setdefault("pool_step2", None)
+st.session_state.setdefault("pool_step2", None)  # Step 2 base + exposures
 # 3
 st.session_state.setdefault(
     "bucket_picks", None
@@ -253,6 +286,7 @@ if step >= 1:
     ):
         num_cols = df_r.select_dtypes(include=[np.number]).columns.tolist()
 
+        # STEP 1 profile selectbox (unique key & tooltip)
         profile = st.selectbox(
             "Profile",
             ["Strict", "Balanced", "Lenient", "Custom"],
@@ -261,6 +295,11 @@ if step >= 1:
                 if step == 1
                 else "Balanced"
             ),
+            key="profile_step1",
+            help="Presets for data-quality gate:\n"
+            "• Min non-null% ≥ threshold\n"
+            "• Min non-zero% ≥ threshold\n"
+            "• Max spike rate (values > Q3+1.5×IQR) ≤ threshold",
         )
         defaults = dict(
             Strict=dict(min_nonnull=0.85, min_nonzero=0.60, max_spike=0.25),
@@ -361,6 +400,8 @@ if step >= 1:
             st.session_state["wizard_step"] = 1
             st.rerun()
 
+st.markdown("---")
+
 # =========================
 # STEP 2 — Signal vs goal + exposure recommendation/mapping
 # =========================
@@ -372,6 +413,7 @@ if step >= 2 and st.session_state.get("pool_step1"):
         if not goal_cols:
             st.info("No goals in metadata.")
             st.stop()
+
         g_sel = st.selectbox(
             "Goal",
             [nice(g) for g in goal_cols],
@@ -386,9 +428,32 @@ if step >= 2 and st.session_state.get("pool_step1"):
         y_col = {nice(g): g for g in goal_cols}[g_sel]
         st.session_state["goal_step2"] = y_col
 
-        # Compute signal trio for pool_step1
+        # ---- NEW: manual narrowing in Step 2 (on pool_step1)
+        st.markdown("#### Choose columns to keep (post-quality, pre-signal)")
+        step2_df = pd.DataFrame(
+            {
+                "use": True,
+                "column": st.session_state["pool_step1"],
+                "nice": [nice(c) for c in st.session_state["pool_step1"]],
+            }
+        )
+        edit2 = st.data_editor(
+            step2_df[["use", "nice", "column"]],
+            use_container_width=True,
+            hide_index=True,
+            key="step2_editor",
+            column_config={
+                "use": st.column_config.CheckboxColumn("Use"),
+                "nice": st.column_config.TextColumn("Name"),
+                "column": st.column_config.TextColumn("Raw column"),
+            },
+        )
+        pool_step2_base = edit2.loc[edit2["use"], "column"].tolist()
+        st.session_state["pool_step2_base"] = pool_step2_base
+
+        # Compute signal trio for pool_step2_base
         sig_rows = []
-        for c in st.session_state["pool_step1"]:
+        for c in pool_step2_base:
             sig = _signal_trio(df_r, c, y_col)
             sig_rows.append(
                 dict(column=c, r2=sig["r2"], nmae=sig["nmae"], rho=sig["rho"])
@@ -404,18 +469,15 @@ if step >= 2 and st.session_state.get("pool_step1"):
                 hide_index=True,
             )
 
-        # Exposure recommendations per platform (Paid vars only, intersect pool_step1)
+        # Exposure recommendations per platform (Paid vars only, intersect pool_step2_base)
         st.markdown("#### Exposure mapping (per platform)")
         st.caption(
             "Recommendation uses |Spearman ρ| (primary), then R², then lower nMAE. You can override."
         )
 
-        # Build per-platform candidate groups
         def _recommend_for_platform(plat: str):
             tok = plat.upper()
-            pool = [
-                c for c in st.session_state["pool_step1"] if _has_token(c, tok)
-            ]
+            pool = [c for c in pool_step2_base if _has_token(c, tok)]
             candidates = dict(
                 Impressions=[c for c in pool if c in IMPR_COLS],
                 Clicks=[c for c in pool if c in CLICK_COLS],
@@ -430,11 +492,9 @@ if step >= 2 and st.session_state.get("pool_step1"):
                 float("inf"),
                 float("inf"),
             )  # lower is better
-
             for kind, cols in candidates.items():
                 for col in cols:
                     s = _signal_trio(df_r, col, y_col)
-                    # want: maximize |rho|, maximize r2, minimize nmae  → negate the first two
                     key = (
                         -(abs(s["rho"])) if pd.notna(s["rho"]) else 0.0,
                         -(s["r2"]) if pd.notna(s["r2"]) else 0.0,
@@ -448,7 +508,6 @@ if step >= 2 and st.session_state.get("pool_step1"):
         exp_choice = st.session_state["exposure_metric_choice"] or {}
         for plat in platforms:
             rec_kind, rec_col, candidates = _recommend_for_platform(plat)
-            # Preselect recommendation unless already chosen in state
             prev = exp_choice.get(plat, {"kind": "None", "column": None})
             cc1, cc2 = st.columns([1, 2])
             with cc1:
@@ -516,14 +575,14 @@ if step >= 2 and st.session_state.get("pool_step1"):
             type="primary",
             disabled=not (all_none or all_have),
         ):
-            # Build pool_step2 = pool_step1 ∪ chosen exposure cols
+            # Build pool_step2 = pool_step2_base ∪ chosen exposure cols
             extra = [
                 cfg["column"]
                 for cfg in exp_choice.values()
                 if cfg.get("column")
             ]
             st.session_state["pool_step2"] = list(
-                dict.fromkeys(st.session_state["pool_step1"] + extra)
+                dict.fromkeys(pool_step2_base + extra)
             )
             st.session_state["wizard_step"] = 3
             st.rerun()
@@ -597,7 +656,7 @@ if step >= 3 and st.session_state.get("pool_step2"):
 st.markdown("---")
 
 # =========================
-# STEP 4 & 5 — Rules → Global VIF & Export
+# STEP 4 & 5 — Rules → Global VIF & Export  (WITH PCA + R/Y/G DIAGNOSTICS IN STEP 4)
 # =========================
 if step >= 4 and st.session_state.get("bucket_picks"):
     with st.expander("Step 4 — Apply rules (pre-VIF)", expanded=(step == 4)):
@@ -609,6 +668,11 @@ if step >= 4 and st.session_state.get("bucket_picks"):
             index=["Strict", "Balanced", "Lenient", "Custom"].index(
                 prof.get("profile", "Balanced")
             ),
+            key="profile_step4",
+            help="Presets for data-quality gate:\n"
+            "• Min non-null% ≥ threshold\n"
+            "• Min non-zero% ≥ threshold\n"
+            "• Max spike rate (values > Q3+1.5×IQR) ≤ threshold",
         )
         defaults = dict(
             Strict=dict(min_nonnull=0.85, min_nonzero=0.60, max_spike=0.25),
@@ -667,6 +731,7 @@ if step >= 4 and st.session_state.get("bucket_picks"):
             for plat, cfg in exp_choice.items():
                 if cfg["column"]:
                     drivers.append(cfg["column"])
+
         # Apply rules
         keep = [
             c
@@ -685,6 +750,95 @@ if step >= 4 and st.session_state.get("bucket_picks"):
             max_spike=max_spike,
         )
 
+        # -----------------------------
+        # NEW: Quick structure diagnostics (PCA & Corr with R/Y/G badges)
+        # -----------------------------
+        Xpre = _prepare_numeric(df_r, keep)
+        if not Xpre.empty and Xpre.shape[1] >= 2:
+            # Standardize
+            Xs = (Xpre - Xpre.mean(0)) / Xpre.std(0).replace(0, 1)
+            Xs = Xs.replace([np.inf, -np.inf], 0.0).fillna(0.0)
+
+            # Corr diagnostics
+            corr = Xs.corr().abs()
+            np.fill_diagonal(corr.values, 0.0)
+            max_abs_corr = float(corr.values.max())
+
+            # Top correlated pairs (abs)
+            pairs = []
+            cols = Xs.columns.tolist()
+            for i in range(len(cols)):
+                for j in range(i + 1, len(cols)):
+                    pairs.append((cols[i], cols[j], float(corr.iat[i, j])))
+            pairs.sort(key=lambda t: t[2], reverse=True)
+            top_pairs = pd.DataFrame(
+                pairs[:10], columns=["var_i", "var_j", "abs_corr"]
+            )
+
+            # PCA (use local import to avoid global edit)
+            try:
+                from sklearn.decomposition import PCA
+
+                pca = PCA().fit(Xs.values)
+                evr = pca.explained_variance_ratio_
+            except Exception:
+                # Fallback via SVD if sklearn not available
+                U, S, Vt = np.linalg.svd(Xs.values, full_matrices=False)
+                ev = (S**2) / (Xs.shape[0] - 1)
+                evr = ev / ev.sum()
+
+            evr = np.asarray(evr, dtype=float)
+            k90 = int(np.searchsorted(np.cumsum(evr), 0.90) + 1)
+            p = Xs.shape[1]
+            first_comp = float(evr[0]) if evr.size else np.nan
+
+            # Badges
+            def _badge_corr(v):
+                return "🟢" if v < 0.60 else ("🟡" if v < 0.85 else "🔴")
+
+            def _badge_k90(k, p):
+                ratio = k / max(p, 1)
+                return (
+                    "🔴" if ratio < 0.40 else ("🟡" if ratio < 0.60 else "🟢")
+                )
+
+            def _badge_pc1(v):
+                return "🟢" if v < 0.40 else ("🟡" if v < 0.60 else "🔴")
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric(
+                    label="Max |corr| (off-diag)",
+                    value=f"{max_abs_corr:.2f}",
+                    delta=_badge_corr(max_abs_corr),
+                )
+            with c2:
+                st.metric(
+                    label="Components for 90% var",
+                    value=f"{k90}/{p}",
+                    delta=_badge_k90(k90, p),
+                )
+            with c3:
+                st.metric(
+                    label="PC1 variance share",
+                    value=f"{first_comp:.2f}",
+                    delta=_badge_pc1(first_comp),
+                )
+
+            with st.expander("Top correlated pairs (abs)", expanded=False):
+                if not top_pairs.empty:
+                    tp = top_pairs.copy()
+                    tp["badge"] = tp["abs_corr"].map(_badge_corr)
+                    st.dataframe(tp, hide_index=True, use_container_width=True)
+                else:
+                    st.caption("No variable pairs available.")
+
+        else:
+            st.caption(
+                "Not enough variables after rules for structure diagnostics."
+            )
+
+        # Navigation
         cA, cB = st.columns([1, 1])
         if cA.button("Continue → Step 5 (VIF & Export)", type="primary"):
             st.session_state["wizard_step"] = 5
@@ -873,6 +1027,7 @@ if step >= 5 and st.session_state.get("drivers_post_rules") is not None:
             for k in [
                 "pool_step1",
                 "goal_step2",
+                "pool_step2_base",
                 "exposure_metric_choice",
                 "pool_step2",
                 "bucket_picks",
@@ -882,7 +1037,9 @@ if step >= 5 and st.session_state.get("drivers_post_rules") is not None:
                 "drivers_final",
             ]:
                 st.session_state[k] = (
-                    None if k != "exposure_metric_choice" else {}
+                    None
+                    if k not in ("exposure_metric_choice", "spend_map")
+                    else ({} if k != "spend_map" else {})
                 )
             st.session_state["wizard_step"] = 1
             st.rerun()
