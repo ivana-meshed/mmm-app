@@ -2173,14 +2173,99 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             ]
         )
 
-        # Single download button for example CSV
-        st.download_button(
-            "📥 Download Example CSV (3 jobs)",
-            data=example.to_csv(index=False),
-            file_name="robyn_batch_example.csv",
-            mime="text/csv",
-            use_container_width=True,
+        # Example with varying columns - demonstrates CSV flexibility
+        example_varied = pd.DataFrame(
+            [
+                {
+                    "country": "fr",
+                    "revision": "r201",
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
+                    "iterations": 300,
+                    "trials": 3,
+                    "train_size": "0.7,0.9",
+                    "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, META_DEMAND_COST, TV_COST",
+                    "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, META_DEMAND_COST, TV_COST",
+                    "context_vars": "IS_WEEKEND,TV_IS_ON",
+                    "factor_vars": "IS_WEEKEND,TV_IS_ON",
+                    "organic_vars": "ORGANIC_TRAFFIC",
+                    "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
+                    "dep_var": "UPLOAD_VALUE",
+                    "dep_var_type": "revenue",
+                    "date_var": "date",
+                    "adstock": "geometric",
+                    "hyperparameter_preset": "Meshed recommend",
+                    "resample_freq": "none",
+                    # Note: This row omits table, query, annotations_gcs_path, and per-variable hyperparameters
+                },
+                {
+                    "country": "de",
+                    "revision": "r202",
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
+                    "iterations": 200,
+                    "trials": 5,
+                    "train_size": "0.75,0.9",
+                    "paid_media_spends": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST",
+                    "paid_media_vars": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST",
+                    "context_vars": "IS_WEEKEND",
+                    "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
+                    "dep_var": "UPLOAD_VALUE",
+                    "date_var": "date",
+                    "adstock": "weibull_cdf",
+                    "hyperparameter_preset": "Facebook recommend",
+                    "resample_freq": "W",
+                    # Note: This row omits factor_vars, organic_vars, dep_var_type, and other optional fields
+                },
+                {
+                    "country": "it",
+                    "revision": "r203",
+                    "iterations": 250,
+                    "trials": 4,
+                    "train_size": "0.7,0.9",
+                    "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST",
+                    "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST",
+                    "organic_vars": "ORGANIC_TRAFFIC",
+                    "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/it/latest/raw.parquet",
+                    "dep_var": "UPLOAD_VALUE",
+                    "date_var": "date",
+                    "adstock": "geometric",
+                    "hyperparameter_preset": "Custom",
+                    # Per-variable hyperparameters for Custom preset (only for some variables)
+                    "GA_SUPPLY_COST_alphas": "[0.8, 2.5]",
+                    "GA_SUPPLY_COST_gammas": "[0.5, 0.85]",
+                    "GA_SUPPLY_COST_thetas": "[0.15, 0.5]",
+                    "BING_DEMAND_COST_alphas": "[1.0, 3.0]",
+                    "BING_DEMAND_COST_gammas": "[0.6, 0.9]",
+                    "BING_DEMAND_COST_thetas": "[0.1, 0.4]",
+                    # Note: This row omits start_date, end_date, context_vars, factor_vars, dep_var_type, resample_freq
+                },
+            ]
         )
+
+        # Download buttons for both examples
+        col_ex1, col_ex2 = st.columns(2)
+        with col_ex1:
+            st.download_button(
+                "📥 Download Example CSV (consistent columns)",
+                data=example.to_csv(index=False),
+                file_name="robyn_batch_example_consistent.csv",
+                mime="text/csv",
+                use_container_width=True,
+                help="All rows have the same columns - recommended for beginners"
+            )
+        with col_ex2:
+            st.download_button(
+                "📥 Download Example CSV (varying columns)",
+                data=example_varied.to_csv(index=False),
+                file_name="robyn_batch_example_varied.csv",
+                mime="text/csv",
+                use_container_width=True,
+                help="Rows have different columns - demonstrates CSV flexibility"
+            )
 
         # --- CSV upload (editable, persistent, deletable) ---
         up = st.file_uploader("Upload batch CSV", type=["csv"], key="batch_csv")
