@@ -1555,6 +1555,9 @@ with tab_single:
 
                     # Create queue entries for each country
                     new_entries = []
+                    logging.info(f"[QUEUE] Adding jobs from Single Run tab for countries: {config_countries}")
+                    logging.info(f"[QUEUE] Starting queue ID: {next_id}, Queue name: {st.session_state.get('queue_name')}")
+                    
                     for i, ctry in enumerate(config_countries):
                         # Get data source information
                         # Use GCS path pattern from loaded data
@@ -1613,6 +1616,8 @@ with tab_single:
 
                     # Add to queue
                     st.session_state.job_queue.extend(new_entries)
+                    logging.info(f"[QUEUE] Added {len(new_entries)} new entries to queue (IDs: {[e['id'] for e in new_entries]})")
+                    logging.info(f"[QUEUE] Total queue size after addition: {len(st.session_state.job_queue)}")
 
                     # Save queue to GCS
                     st.session_state.queue_saved_at = save_queue_to_gcs(
@@ -1623,13 +1628,16 @@ with tab_single:
 
                     # Start queue if "Add & Start" was clicked
                     if add_and_start_clicked:
+                        logging.info(f"[QUEUE] Starting queue '{st.session_state.queue_name}' via 'Add & Start' button")
                         set_queue_running(st.session_state.queue_name, True)
                         st.session_state.queue_running = True
+                        logging.info(f"[QUEUE] Queue running state set to: {st.session_state.queue_running}")
 
                     # Show success message
                     countries_str = ", ".join(
                         [c.upper() for c in config_countries]
                     )
+                    logging.info(f"[QUEUE] Successfully added jobs to queue for: {countries_str}")
                     st.success(
                         f"✅ Added {len(new_entries)} job(s) to queue for: {countries_str}"
                     )
@@ -2284,15 +2292,18 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 try:
                     # Read CSV with flexible parsing - allows missing columns per row
                     # This mimics single run behavior where not all fields are required
+                    logging.info(f"[QUEUE] Uploading CSV file: {getattr(up, 'name', 'unknown')}, size: {getattr(up, 'size', 0)} bytes")
                     st.session_state.uploaded_df = pd.read_csv(up, keep_default_na=True)
                     
                     # Fill any missing columns that might be expected but not present
                     # This makes the CSV structure more forgiving
                     st.session_state.uploaded_fingerprint = fingerprint
+                    logging.info(f"[QUEUE] Successfully loaded CSV with {len(st.session_state.uploaded_df)} rows and {len(st.session_state.uploaded_df.columns)} columns")
                     st.success(
                         f"Loaded {len(st.session_state.uploaded_df)} rows from CSV"
                     )
                 except Exception as e:
+                    logging.error(f"[QUEUE] Failed to parse CSV: {e}", exc_info=True)
                     st.error(f"Failed to parse CSV: {e}")
         else:
             # If user clears the file input, allow re-uploading the same file later
@@ -2371,6 +2382,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.rerun()
 
             if append_uploaded_clicked:
+                logging.info(f"[QUEUE] Processing 'Append uploaded rows to builder' - {len(uploaded_edited)} rows in uploaded table")
                 # Canonical, edited upload table as seen in the UI (including any user sorting)
                 up_base = (
                     uploaded_edited.drop(columns="Delete", errors="ignore")
@@ -2474,6 +2486,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 )
 
                 if added_count > 0:
+                    logging.info(f"[QUEUE] Appending {added_count} unique rows to queue builder")
                     # Append to builder (use builder schema)
                     to_append = up_base.loc[to_append_mask]
                     if need_cols:
@@ -2489,6 +2502,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         ~to_append_mask
                     ].reset_index(drop=True)
 
+                    logging.info(f"[QUEUE] Successfully appended {added_count} rows. {len(st.session_state.uploaded_df)} rows remaining in upload table (duplicates/invalid)")
                     st.success(
                         f"Appended {added_count} row(s) to the builder. "
                         f"Remaining in upload: {len(st.session_state.uploaded_df)} duplicate/invalid row(s)."
@@ -2675,6 +2689,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         need_cols = list(st.session_state.qb_df.columns)
 
         if enqueue_clicked:
+            logging.info(f"[QUEUE] Processing 'Enqueue' from Queue Builder - {len(st.session_state.qb_df)} rows in builder")
             # Build separate sets so we can categorize reasons
             if st.session_state.qb_df.dropna(how="all").empty:
                 st.warning(
@@ -2764,9 +2779,12 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
                 if not new_entries:
                     # nothing to enqueue
+                    logging.info(f"[QUEUE] No new entries to enqueue (all duplicates or invalid)")
                     pass
                 else:
+                    logging.info(f"[QUEUE] Enqueuing {len(new_entries)} new jobs from builder (IDs: {[e['id'] for e in new_entries]})")
                     st.session_state.job_queue.extend(new_entries)
+                    logging.info(f"[QUEUE] Total queue size after enqueue: {len(st.session_state.job_queue)}")
                     st.session_state.queue_saved_at = save_queue_to_gcs(
                         st.session_state.queue_name,
                         st.session_state.job_queue,
@@ -2804,14 +2822,17 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         if qc1.button(
             "▶️ Start Queue", disabled=(len(st.session_state.job_queue) == 0)
         ):
+            logging.info(f"[QUEUE] Starting queue '{st.session_state.queue_name}' via Start button - {len(st.session_state.job_queue)} jobs in queue")
             set_queue_running(st.session_state.queue_name, True)
             st.success("Queue set to RUNNING.")
             st.rerun()
         if qc2.button("⏸️ Stop Queue"):
+            logging.info(f"[QUEUE] Stopping queue '{st.session_state.queue_name}' via Stop button")
             set_queue_running(st.session_state.queue_name, False)
             st.info("Queue paused.")
             st.rerun()
         if qc3.button("⏭️ Process Next Step"):
+            logging.info(f"[QUEUE] Manual queue tick triggered for '{st.session_state.queue_name}'")
             _queue_tick()
             st.toast("Ticked queue")
             st.rerun()
