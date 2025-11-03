@@ -153,7 +153,6 @@ with tab_load:
                 )
             else:
                 st.caption("No type mismatches detected (coarse check).")
-
         except Exception as e:
             st.error(f"Load failed: {e}")
 
