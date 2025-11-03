@@ -45,6 +45,7 @@ from app_shared import (  # GCS & versions; meta & utilities; sidebar + filters;
     resample_numeric,
     safe_eff,
     total_with_prev,
+    resolve_meta_blob_from_selection,
     validate_against_metadata,
 )
 
