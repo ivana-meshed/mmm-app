@@ -1724,11 +1724,11 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
         )
         
         # Submit button inside the form to capture edits
-        mapping_submit = st.form_submit_button("Save edits to mapping table")
+        mapping_submit = st.form_submit_button("✅ Apply mapping changes")
 
-    # Apply mapping changes button outside the form (requirement 3)
-    if st.button("✅ Apply mapping changes", key="apply_mapping_changes_btn", use_container_width=True):
-        # Apply automatic aggregations to current mapping_df
+    # Handle form submission - capture edits and apply aggregations
+    if mapping_submit:
+        # Apply automatic aggregations to edited mapping
         try:
             # Store original length before updating
             original_length = len(st.session_state["mapping_df"])
@@ -1745,14 +1745,15 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
                     "factor_vars_prefix", "FACTOR_"
                 ),
             }
+            # Use mapping_edit which has the user's edits from the data_editor
             updated_mapping, updated_df = _apply_automatic_aggregations(
-                st.session_state["mapping_df"].copy(), st.session_state["df_raw"].copy(), prefixes
+                mapping_edit.copy(), st.session_state["df_raw"].copy(), prefixes
             )
             st.session_state["mapping_df"] = updated_mapping
             st.session_state["df_raw"] = updated_df
             num_new = len(updated_mapping) - original_length
             st.success(
-                f"✅ Mapping refreshed! Total: {len(updated_mapping)} variables."
+                f"✅ Mapping updated! Total: {len(updated_mapping)} variables."
             )
             if num_new > 0:
                 st.info(
@@ -1763,9 +1764,9 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
             st.rerun()
         except Exception as e:
             st.error(f"Failed to apply automatic aggregations: {e}")
-            st.warning("Could not apply automatic aggregations.")
-    
-    # Note: Form submission handled within the form context above
+            # Still save the edits even if aggregation fails
+            st.session_state["mapping_df"] = mapping_edit
+            st.warning("Saved edits without automatic aggregations.")
 
     st.divider()
 

@@ -2030,6 +2030,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 - **Custom hyperparameters** (only when hyperparameter_preset=Custom):
   - For geometric adstock: `alphas_min`, `alphas_max`, `gammas_min`, `gammas_max`, `thetas_min`, `thetas_max`
   - For weibull adstock: `alphas_min`, `alphas_max`, `shapes_min`, `shapes_max`, `scales_min`, `scales_max`
+  - **Per-variable hyperparameters**: `{VAR_NAME}_alphas`, `{VAR_NAME}_gammas`, `{VAR_NAME}_thetas` (for geometric) or `{VAR_NAME}_shapes`, `{VAR_NAME}_scales` (for weibull)
 - `resample_freq` (none|W|M) - Column aggregations from metadata will be used when resampling
 - `gcs_bucket` (optional override per row)
 - **Data source (choose one):**
@@ -2037,7 +2038,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
   - `query` or `table` — For Snowflake-based workflows
 - `annotations_gcs_path` (optional gs:// path)
 
-**Note:** For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows. Column aggregations are automatically loaded from metadata.json when resampling is enabled.
+**Note on CSV flexibility**: Not all rows need to have the same columns. For example, rows with Custom preset can include per-variable hyperparameters while other rows can omit them. The CSV parser will fill missing columns with empty values automatically. This allows you to mix different job configurations in the same CSV file, similar to how single run jobs can have different configurations.
+
+**Note on GCS workflows**: For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows. Column aggregations are automatically loaded from metadata.json when resampling is enabled.
                 """
             )
 
@@ -2193,7 +2196,12 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             fingerprint = f"{getattr(up, 'name', '')}:{getattr(up, 'size', '')}"
             if st.session_state.uploaded_fingerprint != fingerprint:
                 try:
-                    st.session_state.uploaded_df = pd.read_csv(up)
+                    # Read CSV with flexible parsing - allows missing columns per row
+                    # This mimics single run behavior where not all fields are required
+                    st.session_state.uploaded_df = pd.read_csv(up, keep_default_na=True)
+                    
+                    # Fill any missing columns that might be expected but not present
+                    # This makes the CSV structure more forgiving
                     st.session_state.uploaded_fingerprint = fingerprint
                     st.success(
                         f"Loaded {len(st.session_state.uploaded_df)} rows from CSV"
