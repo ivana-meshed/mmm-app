@@ -11,7 +11,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 import warnings
-
+ 
 st.set_page_config(
     page_title="Review Business- & Marketing Data", layout="wide"
 )
@@ -77,7 +77,7 @@ tab_load, tab_biz, tab_mkt = st.tabs(
 )
 
 # =============================
-# TAB 0 — DATA & METADATA LOADER
+# TAB 0 — DATA & METADATA LOADING
 # =============================
 with tab_load:
     st.markdown("### Select country and data versions to analyze")
