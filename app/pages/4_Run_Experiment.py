@@ -1827,6 +1827,15 @@ with tab_single:
                         st.info(
                             f"**Execution ID**: `{execution_name.split('/')[-1]}`"
                         )
+                        
+                        # Store the latest job info for status monitoring
+                        st.session_state["latest_job_execution"] = {
+                            "execution_name": execution_name,
+                            "timestamp": timestamp,
+                            "revision": revision,
+                            "country": country,
+                            "gcs_prefix": gcs_prefix,
+                        }
 
         finally:
             if timings:
@@ -1860,6 +1869,57 @@ with tab_single:
                 "country": country,
                 "gcs_bucket": gcs_bucket,
             }
+
+    # =============== Job Status Display (Requirement 7) ===============
+    st.divider()
+    st.subheader("📊 Recent Job Status")
+    
+    # Show status of the most recently launched job
+    if st.session_state.get("latest_job_execution"):
+        latest_job = st.session_state["latest_job_execution"]
+        
+        col_status1, col_status2 = st.columns([3, 1])
+        with col_status1:
+            st.info(f"**Last Job**: {latest_job['country'].upper()} - {latest_job['revision']} ({latest_job['timestamp']})")
+        with col_status2:
+            refresh_status = st.button("🔄 Refresh Status", key="refresh_latest_job_status", use_container_width=True)
+        
+        if refresh_status or st.session_state.get("auto_refresh_status"):
+            try:
+                status_info = job_manager.get_execution_status(latest_job['execution_name'])
+                
+                # Display status
+                status_state = status_info.get("status", {}).get("state", "UNKNOWN")
+                
+                # Color code the status
+                if status_state == "SUCCEEDED":
+                    st.success(f"✅ Status: {status_state}")
+                elif status_state in ["RUNNING", "PENDING"]:
+                    st.info(f"⏳ Status: {status_state}")
+                elif status_state in ["FAILED", "CANCELLED"]:
+                    st.error(f"❌ Status: {status_state}")
+                else:
+                    st.warning(f"⚠️ Status: {status_state}")
+                
+                # Show detailed status
+                with st.expander("📋 Detailed Status", expanded=False):
+                    st.json(status_info)
+                
+                # If job completed, try to show results
+                if status_state == "SUCCEEDED":
+                    st.success("🎉 Training completed! Check Job History below for results.")
+                    try:
+                        # Try to read from GCS
+                        gcs_prefix = latest_job['gcs_prefix']
+                        bucket_name = st.session_state.get("gcs_bucket", GCS_BUCKET)
+                        st.info(f"Results available at: gs://{bucket_name}/{gcs_prefix}/")
+                    except Exception:
+                        pass
+                        
+            except Exception as e:
+                st.error(f"Failed to get job status: {e}")
+    else:
+        st.info("No jobs launched yet. Click 'Start Training Job' above to begin.")
 
     render_jobs_job_history(key_prefix="single")
 
