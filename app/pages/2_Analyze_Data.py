@@ -192,11 +192,31 @@ if df.empty or not meta:
     INSTALL_COLS,
 ) = build_meta_views(meta, df)
 
+# ---- Nice label resolver (coalesce: metadata nice() -> pretty()) ----
+def nice_title(col: str) -> str:
+    """
+    Coalesce-style label resolver:
+      1) try metadata-based nice(col)
+      2) fallback to pretty(col) when missing/identical
+    """
+    raw = str(col)
+    try:
+        nice_val = nice(col)
+        if (
+            isinstance(nice_val, str)
+            and nice_val.strip()
+            and nice_val.strip().upper() != raw.strip().upper()
+        ):
+            return nice_val.strip()
+        return pretty(raw)
+    except Exception:
+        return pretty(raw)
+
 # -----------------------------
 # Sidebar
 # -----------------------------
 GOAL, sel_countries, TIMEFRAME_LABEL, RANGE, agg_label, FREQ = render_sidebar(
-    meta, df, nice, goal_cols
+    meta, df, nice_title, goal_cols
 )
 
 # Country filter
@@ -268,18 +288,12 @@ res = resample_numeric(
 )
 res["PERIOD_LABEL"] = period_label(res["DATE_PERIOD"], RULE)
 
+
 # =============================
 # TAB 1 — BUSINESS OVERVIEW
 # =============================
 with tab_biz:
     # Small helper to guarantee a nice label even if metadata is incomplete
-    def nice_title(col: str) -> str:
-        try:
-            lbl = nice(col)
-        except Exception:
-            lbl = str(col)
-        return lbl if isinstance(lbl, str) and lbl.strip() else str(col)
-
     st.markdown("## KPI Overview")
 
     has_prev = not df_prev.empty
