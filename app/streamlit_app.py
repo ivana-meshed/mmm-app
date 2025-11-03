@@ -6,8 +6,6 @@ st.set_page_config(
 )
 from app_split_helpers import *
 
-st.title("Robyn MMM Trainer")
-
 st.write(
     """
 1. **Connect your Data** – set up your Snowflake connection.
