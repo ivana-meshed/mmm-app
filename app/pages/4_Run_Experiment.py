@@ -2041,7 +2041,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 """
             )
 
-        # Example CSV with 3 simple jobs
+        # Example CSV with 3 jobs including per-variable hyperparameters
         example = pd.DataFrame(
             [
                 {
@@ -2068,6 +2068,22 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "hyperparameter_preset": "Meshed recommend",
                     "resample_freq": "none",
                     "annotations_gcs_path": "",
+                    # Per-variable hyperparameters (empty for non-Custom preset)
+                    "GA_SUPPLY_COST_alphas": "",
+                    "GA_SUPPLY_COST_gammas": "",
+                    "GA_SUPPLY_COST_thetas": "",
+                    "GA_DEMAND_COST_alphas": "",
+                    "GA_DEMAND_COST_gammas": "",
+                    "GA_DEMAND_COST_thetas": "",
+                    "BING_DEMAND_COST_alphas": "",
+                    "BING_DEMAND_COST_gammas": "",
+                    "BING_DEMAND_COST_thetas": "",
+                    "META_DEMAND_COST_alphas": "",
+                    "META_DEMAND_COST_gammas": "",
+                    "META_DEMAND_COST_thetas": "",
+                    "ORGANIC_TRAFFIC_alphas": "",
+                    "ORGANIC_TRAFFIC_gammas": "",
+                    "ORGANIC_TRAFFIC_thetas": "",
                 },
                 {
                     "country": "de",
@@ -2093,6 +2109,22 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "hyperparameter_preset": "Facebook recommend",
                     "resample_freq": "W",
                     "annotations_gcs_path": "",
+                    # Per-variable hyperparameters (empty for non-Custom preset)
+                    "GA_SUPPLY_COST_alphas": "",
+                    "GA_SUPPLY_COST_gammas": "",
+                    "GA_SUPPLY_COST_thetas": "",
+                    "GA_DEMAND_COST_alphas": "",
+                    "GA_DEMAND_COST_gammas": "",
+                    "GA_DEMAND_COST_thetas": "",
+                    "BING_DEMAND_COST_alphas": "",
+                    "BING_DEMAND_COST_gammas": "",
+                    "BING_DEMAND_COST_thetas": "",
+                    "META_DEMAND_COST_alphas": "",
+                    "META_DEMAND_COST_gammas": "",
+                    "META_DEMAND_COST_thetas": "",
+                    "ORGANIC_TRAFFIC_alphas": "",
+                    "ORGANIC_TRAFFIC_gammas": "",
+                    "ORGANIC_TRAFFIC_thetas": "",
                 },
                 {
                     "country": "it",
@@ -2115,9 +2147,25 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "dep_var_type": "revenue",
                     "date_var": "date",
                     "adstock": "geometric",
-                    "hyperparameter_preset": "Meshed recommend",
+                    "hyperparameter_preset": "Custom",
                     "resample_freq": "none",
                     "annotations_gcs_path": "",
+                    # Per-variable hyperparameters for Custom preset
+                    "GA_SUPPLY_COST_alphas": "[0.8, 2.5]",
+                    "GA_SUPPLY_COST_gammas": "[0.5, 0.85]",
+                    "GA_SUPPLY_COST_thetas": "[0.15, 0.5]",
+                    "GA_DEMAND_COST_alphas": "[1.0, 3.0]",
+                    "GA_DEMAND_COST_gammas": "[0.6, 0.9]",
+                    "GA_DEMAND_COST_thetas": "[0.1, 0.4]",
+                    "BING_DEMAND_COST_alphas": "[1.0, 3.0]",
+                    "BING_DEMAND_COST_gammas": "[0.6, 0.9]",
+                    "BING_DEMAND_COST_thetas": "[0.1, 0.4]",
+                    "META_DEMAND_COST_alphas": "[1.0, 3.0]",
+                    "META_DEMAND_COST_gammas": "[0.6, 0.9]",
+                    "META_DEMAND_COST_thetas": "[0.1, 0.4]",
+                    "ORGANIC_TRAFFIC_alphas": "[0.5, 2.0]",
+                    "ORGANIC_TRAFFIC_gammas": "[0.3, 0.7]",
+                    "ORGANIC_TRAFFIC_thetas": "[0.9, 0.99]",
                 },
             ]
         )
