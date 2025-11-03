@@ -1937,8 +1937,8 @@ with tab_single:
             try:
                 status_info = job_manager.get_execution_status(latest_job['execution_name'])
                 
-                # Display status
-                status_state = status_info.get("status", {}).get("state", "UNKNOWN")
+                # Display status - get from overall_status field
+                status_state = status_info.get("overall_status", "UNKNOWN")
                 
                 # Color code the status
                 if status_state == "SUCCEEDED":
