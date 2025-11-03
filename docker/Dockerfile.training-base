@@ -146,3 +146,18 @@ RUN R -q -e "options(Ncpus=8); \
     remotes::install_github('facebookexperimental/Robyn', subdir='R', upgrade='never', dependencies=c('Depends','Imports')); \
     library(Robyn); cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')"
 
+# ---------- Patch Robyn to fix metric_name_updated subscript error ----------
+# This fixes an issue where check_metric_type() can return a vector of length 2
+# instead of a single value, causing robyn_outputs() to fail
+COPY docker/robyn_check_metric_type.patch /tmp/robyn_check_metric_type.patch
+RUN ROBYN_PATH=$(R -q -e "cat(system.file(package='Robyn'))" | tail -n1) && \
+    if [ -f "${ROBYN_PATH}/R/checks.R" ]; then \
+        echo "Applying Robyn patch to ${ROBYN_PATH}/R/checks.R" && \
+        patch -p1 -d "${ROBYN_PATH}/.." < /tmp/robyn_check_metric_type.patch && \
+        echo "Patch applied successfully"; \
+    else \
+        echo "Warning: Could not find Robyn checks.R file at ${ROBYN_PATH}/R/checks.R" && \
+        ls -la "${ROBYN_PATH}/R/" || echo "R directory not found"; \
+    fi && \
+    rm /tmp/robyn_check_metric_type.patch
+

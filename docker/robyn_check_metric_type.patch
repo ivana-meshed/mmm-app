@@ -1,0 +1,13 @@
+--- a/R/checks.R
++++ b/R/checks.R
+@@ -767,7 +767,8 @@
+     name_loc <- unique(c(
+       which(metric_name == paid_media_spends),
+       which(metric_name == paid_media_vars)
+     ))
+-    metric_name_updated <- paid_media_selected[name_loc]
++    # Fix: Ensure we only return a single value even if metric matches multiple indices
++    metric_name_updated <- paid_media_selected[name_loc[1]]
+   } else {
+     stop(paste(
+       "Invalid 'metric_name' input:", metric_name,
