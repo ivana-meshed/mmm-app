@@ -45,6 +45,7 @@ from app_shared import (
     previous_window,
     resample_numeric,
     total_with_prev,
+    resolve_meta_blob_from_selection
     # colors (if exported; otherwise define locally)
     GREEN,
     RED,
@@ -112,26 +113,27 @@ with tab_load:
 
     if load_clicked:
         try:
-            db = (
-                data_latest_blob(country)
-                if data_ts == "Latest"
-                else data_blob(country, str(data_ts))
-            )
-            mb = (
-                meta_latest_blob(country)
-                if meta_ts == "Latest"
-                else meta_blob(country, str(meta_ts))
-            )
+            # Resolve DATA path (unchanged)
+            db = data_latest_blob(country) if data_ts == "Latest" else data_blob(country, str(data_ts))
 
+            # Resolve META path from the UI label safely:
+            # "Latest", "Universal - <ts>", "<CC> - <ts>", or bare "<ts>"
+            mb = resolve_meta_blob_from_selection(GCS_BUCKET, country, str(meta_ts))
+
+            # Download
             df = download_parquet_from_gcs_cached(GCS_BUCKET, db)
             meta = download_json_from_gcs_cached(GCS_BUCKET, mb)
+
+            # Parse dates using metadata
             df, date_col = parse_date(df, meta)
 
+            # Persist in session
             st.session_state["df"] = df
             st.session_state["meta"] = meta
             st.session_state["date_col"] = date_col
             st.session_state["channels_map"] = meta.get("channels", {}) or {}
 
+            # Validate & notify
             report = validate_against_metadata(df, meta)
             st.success(
                 f"Loaded {len(df):,} rows from gs://{GCS_BUCKET}/{db} and metadata gs://{GCS_BUCKET}/{mb}"
