@@ -2016,8 +2016,10 @@ with tab_queue:
             )
             st.success(f"Saved queue '{st.session_state.queue_name}' to GCS")
 
-        st.markdown(
-            """
+        # Detailed instructions in expander
+        with st.expander("📋 Detailed Instructions", expanded=False):
+            st.markdown(
+                """
 Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country`, `revision`, and data source):
 
 - `country`, `revision`, `iterations`, `trials`, `train_size`
@@ -2036,40 +2038,10 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 - `annotations_gcs_path` (optional gs:// path)
 
 **Note:** For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows. Column aggregations are automatically loaded from metadata.json when resampling is enabled.
-            """
-        )
+                """
+            )
 
-        # Template & Example CSVs (Issue #4 fix: align with Single run)
-        template = pd.DataFrame(
-            [
-                {
-                    "country": "fr",
-                    "revision": "r100",
-                    "start_date": "2024-01-01",
-                    "end_date": time.strftime("%Y-%m-%d"),
-                    "iterations": 200,
-                    "trials": 5,
-                    "train_size": "0.7,0.9",
-                    "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-                    "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-                    "context_vars": "IS_WEEKEND,TV_IS_ON",
-                    "factor_vars": "IS_WEEKEND,TV_IS_ON",
-                    "organic_vars": "ORGANIC_TRAFFIC",
-                    "gcs_bucket": st.session_state["gcs_bucket"],
-                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
-                    "table": "",
-                    "query": "",
-                    "dep_var": "UPLOAD_VALUE",
-                    "dep_var_type": "revenue",
-                    "date_var": "date",
-                    "adstock": "geometric",
-                    "hyperparameter_preset": "Meshed recommend",
-                    "resample_freq": "none",
-                    "annotations_gcs_path": "",
-                }
-            ]
-        )
-
+        # Example CSV with 3 simple jobs
         example = pd.DataFrame(
             [
                 {
@@ -2094,16 +2066,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "geometric",
                     "hyperparameter_preset": "Meshed recommend",
-                    "alphas_min": "",
-                    "alphas_max": "",
-                    "gammas_min": "",
-                    "gammas_max": "",
-                    "thetas_min": "",
-                    "thetas_max": "",
-                    "shapes_min": "",
-                    "shapes_max": "",
-                    "scales_min": "",
-                    "scales_max": "",
                     "resample_freq": "none",
                     "annotations_gcs_path": "",
                 },
@@ -2129,16 +2091,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "weibull_cdf",
                     "hyperparameter_preset": "Facebook recommend",
-                    "alphas_min": "",
-                    "alphas_max": "",
-                    "gammas_min": "",
-                    "gammas_max": "",
-                    "thetas_min": "",
-                    "thetas_max": "",
-                    "shapes_min": "",
-                    "shapes_max": "",
-                    "scales_min": "",
-                    "scales_max": "",
                     "resample_freq": "W",
                     "annotations_gcs_path": "",
                 },
@@ -2163,41 +2115,20 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "dep_var_type": "revenue",
                     "date_var": "date",
                     "adstock": "geometric",
-                    "hyperparameter_preset": "Custom",
-                    # Per-variable hyperparameters for Custom preset
-                    "GA_SUPPLY_COST_alphas": "[0.8, 2.5]",
-                    "GA_SUPPLY_COST_gammas": "[0.5, 0.85]",
-                    "GA_SUPPLY_COST_thetas": "[0.15, 0.5]",
-                    "GA_DEMAND_COST_alphas": "[1.0, 3.0]",
-                    "GA_DEMAND_COST_gammas": "[0.6, 0.9]",
-                    "GA_DEMAND_COST_thetas": "[0.1, 0.4]",
-                    "BING_DEMAND_COST_alphas": "[1.0, 3.0]",
-                    "BING_DEMAND_COST_gammas": "[0.6, 0.9]",
-                    "BING_DEMAND_COST_thetas": "[0.1, 0.4]",
-                    "META_DEMAND_COST_alphas": "[1.0, 3.0]",
-                    "META_DEMAND_COST_gammas": "[0.6, 0.9]",
-                    "META_DEMAND_COST_thetas": "[0.1, 0.4]",
-                    "ORGANIC_TRAFFIC_alphas": "[0.5, 2.0]",
-                    "ORGANIC_TRAFFIC_gammas": "[0.3, 0.7]",
-                    "ORGANIC_TRAFFIC_thetas": "[0.9, 0.99]",
+                    "hyperparameter_preset": "Meshed recommend",
                     "resample_freq": "none",
                     "annotations_gcs_path": "",
                 },
             ]
         )
 
-        col_dl1, col_dl2 = st.columns(2)
-        col_dl1.download_button(
-            "Download CSV template",
-            data=template.to_csv(index=False),
-            file_name="robyn_batch_template.csv",
-            mime="text/csv",
-        )
-        col_dl2.download_button(
-            "Download example CSV (3 jobs)",
+        # Single download button for example CSV
+        st.download_button(
+            "📥 Download Example CSV (3 jobs)",
             data=example.to_csv(index=False),
             file_name="robyn_batch_example.csv",
             mime="text/csv",
+            use_container_width=True,
         )
 
         # --- CSV upload (editable, persistent, deletable) ---
