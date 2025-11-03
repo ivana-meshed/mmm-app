@@ -39,10 +39,14 @@ ensure_session_defaults()
 
 st.title("Experiment")
 
-# Check if we should show a message to switch to Queue tab (Issue #5)
+# Check if we should show a message to switch to Queue tab (Requirement 8)
 if st.session_state.get("switch_to_queue_tab", False):
+    st.balloons()  # Celebratory animation
     st.success(
-        "✅ Configuration added to queue! Please switch to the **Queue** tab to monitor progress."
+        "✅ **Configuration added to queue successfully!**"
+    )
+    st.info(
+        "👉 **Please click on the 'Queue' tab above** to monitor your job's progress."
     )
     st.session_state["switch_to_queue_tab"] = False
 
