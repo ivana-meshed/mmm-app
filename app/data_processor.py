@@ -1,29 +1,61 @@
+"""
+Data processing utilities for the MMM application.
+
+Provides optimized data processing capabilities including:
+- CSV to Parquet conversion with compression
+- Data type optimization for memory efficiency
+- GCS upload/download integration
+"""
+
 import io
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+from config import settings
 from google.cloud import storage
 
 logger = logging.getLogger(__name__)
 
 
 class DataProcessor:
-    """Optimized data processor with Parquet support"""
+    """
+    Optimized data processor with Parquet support.
 
-    def __init__(self, gcs_bucket: str = None):
-        self.gcs_bucket = gcs_bucket or os.getenv(
-            "GCS_BUCKET", "mmm-app-output"
-        )
+    Handles conversion of CSV/DataFrame data to optimized Parquet format
+    with automatic type optimization and compression. Integrates with GCS
+    for cloud storage operations.
+    """
+
+    def __init__(self, gcs_bucket: Optional[str] = None):
+        """
+        Initialize DataProcessor.
+
+        Args:
+            gcs_bucket: GCS bucket name (defaults to settings.GCS_BUCKET)
+        """
+        self.gcs_bucket = gcs_bucket or settings.GCS_BUCKET
         self.storage_client = storage.Client()
 
     def csv_to_parquet(
-        self, csv_data: pd.DataFrame, output_path: str = None
-    ) -> str:
-        """Convert CSV DataFrame to Parquet format with optimization"""
+        self, csv_data: pd.DataFrame, output_path: Optional[str] = None
+    ) -> io.BytesIO:
+        """
+        Convert CSV DataFrame to Parquet format with optimization.
+
+        Applies data type optimization for better compression and performance,
+        then converts to Parquet format with optimal settings for MMM workloads.
+
+        Args:
+            csv_data: Input DataFrame to convert
+            output_path: Optional local file path to save Parquet file
+
+        Returns:
+            BytesIO buffer containing Parquet data
+        """
 
         # Optimize data types for better compression and speed
         df_optimized = self._optimize_dtypes(csv_data)
@@ -60,7 +92,20 @@ class DataProcessor:
         return buffer
 
     def _optimize_dtypes(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Optimize DataFrame data types for better performance"""
+        """
+        Optimize DataFrame data types for better performance and compression.
+
+        Automatically detects and converts to optimal data types:
+        - Integers: Use smallest type that fits the data range (int8, int16, etc.)
+        - Floats: Downcast float64 to float32 where precision is maintained
+        - Categorical: Convert strings with <50% unique values to category type
+
+        Args:
+            df: Input DataFrame to optimize
+
+        Returns:
+            DataFrame with optimized data types
+        """
         df_opt = df.copy()
 
         for col in df_opt.columns:
@@ -125,7 +170,16 @@ class DataProcessor:
         return df_opt
 
     def upload_to_gcs(self, data_buffer: io.BytesIO, gcs_path: str) -> str:
-        """Upload Parquet buffer to GCS"""
+        """
+        Upload Parquet buffer to GCS.
+
+        Args:
+            data_buffer: BytesIO buffer containing Parquet data
+            gcs_path: Destination path in GCS bucket (relative to bucket root)
+
+        Returns:
+            Full GCS URI (gs://bucket/path)
+        """
         bucket = self.storage_client.bucket(self.gcs_bucket)
         blob = bucket.blob(gcs_path)
 
@@ -140,7 +194,15 @@ class DataProcessor:
         return f"gs://{self.gcs_bucket}/{gcs_path}"
 
     def read_parquet_from_gcs(self, gcs_path: str) -> pd.DataFrame:
-        """Read Parquet file from GCS"""
+        """
+        Read Parquet file from GCS.
+
+        Args:
+            gcs_path: Path to Parquet file in GCS bucket
+
+        Returns:
+            DataFrame loaded from Parquet file
+        """
         bucket = self.storage_client.bucket(self.gcs_bucket)
         blob = bucket.blob(gcs_path)
 

@@ -446,11 +446,11 @@ def render_forecast_allocator_section(blobs, country, stamp):
         blobs, "forecast_allocator_index.csv"
     )
     pred_plots = find_pred_allocator_plots(blobs)
-    
+
     # If no index and no plots, don't render the section at all
     if not idx_blob and not pred_plots:
         return
-    
+
     st.subheader("🗓️ Forecast allocations (next 3 months)")
 
     # Prefer the index CSV for metadata + deterministic ordering

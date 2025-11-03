@@ -1,3 +1,15 @@
+"""
+Robyn MMM Trainer - Home Page
+
+This is the main entry point for the MMM (Marketing Mix Modeling) application.
+It provides navigation to the main workflows:
+1. Connect Data - Set up Snowflake connection
+2. Map Data - Map columns and configure metadata
+3. Run Experiment - Execute single or batch MMM experiments
+
+The application is built with Streamlit and deployed on Google Cloud Run.
+"""
+
 # streamlit_app.py (proposed new Home)
 import streamlit as st
 

@@ -1,53 +1,51 @@
 # streamlit_app_overview.py (v2.23) — fixed top-of-file wiring
 import os
 import re
+import warnings
+
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import r2_score, mean_absolute_error
-from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-import warnings
+from scipy import stats
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.preprocessing import PolynomialFeatures
+
 st.set_page_config(page_title="Marketing Overview & Analytics", layout="wide")
 
-from app_shared import (
-    # GCS & versions
-    list_data_versions,
-    list_meta_versions,
-    load_data_from_gcs,
-    download_parquet_from_gcs_cached,
-    download_json_from_gcs_cached,
-    data_blob,
-    data_latest_blob,
-    meta_blob,
-    meta_latest_blob,
-    # meta & utilities
+from app_shared import (  # GCS & versions; meta & utilities; sidebar + filters; colors (if exported; otherwise define locally)
+    BASE_PLATFORM_COLORS,
+    GREEN,
+    RED,
     build_meta_views,
     build_plat_map_df,
-    validate_against_metadata,
-    parse_date,
-    pretty,
+    build_platform_colors,
+    data_blob,
+    data_latest_blob,
+    download_json_from_gcs_cached,
+    download_parquet_from_gcs_cached,
+    filter_range,
     fmt_num,
     freq_to_rule,
-    period_label,
-    safe_eff,
     kpi_box,
     kpi_grid,
     kpi_grid_fixed,
-    BASE_PLATFORM_COLORS,
-    build_platform_colors,
-    # sidebar + filters
-    render_sidebar,
-    filter_range,
+    list_data_versions,
+    list_meta_versions,
+    load_data_from_gcs,
+    meta_blob,
+    meta_latest_blob,
+    parse_date,
+    period_label,
+    pretty,
     previous_window,
+    render_sidebar,
     resample_numeric,
+    safe_eff,
     total_with_prev,
-    # colors (if exported; otherwise define locally)
-    GREEN,
-    RED,
+    validate_against_metadata,
 )
 
 st.title("Marketing Overview & Analytics")
@@ -209,14 +207,22 @@ paid_spend_cols = [
 df["_TOTAL_SPEND"] = df[paid_spend_cols].sum(axis=1) if paid_spend_cols else 0.0
 
 # REPLACE the old 'paid_var_cols = metadata.get("Paid Media Variables", [])' with:
-paid_var_cols = [c for c in (mapping.get("paid_media_vars", []) or []) if c in df.columns]
-organic_cols  = [c for c in (mapping.get("organic_vars",    []) or []) if c in df.columns]
-context_cols  = [c for c in (mapping.get("context_vars",    []) or []) if c in df.columns]
-factor_cols   = [c for c in (mapping.get("factor_vars",     []) or []) if c in df.columns]
+paid_var_cols = [
+    c for c in (mapping.get("paid_media_vars", []) or []) if c in df.columns
+]
+organic_cols = [
+    c for c in (mapping.get("organic_vars", []) or []) if c in df.columns
+]
+context_cols = [
+    c for c in (mapping.get("context_vars", []) or []) if c in df.columns
+]
+factor_cols = [
+    c for c in (mapping.get("factor_vars", []) or []) if c in df.columns
+]
 
 # Convenience unions used later
 present_spend = paid_spend_cols
-present_vars  = paid_var_cols + organic_cols + context_cols + factor_cols
+present_vars = paid_var_cols + organic_cols + context_cols + factor_cols
 
 RULE = freq_to_rule(FREQ)
 spend_label = (
@@ -240,9 +246,12 @@ plat_map_df, platforms, PLATFORM_COLORS = build_plat_map_df(
 # -----------------------------
 df_r = filter_range(df.copy(), DATE_COL, RANGE)
 df_prev = previous_window(df, df_r, DATE_COL, RANGE)
+
+
 # --- Back-compat shim for total_with_prev (expects df_r, df_prev, collist) ---
 def total_with_prev_local(collist):
     return total_with_prev(df_r, df_prev, collist)
+
 
 res = resample_numeric(
     df_r, DATE_COL, RULE, ensure_cols=[target, "_TOTAL_SPEND"]
@@ -262,7 +271,11 @@ with tab_biz:
         kpis = []
         for g in goal_cols:
             cur = df_r[g].sum() if (g in df_r.columns) else np.nan
-            prev = df_prev[g].sum() if (has_prev and g in df_prev.columns) else np.nan
+            prev = (
+                df_prev[g].sum()
+                if (has_prev and g in df_prev.columns)
+                else np.nan
+            )
             delta_txt = None
             if pd.notna(prev):
                 diff = cur - prev
