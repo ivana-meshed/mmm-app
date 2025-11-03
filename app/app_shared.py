@@ -1617,7 +1617,10 @@ def list_meta_versions(bucket: str, country: str, refresh_key: str = "") -> List
     labels += [f"{cc} - {t}" for t in country_sorted]
     return labels
 
-def resolve_meta_blob_from_selection(bucket: str, country: str, meta_selection: str) -> str:
+
+def resolve_meta_blob_from_selection(
+    bucket: str, country: str, meta_selection: str
+) -> str:
     """
     Convert a UI label selection into a real GCS blob path.
     Accepts:
@@ -1644,8 +1647,12 @@ def resolve_meta_blob_from_selection(bucket: str, country: str, meta_selection: 
         versions = list_meta_versions(bucket, country)
         explicit = [v for v in versions if v != "Latest"]
         if not explicit:
-            raise FileNotFoundError("No metadata mapping.json found in country or universal scope.")
-        pick = explicit[0]  # list_meta_versions already orders universal first, newest first
+            raise FileNotFoundError(
+                "No metadata mapping.json found in country or universal scope."
+            )
+        pick = explicit[
+            0
+        ]  # list_meta_versions already orders universal first, newest first
         if pick.startswith("Universal - "):
             ts = pick.split(" - ", 1)[1].strip()
             return meta_blob_universal(ts)
@@ -1662,12 +1669,16 @@ def resolve_meta_blob_from_selection(bucket: str, country: str, meta_selection: 
             cand = meta_blob_universal(ts_lbl)
             if _blob_exists(bucket, cand):
                 return cand
-            raise FileNotFoundError(f"Universal metadata not found: gs://{bucket}/{cand}")
+            raise FileNotFoundError(
+                f"Universal metadata not found: gs://{bucket}/{cand}"
+            )
         if scope_lbl.upper() == cc:
             cand = meta_blob(country, ts_lbl)
             if _blob_exists(bucket, cand):
                 return cand
-            raise FileNotFoundError(f"Country metadata not found: gs://{bucket}/{cand}")
+            raise FileNotFoundError(
+                f"Country metadata not found: gs://{bucket}/{cand}"
+            )
         # Unknown label → treat as bare ts
         s = ts_lbl
 
