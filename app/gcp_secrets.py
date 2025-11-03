@@ -25,14 +25,27 @@ def _get_project_id(project_id: Optional[str] = None) -> str:
 
     Returns:
         Project ID string
+
+    Raises:
+        RuntimeError: If project ID cannot be determined from any source
     """
     if project_id is not None:
         return project_id
     if settings.PROJECT_ID:
         return settings.PROJECT_ID
     # Fall back to ADC
-    _, proj = default()
-    return proj
+    try:
+        _, proj = default()
+        if not proj:
+            raise RuntimeError(
+                "Could not determine project ID from Application Default Credentials"
+            )
+        return proj
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to get project ID: {e}. "
+            "Please set PROJECT_ID environment variable or pass project_id parameter."
+        )
 
 
 def upsert_secret(

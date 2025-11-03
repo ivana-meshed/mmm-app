@@ -42,15 +42,20 @@ def normalize_gs_uri(uri: str) -> str:
     """
     Normalize a gs:// URI by cleaning up the object path.
 
+    For non-gs:// URIs (e.g., local paths or other protocols),
+    the input is returned unchanged.
+
     Args:
-        uri: GCS URI to normalize
+        uri: GCS URI to normalize (or other URI/path)
 
     Returns:
-        Normalized URI
+        Normalized URI (or original input if not a GCS URI)
 
     Example:
         >>> normalize_gs_uri("gs://bucket//path/to/file")
         'gs://bucket/path/to/file'
+        >>> normalize_gs_uri("/local/path")
+        '/local/path'
     """
     s = (uri or "").strip()
     if not s.startswith("gs://"):

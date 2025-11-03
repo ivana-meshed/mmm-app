@@ -14,10 +14,16 @@ from typing import Optional
 
 import pandas as pd
 import snowflake.connector as sf
-from config import settings
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from google.cloud import secretmanager
+
+# Import from parent config module (app.config)
+# When running from app/ directory, this resolves correctly
+try:
+    from config import settings
+except ImportError:
+    from ..config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -218,9 +224,9 @@ def get_table_columns(
         password: Snowflake password
         account: Account identifier
         warehouse: Warehouse name
-        database: Database name
-        schema: Schema name
-        table: Table name (format: database.schema.table)
+        database: Database name (may be overridden by table parameter)
+        schema: Schema name (may be overridden by table parameter)
+        table: Fully qualified table name in format 'database.schema.table'
         role: Optional role name
 
     Returns:
