@@ -1778,16 +1778,21 @@ with tab_single:
                             annotations_path = os.path.join(
                                 td, "enriched_annotations.csv"
                             )
-                            # Reset file pointer and read
-                            ann_file.seek(0)
-                            with open(annotations_path, "wb") as f:
-                                f.write(ann_file.read())
-                            annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
-                            annotations_gcs_path = upload_to_gcs(
-                                gcs_bucket,  # type: ignore
-                                annotations_path,
-                                annotations_blob,
-                            )
+                            # Reset file pointer and read (with error handling)
+                            try:
+                                if hasattr(ann_file, 'seek'):
+                                    ann_file.seek(0)
+                                with open(annotations_path, "wb") as f:
+                                    f.write(ann_file.read())
+                                annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
+                                annotations_gcs_path = upload_to_gcs(
+                                    gcs_bucket,  # type: ignore
+                                    annotations_path,
+                                    annotations_blob,
+                                )
+                            except (AttributeError, IOError) as e:
+                                st.warning(f"Could not read annotations file: {e}. Continuing without annotations.")
+                                annotations_gcs_path = None
 
                     # 4) Create job config
                     with timed_step("Create job configuration", timings):

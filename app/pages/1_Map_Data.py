@@ -1730,6 +1730,9 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
     if st.button("✅ Apply mapping changes", key="apply_mapping_changes_btn", use_container_width=True):
         # Apply automatic aggregations to current mapping_df
         try:
+            # Store original length before updating
+            original_length = len(st.session_state["mapping_df"])
+            
             # Prepare prefixes dict
             prefixes = {
                 "organic_vars": st.session_state.get(
@@ -1747,7 +1750,7 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
             )
             st.session_state["mapping_df"] = updated_mapping
             st.session_state["df_raw"] = updated_df
-            num_new = len(updated_mapping) - len(st.session_state["mapping_df"])
+            num_new = len(updated_mapping) - original_length
             st.success(
                 f"✅ Mapping refreshed! Total: {len(updated_mapping)} variables."
             )
@@ -1762,10 +1765,7 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
             st.error(f"Failed to apply automatic aggregations: {e}")
             st.warning("Could not apply automatic aggregations.")
     
-    # Handle form submission to save edited data
-    if 'mapping_submit' in locals() and mapping_submit:
-        st.success("Mapping edits saved to session.")
-        st.rerun()
+    # Note: Form submission handled within the form context above
 
     st.divider()
 
