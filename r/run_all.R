@@ -842,6 +842,17 @@ paid_media_spends <- intersect(paid_media_spends_cfg, names(df))
 paid_media_vars <- intersect(paid_media_vars_cfg, names(df))
 stopifnot(length(paid_media_spends) == length(paid_media_vars))
 
+# Check for duplicate variable names between spends and vars
+# This can cause issues in Robyn's check_metric_type function
+duplicates <- intersect(paid_media_spends, paid_media_vars)
+if (length(duplicates) > 0) {
+    message("⚠️ Warning: The following variables appear in both paid_media_spends and paid_media_vars: ", 
+            paste(duplicates, collapse = ", "))
+    message("   This may indicate a configuration issue. For proper Robyn behavior,")
+    message("   spends and vars should typically be different (e.g., COST vs SESSIONS).")
+    message("   Continuing with current configuration...")
+}
+
 keep_idx <- vapply(seq_along(paid_media_spends), function(i) sum(df[[paid_media_spends[i]]], na.rm = TRUE) > 0, logical(1))
 paid_media_spends <- paid_media_spends[keep_idx]
 paid_media_vars <- paid_media_vars[keep_idx]
