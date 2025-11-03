@@ -21,14 +21,46 @@ See the diagrams:
 
 ```
 app/
-  streamlit_app.py     # Streamlit UI; connects to Snowflake, writes CSV, invokes R
+  streamlit_app.py          # Streamlit UI entry point
+  config/
+    settings.py             # Centralized configuration (env vars, GCP, Snowflake)
+    __init__.py
+  utils/
+    gcs_utils.py            # GCS operations (upload, download, read/write)
+    snowflake_connector.py  # Snowflake connection and query utilities
+  pages/                    # Streamlit multi-page app
+    0_Connect_Data.py       # Snowflake connection setup
+    1_Map_Data.py           # Data mapping and metadata
+    2_Review_Data.py        # Data validation
+    3_Prepare_Training_Data.py  # Data preparation
+    4_Run_Experiment.py     # Job configuration and execution
+    5_View_Results.py       # Results visualization
+    6_View_Best_Results.py  # Best model selection
+  app_shared.py             # Shared helper functions
+  data_processor.py         # Data optimization and Parquet conversion
+  gcp_secrets.py            # Secret Manager integration
+  snowflake_utils.py        # Backward compatibility wrapper
 r/
-  run_all.R            # Robyn training entrypoint (reads job_cfg and csv_path)
+  run_all.R                 # Robyn training entrypoint (reads job_cfg and csv_path)
 infra/terraform/
-  main.tf, variables.tf, terraform.tfvars  # Cloud Run, SA, IAM, AR, APIs
+  main.tf                   # Cloud Run, service accounts, IAM, storage
+  variables.tf
+  envs/
+    prod.tfvars             # Production environment config
+    dev.tfvars              # Development environment config
 docker/
-  Dockerfile           # Multi-arch capable; installs R pkgs & Python deps
+  Dockerfile.web            # Web service container
+  Dockerfile.training       # Training job container
+  Dockerfile.training-base  # Base image with R dependencies
+  training_entrypoint.sh    # Training job entrypoint
+.github/workflows/
+  ci.yml                    # Production CI/CD (main branch)
+  ci-dev.yml                # Development CI/CD (feat-*, dev branches)
+tests/                      # Unit and integration tests
+docs/                       # Additional documentation
 ```
+
+For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Prerequisites
 

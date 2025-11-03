@@ -373,12 +373,15 @@ column_agg_strategies <- cfg$column_agg_strategies %||% list()
 
 # Parse column_agg_strategies if it's a JSON string
 if (is.character(column_agg_strategies) && nzchar(column_agg_strategies)) {
-    tryCatch({
-        column_agg_strategies <- jsonlite::fromJSON(column_agg_strategies)
-    }, error = function(e) {
-        message("Warning: Could not parse column_agg_strategies JSON: ", conditionMessage(e))
-        column_agg_strategies <- list()
-    })
+    tryCatch(
+        {
+            column_agg_strategies <- jsonlite::fromJSON(column_agg_strategies)
+        },
+        error = function(e) {
+            message("Warning: Could not parse column_agg_strategies JSON: ", conditionMessage(e))
+            column_agg_strategies <- list()
+        }
+    )
 }
 
 message("→ Column aggregation strategies loaded: ", length(column_agg_strategies), " columns")
@@ -523,6 +526,9 @@ if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
     ensure_gcs_auth()
     gcs_download(cfg$data_gcs_path, temp_data)
     df <- arrow::read_parquet(temp_data, as_data_frame = TRUE)
+    if (!is.data.frame(df) || nrow(df) == 0) {
+        stop("Failed to load data from parquet file: ", cfg$data_gcs_path)
+    }
     unlink(temp_data)
     message(sprintf("✅ Data loaded: %s rows, %s columns", format(nrow(df), big.mark = ","), ncol(df)))
 
@@ -732,28 +738,28 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
             # For each numeric column, use the aggregation strategy from metadata or default to sum
             agg_exprs <- list()
             agg_summary <- list()
-            
+
             for (col in numeric_cols) {
                 # Get aggregation strategy from metadata, default to "sum"
                 agg_strategy <- column_agg_strategies[[col]] %||% "sum"
-                
+
                 # Map aggregation strategy to R function
                 agg_func <- switch(agg_strategy,
                     "sum" = sum,
                     "mean" = mean,
                     "max" = max,
                     "min" = min,
-                    "auto" = first,  # For categorical/flag columns, take first value
+                    "auto" = first, # For categorical/flag columns, take first value
                     {
                         # Default case: unsupported aggregation type, default to sum
                         message("   ⚠️ WARNING: Unsupported aggregation type '", agg_strategy, "' for column '", col, "', defaulting to 'sum'")
                         sum
                     }
                 )
-                
+
                 # Create aggregation expression for this column
                 agg_exprs[[col]] <- quo(agg_func(!!sym(col), na.rm = TRUE))
-                
+
                 # Track aggregation types for summary
                 agg_summary[[agg_strategy]] <- (agg_summary[[agg_strategy]] %||% 0) + 1
             }
@@ -887,7 +893,7 @@ get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
                 ))
             }
         }
-        
+
         # Fall back to global custom hyperparameters (old format for backward compatibility)
         if (adstock_type == "geometric") {
             return(list(
@@ -925,7 +931,7 @@ get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
             ))
         }
     }
-    
+
     # Default ranges (for geometric adstock)
     if (adstock_type == "geometric") {
         if (preset == "Facebook recommend") {
@@ -1024,12 +1030,16 @@ for (v in hyper_vars_filtered) {
 hyperparameters_filtered[["train_size"]] <- train_size
 
 message("   Rebuilt hyperparameters: ", length(hyperparameters_filtered), " keys")
-message("   Expected: ", length(hyper_vars_filtered), " variables × ", 
-        if (adstock == "geometric") "3" else "4", " params + train_size")
-message("   Calculation: ", length(hyper_vars_filtered), " vars (", 
-        length(paid_media_vars), " paid_media + ", length(organic_vars), " organic) × ",
-        if (adstock == "geometric") "3 (alphas,gammas,thetas)" else "4 (alphas,gammas,shapes,scales)",
-        " + 1 (train_size) = ", length(hyper_vars_filtered) * (if (adstock == "geometric") 3 else 4) + 1)
+message(
+    "   Expected: ", length(hyper_vars_filtered), " variables × ",
+    if (adstock == "geometric") "3" else "4", " params + train_size"
+)
+message(
+    "   Calculation: ", length(hyper_vars_filtered), " vars (",
+    length(paid_media_vars), " paid_media + ", length(organic_vars), " organic) × ",
+    if (adstock == "geometric") "3 (alphas,gammas,thetas)" else "4 (alphas,gammas,shapes,scales)",
+    " + 1 (train_size) = ", length(hyper_vars_filtered) * (if (adstock == "geometric") 3 else 4) + 1
+)
 
 # First: call robyn_inputs WITHOUT hyperparameters
 message("→ Calling robyn_inputs (preflight, without hyperparameters)...")
@@ -1090,7 +1100,7 @@ message("Preflight InputCollect is NULL? ", is.null(InputCollect))
 if (is.null(InputCollect)) {
     err_msg <- "Preflight robyn_inputs() returned NULL"
     message("FATAL: ", err_msg)
-    
+
     writeLines(
         jsonlite::toJSON(list(
             state = "FAILED",
