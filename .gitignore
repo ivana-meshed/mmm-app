@@ -8,7 +8,15 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.mypy_cache/
+.pytest_cache/
+*.egg-info/
+htmlcov/
+.coverage
+
+# Streamlit
 .streamlit/secrets.toml
+app/.streamlit/secrets.toml
 
 # R
 .Rhistory
@@ -19,7 +27,7 @@ __pycache__/
 renv/library/
 .Rcache/
 
-# Node/Cache-ish
+# Node/Cache
 .cache/
 
 # Terraform
@@ -27,19 +35,18 @@ renv/library/
 *.tfstate
 *.tfstate.*
 .terraform.lock.hcl
+*.plan
+tfplan
+infra/terraform/.terraform/*
+infra/terraform/tfplan
 
 # Local data & temp
 data/
 tmp/
 temp/
 *.tmp
-docs/
-app/deprecated/
-app/streamlit_app_old.py
-app/streamlit_app_backup.py
-app/streamlit_app_dev.py
-app/.streamlit/secrets.toml
 
+# Documentation (generated)
 *.pdf
 docs/*.png
 
@@ -49,23 +56,7 @@ docs/*.png
 *credentials*.json
 secrets/
 
-*.json
-*.png
-*.plan
-#*.txt
-./terraformd/*
-/infra/terraform/~/.terraform.d/*
-/infra/terraform/.terraform/*
-/infra/terraform/tfplan
+# Reports
 baseline_report.md
 performance_report.md
 scripts/reports/*
-.vscode/*
-.pylintrc
-pyproject.toml
-scripts/deploy.sh
-scripts/ci_cd.sh
-scripts/setup_dev_env.sh
-scripts/run_all.sh
-scripts/collect_baseline.py
-scripts/perf_test.py
