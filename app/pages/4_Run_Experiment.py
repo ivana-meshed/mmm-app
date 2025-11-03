@@ -1845,6 +1845,46 @@ with tab_single:
                             "country": country,
                             "gcs_prefix": gcs_prefix,
                         }
+                        
+                        # Add job to history immediately after launch
+                        try:
+                            from datetime import datetime as dt
+                            from app_shared import append_row_to_job_history
+                            
+                            append_row_to_job_history(
+                                {
+                                    "job_id": gcs_prefix,
+                                    "state": "RUNNING",  # Initial state
+                                    "country": country,
+                                    "revision": revision,
+                                    "date_input": end_date_str,
+                                    "iterations": int(iterations),
+                                    "trials": int(trials),
+                                    "train_size": train_size,
+                                    "paid_media_spends": paid_media_spends,
+                                    "paid_media_vars": paid_media_vars,
+                                    "context_vars": context_vars,
+                                    "factor_vars": factor_vars,
+                                    "organic_vars": organic_vars,
+                                    "gcs_bucket": gcs_bucket,
+                                    "table": "",
+                                    "query": "",
+                                    "dep_var": dep_var,
+                                    "date_var": date_var,
+                                    "adstock": adstock,
+                                    "start_time": dt.utcnow().isoformat(timespec="seconds") + "Z",
+                                    "end_time": None,
+                                    "duration_minutes": None,
+                                    "gcs_prefix": gcs_prefix,
+                                    "bucket": gcs_bucket,
+                                    "exec_name": execution_name.split('/')[-1],
+                                    "execution_name": execution_name,
+                                    "message": "Job launched from single run",
+                                },
+                                gcs_bucket,
+                            )
+                        except Exception as e:
+                            st.warning(f"Could not add job to history: {e}")
 
         finally:
             if timings:
