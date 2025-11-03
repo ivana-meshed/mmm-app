@@ -1569,7 +1569,7 @@ with tab_single:
                         params = {
                             "country": ctry,
                             "revision": revision,
-                            "date_input": end_date_str,  # Use end date as date_input
+                            "date_input": time.strftime("%Y-%m-%d"),  # Current date when job is added to queue
                             "iterations": int(iterations),
                             "trials": int(trials),
                             "train_size": train_size,
@@ -1857,7 +1857,7 @@ with tab_single:
                                     "state": "RUNNING",  # Initial state
                                     "country": country,
                                     "revision": revision,
-                                    "date_input": end_date_str,
+                                    "date_input": dt.utcnow().strftime("%Y-%m-%d"),  # Current date when job is run
                                     "iterations": int(iterations),
                                     "trials": int(trials),
                                     "train_size": train_size,
