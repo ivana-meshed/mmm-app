@@ -41,10 +41,7 @@ st.title("Experiment")
 
 # Check if we should show a message to switch to Queue tab (Requirement 8)
 if st.session_state.get("switch_to_queue_tab", False):
-    st.balloons()  # Celebratory animation
-    st.success(
-        "✅ **Configuration added to queue successfully!**"
-    )
+    st.success("✅ **Configuration added to queue successfully!**")
     st.info(
         "👉 **Please click on the 'Queue' tab above** to monitor your job's progress."
     )
@@ -1569,7 +1566,9 @@ with tab_single:
                         params = {
                             "country": ctry,
                             "revision": revision,
-                            "date_input": time.strftime("%Y-%m-%d"),  # Current date when job is added to queue
+                            "date_input": time.strftime(
+                                "%Y-%m-%d"
+                            ),  # Current date when job is added to queue
                             "iterations": int(iterations),
                             "trials": int(trials),
                             "train_size": train_size,
@@ -1780,7 +1779,7 @@ with tab_single:
                             )
                             # Reset file pointer and read (with error handling)
                             try:
-                                if hasattr(ann_file, 'seek'):
+                                if hasattr(ann_file, "seek"):
                                     ann_file.seek(0)
                                 with open(annotations_path, "wb") as f:
                                     f.write(ann_file.read())
@@ -1791,7 +1790,9 @@ with tab_single:
                                     annotations_blob,
                                 )
                             except (AttributeError, IOError) as e:
-                                st.warning(f"Could not read annotations file: {e}. Continuing without annotations.")
+                                st.warning(
+                                    f"Could not read annotations file: {e}. Continuing without annotations."
+                                )
                                 annotations_gcs_path = None
 
                     # 4) Create job config
@@ -1836,7 +1837,7 @@ with tab_single:
                         st.info(
                             f"**Execution ID**: `{execution_name.split('/')[-1]}`"
                         )
-                        
+
                         # Store the latest job info for status monitoring
                         st.session_state["latest_job_execution"] = {
                             "execution_name": execution_name,
@@ -1845,19 +1846,21 @@ with tab_single:
                             "country": country,
                             "gcs_prefix": gcs_prefix,
                         }
-                        
+
                         # Add job to history immediately after launch
                         try:
                             from datetime import datetime as dt
                             from app_shared import append_row_to_job_history
-                            
+
                             append_row_to_job_history(
                                 {
                                     "job_id": gcs_prefix,
                                     "state": "RUNNING",  # Initial state
                                     "country": country,
                                     "revision": revision,
-                                    "date_input": dt.utcnow().strftime("%Y-%m-%d"),  # Current date when job is run
+                                    "date_input": dt.utcnow().strftime(
+                                        "%Y-%m-%d"
+                                    ),  # Current date when job is run
                                     "iterations": int(iterations),
                                     "trials": int(trials),
                                     "train_size": train_size,
@@ -1872,12 +1875,15 @@ with tab_single:
                                     "dep_var": dep_var,
                                     "date_var": date_var,
                                     "adstock": adstock,
-                                    "start_time": dt.utcnow().isoformat(timespec="seconds") + "Z",
+                                    "start_time": dt.utcnow().isoformat(
+                                        timespec="seconds"
+                                    )
+                                    + "Z",
                                     "end_time": None,
                                     "duration_minutes": None,
                                     "gcs_prefix": gcs_prefix,
                                     "bucket": gcs_bucket,
-                                    "exec_name": execution_name.split('/')[-1],
+                                    "exec_name": execution_name.split("/")[-1],
                                     "execution_name": execution_name,
                                     "message": "Job launched from single run",
                                 },
@@ -1922,24 +1928,32 @@ with tab_single:
     # =============== Job Status Display (Requirement 7) ===============
     st.divider()
     st.subheader("📊 Recent Job Status")
-    
+
     # Show status of the most recently launched job
     if st.session_state.get("latest_job_execution"):
         latest_job = st.session_state["latest_job_execution"]
-        
+
         col_status1, col_status2 = st.columns([3, 1])
         with col_status1:
-            st.info(f"**Last Job**: {latest_job['country'].upper()} - {latest_job['revision']} ({latest_job['timestamp']})")
+            st.info(
+                f"**Last Job**: {latest_job['country'].upper()} - {latest_job['revision']} ({latest_job['timestamp']})"
+            )
         with col_status2:
-            refresh_status = st.button("🔄 Refresh Status", key="refresh_latest_job_status", use_container_width=True)
-        
+            refresh_status = st.button(
+                "🔄 Refresh Status",
+                key="refresh_latest_job_status",
+                use_container_width=True,
+            )
+
         if refresh_status or st.session_state.get("auto_refresh_status"):
             try:
-                status_info = job_manager.get_execution_status(latest_job['execution_name'])
-                
+                status_info = job_manager.get_execution_status(
+                    latest_job["execution_name"]
+                )
+
                 # Display status - get from overall_status field
                 status_state = status_info.get("overall_status", "UNKNOWN")
-                
+
                 # Color code the status
                 if status_state == "SUCCEEDED":
                     st.success(f"✅ Status: {status_state}")
@@ -1949,26 +1963,34 @@ with tab_single:
                     st.error(f"❌ Status: {status_state}")
                 else:
                     st.warning(f"⚠️ Status: {status_state}")
-                
+
                 # Show detailed status
                 with st.expander("📋 Detailed Status", expanded=False):
                     st.json(status_info)
-                
+
                 # If job completed, try to show results
                 if status_state == "SUCCEEDED":
-                    st.success("🎉 Training completed! Check Job History below for results.")
+                    st.success(
+                        "🎉 Training completed! Check Job History below for results."
+                    )
                     try:
                         # Try to read from GCS
-                        gcs_prefix = latest_job['gcs_prefix']
-                        bucket_name = st.session_state.get("gcs_bucket", GCS_BUCKET)
-                        st.info(f"Results available at: gs://{bucket_name}/{gcs_prefix}/")
+                        gcs_prefix = latest_job["gcs_prefix"]
+                        bucket_name = st.session_state.get(
+                            "gcs_bucket", GCS_BUCKET
+                        )
+                        st.info(
+                            f"Results available at: gs://{bucket_name}/{gcs_prefix}/"
+                        )
                     except Exception:
                         pass
-                        
+
             except Exception as e:
                 st.error(f"Failed to get job status: {e}")
     else:
-        st.info("No jobs launched yet. Click 'Start Training Job' above to begin.")
+        st.info(
+            "No jobs launched yet. Click 'Start Training Job' above to begin."
+        )
 
     render_jobs_job_history(key_prefix="single")
 
@@ -2256,7 +2278,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 file_name="robyn_batch_example_consistent.csv",
                 mime="text/csv",
                 use_container_width=True,
-                help="All rows have the same columns - recommended for beginners"
+                help="All rows have the same columns - recommended for beginners",
             )
         with col_ex2:
             st.download_button(
@@ -2265,7 +2287,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 file_name="robyn_batch_example_varied.csv",
                 mime="text/csv",
                 use_container_width=True,
-                help="Rows have different columns - demonstrates CSV flexibility"
+                help="Rows have different columns - demonstrates CSV flexibility",
             )
 
         # --- CSV upload (editable, persistent, deletable) ---
@@ -2284,8 +2306,10 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 try:
                     # Read CSV with flexible parsing - allows missing columns per row
                     # This mimics single run behavior where not all fields are required
-                    st.session_state.uploaded_df = pd.read_csv(up, keep_default_na=True)
-                    
+                    st.session_state.uploaded_df = pd.read_csv(
+                        up, keep_default_na=True
+                    )
+
                     # Fill any missing columns that might be expected but not present
                     # This makes the CSV structure more forgiving
                     st.session_state.uploaded_fingerprint = fingerprint
