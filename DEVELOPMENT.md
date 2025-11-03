@@ -301,11 +301,8 @@ cp .env.example .env
 
 # Edit the file and replace REPLACE_ME values with your configuration
 
-# Load environment variables into your shell (recommended)
+# Load environment variables into your shell
 set -a; source .env; set +a
-
-# Or for simple cases without spaces/special chars:
-# export $(grep -v '^#' .env | xargs)
 ```
 
 Alternatively, use with tools like:
