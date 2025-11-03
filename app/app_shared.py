@@ -1487,10 +1487,7 @@ def _require_sf_session():
 
 ## FE additions below
 
-<<<<<<< HEAD
-=======
 
->>>>>>> dev
 # =========================
 # Date Parser (unchanged)
 # =========================
@@ -1526,6 +1523,7 @@ def data_blob(country: str, ts: str) -> str:
 
 def data_latest_blob(country: str) -> str:
     return f"{data_root(country)}/latest/raw.parquet"
+
 
 def meta_blob(country: str, ts: str) -> str:
     """Country-scoped metadata path."""
@@ -1606,7 +1604,10 @@ def list_meta_versions(
     labels += [f"{cc} - {t}" for t in country_sorted]
     return labels
 
-def resolve_meta_blob_from_selection(bucket: str, country: str, meta_selection: str) -> str:
+
+def resolve_meta_blob_from_selection(
+    bucket: str, country: str, meta_selection: str
+) -> str:
     """
     Convert a UI label selection into a real GCS blob path.
     Accepts:
@@ -1633,8 +1634,12 @@ def resolve_meta_blob_from_selection(bucket: str, country: str, meta_selection: 
         versions = list_meta_versions(bucket, country)
         explicit = [v for v in versions if v != "Latest"]
         if not explicit:
-            raise FileNotFoundError("No metadata mapping.json found in country or universal scope.")
-        pick = explicit[0]  # list_meta_versions already orders universal first, newest first
+            raise FileNotFoundError(
+                "No metadata mapping.json found in country or universal scope."
+            )
+        pick = explicit[
+            0
+        ]  # list_meta_versions already orders universal first, newest first
         if pick.startswith("Universal - "):
             ts = pick.split(" - ", 1)[1].strip()
             return meta_blob_universal(ts)
@@ -1651,12 +1656,16 @@ def resolve_meta_blob_from_selection(bucket: str, country: str, meta_selection: 
             cand = meta_blob_universal(ts_lbl)
             if _blob_exists(bucket, cand):
                 return cand
-            raise FileNotFoundError(f"Universal metadata not found: gs://{bucket}/{cand}")
+            raise FileNotFoundError(
+                f"Universal metadata not found: gs://{bucket}/{cand}"
+            )
         if scope_lbl.upper() == cc:
             cand = meta_blob(country, ts_lbl)
             if _blob_exists(bucket, cand):
                 return cand
-            raise FileNotFoundError(f"Country metadata not found: gs://{bucket}/{cand}")
+            raise FileNotFoundError(
+                f"Country metadata not found: gs://{bucket}/{cand}"
+            )
         # Unknown label → treat as bare ts
         s = ts_lbl
 
@@ -1673,7 +1682,6 @@ def resolve_meta_blob_from_selection(bucket: str, country: str, meta_selection: 
         f"Metadata not found for ts='{ts_str}' in either "
         f"gs://{bucket}/{cand_country} or gs://{bucket}/{cand_universal}"
     )
-
 
 
 def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
