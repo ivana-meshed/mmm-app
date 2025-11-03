@@ -1639,16 +1639,6 @@ with tab_single:
                 except Exception as e:
                     st.error(f"Failed to add to queue: {e}")
 
-    # Outputs (moved outside Save Configuration expander)
-    with st.expander("📤 Outputs"):
-        gcs_bucket = st.text_input(
-            "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
-        )
-        st.session_state["gcs_bucket"] = gcs_bucket
-        ann_file = st.file_uploader(
-            "Optional: enriched_annotations.csv", type=["csv"]
-        )
-
     # =============== Single-run button ===============
     def create_job_config_single(
         data_gcs_path: str,
@@ -1777,11 +1767,15 @@ with tab_single:
                     # No need to query and upload - data is already in GCS
                     st.info(f"Using data from: {data_gcs_path}")
 
+                    # Get annotation file from session state (set in Connect_Data page)
+                    ann_file = st.session_state.get("annotations_file")
                     if ann_file is not None:
                         with timed_step("Upload annotations to GCS", timings):
                             annotations_path = os.path.join(
                                 td, "enriched_annotations.csv"
                             )
+                            # Reset file pointer and read
+                            ann_file.seek(0)
                             with open(annotations_path, "wb") as f:
                                 f.write(ann_file.read())
                             annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
