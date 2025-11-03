@@ -153,11 +153,15 @@ COPY docker/robyn_check_metric_type.patch /tmp/robyn_check_metric_type.patch
 RUN ROBYN_PATH=$(R -q -e "cat(system.file(package='Robyn'))" | tail -n1) && \
     if [ -f "${ROBYN_PATH}/R/checks.R" ]; then \
         echo "Applying Robyn patch to ${ROBYN_PATH}/R/checks.R" && \
+        patch --dry-run -p1 -d "${ROBYN_PATH}/.." < /tmp/robyn_check_metric_type.patch && \
         patch -p1 -d "${ROBYN_PATH}/.." < /tmp/robyn_check_metric_type.patch && \
-        echo "Patch applied successfully"; \
+        echo "Patch applied successfully" && \
+        grep -A 2 "name_loc\[1\]" "${ROBYN_PATH}/R/checks.R" && \
+        echo "Patch verification: metric_name_updated line found"; \
     else \
         echo "Warning: Could not find Robyn checks.R file at ${ROBYN_PATH}/R/checks.R" && \
         ls -la "${ROBYN_PATH}/R/" || echo "R directory not found"; \
+        exit 1; \
     fi && \
     rm /tmp/robyn_check_metric_type.patch
 

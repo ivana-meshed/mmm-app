@@ -1,6 +1,14 @@
 --- a/R/checks.R
 +++ b/R/checks.R
-@@ -767,7 +767,8 @@
+@@ -755,7 +755,7 @@ check_allocator <- function(OutputCollect, select_model, paid_media_selected, s
+   )
+ }
+ 
+ check_metric_type <- function(metric_name, paid_media_spends, paid_media_vars, paid_media_selected, exposure_vars, organic_vars) {
+   if (metric_name %in% organic_vars && length(metric_name) == 1) {
+     metric_type <- "organic"
+     metric_name_updated <- metric_name
+@@ -767,7 +767,8 @@ check_metric_type <- function(metric_name, paid_media_spends, paid_media_vars,
      name_loc <- unique(c(
        which(metric_name == paid_media_spends),
        which(metric_name == paid_media_vars)
