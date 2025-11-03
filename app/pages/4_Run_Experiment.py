@@ -2098,8 +2098,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "train_size": "0.75,0.9",
                     "paid_media_spends": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
                     "paid_media_vars": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-                    "context_vars": "IS_WEEKEND",
-                    "factor_vars": "IS_WEEKEND",
+                    "context_vars": "",
+                    "factor_vars": "",
                     "organic_vars": "ORGANIC_TRAFFIC",
                     "gcs_bucket": st.session_state["gcs_bucket"],
                     "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
@@ -2209,7 +2209,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "train_size": "0.75,0.9",
                     "paid_media_spends": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST",
                     "paid_media_vars": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST",
-                    "context_vars": "IS_WEEKEND",
+                    "context_vars": "",
                     "gcs_bucket": st.session_state["gcs_bucket"],
                     "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
                     "dep_var": "UPLOAD_VALUE",
@@ -2218,6 +2218,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "hyperparameter_preset": "Facebook recommend",
                     "resample_freq": "W",
                     # Note: This row omits factor_vars, organic_vars, dep_var_type, and other optional fields
+                    # Note: IS_WEEKEND is removed because weekly resampling makes it constant (no variance)
                 },
                 {
                     "country": "it",
