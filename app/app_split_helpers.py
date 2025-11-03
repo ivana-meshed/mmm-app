@@ -186,10 +186,10 @@ def prepare_and_launch_job(params: dict) -> dict:
     gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
     timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
     gcs_prefix = f"robyn/{params['revision']}/{params['country']}/{timestamp}"
-    
+
     # Check if data already exists in GCS (Issue #4 GCS-based workflow)
     data_gcs_path_provided = params.get("data_gcs_path")
-    
+
     if data_gcs_path_provided:
         # GCS-based workflow: data already exists, no Snowflake query needed
         logger.info(f"Using existing data from GCS: {data_gcs_path_provided}")
@@ -224,8 +224,10 @@ def prepare_and_launch_job(params: dict) -> dict:
             # 3) Upload data
             with timed_step("Upload data to GCS", timings):
                 data_blob = f"training-data/{timestamp}/input_data.parquet"
-                data_gcs_path = upload_to_gcs(gcs_bucket, parquet_path, data_blob)
-                
+                data_gcs_path = upload_to_gcs(
+                    gcs_bucket, parquet_path, data_blob
+                )
+
             # Seed timings.csv (web-side steps) if not present
             if timings:
                 df_times = pd.DataFrame(timings)
@@ -241,31 +243,40 @@ def prepare_and_launch_job(params: dict) -> dict:
 
     # Optional annotations (batch: pass a gs:// in params)
     annotations_gcs_path = params.get("annotations_gcs_path") or None
-    
+
     # Load metadata to get column_agg_strategies for resampling
     # This ensures queue jobs use per-column aggregations from metadata
     if params.get("resample_freq", "none") != "none":
         try:
             from google.cloud import storage
+
             country = params.get("country", "").lower()
             # Try to load latest metadata for this country
             client = storage.Client()
             bucket = client.bucket(gcs_bucket)
             metadata_blob_path = f"metadata/{country}/latest/mapping.json"
             blob = bucket.blob(metadata_blob_path)
-            
+
             if blob.exists():
                 metadata = json.loads(blob.download_as_bytes())
                 column_agg_strategies = metadata.get("agg_strategies", {})
                 if column_agg_strategies:
                     params["column_agg_strategies"] = column_agg_strategies
-                    logger.info(f"Loaded {len(column_agg_strategies)} column aggregation strategies from metadata for country {country}")
+                    logger.info(
+                        f"Loaded {len(column_agg_strategies)} column aggregation strategies from metadata for country {country}"
+                    )
                 else:
-                    logger.warning(f"No column_agg_strategies found in metadata for country {country}")
+                    logger.warning(
+                        f"No column_agg_strategies found in metadata for country {country}"
+                    )
             else:
-                logger.warning(f"Metadata not found at {metadata_blob_path}, using default aggregations")
+                logger.warning(
+                    f"Metadata not found at {metadata_blob_path}, using default aggregations"
+                )
         except Exception as e:
-            logger.warning(f"Could not load metadata for column aggregations: {e}")
+            logger.warning(
+                f"Could not load metadata for column aggregations: {e}"
+            )
             # Continue without column_agg_strategies - R script will default to sum
 
     # 4) Create config (timestamped + latest)
@@ -579,47 +590,77 @@ def _make_normalizer(defaults: dict):
             return row.get(v) if (v in row and pd.notna(row[v])) else default  # type: ignore
 
         # Support backward compatibility: if start_date/end_date not present, use date_input
-        start_date_val = _g("start_date", defaults.get("start_date", "2024-01-01"))
-        end_date_val = _g("end_date", defaults.get("end_date", time.strftime("%Y-%m-%d")))
-        date_input_val = _g("date_input", defaults.get("date_input", time.strftime("%Y-%m-%d")))
-        
+        start_date_val = _g(
+            "start_date", defaults.get("start_date", "2024-01-01")
+        )
+        end_date_val = _g(
+            "end_date", defaults.get("end_date", time.strftime("%Y-%m-%d"))
+        )
+        date_input_val = _g(
+            "date_input", defaults.get("date_input", time.strftime("%Y-%m-%d"))
+        )
+
         # If neither start_date nor end_date are provided, fall back to date_input
         if not str(start_date_val).strip():
             start_date_val = "2024-01-01"
         if not str(end_date_val).strip():
             end_date_val = date_input_val
-        
+
         # Parse custom hyperparameters if hyperparameter_preset is "Custom"
-        hyperparameter_preset_val = str(_g("hyperparameter_preset", defaults.get("hyperparameter_preset", "Meshed recommend")))
+        hyperparameter_preset_val = str(
+            _g(
+                "hyperparameter_preset",
+                defaults.get("hyperparameter_preset", "Meshed recommend"),
+            )
+        )
         custom_hyperparameters = {}
-        
+
         if hyperparameter_preset_val == "Custom":
             # Check for per-variable hyperparameter columns (new format)
             # Pattern: {VAR_NAME}_alphas, {VAR_NAME}_gammas, {VAR_NAME}_thetas, etc.
             for col in row.index:
                 if pd.notna(row[col]) and str(row[col]).strip():
                     # Check if column matches per-variable pattern
-                    if col.endswith(('_alphas', '_gammas', '_thetas', '_shapes', '_scales')):
+                    if col.endswith(
+                        ("_alphas", "_gammas", "_thetas", "_shapes", "_scales")
+                    ):
                         try:
                             # Parse the value - could be a list string like "[1.0, 3.0]" or comma-separated "1.0, 3.0"
                             val_str = str(row[col]).strip()
-                            if val_str.startswith('[') and val_str.endswith(']'):
+                            if val_str.startswith("[") and val_str.endswith(
+                                "]"
+                            ):
                                 # JSON-like list format
                                 import json
-                                custom_hyperparameters[col] = json.loads(val_str)
-                            elif ',' in val_str:
+
+                                custom_hyperparameters[col] = json.loads(
+                                    val_str
+                                )
+                            elif "," in val_str:
                                 # Comma-separated format
-                                custom_hyperparameters[col] = [float(x.strip()) for x in val_str.split(',')]
+                                custom_hyperparameters[col] = [
+                                    float(x.strip()) for x in val_str.split(",")
+                                ]
                             else:
                                 # Single value or other format - skip
                                 pass
                         except (ValueError, TypeError, json.JSONDecodeError):
                             pass
-            
+
             # Backward compatibility: check for old global format (alphas_min/max, etc.)
             if not custom_hyperparameters:
-                for param in ["alphas_min", "alphas_max", "gammas_min", "gammas_max", "thetas_min", "thetas_max",
-                             "shapes_min", "shapes_max", "scales_min", "scales_max"]:
+                for param in [
+                    "alphas_min",
+                    "alphas_max",
+                    "gammas_min",
+                    "gammas_max",
+                    "thetas_min",
+                    "thetas_max",
+                    "shapes_min",
+                    "shapes_max",
+                    "scales_min",
+                    "scales_max",
+                ]:
                     val = _g(param, "")
                     if val and str(val).strip():
                         try:
@@ -630,7 +671,9 @@ def _make_normalizer(defaults: dict):
         result = {
             "country": str(_g("country", defaults["country"])),
             "revision": str(_g("revision", defaults["revision"])),
-            "date_input": str(date_input_val),  # Keep for backward compatibility
+            "date_input": str(
+                date_input_val
+            ),  # Keep for backward compatibility
             "start_date": str(start_date_val),  # New field
             "end_date": str(end_date_val),  # New field
             "iterations": (
@@ -654,7 +697,9 @@ def _make_normalizer(defaults: dict):
             "table": str(_g("table", "")),
             "query": str(_g("query", "")),
             "dep_var": str(_g("dep_var", defaults["dep_var"])),
-            "dep_var_type": str(_g("dep_var_type", defaults.get("dep_var_type", "revenue"))),  # New field
+            "dep_var_type": str(
+                _g("dep_var_type", defaults.get("dep_var_type", "revenue"))
+            ),  # New field
             "date_var": str(_g("date_var", defaults["date_var"])),
             "adstock": str(_g("adstock", defaults["adstock"])),
             "hyperparameter_preset": hyperparameter_preset_val,
@@ -666,11 +711,11 @@ def _make_normalizer(defaults: dict):
             ),
             "annotations_gcs_path": str(_g("annotations_gcs_path", "")),
         }
-        
+
         # Add custom_hyperparameters if present
         if custom_hyperparameters:
             result["custom_hyperparameters"] = custom_hyperparameters
-        
+
         return result
 
     return _normalize_row
@@ -859,13 +904,17 @@ def _queue_tick():
                 st.session_state.get("gcs_bucket", GCS_BUCKET),
             )
             moved += 1
-            logger.info(f"Moved job {entry.get('id')} to history with status {final_state}")
+            logger.info(
+                f"Moved job {entry.get('id')} to history with status {final_state}"
+            )
         else:
             remaining.append(entry)
 
     if moved:
         # Persist trimmed queue
-        logger.info(f"Moved {moved} finished job(s) to history, {len(remaining)} remaining in queue")
+        logger.info(
+            f"Moved {moved} finished job(s) to history, {len(remaining)} remaining in queue"
+        )
         st.session_state.job_queue = remaining
         st.session_state.queue_saved_at = save_queue_to_gcs(
             st.session_state.queue_name,

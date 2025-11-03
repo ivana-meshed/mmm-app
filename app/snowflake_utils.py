@@ -1,47 +1,17 @@
-import pandas as pd
-import snowflake.connector as sf
+"""
+Snowflake utilities for the MMM application.
 
+This module is maintained for backward compatibility.
+New code should use utils.snowflake_connector instead.
 
-def _conn(user, password, account, warehouse, database, schema, role=None):
-    return sf.connect(
-        user=user,
-        password=password,
-        account=account,
-        warehouse=warehouse,
-        database=database,
-        schema=schema,
-        role=role,
-    )
+Deprecated: This module will be removed in a future version.
+"""
 
+from utils.snowflake_connector import (
+    get_table_columns,
+    run_query_sample,
+)
 
-def get_snowflake_columns(
-    user, password, account, warehouse, database, schema, table, role=None
-):
-    db, sch, tbl = table.split(".")
-    with _conn(
-        user, password, account, warehouse, database, schema, role
-    ) as con:
-        cur = con.cursor()
-        cur.execute(f"SHOW COLUMNS IN {db}.{sch}.{tbl}")
-        rows = cur.fetchall()
-        # rows: name, type, kind, ...
-        cols = [r[2] for r in rows]  # column_name index
-        return cols
-
-
-def run_sql_sample(
-    user,
-    password,
-    account,
-    warehouse,
-    database,
-    schema,
-    sql,
-    role=None,
-    limit=1000,
-):
-    with _conn(
-        user, password, account, warehouse, database, schema, role
-    ) as con:
-        df = pd.read_sql(f"{sql} LIMIT {limit}", con)
-    return df
+# Backward compatibility aliases
+get_snowflake_columns = get_table_columns
+run_sql_sample = run_query_sample
