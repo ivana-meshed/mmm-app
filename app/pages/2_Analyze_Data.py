@@ -287,14 +287,8 @@ with tab_biz:
     # Build a stable (nice -> raw col) mapping for goals so we can show friendly labels everywhere
     if goal_cols:
         goal_label_map = {nice_title(g): g for g in goal_cols}
-        goal_labels_sorted = sorted(
-            goal_label_map.keys(), key=lambda s: s.lower()
-        )
-        target = (
-            GOAL
-            if (GOAL and GOAL in df.columns)
-            else (goal_cols[0] if goal_cols else None)
-        )
+        goal_labels_sorted = sorted(goal_label_map.keys(), key=lambda s: s.lower())
+        target = GOAL if (GOAL and GOAL in df.columns) else (goal_cols[0] if goal_cols else None)
     else:
         goal_label_map = {}
         goal_labels_sorted = []
@@ -337,11 +331,7 @@ with tab_biz:
                 diff = cur_eff - prev_eff
                 delta_txt = f"{'+' if diff >= 0 else ''}{diff:.2f}"
             # ROAS only for GMV explicitly; otherwise <NiceGoal> / <Spend label>
-            eff_title = (
-                "ROAS"
-                if str(g).upper() == "GMV"
-                else f"{nice_title(g)} / {spend_label}"
-            )
+            eff_title = "ROAS" if str(g).upper() == "GMV" else f"{nice_title(g)} / {spend_label}"
             kpis2.append(
                 dict(
                     title=eff_title,
@@ -362,9 +352,7 @@ with tab_biz:
     with cA:
         fig1 = go.Figure()
         if target and target in res:
-            fig1.add_bar(
-                x=res["PERIOD_LABEL"], y=res[target], name=nice_title(target)
-            )
+            fig1.add_bar(x=res["PERIOD_LABEL"], y=res[target], name=nice_title(target))
         fig1.add_trace(
             go.Scatter(
                 x=res["PERIOD_LABEL"],
@@ -382,20 +370,14 @@ with tab_biz:
             yaxis2=dict(title=spend_label, overlaying="y", side="right"),
             bargap=0.15,
             hovermode="x unified",
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0
-            ),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
             margin=dict(b=60),
         )
         st.plotly_chart(fig1, use_container_width=True)
 
     with cB:
         eff_t = res.copy()
-        label_eff = (
-            "ROAS"
-            if (target and str(target).upper() == "GMV")
-            else "Efficiency"
-        )
+        label_eff = "ROAS" if (target and str(target).upper() == "GMV") else "Efficiency"
         if target and target in eff_t.columns and "_TOTAL_SPEND" in eff_t:
             eff_t["EFF"] = np.where(
                 eff_t["_TOTAL_SPEND"] > 0,
@@ -406,11 +388,7 @@ with tab_biz:
             eff_t["EFF"] = np.nan
         fig2e = go.Figure()
         if target and target in eff_t:
-            fig2e.add_bar(
-                x=eff_t["PERIOD_LABEL"],
-                y=eff_t[target],
-                name=nice_title(target),
-            )
+            fig2e.add_bar(x=eff_t["PERIOD_LABEL"], y=eff_t[target], name=nice_title(target))
         fig2e.add_trace(
             go.Scatter(
                 x=eff_t["PERIOD_LABEL"],
@@ -428,9 +406,7 @@ with tab_biz:
             yaxis2=dict(title=label_eff, overlaying="y", side="right"),
             bargap=0.15,
             hovermode="x unified",
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0
-            ),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
             margin=dict(b=60),
         )
         st.plotly_chart(fig2e, use_container_width=True)
@@ -442,9 +418,7 @@ with tab_biz:
     # -----------------------------
     st.markdown("## Explore Any Metric Over Time")
 
-    numeric_candidates = df_r.select_dtypes(
-        include=[np.number]
-    ).columns.tolist()
+    numeric_candidates = df_r.select_dtypes(include=[np.number]).columns.tolist()
     metrics = [c for c in numeric_candidates if c != "_TOTAL_SPEND"]
 
     if not metrics:
@@ -460,9 +434,7 @@ with tab_biz:
             final = lbl if counts[lbl] == 1 else f"{lbl} · {col}"
             labels.append((final, col))
 
-        labels_sorted = sorted(
-            [l for (l, _) in labels], key=lambda s: s.lower()
-        )
+        labels_sorted = sorted([l for (l, _) in labels], key=lambda s: s.lower())
         label_to_col = {l: c for (l, c) in labels}
 
         # default to current target if available
@@ -472,9 +444,7 @@ with tab_biz:
         )
 
         c_sel, c_spend = st.columns([2, 1])
-        picked_label = c_sel.selectbox(
-            "Metric", labels_sorted, index=labels_sorted.index(default_label)
-        )
+        picked_label = c_sel.selectbox("Metric", labels_sorted, index=labels_sorted.index(default_label))
         picked_col = label_to_col[picked_label]
 
         # ensure selected metric is in res; if not, add via same resample rule
@@ -487,23 +457,15 @@ with tab_biz:
                 .rename(columns={DATE_COL: "DATE_PERIOD"})
             )
             res_plot = res.merge(add, on="DATE_PERIOD", how="left")
-            res_plot["PERIOD_LABEL"] = period_label(
-                res_plot["DATE_PERIOD"], RULE
-            )
+            res_plot["PERIOD_LABEL"] = period_label(res_plot["DATE_PERIOD"], RULE)
         else:
             res_plot = res
 
-        want_overlay = c_spend.checkbox(
-            f"Overlay Total {spend_label}", value=True
-        )
+        want_overlay = c_spend.checkbox(f"Overlay Total {spend_label}", value=True)
         can_overlay = "_TOTAL_SPEND" in res_plot.columns
 
         fig_custom = go.Figure()
-        fig_custom.add_bar(
-            x=res_plot["PERIOD_LABEL"],
-            y=res_plot[picked_col],
-            name=nice_title(picked_col),
-        )
+        fig_custom.add_bar(x=res_plot["PERIOD_LABEL"], y=res_plot[picked_col], name=nice_title(picked_col))
 
         if want_overlay and can_overlay:
             fig_custom.add_trace(
@@ -528,18 +490,14 @@ with tab_biz:
             xaxis=dict(title="Date", title_standoff=8),
             bargap=0.15,
             hovermode="x unified",
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0
-            ),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
             margin=dict(b=60),
         )
         st.plotly_chart(fig_custom, use_container_width=True)
 
         if want_overlay and not can_overlay:
-            st.caption(
-                f"ℹ️ Overlay disabled: '_TOTAL_SPEND' not available for this selection."
-            )
-
+            st.caption(f"ℹ️ Overlay disabled: '_TOTAL_SPEND' not available for this selection.")
+            
 # =============================
 # TAB 2 — MARKETING OVERVIEW
 # =============================
@@ -590,6 +548,7 @@ with tab_mkt:
         ],
         per_row=3,
     )
+
 
     # ----- KPI — Spend (TOTALS + per-platform tiles) -----
     st.markdown("#### Spend (Total)")

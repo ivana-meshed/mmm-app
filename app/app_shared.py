@@ -1586,7 +1586,7 @@ def list_data_versions(
 @st.cache_data(show_spinner=False)
 def list_meta_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
     """
-    Returns labels for the UI in the form:
+    Returns labels in the form:
       ["Latest", "Universal - <ts1>", "Universal - <ts2>", ..., "<CC> - <ts1>", "<CC> - <ts2>", ...]
     Universal entries are listed first (newest → oldest), then country entries (newest → oldest).
     """
@@ -1616,85 +1616,6 @@ def list_meta_versions(bucket: str, country: str, refresh_key: str = "") -> List
     labels += [f"Universal - {t}" for t in universal_sorted]
     labels += [f"{cc} - {t}" for t in country_sorted]
     return labels
-
-
-def resolve_meta_blob_from_selection(
-    bucket: str, country: str, meta_selection: str
-) -> str:
-    """
-    Convert a UI label selection into a real GCS blob path.
-    Accepts:
-      - "Latest"
-      - "Universal - <ts>"
-      - "<CC> - <ts>" (CC = current country code, case-insensitive)
-      - "<ts>" (bare)  → try country first, then universal
-    Never returns a label path; always a real "metadata/<scope>/<ts>/mapping.json".
-    Raises FileNotFoundError if nothing resolves.
-    """
-    s = (meta_selection or "").strip()
-    cc = country.upper().strip()
-
-    # Latest: prefer country latest if exists, else universal latest, else newest explicit across both
-    if s.lower() == "latest":
-        cand_country = meta_latest_blob(country)
-        cand_universal = meta_latest_blob_universal()
-        if _blob_exists(bucket, cand_country):
-            return cand_country
-        if _blob_exists(bucket, cand_universal):
-            return cand_universal
-
-        # fallback: pick newest explicit across both scopes using list_meta_versions order
-        versions = list_meta_versions(bucket, country)
-        explicit = [v for v in versions if v != "Latest"]
-        if not explicit:
-            raise FileNotFoundError(
-                "No metadata mapping.json found in country or universal scope."
-            )
-        pick = explicit[
-            0
-        ]  # list_meta_versions already orders universal first, newest first
-        if pick.startswith("Universal - "):
-            ts = pick.split(" - ", 1)[1].strip()
-            return meta_blob_universal(ts)
-        else:
-            ts = pick.split(" - ", 1)[1].strip()
-            return meta_blob(country, ts)
-
-    # Labeled selection?
-    if " - " in s:
-        scope_lbl, ts_lbl = s.split(" - ", 1)
-        scope_lbl = scope_lbl.strip()
-        ts_lbl = ts_lbl.strip()
-        if scope_lbl.lower() == "universal":
-            cand = meta_blob_universal(ts_lbl)
-            if _blob_exists(bucket, cand):
-                return cand
-            raise FileNotFoundError(
-                f"Universal metadata not found: gs://{bucket}/{cand}"
-            )
-        if scope_lbl.upper() == cc:
-            cand = meta_blob(country, ts_lbl)
-            if _blob_exists(bucket, cand):
-                return cand
-            raise FileNotFoundError(
-                f"Country metadata not found: gs://{bucket}/{cand}"
-            )
-        # Unknown label → treat as bare ts
-        s = ts_lbl
-
-    # Bare ts: try country then universal
-    ts_str = s
-    cand_country = meta_blob(country, ts_str)
-    if _blob_exists(bucket, cand_country):
-        return cand_country
-    cand_universal = meta_blob_universal(ts_str)
-    if _blob_exists(bucket, cand_universal):
-        return cand_universal
-
-    raise FileNotFoundError(
-        f"Metadata not found for ts='{ts_str}' in either "
-        f"gs://{bucket}/{cand_country} or gs://{bucket}/{cand_universal}"
-    )
 
 
 def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
@@ -1736,18 +1657,92 @@ def load_data_from_gcs(bucket: str, country: str, data_ts: str, meta_ts: str) ->
           - "Universal - <ts>"
           - "<CC> - <ts>"  (CC = current country code)
           - "<ts>" (bare)  → try country first, then universal
+    For 'Latest', prefer country latest if exists, else universal latest; if neither exists,
+    pick the newest explicit version across both scopes.
     """
     # data
     db = data_latest_blob(country) if data_ts == "Latest" else data_blob(country, str(data_ts))
     df = _download_parquet_from_gcs(bucket, db)
 
-    # meta (use the resolver so display labels never leak into paths)
-    mb = resolve_meta_blob_from_selection(bucket, country, str(meta_ts))
+    # --- meta selection parsing
+    chosen_scope = None  # "universal" | "country" | None
+    chosen_ts = None
+
+    if isinstance(meta_ts, str):
+        s = meta_ts.strip()
+        if s.lower() == "latest":
+            chosen_scope, chosen_ts = "latest", None
+        else:
+            # Match "Universal - <ts>" OR "<CC> - <ts>"
+            if " - " in s:
+                scope_lbl, ts_lbl = s.split(" - ", 1)
+                scope_lbl = scope_lbl.strip()
+                ts_lbl = ts_lbl.strip()
+                if scope_lbl.lower() == "universal":
+                    chosen_scope, chosen_ts = "universal", ts_lbl
+                elif scope_lbl.upper() == country.upper():
+                    chosen_scope, chosen_ts = "country", ts_lbl
+                else:
+                    # Unknown scope label → treat as bare ts for safety
+                    chosen_scope, chosen_ts = None, s
+            else:
+                # Bare ts
+                chosen_scope, chosen_ts = None, s
+
+    # --- resolve meta blob path
+    if chosen_scope == "latest":
+        mb_country = meta_latest_blob(country)
+        mb_universal = meta_latest_blob_universal()
+        if _blob_exists(bucket, mb_country):
+            mb = mb_country
+        elif _blob_exists(bucket, mb_universal):
+            mb = mb_universal
+        else:
+            # fallback to newest explicit across both scopes
+            versions = list_meta_versions(bucket, country)
+            # versions is ["Latest", "Universal - ts...", "CC - ts..."]
+            explicit = [v for v in versions if v != "Latest"]
+            if not explicit:
+                raise FileNotFoundError("No metadata mapping.json found in country or universal scope.")
+            # the list is already ordered newest-first within each scope and Universal first
+            pick = explicit[0]
+            if pick.startswith("Universal - "):
+                ts = pick.split(" - ", 1)[1].strip()
+                mb = meta_blob_universal(ts)
+            else:
+                ts = pick.split(" - ", 1)[1].strip()
+                mb = meta_blob(country, ts)
+    elif chosen_scope == "universal" and chosen_ts:
+        mb = meta_blob_universal(chosen_ts)
+        if not _blob_exists(bucket, mb):
+            raise FileNotFoundError(f"Universal metadata not found: gs://{bucket}/{mb}")
+    elif chosen_scope == "country" and chosen_ts:
+        mb = meta_blob(country, chosen_ts)
+        if not _blob_exists(bucket, mb):
+            raise FileNotFoundError(f"Country metadata not found: gs://{bucket}/{mb}")
+    else:
+        # Bare ts (or unrecognized label): try country then universal
+        ts_str = str(chosen_ts or meta_ts).strip()
+        cand_country = meta_blob(country, ts_str)
+        if _blob_exists(bucket, cand_country):
+            mb = cand_country
+        else:
+            cand_universal = meta_blob_universal(ts_str)
+            if _blob_exists(bucket, cand_universal):
+                mb = cand_universal
+            else:
+                raise FileNotFoundError(
+                    f"Metadata not found for ts='{ts_str}' in either "
+                    f"gs://{bucket}/{cand_country} or gs://{bucket}/{cand_universal}"
+                )
+
     meta = _download_json_from_gcs(bucket, mb)
 
     df, date_col = parse_date(df, meta)
     return df, meta, date_col
 
+
+    
 # =========================
 # KPI tiles
 # =========================
