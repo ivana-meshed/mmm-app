@@ -1483,11 +1483,8 @@ def _require_sf_session():
 
 ## FE additions below
 
-
-
-
 # =========================
-# Date Parser
+# Date Parser (unchanged)
 # =========================
 def parse_date(df: pd.DataFrame, meta: dict) -> Tuple[pd.DataFrame, str]:
     wanted = str(meta.get("data", {}).get("date_field") or "DATE")
@@ -1505,6 +1502,7 @@ def parse_date(df: pd.DataFrame, meta: dict) -> Tuple[pd.DataFrame, str]:
         df = df.sort_values(date_col).reset_index(drop=True)
     return df, date_col
 
+
 # =========================
 # GCS: paths, listing, download
 # =========================
@@ -1517,11 +1515,28 @@ def data_blob(country: str, ts: str) -> str:
 def data_latest_blob(country: str) -> str:
     return f"{data_root(country)}/latest/raw.parquet"
 
+# --- metadata paths (country + universal)
 def meta_blob(country: str, ts: str) -> str:
+    """Country-scoped metadata path."""
     return f"metadata/{country.lower().strip()}/{ts}/mapping.json"
 
+def meta_blob_universal(ts: str) -> str:
+    """Universal metadata path."""
+    return f"metadata/universal/{ts}/mapping.json"
+
 def meta_latest_blob(country: str) -> str:
+    """Country-scoped 'latest' pointer."""
     return f"metadata/{country.lower().strip()}/latest/mapping.json"
+
+def meta_latest_blob_universal() -> str:
+    """Universal 'latest' pointer."""
+    return "metadata/universal/latest/mapping.json"
+
+# --- small helper
+def _blob_exists(bucket: str, blob_path: str) -> bool:
+    client = storage.Client()
+    blob = client.bucket(bucket).blob(blob_path)
+    return blob.exists()
 
 @st.cache_data(show_spinner=False)
 def sorted_versions_newest_first(ts_list: List[str]) -> List[str]:
@@ -1558,14 +1573,28 @@ def list_data_versions(bucket: str, country: str, refresh_key: str = "") -> List
 
 @st.cache_data(show_spinner=False)
 def list_meta_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
+    """
+    Union of country-scoped and universal metadata versions.
+    If a version exists in both, we still show one entry (the version string).
+    """
     client = storage.Client()
-    prefix = f"metadata/{country.lower().strip()}/"
-    blobs = client.list_blobs(bucket, prefix=prefix)
+    country_prefix = f"metadata/{country.lower().strip()}/"
+    universal_prefix = "metadata/universal/"
+
     ts = set()
-    for b in blobs:
+
+    # country-scoped
+    for b in client.list_blobs(bucket, prefix=country_prefix):
         parts = b.name.split("/")
         if len(parts) >= 4 and parts[-1] == "mapping.json":
             ts.add(parts[-2])
+
+    # universal
+    for b in client.list_blobs(bucket, prefix=universal_prefix):
+        parts = b.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "mapping.json":
+            ts.add(parts[-2])
+
     out = sorted_versions_newest_first(list(ts))
     return ["Latest"] + out
 
@@ -1595,9 +1624,49 @@ def download_json_from_gcs_cached(bucket: str, blob_path: str) -> dict:
 
 @st.cache_data(show_spinner=False)
 def load_data_from_gcs(bucket: str, country: str, data_ts: str, meta_ts: str) -> Tuple[pd.DataFrame, dict, str]:
+    """
+    Data: unchanged (country only).
+    Meta: try country first; if missing, fallback to universal.
+          For 'Latest', prefer country latest if exists, else universal latest.
+    """
+    # data
     db = data_latest_blob(country) if data_ts == "Latest" else data_blob(country, str(data_ts))
-    mb = meta_latest_blob(country) if meta_ts == "Latest" else meta_blob(country, str(meta_ts))
     df = _download_parquet_from_gcs(bucket, db)
+
+    # meta resolution (country → universal fallback)
+    if meta_ts == "Latest":
+        mb_country = meta_latest_blob(country)
+        mb_universal = meta_latest_blob_universal()
+        if _blob_exists(bucket, mb_country):
+            mb = mb_country
+        elif _blob_exists(bucket, mb_universal):
+            mb = mb_universal
+        else:
+            # As a last resort, scan versions and pick newest across both scopes
+            # (keeps behavior robust if 'latest/' symlink wasn't created)
+            versions = list_meta_versions(bucket, country)
+            # versions includes "Latest" + sorted versions
+            if len(versions) > 1:
+                chosen = versions[1]  # newest explicit ts
+                mb = meta_blob(country, chosen) if _blob_exists(bucket, meta_blob(country, chosen)) else meta_blob_universal(chosen)
+            else:
+                raise FileNotFoundError("No metadata mapping.json found in country or universal scope.")
+    else:
+        # explicit ts: prefer country path; fallback to universal
+        ts_str = str(meta_ts)
+        mb_country = meta_blob(country, ts_str)
+        if _blob_exists(bucket, mb_country):
+            mb = mb_country
+        else:
+            mb_universal = meta_blob_universal(ts_str)
+            if _blob_exists(bucket, mb_universal):
+                mb = mb_universal
+            else:
+                raise FileNotFoundError(
+                    f"Metadata not found for ts='{ts_str}' in either "
+                    f"gs://{bucket}/{meta_blob(country, ts_str)} or gs://{bucket}/{mb_universal}"
+                )
+
     meta = _download_json_from_gcs(bucket, mb)
     df, date_col = parse_date(df, meta)
     return df, meta, date_col
@@ -1859,7 +1928,7 @@ def render_sidebar(meta: dict, df: pd.DataFrame, nice, goal_cols: List[str]):
     if "COUNTRY" in df.columns:
         country_list = sorted(df["COUNTRY"].dropna().astype(str).unique().tolist())
         default_countries = country_list or []
-        sel_countries = st.sidebar.multiselect("Country (multi-select)", country_list, default=default_countries)
+        sel_countries = st.sidebar.multiselect("Country", country_list, default=default_countries)
     else:
         sel_countries = []
         st.sidebar.caption("Dataset has no COUNTRY column — showing all rows.")
