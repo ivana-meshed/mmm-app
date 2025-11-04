@@ -828,6 +828,13 @@ def _queue_tick():
             launcher=prepare_and_launch_job,
         )
         logger.info(f"Queue tick result: {res}")
+        
+        # Log launch failures prominently
+        if not res.get("ok") and "launch failed" in res.get("message", ""):
+            logger.error(f"[QUEUE_ERROR] Launch failure detected in queue tick")
+            logger.error(f"[QUEUE_ERROR] Error message: {res.get('message')}")
+            logger.error(f"[QUEUE_ERROR] Queue: {st.session_state.queue_name}")
+            
     except Exception as e:
         logger.exception(f"Queue tick_once_headless failed: {e}")
         raise

@@ -293,6 +293,10 @@ def _safe_tick_once(
 
         # --- Outside critical section: perform the actual launch ---
         message = "Launched"
+        logger.info(f"[QUEUE] Attempting to launch job {entry.get('id')}")
+        logger.info(f"[QUEUE] Job params: country={entry.get('params', {}).get('country')}, "
+                   f"revision={entry.get('params', {}).get('revision')}, "
+                   f"iterations={entry.get('params', {}).get('iterations')}")
         try:
             exec_info = launcher(entry["params"])
             time.sleep(SAFE_LAG_SECONDS_AFTER_RUNNING)
@@ -301,16 +305,25 @@ def _safe_tick_once(
             entry["gcs_prefix"] = exec_info.get("gcs_prefix")
             entry["status"] = "RUNNING"
             entry["message"] = "Launched"
+            logger.info(f"[QUEUE] Successfully launched job {entry.get('id')}")
+            logger.info(f"[QUEUE] Execution: {entry['execution_name']}")
+            logger.info(f"[QUEUE] GCS prefix: {entry['gcs_prefix']}")
         except Exception as e:
             entry["status"] = "ERROR"
             entry["message"] = f"launch failed: {e}"
             message = entry["message"]
-            logger.exception(
-                f"[QUEUE_ERROR] Failed to launch job {entry.get('id')}: {e}"
-            )
+            logger.error(f"[QUEUE_ERROR] ========================================")
+            logger.error(f"[QUEUE_ERROR] LAUNCH FAILURE - Job {entry.get('id')}")
+            logger.error(f"[QUEUE_ERROR] ========================================")
+            logger.error(f"[QUEUE_ERROR] Error type: {type(e).__name__}")
+            logger.error(f"[QUEUE_ERROR] Error message: {e}")
             logger.error(
                 f"[QUEUE_ERROR] Job params: country={entry.get('params', {}).get('country')}, "
                 f"revision={entry.get('params', {}).get('revision')}"
+            )
+            logger.error(f"[QUEUE_ERROR] Full stack trace below:")
+            logger.exception(
+                f"[QUEUE_ERROR] Failed to launch job {entry.get('id')}"
             )
 
         # Persist the post-launch state with another guarded write
