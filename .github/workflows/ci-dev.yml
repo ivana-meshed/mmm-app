@@ -217,7 +217,7 @@ jobs:
             echo "Checking if sf-private-key is already managed..."
             if ! terraform state show google_secret_manager_secret.sf_private_key >/dev/null 2>&1; then
               echo "Importing sf-private-key secret..."
-              terraform import google_secret_manager_secret.sf_private_key projects/$PROJECT_ID/secrets/sf-private-key || true
+              terraform import -lock-timeout=5m google_secret_manager_secret.sf_private_key projects/$PROJECT_ID/secrets/sf-private-key || true
             else
               echo "sf-private-key already managed in Terraform state—skipping import."
             fi
@@ -226,7 +226,7 @@ jobs:
               echo "Checking if sf-private-key version is already managed..."
               if ! terraform state show google_secret_manager_secret_version.sf_private_key_version >/dev/null 2>&1; then
                 echo "Importing sf-private-key version $VERSION_ID..."
-                terraform import google_secret_manager_secret_version.sf_private_key_version projects/$PROJECT_ID/secrets/sf-private-key/versions/$VERSION_ID || true
+                terraform import -lock-timeout=5m google_secret_manager_secret_version.sf_private_key_version projects/$PROJECT_ID/secrets/sf-private-key/versions/$VERSION_ID || true
               else
                 echo "sf-private-key version already managed in Terraform state—skipping import."
               fi
@@ -239,7 +239,7 @@ jobs:
             echo "Checking if sf-private-key-persistent is already managed..."
             if ! terraform state show google_secret_manager_secret.sf_private_key_persistent >/dev/null 2>&1; then
               echo "Importing sf-private-key-persistent secret..."
-              terraform import google_secret_manager_secret.sf_private_key_persistent projects/$PROJECT_ID/secrets/sf-private-key-persistent || true
+              terraform import -lock-timeout=5m google_secret_manager_secret.sf_private_key_persistent projects/$PROJECT_ID/secrets/sf-private-key-persistent || true
             else
               echo "sf-private-key-persistent already managed in Terraform state—skipping import."
             fi
@@ -251,7 +251,7 @@ jobs:
             echo "Checking if streamlit-auth-client-id is already managed..."
             if ! terraform state show google_secret_manager_secret.auth_client_id >/dev/null 2>&1; then
               echo "Importing streamlit-auth-client-id secret..."
-              terraform import google_secret_manager_secret.auth_client_id projects/$PROJECT_ID/secrets/streamlit-auth-client-id || true
+              terraform import -lock-timeout=5m google_secret_manager_secret.auth_client_id projects/$PROJECT_ID/secrets/streamlit-auth-client-id || true
             else
               echo "streamlit-auth-client-id already managed in Terraform state—skipping import."
             fi
@@ -260,7 +260,7 @@ jobs:
               echo "Checking if streamlit-auth-client-id version is already managed..."
               if ! terraform state show google_secret_manager_secret_version.auth_client_id_v >/dev/null 2>&1; then
                 echo "Importing streamlit-auth-client-id version $VERSION_ID..."
-                terraform import google_secret_manager_secret_version.auth_client_id_v projects/$PROJECT_ID/secrets/streamlit-auth-client-id/versions/$VERSION_ID || true
+                terraform import -lock-timeout=5m google_secret_manager_secret_version.auth_client_id_v projects/$PROJECT_ID/secrets/streamlit-auth-client-id/versions/$VERSION_ID || true
               else
                 echo "streamlit-auth-client-id version already managed in Terraform state—skipping import."
               fi
@@ -273,7 +273,7 @@ jobs:
             echo "Checking if streamlit-auth-client-secret is already managed..."
             if ! terraform state show google_secret_manager_secret.auth_client_secret >/dev/null 2>&1; then
               echo "Importing streamlit-auth-client-secret secret..."
-              terraform import google_secret_manager_secret.auth_client_secret projects/$PROJECT_ID/secrets/streamlit-auth-client-secret || true
+              terraform import -lock-timeout=5m google_secret_manager_secret.auth_client_secret projects/$PROJECT_ID/secrets/streamlit-auth-client-secret || true
             else
               echo "streamlit-auth-client-secret already managed in Terraform state—skipping import."
             fi
@@ -282,7 +282,7 @@ jobs:
               echo "Checking if streamlit-auth-client-secret version is already managed..."
               if ! terraform state show google_secret_manager_secret_version.auth_client_secret_v >/dev/null 2>&1; then
                 echo "Importing streamlit-auth-client-secret version $VERSION_ID..."
-                terraform import google_secret_manager_secret_version.auth_client_secret_v projects/$PROJECT_ID/secrets/streamlit-auth-client-secret/versions/$VERSION_ID || true
+                terraform import -lock-timeout=5m google_secret_manager_secret_version.auth_client_secret_v projects/$PROJECT_ID/secrets/streamlit-auth-client-secret/versions/$VERSION_ID || true
               else
                 echo "streamlit-auth-client-secret version already managed in Terraform state—skipping import."
               fi
@@ -295,7 +295,7 @@ jobs:
             echo "Checking if streamlit-auth-cookie-secret is already managed..."
             if ! terraform state show google_secret_manager_secret.auth_cookie_secret >/dev/null 2>&1; then
               echo "Importing streamlit-auth-cookie-secret secret..."
-              terraform import google_secret_manager_secret.auth_cookie_secret projects/$PROJECT_ID/secrets/streamlit-auth-cookie-secret || true
+              terraform import -lock-timeout=5m google_secret_manager_secret.auth_cookie_secret projects/$PROJECT_ID/secrets/streamlit-auth-cookie-secret || true
             else
               echo "streamlit-auth-cookie-secret already managed in Terraform state—skipping import."
             fi
@@ -304,7 +304,7 @@ jobs:
               echo "Checking if streamlit-auth-cookie-secret version is already managed..."
               if ! terraform state show google_secret_manager_secret_version.auth_cookie_secret_v >/dev/null 2>&1; then
                 echo "Importing streamlit-auth-cookie-secret version $VERSION_ID..."
-                terraform import google_secret_manager_secret_version.auth_cookie_secret_v projects/$PROJECT_ID/secrets/streamlit-auth-cookie-secret/versions/$VERSION_ID || true
+                terraform import -lock-timeout=5m google_secret_manager_secret_version.auth_cookie_secret_v projects/$PROJECT_ID/secrets/streamlit-auth-cookie-secret/versions/$VERSION_ID || true
               else
                 echo "streamlit-auth-cookie-secret version already managed in Terraform state—skipping import."
               fi
@@ -314,18 +314,18 @@ jobs:
           fi
           # Import SAs (existing)
           if ! terraform state show google_service_account.web_service_sa >/dev/null 2>&1; then
-            terraform import google_service_account.web_service_sa "projects/$PROJECT_ID/serviceAccounts/$WEB_RUNTIME_SA" || true
+            terraform import -lock-timeout=5m google_service_account.web_service_sa "projects/$PROJECT_ID/serviceAccounts/$WEB_RUNTIME_SA" || true
           else
             echo "web_service_sa already managed in Terraform state—skipping import."
           fi
           if ! terraform state show google_service_account.scheduler >/dev/null 2>&1; then
-            terraform import google_service_account.scheduler \
+            terraform import -lock-timeout=5m google_service_account.scheduler \
               "projects/$PROJECT_ID/serviceAccounts/robyn-queue-scheduler@$PROJECT_ID.iam.gserviceaccount.com" || true
           else
             echo "scheduler already managed in Terraform state—skipping import."
           fi
           if ! terraform state show google_service_account.training_job_sa >/dev/null 2>&1; then
-            terraform import google_service_account.training_job_sa "projects/$PROJECT_ID/serviceAccounts/$TRAINING_RUNTIME_SA" || true
+            terraform import -lock-timeout=5m google_service_account.training_job_sa "projects/$PROJECT_ID/serviceAccounts/$TRAINING_RUNTIME_SA" || true
           else
             echo "training_job_sa already managed in Terraform state—skipping import."
           fi
@@ -334,7 +334,7 @@ jobs:
             echo "Checking if training job is already managed..."
             if ! terraform state show google_cloud_run_v2_job.training_job >/dev/null 2>&1; then
               echo "Training job exists—importing..."
-              terraform import google_cloud_run_v2_job.training_job projects/$PROJECT_ID/locations/$REGION/jobs/${SERVICE_NAME}-training || true
+              terraform import -lock-timeout=5m google_cloud_run_v2_job.training_job projects/$PROJECT_ID/locations/$REGION/jobs/${SERVICE_NAME}-training || true
             else
               echo "Training job already managed in Terraform state—skipping import."
             fi
@@ -346,7 +346,7 @@ jobs:
             echo "Checking if web service is already managed..."
             if ! terraform state show google_cloud_run_service.web_service >/dev/null 2>&1; then
               echo "Web service exists—importing..."
-              terraform import google_cloud_run_service.web_service projects/$PROJECT_ID/locations/$REGION/services/${SERVICE_NAME}-web || true
+              terraform import -lock-timeout=5m google_cloud_run_service.web_service projects/$PROJECT_ID/locations/$REGION/services/${SERVICE_NAME}-web || true
             else
               echo "Web service already managed in Terraform state—skipping import."
             fi
@@ -394,12 +394,12 @@ jobs:
             echo "Re-importing resources to clear taints..."
             if gcloud run services describe "${SERVICE_NAME}-web" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
               terraform state rm google_cloud_run_service.web_service || true
-              terraform import google_cloud_run_service.web_service \
+              terraform import -lock-timeout=5m google_cloud_run_service.web_service \
                 "projects/$PROJECT_ID/locations/$REGION/services/${SERVICE_NAME}-web" || true
             fi
             if gcloud run jobs describe "${SERVICE_NAME}-training" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
               terraform state rm google_cloud_run_v2_job.training_job || true
-              terraform import google_cloud_run_v2_job.training_job \
+              terraform import -lock-timeout=5m google_cloud_run_v2_job.training_job \
                 "projects/$PROJECT_ID/locations/$REGION/jobs/${SERVICE_NAME}-training" || true
             fi
           fi
