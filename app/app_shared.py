@@ -1561,9 +1561,8 @@ def _require_sf_session():
 
 ## FE additions below
 
-
 # =========================
-# Date Parser
+# Date Parser (unchanged)
 # =========================
 def parse_date(df: pd.DataFrame, meta: dict) -> Tuple[pd.DataFrame, str]:
     wanted = str(meta.get("data", {}).get("date_field") or "DATE")
@@ -1590,7 +1589,6 @@ def parse_date(df: pd.DataFrame, meta: dict) -> Tuple[pd.DataFrame, str]:
 def data_root(country: str) -> str:
     return f"datasets/{country.lower().strip()}"
 
-
 def data_blob(country: str, ts: str) -> str:
     return f"{data_root(country)}/{ts}/raw.parquet"
 
@@ -1598,14 +1596,28 @@ def data_blob(country: str, ts: str) -> str:
 def data_latest_blob(country: str) -> str:
     return f"{data_root(country)}/latest/raw.parquet"
 
-
+# --- metadata paths (country + universal)
 def meta_blob(country: str, ts: str) -> str:
+    """Country-scoped metadata path."""
     return f"metadata/{country.lower().strip()}/{ts}/mapping.json"
 
+def meta_blob_universal(ts: str) -> str:
+    """Universal metadata path."""
+    return f"metadata/universal/{ts}/mapping.json"
 
 def meta_latest_blob(country: str) -> str:
+    """Country-scoped 'latest' pointer."""
     return f"metadata/{country.lower().strip()}/latest/mapping.json"
 
+def meta_latest_blob_universal() -> str:
+    """Universal 'latest' pointer."""
+    return "metadata/universal/latest/mapping.json"
+
+# --- small helper
+def _blob_exists(bucket: str, blob_path: str) -> bool:
+    client = storage.Client()
+    blob = client.bucket(bucket).blob(blob_path)
+    return blob.exists()
 
 @st.cache_data(show_spinner=False)
 def sorted_versions_newest_first(ts_list: List[str]) -> List[str]:
@@ -1646,19 +1658,106 @@ def list_data_versions(
 
 
 @st.cache_data(show_spinner=False)
-def list_meta_versions(
-    bucket: str, country: str, refresh_key: str = ""
-) -> List[str]:
+def list_meta_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
+    """
+    Returns labels for the UI in the form:
+      ["Latest", "Universal - <ts1>", "Universal - <ts2>", ..., "<CC> - <ts1>", "<CC> - <ts2>", ...]
+    Universal entries are listed first (newest → oldest), then country entries (newest → oldest).
+    """
     client = storage.Client()
-    prefix = f"metadata/{country.lower().strip()}/"
-    blobs = client.list_blobs(bucket, prefix=prefix)
-    ts = set()
-    for b in blobs:
+    cc = country.upper().strip()
+    country_prefix = f"metadata/{country.lower().strip()}/"
+    universal_prefix = "metadata/universal/"
+
+    ts_country, ts_universal = set(), set()
+
+    # country-scoped
+    for b in client.list_blobs(bucket, prefix=country_prefix):
         parts = b.name.split("/")
         if len(parts) >= 4 and parts[-1] == "mapping.json":
-            ts.add(parts[-2])
-    out = sorted_versions_newest_first(list(ts))
-    return ["Latest"] + out
+            ts_country.add(parts[-2])
+
+    # universal
+    for b in client.list_blobs(bucket, prefix=universal_prefix):
+        parts = b.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "mapping.json":
+            ts_universal.add(parts[-2])
+
+    country_sorted = sorted_versions_newest_first(list(ts_country))
+    universal_sorted = sorted_versions_newest_first(list(ts_universal))
+
+    labels = ["Latest"]
+    labels += [f"Universal - {t}" for t in universal_sorted]
+    labels += [f"{cc} - {t}" for t in country_sorted]
+    return labels
+
+def resolve_meta_blob_from_selection(bucket: str, country: str, meta_selection: str) -> str:
+    """
+    Convert a UI label selection into a real GCS blob path.
+    Accepts:
+      - "Latest"
+      - "Universal - <ts>"
+      - "<CC> - <ts>" (CC = current country code, case-insensitive)
+      - "<ts>" (bare)  → try country first, then universal
+    Never returns a label path; always a real "metadata/<scope>/<ts>/mapping.json".
+    Raises FileNotFoundError if nothing resolves.
+    """
+    s = (meta_selection or "").strip()
+    cc = country.upper().strip()
+
+    # Latest: prefer country latest if exists, else universal latest, else newest explicit across both
+    if s.lower() == "latest":
+        cand_country = meta_latest_blob(country)
+        cand_universal = meta_latest_blob_universal()
+        if _blob_exists(bucket, cand_country):
+            return cand_country
+        if _blob_exists(bucket, cand_universal):
+            return cand_universal
+
+        # fallback: pick newest explicit across both scopes using list_meta_versions order
+        versions = list_meta_versions(bucket, country)
+        explicit = [v for v in versions if v != "Latest"]
+        if not explicit:
+            raise FileNotFoundError("No metadata mapping.json found in country or universal scope.")
+        pick = explicit[0]  # list_meta_versions already orders universal first, newest first
+        if pick.startswith("Universal - "):
+            ts = pick.split(" - ", 1)[1].strip()
+            return meta_blob_universal(ts)
+        else:
+            ts = pick.split(" - ", 1)[1].strip()
+            return meta_blob(country, ts)
+
+    # Labeled selection?
+    if " - " in s:
+        scope_lbl, ts_lbl = s.split(" - ", 1)
+        scope_lbl = scope_lbl.strip()
+        ts_lbl = ts_lbl.strip()
+        if scope_lbl.lower() == "universal":
+            cand = meta_blob_universal(ts_lbl)
+            if _blob_exists(bucket, cand):
+                return cand
+            raise FileNotFoundError(f"Universal metadata not found: gs://{bucket}/{cand}")
+        if scope_lbl.upper() == cc:
+            cand = meta_blob(country, ts_lbl)
+            if _blob_exists(bucket, cand):
+                return cand
+            raise FileNotFoundError(f"Country metadata not found: gs://{bucket}/{cand}")
+        # Unknown label → treat as bare ts
+        s = ts_lbl
+
+    # Bare ts: try country then universal
+    ts_str = s
+    cand_country = meta_blob(country, ts_str)
+    if _blob_exists(bucket, cand_country):
+        return cand_country
+    cand_universal = meta_blob_universal(ts_str)
+    if _blob_exists(bucket, cand_universal):
+        return cand_universal
+
+    raise FileNotFoundError(
+        f"Metadata not found for ts='{ts_str}' in either "
+        f"gs://{bucket}/{cand_country} or gs://{bucket}/{cand_universal}"
+    )
 
 
 def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
@@ -1692,24 +1791,25 @@ def download_json_from_gcs_cached(bucket: str, blob_path: str) -> dict:
 
 
 @st.cache_data(show_spinner=False)
-def load_data_from_gcs(
-    bucket: str, country: str, data_ts: str, meta_ts: str
-) -> Tuple[pd.DataFrame, dict, str]:
-    db = (
-        data_latest_blob(country)
-        if data_ts == "Latest"
-        else data_blob(country, str(data_ts))
-    )
-    mb = (
-        meta_latest_blob(country)
-        if meta_ts == "Latest"
-        else meta_blob(country, str(meta_ts))
-    )
+def load_data_from_gcs(bucket: str, country: str, data_ts: str, meta_ts: str) -> Tuple[pd.DataFrame, dict, str]:
+    """
+    Data: unchanged (country only).
+    Meta: supports label formats:
+          - "Latest"
+          - "Universal - <ts>"
+          - "<CC> - <ts>"  (CC = current country code)
+          - "<ts>" (bare)  → try country first, then universal
+    """
+    # data
+    db = data_latest_blob(country) if data_ts == "Latest" else data_blob(country, str(data_ts))
     df = _download_parquet_from_gcs(bucket, db)
+
+    # meta (use the resolver so display labels never leak into paths)
+    mb = resolve_meta_blob_from_selection(bucket, country, str(meta_ts))
     meta = _download_json_from_gcs(bucket, mb)
+
     df, date_col = parse_date(df, meta)
     return df, meta, date_col
-
 
 # =========================
 # KPI tiles
@@ -2033,9 +2133,7 @@ def render_sidebar(meta: dict, df: pd.DataFrame, nice, goal_cols: List[str]):
             df["COUNTRY"].dropna().astype(str).unique().tolist()
         )
         default_countries = country_list or []
-        sel_countries = st.sidebar.multiselect(
-            "Country (multi-select)", country_list, default=default_countries
-        )
+        sel_countries = st.sidebar.multiselect("Country", country_list, default=default_countries)
     else:
         sel_countries = []
         st.sidebar.caption("Dataset has no COUNTRY column — showing all rows.")
