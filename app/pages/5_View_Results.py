@@ -441,12 +441,19 @@ def render_metrics_section(blobs, country, stamp):
 
 
 def render_forecast_allocator_section(blobs, country, stamp):
-    st.subheader("🗓️ Forecast allocations (next 3 months)")
-
-    # Prefer the index CSV for metadata + deterministic ordering
+    # Check if there are any forecast allocator plots before showing the section
     idx_blob = find_blob(blobs, "/forecast_allocator_index.csv") or find_blob(
         blobs, "forecast_allocator_index.csv"
     )
+    pred_plots = find_pred_allocator_plots(blobs)
+
+    # If no index and no plots, don't render the section at all
+    if not idx_blob and not pred_plots:
+        return
+
+    st.subheader("🗓️ Forecast allocations (next 3 months)")
+
+    # Prefer the index CSV for metadata + deterministic ordering
     if idx_blob:
         df_idx = read_csv_blob_to_df(idx_blob)
         if df_idx is not None and not df_idx.empty:
@@ -539,8 +546,7 @@ def render_forecast_allocator_section(blobs, country, stamp):
                     st.error(f"Could not display {image_fn}: {e}")
             return
 
-    # Fallback: no index → try to list pred plots directly
-    pred_plots = find_pred_allocator_plots(blobs)
+    # Fallback: no index → try to list pred plots directly (already checked above)
     if not pred_plots:
         st.info("No forecast allocator plots found.")
         return

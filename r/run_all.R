@@ -368,7 +368,28 @@ custom_hyperparameters <- cfg$custom_hyperparameters %||% list()
 
 # NEW: resample parameters
 resample_freq <- cfg$resample_freq %||% "none"
-resample_agg <- cfg$resample_agg %||% "sum"
+# Column aggregation strategies from metadata (passed as JSON string or dict)
+column_agg_strategies <- cfg$column_agg_strategies %||% list()
+
+# Parse column_agg_strategies if it's a JSON string
+if (is.character(column_agg_strategies) && nzchar(column_agg_strategies)) {
+    tryCatch(
+        {
+            column_agg_strategies <- jsonlite::fromJSON(column_agg_strategies)
+        },
+        error = function(e) {
+            message("Warning: Could not parse column_agg_strategies JSON: ", conditionMessage(e))
+            column_agg_strategies <- list()
+        }
+    )
+}
+
+message("→ Column aggregation strategies loaded: ", length(column_agg_strategies), " columns")
+if (length(column_agg_strategies) > 0) {
+    # Count aggregations by type
+    agg_counts <- table(unlist(column_agg_strategies))
+    message("   Aggregations by type: ", paste(names(agg_counts), "=", agg_counts, collapse = ", "))
+}
 
 # Helper function to parse comma-separated strings from config
 parse_csv_config <- function(x) {
@@ -376,14 +397,20 @@ parse_csv_config <- function(x) {
         return(character(0))
     }
     if (is.list(x) || (is.character(x) && length(x) > 1)) {
-        # Already a list/vector
-        return(as.character(x))
+        # Already a list/vector - filter out NA and empty strings
+        result <- as.character(x)
+        result <- result[!is.na(result) & nzchar(trimws(result))]
+        return(result)
     }
     if (is.character(x) && length(x) == 1) {
-        # Split comma-separated string
-        trimws(unlist(strsplit(x, ",")))
+        # Split comma-separated string and filter out empty/NA values
+        result <- trimws(unlist(strsplit(x, ",")))
+        result <- result[!is.na(result) & nzchar(result)]
+        return(result)
     } else {
-        as.character(x)
+        result <- as.character(x)
+        result <- result[!is.na(result) & nzchar(trimws(result))]
+        return(result)
     }
 }
 
@@ -499,6 +526,9 @@ if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
     ensure_gcs_auth()
     gcs_download(cfg$data_gcs_path, temp_data)
     df <- arrow::read_parquet(temp_data, as_data_frame = TRUE)
+    if (!is.data.frame(df) || nrow(df) == 0) {
+        stop("Failed to load data from parquet file: ", cfg$data_gcs_path)
+    }
     unlink(temp_data)
     message(sprintf("✅ Data loaded: %s rows, %s columns", format(nrow(df), big.mark = ","), ncol(df)))
 
@@ -622,7 +652,7 @@ if (anyDuplicated(df$date)) {
 
     df <- df %>%
         dplyr::group_by(date) %>%
-        dplyr::summarise(dplyr::across(!dplyr::all_of("date"), sum_or_first), .groups = "drop")
+        dplyr::summarise(dplyr::across(everything(), sum_or_first), .groups = "drop")
 
     message("   After deduplication: ", nrow(df), " rows")
     message("   Columns after deduplication: ", paste(head(names(df), 30), collapse = ", "), if (length(names(df)) > 30) "..." else "")
@@ -663,9 +693,9 @@ df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
 ## ---------- RESAMPLING ----------
 # Apply resampling if configured (Weekly or Monthly aggregation)
-message("→ Resampling configuration: freq=", resample_freq, ", agg=", resample_agg)
+message("→ Resampling configuration: freq=", resample_freq)
 if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
-    message("→ Applying resampling to data...")
+    message("→ Applying resampling to data with per-column aggregations from metadata...")
 
     # Log pre-resample state
     pre_resample_rows <- nrow(df)
@@ -679,19 +709,6 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
             numeric_cols <- names(df)[sapply(df, is.numeric)]
             non_numeric_cols <- setdiff(names(df), c(date_col, numeric_cols))
 
-            # Determine aggregation function with explicit handling of invalid types
-            agg_func <- switch(resample_agg,
-                "sum" = sum,
-                "mean" = mean,
-                "max" = max,
-                "min" = min,
-                {
-                    # Default case: unsupported aggregation type
-                    message("   ⚠️ WARNING: Unsupported aggregation type '", resample_agg, "', defaulting to 'sum'")
-                    sum
-                }
-            )
-
             # Create time period grouping based on frequency
             if (resample_freq == "W") {
                 # Weekly aggregation (week starts on Monday)
@@ -703,7 +720,7 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
                 df$resample_period <- floor_date(df$date, unit = "month")
             }
 
-            # Aggregate numeric columns
+            # Aggregate numeric columns using per-column strategies
             # Note: na.rm=TRUE removes missing values during aggregation. This is intentional
             # to handle gaps in data, but be aware that this silently removes NAs.
             # Count NAs before aggregation for logging
@@ -717,12 +734,48 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
                 }
             }
 
+            # Build per-column aggregation expressions
+            # For each numeric column, use the aggregation strategy from metadata or default to sum
+            agg_exprs <- list()
+            agg_summary <- list()
+
+            for (col in numeric_cols) {
+                # Get aggregation strategy from metadata, default to "sum"
+                agg_strategy <- column_agg_strategies[[col]] %||% "sum"
+
+                # Map aggregation strategy to R function
+                agg_func <- switch(agg_strategy,
+                    "sum" = sum,
+                    "mean" = mean,
+                    "max" = max,
+                    "min" = min,
+                    "auto" = first, # For categorical/flag columns, take first value
+                    {
+                        # Default case: unsupported aggregation type, default to sum
+                        message("   ⚠️ WARNING: Unsupported aggregation type '", agg_strategy, "' for column '", col, "', defaulting to 'sum'")
+                        sum
+                    }
+                )
+
+                # Create aggregation expression for this column
+                agg_exprs[[col]] <- quo(agg_func(!!sym(col), na.rm = TRUE))
+
+                # Track aggregation types for summary
+                agg_summary[[agg_strategy]] <- (agg_summary[[agg_strategy]] %||% 0) + 1
+            }
+
+            # Log aggregation summary
+            if (length(agg_summary) > 0) {
+                agg_summary_str <- paste(names(agg_summary), "=", agg_summary, collapse = ", ")
+                message("   Column aggregations: ", agg_summary_str)
+            } else {
+                message("   Using default 'sum' aggregation for all numeric columns")
+            }
+
+            # Apply aggregations using the dynamically built expressions
             df_resampled <- df %>%
                 group_by(resample_period) %>%
-                summarise(
-                    across(all_of(numeric_cols), ~ agg_func(.x, na.rm = TRUE)),
-                    .groups = "drop"
-                )
+                summarise(!!!agg_exprs, .groups = "drop")
 
             # Handle non-numeric columns (take first value in each period)
             if (length(non_numeric_cols) > 0) {
@@ -750,7 +803,6 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
             post_resample_date_range <- paste(min(df$date), "to", max(df$date))
             message("✅ Resampling complete:")
             message("   Post-resample: ", post_resample_rows, " rows, date range: ", post_resample_date_range)
-            message("   Aggregation: ", resample_agg, " applied to numeric columns")
             message(
                 "   Rows reduced from ", pre_resample_rows, " to ", post_resample_rows,
                 " (", round(100 * (1 - post_resample_rows / pre_resample_rows), 1), "% reduction)"
@@ -770,7 +822,6 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
                 "RESAMPLING ERROR",
                 paste0("When: ", Sys.time()),
                 paste0("Frequency: ", resample_freq),
-                paste0("Aggregation: ", resample_agg),
                 paste0("Message: ", conditionMessage(e)),
                 "",
                 "Stack trace:",
@@ -818,6 +869,121 @@ cat(
     "  adstock          :", adstock, "\n"
 )
 
+## ---------- DEFINE HYPERPARAMETER PRESETS FUNCTION ----------
+# Define this function before we use it
+get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
+    # Check if preset is "Custom" and custom_hyperparameters is provided
+    if (preset == "Custom" && length(custom_hyperparameters) > 0) {
+        # First check for variable-specific custom hyperparameters (new format)
+        var_alphas_key <- paste0(var_name, "_alphas")
+        if (!is.null(custom_hyperparameters[[var_alphas_key]])) {
+            # Variable-specific hyperparameters found
+            if (adstock_type == "geometric") {
+                return(list(
+                    alphas = custom_hyperparameters[[var_alphas_key]],
+                    gammas = custom_hyperparameters[[paste0(var_name, "_gammas")]] %||% c(0.6, 0.9),
+                    thetas = custom_hyperparameters[[paste0(var_name, "_thetas")]] %||% c(0.1, 0.4)
+                ))
+            } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
+                return(list(
+                    alphas = custom_hyperparameters[[var_alphas_key]],
+                    gammas = custom_hyperparameters[[paste0(var_name, "_gammas")]] %||% c(0.3, 1),
+                    shapes = custom_hyperparameters[[paste0(var_name, "_shapes")]] %||% c(0.5, 2.5),
+                    scales = custom_hyperparameters[[paste0(var_name, "_scales")]] %||% c(0.001, 0.15)
+                ))
+            }
+        }
+
+        # Fall back to global custom hyperparameters (old format for backward compatibility)
+        if (adstock_type == "geometric") {
+            return(list(
+                alphas = c(
+                    custom_hyperparameters$alphas_min %||% 1.0,
+                    custom_hyperparameters$alphas_max %||% 3.0
+                ),
+                gammas = c(
+                    custom_hyperparameters$gammas_min %||% 0.6,
+                    custom_hyperparameters$gammas_max %||% 0.9
+                ),
+                thetas = c(
+                    custom_hyperparameters$thetas_min %||% 0.1,
+                    custom_hyperparameters$thetas_max %||% 0.4
+                )
+            ))
+        } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
+            return(list(
+                alphas = c(
+                    custom_hyperparameters$alphas_min %||% 0.5,
+                    custom_hyperparameters$alphas_max %||% 3.0
+                ),
+                gammas = c(
+                    custom_hyperparameters$gammas_min %||% 0.3,
+                    custom_hyperparameters$gammas_max %||% 1.0
+                ),
+                shapes = c(
+                    custom_hyperparameters$shapes_min %||% 0.5,
+                    custom_hyperparameters$shapes_max %||% 2.5
+                ),
+                scales = c(
+                    custom_hyperparameters$scales_min %||% 0.001,
+                    custom_hyperparameters$scales_max %||% 0.15
+                )
+            ))
+        }
+    }
+
+    # Default ranges (for geometric adstock)
+    if (adstock_type == "geometric") {
+        if (preset == "Facebook recommend") {
+            # Facebook's recommended ranges for geometric
+            if (var_name == "ORGANIC_TRAFFIC") {
+                list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.3))
+            } else if (var_name == "TV_COST") {
+                list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0.3, 0.8))
+            } else {
+                list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.3))
+            }
+        } else if (preset == "Meshed recommend") {
+            # Meshed's customized ranges
+            if (var_name == "ORGANIC_TRAFFIC") {
+                list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
+            } else if (var_name == "TV_COST") {
+                list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
+            } else if (var_name == "PARTNERSHIP_COSTS") {
+                list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
+            } else {
+                list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
+            }
+        } else {
+            # Custom preset fallback - use Meshed defaults
+            if (var_name == "ORGANIC_TRAFFIC") {
+                list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
+            } else if (var_name == "TV_COST") {
+                list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
+            } else if (var_name == "PARTNERSHIP_COSTS") {
+                list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
+            } else {
+                list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
+            }
+        }
+    } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
+        # Weibull adstock ranges (from Robyn documentation)
+        # Weibull needs: alphas, gammas (for Hill saturation), shapes, scales (for Weibull adstock)
+        if (preset == "Facebook recommend") {
+            list(alphas = c(0.5, 3), gammas = c(0.3, 1), shapes = c(0.0001, 2), scales = c(0, 0.1))
+        } else if (preset == "Meshed recommend") {
+            # Meshed customizations for Weibull
+            list(alphas = c(0.5, 3), gammas = c(0.3, 1), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
+        } else {
+            # Custom fallback
+            list(alphas = c(0.5, 3), gammas = c(0.3, 1), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
+        }
+    } else {
+        # Fallback
+        list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.5))
+    }
+}
+
 # Log data dimensions before robyn_inputs
 message("→ Data ready for robyn_inputs:")
 message("   Rows: ", nrow(df))
@@ -832,6 +998,48 @@ if (length(missing_drivers) > 0) {
 } else {
     message("   ✅ All driver variables found in data")
 }
+
+# IMPORTANT: Rebuild hyperparameters based on ACTUAL filtered variables
+# This ensures hyperparameters match the variables after zero-variance filtering
+message("→ Rebuilding hyperparameters for filtered variables...")
+
+# According to Robyn documentation:
+# - Paid media & organic variables need hyperparameters (alphas + gammas/thetas or shapes/scales)
+# - Prophet variables DO NOT need hyperparameters (handled separately by Prophet)
+# - Context variables typically do NOT need hyperparameters (unless lagged effect)
+hyper_vars_filtered <- c(paid_media_vars, organic_vars)
+message("   Variables for hyperparameters: ", paste(hyper_vars_filtered, collapse = ", "))
+message("   Adstock type: ", adstock)
+
+# Rebuild hyperparameters list for the filtered variables
+hyperparameters_filtered <- list()
+for (v in hyper_vars_filtered) {
+    spec <- get_hyperparameter_ranges(hyperparameter_preset, adstock, v)
+    hyperparameters_filtered[[paste0(v, "_alphas")]] <- spec$alphas
+
+    if (adstock == "geometric") {
+        hyperparameters_filtered[[paste0(v, "_gammas")]] <- spec$gammas
+        hyperparameters_filtered[[paste0(v, "_thetas")]] <- spec$thetas
+    } else {
+        # Weibull uses alphas, gammas, shapes and scales (4 params per variable)
+        hyperparameters_filtered[[paste0(v, "_gammas")]] <- spec$gammas
+        hyperparameters_filtered[[paste0(v, "_shapes")]] <- spec$shapes
+        hyperparameters_filtered[[paste0(v, "_scales")]] <- spec$scales
+    }
+}
+hyperparameters_filtered[["train_size"]] <- train_size
+
+message("   Rebuilt hyperparameters: ", length(hyperparameters_filtered), " keys")
+message(
+    "   Expected: ", length(hyper_vars_filtered), " variables × ",
+    if (adstock == "geometric") "3" else "4", " params + train_size"
+)
+message(
+    "   Calculation: ", length(hyper_vars_filtered), " vars (",
+    length(paid_media_vars), " paid_media + ", length(organic_vars), " organic) × ",
+    if (adstock == "geometric") "3 (alphas,gammas,thetas)" else "4 (alphas,gammas,shapes,scales)",
+    " + 1 (train_size) = ", length(hyper_vars_filtered) * (if (adstock == "geometric") 3 else 4) + 1
+)
 
 # First: call robyn_inputs WITHOUT hyperparameters
 message("→ Calling robyn_inputs (preflight, without hyperparameters)...")
@@ -884,149 +1092,39 @@ message("Preflight InputCollect is NULL? ", is.null(InputCollect))
 log_ic_snapshot_files(InputCollect, dir_path, tag = "preflight")
 flush_and_ship_log("after preflight robyn_inputs")
 
-# Breadcrumb before hyper_vars access (does not change behavior)
-message("About to build hyper_vars; InputCollect NULL? ", is.null(InputCollect))
-if (!is.null(InputCollect)) {
-    message("paid_media_vars (preflight): ", paste(InputCollect$paid_media_vars, collapse = ", "))
-    message("organic_vars (preflight): ", paste(InputCollect$organic_vars, collapse = ", "))
+# Preflight is used only for validation - hyperparameters are already built
+# using the filtered variables before the preflight
+message("Preflight InputCollect is NULL? ", is.null(InputCollect))
+
+# Check if preflight robyn_inputs succeeded - if not, exit early
+if (is.null(InputCollect)) {
+    err_msg <- "Preflight robyn_inputs() returned NULL"
+    message("FATAL: ", err_msg)
+
+    writeLines(
+        jsonlite::toJSON(list(
+            state = "FAILED",
+            step = "preflight_robyn_inputs",
+            start_time = as.character(job_started),
+            end_time = as.character(Sys.time()),
+            error = err_msg
+        ), auto_unbox = TRUE, pretty = TRUE),
+        status_json
+    )
+    gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+    cleanup()
+    quit(status = 1)
 }
 
-# Now build hyperparameters based on what Robyn ACTUALLY has
-hyper_vars <- c(InputCollect$paid_media_vars, InputCollect$organic_vars)
-hyperparameters <- list()
+log_ic_snapshot_files(InputCollect, dir_path, tag = "preflight")
+message("paid_media_vars (preflight): ", paste(InputCollect$paid_media_vars, collapse = ", "))
+message("organic_vars (preflight): ", paste(InputCollect$organic_vars, collapse = ", "))
 
+# Use the filtered hyperparameters built earlier
+hyperparameters <- hyperparameters_filtered
 
-# Now attach to InputCollect
-## ---------- BUILD HYPERPARAMETERS FIRST ----------
-# BEFORE calling robyn_inputs(), build the hyperparameter list
-
-# Define hyperparameter presets
-get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
-    # Check if preset is "Custom" and custom_hyperparameters is provided
-    if (preset == "Custom" && length(custom_hyperparameters) > 0) {
-        # First check for variable-specific custom hyperparameters (new format)
-        var_alphas_key <- paste0(var_name, "_alphas")
-        if (!is.null(custom_hyperparameters[[var_alphas_key]])) {
-            # Variable-specific hyperparameters found
-            if (adstock_type == "geometric") {
-                return(list(
-                    alphas = custom_hyperparameters[[var_alphas_key]],
-                    gammas = custom_hyperparameters[[paste0(var_name, "_gammas")]] %||% c(0.6, 0.9),
-                    thetas = custom_hyperparameters[[paste0(var_name, "_thetas")]] %||% c(0.1, 0.4)
-                ))
-            } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
-                return(list(
-                    alphas = custom_hyperparameters[[var_alphas_key]],
-                    shapes = custom_hyperparameters[[paste0(var_name, "_shapes")]] %||% c(0.5, 2.5),
-                    scales = custom_hyperparameters[[paste0(var_name, "_scales")]] %||% c(0.001, 0.15)
-                ))
-            }
-        }
-        
-        # Fall back to global custom hyperparameters (old format for backward compatibility)
-        if (adstock_type == "geometric") {
-            return(list(
-                alphas = c(
-                    custom_hyperparameters$alphas_min %||% 1.0,
-                    custom_hyperparameters$alphas_max %||% 3.0
-                ),
-                gammas = c(
-                    custom_hyperparameters$gammas_min %||% 0.6,
-                    custom_hyperparameters$gammas_max %||% 0.9
-                ),
-                thetas = c(
-                    custom_hyperparameters$thetas_min %||% 0.1,
-                    custom_hyperparameters$thetas_max %||% 0.4
-                )
-            ))
-        } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
-            return(list(
-                alphas = c(
-                    custom_hyperparameters$alphas_min %||% 0.5,
-                    custom_hyperparameters$alphas_max %||% 3.0
-                ),
-                shapes = c(
-                    custom_hyperparameters$shapes_min %||% 0.5,
-                    custom_hyperparameters$shapes_max %||% 2.5
-                ),
-                scales = c(
-                    custom_hyperparameters$scales_min %||% 0.001,
-                    custom_hyperparameters$scales_max %||% 0.15
-                )
-            ))
-        }
-    }
-    
-    # Default ranges (for geometric adstock)
-    if (adstock_type == "geometric") {
-        if (preset == "Facebook recommend") {
-            # Facebook's recommended ranges for geometric
-            if (var_name == "ORGANIC_TRAFFIC") {
-                list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.3))
-            } else if (var_name == "TV_COST") {
-                list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0.3, 0.8))
-            } else {
-                list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.3))
-            }
-        } else if (preset == "Meshed recommend") {
-            # Meshed's customized ranges
-            if (var_name == "ORGANIC_TRAFFIC") {
-                list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
-            } else if (var_name == "TV_COST") {
-                list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
-            } else if (var_name == "PARTNERSHIP_COSTS") {
-                list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
-            } else {
-                list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
-            }
-        } else {
-            # Custom preset fallback - use Meshed defaults
-            if (var_name == "ORGANIC_TRAFFIC") {
-                list(alphas = c(0.5, 2.0), gammas = c(0.3, 0.7), thetas = c(0.9, 0.99))
-            } else if (var_name == "TV_COST") {
-                list(alphas = c(0.8, 2.2), gammas = c(0.6, 0.99), thetas = c(0.7, 0.95))
-            } else if (var_name == "PARTNERSHIP_COSTS") {
-                list(alphas = c(0.65, 2.25), gammas = c(0.45, 0.875), thetas = c(0.3, 0.625))
-            } else {
-                list(alphas = c(1.0, 3.0), gammas = c(0.6, 0.9), thetas = c(0.1, 0.4))
-            }
-        }
-    } else if (adstock_type %in% c("weibull_cdf", "weibull_pdf")) {
-        # Weibull adstock ranges (from Robyn documentation)
-        if (preset == "Facebook recommend") {
-            list(alphas = c(0.5, 3), shapes = c(0.0001, 2), scales = c(0, 0.1))
-        } else if (preset == "Meshed recommend") {
-            # Meshed customizations for Weibull
-            list(alphas = c(0.5, 3), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
-        } else {
-            # Custom fallback
-            list(alphas = c(0.5, 3), shapes = c(0.5, 2.5), scales = c(0.001, 0.15))
-        }
-    } else {
-        # Fallback
-        list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.5))
-    }
-}
-
-# Build hyperparameters using the preset
-hyper_vars <- c(InputCollect$paid_media_vars, InputCollect$organic_vars)
-hyperparameters <- list()
-
-for (v in hyper_vars) {
-    spec <- get_hyperparameter_ranges(hyperparameter_preset, adstock, v)
-    hyperparameters[[paste0(v, "_alphas")]] <- spec$alphas
-
-    if (adstock == "geometric") {
-        hyperparameters[[paste0(v, "_gammas")]] <- spec$gammas
-        hyperparameters[[paste0(v, "_thetas")]] <- spec$thetas
-    } else {
-        # Weibull uses shapes and scales instead of gammas and thetas
-        hyperparameters[[paste0(v, "_shapes")]] <- spec$shapes
-        hyperparameters[[paste0(v, "_scales")]] <- spec$scales
-    }
-}
-hyperparameters[["train_size"]] <- train_size
-
+# Hyperparameters were already built earlier using hyperparameters_filtered
+# Log them here for reference
 message("Pre-built hyperparameters (", hyperparameter_preset, " preset): ", length(hyperparameters), " keys")
 
 log_hyperparameters(hyperparameters, dir_path)

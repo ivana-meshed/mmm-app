@@ -186,10 +186,10 @@ def prepare_and_launch_job(params: dict) -> dict:
     gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
     timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
     gcs_prefix = f"robyn/{params['revision']}/{params['country']}/{timestamp}"
-    
+
     # Check if data already exists in GCS (Issue #4 GCS-based workflow)
     data_gcs_path_provided = params.get("data_gcs_path")
-    
+
     if data_gcs_path_provided:
         # GCS-based workflow: data already exists, no Snowflake query needed
         logger.info(f"Using existing data from GCS: {data_gcs_path_provided}")
@@ -224,8 +224,10 @@ def prepare_and_launch_job(params: dict) -> dict:
             # 3) Upload data
             with timed_step("Upload data to GCS", timings):
                 data_blob = f"training-data/{timestamp}/input_data.parquet"
-                data_gcs_path = upload_to_gcs(gcs_bucket, parquet_path, data_blob)
-                
+                data_gcs_path = upload_to_gcs(
+                    gcs_bucket, parquet_path, data_blob
+                )
+
             # Seed timings.csv (web-side steps) if not present
             if timings:
                 df_times = pd.DataFrame(timings)
@@ -241,6 +243,39 @@ def prepare_and_launch_job(params: dict) -> dict:
 
     # Optional annotations (batch: pass a gs:// in params)
     annotations_gcs_path = params.get("annotations_gcs_path") or None
+
+    # Load metadata to get column_agg_strategies for resampling
+    # This ensures queue jobs use per-column aggregations from metadata
+    if params.get("resample_freq", "none") != "none":
+        try:
+            country = params.get("country", "").lower()
+            # Try to load latest metadata for this country
+            client = storage.Client()
+            bucket = client.bucket(gcs_bucket)
+            metadata_blob_path = f"metadata/{country}/latest/mapping.json"
+            blob = bucket.blob(metadata_blob_path)
+
+            if blob.exists():
+                metadata = json.loads(blob.download_as_bytes())
+                column_agg_strategies = metadata.get("agg_strategies", {})
+                if column_agg_strategies:
+                    params["column_agg_strategies"] = column_agg_strategies
+                    logger.info(
+                        f"Loaded {len(column_agg_strategies)} column aggregation strategies from metadata for country {country}"
+                    )
+                else:
+                    logger.warning(
+                        f"No column_agg_strategies found in metadata for country {country}"
+                    )
+            else:
+                logger.warning(
+                    f"Metadata not found at {metadata_blob_path}, using default aggregations"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Could not load metadata for column aggregations: {e}"
+            )
+            # Continue without column_agg_strategies - R script will default to sum
 
     # 4) Create config (timestamped + latest)
     with tempfile.TemporaryDirectory() as td:
@@ -361,9 +396,10 @@ def _empty_job_history_df() -> pd.DataFrame:
     return pd.DataFrame(columns=cols)
 
 
+@st.fragment
 def render_jobs_job_history(key_prefix: str = "single") -> None:
     with st.expander("📚 Job History (from GCS)", expanded=False):
-        # Refresh control first (button triggers a rerun)
+        # Refresh control first (button triggers fragment rerun only)
         if st.button(
             "🔁 Refresh job_history", key=f"refresh_job_history_{key_prefix}"
         ):
@@ -371,7 +407,7 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
             st.session_state["job_history_nonce"] = (
                 st.session_state.get("job_history_nonce", 0) + 1
             )
-            st.rerun()
+            st.rerun(scope="fragment")
 
         try:
             df_job_history = read_job_history_from_gcs(
@@ -395,107 +431,160 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
 
 
 def render_job_status_monitor(key_prefix: str = "single") -> None:
-    """Status UI usable in both tabs, even without a session job."""
+    """Status UI showing all currently running jobs as a table."""
     st.subheader("📊 Job Status Monitor")
 
-    # Prefer the latest session execution if present; allow manual input always.
-    default_exec = (
-        (st.session_state.job_executions[-1]["execution_name"])
-        if st.session_state.get("job_executions")
-        else ""
-    )
-    exec_name = st.text_input(
-        "Execution resource name (paste one to check any run)",
-        value=default_exec,
-        key=f"exec_input_{key_prefix}",
-    )
-
-    if st.button("🔍 Check Status", key=f"check_status_{key_prefix}"):
-        if not exec_name:
-            st.warning("Paste an execution resource name to check.")
-        else:
-            try:
-                status_info = job_manager.get_execution_status(exec_name)
-                st.json(status_info)
-            except Exception as e:
-                st.error(f"Status check failed: {e}")
-
-    # Quick results/log viewer driven by the job_history (no execution name required)
-    with st.expander("📁 View Results (pick from job_history)", expanded=False):
-        try:
-            df_led = read_job_history_from_gcs(
-                st.session_state.get("gcs_bucket", GCS_BUCKET)
+    # Collect all running jobs from two sources:
+    # 1. Queue jobs (RUNNING/LAUNCHING status)
+    # 2. Single run jobs from session state
+    all_running_jobs = []
+    
+    # Add queue jobs
+    queue = st.session_state.get("job_queue", [])
+    for job in queue:
+        if job.get("status") in ("RUNNING", "LAUNCHING"):
+            all_running_jobs.append({
+                "Source": "Queue",
+                "Job ID": str(job.get("id", "?")),
+                "Status": job.get("status", "UNKNOWN"),
+                "Country": job.get("params", {}).get("country", "N/A"),
+                "Revision": job.get("params", {}).get("revision", "N/A"),
+                "Iterations": str(job.get("params", {}).get("iterations", "N/A")),
+                "Trials": str(job.get("params", {}).get("trials", "N/A")),
+                "GCS Prefix": job.get("gcs_prefix", ""),
+                "Execution Details": job.get("execution_name", ""),
+            })
+    
+    # Add single run jobs from session state
+    for exec_info in st.session_state.get("job_executions", []):
+        exec_name = exec_info.get("execution_name", "")
+        if exec_name:
+            all_running_jobs.append({
+                "Source": "Single",
+                "Job ID": f"single-{exec_info.get('timestamp', '?')}",
+                "Status": "RUNNING",
+                "Country": exec_info.get("country", "N/A"),
+                "Revision": exec_info.get("revision", "N/A"),
+                "Iterations": "N/A",
+                "Trials": "N/A",
+                "GCS Prefix": exec_info.get("gcs_prefix", ""),
+                "Execution Details": exec_name,
+            })
+    
+    # Refresh button
+    if st.button("🔄 Refresh Status", key=f"refresh_status_table_{key_prefix}"):
+        st.rerun()
+    
+    if not all_running_jobs:
+        st.info("ℹ️ No jobs currently running")
+    else:
+        # Create DataFrame for display
+        df = pd.DataFrame(all_running_jobs)
+        
+        # Display table with clickable links
+        st.write(f"**{len(all_running_jobs)} job(s) currently running:**")
+        
+        # Create display dataframe with proper URLs
+        display_df = df.copy()
+        
+        # Convert GCS Prefix to clickable URLs
+        gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
+        display_df["GCS Prefix"] = display_df["GCS Prefix"].apply(
+            lambda x: f"https://console.cloud.google.com/storage/browser/{gcs_bucket}/{x}" if x else ""
+        )
+        
+        # For execution details, create links to Cloud Run console
+        if PROJECT_ID and REGION:
+            display_df["Execution Details"] = display_df["Execution Details"].apply(
+                lambda x: f"https://console.cloud.google.com/run/jobs/executions/details/{REGION}/{x.split('/')[-1]}?project={PROJECT_ID}" if x and "/" in x else x
             )
-        except Exception as e:
-            st.error(f"Failed to read job_history: {e}")
-            df_led = None
+        
+        # Apply color coding to Status column using styled dataframe
+        def color_status(val):
+            if val == "RUNNING":
+                return 'background-color: #90EE90'  # Light green
+            elif val == "LAUNCHING":
+                return 'background-color: #FFD700'  # Gold
+            elif val == "SUCCEEDED":
+                return 'background-color: #32CD32'  # Lime green
+            elif val in ["FAILED", "ERROR"]:
+                return 'background-color: #FF6B6B'  # Light red
+            else:
+                return ''
+        
+        # Use st.dataframe with column configuration for clickable links
+        column_config = {
+            "GCS Prefix": st.column_config.LinkColumn(
+                "GCS Prefix",
+                help="Click to open GCS folder in new tab",
+                display_text="Open GCS ↗"
+            ),
+            "Execution Details": st.column_config.LinkColumn(
+                "Execution Details",
+                help="Click to open Cloud Run execution details in new tab",
+                display_text="Open Execution ↗"
+            ),
+        }
+        
+        st.dataframe(
+            display_df.style.applymap(color_status, subset=['Status']),
+            column_config=column_config,
+            use_container_width=True,
+            hide_index=True,
+        )
 
-        if df_led is None or df_led.empty or "gcs_prefix" not in df_led.columns:
-            st.info("No job_history entries with results yet.")
-        else:
-            df_led = df_led.copy()
+    # Manual job status checker (for any execution)
+    with st.expander("🔍 Manual Status Check", expanded=False):
+        st.write("Check status of any job by entering the execution ID:")
+        
+        # Build the prefix from environment variables
+        exec_prefix = ""
+        if PROJECT_ID and REGION and TRAINING_JOB_NAME:
+            exec_prefix = f"projects/{PROJECT_ID}/locations/{REGION}/jobs/{TRAINING_JOB_NAME}/executions/"
+        
+        # Get default execution ID (last part only)
+        default_exec_id = ""
+        if st.session_state.get("job_executions"):
+            last_exec = st.session_state.job_executions[-1]["execution_name"]
+            if "/executions/" in last_exec:
+                default_exec_id = last_exec.split("/executions/")[-1]
+        
+        exec_id = st.text_input(
+            "Execution ID (short form)",
+            value=default_exec_id,
+            key=f"exec_id_manual_{key_prefix}",
+            help="Enter just the execution ID (e.g., 'mmm-app-dev-training-abc123'). The full path will be constructed automatically."
+        )
+        
+        if exec_prefix:
+            st.caption(f"Full path: `{exec_prefix}{exec_id or '<execution-id>'}`")
 
-            # Build readable labels
-            def _label(r):
-                return f"[{r.get('state','?')}] {r.get('country','?')}/{r.get('revision','?')} · {r.get('gcs_prefix','—')}"
-
-            df_led["__label__"] = df_led.apply(_label, axis=1)
-            idx = st.selectbox(
-                "Pick a job",
-                options=list(df_led.index),
-                format_func=lambda i: df_led.loc[i, "__label__"],
-                key=f"job_history_pick_{key_prefix}",
-            )
-
-            # ...
-            row = df_led.loc[idx]
-
-            # Sanitize bucket and prefix values to avoid pd.NA truthiness
-            bucket_view = row.get(
-                "bucket", st.session_state.get("gcs_bucket", GCS_BUCKET)
-            )
-            if pd.isna(bucket_view) or not str(bucket_view).strip():
-                bucket_view = st.session_state.get("gcs_bucket", GCS_BUCKET)
-
-            gcs_prefix_view = row.get("gcs_prefix")
-            if pd.isna(gcs_prefix_view) or not str(gcs_prefix_view).strip():
-                gcs_prefix_view = None
-
-            if gcs_prefix_view is not None:
-                st.info(
-                    f"Results location: gs://{bucket_view}/{gcs_prefix_view}/"
-                )
+        if st.button("🔍 Check Status", key=f"check_status_manual_{key_prefix}"):
+            if not exec_id:
+                st.warning("Please enter an execution ID.")
+            else:
+                exec_name = exec_prefix + exec_id
                 try:
-                    client = storage.Client()
-                    bucket_obj = client.bucket(bucket_view)
-                    log_blob = bucket_obj.blob(
-                        f"{gcs_prefix_view}/robyn_console.log"
-                    )
-                    if log_blob.exists():
-                        log_bytes = log_blob.download_as_bytes()
-                        tail = (
-                            log_bytes[-2000:]
-                            if len(log_bytes) > 2000
-                            else log_bytes
-                        )
-                        st.text_area(
-                            "Training Log (last 2000 chars):",
-                            value=tail.decode("utf-8", errors="replace"),
-                            height=240,
-                            key=f"log_tail_{key_prefix}",
-                        )
-                        st.download_button(
-                            "Download full training log",
-                            data=log_bytes,
-                            file_name=f"robyn_training_{row.get('job_id','')}.log",
-                            mime="text/plain",
-                            key=f"dl_log_{key_prefix}",
-                        )
-                    else:
-                        st.info("Training log not yet available for this job.")
+                    with st.spinner("Fetching status..."):
+                        status_info = job_manager.get_execution_status(exec_name)
+                        st.json(status_info)
                 except Exception as e:
-                    st.warning(f"Could not fetch training log: {e}")
-            # ...
+                    error_msg = str(e)
+                    if "403" in error_msg or "Permission denied" in error_msg:
+                        st.error(
+                            "⚠️ Permission Error: The service account doesn't have "
+                            "permission to view job execution status."
+                        )
+                        st.info(
+                            "**To fix this issue:**\n"
+                            "1. The web service account needs Cloud Run permissions\n"
+                            "2. Ensure it has 'roles/run.developer' or 'roles/run.admin'\n"
+                            "3. Check the terraform configuration in infra/terraform/main.tf"
+                        )
+                        with st.expander("Technical Details"):
+                            st.code(error_msg)
+                    else:
+                        st.error(f"Status check failed: {e}")
 
 
 def set_queue_running(
@@ -553,47 +642,77 @@ def _make_normalizer(defaults: dict):
             return row.get(v) if (v in row and pd.notna(row[v])) else default  # type: ignore
 
         # Support backward compatibility: if start_date/end_date not present, use date_input
-        start_date_val = _g("start_date", defaults.get("start_date", "2024-01-01"))
-        end_date_val = _g("end_date", defaults.get("end_date", time.strftime("%Y-%m-%d")))
-        date_input_val = _g("date_input", defaults.get("date_input", time.strftime("%Y-%m-%d")))
-        
+        start_date_val = _g(
+            "start_date", defaults.get("start_date", "2024-01-01")
+        )
+        end_date_val = _g(
+            "end_date", defaults.get("end_date", time.strftime("%Y-%m-%d"))
+        )
+        date_input_val = _g(
+            "date_input", defaults.get("date_input", time.strftime("%Y-%m-%d"))
+        )
+
         # If neither start_date nor end_date are provided, fall back to date_input
         if not str(start_date_val).strip():
             start_date_val = "2024-01-01"
         if not str(end_date_val).strip():
             end_date_val = date_input_val
-        
+
         # Parse custom hyperparameters if hyperparameter_preset is "Custom"
-        hyperparameter_preset_val = str(_g("hyperparameter_preset", defaults.get("hyperparameter_preset", "Meshed recommend")))
+        hyperparameter_preset_val = str(
+            _g(
+                "hyperparameter_preset",
+                defaults.get("hyperparameter_preset", "Meshed recommend"),
+            )
+        )
         custom_hyperparameters = {}
-        
+
         if hyperparameter_preset_val == "Custom":
             # Check for per-variable hyperparameter columns (new format)
             # Pattern: {VAR_NAME}_alphas, {VAR_NAME}_gammas, {VAR_NAME}_thetas, etc.
             for col in row.index:
                 if pd.notna(row[col]) and str(row[col]).strip():
                     # Check if column matches per-variable pattern
-                    if col.endswith(('_alphas', '_gammas', '_thetas', '_shapes', '_scales')):
+                    if col.endswith(
+                        ("_alphas", "_gammas", "_thetas", "_shapes", "_scales")
+                    ):
                         try:
                             # Parse the value - could be a list string like "[1.0, 3.0]" or comma-separated "1.0, 3.0"
                             val_str = str(row[col]).strip()
-                            if val_str.startswith('[') and val_str.endswith(']'):
+                            if val_str.startswith("[") and val_str.endswith(
+                                "]"
+                            ):
                                 # JSON-like list format
                                 import json
-                                custom_hyperparameters[col] = json.loads(val_str)
-                            elif ',' in val_str:
+
+                                custom_hyperparameters[col] = json.loads(
+                                    val_str
+                                )
+                            elif "," in val_str:
                                 # Comma-separated format
-                                custom_hyperparameters[col] = [float(x.strip()) for x in val_str.split(',')]
+                                custom_hyperparameters[col] = [
+                                    float(x.strip()) for x in val_str.split(",")
+                                ]
                             else:
                                 # Single value or other format - skip
                                 pass
                         except (ValueError, TypeError, json.JSONDecodeError):
                             pass
-            
+
             # Backward compatibility: check for old global format (alphas_min/max, etc.)
             if not custom_hyperparameters:
-                for param in ["alphas_min", "alphas_max", "gammas_min", "gammas_max", "thetas_min", "thetas_max",
-                             "shapes_min", "shapes_max", "scales_min", "scales_max"]:
+                for param in [
+                    "alphas_min",
+                    "alphas_max",
+                    "gammas_min",
+                    "gammas_max",
+                    "thetas_min",
+                    "thetas_max",
+                    "shapes_min",
+                    "shapes_max",
+                    "scales_min",
+                    "scales_max",
+                ]:
                     val = _g(param, "")
                     if val and str(val).strip():
                         try:
@@ -604,7 +723,9 @@ def _make_normalizer(defaults: dict):
         result = {
             "country": str(_g("country", defaults["country"])),
             "revision": str(_g("revision", defaults["revision"])),
-            "date_input": str(date_input_val),  # Keep for backward compatibility
+            "date_input": str(
+                date_input_val
+            ),  # Keep for backward compatibility
             "start_date": str(start_date_val),  # New field
             "end_date": str(end_date_val),  # New field
             "iterations": (
@@ -628,7 +749,9 @@ def _make_normalizer(defaults: dict):
             "table": str(_g("table", "")),
             "query": str(_g("query", "")),
             "dep_var": str(_g("dep_var", defaults["dep_var"])),
-            "dep_var_type": str(_g("dep_var_type", defaults.get("dep_var_type", "revenue"))),  # New field
+            "dep_var_type": str(
+                _g("dep_var_type", defaults.get("dep_var_type", "revenue"))
+            ),  # New field
             "date_var": str(_g("date_var", defaults["date_var"])),
             "adstock": str(_g("adstock", defaults["adstock"])),
             "hyperparameter_preset": hyperparameter_preset_val,
@@ -640,11 +763,11 @@ def _make_normalizer(defaults: dict):
             ),
             "annotations_gcs_path": str(_g("annotations_gcs_path", "")),
         }
-        
+
         # Add custom_hyperparameters if present
         if custom_hyperparameters:
             result["custom_hyperparameters"] = custom_hyperparameters
-        
+
         return result
 
     return _normalize_row
@@ -756,6 +879,13 @@ def _queue_tick():
             launcher=prepare_and_launch_job,
         )
         logger.info(f"Queue tick result: {res}")
+        
+        # Log launch failures prominently
+        if not res.get("ok") and "launch failed" in res.get("message", ""):
+            logger.error(f"[QUEUE_ERROR] Launch failure detected in queue tick")
+            logger.error(f"[QUEUE_ERROR] Error message: {res.get('message')}")
+            logger.error(f"[QUEUE_ERROR] Queue: {st.session_state.queue_name}")
+            
     except Exception as e:
         logger.exception(f"Queue tick_once_headless failed: {e}")
         raise
@@ -833,13 +963,30 @@ def _queue_tick():
                 st.session_state.get("gcs_bucket", GCS_BUCKET),
             )
             moved += 1
-            logger.info(f"Moved job {entry.get('id')} to history with status {final_state}")
+            
+            # Enhanced logging for job history movement
+            error_msg = entry.get("message", "")
+            if final_state in ("ERROR", "FAILED", "CANCELLED"):
+                logger.error(
+                    f"[QUEUE_ERROR] Moved job {entry.get('id')} to history with status {final_state}"
+                )
+                logger.error(
+                    f"[QUEUE_ERROR] Job details - Country: {p.get('country')}, "
+                    f"Revision: {p.get('revision')}, GCS: {entry.get('gcs_prefix')}"
+                )
+                logger.error(f"[QUEUE_ERROR] Error message: {error_msg}")
+            else:
+                logger.info(
+                    f"Moved job {entry.get('id')} to history with status {final_state}"
+                )
         else:
             remaining.append(entry)
 
     if moved:
         # Persist trimmed queue
-        logger.info(f"Moved {moved} finished job(s) to history, {len(remaining)} remaining in queue")
+        logger.info(
+            f"Moved {moved} finished job(s) to history, {len(remaining)} remaining in queue"
+        )
         st.session_state.job_queue = remaining
         st.session_state.queue_saved_at = save_queue_to_gcs(
             st.session_state.queue_name,
@@ -850,6 +997,29 @@ def _queue_tick():
         st.session_state["job_history_nonce"] = (
             st.session_state.get("job_history_nonce", 0) + 1
         )
+        
+        # If jobs were completed and there are still PENDING jobs with no RUNNING jobs,
+        # immediately launch the next one
+        if remaining:
+            pending_count = sum(1 for e in remaining if e.get("status") == "PENDING")
+            running_count = sum(1 for e in remaining if e.get("status") in ("RUNNING", "LAUNCHING"))
+            
+            if pending_count > 0 and running_count == 0 and st.session_state.get("queue_running"):
+                logger.info(
+                    f"[QUEUE] Auto-launching next job: {pending_count} pending, {running_count} running"
+                )
+                # Recursively tick again to launch the next PENDING job
+                try:
+                    res = queue_tick_once_headless(
+                        st.session_state.queue_name,
+                        st.session_state.get("gcs_bucket", GCS_BUCKET),
+                        launcher=prepare_and_launch_job,
+                    )
+                    logger.info(f"[QUEUE] Auto-launch tick result: {res}")
+                    # Refresh queue again after the auto-launch
+                    maybe_refresh_queue_from_gcs(force=True)
+                except Exception as e:
+                    logger.exception(f"[QUEUE] Auto-launch tick failed: {e}")
 
 
 def _auto_refresh_and_tick(interval_ms: int = 2000):
@@ -858,23 +1028,45 @@ def _auto_refresh_and_tick(interval_ms: int = 2000):
     refresh so the page re-runs and we tick again.
     """
     if not st.session_state.get("queue_running"):
-        logger.debug("Queue not running, skipping auto-refresh")
+        logger.info("[QUEUE] Auto-refresh skipped: queue_running is False")
         return
 
-    # If there’s nothing left, stop auto-refreshing.
+    # Check queue before tick
     q = st.session_state.get("job_queue") or []
+    logger.info(f"[QUEUE] Auto-refresh: queue has {len(q)} entries before tick")
+    
     if len(q) == 0:
+        logger.info("[QUEUE] Auto-refresh stopping: queue is empty")
         st.session_state.queue_running = False
         return
+    
+    # Log job statuses before tick
+    pending_count = sum(1 for e in q if e.get("status") == "PENDING")
+    running_count = sum(1 for e in q if e.get("status") in ("RUNNING", "LAUNCHING"))
+    completed_count = sum(1 for e in q if e.get("status") in ("SUCCEEDED", "FAILED", "ERROR", "CANCELLED", "COMPLETED"))
+    logger.info(f"[QUEUE] Before tick: {pending_count} pending, {running_count} running, {completed_count} completed")
 
     # Advance the queue once
     _queue_tick()
+    
+    # Check queue after tick
+    q_after = st.session_state.get("job_queue") or []
+    logger.info(f"[QUEUE] After tick: queue has {len(q_after)} entries")
+    
+    # If queue is now empty, stop running
+    if len(q_after) == 0:
+        logger.info("[QUEUE] Queue is now empty after tick, stopping auto-refresh")
+        st.session_state.queue_running = False
+        return
 
     # Schedule a client-side refresh
+    logger.info(f"[QUEUE] Scheduling page refresh in {interval_ms}ms")
     st.markdown(
         f"<script>setTimeout(function(){{window.location.reload();}}, {interval_ms});</script>",
         unsafe_allow_html=True,
     )
+
+
 
 
 def _sorted_with_controls(

@@ -9,8 +9,10 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
 import pandas as pd
 import streamlit as st
+
 st.set_page_config(page_title="Experiment", page_icon="🧪", layout="wide")
 from app_shared import (
     GCS_BUCKET,
@@ -27,24 +29,28 @@ from app_shared import (
     upload_to_gcs,
 )
 from google.cloud import storage
+
 data_processor = get_data_processor()
 job_manager = get_job_manager()
 from app_split_helpers import *  # bring in all helper functions/constants
-
 
 require_login_and_domain()
 ensure_session_defaults()
 
 st.title("Experiment")
 
-# Check if we should show a message to switch to Queue tab (Issue #5)
+# Check if we should show a message to switch to Queue tab (Requirement 8)
 if st.session_state.get("switch_to_queue_tab", False):
-    st.success("✅ Configuration added to queue! Please switch to the **Queue** tab to monitor progress.")
+    st.success("✅ **Configuration added to queue successfully!**")
+    st.info(
+        "👉 **Please click on the 'Queue' tab above** to monitor your job's progress."
+    )
     st.session_state["switch_to_queue_tab"] = False
 
-tab_single, tab_queue = st.tabs(["Single run", "Queue"])
+tab_single, tab_queue, tab_status = st.tabs(["Single run", "Queue", "Status"])
 
 # Prefill fields from saved metadata if present (session_state keys should already be set by Map Your Data page).
+
 
 # Helper functions for GCS data loading
 def _list_country_versions(bucket: str, country: str) -> List[str]:
@@ -70,7 +76,11 @@ def _list_metadata_versions(bucket: str, country: str) -> List[str]:
     ts = set()
     for blob in blobs:
         parts = blob.name.split("/")
-        if len(parts) >= 4 and parts[-1] == "mapping.json" and parts[-2] != "latest":
+        if (
+            len(parts) >= 4
+            and parts[-1] == "mapping.json"
+            and parts[-2] != "latest"
+        ):
             ts.add(parts[-2])
     versions = sorted(ts, reverse=True)
     # Replace "latest" with "Latest" if present
@@ -145,16 +155,23 @@ with tab_single:
     st.subheader("Robyn configuration & training")
 
     # Data selection
-    with st.expander("Data selection", expanded=False):
+    with st.expander("📊 Data selection", expanded=False):
         # Show current loaded state (point 4 - UI representing actual state)
-        if "preview_df" in st.session_state and st.session_state["preview_df"] is not None:
+        if (
+            "preview_df" in st.session_state
+            and st.session_state["preview_df"] is not None
+        ):
             loaded_country = st.session_state.get("selected_country", "N/A")
             loaded_version = st.session_state.get("selected_version", "N/A")
-            loaded_metadata_source = st.session_state.get("selected_metadata", "N/A")
-            st.info(f"🔵 **Currently Loaded:** Data: {loaded_country.upper()} - {loaded_version} | Metadata: {loaded_metadata_source}")
+            loaded_metadata_source = st.session_state.get(
+                "selected_metadata", "N/A"
+            )
+            st.info(
+                f"🔵 **Currently Loaded:** Data: {loaded_country.upper()} - {loaded_version} | Metadata: {loaded_metadata_source}"
+            )
         else:
             st.warning("⚪ No data loaded yet")
-        
+
         # Country selection
         available_countries = ["fr", "de", "it", "es", "nl", "uk"]
         selected_country = st.selectbox(
@@ -220,7 +237,9 @@ with tab_single:
         )
 
         # Load data button with automatic preview
-        if st.button("Load selected data", type="primary", use_container_width=True):
+        if st.button(
+            "Load selected data", type="primary", use_container_width=True
+        ):
             tmp_path = None
             try:
                 with st.spinner("Loading data from GCS..."):
@@ -259,28 +278,50 @@ with tab_single:
                             f"✅ Loaded {len(df_prev)} rows, {len(df_prev.columns)} columns from **{selected_country.upper()}** - {selected_version}"
                         )
                         st.info(f"📋 Using metadata: **{selected_metadata}**")
-                        
+
                         # Display summary of loaded data (Issue #1 fix: show goals details)
-                        with st.expander("📊 Loaded Data Summary", expanded=False):
-                            st.write(f"**Data Source:** {selected_country.upper()} - {selected_version}")
-                            st.write(f"**Metadata Source:** {selected_metadata}")
+                        with st.expander(
+                            "📊 Loaded Data Summary", expanded=False
+                        ):
+                            st.write(
+                                f"**Data Source:** {selected_country.upper()} - {selected_version}"
+                            )
+                            st.write(
+                                f"**Metadata Source:** {selected_metadata}"
+                            )
                             st.write(f"**Rows:** {len(df_prev):,}")
                             st.write(f"**Columns:** {len(df_prev.columns)}")
-                            
+
                             if metadata:
                                 if "goals" in metadata and metadata["goals"]:
-                                    st.write(f"**Goals:** {len(metadata['goals'])} goal(s)")
+                                    st.write(
+                                        f"**Goals:** {len(metadata['goals'])} goal(s)"
+                                    )
                                     # Show detailed goals information
                                     for g in metadata["goals"]:
-                                        main_indicator = " (Main)" if g.get("main", False) else ""
-                                        st.write(f"  - {g['var']}: {g.get('type', 'N/A')} ({g.get('group', 'N/A')}){main_indicator}")
+                                        main_indicator = (
+                                            " (Main)"
+                                            if g.get("main", False)
+                                            else ""
+                                        )
+                                        st.write(
+                                            f"  - {g['var']}: {g.get('type', 'N/A')} ({g.get('group', 'N/A')}){main_indicator}"
+                                        )
                                 if "mapping" in metadata:
-                                    total_vars = sum(len(v) for v in metadata['mapping'].values() if isinstance(v, list))
-                                    st.write(f"**Mapped Variables:** {total_vars}")
+                                    total_vars = sum(
+                                        len(v)
+                                        for v in metadata["mapping"].values()
+                                        if isinstance(v, list)
+                                    )
+                                    st.write(
+                                        f"**Mapped Variables:** {total_vars}"
+                                    )
                                 if "data" in metadata:
-                                    data_info = metadata['data']
-                                    st.write(f"**Date Field:** {data_info.get('date_field', 'N/A')}")
-                                    
+                                    data_info = metadata["data"]
+                                    st.write(
+                                        f"**Date Field:** {data_info.get('date_field', 'N/A')}"
+                                    )
+
             except Exception as e:
                 st.error(f"Failed to load data: {e}")
             finally:
@@ -329,14 +370,18 @@ with tab_single:
                         blob_path = f"training-configs/saved/{current_country}/{selected_config}.json"
                         blob = client.bucket(gcs_bucket).blob(blob_path)
                         config_data = json.loads(blob.download_as_bytes())
-                        
+
                         # Store loaded configuration in session state
-                        st.session_state["loaded_training_config"] = config_data.get("config", {})
-                        
+                        st.session_state["loaded_training_config"] = (
+                            config_data.get("config", {})
+                        )
+
                         st.success(
                             f"✅ Configuration '{selected_config}' loaded successfully!"
                         )
-                        st.info("The configuration values are now applied to the form below.")
+                        st.info(
+                            "The configuration values are now applied to the form below."
+                        )
                         st.json(config_data, expanded=False)
                         st.rerun()
                     except Exception as e:
@@ -349,11 +394,11 @@ with tab_single:
             st.warning(f"Could not list configurations: {e}")
 
     # Robyn config (moved outside Data selection expander)
-    with st.expander("Robyn configuration", expanded=False):
+    with st.expander("⚙️ Robyn configuration", expanded=False):
         # Country auto-filled from Data Selection
         country = st.session_state.get("selected_country", "fr")
         st.info(f"**Country:** {country.upper()} (from Data Selection)")
-            
+
         # Check if there's a loaded configuration
         loaded_config = st.session_state.get("loaded_training_config", {})
 
@@ -363,21 +408,26 @@ with tab_single:
             "Production": {"iterations": 2000, "trials": 5},
             "Custom": {"iterations": 5000, "trials": 10},
         }
-        
+
         # Determine default preset based on loaded config
         default_preset_index = 0
         if loaded_config:
             loaded_iterations = loaded_config.get("iterations", 200)
             loaded_trials = loaded_config.get("trials", 3)
             # Check if loaded values match a preset
-            for idx, (preset_name, preset_vals) in enumerate(preset_options.items()):
-                if preset_vals["iterations"] == loaded_iterations and preset_vals["trials"] == loaded_trials:
+            for idx, (preset_name, preset_vals) in enumerate(
+                preset_options.items()
+            ):
+                if (
+                    preset_vals["iterations"] == loaded_iterations
+                    and preset_vals["trials"] == loaded_trials
+                ):
                     default_preset_index = idx
                     break
             else:
                 # Doesn't match any preset, default to Custom
                 default_preset_index = 2
-        
+
         preset_choice = st.selectbox(
             "Training preset",
             options=list(preset_options.keys()),
@@ -389,17 +439,23 @@ with tab_single:
             col1, col2 = st.columns(2)
             with col1:
                 iterations = st.number_input(
-                    "Iterations", 
-                    value=loaded_config.get("iterations", 5000) if loaded_config else 5000, 
-                    min_value=50, 
-                    step=100
+                    "Iterations",
+                    value=(
+                        loaded_config.get("iterations", 5000)
+                        if loaded_config
+                        else 5000
+                    ),
+                    min_value=50,
+                    step=100,
                 )
             with col2:
                 trials = st.number_input(
-                    "Trials", 
-                    value=loaded_config.get("trials", 10) if loaded_config else 10, 
-                    min_value=1, 
-                    step=1
+                    "Trials",
+                    value=(
+                        loaded_config.get("trials", 10) if loaded_config else 10
+                    ),
+                    min_value=1,
+                    step=1,
                 )
         else:
             iterations = preset_options[preset_choice]["iterations"]  # type: ignore
@@ -409,7 +465,11 @@ with tab_single:
         # Train size stays as is
         train_size = st.text_input(
             "Train size",
-            value=loaded_config.get("train_size", "0.7,0.9") if loaded_config else "0.7,0.9",
+            value=(
+                loaded_config.get("train_size", "0.7,0.9")
+                if loaded_config
+                else "0.7,0.9"
+            ),
             help="Comma-separated train/validation split ratios",
         )
 
@@ -429,10 +489,12 @@ with tab_single:
             default_start_date = datetime(2024, 1, 1).date()
             if loaded_config and "start_date" in loaded_config:
                 try:
-                    default_start_date = datetime.strptime(loaded_config["start_date"], "%Y-%m-%d").date()
+                    default_start_date = datetime.strptime(
+                        loaded_config["start_date"], "%Y-%m-%d"
+                    ).date()
                 except:
                     pass
-            
+
             start_data_date = st.date_input(
                 "Training start date",
                 value=default_start_date,
@@ -443,10 +505,12 @@ with tab_single:
             default_end_date = datetime.now().date()
             if loaded_config and "end_date" in loaded_config:
                 try:
-                    default_end_date = datetime.strptime(loaded_config["end_date"], "%Y-%m-%d").date()
+                    default_end_date = datetime.strptime(
+                        loaded_config["end_date"], "%Y-%m-%d"
+                    ).date()
                 except:
                     pass
-            
+
             end_data_date = st.date_input(
                 "Training end date",
                 value=default_end_date,
@@ -470,10 +534,12 @@ with tab_single:
                 default_dep_var_index = 0
                 if loaded_config and "dep_var" in loaded_config:
                     try:
-                        default_dep_var_index = goal_options.index(loaded_config["dep_var"])
+                        default_dep_var_index = goal_options.index(
+                            loaded_config["dep_var"]
+                        )
                     except (ValueError, KeyError):
                         pass
-                
+
                 dep_var = st.selectbox(
                     "Goal variable",
                     options=goal_options,
@@ -487,21 +553,41 @@ with tab_single:
                         for g in metadata["goals"]
                         if g["var"] == dep_var
                     ),
-                    loaded_config.get("dep_var_type", "revenue") if loaded_config else "revenue",
+                    (
+                        loaded_config.get("dep_var_type", "revenue")
+                        if loaded_config
+                        else "revenue"
+                    ),
                 )
             else:
                 dep_var = st.text_input(
-                    "Goal variable", 
-                    value=loaded_config.get("dep_var", "UPLOAD_VALUE") if loaded_config else "UPLOAD_VALUE"
+                    "Goal variable",
+                    value=(
+                        loaded_config.get("dep_var", "UPLOAD_VALUE")
+                        if loaded_config
+                        else "UPLOAD_VALUE"
+                    ),
                 )
-                dep_var_type = loaded_config.get("dep_var_type", "revenue") if loaded_config else "revenue"
+                dep_var_type = (
+                    loaded_config.get("dep_var_type", "revenue")
+                    if loaded_config
+                    else "revenue"
+                )
         else:
             dep_var = st.text_input(
                 "Goal variable",
-                value=loaded_config.get("dep_var", "UPLOAD_VALUE") if loaded_config else "UPLOAD_VALUE",
+                value=(
+                    loaded_config.get("dep_var", "UPLOAD_VALUE")
+                    if loaded_config
+                    else "UPLOAD_VALUE"
+                ),
                 help="Dependent variable column in your data",
             )
-            dep_var_type = loaded_config.get("dep_var_type", "revenue") if loaded_config else "revenue"
+            dep_var_type = (
+                loaded_config.get("dep_var_type", "revenue")
+                if loaded_config
+                else "revenue"
+            )
 
         # Goals type - display and allow override
         dep_var_type = st.selectbox(
@@ -514,7 +600,11 @@ with tab_single:
         # Date variable
         date_var = st.text_input(
             "date_var",
-            value=loaded_config.get("date_var", "date") if loaded_config else "date",
+            value=(
+                loaded_config.get("date_var", "date")
+                if loaded_config
+                else "date"
+            ),
             help="Date column in your data (e.g., date)",
         )
 
@@ -523,10 +613,12 @@ with tab_single:
         default_adstock_index = 0
         if loaded_config and "adstock" in loaded_config:
             try:
-                default_adstock_index = adstock_options.index(loaded_config["adstock"])
+                default_adstock_index = adstock_options.index(
+                    loaded_config["adstock"]
+                )
             except (ValueError, KeyError):
                 pass
-        
+
         adstock = st.selectbox(
             "adstock",
             options=adstock_options,
@@ -536,14 +628,20 @@ with tab_single:
 
         # Hyperparameters - conditional on adstock
         st.write("**Hyperparameters**")
-        hyperparameter_options = ["Facebook recommend", "Meshed recommend", "Custom"]
+        hyperparameter_options = [
+            "Facebook recommend",
+            "Meshed recommend",
+            "Custom",
+        ]
         default_hyperparameter_index = 1
         if loaded_config and "hyperparameter_preset" in loaded_config:
             try:
-                default_hyperparameter_index = hyperparameter_options.index(loaded_config["hyperparameter_preset"])
+                default_hyperparameter_index = hyperparameter_options.index(
+                    loaded_config["hyperparameter_preset"]
+                )
             except (ValueError, KeyError):
                 pass
-        
+
         hyperparameter_preset = st.selectbox(
             "Hyperparameter preset",
             options=hyperparameter_options,
@@ -554,24 +652,25 @@ with tab_single:
         # Store the hyperparameter choice for later use
         st.session_state["hyperparameter_preset"] = hyperparameter_preset
         st.session_state["adstock_choice"] = adstock
-        
+
         # Show info message when Custom is selected
         if hyperparameter_preset == "Custom":
-            st.info("📌 **Custom Hyperparameters Selected**: Scroll down to the **Variable mapping** section below to configure per-variable hyperparameter ranges for each paid media and organic variable.")
+            st.info(
+                "📌 **Custom Hyperparameters Selected**: Scroll down to the **Variable mapping** section below to configure per-variable hyperparameter ranges for each paid media and organic variable."
+            )
 
         # Custom hyperparameters will be collected later after variables are selected
         # We need to know which variables are selected before showing per-variable hyperparameters
         custom_hyperparameters = {}
 
         # NEW: optional resampling
-        c_rs1, c_rs2 = st.columns([1, 1])
-        resample_freq_label = c_rs1.selectbox(
+        resample_freq_label = st.selectbox(
             "Resample input data (optional)",
             ["None", "Weekly (W)", "Monthly (M)"],
             index=0,
-            help="Aggregates the input before training.",
+            help="Aggregates the input before training. Column aggregations from metadata will be used.",
         )
-        
+
         # Determine default resample freq from loaded config
         resample_freq_map = {
             "none": "None",
@@ -580,40 +679,40 @@ with tab_single:
         }
         default_resample_freq = "None"
         if loaded_config and "resample_freq" in loaded_config:
-            default_resample_freq = resample_freq_map.get(loaded_config["resample_freq"], "None")
-        
+            default_resample_freq = resample_freq_map.get(
+                loaded_config["resample_freq"], "None"
+            )
+
         resample_freq = {
             "None": "none",
             "Weekly (W)": "W",
             "Monthly (M)": "M",
         }.get(resample_freq_label or default_resample_freq, "none")
 
-        # Determine default resample agg from loaded config
-        resample_agg_map = {
-            "sum": "sum",
-            "mean": "avg (mean)",
-            "max": "max",
-            "min": "min",
-        }
-        default_resample_agg = "sum"
-        if loaded_config and "resample_agg" in loaded_config:
-            default_resample_agg = resample_agg_map.get(loaded_config["resample_agg"], "sum")
-        
-        resample_agg_label = c_rs2.selectbox(
-            "Aggregation for metrics (when resampling)",
-            ["sum", "avg (mean)", "max", "min"],
-            index=["sum", "avg (mean)", "max", "min"].index(default_resample_agg) if default_resample_agg in ["sum", "avg (mean)", "max", "min"] else 0,
-            help="Applied to numeric columns during resample.",
-        )
-        resample_agg = {
-            "sum": "sum",
-            "avg (mean)": "mean",
-            "max": "max",
-            "min": "min",
-        }.get(resample_agg_label or "sum", "sum")
+        # Get column aggregations from metadata
+        # These will be passed to R for per-column resampling
+        column_agg_strategies = {}
+        if metadata and "agg_strategies" in metadata:
+            column_agg_strategies = metadata["agg_strategies"]
+
+        # Display info about column aggregations if resampling is enabled
+        if resample_freq != "none" and column_agg_strategies:
+            # Count aggregations by type
+            agg_counts = {}
+            for agg in column_agg_strategies.values():
+                agg_counts[agg] = agg_counts.get(agg, 0) + 1
+
+            agg_summary = ", ".join(
+                [f"{count} {agg}" for agg, count in sorted(agg_counts.items())]
+            )
+            st.info(f"ℹ️ Using column aggregations from metadata: {agg_summary}")
+        elif resample_freq != "none" and not column_agg_strategies:
+            st.warning(
+                "⚠️ No column aggregations found in metadata. Default 'sum' will be used for all numeric columns."
+            )
 
     # Variables (moved outside Data selection expander)
-    with st.expander("Variable mapping", expanded=False):
+    with st.expander("🗺️ Variable mapping", expanded=False):
         # Get available columns from loaded data
         preview_df = st.session_state.get("preview_df")
         if preview_df is not None and not preview_df.empty:
@@ -712,16 +811,16 @@ with tab_single:
         # Merge columns from preview data and metadata
         # Include all columns from metadata even if not in preview (e.g., CUSTOM columns)
         all_columns_set = set(all_columns) if all_columns else set()
-        
+
         # Add all columns from metadata to the available columns
         if metadata and "mapping" in metadata:
             for cat_vars in metadata["mapping"].values():
                 if isinstance(cat_vars, list):
                     all_columns_set.update(cat_vars)
-        
+
         # Convert back to list
         all_columns = list(all_columns_set)
-        
+
         # Note: We don't filter default_values by all_columns anymore
         # because metadata may contain CUSTOM columns not yet in preview data
 
@@ -753,23 +852,29 @@ with tab_single:
         # Get all paid_media_spends from metadata (including CUSTOM columns)
         # Don't filter by all_columns since CUSTOM columns may not be in preview yet
         available_spends = default_values["paid_media_spends"]
-        
+
         # Determine default selections from loaded config
         default_paid_media_spends = available_spends  # All selected by default
         if loaded_config and "paid_media_spends" in loaded_config:
             # Parse loaded config (could be comma-separated string or list)
             loaded_spends = loaded_config["paid_media_spends"]
             if isinstance(loaded_spends, str):
-                loaded_spends = [s.strip() for s in loaded_spends.split(",") if s.strip()]
+                loaded_spends = [
+                    s.strip() for s in loaded_spends.split(",") if s.strip()
+                ]
             # Only include loaded spends that are in available_spends
-            default_paid_media_spends = [s for s in loaded_spends if s in available_spends]
-            
+            default_paid_media_spends = [
+                s for s in loaded_spends if s in available_spends
+            ]
+
             # Initialize spend_var_mapping from loaded config (Issue #2 fix)
             if "paid_media_vars" in loaded_config:
                 loaded_vars = loaded_config["paid_media_vars"]
                 if isinstance(loaded_vars, str):
-                    loaded_vars = [s.strip() for s in loaded_vars.split(",") if s.strip()]
-                
+                    loaded_vars = [
+                        s.strip() for s in loaded_vars.split(",") if s.strip()
+                    ]
+
                 # Build mapping: for each spend, find the corresponding var from loaded_vars
                 if metadata and "paid_media_mapping" in metadata:
                     paid_media_mapping = metadata["paid_media_mapping"]
@@ -780,7 +885,9 @@ with tab_single:
                         matched = False
                         for var in loaded_vars:
                             if var in possible_vars:
-                                st.session_state["spend_var_mapping"][spend] = var
+                                st.session_state["spend_var_mapping"][
+                                    spend
+                                ] = var
                                 matched = True
                                 break
                         # If no match in possible_vars, check if the spend itself is in loaded_vars
@@ -794,11 +901,15 @@ with tab_single:
                     # Fallback: try to match by index
                     for i, spend in enumerate(loaded_spends):
                         if i < len(loaded_vars):
-                            st.session_state["spend_var_mapping"][spend] = loaded_vars[i]
-        
+                            st.session_state["spend_var_mapping"][spend] = (
+                                loaded_vars[i]
+                            )
+
         # Filter defaults to only include items that exist in available_spends
         # This prevents StreamlitAPIException when defaults aren't in options
-        default_paid_media_spends = [s for s in default_paid_media_spends if s in available_spends]
+        default_paid_media_spends = [
+            s for s in default_paid_media_spends if s in available_spends
+        ]
 
         # Display paid_media_spends first (all selected by default)
         st.markdown("**Paid Media Configuration**")
@@ -832,12 +943,14 @@ with tab_single:
 
                 # Special handling for CUSTOM columns
                 is_custom_spend = "_CUSTOM" in spend
-                
+
                 # Find all paid_media_vars with same channel and subchannel
                 if is_custom_spend:
                     # For CUSTOM spends, match other CUSTOM vars with same prefix
                     # E.g., GA_SMALL_COST_CUSTOM matches GA_SMALL_*_CUSTOM
-                    base_pattern = spend.replace("_COST_CUSTOM", "").replace("_COSTS_CUSTOM", "")
+                    base_pattern = spend.replace("_COST_CUSTOM", "").replace(
+                        "_COSTS_CUSTOM", ""
+                    )
                     matching_vars = [
                         v
                         for v in default_values["paid_media_vars"]
@@ -867,13 +980,8 @@ with tab_single:
                 ) or (matching_vars[0] if matching_vars else spend)
 
                 # Ensure default_var is in the options
-                if (
-                    default_var not in matching_vars
-                    and default_var != spend
-                ):
-                    default_var = (
-                        matching_vars[0] if matching_vars else spend
-                    )
+                if default_var not in matching_vars and default_var != spend:
+                    default_var = matching_vars[0] if matching_vars else spend
 
                 # Add the spend itself as an option
                 var_options = matching_vars + [spend]
@@ -912,12 +1020,16 @@ with tab_single:
         if loaded_config and "context_vars" in loaded_config:
             loaded_context = loaded_config["context_vars"]
             if isinstance(loaded_context, str):
-                loaded_context = [s.strip() for s in loaded_context.split(",") if s.strip()]
+                loaded_context = [
+                    s.strip() for s in loaded_context.split(",") if s.strip()
+                ]
             default_context_vars = loaded_context
-        
+
         # Filter defaults to only include items that exist in all_columns
-        default_context_vars = [v for v in default_context_vars if v in all_columns]
-        
+        default_context_vars = [
+            v for v in default_context_vars if v in all_columns
+        ]
+
         context_vars_list = st.multiselect(
             "context_vars",
             options=all_columns,
@@ -932,23 +1044,26 @@ with tab_single:
         if loaded_config and "factor_vars" in loaded_config:
             loaded_factor = loaded_config["factor_vars"]
             if isinstance(loaded_factor, str):
-                loaded_factor = [s.strip() for s in loaded_factor.split(",") if s.strip()]
+                loaded_factor = [
+                    s.strip() for s in loaded_factor.split(",") if s.strip()
+                ]
             default_factor_vars = loaded_factor
-        
+
         # Filter defaults to only include items that exist in all_columns
-        default_factor_vars = [v for v in default_factor_vars if v in all_columns]
-        
+        default_factor_vars = [
+            v for v in default_factor_vars if v in all_columns
+        ]
+
         factor_vars_list = st.multiselect(
             "factor_vars",
             options=all_columns,
             default=default_factor_vars,
             help="Select factor/categorical variables",
         )
-        
+
         # Auto-add factor_vars to context_vars (requirement 6)
         if factor_vars_list:
             context_vars_list = list(set(context_vars_list + factor_vars_list))
-
 
         # Organic vars - multiselect
         st.markdown("**Organic/Baseline Variables**")
@@ -957,12 +1072,16 @@ with tab_single:
         if loaded_config and "organic_vars" in loaded_config:
             loaded_organic = loaded_config["organic_vars"]
             if isinstance(loaded_organic, str):
-                loaded_organic = [s.strip() for s in loaded_organic.split(",") if s.strip()]
+                loaded_organic = [
+                    s.strip() for s in loaded_organic.split(",") if s.strip()
+                ]
             default_organic_vars = loaded_organic
-        
+
         # Filter defaults to only include items that exist in all_columns
-        default_organic_vars = [v for v in default_organic_vars if v in all_columns]
-        
+        default_organic_vars = [
+            v for v in default_organic_vars if v in all_columns
+        ]
+
         organic_vars_list = st.multiselect(
             "organic_vars",
             options=all_columns,
@@ -974,175 +1093,255 @@ with tab_single:
         if hyperparameter_preset == "Custom":
             st.markdown("---")
             st.markdown("### 🎛️ Custom Hyperparameters per Variable")
-            st.info("📝 **Per-Variable Hyperparameters**: Define custom ranges for each paid media and organic variable. Values are prefilled with Meshed recommend defaults.")
-            
+            st.info(
+                "📝 **Per-Variable Hyperparameters**: Define custom ranges for each paid media and organic variable. Values are prefilled with Meshed recommend defaults."
+            )
+
             # Helper function to get variable-specific defaults based on preset
             def get_var_defaults(var_name, adstock_type):
                 """Get default hyperparameter ranges for a variable"""
                 # Check if loaded config has this variable's hyperparameters
                 if loaded_config and "custom_hyperparameters" in loaded_config:
-                    var_alphas = loaded_config["custom_hyperparameters"].get(f"{var_name}_alphas")
+                    var_alphas = loaded_config["custom_hyperparameters"].get(
+                        f"{var_name}_alphas"
+                    )
                     if var_alphas:
                         # Loaded from config
                         if adstock_type == "geometric":
                             return {
                                 "alphas": var_alphas,
-                                "gammas": loaded_config["custom_hyperparameters"].get(f"{var_name}_gammas", [0.6, 0.9]),
-                                "thetas": loaded_config["custom_hyperparameters"].get(f"{var_name}_thetas", [0.1, 0.4])
+                                "gammas": loaded_config[
+                                    "custom_hyperparameters"
+                                ].get(f"{var_name}_gammas", [0.6, 0.9]),
+                                "thetas": loaded_config[
+                                    "custom_hyperparameters"
+                                ].get(f"{var_name}_thetas", [0.1, 0.4]),
                             }
                         else:
                             return {
                                 "alphas": var_alphas,
-                                "shapes": loaded_config["custom_hyperparameters"].get(f"{var_name}_shapes", [0.5, 2.5]),
-                                "scales": loaded_config["custom_hyperparameters"].get(f"{var_name}_scales", [0.001, 0.15])
+                                "shapes": loaded_config[
+                                    "custom_hyperparameters"
+                                ].get(f"{var_name}_shapes", [0.5, 2.5]),
+                                "scales": loaded_config[
+                                    "custom_hyperparameters"
+                                ].get(f"{var_name}_scales", [0.001, 0.15]),
                             }
-                
+
                 # Use Meshed recommend defaults
                 if adstock_type == "geometric":
                     if "ORGANIC" in var_name.upper():
-                        return {"alphas": [0.5, 2.0], "gammas": [0.3, 0.7], "thetas": [0.9, 0.99]}
+                        return {
+                            "alphas": [0.5, 2.0],
+                            "gammas": [0.3, 0.7],
+                            "thetas": [0.9, 0.99],
+                        }
                     elif "TV" in var_name.upper():
-                        return {"alphas": [0.8, 2.2], "gammas": [0.6, 0.99], "thetas": [0.7, 0.95]}
+                        return {
+                            "alphas": [0.8, 2.2],
+                            "gammas": [0.6, 0.99],
+                            "thetas": [0.7, 0.95],
+                        }
                     elif "PARTNERSHIP" in var_name.upper():
-                        return {"alphas": [0.65, 2.25], "gammas": [0.45, 0.875], "thetas": [0.3, 0.625]}
+                        return {
+                            "alphas": [0.65, 2.25],
+                            "gammas": [0.45, 0.875],
+                            "thetas": [0.3, 0.625],
+                        }
                     else:
-                        return {"alphas": [1.0, 3.0], "gammas": [0.6, 0.9], "thetas": [0.1, 0.4]}
+                        return {
+                            "alphas": [1.0, 3.0],
+                            "gammas": [0.6, 0.9],
+                            "thetas": [0.1, 0.4],
+                        }
                 else:  # weibull
-                    return {"alphas": [0.5, 3.0], "shapes": [0.5, 2.5], "scales": [0.001, 0.15]}
-            
+                    return {
+                        "alphas": [0.5, 3.0],
+                        "shapes": [0.5, 2.5],
+                        "scales": [0.001, 0.15],
+                    }
+
             # Combine all variables that need hyperparameters
             all_hyper_vars = paid_media_vars_list + organic_vars_list
-            
+
             if all_hyper_vars:
-                st.caption(f"Configuring hyperparameters for {len(all_hyper_vars)} variable(s)")
-                
+                st.caption(
+                    f"Configuring hyperparameters for {len(all_hyper_vars)} variable(s)"
+                )
+
                 # Use expander for each variable to keep UI manageable
                 for idx, var in enumerate(all_hyper_vars):
-                    with st.expander(f"**{var}**", expanded=False):
+                    with st.expander(f"📈 **{var}**", expanded=False):
                         defaults = get_var_defaults(var, adstock)
-                        
+
                         if adstock == "geometric":
                             col1, col2 = st.columns(2)
                             with col1:
                                 alphas_min = st.number_input(
-                                    "Alpha Min", 
+                                    "Alpha Min",
                                     value=float(defaults["alphas"][0]),
-                                    min_value=0.1, max_value=10.0, step=0.1,
+                                    min_value=0.1,
+                                    max_value=10.0,
+                                    step=0.1,
                                     key=f"custom_hyper_{idx}_{var}_alphas_min",
-                                    help=f"Minimum alpha for {var}"
+                                    help=f"Minimum alpha for {var}",
                                 )
                             with col2:
                                 alphas_max = st.number_input(
                                     "Alpha Max",
                                     value=float(defaults["alphas"][1]),
-                                    min_value=0.1, max_value=10.0, step=0.1,
+                                    min_value=0.1,
+                                    max_value=10.0,
+                                    step=0.1,
                                     key=f"custom_hyper_{idx}_{var}_alphas_max",
-                                    help=f"Maximum alpha for {var}"
+                                    help=f"Maximum alpha for {var}",
                                 )
-                            
+
                             col1, col2 = st.columns(2)
                             with col1:
                                 gammas_min = st.number_input(
                                     "Gamma Min",
                                     value=float(defaults["gammas"][0]),
-                                    min_value=0.0, max_value=1.0, step=0.05,
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    step=0.05,
                                     key=f"custom_hyper_{idx}_{var}_gammas_min",
-                                    help=f"Minimum gamma for {var}"
+                                    help=f"Minimum gamma for {var}",
                                 )
                             with col2:
                                 gammas_max = st.number_input(
                                     "Gamma Max",
                                     value=float(defaults["gammas"][1]),
-                                    min_value=0.0, max_value=1.0, step=0.05,
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    step=0.05,
                                     key=f"custom_hyper_{idx}_{var}_gammas_max",
-                                    help=f"Maximum gamma for {var}"
+                                    help=f"Maximum gamma for {var}",
                                 )
-                            
+
                             col1, col2 = st.columns(2)
                             with col1:
                                 thetas_min = st.number_input(
                                     "Theta Min",
                                     value=float(defaults["thetas"][0]),
-                                    min_value=0.0, max_value=1.0, step=0.05,
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    step=0.05,
                                     key=f"custom_hyper_{idx}_{var}_thetas_min",
-                                    help=f"Minimum theta for {var}"
+                                    help=f"Minimum theta for {var}",
                                 )
                             with col2:
                                 thetas_max = st.number_input(
                                     "Theta Max",
                                     value=float(defaults["thetas"][1]),
-                                    min_value=0.0, max_value=1.0, step=0.05,
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    step=0.05,
                                     key=f"custom_hyper_{idx}_{var}_thetas_max",
-                                    help=f"Maximum theta for {var}"
+                                    help=f"Maximum theta for {var}",
                                 )
-                            
+
                             # Store per-variable hyperparameters
-                            custom_hyperparameters[f"{var}_alphas"] = [alphas_min, alphas_max]
-                            custom_hyperparameters[f"{var}_gammas"] = [gammas_min, gammas_max]
-                            custom_hyperparameters[f"{var}_thetas"] = [thetas_min, thetas_max]
-                        
+                            custom_hyperparameters[f"{var}_alphas"] = [
+                                alphas_min,
+                                alphas_max,
+                            ]
+                            custom_hyperparameters[f"{var}_gammas"] = [
+                                gammas_min,
+                                gammas_max,
+                            ]
+                            custom_hyperparameters[f"{var}_thetas"] = [
+                                thetas_min,
+                                thetas_max,
+                            ]
+
                         else:  # weibull
                             col1, col2 = st.columns(2)
                             with col1:
                                 alphas_min = st.number_input(
                                     "Alpha Min",
                                     value=float(defaults["alphas"][0]),
-                                    min_value=0.1, max_value=10.0, step=0.1,
+                                    min_value=0.1,
+                                    max_value=10.0,
+                                    step=0.1,
                                     key=f"custom_hyper_{idx}_{var}_alphas_min",
-                                    help=f"Minimum alpha for {var}"
+                                    help=f"Minimum alpha for {var}",
                                 )
                             with col2:
                                 alphas_max = st.number_input(
                                     "Alpha Max",
                                     value=float(defaults["alphas"][1]),
-                                    min_value=0.1, max_value=10.0, step=0.1,
+                                    min_value=0.1,
+                                    max_value=10.0,
+                                    step=0.1,
                                     key=f"custom_hyper_{idx}_{var}_alphas_max",
-                                    help=f"Maximum alpha for {var}"
+                                    help=f"Maximum alpha for {var}",
                                 )
-                            
+
                             col1, col2 = st.columns(2)
                             with col1:
                                 shapes_min = st.number_input(
                                     "Shape Min",
                                     value=float(defaults["shapes"][0]),
-                                    min_value=0.0001, max_value=10.0, step=0.1,
+                                    min_value=0.0001,
+                                    max_value=10.0,
+                                    step=0.1,
                                     key=f"custom_hyper_{idx}_{var}_shapes_min",
-                                    help=f"Minimum shape for {var}"
+                                    help=f"Minimum shape for {var}",
                                 )
                             with col2:
                                 shapes_max = st.number_input(
                                     "Shape Max",
                                     value=float(defaults["shapes"][1]),
-                                    min_value=0.0001, max_value=10.0, step=0.1,
+                                    min_value=0.0001,
+                                    max_value=10.0,
+                                    step=0.1,
                                     key=f"custom_hyper_{idx}_{var}_shapes_max",
-                                    help=f"Maximum shape for {var}"
+                                    help=f"Maximum shape for {var}",
                                 )
-                            
+
                             col1, col2 = st.columns(2)
                             with col1:
                                 scales_min = st.number_input(
                                     "Scale Min",
                                     value=float(defaults["scales"][0]),
-                                    min_value=0.0, max_value=1.0, step=0.001, format="%.3f",
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    step=0.001,
+                                    format="%.3f",
                                     key=f"custom_hyper_{idx}_{var}_scales_min",
-                                    help=f"Minimum scale for {var}"
+                                    help=f"Minimum scale for {var}",
                                 )
                             with col2:
                                 scales_max = st.number_input(
                                     "Scale Max",
                                     value=float(defaults["scales"][1]),
-                                    min_value=0.0, max_value=1.0, step=0.01, format="%.3f",
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    step=0.01,
+                                    format="%.3f",
                                     key=f"custom_hyper_{idx}_{var}_scales_max",
-                                    help=f"Maximum scale for {var}"
+                                    help=f"Maximum scale for {var}",
                                 )
-                            
+
                             # Store per-variable hyperparameters
-                            custom_hyperparameters[f"{var}_alphas"] = [alphas_min, alphas_max]
-                            custom_hyperparameters[f"{var}_shapes"] = [shapes_min, shapes_max]
-                            custom_hyperparameters[f"{var}_scales"] = [scales_min, scales_max]
+                            custom_hyperparameters[f"{var}_alphas"] = [
+                                alphas_min,
+                                alphas_max,
+                            ]
+                            custom_hyperparameters[f"{var}_shapes"] = [
+                                shapes_min,
+                                shapes_max,
+                            ]
+                            custom_hyperparameters[f"{var}_scales"] = [
+                                scales_min,
+                                scales_max,
+                            ]
             else:
-                st.warning("⚠️ Please select paid media and/or organic variables first to configure their hyperparameters.")
-        
+                st.warning(
+                    "⚠️ Please select paid media and/or organic variables first to configure their hyperparameters."
+                )
+
         # Store custom hyperparameters in session state
         st.session_state["custom_hyperparameters"] = custom_hyperparameters
 
@@ -1183,20 +1382,28 @@ with tab_single:
                 help="Countries this configuration applies to",
             )
         else:
-            config_countries = [
-                st.session_state.get("selected_country", "fr")
-            ]
+            config_countries = [st.session_state.get("selected_country", "fr")]
 
         # Add action buttons (Issue #5 fix: add queue options)
         col_btn1, col_btn2, col_btn3 = st.columns(3)
-        
-        save_config_clicked = col_btn1.button("💾 Save Configuration", use_container_width=True, key="save_config_btn")
-        add_to_queue_clicked = col_btn2.button("➕ Add to Queue", use_container_width=True, key="add_to_queue_btn")
-        add_and_start_clicked = col_btn3.button("▶️ Add to Queue & Start", use_container_width=True, key="add_and_start_btn")
-        
+
+        save_config_clicked = col_btn1.button(
+            "💾 Save Configuration",
+            use_container_width=True,
+            key="save_config_btn",
+        )
+        add_to_queue_clicked = col_btn2.button(
+            "➕ Add to Queue", use_container_width=True, key="add_to_queue_btn"
+        )
+        add_and_start_clicked = col_btn3.button(
+            "▶️ Add to Queue & Start",
+            use_container_width=True,
+            key="add_and_start_btn",
+        )
+
         # Add Download as CSV button
         st.markdown("---")
-        
+
         # Helper function to convert custom_hyperparameters to CSV format
         def convert_hyperparams_to_csv_format(custom_hp, adstock_type):
             """Convert custom_hyperparameters dict to CSV column format"""
@@ -1207,7 +1414,7 @@ with tab_single:
                         # Per-variable format: VAR_NAME_alphas = [min, max]
                         csv_cols[key] = str(value)
             return csv_cols
-        
+
         # Build CSV row for current configuration
         csv_row = {
             "country": country,
@@ -1232,32 +1439,38 @@ with tab_single:
             "adstock": adstock,
             "hyperparameter_preset": hyperparameter_preset,
             "resample_freq": resample_freq,
-            "resample_agg": resample_agg,
+            "column_agg_strategies": (
+                json.dumps(column_agg_strategies)
+                if column_agg_strategies
+                else ""
+            ),
             "annotations_gcs_path": "",
         }
-        
+
         # Add custom hyperparameters to CSV row
         if hyperparameter_preset == "Custom" and custom_hyperparameters:
-            csv_row.update(convert_hyperparams_to_csv_format(custom_hyperparameters, adstock))
-        
+            csv_row.update(
+                convert_hyperparams_to_csv_format(
+                    custom_hyperparameters, adstock
+                )
+            )
+
         csv_df = pd.DataFrame([csv_row])
-        
+
         st.download_button(
             "📥 Download as CSV",
             data=csv_df.to_csv(index=False),
             file_name=f"robyn_config_{country}_{revision}_{time.strftime('%Y%m%d')}.csv",
             mime="text/csv",
             use_container_width=True,
-            help="Download current configuration as CSV for batch processing"
+            help="Download current configuration as CSV for batch processing",
         )
-        
+
         st.markdown("---")
 
         if save_config_clicked:
             if not revision or not revision.strip():
-                st.error(
-                    "⚠️ Revision tag is required to save configuration."
-                )
+                st.error("⚠️ Revision tag is required to save configuration.")
             elif not config_name or not config_name.strip():
                 st.error("⚠️ Configuration name is required.")
             else:
@@ -1284,16 +1497,22 @@ with tab_single:
                             "date_var": date_var,
                             "adstock": adstock,
                             "hyperparameter_preset": hyperparameter_preset,
-                            "custom_hyperparameters": custom_hyperparameters if hyperparameter_preset == "Custom" else {},
+                            "custom_hyperparameters": (
+                                custom_hyperparameters
+                                if hyperparameter_preset == "Custom"
+                                else {}
+                            ),
                             "resample_freq": resample_freq,
-                            "resample_agg": resample_agg,
+                            "column_agg_strategies": column_agg_strategies,
                         },
                     }
 
                     # Save to GCS
                     client = storage.Client()
                     for ctry in config_countries:
-                        blob_path = f"training-configs/saved/{ctry}/{config_name}.json"
+                        blob_path = (
+                            f"training-configs/saved/{ctry}/{config_name}.json"
+                        )
                         blob = client.bucket(gcs_bucket).blob(blob_path)
                         blob.upload_from_string(
                             json.dumps(config_payload, indent=2),
@@ -1308,7 +1527,7 @@ with tab_single:
                     )
                 except Exception as e:
                     st.error(f"Failed to save configuration: {e}")
-        
+
         # Handle "Add to Queue" button (Issue #5 fix)
         if add_to_queue_clicked or add_and_start_clicked:
             if not revision or not revision.strip():
@@ -1316,26 +1535,47 @@ with tab_single:
             else:
                 try:
                     # Import helper from app_split_helpers
-                    from app_split_helpers import _normalize_row, save_queue_to_gcs, set_queue_running
-                    
+                    from app_split_helpers import (
+                        _normalize_row,
+                        save_queue_to_gcs,
+                        set_queue_running,
+                    )
+
                     # Get next queue ID
                     next_id = (
-                        max([e["id"] for e in st.session_state.job_queue], default=0) + 1
+                        max(
+                            [e["id"] for e in st.session_state.job_queue],
+                            default=0,
+                        )
+                        + 1
                     )
-                    
+
                     # Create queue entries for each country
                     new_entries = []
+                    logging.info(
+                        f"[QUEUE] Adding jobs from Single Run tab for countries: {config_countries}"
+                    )
+                    logging.info(
+                        f"[QUEUE] Starting queue ID: {next_id}, Queue name: {st.session_state.get('queue_name')}"
+                    )
+
                     for i, ctry in enumerate(config_countries):
                         # Get data source information
                         # Use GCS path pattern from loaded data
-                        data_version = st.session_state.get("selected_version", "Latest")
-                        data_blob_path = _get_data_blob(ctry, data_version.lower())
-                        
+                        data_version = st.session_state.get(
+                            "selected_version", "Latest"
+                        )
+                        data_blob_path = _get_data_blob(
+                            ctry, data_version.lower()
+                        )
+
                         # Build params dict
                         params = {
                             "country": ctry,
                             "revision": revision,
-                            "date_input": end_date_str,  # Use end date as date_input
+                            "date_input": time.strftime(
+                                "%Y-%m-%d"
+                            ),  # Current date when job is added to queue
                             "iterations": int(iterations),
                             "trials": int(trials),
                             "train_size": train_size,
@@ -1352,62 +1592,77 @@ with tab_single:
                             "date_var": date_var,
                             "adstock": adstock,
                             "hyperparameter_preset": hyperparameter_preset,
-                            "custom_hyperparameters": custom_hyperparameters if hyperparameter_preset == "Custom" else {},
+                            "custom_hyperparameters": (
+                                custom_hyperparameters
+                                if hyperparameter_preset == "Custom"
+                                else {}
+                            ),
                             "resample_freq": resample_freq,
-                            "resample_agg": resample_agg,
+                            "column_agg_strategies": column_agg_strategies,
                             "annotations_gcs_path": "",
                             "start_date": start_date_str,
                             "end_date": end_date_str,
                             "data_gcs_path": f"gs://{gcs_bucket}/{data_blob_path}",
                         }
-                        
-                        new_entries.append({
-                            "id": next_id + i,
-                            "params": params,
-                            "status": "PENDING",
-                            "timestamp": None,
-                            "execution_name": None,
-                            "gcs_prefix": None,
-                            "message": "",
-                        })
-                    
+
+                        new_entries.append(
+                            {
+                                "id": next_id + i,
+                                "params": params,
+                                "status": "PENDING",
+                                "timestamp": None,
+                                "execution_name": None,
+                                "gcs_prefix": None,
+                                "message": "",
+                            }
+                        )
+
                     # Add to queue
                     st.session_state.job_queue.extend(new_entries)
-                    
+                    logging.info(
+                        f"[QUEUE] Added {len(new_entries)} new entries to queue (IDs: {[e['id'] for e in new_entries]})"
+                    )
+                    logging.info(
+                        f"[QUEUE] Total queue size after addition: {len(st.session_state.job_queue)}"
+                    )
+
                     # Save queue to GCS
                     st.session_state.queue_saved_at = save_queue_to_gcs(
                         st.session_state.queue_name,
                         st.session_state.job_queue,
                         queue_running=st.session_state.queue_running,
                     )
-                    
+
                     # Start queue if "Add & Start" was clicked
                     if add_and_start_clicked:
+                        logging.info(
+                            f"[QUEUE] Starting queue '{st.session_state.queue_name}' via 'Add & Start' button"
+                        )
                         set_queue_running(st.session_state.queue_name, True)
                         st.session_state.queue_running = True
-                    
+                        logging.info(
+                            f"[QUEUE] Queue running state set to: {st.session_state.queue_running}"
+                        )
+
                     # Show success message
-                    countries_str = ", ".join([c.upper() for c in config_countries])
-                    st.success(f"✅ Added {len(new_entries)} job(s) to queue for: {countries_str}")
-                    
+                    countries_str = ", ".join(
+                        [c.upper() for c in config_countries]
+                    )
+                    logging.info(
+                        f"[QUEUE] Successfully added jobs to queue for: {countries_str}"
+                    )
+                    st.success(
+                        f"✅ Added {len(new_entries)} job(s) to queue for: {countries_str}"
+                    )
+
                     # Set flag to switch to Queue tab
                     st.session_state["switch_to_queue_tab"] = True
-                    
+
                     # Rerun to refresh and switch tab
                     st.rerun()
-                    
+
                 except Exception as e:
                     st.error(f"Failed to add to queue: {e}")
-
-    # Outputs (moved outside Save Configuration expander)
-    with st.expander("Outputs"):
-        gcs_bucket = st.text_input(
-            "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
-        )
-        st.session_state["gcs_bucket"] = gcs_bucket
-        ann_file = st.file_uploader(
-            "Optional: enriched_annotations.csv", type=["csv"]
-        )
 
     # =============== Single-run button ===============
     def create_job_config_single(
@@ -1437,7 +1692,7 @@ with tab_single:
                 hyperparameter_preset,
                 custom_hyperparameters,  # NEW
                 resample_freq,
-                resample_agg,
+                column_agg_strategies,
             ),
             data_gcs_path,
             timestamp,
@@ -1465,7 +1720,7 @@ with tab_single:
         hyperparameter_preset,
         custom_hyperparameters,  # NEW
         resample_freq,
-        resample_agg,
+        column_agg_strategies,
     ) -> dict:
         return {
             "country": country,
@@ -1490,11 +1745,13 @@ with tab_single:
             "hyperparameter_preset": hyperparameter_preset,
             "custom_hyperparameters": custom_hyperparameters,  # NEW
             "resample_freq": resample_freq,
-            "resample_agg": resample_agg,
+            "column_agg_strategies": column_agg_strategies,
             "data_gcs_path": "",  # Will be filled later
         }
 
-    if st.button("🚀 Start Training Job", type="primary", use_container_width=True):
+    if st.button(
+        "🚀 Start Training Job", type="primary", use_container_width=True
+    ):
         # Validate revision is filled
         if not revision or not revision.strip():
             st.error(
@@ -1535,21 +1792,30 @@ with tab_single:
                     # No need to query and upload - data is already in GCS
                     st.info(f"Using data from: {data_gcs_path}")
 
+                    # Get annotation file from session state (set in Connect_Data page)
+                    ann_file = st.session_state.get("annotations_file")
                     if ann_file is not None:
-                        with timed_step(
-                            "Upload annotations to GCS", timings
-                        ):
+                        with timed_step("Upload annotations to GCS", timings):
                             annotations_path = os.path.join(
                                 td, "enriched_annotations.csv"
                             )
-                            with open(annotations_path, "wb") as f:
-                                f.write(ann_file.read())
-                            annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
-                            annotations_gcs_path = upload_to_gcs(
-                                gcs_bucket,  # type: ignore
-                                annotations_path,
-                                annotations_blob,
-                            )
+                            # Reset file pointer and read (with error handling)
+                            try:
+                                if hasattr(ann_file, "seek"):
+                                    ann_file.seek(0)
+                                with open(annotations_path, "wb") as f:
+                                    f.write(ann_file.read())
+                                annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
+                                annotations_gcs_path = upload_to_gcs(
+                                    gcs_bucket,  # type: ignore
+                                    annotations_path,
+                                    annotations_blob,
+                                )
+                            except (AttributeError, IOError) as e:
+                                st.warning(
+                                    f"Could not read annotations file: {e}. Continuing without annotations."
+                                )
+                                annotations_gcs_path = None
 
                     # 4) Create job config
                     with timed_step("Create job configuration", timings):
@@ -1594,6 +1860,60 @@ with tab_single:
                             f"**Execution ID**: `{execution_name.split('/')[-1]}`"
                         )
 
+                        # Store the latest job info for status monitoring
+                        st.session_state["latest_job_execution"] = {
+                            "execution_name": execution_name,
+                            "timestamp": timestamp,
+                            "revision": revision,
+                            "country": country,
+                            "gcs_prefix": gcs_prefix,
+                        }
+
+                        # Add job to history immediately after launch
+                        try:
+                            from datetime import datetime as dt
+                            from app_shared import append_row_to_job_history
+
+                            append_row_to_job_history(
+                                {
+                                    "job_id": gcs_prefix,
+                                    "state": "RUNNING",  # Initial state
+                                    "country": country,
+                                    "revision": revision,
+                                    "date_input": dt.utcnow().strftime(
+                                        "%Y-%m-%d"
+                                    ),  # Current date when job is run
+                                    "iterations": int(iterations),
+                                    "trials": int(trials),
+                                    "train_size": train_size,
+                                    "paid_media_spends": paid_media_spends,
+                                    "paid_media_vars": paid_media_vars,
+                                    "context_vars": context_vars,
+                                    "factor_vars": factor_vars,
+                                    "organic_vars": organic_vars,
+                                    "gcs_bucket": gcs_bucket,
+                                    "table": "",
+                                    "query": "",
+                                    "dep_var": dep_var,
+                                    "date_var": date_var,
+                                    "adstock": adstock,
+                                    "start_time": dt.utcnow().isoformat(
+                                        timespec="seconds"
+                                    )
+                                    + "Z",
+                                    "end_time": None,
+                                    "duration_minutes": None,
+                                    "gcs_prefix": gcs_prefix,
+                                    "bucket": gcs_bucket,
+                                    "exec_name": execution_name.split("/")[-1],
+                                    "execution_name": execution_name,
+                                    "message": "Job launched from single run",
+                                },
+                                gcs_bucket,
+                            )
+                        except Exception as e:
+                            st.warning(f"Could not add job to history: {e}")
+
         finally:
             if timings:
                 df_times = pd.DataFrame(timings)
@@ -1627,7 +1947,9 @@ with tab_single:
                 "gcs_bucket": gcs_bucket,
             }
 
-    render_jobs_job_history(key_prefix="single")
+    # =============== Job Status Display (Requirement 7) ===============
+    st.divider()
+    st.info("👉 **View current and past job executions in the 'Status' tab above.**")
 
     # ===================== BATCH QUEUE (CSV) =====================
 
@@ -1673,8 +1995,10 @@ with tab_queue:
             )
             st.success(f"Saved queue '{st.session_state.queue_name}' to GCS")
 
-        st.markdown(
-            """
+        # Detailed instructions in expander
+        with st.expander("📋 Detailed Instructions", expanded=False):
+            st.markdown(
+                """
 Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country`, `revision`, and data source):
 
 - `country`, `revision`, `iterations`, `trials`, `train_size`
@@ -1685,49 +2009,21 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 - **Custom hyperparameters** (only when hyperparameter_preset=Custom):
   - For geometric adstock: `alphas_min`, `alphas_max`, `gammas_min`, `gammas_max`, `thetas_min`, `thetas_max`
   - For weibull adstock: `alphas_min`, `alphas_max`, `shapes_min`, `shapes_max`, `scales_min`, `scales_max`
-- `resample_freq` (none|W|M), `resample_agg` (sum|mean|max|min)
+  - **Per-variable hyperparameters**: `{VAR_NAME}_alphas`, `{VAR_NAME}_gammas`, `{VAR_NAME}_thetas` (for geometric) or `{VAR_NAME}_shapes`, `{VAR_NAME}_scales` (for weibull)
+- `resample_freq` (none|W|M) - Column aggregations from metadata will be used when resampling
 - `gcs_bucket` (optional override per row)
 - **Data source (choose one):**
   - `data_gcs_path` (gs:// path to parquet file) — **Recommended for GCS-based workflows**
   - `query` or `table` — For Snowflake-based workflows
 - `annotations_gcs_path` (optional gs:// path)
 
-**Note:** For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows.
-            """
-        )
+**Note on CSV flexibility**: Not all rows need to have the same columns. For example, rows with Custom preset can include per-variable hyperparameters while other rows can omit them. The CSV parser will fill missing columns with empty values automatically. This allows you to mix different job configurations in the same CSV file, similar to how single run jobs can have different configurations.
 
-        # Template & Example CSVs (Issue #4 fix: align with Single run)
-        template = pd.DataFrame(
-            [
-                {
-                    "country": "fr",
-                    "revision": "r100",
-                    "start_date": "2024-01-01",
-                    "end_date": time.strftime("%Y-%m-%d"),
-                    "iterations": 200,
-                    "trials": 5,
-                    "train_size": "0.7,0.9",
-                    "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-                    "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-                    "context_vars": "IS_WEEKEND,TV_IS_ON",
-                    "factor_vars": "IS_WEEKEND,TV_IS_ON",
-                    "organic_vars": "ORGANIC_TRAFFIC",
-                    "gcs_bucket": st.session_state["gcs_bucket"],
-                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
-                    "table": "",
-                    "query": "",
-                    "dep_var": "UPLOAD_VALUE",
-                    "dep_var_type": "revenue",
-                    "date_var": "date",
-                    "adstock": "geometric",
-                    "hyperparameter_preset": "Meshed recommend",
-                    "resample_freq": "none",
-                    "resample_agg": "sum",
-                    "annotations_gcs_path": "",
-                }
-            ]
-        )
+**Note on GCS workflows**: For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows. Column aggregations are automatically loaded from metadata.json when resampling is enabled.
+                """
+            )
 
+        # Example CSV with 3 jobs including per-variable hyperparameters
         example = pd.DataFrame(
             [
                 {
@@ -1752,19 +2048,24 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "geometric",
                     "hyperparameter_preset": "Meshed recommend",
-                    "alphas_min": "",
-                    "alphas_max": "",
-                    "gammas_min": "",
-                    "gammas_max": "",
-                    "thetas_min": "",
-                    "thetas_max": "",
-                    "shapes_min": "",
-                    "shapes_max": "",
-                    "scales_min": "",
-                    "scales_max": "",
                     "resample_freq": "none",
-                    "resample_agg": "sum",
                     "annotations_gcs_path": "",
+                    # Per-variable hyperparameters (empty for non-Custom preset)
+                    "GA_SUPPLY_COST_alphas": "",
+                    "GA_SUPPLY_COST_gammas": "",
+                    "GA_SUPPLY_COST_thetas": "",
+                    "GA_DEMAND_COST_alphas": "",
+                    "GA_DEMAND_COST_gammas": "",
+                    "GA_DEMAND_COST_thetas": "",
+                    "BING_DEMAND_COST_alphas": "",
+                    "BING_DEMAND_COST_gammas": "",
+                    "BING_DEMAND_COST_thetas": "",
+                    "META_DEMAND_COST_alphas": "",
+                    "META_DEMAND_COST_gammas": "",
+                    "META_DEMAND_COST_thetas": "",
+                    "ORGANIC_TRAFFIC_alphas": "",
+                    "ORGANIC_TRAFFIC_gammas": "",
+                    "ORGANIC_TRAFFIC_thetas": "",
                 },
                 {
                     "country": "de",
@@ -1776,8 +2077,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "train_size": "0.75,0.9",
                     "paid_media_spends": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
                     "paid_media_vars": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-                    "context_vars": "IS_WEEKEND",
-                    "factor_vars": "IS_WEEKEND",
+                    "context_vars": "",
+                    "factor_vars": "",
                     "organic_vars": "ORGANIC_TRAFFIC",
                     "gcs_bucket": st.session_state["gcs_bucket"],
                     "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
@@ -1788,19 +2089,24 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "weibull_cdf",
                     "hyperparameter_preset": "Facebook recommend",
-                    "alphas_min": "",
-                    "alphas_max": "",
-                    "gammas_min": "",
-                    "gammas_max": "",
-                    "thetas_min": "",
-                    "thetas_max": "",
-                    "shapes_min": "",
-                    "shapes_max": "",
-                    "scales_min": "",
-                    "scales_max": "",
                     "resample_freq": "W",
-                    "resample_agg": "sum",
                     "annotations_gcs_path": "",
+                    # Per-variable hyperparameters (empty for non-Custom preset)
+                    "GA_SUPPLY_COST_alphas": "",
+                    "GA_SUPPLY_COST_gammas": "",
+                    "GA_SUPPLY_COST_thetas": "",
+                    "GA_DEMAND_COST_alphas": "",
+                    "GA_DEMAND_COST_gammas": "",
+                    "GA_DEMAND_COST_thetas": "",
+                    "BING_DEMAND_COST_alphas": "",
+                    "BING_DEMAND_COST_gammas": "",
+                    "BING_DEMAND_COST_thetas": "",
+                    "META_DEMAND_COST_alphas": "",
+                    "META_DEMAND_COST_gammas": "",
+                    "META_DEMAND_COST_thetas": "",
+                    "ORGANIC_TRAFFIC_alphas": "",
+                    "ORGANIC_TRAFFIC_gammas": "",
+                    "ORGANIC_TRAFFIC_thetas": "",
                 },
                 {
                     "country": "it",
@@ -1824,6 +2130,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "geometric",
                     "hyperparameter_preset": "Custom",
+                    "resample_freq": "none",
+                    "annotations_gcs_path": "",
                     # Per-variable hyperparameters for Custom preset
                     "GA_SUPPLY_COST_alphas": "[0.8, 2.5]",
                     "GA_SUPPLY_COST_gammas": "[0.5, 0.85]",
@@ -1840,26 +2148,104 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "ORGANIC_TRAFFIC_alphas": "[0.5, 2.0]",
                     "ORGANIC_TRAFFIC_gammas": "[0.3, 0.7]",
                     "ORGANIC_TRAFFIC_thetas": "[0.9, 0.99]",
-                    "resample_freq": "none",
-                    "resample_agg": "sum",
-                    "annotations_gcs_path": "",
                 },
             ]
         )
 
-        col_dl1, col_dl2 = st.columns(2)
-        col_dl1.download_button(
-            "Download CSV template",
-            data=template.to_csv(index=False),
-            file_name="robyn_batch_template.csv",
-            mime="text/csv",
+        # Example with varying columns - demonstrates CSV flexibility
+        example_varied = pd.DataFrame(
+            [
+                {
+                    "country": "fr",
+                    "revision": "r201",
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
+                    "iterations": 300,
+                    "trials": 3,
+                    "train_size": "0.7,0.9",
+                    "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, META_DEMAND_COST, TV_COST",
+                    "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, META_DEMAND_COST, TV_COST",
+                    "context_vars": "IS_WEEKEND,TV_IS_ON",
+                    "factor_vars": "IS_WEEKEND,TV_IS_ON",
+                    "organic_vars": "ORGANIC_TRAFFIC",
+                    "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
+                    "dep_var": "UPLOAD_VALUE",
+                    "dep_var_type": "revenue",
+                    "date_var": "date",
+                    "adstock": "geometric",
+                    "hyperparameter_preset": "Meshed recommend",
+                    "resample_freq": "none",
+                    # Note: This row omits table, query, annotations_gcs_path, and per-variable hyperparameters
+                },
+                {
+                    "country": "de",
+                    "revision": "r202",
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
+                    "iterations": 200,
+                    "trials": 5,
+                    "train_size": "0.75,0.9",
+                    "paid_media_spends": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST",
+                    "paid_media_vars": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST",
+                    "context_vars": "",
+                    "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
+                    "dep_var": "UPLOAD_VALUE",
+                    "date_var": "date",
+                    "adstock": "weibull_cdf",
+                    "hyperparameter_preset": "Facebook recommend",
+                    "resample_freq": "W",
+                    # Note: This row omits factor_vars, organic_vars, dep_var_type, and other optional fields
+                    # Note: IS_WEEKEND is removed because weekly resampling makes it constant (no variance)
+                },
+                {
+                    "country": "it",
+                    "revision": "r203",
+                    "iterations": 250,
+                    "trials": 4,
+                    "train_size": "0.7,0.9",
+                    "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST",
+                    "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST",
+                    "organic_vars": "ORGANIC_TRAFFIC",
+                    "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/it/latest/raw.parquet",
+                    "dep_var": "UPLOAD_VALUE",
+                    "date_var": "date",
+                    "adstock": "geometric",
+                    "hyperparameter_preset": "Custom",
+                    # Per-variable hyperparameters for Custom preset (only for some variables)
+                    "GA_SUPPLY_COST_alphas": "[0.8, 2.5]",
+                    "GA_SUPPLY_COST_gammas": "[0.5, 0.85]",
+                    "GA_SUPPLY_COST_thetas": "[0.15, 0.5]",
+                    "BING_DEMAND_COST_alphas": "[1.0, 3.0]",
+                    "BING_DEMAND_COST_gammas": "[0.6, 0.9]",
+                    "BING_DEMAND_COST_thetas": "[0.1, 0.4]",
+                    # Note: This row omits start_date, end_date, context_vars, factor_vars, dep_var_type, resample_freq
+                },
+            ]
         )
-        col_dl2.download_button(
-            "Download example CSV (3 jobs)",
-            data=example.to_csv(index=False),
-            file_name="robyn_batch_example.csv",
-            mime="text/csv",
-        )
+
+        # Download buttons for both examples
+        col_ex1, col_ex2 = st.columns(2)
+        with col_ex1:
+            st.download_button(
+                "📥 Download Example CSV (consistent columns)",
+                data=example.to_csv(index=False),
+                file_name="robyn_batch_example_consistent.csv",
+                mime="text/csv",
+                use_container_width=True,
+                help="All rows have the same columns - recommended for beginners",
+            )
+        with col_ex2:
+            st.download_button(
+                "📥 Download Example CSV (varying columns)",
+                data=example_varied.to_csv(index=False),
+                file_name="robyn_batch_example_varied.csv",
+                mime="text/csv",
+                use_container_width=True,
+                help="Rows have different columns - demonstrates CSV flexibility",
+            )
 
         # --- CSV upload (editable, persistent, deletable) ---
         up = st.file_uploader("Upload batch CSV", type=["csv"], key="batch_csv")
@@ -1875,12 +2261,28 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             fingerprint = f"{getattr(up, 'name', '')}:{getattr(up, 'size', '')}"
             if st.session_state.uploaded_fingerprint != fingerprint:
                 try:
-                    st.session_state.uploaded_df = pd.read_csv(up)
+                    # Read CSV with flexible parsing - allows missing columns per row
+                    # This mimics single run behavior where not all fields are required
+                    logging.info(
+                        f"[QUEUE] Uploading CSV file: {getattr(up, 'name', 'unknown')}, size: {getattr(up, 'size', 0)} bytes"
+                    )
+                    st.session_state.uploaded_df = pd.read_csv(
+                        up, keep_default_na=True
+                    )
+
+                    # Fill any missing columns that might be expected but not present
+                    # This makes the CSV structure more forgiving
                     st.session_state.uploaded_fingerprint = fingerprint
+                    logging.info(
+                        f"[QUEUE] Successfully loaded CSV with {len(st.session_state.uploaded_df)} rows and {len(st.session_state.uploaded_df.columns)} columns"
+                    )
                     st.success(
                         f"Loaded {len(st.session_state.uploaded_df)} rows from CSV"
                     )
                 except Exception as e:
+                    logging.error(
+                        f"[QUEUE] Failed to parse CSV: {e}", exc_info=True
+                    )
                     st.error(f"Failed to parse CSV: {e}")
         else:
             # If user clears the file input, allow re-uploading the same file later
@@ -1959,6 +2361,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.rerun()
 
             if append_uploaded_clicked:
+                logging.info(
+                    f"[QUEUE] Processing 'Append uploaded rows to builder' - {len(uploaded_edited)} rows in uploaded table"
+                )
                 # Canonical, edited upload table as seen in the UI (including any user sorting)
                 up_base = (
                     uploaded_edited.drop(columns="Delete", errors="ignore")
@@ -2029,7 +2434,11 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 for i, r in up_base.iterrows():
                     params = _normalize_row(r)
                     # Check for data source: query, table, or data_gcs_path
-                    if not (params.get("query") or params.get("table") or params.get("data_gcs_path")):
+                    if not (
+                        params.get("query")
+                        or params.get("table")
+                        or params.get("data_gcs_path")
+                    ):
                         dup["missing_data_source"].append(i + 1)  # type: ignore
                         to_append_mask.append(False)
                         continue
@@ -2058,6 +2467,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 )
 
                 if added_count > 0:
+                    logging.info(
+                        f"[QUEUE] Appending {added_count} unique rows to queue builder"
+                    )
                     # Append to builder (use builder schema)
                     to_append = up_base.loc[to_append_mask]
                     if need_cols:
@@ -2073,6 +2485,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         ~to_append_mask
                     ].reset_index(drop=True)
 
+                    logging.info(
+                        f"[QUEUE] Successfully appended {added_count} rows. {len(st.session_state.uploaded_df)} rows remaining in upload table (duplicates/invalid)"
+                    )
                     st.success(
                         f"Appended {added_count} row(s) to the builder. "
                         f"Remaining in upload: {len(st.session_state.uploaded_df)} duplicate/invalid row(s)."
@@ -2114,9 +2529,10 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 "dep_var_type": p.get("dep_var_type", "revenue"),
                 "date_var": p.get("date_var", ""),
                 "adstock": p.get("adstock", ""),
-                "hyperparameter_preset": p.get("hyperparameter_preset", "Meshed recommend"),
+                "hyperparameter_preset": p.get(
+                    "hyperparameter_preset", "Meshed recommend"
+                ),
                 "resample_freq": p.get("resample_freq", "none"),
-                "resample_agg": p.get("resample_agg", "sum"),
                 "annotations_gcs_path": p.get("annotations_gcs_path", ""),
             }
 
@@ -2146,7 +2562,6 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "adstock",
                     "hyperparameter_preset",
                     "resample_freq",
-                    "resample_agg",
                     "annotations_gcs_path",
                 ]
             )
@@ -2259,6 +2674,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         need_cols = list(st.session_state.qb_df.columns)
 
         if enqueue_clicked:
+            logging.info(
+                f"[QUEUE] Processing 'Enqueue' from Queue Builder - {len(st.session_state.qb_df)} rows in builder"
+            )
             # Build separate sets so we can categorize reasons
             if st.session_state.qb_df.dropna(how="all").empty:
                 st.warning(
@@ -2313,7 +2731,11 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 for i, row in st.session_state.qb_df.iterrows():
                     params = _normalize_row(row)
                     # Check for data source: query, table, or data_gcs_path
-                    if not (params.get("query") or params.get("table") or params.get("data_gcs_path")):
+                    if not (
+                        params.get("query")
+                        or params.get("table")
+                        or params.get("data_gcs_path")
+                    ):
                         dup["missing_data_source"].append(i + 1)
                         continue
                     sig = json.dumps(params, sort_keys=True)
@@ -2344,9 +2766,18 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
                 if not new_entries:
                     # nothing to enqueue
+                    logging.info(
+                        f"[QUEUE] No new entries to enqueue (all duplicates or invalid)"
+                    )
                     pass
                 else:
+                    logging.info(
+                        f"[QUEUE] Enqueuing {len(new_entries)} new jobs from builder (IDs: {[e['id'] for e in new_entries]})"
+                    )
                     st.session_state.job_queue.extend(new_entries)
+                    logging.info(
+                        f"[QUEUE] Total queue size after enqueue: {len(st.session_state.job_queue)}"
+                    )
                     st.session_state.queue_saved_at = save_queue_to_gcs(
                         st.session_state.queue_name,
                         st.session_state.job_queue,
@@ -2384,14 +2815,24 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         if qc1.button(
             "▶️ Start Queue", disabled=(len(st.session_state.job_queue) == 0)
         ):
+            logging.info(
+                f"[QUEUE] Starting queue '{st.session_state.queue_name}' via Start button - {len(st.session_state.job_queue)} jobs in queue"
+            )
             set_queue_running(st.session_state.queue_name, True)
             st.success("Queue set to RUNNING.")
+            st.info("👉 **View current and past job executions in the 'Status' tab above.**")
             st.rerun()
         if qc2.button("⏸️ Stop Queue"):
+            logging.info(
+                f"[QUEUE] Stopping queue '{st.session_state.queue_name}' via Stop button"
+            )
             set_queue_running(st.session_state.queue_name, False)
             st.info("Queue paused.")
             st.rerun()
         if qc3.button("⏭️ Process Next Step"):
+            logging.info(
+                f"[QUEUE] Manual queue tick triggered for '{st.session_state.queue_name}'"
+            )
             _queue_tick()
             st.toast("Ticked queue")
             st.rerun()
@@ -2504,26 +2945,16 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.success("Queue updated.")
                 st.rerun()
 
-    render_jobs_job_history(key_prefix="queue")
-    render_job_status_monitor(key_prefix="queue")
 
-    # ─────────────────────────────
-    # Execution timeline & timings.csv (single latest)
-    # ─────────────────────────────
-    if st.session_state.last_timings:
-        with st.expander("⏱️ Execution Timeline", expanded=False):
-            df_times = st.session_state.last_timings["df"]
-            total = (
-                float(df_times["Time (s)"].sum()) if not df_times.empty else 0.0
-            )
-            if total > 0:
-                df_times = df_times.copy()
-                df_times["% of total"] = (
-                    df_times["Time (s)"] / total * 100
-                ).round(1)
-            st.markdown("**Setup steps (this session)**")
-            st.dataframe(df_times, width="stretch")  # type: ignore
-            st.write(f"**Total setup time:** {_fmt_secs(total)}")
-            st.write(
-                "**Note**: Training runs asynchronously in Cloud Run Jobs."
-            )
+# ===================== STATUS TAB =====================
+with tab_status:
+    st.subheader("Job Status & History")
+    st.write("Track all your training jobs - both from Single run and Queue tabs.")
+    
+    # Job Status Monitor
+    render_job_status_monitor(key_prefix="status")
+    
+    st.divider()
+    
+    # Job History
+    render_jobs_job_history(key_prefix="status")
