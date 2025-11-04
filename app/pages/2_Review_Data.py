@@ -115,11 +115,10 @@ def _cat_stats(s: pd.Series) -> dict:
 # -----------------------------
 # TABS
 # -----------------------------
-tab_load, tab_biz, tab_mkt = st.tabs(
+tab_load, tab_biz, tab_profile = st.tabs(
     [
         "Select Data To Analyze",
         "Business Data",
-        "Marketing Data",
         "Data Profile"
     ]
 )
@@ -977,7 +976,7 @@ with tab_mkt:
         st.info("Platform mapping not available.")
 
 # =============================
-# TAB 4 — DATA PROFILE
+# 3 — DATA PROFILE
 # =============================
 with tab_profile:
     st.subheader(f"Data Profile — {TIMEFRAME_LABEL}")
