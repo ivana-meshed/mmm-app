@@ -29,7 +29,7 @@ prepare_page = st.Page(
     "pages/3_Prepare_Training_Data.py", title="Prepare Data", icon="🛠️"
 )
 prepare_page2 = st.Page(
-    "pages/3_Prepare_Datav2.py", title="Prepare Data 2", icon="🛠️"
+    "pages/3_Prepare_Training_Datav2.py", title="Prepare Data 2", icon="🛠️"
 )
 experiment_page = st.Page(
     "pages/4_Run_Experiment.py", title="Run Experiment", icon="🧪"
