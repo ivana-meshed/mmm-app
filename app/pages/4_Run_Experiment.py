@@ -1965,13 +1965,68 @@ with tab_single:
                 # If job completed, try to show results
                 if status_state == "SUCCEEDED":
                     st.success("🎉 Training completed! Check Job History below for results.")
+                    
+                    # Update job_history with final status
                     try:
-                        # Try to read from GCS
+                        from app_shared import append_row_to_job_history, read_status_json
+                        from datetime import datetime as dt
+                        
                         gcs_prefix = latest_job['gcs_prefix']
                         bucket_name = st.session_state.get("gcs_bucket", GCS_BUCKET)
+                        
+                        # Read status.json to get timing information
+                        status_json = read_status_json(bucket_name, gcs_prefix)
+                        
+                        # Update the job history entry with completion info
+                        append_row_to_job_history(
+                            {
+                                "job_id": gcs_prefix,
+                                "state": "SUCCEEDED",
+                                "end_time": status_json.get("end_time") if status_json else dt.utcnow().isoformat(timespec="seconds") + "Z",
+                                "duration_minutes": status_json.get("duration_minutes") if status_json else None,
+                                "message": "Job completed successfully",
+                            },
+                            bucket_name,
+                        )
+                        logging.info(f"[JOB_STATUS] Updated job_history for {gcs_prefix} with SUCCEEDED status")
+                        
                         st.info(f"Results available at: gs://{bucket_name}/{gcs_prefix}/")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.error(f"[JOB_STATUS] Failed to update job_history: {e}", exc_info=True)
+                        # Still show results location even if history update fails
+                        try:
+                            gcs_prefix = latest_job['gcs_prefix']
+                            bucket_name = st.session_state.get("gcs_bucket", GCS_BUCKET)
+                            st.info(f"Results available at: gs://{bucket_name}/{gcs_prefix}/")
+                        except Exception:
+                            pass
+                
+                # If job failed, update history with failed status
+                elif status_state in ["FAILED", "CANCELLED"]:
+                    try:
+                        from app_shared import append_row_to_job_history, read_status_json
+                        from datetime import datetime as dt
+                        
+                        gcs_prefix = latest_job['gcs_prefix']
+                        bucket_name = st.session_state.get("gcs_bucket", GCS_BUCKET)
+                        
+                        # Read status.json to get timing information
+                        status_json = read_status_json(bucket_name, gcs_prefix)
+                        
+                        # Update the job history entry with failure info
+                        append_row_to_job_history(
+                            {
+                                "job_id": gcs_prefix,
+                                "state": status_state,
+                                "end_time": status_json.get("end_time") if status_json else dt.utcnow().isoformat(timespec="seconds") + "Z",
+                                "duration_minutes": status_json.get("duration_minutes") if status_json else None,
+                                "message": f"Job {status_state.lower()}",
+                            },
+                            bucket_name,
+                        )
+                        logging.info(f"[JOB_STATUS] Updated job_history for {gcs_prefix} with {status_state} status")
+                    except Exception as e:
+                        logging.error(f"[JOB_STATUS] Failed to update job_history: {e}", exc_info=True)
                         
             except Exception as e:
                 st.error(f"Failed to get job status: {e}")
