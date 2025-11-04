@@ -391,7 +391,7 @@ jobs:
             if gcloud run jobs describe "${SERVICE_NAME}-training" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
               terraform state rm google_cloud_run_v2_job.training_job || true
               terraform import -lock-timeout=5m google_cloud_run_v2_job.training_job \
-                "projects/$PROJECT_ID/locations/$REGION/jobs/${SERVICE_NAME}-training" || true
+                "locations/$REGION/namespaces/$PROJECT_ID/services/${SERVICE_NAME}-training" || true
             fi
           fi
 
