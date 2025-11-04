@@ -12,6 +12,10 @@ on:
         - '!docker/Dockerfile.training-base'
         - 'infra/terraform/**'  # exclude base so normal builds skip base
 
+concurrency:
+  group: terraform-dev
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read

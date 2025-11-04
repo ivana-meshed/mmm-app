@@ -4,6 +4,9 @@ on:
   push:
     branches: [ main ]
 
+concurrency:
+  group: terraform-prod
+  cancel-in-progress: false
 
 permissions:
   id-token: write
