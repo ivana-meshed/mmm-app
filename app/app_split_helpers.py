@@ -431,47 +431,77 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
 
 
 def render_job_status_monitor(key_prefix: str = "single") -> None:
-    """Status UI showing all currently running jobs from the queue."""
+    """Status UI showing all currently running jobs from queue and single runs."""
     st.subheader("📊 Job Status Monitor")
 
-    # Show all currently running/launching jobs from the queue
-    queue = st.session_state.get("job_queue", [])
-    running_jobs = [
-        e for e in queue 
-        if e.get("status") in ("RUNNING", "LAUNCHING")
-    ]
+    # Collect all running jobs from two sources:
+    # 1. Queue jobs (RUNNING/LAUNCHING status)
+    # 2. Single run jobs from session state
+    all_running_jobs = []
     
-    if not running_jobs:
+    # Add queue jobs
+    queue = st.session_state.get("job_queue", [])
+    for job in queue:
+        if job.get("status") in ("RUNNING", "LAUNCHING"):
+            all_running_jobs.append({
+                "source": "queue",
+                "job_id": job.get("id", "?"),
+                "status": job.get("status", "UNKNOWN"),
+                "execution_name": job.get("execution_name", ""),
+                "country": job.get("params", {}).get("country", "N/A"),
+                "revision": job.get("params", {}).get("revision", "N/A"),
+                "iterations": job.get("params", {}).get("iterations", "N/A"),
+                "trials": job.get("params", {}).get("trials", "N/A"),
+                "gcs_prefix": job.get("gcs_prefix", ""),
+            })
+    
+    # Add single run jobs from session state
+    for exec_info in st.session_state.get("job_executions", []):
+        exec_name = exec_info.get("execution_name", "")
+        if exec_name:
+            all_running_jobs.append({
+                "source": "single",
+                "job_id": f"single-{exec_info.get('timestamp', '?')}",
+                "status": "RUNNING",
+                "execution_name": exec_name,
+                "country": exec_info.get("country", "N/A"),
+                "revision": exec_info.get("revision", "N/A"),
+                "iterations": "N/A",
+                "trials": "N/A",
+                "gcs_prefix": exec_info.get("gcs_prefix", ""),
+            })
+    
+    if not all_running_jobs:
         st.info("ℹ️ No jobs currently running")
     else:
-        st.write(f"**{len(running_jobs)} job(s) currently running:**")
+        st.write(f"**{len(all_running_jobs)} job(s) currently running:**")
         
-        for job in running_jobs:
-            params = job.get("params", {})
-            exec_name = job.get("execution_name", "")
-            job_id = job.get("id", "?")
-            status = job.get("status", "UNKNOWN")
-            
+        for job in all_running_jobs:
+            source_badge = "🔄 Queue" if job["source"] == "queue" else "▶️ Single"
             with st.expander(
-                f"🔄 Job #{job_id}: {params.get('country', '?')} / {params.get('revision', '?')} - {status}",
+                f"{source_badge} Job {job['job_id']}: {job['country']} / {job['revision']} - {job['status']}",
                 expanded=False
             ):
                 col1, col2 = st.columns([2, 1])
                 
                 with col1:
-                    st.write(f"**Job ID:** {job_id}")
-                    st.write(f"**Status:** {status}")
-                    st.write(f"**Country:** {params.get('country', 'N/A')}")
-                    st.write(f"**Revision:** {params.get('revision', 'N/A')}")
-                    st.write(f"**Iterations:** {params.get('iterations', 'N/A')}")
-                    st.write(f"**Trials:** {params.get('trials', 'N/A')}")
-                    if job.get("gcs_prefix"):
+                    st.write(f"**Source:** {job['source'].title()}")
+                    st.write(f"**Job ID:** {job['job_id']}")
+                    st.write(f"**Status:** {job['status']}")
+                    st.write(f"**Country:** {job['country']}")
+                    st.write(f"**Revision:** {job['revision']}")
+                    if job['iterations'] != "N/A":
+                        st.write(f"**Iterations:** {job['iterations']}")
+                    if job['trials'] != "N/A":
+                        st.write(f"**Trials:** {job['trials']}")
+                    if job['gcs_prefix']:
                         st.write(f"**GCS Prefix:** `{job['gcs_prefix']}`")
                 
                 with col2:
+                    exec_name = job['execution_name']
                     if exec_name and st.button(
                         "🔍 Check Status", 
-                        key=f"check_status_{key_prefix}_{job_id}"
+                        key=f"check_status_{key_prefix}_{job['job_id']}"
                     ):
                         try:
                             with st.spinner("Fetching status..."):
@@ -509,24 +539,35 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
 
     # Manual job status checker (for any execution)
     with st.expander("🔍 Manual Status Check", expanded=False):
-        st.write("Check status of any job by pasting its execution name:")
+        st.write("Check status of any job by entering the execution ID:")
         
-        default_exec = (
-            (st.session_state.job_executions[-1]["execution_name"])
-            if st.session_state.get("job_executions")
-            else ""
+        # Build the prefix from environment variables
+        exec_prefix = ""
+        if PROJECT_ID and REGION and TRAINING_JOB_NAME:
+            exec_prefix = f"projects/{PROJECT_ID}/locations/{REGION}/jobs/{TRAINING_JOB_NAME}/executions/"
+        
+        # Get default execution ID (last part only)
+        default_exec_id = ""
+        if st.session_state.get("job_executions"):
+            last_exec = st.session_state.job_executions[-1]["execution_name"]
+            if "/executions/" in last_exec:
+                default_exec_id = last_exec.split("/executions/")[-1]
+        
+        exec_id = st.text_input(
+            "Execution ID (short form)",
+            value=default_exec_id,
+            key=f"exec_id_manual_{key_prefix}",
+            help="Enter just the execution ID (e.g., 'mmm-app-dev-training-abc123'). The full path will be constructed automatically."
         )
-        exec_name = st.text_input(
-            "Execution resource name",
-            value=default_exec,
-            key=f"exec_input_manual_{key_prefix}",
-            help="Format: projects/{project}/locations/{region}/jobs/{job}/executions/{execution}"
-        )
+        
+        if exec_prefix:
+            st.caption(f"Full path: `{exec_prefix}{exec_id or '<execution-id>'}`")
 
         if st.button("🔍 Check Status", key=f"check_status_manual_{key_prefix}"):
-            if not exec_name:
-                st.warning("Please paste an execution resource name.")
+            if not exec_id:
+                st.warning("Please enter an execution ID.")
             else:
+                exec_name = exec_prefix + exec_id
                 try:
                     with st.spinner("Fetching status..."):
                         status_info = job_manager.get_execution_status(exec_name)
@@ -548,83 +589,6 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                             st.code(error_msg)
                     else:
                         st.error(f"Status check failed: {e}")
-
-    # Quick results/log viewer driven by the job_history (no execution name required)
-    with st.expander("📁 View Results (pick from job_history)", expanded=False):
-        try:
-            df_led = read_job_history_from_gcs(
-                st.session_state.get("gcs_bucket", GCS_BUCKET)
-            )
-        except Exception as e:
-            st.error(f"Failed to read job_history: {e}")
-            df_led = None
-
-        if df_led is None or df_led.empty or "gcs_prefix" not in df_led.columns:
-            st.info("No job_history entries with results yet.")
-        else:
-            df_led = df_led.copy()
-
-            # Build readable labels
-            def _label(r):
-                return f"[{r.get('state','?')}] {r.get('country','?')}/{r.get('revision','?')} · {r.get('gcs_prefix','—')}"
-
-            df_led["__label__"] = df_led.apply(_label, axis=1)
-            idx = st.selectbox(
-                "Pick a job",
-                options=list(df_led.index),
-                format_func=lambda i: df_led.loc[i, "__label__"],
-                key=f"job_history_pick_{key_prefix}",
-            )
-
-            # ...
-            row = df_led.loc[idx]
-
-            # Sanitize bucket and prefix values to avoid pd.NA truthiness
-            bucket_view = row.get(
-                "bucket", st.session_state.get("gcs_bucket", GCS_BUCKET)
-            )
-            if pd.isna(bucket_view) or not str(bucket_view).strip():
-                bucket_view = st.session_state.get("gcs_bucket", GCS_BUCKET)
-
-            gcs_prefix_view = row.get("gcs_prefix")
-            if pd.isna(gcs_prefix_view) or not str(gcs_prefix_view).strip():
-                gcs_prefix_view = None
-
-            if gcs_prefix_view is not None:
-                st.info(
-                    f"Results location: gs://{bucket_view}/{gcs_prefix_view}/"
-                )
-                try:
-                    client = storage.Client()
-                    bucket_obj = client.bucket(bucket_view)
-                    log_blob = bucket_obj.blob(
-                        f"{gcs_prefix_view}/robyn_console.log"
-                    )
-                    if log_blob.exists():
-                        log_bytes = log_blob.download_as_bytes()
-                        tail = (
-                            log_bytes[-2000:]
-                            if len(log_bytes) > 2000
-                            else log_bytes
-                        )
-                        st.text_area(
-                            "Training Log (last 2000 chars):",
-                            value=tail.decode("utf-8", errors="replace"),
-                            height=240,
-                            key=f"log_tail_{key_prefix}",
-                        )
-                        st.download_button(
-                            "Download full training log",
-                            data=log_bytes,
-                            file_name=f"robyn_training_{row.get('job_id','')}.log",
-                            mime="text/plain",
-                            key=f"dl_log_{key_prefix}",
-                        )
-                    else:
-                        st.info("Training log not yet available for this job.")
-                except Exception as e:
-                    st.warning(f"Could not fetch training log: {e}")
-            # ...
 
 
 def set_queue_running(
