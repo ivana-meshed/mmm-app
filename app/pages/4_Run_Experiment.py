@@ -1552,6 +1552,13 @@ with tab_single:
 
                     # Create queue entries for each country
                     new_entries = []
+                    logging.info(
+                        f"[QUEUE] Adding jobs from Single Run tab for countries: {config_countries}"
+                    )
+                    logging.info(
+                        f"[QUEUE] Starting queue ID: {next_id}, Queue name: {st.session_state.get('queue_name')}"
+                    )
+
                     for i, ctry in enumerate(config_countries):
                         # Get data source information
                         # Use GCS path pattern from loaded data
@@ -1612,6 +1619,12 @@ with tab_single:
 
                     # Add to queue
                     st.session_state.job_queue.extend(new_entries)
+                    logging.info(
+                        f"[QUEUE] Added {len(new_entries)} new entries to queue (IDs: {[e['id'] for e in new_entries]})"
+                    )
+                    logging.info(
+                        f"[QUEUE] Total queue size after addition: {len(st.session_state.job_queue)}"
+                    )
 
                     # Save queue to GCS
                     st.session_state.queue_saved_at = save_queue_to_gcs(
@@ -1622,12 +1635,21 @@ with tab_single:
 
                     # Start queue if "Add & Start" was clicked
                     if add_and_start_clicked:
+                        logging.info(
+                            f"[QUEUE] Starting queue '{st.session_state.queue_name}' via 'Add & Start' button"
+                        )
                         set_queue_running(st.session_state.queue_name, True)
                         st.session_state.queue_running = True
+                        logging.info(
+                            f"[QUEUE] Queue running state set to: {st.session_state.queue_running}"
+                        )
 
                     # Show success message
                     countries_str = ", ".join(
                         [c.upper() for c in config_countries]
+                    )
+                    logging.info(
+                        f"[QUEUE] Successfully added jobs to queue for: {countries_str}"
                     )
                     st.success(
                         f"✅ Added {len(new_entries)} job(s) to queue for: {countries_str}"
@@ -1926,71 +1948,178 @@ with tab_single:
             }
 
     # =============== Job Status Display (Requirement 7) ===============
-    st.divider()
-    st.subheader("📊 Recent Job Status")
+    @st.fragment
+    def render_job_status():
+        st.divider()
+        st.subheader("📊 Recent Job Status")
 
-    # Show status of the most recently launched job
-    if st.session_state.get("latest_job_execution"):
-        latest_job = st.session_state["latest_job_execution"]
+        # Show status of the most recently launched job
+        if st.session_state.get("latest_job_execution"):
+            latest_job = st.session_state["latest_job_execution"]
 
-        col_status1, col_status2 = st.columns([3, 1])
-        with col_status1:
-            st.info(
-                f"**Last Job**: {latest_job['country'].upper()} - {latest_job['revision']} ({latest_job['timestamp']})"
-            )
-        with col_status2:
-            refresh_status = st.button(
-                "🔄 Refresh Status",
-                key="refresh_latest_job_status",
-                use_container_width=True,
-            )
-
-        if refresh_status or st.session_state.get("auto_refresh_status"):
-            try:
-                status_info = job_manager.get_execution_status(
-                    latest_job["execution_name"]
+            col_status1, col_status2 = st.columns([3, 1])
+            with col_status1:
+                st.info(
+                    f"**Last Job**: {latest_job['country'].upper()} - {latest_job['revision']} ({latest_job['timestamp']})"
+                )
+            with col_status2:
+                refresh_status = st.button(
+                    "🔄 Refresh Status",
+                    key="refresh_latest_job_status",
+                    use_container_width=True,
                 )
 
-                # Display status - get from overall_status field
-                status_state = status_info.get("overall_status", "UNKNOWN")
-
-                # Color code the status
-                if status_state == "SUCCEEDED":
-                    st.success(f"✅ Status: {status_state}")
-                elif status_state in ["RUNNING", "PENDING"]:
-                    st.info(f"⏳ Status: {status_state}")
-                elif status_state in ["FAILED", "CANCELLED"]:
-                    st.error(f"❌ Status: {status_state}")
-                else:
-                    st.warning(f"⚠️ Status: {status_state}")
-
-                # Show detailed status
-                with st.expander("📋 Detailed Status", expanded=False):
-                    st.json(status_info)
-
-                # If job completed, try to show results
-                if status_state == "SUCCEEDED":
-                    st.success(
-                        "🎉 Training completed! Check Job History below for results."
+            if refresh_status or st.session_state.get("auto_refresh_status"):
+                try:
+                    status_info = job_manager.get_execution_status(
+                        latest_job["execution_name"]
                     )
-                    try:
-                        # Try to read from GCS
-                        gcs_prefix = latest_job["gcs_prefix"]
-                        bucket_name = st.session_state.get(
-                            "gcs_bucket", GCS_BUCKET
-                        )
-                        st.info(
-                            f"Results available at: gs://{bucket_name}/{gcs_prefix}/"
-                        )
-                    except Exception:
-                        pass
 
-            except Exception as e:
-                st.error(f"Failed to get job status: {e}")
-    else:
-        st.info(
-            "No jobs launched yet. Click 'Start Training Job' above to begin."
-        )
+                    # Display status - get from overall_status field
+                    status_state = status_info.get("overall_status", "UNKNOWN")
+
+                    # Color code the status
+                    if status_state == "SUCCEEDED":
+                        st.success(f"✅ Status: {status_state}")
+                    elif status_state in ["RUNNING", "PENDING"]:
+                        st.info(f"⏳ Status: {status_state}")
+                    elif status_state in ["FAILED", "CANCELLED"]:
+                        st.error(f"❌ Status: {status_state}")
+                    else:
+                        st.warning(f"⚠️ Status: {status_state}")
+
+                    # Show detailed status
+                    with st.expander("📋 Detailed Status", expanded=False):
+                        st.json(status_info)
+
+                    # If job completed, try to show results
+                    if status_state == "SUCCEEDED":
+                        st.success(
+                            "🎉 Training completed! Check Job History below for results."
+                        )
+
+                        # Update job_history with final status
+                        try:
+                            from app_shared import (
+                                append_row_to_job_history,
+                                read_status_json,
+                            )
+                            from datetime import datetime as dt
+
+                            gcs_prefix = latest_job["gcs_prefix"]
+                            bucket_name = st.session_state.get(
+                                "gcs_bucket", GCS_BUCKET
+                            )
+
+                            # Read status.json to get timing information
+                            status_json = read_status_json(
+                                bucket_name, gcs_prefix
+                            )
+
+                            # Update the job history entry with completion info
+                            append_row_to_job_history(
+                                {
+                                    "job_id": gcs_prefix,
+                                    "state": "SUCCEEDED",
+                                    "end_time": (
+                                        status_json.get("end_time")
+                                        if status_json
+                                        else dt.utcnow().isoformat(
+                                            timespec="seconds"
+                                        )
+                                        + "Z"
+                                    ),
+                                    "duration_minutes": (
+                                        status_json.get("duration_minutes")
+                                        if status_json
+                                        else None
+                                    ),
+                                    "message": "Job completed successfully",
+                                },
+                                bucket_name,
+                            )
+                            logging.info(
+                                f"[JOB_STATUS] Updated job_history for {gcs_prefix} with SUCCEEDED status"
+                            )
+
+                            st.info(
+                                f"Results available at: gs://{bucket_name}/{gcs_prefix}/"
+                            )
+                        except Exception as e:
+                            logging.error(
+                                f"[JOB_STATUS] Failed to update job_history: {e}",
+                                exc_info=True,
+                            )
+                            # Still show results location even if history update fails
+                            try:
+                                gcs_prefix = latest_job["gcs_prefix"]
+                                bucket_name = st.session_state.get(
+                                    "gcs_bucket", GCS_BUCKET
+                                )
+                                st.info(
+                                    f"Results available at: gs://{bucket_name}/{gcs_prefix}/"
+                                )
+                            except Exception:
+                                pass
+
+                    # If job failed, update history with failed status
+                    elif status_state in ["FAILED", "CANCELLED"]:
+                        try:
+                            from app_shared import (
+                                append_row_to_job_history,
+                                read_status_json,
+                            )
+                            from datetime import datetime as dt
+
+                            gcs_prefix = latest_job["gcs_prefix"]
+                            bucket_name = st.session_state.get(
+                                "gcs_bucket", GCS_BUCKET
+                            )
+
+                            # Read status.json to get timing information
+                            status_json = read_status_json(
+                                bucket_name, gcs_prefix
+                            )
+
+                            # Update the job history entry with failure info
+                            append_row_to_job_history(
+                                {
+                                    "job_id": gcs_prefix,
+                                    "state": status_state,
+                                    "end_time": (
+                                        status_json.get("end_time")
+                                        if status_json
+                                        else dt.utcnow().isoformat(
+                                            timespec="seconds"
+                                        )
+                                        + "Z"
+                                    ),
+                                    "duration_minutes": (
+                                        status_json.get("duration_minutes")
+                                        if status_json
+                                        else None
+                                    ),
+                                    "message": f"Job {status_state.lower()}",
+                                },
+                                bucket_name,
+                            )
+                            logging.info(
+                                f"[JOB_STATUS] Updated job_history for {gcs_prefix} with {status_state} status"
+                            )
+                        except Exception as e:
+                            logging.error(
+                                f"[JOB_STATUS] Failed to update job_history: {e}",
+                                exc_info=True,
+                            )
+
+                except Exception as e:
+                    st.error(f"Failed to get job status: {e}")
+        else:
+            st.info(
+                "No jobs launched yet. Click 'Start Training Job' above to begin."
+            )
+
+    render_job_status()
 
     render_jobs_job_history(key_prefix="single")
 
@@ -2306,6 +2435,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 try:
                     # Read CSV with flexible parsing - allows missing columns per row
                     # This mimics single run behavior where not all fields are required
+                    logging.info(
+                        f"[QUEUE] Uploading CSV file: {getattr(up, 'name', 'unknown')}, size: {getattr(up, 'size', 0)} bytes"
+                    )
                     st.session_state.uploaded_df = pd.read_csv(
                         up, keep_default_na=True
                     )
@@ -2313,10 +2445,16 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     # Fill any missing columns that might be expected but not present
                     # This makes the CSV structure more forgiving
                     st.session_state.uploaded_fingerprint = fingerprint
+                    logging.info(
+                        f"[QUEUE] Successfully loaded CSV with {len(st.session_state.uploaded_df)} rows and {len(st.session_state.uploaded_df.columns)} columns"
+                    )
                     st.success(
                         f"Loaded {len(st.session_state.uploaded_df)} rows from CSV"
                     )
                 except Exception as e:
+                    logging.error(
+                        f"[QUEUE] Failed to parse CSV: {e}", exc_info=True
+                    )
                     st.error(f"Failed to parse CSV: {e}")
         else:
             # If user clears the file input, allow re-uploading the same file later
@@ -2395,6 +2533,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.rerun()
 
             if append_uploaded_clicked:
+                logging.info(
+                    f"[QUEUE] Processing 'Append uploaded rows to builder' - {len(uploaded_edited)} rows in uploaded table"
+                )
                 # Canonical, edited upload table as seen in the UI (including any user sorting)
                 up_base = (
                     uploaded_edited.drop(columns="Delete", errors="ignore")
@@ -2498,6 +2639,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 )
 
                 if added_count > 0:
+                    logging.info(
+                        f"[QUEUE] Appending {added_count} unique rows to queue builder"
+                    )
                     # Append to builder (use builder schema)
                     to_append = up_base.loc[to_append_mask]
                     if need_cols:
@@ -2513,6 +2657,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         ~to_append_mask
                     ].reset_index(drop=True)
 
+                    logging.info(
+                        f"[QUEUE] Successfully appended {added_count} rows. {len(st.session_state.uploaded_df)} rows remaining in upload table (duplicates/invalid)"
+                    )
                     st.success(
                         f"Appended {added_count} row(s) to the builder. "
                         f"Remaining in upload: {len(st.session_state.uploaded_df)} duplicate/invalid row(s)."
@@ -2699,6 +2846,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         need_cols = list(st.session_state.qb_df.columns)
 
         if enqueue_clicked:
+            logging.info(
+                f"[QUEUE] Processing 'Enqueue' from Queue Builder - {len(st.session_state.qb_df)} rows in builder"
+            )
             # Build separate sets so we can categorize reasons
             if st.session_state.qb_df.dropna(how="all").empty:
                 st.warning(
@@ -2788,9 +2938,18 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
                 if not new_entries:
                     # nothing to enqueue
+                    logging.info(
+                        f"[QUEUE] No new entries to enqueue (all duplicates or invalid)"
+                    )
                     pass
                 else:
+                    logging.info(
+                        f"[QUEUE] Enqueuing {len(new_entries)} new jobs from builder (IDs: {[e['id'] for e in new_entries]})"
+                    )
                     st.session_state.job_queue.extend(new_entries)
+                    logging.info(
+                        f"[QUEUE] Total queue size after enqueue: {len(st.session_state.job_queue)}"
+                    )
                     st.session_state.queue_saved_at = save_queue_to_gcs(
                         st.session_state.queue_name,
                         st.session_state.job_queue,
@@ -2828,14 +2987,23 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         if qc1.button(
             "▶️ Start Queue", disabled=(len(st.session_state.job_queue) == 0)
         ):
+            logging.info(
+                f"[QUEUE] Starting queue '{st.session_state.queue_name}' via Start button - {len(st.session_state.job_queue)} jobs in queue"
+            )
             set_queue_running(st.session_state.queue_name, True)
             st.success("Queue set to RUNNING.")
             st.rerun()
         if qc2.button("⏸️ Stop Queue"):
+            logging.info(
+                f"[QUEUE] Stopping queue '{st.session_state.queue_name}' via Stop button"
+            )
             set_queue_running(st.session_state.queue_name, False)
             st.info("Queue paused.")
             st.rerun()
         if qc3.button("⏭️ Process Next Step"):
+            logging.info(
+                f"[QUEUE] Manual queue tick triggered for '{st.session_state.queue_name}'"
+            )
             _queue_tick()
             st.toast("Ticked queue")
             st.rerun()
