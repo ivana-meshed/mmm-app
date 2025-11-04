@@ -25,12 +25,6 @@ map_page = st.Page("pages/1_Map_Data.py", title="Map Data", icon="🗺️")
 
 review_page = st.Page("pages/2_Review_Data.py", title="Review Data", icon="📊")
 
-prepare_page = st.Page(
-    "pages/3_Prepare_Training_Data.py", title="Prepare Data", icon="🛠️"
-)
-prepare_page2 = st.Page(
-    "pages/3_Prepare_Training_Datav2.py", title="Prepare Data 2", icon="🛠️"
-)
 experiment_page = st.Page(
     "pages/4_Run_Experiment.py", title="Run Experiment", icon="🧪"
 )
@@ -47,8 +41,6 @@ pg = st.navigation(
         connect_page,
         map_page,
         review_page,
-        prepare_page,
-        prepare_page2,
         experiment_page,
         results_page,
         best_results_page,
