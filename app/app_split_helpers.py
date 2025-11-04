@@ -248,8 +248,6 @@ def prepare_and_launch_job(params: dict) -> dict:
     # This ensures queue jobs use per-column aggregations from metadata
     if params.get("resample_freq", "none") != "none":
         try:
-            from google.cloud import storage
-
             country = params.get("country", "").lower()
             # Try to load latest metadata for this country
             client = storage.Client()
