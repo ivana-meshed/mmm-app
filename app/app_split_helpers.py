@@ -944,6 +944,29 @@ def _queue_tick():
         st.session_state["job_history_nonce"] = (
             st.session_state.get("job_history_nonce", 0) + 1
         )
+        
+        # If jobs were completed and there are still PENDING jobs with no RUNNING jobs,
+        # immediately launch the next one
+        if remaining:
+            pending_count = sum(1 for e in remaining if e.get("status") == "PENDING")
+            running_count = sum(1 for e in remaining if e.get("status") in ("RUNNING", "LAUNCHING"))
+            
+            if pending_count > 0 and running_count == 0 and st.session_state.get("queue_running"):
+                logger.info(
+                    f"[QUEUE] Auto-launching next job: {pending_count} pending, {running_count} running"
+                )
+                # Recursively tick again to launch the next PENDING job
+                try:
+                    res = queue_tick_once_headless(
+                        st.session_state.queue_name,
+                        st.session_state.get("gcs_bucket", GCS_BUCKET),
+                        launcher=prepare_and_launch_job,
+                    )
+                    logger.info(f"[QUEUE] Auto-launch tick result: {res}")
+                    # Refresh queue again after the auto-launch
+                    maybe_refresh_queue_from_gcs(force=True)
+                except Exception as e:
+                    logger.exception(f"[QUEUE] Auto-launch tick failed: {e}")
 
 
 def _auto_refresh_and_tick(interval_ms: int = 2000):
