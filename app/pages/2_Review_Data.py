@@ -1062,6 +1062,9 @@ def _distribution_values(s: pd.Series, *, numeric_bins: int = 10, cat_topk: int 
         return (vc / total).tolist() if total else []
 
 # ==== Data Profile tab ====
+# =============================
+# TAB 3 — DATA PROFILE
+# =============================
 with tab_profile:
     st.subheader(f"Data Profile — {TIMEFRAME_LABEL}")
 
@@ -1071,31 +1074,12 @@ with tab_profile:
         st.info("No data in the selected timeframe to profile.")
         st.stop()
 
-    # ----- Column typing buckets -----
-    numeric_cols   = prof_df.select_dtypes(include=[np.number]).columns.tolist()
-    datetime_cols  = prof_df.select_dtypes(include=["datetime", "datetimetz"]).columns.tolist()
-    bool_cols      = prof_df.select_dtypes(include=["bool"]).columns.tolist()
-    object_cols    = [c for c in prof_df.columns if c not in numeric_cols + datetime_cols + bool_cols]
-
-    type_opts = {
-        "Numeric": numeric_cols,
-        "Categorical": object_cols + bool_cols,
-        "Datetime": datetime_cols,
-    }
-    type_pick = st.multiselect(
-        "Column types to include",
-        ["Numeric", "Categorical", "Datetime"],
-        default=["Numeric", "Categorical", "Datetime"],
-        help="Profile only selected types."
-    )
-
-    # ----- Category filter from metadata -----
-    # Build category sets from mapping; fall back safely if keys are missing
-    paid_spend  = set(mapping.get("paid_media_spends", []) or [])
-    paid_vars   = set(mapping.get("paid_media_vars", []) or [])
-    organic_vars= set(mapping.get("organic_vars", []) or [])
-    context_vars= set(mapping.get("context_vars", []) or [])
-    factor_vars = set(mapping.get("factor_vars", []) or [])
+    # ----- Category filter from metadata (first) -----
+    paid_spend   = set(mapping.get("paid_media_spends", []) or [])
+    paid_vars    = set(mapping.get("paid_media_vars", []) or [])
+    organic_vars = set(mapping.get("organic_vars", []) or [])
+    context_vars = set(mapping.get("context_vars", []) or [])
+    factor_vars  = set(mapping.get("factor_vars", []) or [])
 
     known = paid_spend | paid_vars | organic_vars | context_vars | factor_vars
     other = set(prof_df.columns) - known
@@ -1108,22 +1092,52 @@ with tab_profile:
         "Factor": factor_vars,
         "Other": other,
     }
+
     cat_pick = st.multiselect(
         "Metadata categories",
         options=list(category_map.keys()),
         default=list(category_map.keys()),
-        help="Filter columns by metadata category."
+        help="Filter columns by metadata category first."
     )
 
-    # Build wanted columns by type + category, preserving DF order
-    wanted_type_cols = set()
-    for t in type_pick:
-        wanted_type_cols |= set(type_opts.get(t, []))
+    # If no category picked, no columns are in-scope
+    if not cat_pick:
+        st.info("Pick at least one metadata category.")
+        st.stop()
 
-    wanted_cat_cols = set().union(*(category_map[c] for c in cat_pick)) if cat_pick else set()
-    # If nothing selected in categories, just keep empty; handle below.
+    wanted_cat_cols = set().union(*(category_map[c] for c in cat_pick))
 
-    wanted_cols = [c for c in prof_df.columns if (c in wanted_type_cols) and (not cat_pick or c in wanted_cat_cols)]
+    # ----- Optional: also filter by column type -----
+    filter_by_type = st.checkbox(
+        "Also filter by column type", value=False,
+        help="Check to additionally restrict the profile to selected data types."
+    )
+
+    numeric_cols  = prof_df.select_dtypes(include=[np.number]).columns.tolist()
+    datetime_cols = prof_df.select_dtypes(include=["datetime", "datetimetz"]).columns.tolist()
+    bool_cols     = prof_df.select_dtypes(include=["bool"]).columns.tolist()
+    object_cols   = [c for c in prof_df.columns if c not in numeric_cols + datetime_cols + bool_cols]
+
+    type_opts = {
+        "Numeric": numeric_cols,
+        "Categorical": object_cols + bool_cols,
+        "Datetime": datetime_cols,
+    }
+
+    if filter_by_type:
+        type_pick = st.multiselect(
+            "Column types to include",
+            ["Numeric", "Categorical", "Datetime"],
+            default=["Numeric", "Categorical", "Datetime"],
+            help="Profile only selected types (on top of the category filter)."
+        )
+        wanted_type_cols = set().union(*(type_opts.get(t, []) for t in type_pick)) if type_pick else set()
+    else:
+        type_pick = []
+        wanted_type_cols = set(prof_df.columns)  # no type restriction
+
+    # Build final wanted columns (preserve DF order)
+    wanted_cols = [c for c in prof_df.columns if (c in wanted_cat_cols) and (c in wanted_type_cols)]
 
     # Optional text filter
     col_filter = st.text_input("Filter columns (contains)", value="").strip().lower()
@@ -1139,11 +1153,12 @@ with tab_profile:
     for col in wanted_cols:
         s = prof_df[col]
         col_type = str(s.dtype)
-        # Stats
+
         if pd.api.types.is_numeric_dtype(s):
             stats = _num_stats(s)
         elif pd.api.types.is_datetime64_any_dtype(s):
-            stats = _cat_stats(s)  # base metrics
+            # datetime summary: reuse cat base + min/max timestamps
+            stats = _cat_stats(s)
             ss = pd.to_datetime(s, errors="coerce").dropna()
             stats["min"] = ss.min().timestamp() if not ss.empty else np.nan
             stats["max"] = ss.max().timestamp() if not ss.empty else np.nan
@@ -1151,12 +1166,11 @@ with tab_profile:
         else:
             stats = _cat_stats(s)
 
-        # Distribution for the spark bar
         dist_vals = _distribution_values(s)
 
         rows.append(
             dict(
-                Use=True,                # default selected
+                Use=True,
                 Column=col,
                 Type=col_type,
                 Dist=dist_vals,
@@ -1174,20 +1188,22 @@ with tab_profile:
         st.metric("Rows (selected timeframe)", f"{total_rows:,}")
         st.metric("Columns", f"{total_cols:,}")
     with right:
-        high_null = (prof_table["nulls_pct"] >= 0.5).fillna(False)
-        constant  = (prof_table["distinct"] <= 1).fillna(False)
-        zeros_only= (prof_table["zeros_pct"] >= 0.99).fillna(False) & prof_table["non_null"].fillna(0).gt(0)
+        high_null  = (prof_table["nulls_pct"] >= 0.5).fillna(False)
+        constant   = (prof_table["distinct"] <= 1).fillna(False)
+        zeros_only = (prof_table["zeros_pct"] >= 0.99).fillna(False) & prof_table["non_null"].fillna(0).gt(0)
         st.caption(
             f"Potential issues — High-null: {int(high_null.sum()):,} · "
             f"Constant: {int(constant.sum()):,} · "
             f"All/Mostly Zero (numeric): {int(zeros_only.sum()):,}"
         )
 
-    # ----- Friendly date strings for datetime min/max (display-only) -----
-    # Keep numeric cols (incl. pct) as numeric so sorting works.
+    # ----- Prepare display frame -----
     disp = prof_table.copy()
-    is_dt = disp["Type"].eq("datetime64")
-    if is_dt.any():
+
+    # Format datetime min/max to readable strings *only when any datetime present*,
+    # so the dtype stays float when no datetime is in the current selection.
+    is_dt_present = disp["Type"].eq("datetime64").any()
+    if is_dt_present:
         def _fmt_dt(num_ts):
             if pd.isna(num_ts):
                 return "–"
@@ -1195,21 +1211,32 @@ with tab_profile:
                 return pd.to_datetime(num_ts, unit="s").strftime("%Y-%m-%d")
             except Exception:
                 return "–"
-        disp.loc[is_dt, "min"] = disp.loc[is_dt, "min"].map(_fmt_dt)
-        disp.loc[is_dt, "max"] = disp.loc[is_dt, "max"].map(_fmt_dt)
+        mask_dt = disp["Type"].eq("datetime64")
+        disp.loc[mask_dt, "min"] = disp.loc[mask_dt, "min"].map(_fmt_dt)
+        disp.loc[mask_dt, "max"] = disp.loc[mask_dt, "max"].map(_fmt_dt)
 
-    # ----- Interactive grid (checkbox + proper numeric sorting + tiny bar) -----
-    # NOTE: counts kept numeric; percent columns are floats and formatted as %.
-    # Min/Max are mixed (strings for datetime rows), so sorting those may be lexical for those rows — acceptable.
+    # ----- Interactive grid -----
+    # Put Distribution right after Type as requested
     grid_cols = [
-        "Use", "Column", "Type",
+        "Use", "Column", "Type", "Dist",
         "non_null", "nulls", "nulls_pct",
         "zeros", "zeros_pct",
         "distinct",
         "min", "p10", "median", "mean", "p90", "max", "std",
-        "Dist",
     ]
     show_cols = [c for c in grid_cols if c in disp.columns]
+
+    # Column config: choose Text vs Number for min/max dynamically to avoid type conflicts
+    min_cfg = (
+        st.column_config.TextColumn("Min")
+        if is_dt_present else
+        st.column_config.NumberColumn("Min", format="%.2f")
+    )
+    max_cfg = (
+        st.column_config.TextColumn("Max")
+        if is_dt_present else
+        st.column_config.NumberColumn("Max", format="%.2f")
+    )
 
     edited = st.data_editor(
         disp[show_cols],
@@ -1218,49 +1245,47 @@ with tab_profile:
         num_rows="fixed",
         column_config={
             "Use": st.column_config.CheckboxColumn(required=True),
-            "non_null": st.column_config.NumberColumn("Non-Null", format="%.0f"),
-            "nulls": st.column_config.NumberColumn("Nulls", format="%.0f"),
-            "nulls_pct": st.column_config.NumberColumn("Nulls %", format="%.1f%%"),
-            "zeros": st.column_config.NumberColumn("Zeros", format="%.0f"),
-            "zeros_pct": st.column_config.NumberColumn("Zeros %", format="%.1f%%"),
-            "distinct": st.column_config.NumberColumn("Distinct", format="%.0f"),
-            "min": st.column_config.TextColumn("Min"),      # text because datetime rows are strings
-            "p10": st.column_config.NumberColumn("P10", format="%.2f"),
-            "median": st.column_config.NumberColumn("Median", format="%.2f"),
-            "mean": st.column_config.NumberColumn("Mean", format="%.2f"),
-            "p90": st.column_config.NumberColumn("P90", format="%.2f"),
-            "max": st.column_config.TextColumn("Max"),      # text because datetime rows are strings
-            "std": st.column_config.NumberColumn("Std", format="%.2f"),
             "Dist": st.column_config.BarChartColumn(
                 "Distribution",
-                help="For numeric: histogram; for categorical: top-k share.",
+                help="For numeric: histogram; for categorical: top-k share; for datetime: monthly buckets.",
                 y_min=0.0, y_max=1.0,
             ),
+            "non_null":  st.column_config.NumberColumn("Non-Null", format="%.0f"),
+            "nulls":     st.column_config.NumberColumn("Nulls", format="%.0f"),
+            "nulls_pct": st.column_config.NumberColumn("Nulls %", format="%.1f%%"),
+            "zeros":     st.column_config.NumberColumn("Zeros", format="%.0f"),
+            "zeros_pct": st.column_config.NumberColumn("Zeros %", format="%.1f%%"),
+            "distinct":  st.column_config.NumberColumn("Distinct", format="%.0f"),
+            "min":       min_cfg,
+            "p10":       st.column_config.NumberColumn("P10", format="%.2f"),
+            "median":    st.column_config.NumberColumn("Median", format="%.2f"),
+            "mean":      st.column_config.NumberColumn("Mean", format="%.2f"),
+            "p90":       st.column_config.NumberColumn("P90", format="%.2f"),
+            "max":       max_cfg,
+            "std":       st.column_config.NumberColumn("Std", format="%.2f"),
         },
-        key="data_profile_editor_v1",
+        key="data_profile_editor_v2",
     )
 
     # Persist selected cols for later views
     selected_cols = edited.loc[edited["Use"] == True, "Column"].tolist() if not edited.empty else []
     st.session_state["selected_profile_columns"] = selected_cols
 
-    # Downloads (only selected rows)
+    # ----- Downloads (clear names) -----
     prof_out = prof_table[prof_table["Column"].isin(selected_cols)].copy() if selected_cols else prof_table.copy()
     csv = prof_out.drop(columns=["Dist"], errors="ignore").to_csv(index=False).encode("utf-8")
     st.download_button(
-        "Download profile (CSV) — selected",
+        "Export profile (CSV, selected rows)",
         data=csv,
         file_name="data_profile_selected.csv",
         mime="text/csv",
-        help="Exports only rows with 'Use' checked. (Distribution spark data is omitted.)",
     )
 
     if selected_cols:
         cols_csv = pd.DataFrame({"column": selected_cols}).to_csv(index=False).encode("utf-8")
         st.download_button(
-            "Download selected column list",
+            "Export selected column names (CSV)",
             data=cols_csv,
             file_name="selected_columns.csv",
             mime="text/csv",
-            help="Just the list of selected columns (one per row).",
         )
