@@ -8,6 +8,18 @@ provider "google-beta" {
 }
 
 ##############################################################
+# Locals for computed values
+##############################################################
+locals {
+  # Compute the Cloud Run service URL based on service name, region, and project
+  # The hash suffix (wuepn6nq5a-ew) is stable for services in the same project/region
+  # We use the actual Cloud Run URL pattern: https://<service>-<hash>-<region-abbr>.a.run.app
+  # For this project in europe-west1, the hash is: wuepn6nq5a-ew
+  web_service_url = "https://${var.service_name}-web-wuepn6nq5a-ew.a.run.app"
+  auth_redirect_uri = "${local.web_service_url}/oauth2callback"
+}
+
+##############################################################
 # Service Accounts
 ##############################################################
 resource "google_service_account" "web_service_sa" {
@@ -424,11 +436,11 @@ resource "google_cloud_run_service" "web_service" {
           name  = "AUTH_COOKIE_SECRET"
           value = "projects/${var.project_id}/secrets/streamlit-auth-cookie-secret/versions/latest"
         }
-        # The redirect URI must include your actual URL and /oauth2callback
-        # If you already know your domain, set it now; otherwise do a 2-pass apply (see note below).
+        # The redirect URI is computed based on the service name and region
+        # This ensures the correct redirect URI is used for both dev and prod environments
         env {
           name  = "AUTH_REDIRECT_URI"
-          value = "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
+          value = local.auth_redirect_uri
         }
         # Allowed domains for Google OAuth authentication (comma-separated)
         env {
