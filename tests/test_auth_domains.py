@@ -4,6 +4,7 @@ Tests for Google authentication domain validation.
 This module tests the domain validation logic for Google OAuth authentication.
 """
 
+import importlib
 import os
 import unittest
 from unittest.mock import patch
@@ -12,13 +13,16 @@ from unittest.mock import patch
 class TestAllowedDomains(unittest.TestCase):
     """Test cases for allowed domains configuration."""
 
+    def _reload_settings(self):
+        """Helper method to reload settings module."""
+        from app.config import settings
+        importlib.reload(settings)
+        return settings
+
     def test_single_domain_parsing(self):
         """Test parsing a single domain from environment variable."""
         with patch.dict(os.environ, {"ALLOWED_DOMAINS": "mesheddata.com"}):
-            # Force reload of settings
-            import importlib
-            from app.config import settings
-            importlib.reload(settings)
+            settings = self._reload_settings()
             
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
             self.assertEqual(len(settings.ALLOWED_DOMAINS), 1)
@@ -26,10 +30,7 @@ class TestAllowedDomains(unittest.TestCase):
     def test_multiple_domains_parsing(self):
         """Test parsing multiple domains from environment variable."""
         with patch.dict(os.environ, {"ALLOWED_DOMAINS": "mesheddata.com,example.com,test.org"}):
-            # Force reload of settings
-            import importlib
-            from app.config import settings
-            importlib.reload(settings)
+            settings = self._reload_settings()
             
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
             self.assertIn("example.com", settings.ALLOWED_DOMAINS)
@@ -39,10 +40,7 @@ class TestAllowedDomains(unittest.TestCase):
     def test_domains_with_spaces(self):
         """Test parsing domains with extra whitespace."""
         with patch.dict(os.environ, {"ALLOWED_DOMAINS": " mesheddata.com , example.com , test.org "}):
-            # Force reload of settings
-            import importlib
-            from app.config import settings
-            importlib.reload(settings)
+            settings = self._reload_settings()
             
             # Should be trimmed
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
@@ -54,10 +52,11 @@ class TestAllowedDomains(unittest.TestCase):
     def test_domains_normalized_to_lowercase(self):
         """Test that domains are normalized to lowercase."""
         with patch.dict(os.environ, {"ALLOWED_DOMAINS": "MeshedData.COM,EXAMPLE.COM"}):
-            # Force reload of settings
-            import importlib
-            from app.config import settings
-            importlib.reload(settings)
+            settings = self._reload_settings()
+            
+            self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
+            self.assertIn("example.com", settings.ALLOWED_DOMAINS)
+            # Should not contain uppercase versions
             
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
             self.assertIn("example.com", settings.ALLOWED_DOMAINS)
@@ -67,10 +66,7 @@ class TestAllowedDomains(unittest.TestCase):
     def test_empty_domains_filtered(self):
         """Test that empty domains are filtered out."""
         with patch.dict(os.environ, {"ALLOWED_DOMAINS": "mesheddata.com,,example.com,  ,test.org"}):
-            # Force reload of settings
-            import importlib
-            from app.config import settings
-            importlib.reload(settings)
+            settings = self._reload_settings()
             
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
             self.assertIn("example.com", settings.ALLOWED_DOMAINS)
@@ -80,10 +76,7 @@ class TestAllowedDomains(unittest.TestCase):
     def test_backward_compatibility_allowed_domain(self):
         """Test backward compatibility with ALLOWED_DOMAIN (singular) env var."""
         with patch.dict(os.environ, {"ALLOWED_DOMAIN": "legacy.com", "ALLOWED_DOMAINS": "mesheddata.com"}):
-            # Force reload of settings
-            import importlib
-            from app.config import settings
-            importlib.reload(settings)
+            settings = self._reload_settings()
             
             # Both should be present
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
@@ -98,10 +91,7 @@ class TestAllowedDomains(unittest.TestCase):
             if "ALLOWED_DOMAIN" in os.environ:
                 del os.environ["ALLOWED_DOMAIN"]
             
-            # Force reload of settings
-            import importlib
-            from app.config import settings
-            importlib.reload(settings)
+            settings = self._reload_settings()
             
             # Should default to mesheddata.com
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)

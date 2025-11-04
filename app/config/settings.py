@@ -210,11 +210,14 @@ AUTH_COOKIE_SECRET: Optional[str] = os.getenv("STREAMLIT_COOKIE_SECRET")
 ALLOWED_DOMAINS_RAW: str = os.getenv("ALLOWED_DOMAINS", "mesheddata.com")
 """Comma-separated list of allowed email domains for authentication"""
 
-ALLOWED_DOMAINS: list[str] = [
-    domain.strip().lower()
-    for domain in ALLOWED_DOMAINS_RAW.split(",")
-    if domain.strip()
-]
+# Parse and normalize domains
+_parsed_domains = []
+for domain in ALLOWED_DOMAINS_RAW.split(","):
+    domain_clean = domain.strip().lower()
+    if domain_clean:
+        _parsed_domains.append(domain_clean)
+
+ALLOWED_DOMAINS: list[str] = _parsed_domains
 """List of allowed email domains for authentication (parsed from ALLOWED_DOMAINS env var)"""
 
 # Backward compatibility: support single ALLOWED_DOMAIN env var

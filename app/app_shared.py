@@ -1370,7 +1370,7 @@ def _is_bool_like(series: pd.Series) -> bool:
         return False
 
 
-def require_login_and_domain(allowed_domain: str = None) -> None:
+def require_login_and_domain(allowed_domain: Optional[str] = None) -> None:
     """
     Hard-stops the current Streamlit run unless the user is logged in
     with a Google account from one of the allowed domains.
