@@ -1964,36 +1964,48 @@ with tab_queue:
     st.subheader(
         "Batch queue (CSV) — queue & run multiple jobs sequentially",
     )
-    with st.expander(
-        "📚 Batch queue (CSV) — queue & run multiple jobs sequentially",
-        expanded=False,
-    ):
-        _render_flash("batch_dupes")
-        maybe_refresh_queue_from_gcs()
-        # Queue name + Load/Save
-        cqn1, cqn2, cqn3 = st.columns([2, 1, 1])
-        new_qname = cqn1.text_input(
-            "Queue name",
-            value=st.session_state["queue_name"],
-            help="Persists to GCS under robyn-queues/<name>/queue.json",
+    
+    # Initialize expander state tracking if not present
+    if "csv_upload_expanded" not in st.session_state:
+        st.session_state.csv_upload_expanded = False
+    if "queue_builder_expanded" not in st.session_state:
+        st.session_state.queue_builder_expanded = False
+    if "current_queue_expanded" not in st.session_state:
+        st.session_state.current_queue_expanded = False
+    
+    _render_flash("batch_dupes")
+    maybe_refresh_queue_from_gcs()
+    
+    # Queue name + Load/Save (outside expanders, always visible)
+    cqn1, cqn2, cqn3 = st.columns([2, 1, 1])
+    new_qname = cqn1.text_input(
+        "Queue name",
+        value=st.session_state["queue_name"],
+        help="Persists to GCS under robyn-queues/<name>/queue.json",
+    )
+    if new_qname != st.session_state["queue_name"]:
+        st.session_state["queue_name"] = new_qname
+
+    if cqn2.button("⬇️ Load from GCS", key="load_queue_from_gcs"):
+        payload = load_queue_payload(st.session_state.queue_name)
+        st.session_state.job_queue = payload["entries"]
+        st.session_state.queue_running = payload.get("queue_running", False)
+        st.session_state.queue_saved_at = payload.get("saved_at")
+        st.success(f"Loaded queue '{st.session_state.queue_name}' from GCS")
+
+    if cqn3.button("⬆️ Save to GCS", key="save_queue_to_gcs"):
+        st.session_state.queue_saved_at = save_queue_to_gcs(
+            st.session_state.queue_name,
+            st.session_state.job_queue,
+            queue_running=st.session_state.queue_running,
         )
-        if new_qname != st.session_state["queue_name"]:
-            st.session_state["queue_name"] = new_qname
-
-        if cqn2.button("⬇️ Load from GCS"):
-            payload = load_queue_payload(st.session_state.queue_name)
-            st.session_state.job_queue = payload["entries"]
-            st.session_state.queue_running = payload.get("queue_running", False)
-            st.session_state.queue_saved_at = payload.get("saved_at")
-            st.success(f"Loaded queue '{st.session_state.queue_name}' from GCS")
-
-        if cqn3.button("⬆️ Save to GCS"):
-            st.session_state.queue_saved_at = save_queue_to_gcs(
-                st.session_state.queue_name,
-                st.session_state.job_queue,
-                queue_running=st.session_state.queue_running,
-            )
-            st.success(f"Saved queue '{st.session_state.queue_name}' to GCS")
+        st.success(f"Saved queue '{st.session_state.queue_name}' to GCS")
+    
+    # ========== EXPANDER 1: CSV Upload ==========
+    with st.expander(
+        "📤 CSV Upload",
+        expanded=st.session_state.csv_upload_expanded,
+    ):
 
         # Detailed instructions in expander
         with st.expander("📋 Detailed Instructions", expanded=False):
@@ -2492,8 +2504,16 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         f"Appended {added_count} row(s) to the builder. "
                         f"Remaining in upload: {len(st.session_state.uploaded_df)} duplicate/invalid row(s)."
                     )
+                    # Auto-transition to Queue Builder expander
+                    st.session_state.csv_upload_expanded = False
+                    st.session_state.queue_builder_expanded = True
                     st.rerun()
-
+    
+    # ========== EXPANDER 2: Queue Builder ==========
+    with st.expander(
+        "✏️ Queue Builder",
+        expanded=st.session_state.queue_builder_expanded,
+    ):
         # Seed once from current GCS queue (do NOT re-seed on every rerun)
         # ===== Queue Builder (parameters only, editable) =====
         payload = load_queue_payload(st.session_state.queue_name)
@@ -2798,38 +2818,48 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     st.success(
                         f"Enqueued {len(new_entries)} new job(s), saved to GCS, and removed them from the builder."
                     )
+                    # Auto-transition to Current Queue expander
+                    st.session_state.queue_builder_expanded = False
+                    st.session_state.current_queue_expanded = True
                     st.rerun()
-
+    
+    # ========== EXPANDER 3: Current Queue ==========
+    with st.expander(
+        "📋 Current Queue",
+        expanded=st.session_state.current_queue_expanded,
+    ):
         # Queue controls
         st.caption(
             f"Queue status: {'▶️ RUNNING' if st.session_state.queue_running else '⏸️ STOPPED'} · "
             f"{sum(e['status'] in ('RUNNING','LAUNCHING') for e in st.session_state.job_queue)} running"
         )
 
-        if st.button("🔁 Refresh from GCS", use_container_width=True):
+        if st.button("🔁 Refresh from GCS", use_container_width=True, key="refresh_queue_from_gcs"):
             maybe_refresh_queue_from_gcs(force=True)
             st.success("Refreshed from GCS.")
             st.rerun()
 
         qc1, qc2, qc3, qc4 = st.columns(4)
         if qc1.button(
-            "▶️ Start Queue", disabled=(len(st.session_state.job_queue) == 0)
+            "▶️ Start Queue", disabled=(len(st.session_state.job_queue) == 0), key="start_queue_btn"
         ):
             logging.info(
                 f"[QUEUE] Starting queue '{st.session_state.queue_name}' via Start button - {len(st.session_state.job_queue)} jobs in queue"
             )
             set_queue_running(st.session_state.queue_name, True)
+            st.session_state.queue_running = True
             st.success("Queue set to RUNNING.")
             st.info("👉 **View current and past job executions in the 'Status' tab above.**")
             st.rerun()
-        if qc2.button("⏸️ Stop Queue"):
+        if qc2.button("⏸️ Stop Queue", key="stop_queue_btn"):
             logging.info(
                 f"[QUEUE] Stopping queue '{st.session_state.queue_name}' via Stop button"
             )
             set_queue_running(st.session_state.queue_name, False)
+            st.session_state.queue_running = False
             st.info("Queue paused.")
             st.rerun()
-        if qc3.button("⏭️ Process Next Step"):
+        if qc3.button("⏭️ Process Next Step", key="process_next_step_btn"):
             logging.info(
                 f"[QUEUE] Manual queue tick triggered for '{st.session_state.queue_name}'"
             )
@@ -2837,11 +2867,12 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             st.toast("Ticked queue")
             st.rerun()
 
-        if qc4.button("💾 Save now"):
+        if qc4.button("💾 Save now", key="save_queue_now_btn"):
             save_queue_to_gcs(
                 st.session_state.queue_name, st.session_state.job_queue
             )
             st.success("Queue saved to GCS.")
+            # No rerun needed for save operation
 
         _auto_refresh_and_tick(interval_ms=2000)
 
