@@ -19,26 +19,24 @@ from app_split_helpers import *
 
 # Define pages for custom navigation
 connect_page = st.Page(
-    "pages/0_0_Connect_Data.py", title="Connect Data", icon="🧩"
+    "pages/0_Connect_Data.py", title="Connect Data", icon="🧩"
 )
-map_page = st.Page("pages/1_1_Map_Data.py", title="Map Data", icon="🗺️")
-review_page = st.Page(
-    "pages/2_2_Review_Data.py", title="Review Data", icon="📊"
-)
+map_page = st.Page("pages/1_Map_Data.py", title="Map Data", icon="🗺️")
+review_page = st.Page("pages/2_Review_Data.py", title="Review Data", icon="📊")
 prepare_page = st.Page(
-    "pages/3_3_Prepare_Data.py", title="Prepare Data", icon="🛠️"
+    "pages/3_Prepare_Data.py", title="Prepare Data", icon="🛠️"
 )
 prepare_page2 = st.Page(
-    "pages/3_3_Prepare_Datav2.py", title="Prepare Data 2", icon="🛠️"
+    "pages/3b_Prepare_Data_2.py", title="Prepare Data 2", icon="🛠️"
 )
 experiment_page = st.Page(
-    "pages/4_4_Run_Experiment.py", title="Run Experiment", icon="🧪"
+    "pages/4_Run_Experiment.py", title="Run Experiment", icon="🧪"
 )
 results_page = st.Page(
-    "pages/5_5_View_Results.py", title="View Results", icon="📈"
+    "pages/5_View_Results.py", title="View Results", icon="📈"
 )
 best_results_page = st.Page(
-    "pages/6_6_View_Best_Results.py", title="Best Results", icon="🏆"
+    "pages/6_View_Best_Results.py", title="Best Results", icon="🏆"
 )
 
 # Create navigation - this replaces the default sidebar navigation
