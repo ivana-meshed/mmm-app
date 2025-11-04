@@ -54,8 +54,8 @@ from app_shared import (
     GREEN,
     RED,
 )
+
 require_login_and_domain()
-ensure_session_defaults()
 
 st.title("Review Business- & Marketing Data")
 
