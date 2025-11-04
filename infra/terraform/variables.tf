@@ -88,6 +88,6 @@ variable "auth_client_secret" {
 
 variable "allowed_domains" {
   type        = string
-  default     = "mesheddata.com"
+  default     = "mesheddata.com, buycycle.com"
   description = "Comma-separated list of allowed email domains for Google OAuth authentication"
 }
