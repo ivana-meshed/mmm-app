@@ -398,9 +398,10 @@ def _empty_job_history_df() -> pd.DataFrame:
     return pd.DataFrame(columns=cols)
 
 
+@st.fragment
 def render_jobs_job_history(key_prefix: str = "single") -> None:
     with st.expander("📚 Job History (from GCS)", expanded=False):
-        # Refresh control first (button triggers a rerun)
+        # Refresh control first (button triggers fragment rerun only)
         if st.button(
             "🔁 Refresh job_history", key=f"refresh_job_history_{key_prefix}"
         ):
@@ -408,7 +409,7 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
             st.session_state["job_history_nonce"] = (
                 st.session_state.get("job_history_nonce", 0) + 1
             )
-            st.rerun()
+            st.rerun(scope="fragment")
 
         try:
             df_job_history = read_job_history_from_gcs(
@@ -827,6 +828,13 @@ def _queue_tick():
             launcher=prepare_and_launch_job,
         )
         logger.info(f"Queue tick result: {res}")
+        
+        # Log launch failures prominently
+        if not res.get("ok") and "launch failed" in res.get("message", ""):
+            logger.error(f"[QUEUE_ERROR] Launch failure detected in queue tick")
+            logger.error(f"[QUEUE_ERROR] Error message: {res.get('message')}")
+            logger.error(f"[QUEUE_ERROR] Queue: {st.session_state.queue_name}")
+            
     except Exception as e:
         logger.exception(f"Queue tick_once_headless failed: {e}")
         raise
@@ -904,9 +912,22 @@ def _queue_tick():
                 st.session_state.get("gcs_bucket", GCS_BUCKET),
             )
             moved += 1
-            logger.info(
-                f"Moved job {entry.get('id')} to history with status {final_state}"
-            )
+            
+            # Enhanced logging for job history movement
+            error_msg = entry.get("message", "")
+            if final_state in ("ERROR", "FAILED", "CANCELLED"):
+                logger.error(
+                    f"[QUEUE_ERROR] Moved job {entry.get('id')} to history with status {final_state}"
+                )
+                logger.error(
+                    f"[QUEUE_ERROR] Job details - Country: {p.get('country')}, "
+                    f"Revision: {p.get('revision')}, GCS: {entry.get('gcs_prefix')}"
+                )
+                logger.error(f"[QUEUE_ERROR] Error message: {error_msg}")
+            else:
+                logger.info(
+                    f"Moved job {entry.get('id')} to history with status {final_state}"
+                )
         else:
             remaining.append(entry)
 
@@ -933,23 +954,45 @@ def _auto_refresh_and_tick(interval_ms: int = 2000):
     refresh so the page re-runs and we tick again.
     """
     if not st.session_state.get("queue_running"):
-        logger.debug("Queue not running, skipping auto-refresh")
+        logger.info("[QUEUE] Auto-refresh skipped: queue_running is False")
         return
 
-    # If there’s nothing left, stop auto-refreshing.
+    # Check queue before tick
     q = st.session_state.get("job_queue") or []
+    logger.info(f"[QUEUE] Auto-refresh: queue has {len(q)} entries before tick")
+    
     if len(q) == 0:
+        logger.info("[QUEUE] Auto-refresh stopping: queue is empty")
         st.session_state.queue_running = False
         return
+    
+    # Log job statuses before tick
+    pending_count = sum(1 for e in q if e.get("status") == "PENDING")
+    running_count = sum(1 for e in q if e.get("status") in ("RUNNING", "LAUNCHING"))
+    completed_count = sum(1 for e in q if e.get("status") in ("SUCCEEDED", "FAILED", "ERROR", "CANCELLED", "COMPLETED"))
+    logger.info(f"[QUEUE] Before tick: {pending_count} pending, {running_count} running, {completed_count} completed")
 
     # Advance the queue once
     _queue_tick()
+    
+    # Check queue after tick
+    q_after = st.session_state.get("job_queue") or []
+    logger.info(f"[QUEUE] After tick: queue has {len(q_after)} entries")
+    
+    # If queue is now empty, stop running
+    if len(q_after) == 0:
+        logger.info("[QUEUE] Queue is now empty after tick, stopping auto-refresh")
+        st.session_state.queue_running = False
+        return
 
     # Schedule a client-side refresh
+    logger.info(f"[QUEUE] Scheduling page refresh in {interval_ms}ms")
     st.markdown(
         f"<script>setTimeout(function(){{window.location.reload();}}, {interval_ms});</script>",
         unsafe_allow_html=True,
     )
+
+
 
 
 def _sorted_with_controls(
