@@ -213,6 +213,23 @@ def _safe_tick_once(
                     )
                     message = entry["message"]
                     changed = True
+                    
+                    # Enhanced logging for final states
+                    if final_state in ("FAILED", "ERROR", "CANCELLED"):
+                        logger.error(
+                            f"[QUEUE_ERROR] Job {entry.get('id')} transitioned to {final_state}"
+                        )
+                        logger.error(
+                            f"[QUEUE_ERROR] Execution: {entry.get('execution_name', 'N/A')}"
+                        )
+                        logger.error(
+                            f"[QUEUE_ERROR] GCS prefix: {entry.get('gcs_prefix', 'N/A')}"
+                        )
+                        logger.error(f"[QUEUE_ERROR] Error message: {message}")
+                    else:
+                        logger.info(
+                            f"[QUEUE] Job {entry.get('id')} completed with status {final_state}"
+                        )
                 elif entry.get("status") == "LAUNCHING":
                     # Visible execution, promote to RUNNING
                     entry["status"] = "RUNNING"
@@ -223,6 +240,12 @@ def _safe_tick_once(
                 entry["message"] = str(e)
                 message = entry["message"]
                 changed = True
+                logger.error(
+                    f"[QUEUE_ERROR] Failed to get status for job {entry.get('id')}: {e}"
+                )
+                logger.error(
+                    f"[QUEUE_ERROR] Execution: {entry.get('execution_name', 'N/A')}"
+                )
 
             if changed:
                 doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
@@ -282,6 +305,13 @@ def _safe_tick_once(
             entry["status"] = "ERROR"
             entry["message"] = f"launch failed: {e}"
             message = entry["message"]
+            logger.exception(
+                f"[QUEUE_ERROR] Failed to launch job {entry.get('id')}: {e}"
+            )
+            logger.error(
+                f"[QUEUE_ERROR] Job params: country={entry.get('params', {}).get('country')}, "
+                f"revision={entry.get('params', {}).get('revision')}"
+            )
 
         # Persist the post-launch state with another guarded write
         blob.reload()

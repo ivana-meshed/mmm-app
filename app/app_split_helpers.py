@@ -905,9 +905,22 @@ def _queue_tick():
                 st.session_state.get("gcs_bucket", GCS_BUCKET),
             )
             moved += 1
-            logger.info(
-                f"Moved job {entry.get('id')} to history with status {final_state}"
-            )
+            
+            # Enhanced logging for job history movement
+            error_msg = entry.get("message", "")
+            if final_state in ("ERROR", "FAILED", "CANCELLED"):
+                logger.error(
+                    f"[QUEUE_ERROR] Moved job {entry.get('id')} to history with status {final_state}"
+                )
+                logger.error(
+                    f"[QUEUE_ERROR] Job details - Country: {p.get('country')}, "
+                    f"Revision: {p.get('revision')}, GCS: {entry.get('gcs_prefix')}"
+                )
+                logger.error(f"[QUEUE_ERROR] Error message: {error_msg}")
+            else:
+                logger.info(
+                    f"Moved job {entry.get('id')} to history with status {final_state}"
+                )
         else:
             remaining.append(entry)
 
