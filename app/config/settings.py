@@ -207,5 +207,18 @@ AUTH_CLIENT_SECRET: Optional[str] = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
 AUTH_COOKIE_SECRET: Optional[str] = os.getenv("STREAMLIT_COOKIE_SECRET")
 """Streamlit cookie secret for session management"""
 
-ALLOWED_DOMAIN: str = os.getenv("ALLOWED_DOMAIN", "mesheddata.com")
-"""Allowed email domain for authentication"""
+ALLOWED_DOMAINS_RAW: str = os.getenv("ALLOWED_DOMAINS", "mesheddata.com")
+"""Comma-separated list of allowed email domains for authentication"""
+
+ALLOWED_DOMAINS: list[str] = [
+    domain.strip().lower()
+    for domain in ALLOWED_DOMAINS_RAW.split(",")
+    if domain.strip()
+]
+"""List of allowed email domains for authentication (parsed from ALLOWED_DOMAINS env var)"""
+
+# Backward compatibility: support single ALLOWED_DOMAIN env var
+if os.getenv("ALLOWED_DOMAIN"):
+    _legacy_domain = os.getenv("ALLOWED_DOMAIN", "").strip().lower()
+    if _legacy_domain and _legacy_domain not in ALLOWED_DOMAINS:
+        ALLOWED_DOMAINS.append(_legacy_domain)

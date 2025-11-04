@@ -16,3 +16,8 @@ sf_warehouse = "SMALL_WH"
 sf_database  = "MESHED_BUYCYCLE"
 sf_schema    = "GROWTH"
 sf_role      = "ACCOUNTADMIN"
+
+# Google OAuth allowed domains (comma-separated)
+# Example: allowed_domains = "mesheddata.com,example.com"
+# Default: allowed_domains = "mesheddata.com"
+

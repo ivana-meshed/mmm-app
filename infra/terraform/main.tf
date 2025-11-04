@@ -430,6 +430,11 @@ resource "google_cloud_run_service" "web_service" {
           name  = "AUTH_REDIRECT_URI"
           value = "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
         }
+        # Allowed domains for Google OAuth authentication (comma-separated)
+        env {
+          name  = "ALLOWED_DOMAINS"
+          value = var.allowed_domains
+        }
 
       }
     }

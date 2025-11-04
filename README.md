@@ -158,17 +158,40 @@ gcloud run services describe mmm-trainer \
 ## Streamlit App Usage
 
 1. Open the Cloud Run URL shown by Terraform.
-2. Fill in **Snowflake** connection info.
-3. Provide your Snowflake private key (PEM format):
+2. **Sign in** with your authorized Google account (see [Google Authentication](#google-authentication) below).
+3. Fill in **Snowflake** connection info.
+4. Provide your Snowflake private key (PEM format):
    - Upload a `.pem` file, or paste the key directly
    - Optionally check **"Save this key for future sessions"** to persist it in Google Secret Manager
    - In future sessions, saved keys are loaded automatically
-4. Provide either a **table** (`DB.SCHEMA.TABLE`) or a **SQL query**.
-5. (Optional) Upload `enriched_annotations.csv`.
-6. Review/adjust variable mapping (spends/vars/context/factors/organic).
-7. Click **Train**:
+5. Provide either a **table** (`DB.SCHEMA.TABLE`) or a **SQL query**.
+6. (Optional) Upload `enriched_annotations.csv`.
+7. Review/adjust variable mapping (spends/vars/context/factors/organic).
+8. Click **Train**:
    - App pulls data → writes `/tmp/input_snapshot.csv` → invokes `Rscript r/run_all.R job_cfg=...`.
    - R uploads artifacts into `gs://<bucket>/robyn/<revision>/<country>/<timestamp>/`.
+
+## Google Authentication
+
+The application uses Google OAuth to restrict access to authorized email domains.
+
+### Configuring Allowed Domains
+
+By default, the application allows users from `mesheddata.com`. To add additional domains:
+
+1. Update the `allowed_domains` variable in your Terraform configuration:
+   ```hcl
+   # In infra/terraform/envs/prod.tfvars
+   allowed_domains = "mesheddata.com,example.com"
+   ```
+
+2. Apply the Terraform changes:
+   ```bash
+   cd infra/terraform
+   terraform apply -var-file="envs/prod.tfvars"
+   ```
+
+For detailed instructions, see [docs/google_auth_domain_configuration.md](docs/google_auth_domain_configuration.md).
 
 ## Google Auth (GCS Uploads)
 
