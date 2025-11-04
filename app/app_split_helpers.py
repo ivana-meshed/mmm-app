@@ -481,35 +481,8 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
         # Create DataFrame for display
         df = pd.DataFrame(all_running_jobs)
         
-        # Color code status column
-        def highlight_status(row):
-            status = row["Status"]
-            if status == "RUNNING":
-                return ['background-color: #90EE90'] * len(row)  # Light green
-            elif status == "LAUNCHING":
-                return ['background-color: #FFD700'] * len(row)  # Gold
-            elif status == "SUCCEEDED":
-                return ['background-color: #32CD32'] * len(row)  # Lime green
-            elif status in ["FAILED", "ERROR"]:
-                return ['background-color: #FF6B6B'] * len(row)  # Light red
-            else:
-                return [''] * len(row)
-        
         # Display table with clickable links
         st.write(f"**{len(all_running_jobs)} job(s) currently running:**")
-        
-        # Use st.dataframe with column configuration for clickable links
-        column_config = {
-            "GCS Prefix": st.column_config.LinkColumn(
-                "GCS Prefix",
-                help="Click to open GCS folder in new tab",
-                display_text="Open GCS ↗"
-            ),
-            "Execution Details": st.column_config.TextColumn(
-                "Execution Details",
-                help="Cloud Run execution resource name"
-            ),
-        }
         
         # Create display dataframe with proper URLs
         display_df = df.copy()
@@ -526,8 +499,35 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                 lambda x: f"https://console.cloud.google.com/run/jobs/executions/details/{REGION}/{x.split('/')[-1]}?project={PROJECT_ID}" if x and "/" in x else x
             )
         
+        # Apply color coding to Status column using styled dataframe
+        def color_status(val):
+            if val == "RUNNING":
+                return 'background-color: #90EE90'  # Light green
+            elif val == "LAUNCHING":
+                return 'background-color: #FFD700'  # Gold
+            elif val == "SUCCEEDED":
+                return 'background-color: #32CD32'  # Lime green
+            elif val in ["FAILED", "ERROR"]:
+                return 'background-color: #FF6B6B'  # Light red
+            else:
+                return ''
+        
+        # Use st.dataframe with column configuration for clickable links
+        column_config = {
+            "GCS Prefix": st.column_config.LinkColumn(
+                "GCS Prefix",
+                help="Click to open GCS folder in new tab",
+                display_text="Open GCS ↗"
+            ),
+            "Execution Details": st.column_config.LinkColumn(
+                "Execution Details",
+                help="Click to open Cloud Run execution details in new tab",
+                display_text="Open Execution ↗"
+            ),
+        }
+        
         st.dataframe(
-            display_df,
+            display_df.style.applymap(color_status, subset=['Status']),
             column_config=column_config,
             use_container_width=True,
             hide_index=True,
