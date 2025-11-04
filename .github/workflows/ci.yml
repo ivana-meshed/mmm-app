@@ -320,6 +320,18 @@ jobs:
           else
             echo "training_job_sa already managed in Terraform state—skipping import."
           fi
+          # Import Cloud Scheduler job
+          if gcloud scheduler jobs describe robyn-queue-tick --location=$REGION --project=$PROJECT_ID >/dev/null 2>&1; then
+            echo "Checking if scheduler job is already managed..."
+            if ! terraform state show google_cloud_scheduler_job.robyn_queue_tick >/dev/null 2>&1; then
+              echo "Scheduler job exists—importing..."
+              terraform import -lock-timeout=5m google_cloud_scheduler_job.robyn_queue_tick projects/$PROJECT_ID/locations/$REGION/jobs/robyn-queue-tick || true
+            else
+              echo "Scheduler job already managed in Terraform state—skipping import."
+            fi
+          else
+            echo "Scheduler job does not exist—will create on apply."
+          fi
           # Import training job
           if gcloud run jobs describe ${SERVICE_NAME}-training --region=$REGION --project=$PROJECT_ID >/dev/null 2>&1; then
             echo "Checking if training job is already managed..."
