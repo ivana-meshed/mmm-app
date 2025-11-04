@@ -496,6 +496,21 @@ class CloudRunJobManager:
             except Exception:
                 return str(dtobj) if dtobj is not None else None
 
+        # Validate execution_name format
+        if not execution_name or not isinstance(execution_name, str):
+            return {
+                "overall_status": "ERROR",
+                "error": "Invalid execution_name: must be a non-empty string"
+            }
+        
+        # Expected format: projects/{project}/locations/{region}/jobs/{job}/executions/{execution}
+        if not execution_name.startswith("projects/"):
+            return {
+                "overall_status": "ERROR",
+                "error": f"Invalid execution_name format: {execution_name}. "
+                        "Expected format: projects/{{project}}/locations/{{region}}/jobs/{{job}}/executions/{{execution}}"
+            }
+
         try:
             execution = self.executions_client.get_execution(
                 name=execution_name
@@ -530,8 +545,24 @@ class CloudRunJobManager:
                 status["overall_status"] = "PENDING"
             return status
         except Exception as e:
-            logger.error(f"Error getting execution status: {e}", exc_info=True)
-            return {"overall_status": "ERROR", "error": str(e)}
+            logger.error(f"Error getting execution status for '{execution_name}': {e}", exc_info=True)
+            error_msg = str(e)
+            
+            # Provide helpful error messages for common issues
+            if "403" in error_msg or "Permission denied" in error_msg:
+                return {
+                    "overall_status": "ERROR",
+                    "error": f"Permission denied: The service account may not have access to view executions. "
+                            f"Ensure the web service account has 'roles/run.developer' or 'roles/run.admin' permissions. "
+                            f"Original error: {error_msg}"
+                }
+            elif "404" in error_msg or "not found" in error_msg.lower():
+                return {
+                    "overall_status": "ERROR",
+                    "error": f"Execution not found: {execution_name}. The execution may have been deleted or the name is incorrect."
+                }
+            else:
+                return {"overall_status": "ERROR", "error": error_msg}
 
 
 # ─────────────────────────────

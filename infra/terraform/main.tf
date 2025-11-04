@@ -101,6 +101,11 @@ resource "google_secret_manager_secret_iam_member" "sf_private_key_persistent_ve
 #  member             = "serviceAccount:${google_service_account.web_service_sa.email}"
 #}
 
+# Allow web service to execute and monitor training jobs
+# The run.admin role includes:
+# - run.jobs.run (to execute jobs)
+# - run.executions.get (to view execution status)
+# - run.executions.list (to list executions)
 resource "google_project_iam_member" "web_service_job_admin" {
   project = var.project_id
   role    = "roles/run.admin"

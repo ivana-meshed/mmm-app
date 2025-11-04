@@ -431,30 +431,123 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
 
 
 def render_job_status_monitor(key_prefix: str = "single") -> None:
-    """Status UI usable in both tabs, even without a session job."""
+    """Status UI showing all currently running jobs from the queue."""
     st.subheader("📊 Job Status Monitor")
 
-    # Prefer the latest session execution if present; allow manual input always.
-    default_exec = (
-        (st.session_state.job_executions[-1]["execution_name"])
-        if st.session_state.get("job_executions")
-        else ""
-    )
-    exec_name = st.text_input(
-        "Execution resource name (paste one to check any run)",
-        value=default_exec,
-        key=f"exec_input_{key_prefix}",
-    )
+    # Show all currently running/launching jobs from the queue
+    queue = st.session_state.get("job_queue", [])
+    running_jobs = [
+        e for e in queue 
+        if e.get("status") in ("RUNNING", "LAUNCHING")
+    ]
+    
+    if not running_jobs:
+        st.info("ℹ️ No jobs currently running")
+    else:
+        st.write(f"**{len(running_jobs)} job(s) currently running:**")
+        
+        for job in running_jobs:
+            params = job.get("params", {})
+            exec_name = job.get("execution_name", "")
+            job_id = job.get("id", "?")
+            status = job.get("status", "UNKNOWN")
+            
+            with st.expander(
+                f"🔄 Job #{job_id}: {params.get('country', '?')} / {params.get('revision', '?')} - {status}",
+                expanded=False
+            ):
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.write(f"**Job ID:** {job_id}")
+                    st.write(f"**Status:** {status}")
+                    st.write(f"**Country:** {params.get('country', 'N/A')}")
+                    st.write(f"**Revision:** {params.get('revision', 'N/A')}")
+                    st.write(f"**Iterations:** {params.get('iterations', 'N/A')}")
+                    st.write(f"**Trials:** {params.get('trials', 'N/A')}")
+                    if job.get("gcs_prefix"):
+                        st.write(f"**GCS Prefix:** `{job['gcs_prefix']}`")
+                
+                with col2:
+                    if exec_name and st.button(
+                        "🔍 Check Status", 
+                        key=f"check_status_{key_prefix}_{job_id}"
+                    ):
+                        try:
+                            with st.spinner("Fetching status..."):
+                                status_info = job_manager.get_execution_status(exec_name)
+                                st.success(f"Status: {status_info.get('overall_status', 'UNKNOWN')}")
+                                
+                                # Show key metrics
+                                if status_info.get("running_count"):
+                                    st.metric("Running", status_info["running_count"])
+                                if status_info.get("succeeded_count"):
+                                    st.metric("Succeeded", status_info["succeeded_count"])
+                                if status_info.get("failed_count"):
+                                    st.metric("Failed", status_info["failed_count"])
+                                
+                                with st.expander("Full Status Details"):
+                                    st.json(status_info)
+                        except Exception as e:
+                            error_msg = str(e)
+                            if "403" in error_msg or "Permission denied" in error_msg:
+                                st.error(
+                                    "⚠️ Permission Error: The service account doesn't have "
+                                    "permission to view job execution status. "
+                                    "Please ensure the web service account has 'roles/run.developer' "
+                                    "or 'roles/run.admin' permissions."
+                                )
+                                with st.expander("Technical Details"):
+                                    st.code(error_msg)
+                            else:
+                                st.error(f"Status check failed: {e}")
+                
+                # Show execution name for debugging
+                if exec_name:
+                    with st.expander("Execution Details", expanded=False):
+                        st.code(exec_name, language="text")
 
-    if st.button("🔍 Check Status", key=f"check_status_{key_prefix}"):
-        if not exec_name:
-            st.warning("Paste an execution resource name to check.")
-        else:
-            try:
-                status_info = job_manager.get_execution_status(exec_name)
-                st.json(status_info)
-            except Exception as e:
-                st.error(f"Status check failed: {e}")
+    # Manual job status checker (for any execution)
+    with st.expander("🔍 Manual Status Check", expanded=False):
+        st.write("Check status of any job by pasting its execution name:")
+        
+        default_exec = (
+            (st.session_state.job_executions[-1]["execution_name"])
+            if st.session_state.get("job_executions")
+            else ""
+        )
+        exec_name = st.text_input(
+            "Execution resource name",
+            value=default_exec,
+            key=f"exec_input_manual_{key_prefix}",
+            help="Format: projects/{project}/locations/{region}/jobs/{job}/executions/{execution}"
+        )
+
+        if st.button("🔍 Check Status", key=f"check_status_manual_{key_prefix}"):
+            if not exec_name:
+                st.warning("Please paste an execution resource name.")
+            else:
+                try:
+                    with st.spinner("Fetching status..."):
+                        status_info = job_manager.get_execution_status(exec_name)
+                        st.json(status_info)
+                except Exception as e:
+                    error_msg = str(e)
+                    if "403" in error_msg or "Permission denied" in error_msg:
+                        st.error(
+                            "⚠️ Permission Error: The service account doesn't have "
+                            "permission to view job execution status."
+                        )
+                        st.info(
+                            "**To fix this issue:**\n"
+                            "1. The web service account needs Cloud Run permissions\n"
+                            "2. Ensure it has 'roles/run.developer' or 'roles/run.admin'\n"
+                            "3. Check the terraform configuration in infra/terraform/main.tf"
+                        )
+                        with st.expander("Technical Details"):
+                            st.code(error_msg)
+                    else:
+                        st.error(f"Status check failed: {e}")
 
     # Quick results/log viewer driven by the job_history (no execution name required)
     with st.expander("📁 View Results (pick from job_history)", expanded=False):
