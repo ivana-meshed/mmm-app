@@ -428,7 +428,7 @@ resource "google_cloud_run_service" "web_service" {
         # If you already know your domain, set it now; otherwise do a 2-pass apply (see note below).
         env {
           name  = "AUTH_REDIRECT_URI"
-          value = "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
+          value = "https://${var.service_name}-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
         }
         # Allowed domains for Google OAuth authentication (comma-separated)
         env {
