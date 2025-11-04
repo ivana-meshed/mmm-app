@@ -398,9 +398,10 @@ def _empty_job_history_df() -> pd.DataFrame:
     return pd.DataFrame(columns=cols)
 
 
+@st.fragment
 def render_jobs_job_history(key_prefix: str = "single") -> None:
     with st.expander("📚 Job History (from GCS)", expanded=False):
-        # Refresh control first (button triggers a rerun)
+        # Refresh control first (button triggers fragment rerun only)
         if st.button(
             "🔁 Refresh job_history", key=f"refresh_job_history_{key_prefix}"
         ):
@@ -408,7 +409,7 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
             st.session_state["job_history_nonce"] = (
                 st.session_state.get("job_history_nonce", 0) + 1
             )
-            st.rerun()
+            st.rerun(scope="fragment")
 
         try:
             df_job_history = read_job_history_from_gcs(

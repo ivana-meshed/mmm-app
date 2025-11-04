@@ -1928,110 +1928,114 @@ with tab_single:
             }
 
     # =============== Job Status Display (Requirement 7) ===============
-    st.divider()
-    st.subheader("📊 Recent Job Status")
-    
-    # Show status of the most recently launched job
-    if st.session_state.get("latest_job_execution"):
-        latest_job = st.session_state["latest_job_execution"]
+    @st.fragment
+    def render_job_status():
+        st.divider()
+        st.subheader("📊 Recent Job Status")
         
-        col_status1, col_status2 = st.columns([3, 1])
-        with col_status1:
-            st.info(f"**Last Job**: {latest_job['country'].upper()} - {latest_job['revision']} ({latest_job['timestamp']})")
-        with col_status2:
-            refresh_status = st.button("🔄 Refresh Status", key="refresh_latest_job_status", use_container_width=True)
-        
-        if refresh_status or st.session_state.get("auto_refresh_status"):
-            try:
-                status_info = job_manager.get_execution_status(latest_job['execution_name'])
-                
-                # Display status - get from overall_status field
-                status_state = status_info.get("overall_status", "UNKNOWN")
-                
-                # Color code the status
-                if status_state == "SUCCEEDED":
-                    st.success(f"✅ Status: {status_state}")
-                elif status_state in ["RUNNING", "PENDING"]:
-                    st.info(f"⏳ Status: {status_state}")
-                elif status_state in ["FAILED", "CANCELLED"]:
-                    st.error(f"❌ Status: {status_state}")
-                else:
-                    st.warning(f"⚠️ Status: {status_state}")
-                
-                # Show detailed status
-                with st.expander("📋 Detailed Status", expanded=False):
-                    st.json(status_info)
-                
-                # If job completed, try to show results
-                if status_state == "SUCCEEDED":
-                    st.success("🎉 Training completed! Check Job History below for results.")
+        # Show status of the most recently launched job
+        if st.session_state.get("latest_job_execution"):
+            latest_job = st.session_state["latest_job_execution"]
+            
+            col_status1, col_status2 = st.columns([3, 1])
+            with col_status1:
+                st.info(f"**Last Job**: {latest_job['country'].upper()} - {latest_job['revision']} ({latest_job['timestamp']})")
+            with col_status2:
+                refresh_status = st.button("🔄 Refresh Status", key="refresh_latest_job_status", use_container_width=True)
+            
+            if refresh_status or st.session_state.get("auto_refresh_status"):
+                try:
+                    status_info = job_manager.get_execution_status(latest_job['execution_name'])
                     
-                    # Update job_history with final status
-                    try:
-                        from app_shared import append_row_to_job_history, read_status_json
-                        from datetime import datetime as dt
+                    # Display status - get from overall_status field
+                    status_state = status_info.get("overall_status", "UNKNOWN")
+                    
+                    # Color code the status
+                    if status_state == "SUCCEEDED":
+                        st.success(f"✅ Status: {status_state}")
+                    elif status_state in ["RUNNING", "PENDING"]:
+                        st.info(f"⏳ Status: {status_state}")
+                    elif status_state in ["FAILED", "CANCELLED"]:
+                        st.error(f"❌ Status: {status_state}")
+                    else:
+                        st.warning(f"⚠️ Status: {status_state}")
+                    
+                    # Show detailed status
+                    with st.expander("📋 Detailed Status", expanded=False):
+                        st.json(status_info)
+                    
+                    # If job completed, try to show results
+                    if status_state == "SUCCEEDED":
+                        st.success("🎉 Training completed! Check Job History below for results.")
                         
-                        gcs_prefix = latest_job['gcs_prefix']
-                        bucket_name = st.session_state.get("gcs_bucket", GCS_BUCKET)
-                        
-                        # Read status.json to get timing information
-                        status_json = read_status_json(bucket_name, gcs_prefix)
-                        
-                        # Update the job history entry with completion info
-                        append_row_to_job_history(
-                            {
-                                "job_id": gcs_prefix,
-                                "state": "SUCCEEDED",
-                                "end_time": status_json.get("end_time") if status_json else dt.utcnow().isoformat(timespec="seconds") + "Z",
-                                "duration_minutes": status_json.get("duration_minutes") if status_json else None,
-                                "message": "Job completed successfully",
-                            },
-                            bucket_name,
-                        )
-                        logging.info(f"[JOB_STATUS] Updated job_history for {gcs_prefix} with SUCCEEDED status")
-                        
-                        st.info(f"Results available at: gs://{bucket_name}/{gcs_prefix}/")
-                    except Exception as e:
-                        logging.error(f"[JOB_STATUS] Failed to update job_history: {e}", exc_info=True)
-                        # Still show results location even if history update fails
+                        # Update job_history with final status
                         try:
+                            from app_shared import append_row_to_job_history, read_status_json
+                            from datetime import datetime as dt
+                            
                             gcs_prefix = latest_job['gcs_prefix']
                             bucket_name = st.session_state.get("gcs_bucket", GCS_BUCKET)
+                            
+                            # Read status.json to get timing information
+                            status_json = read_status_json(bucket_name, gcs_prefix)
+                            
+                            # Update the job history entry with completion info
+                            append_row_to_job_history(
+                                {
+                                    "job_id": gcs_prefix,
+                                    "state": "SUCCEEDED",
+                                    "end_time": status_json.get("end_time") if status_json else dt.utcnow().isoformat(timespec="seconds") + "Z",
+                                    "duration_minutes": status_json.get("duration_minutes") if status_json else None,
+                                    "message": "Job completed successfully",
+                                },
+                                bucket_name,
+                            )
+                            logging.info(f"[JOB_STATUS] Updated job_history for {gcs_prefix} with SUCCEEDED status")
+                            
                             st.info(f"Results available at: gs://{bucket_name}/{gcs_prefix}/")
-                        except Exception:
-                            pass
-                
-                # If job failed, update history with failed status
-                elif status_state in ["FAILED", "CANCELLED"]:
-                    try:
-                        from app_shared import append_row_to_job_history, read_status_json
-                        from datetime import datetime as dt
-                        
-                        gcs_prefix = latest_job['gcs_prefix']
-                        bucket_name = st.session_state.get("gcs_bucket", GCS_BUCKET)
-                        
-                        # Read status.json to get timing information
-                        status_json = read_status_json(bucket_name, gcs_prefix)
-                        
-                        # Update the job history entry with failure info
-                        append_row_to_job_history(
-                            {
-                                "job_id": gcs_prefix,
-                                "state": status_state,
-                                "end_time": status_json.get("end_time") if status_json else dt.utcnow().isoformat(timespec="seconds") + "Z",
-                                "duration_minutes": status_json.get("duration_minutes") if status_json else None,
-                                "message": f"Job {status_state.lower()}",
-                            },
-                            bucket_name,
-                        )
-                        logging.info(f"[JOB_STATUS] Updated job_history for {gcs_prefix} with {status_state} status")
-                    except Exception as e:
-                        logging.error(f"[JOB_STATUS] Failed to update job_history: {e}", exc_info=True)
-                        
-            except Exception as e:
-                st.error(f"Failed to get job status: {e}")
-    else:
-        st.info("No jobs launched yet. Click 'Start Training Job' above to begin.")
+                        except Exception as e:
+                            logging.error(f"[JOB_STATUS] Failed to update job_history: {e}", exc_info=True)
+                            # Still show results location even if history update fails
+                            try:
+                                gcs_prefix = latest_job['gcs_prefix']
+                                bucket_name = st.session_state.get("gcs_bucket", GCS_BUCKET)
+                                st.info(f"Results available at: gs://{bucket_name}/{gcs_prefix}/")
+                            except Exception:
+                                pass
+                    
+                    # If job failed, update history with failed status
+                    elif status_state in ["FAILED", "CANCELLED"]:
+                        try:
+                            from app_shared import append_row_to_job_history, read_status_json
+                            from datetime import datetime as dt
+                            
+                            gcs_prefix = latest_job['gcs_prefix']
+                            bucket_name = st.session_state.get("gcs_bucket", GCS_BUCKET)
+                            
+                            # Read status.json to get timing information
+                            status_json = read_status_json(bucket_name, gcs_prefix)
+                            
+                            # Update the job history entry with failure info
+                            append_row_to_job_history(
+                                {
+                                    "job_id": gcs_prefix,
+                                    "state": status_state,
+                                    "end_time": status_json.get("end_time") if status_json else dt.utcnow().isoformat(timespec="seconds") + "Z",
+                                    "duration_minutes": status_json.get("duration_minutes") if status_json else None,
+                                    "message": f"Job {status_state.lower()}",
+                                },
+                                bucket_name,
+                            )
+                            logging.info(f"[JOB_STATUS] Updated job_history for {gcs_prefix} with {status_state} status")
+                        except Exception as e:
+                            logging.error(f"[JOB_STATUS] Failed to update job_history: {e}", exc_info=True)
+                            
+                except Exception as e:
+                    st.error(f"Failed to get job status: {e}")
+        else:
+            st.info("No jobs launched yet. Click 'Start Training Job' above to begin.")
+
+    render_job_status()
 
     render_jobs_job_history(key_prefix="single")
 
