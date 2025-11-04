@@ -49,10 +49,13 @@ from app_shared import (
     resample_numeric,
     total_with_prev,
     resolve_meta_blob_from_selection,
+    require_login_and_domain
     # colors (if exported; otherwise define locally)
     GREEN,
     RED,
 )
+require_login_and_domain()
+ensure_session_defaults()
 
 st.title("Review Business- & Marketing Data")
 
@@ -115,10 +118,11 @@ def _cat_stats(s: pd.Series) -> dict:
 # -----------------------------
 # TABS
 # -----------------------------
-tab_load, tab_biz, tab_profile = st.tabs(
+tab_load, tab_biz, tab_mkt, tab_profile = st.tabs(
     [
         "Select Data To Analyze",
         "Business Data",
+        "Marketing Data",
         "Data Profile"
     ]
 )
