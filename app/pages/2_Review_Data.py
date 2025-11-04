@@ -49,7 +49,7 @@ from app_shared import (
     resample_numeric,
     total_with_prev,
     resolve_meta_blob_from_selection,
-    require_login_and_domain
+    require_login_and_domain,
     # colors (if exported; otherwise define locally)
     GREEN,
     RED,
