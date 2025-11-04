@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 permissions:
   id-token: write
@@ -182,7 +184,7 @@ jobs:
           terraform init -input=false -reconfigure -backend-config="prefix=envs/prod"
           terraform -version
           terraform workspace new prod || terraform workspace select prod  # Create/select if needed
-          
+
           # Verify we're in the correct workspace
           CURRENT_WORKSPACE=$(terraform workspace show)
           if [ "$CURRENT_WORKSPACE" != "prod" ]; then
@@ -190,7 +192,7 @@ jobs:
             exit 1
           fi
           echo "✓ Confirmed workspace: $CURRENT_WORKSPACE"
-          
+
           terraform fmt -check
           terraform validate
 

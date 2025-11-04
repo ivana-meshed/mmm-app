@@ -1227,7 +1227,20 @@ with st.expander(
         key="load_metadata_source_selector",
     )
 
-    if st.button("Load & apply metadata", use_container_width=True):
+    # Add buttons for Load and Refresh
+    col_load, col_refresh = st.columns([1, 1])
+    with col_load:
+        load_metadata_clicked = st.button("Load & apply metadata", use_container_width=True, key="load_metadata_btn")
+    with col_refresh:
+        refresh_metadata_clicked = st.button("↻ Refresh metadata list", use_container_width=True, key="refresh_metadata_btn")
+
+    # Handle refresh button
+    if refresh_metadata_clicked:
+        _list_metadata_versions_cached.clear()
+        st.success("Refreshed metadata list.")
+        st.rerun()
+
+    if load_metadata_clicked:
         try:
             # Parse metadata selection to get country and version
             meta_parts = selected_metadata.split(" - ")
@@ -1404,42 +1417,6 @@ with st.expander("🎯 Goals", expanded=False):
 
 # ---- Custom channels UI ----
 with st.expander("📺 Custom Marketing Channels", expanded=False):
-    ch_col1, ch_col2 = st.columns([2, 1])
-    with ch_col1:
-        new_channel = st.text_input(
-            "Add custom channel (e.g., 'spotify', 'podcast')",
-            key="new_channel_input",
-            help="Enter channel names that aren't in the default list",
-        )
-    with ch_col2:
-        if st.button(
-            "➕ Add Channel", key="add_channel_btn", use_container_width=True
-        ):
-            if new_channel and new_channel.strip():
-                custom_channels = st.session_state.get("custom_channels", [])
-                channel_lower = new_channel.strip().lower()
-                if (
-                    channel_lower not in custom_channels
-                    and channel_lower not in _get_known_channels()
-                ):
-                    custom_channels.append(channel_lower)
-                    st.session_state["custom_channels"] = custom_channels
-                    st.success(f"Added custom channel: {channel_lower}")
-                    st.rerun()
-                elif channel_lower in custom_channels:
-                    st.warning(
-                        f"Channel '{channel_lower}' already exists in custom channels"
-                    )
-                else:
-                    st.warning(
-                        f"Channel '{channel_lower}' already exists in known channels"
-                    )
-
-    # Display current custom channels
-    if st.session_state.get("custom_channels"):
-        st.caption(
-            "Custom channels: " + ", ".join(st.session_state["custom_channels"])
-        )
     # Show recognized channels from mapping and inferred from column names
     mapping_channels = []
     if (
@@ -1465,13 +1442,51 @@ with st.expander("📺 Custom Marketing Channels", expanded=False):
         }
     )
 
-    # combine and dedupe
+    # combine and dedupe to get recognized channels
     recognized_channels = sorted(set(mapping_channels + inferred_channels))
 
-    if recognized_channels:
-        st.caption(
-            "Recognized channels from data: " + ", ".join(recognized_channels)
-        )
+    # Combine recognized channels with existing custom channels for prefill
+    existing_custom = st.session_state.get("custom_channels", [])
+    all_existing_channels = sorted(set(recognized_channels + existing_custom))
+
+    # Single input field with prefilled recognized channels
+    channels_input = st.text_area(
+        "Marketing Channels (comma-separated)",
+        value=", ".join(all_existing_channels),
+        help="Recognized channels from your data are prefilled. Add additional custom channels (e.g., 'spotify', 'podcast') separated by commas.",
+        height=100,
+        key="channels_input"
+    )
+
+    if st.button("➕ Add Channels", key="add_channels_btn", use_container_width=True):
+        # Parse the input
+        entered_channels = [ch.strip().lower() for ch in channels_input.split(",") if ch.strip()]
+        
+        # Separate into custom vs recognized
+        known_channels_set = set(_get_known_channels())
+        new_custom_channels = []
+        
+        for ch in entered_channels:
+            # If it's not in recognized (from data) and not in known defaults, it's custom
+            if ch not in recognized_channels and ch not in known_channels_set:
+                new_custom_channels.append(ch)
+        
+        # Update session state
+        st.session_state["custom_channels"] = new_custom_channels
+        
+        # Rebuild mapping_df to include new channels
+        if not st.session_state["mapping_df"].empty:
+            # Re-extract channels for all variables
+            for idx, row in st.session_state["mapping_df"].iterrows():
+                var_name = str(row["var"])
+                extracted_channel = _extract_channel_from_column(var_name)
+                if extracted_channel:
+                    st.session_state["mapping_df"].at[idx, "channel"] = extracted_channel
+        
+        st.success(f"✅ Channels updated! Added {len(new_custom_channels)} custom channel(s).")
+        if new_custom_channels:
+            st.info(f"Custom channels: {', '.join(new_custom_channels)}")
+        st.rerun()
 
     st.divider()
 
@@ -1577,76 +1592,6 @@ if st.session_state["mapping_df"].empty:
 
 # ---- Variable Mapping Editor ----
 with st.expander("🗺️ Variable Mapping", expanded=False):
-    # --- Re-apply auto-tag rules on demand (outside any form) ---
-    rt1, rt2 = st.columns([1, 1])
-
-    # Only fill previously-untagged rows (preserves manual edits)
-    if rt1.button(
-        "🔁 Auto-tag UNTAGGED columns",
-        key="retag_missing",
-        use_container_width=True,
-    ):
-        m = st.session_state["mapping_df"].copy()
-        inferred = {
-            c: _infer_category(c, st.session_state["auto_rules"])
-            for c in all_cols
-        }
-
-        # Ensure all columns exist
-        if "channel" not in m.columns:
-            m["channel"] = ""
-        if "data_type" not in m.columns:
-            m["data_type"] = "numeric"
-        if "agg_strategy" not in m.columns:
-            m["agg_strategy"] = "sum"
-
-        # Fill missing values
-        m["category"] = m.apply(
-            lambda r: (
-                r["category"]
-                if str(r["category"]).strip()
-                else inferred.get(r["var"], "")
-            ),
-            axis=1,
-        )
-        m["channel"] = m.apply(
-            lambda r: (
-                r["channel"]
-                if str(r.get("channel", "")).strip()
-                else _extract_channel_from_column(str(r["var"]))
-            ),
-            axis=1,
-        )
-        m["data_type"] = m.apply(
-            lambda r: (
-                r["data_type"]
-                if str(r.get("data_type", "")).strip()
-                else _detect_data_type(df_raw, str(r["var"]))
-            ),
-            axis=1,
-        )
-        m["agg_strategy"] = m.apply(
-            lambda r: (
-                r["agg_strategy"]
-                if str(r.get("agg_strategy", "")).strip()
-                else _default_agg_strategy(str(r.get("data_type", "numeric")))
-            ),
-            axis=1,
-        )
-        st.session_state["mapping_df"] = m.astype("object")
-        st.success("Filled categories for previously untagged columns.")
-
-    # Overwrite everything from current rules (discard manual edits)
-    if rt2.button(
-        "♻️ Re-apply rules to ALL", key="retag_all", use_container_width=True
-    ):
-        st.session_state["mapping_df"] = _build_mapping_df(
-            all_cols, df_raw, st.session_state["auto_rules"]
-        )
-        st.warning(
-            "Re-applied rules to ALL columns (manual categories were overwritten)."
-        )
-
     # Add sorting controls (user-controlled, not automatic)
     st.write("**Sort mapping table:**")
     sort_col1, sort_col2, sort_col3 = st.columns([2, 1, 1])
@@ -1777,12 +1722,17 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
             },
             key="mapping_editor",
         )
-
+        
+        # Submit button inside the form to capture edits
         mapping_submit = st.form_submit_button("✅ Apply mapping changes")
 
+    # Handle form submission - capture edits and apply aggregations
     if mapping_submit:
-        # Apply automatic aggregations
+        # Apply automatic aggregations to edited mapping
         try:
+            # Store original length before updating
+            original_length = len(st.session_state["mapping_df"])
+            
             # Prepare prefixes dict
             prefixes = {
                 "organic_vars": st.session_state.get(
@@ -1795,15 +1745,15 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
                     "factor_vars_prefix", "FACTOR_"
                 ),
             }
+            # Use mapping_edit which has the user's edits from the data_editor
             updated_mapping, updated_df = _apply_automatic_aggregations(
                 mapping_edit.copy(), st.session_state["df_raw"].copy(), prefixes
             )
             st.session_state["mapping_df"] = updated_mapping
             st.session_state["df_raw"] = updated_df
-            num_new = len(updated_mapping) - len(mapping_edit)
+            num_new = len(updated_mapping) - original_length
             st.success(
-                f"✅ Mapping updated! Added {num_new} new aggregated columns. "
-                f"Total: {len(updated_mapping)} variables."
+                f"✅ Mapping updated! Total: {len(updated_mapping)} variables."
             )
             if num_new > 0:
                 st.info(
@@ -1814,8 +1764,9 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
             st.rerun()
         except Exception as e:
             st.error(f"Failed to apply automatic aggregations: {e}")
+            # Still save the edits even if aggregation fails
             st.session_state["mapping_df"] = mapping_edit
-            st.warning("Saved mapping without automatic aggregations.")
+            st.warning("Saved edits without automatic aggregations.")
 
     st.divider()
 
