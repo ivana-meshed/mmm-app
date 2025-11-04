@@ -3118,24 +3118,3 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
     render_jobs_job_history(key_prefix="queue")
     render_job_status_monitor(key_prefix="queue")
-
-    # ─────────────────────────────
-    # Execution timeline & timings.csv (single latest)
-    # ─────────────────────────────
-    if st.session_state.last_timings:
-        with st.expander("⏱️ Execution Timeline", expanded=False):
-            df_times = st.session_state.last_timings["df"]
-            total = (
-                float(df_times["Time (s)"].sum()) if not df_times.empty else 0.0
-            )
-            if total > 0:
-                df_times = df_times.copy()
-                df_times["% of total"] = (
-                    df_times["Time (s)"] / total * 100
-                ).round(1)
-            st.markdown("**Setup steps (this session)**")
-            st.dataframe(df_times, width="stretch")  # type: ignore
-            st.write(f"**Total setup time:** {_fmt_secs(total)}")
-            st.write(
-                "**Note**: Training runs asynchronously in Cloud Run Jobs."
-            )
