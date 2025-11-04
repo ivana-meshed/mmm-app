@@ -15,7 +15,7 @@ locals {
   # The hash suffix (wuepn6nq5a-ew) is stable for services in the same project/region
   # We use the actual Cloud Run URL pattern: https://<service>-<hash>-<region-abbr>.a.run.app
   # For this project in europe-west1, the hash is: wuepn6nq5a-ew
-  web_service_url = "https://${var.service_name}-web-wuepn6nq5a-ew.a.run.app"
+  web_service_url   = "https://${var.service_name}-web-wuepn6nq5a-ew.a.run.app"
   auth_redirect_uri = "${local.web_service_url}/oauth2callback"
 }
 
