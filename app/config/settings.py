@@ -207,7 +207,9 @@ AUTH_CLIENT_SECRET: Optional[str] = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
 AUTH_COOKIE_SECRET: Optional[str] = os.getenv("STREAMLIT_COOKIE_SECRET")
 """Streamlit cookie secret for session management"""
 
-ALLOWED_DOMAINS_RAW: str = os.getenv("ALLOWED_DOMAINS", "mesheddata.com")
+ALLOWED_DOMAINS_RAW: str = os.getenv(
+    "ALLOWED_DOMAINS", "mesheddata.com, buycycle.com"
+)
 """Comma-separated list of allowed email domains for authentication"""
 
 # Parse and normalize domains
