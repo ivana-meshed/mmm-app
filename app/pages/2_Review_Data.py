@@ -60,8 +60,55 @@ st.session_state.setdefault("country", "de")
 st.session_state.setdefault("picked_data_ts", "Latest")
 st.session_state.setdefault("picked_meta_ts", "Latest")
 
+# ---------- Data Profile helpers ----------
+def _num_stats(s: pd.Series) -> dict:
+    s = pd.to_numeric(s, errors="coerce")
+    n = len(s)
+    nn = int(s.notna().sum())
+    na = n - nn
+    if nn == 0:
+        return dict(
+            non_null=nn, nulls=na, nulls_pct=np.nan, zeros=0, zeros_pct=np.nan,
+            distinct=0, min=np.nan, p10=np.nan, median=np.nan, mean=np.nan,
+            p90=np.nan, max=np.nan, std=np.nan
+        )
+    z = int((s.fillna(0) == 0).sum())
+    s2 = s.dropna()
+    return dict(
+        non_null=nn,
+        nulls=na,
+        nulls_pct=na / n if n else np.nan,
+        zeros=z,
+        zeros_pct=z / n if n else np.nan,
+        distinct=int(s2.nunique(dropna=True)),
+        min=float(s2.min()) if not s2.empty else np.nan,
+        p10=float(np.percentile(s2, 10)) if not s2.empty else np.nan,
+        median=float(s2.median()) if not s2.empty else np.nan,
+        mean=float(s2.mean()) if not s2.empty else np.nan,
+        p90=float(np.percentile(s2, 90)) if not s2.empty else np.nan,
+        max=float(s2.max()) if not s2.empty else np.nan,
+        std=float(s2.std(ddof=1)) if s2.size > 1 else np.nan,
+    )
+
+def _cat_stats(s: pd.Series) -> dict:
+    n = len(s)
+    nn = int(s.notna().sum())
+    na = n - nn
+    s2 = s.dropna()
+    # “zeros” not meaningful for cats; leave blank
+    return dict(
+        non_null=nn,
+        nulls=na,
+        nulls_pct=na / n if n else np.nan,
+        zeros=np.nan,
+        zeros_pct=np.nan,
+        distinct=int(s2.nunique(dropna=True)) if nn else 0,
+        min=np.nan, p10=np.nan, median=np.nan, mean=np.nan,
+        p90=np.nan, max=np.nan, std=np.nan,
+    )
+
 # -----------------------------
-# Tabs
+# TABS
 # -----------------------------
 tab_load, tab_biz, tab_reg, tab_mkt = st.tabs(
     [
@@ -69,6 +116,7 @@ tab_load, tab_biz, tab_reg, tab_mkt = st.tabs(
         "Business, Overview",
         "Business, Regional",
         "Marketing",
+        "Data Profile"
     ]
 )
 
@@ -1292,3 +1340,161 @@ with tab_mkt:
             st.markdown("---")
     else:
         st.info("Platform mapping not available.")
+
+# =============================
+# TAB 4 — DATA PROFILE
+# =============================
+with tab_profile:
+    st.subheader(f"Data Profile — {TIMEFRAME_LABEL}")
+
+    # Which frame to profile (timeframe-adjusted)
+    prof_df = df_r.copy()
+
+    if prof_df.empty:
+        st.info("No data in the selected timeframe to profile.")
+        st.stop()
+
+    # Column type selector
+    numeric_cols = prof_df.select_dtypes(include=[np.number]).columns.tolist()
+    datetime_cols = prof_df.select_dtypes(include=["datetime", "datetimetz"]).columns.tolist()
+    bool_cols = prof_df.select_dtypes(include=["bool"]).columns.tolist()
+    object_cols = [c for c in prof_df.columns if c not in numeric_cols + datetime_cols + bool_cols]
+
+    type_opts = {
+        "Numeric": numeric_cols,
+        "Categorical": object_cols + bool_cols,
+        "Datetime": datetime_cols,
+    }
+    type_pick = st.multiselect(
+        "Column types to include",
+        ["Numeric", "Categorical", "Datetime"],
+        default=["Numeric", "Categorical", "Datetime"],
+        help="Profile only selected types."
+    )
+
+    # Build rows
+    wanted_cols = []
+    for t in type_pick:
+        wanted_cols.extend(type_opts.get(t, []))
+    # keep order as in df
+    wanted_cols = [c for c in prof_df.columns if c in set(wanted_cols)]
+
+    rows = []
+    for col in wanted_cols:
+        s = prof_df[col]
+        col_type = str(s.dtype)
+        if pd.api.types.is_numeric_dtype(s):
+            stats = _num_stats(s)
+        elif pd.api.types.is_datetime64_any_dtype(s):
+            # datetime summary: reuse cat base + min/max/distinct
+            base = _cat_stats(s)
+            ss = s.dropna()
+            base["min"] = ss.min().timestamp() if not ss.empty else np.nan
+            base["max"] = ss.max().timestamp() if not ss.empty else np.nan
+            # keep mean/median/std empty for datetime
+            stats = base
+            col_type = "datetime64"
+        else:
+            stats = _cat_stats(s)
+
+        rows.append(
+            dict(
+                Column=col,
+                Type=col_type,
+                **stats,
+            )
+        )
+
+    prof_table = pd.DataFrame(rows)
+
+    # Friendly display formatting
+    def _fmt_int(x): 
+        return "–" if pd.isna(x) else f"{int(x):,}"
+    def _fmt_float(x):
+        return "–" if pd.isna(x) else f"{x:,.2f}"
+    def _fmt_pct(x):
+        return "–" if pd.isna(x) else f"{x:.1%}"
+
+    disp = prof_table.copy()
+    # Render datetime min/max back to readable timestamps if present
+    if "datetime64" in disp["Type"].unique():
+        def _fmt_dt(num_ts):
+            if pd.isna(num_ts):
+                return "–"
+            try:
+                return pd.to_datetime(num_ts, unit="s").strftime("%Y-%m-%d")
+            except Exception:
+                return "–"
+        disp.loc[disp["Type"].eq("datetime64"), "min"] = disp.loc[disp["Type"].eq("datetime64"), "min"].map(_fmt_dt)
+        disp.loc[disp["Type"].eq("datetime64"), "max"] = disp.loc[disp["Type"].eq("datetime64"), "max"].map(_fmt_dt)
+
+    # Pretty numbers
+    for c in ["non_null", "nulls", "zeros", "distinct"]:
+        if c in disp:
+            disp[c] = disp[c].map(_fmt_int)
+    for c in ["min", "p10", "median", "mean", "p90", "max", "std"]:
+        if c in disp:
+            # don't touch datetime rows (already formatted)
+            mask_dt = disp["Type"].eq("datetime64")
+            disp.loc[~mask_dt, c] = disp.loc[~mask_dt, c].map(_fmt_float)
+    for c in ["nulls_pct", "zeros_pct"]:
+        if c in disp:
+            disp[c] = disp[c].map(_fmt_pct)
+
+    # Nice column headers
+    rename_map = {
+        "non_null": "Non-Null",
+        "nulls": "Nulls",
+        "nulls_pct": "Nulls %",
+        "zeros": "Zeros",
+        "zeros_pct": "Zeros %",
+        "distinct": "Distinct",
+        "min": "Min",
+        "p10": "P10",
+        "median": "Median",
+        "mean": "Mean",
+        "p90": "P90",
+        "max": "Max",
+        "std": "Std",
+    }
+    disp = disp.rename(columns=rename_map)
+
+    # Optional text filter
+    col_filter = st.text_input("Filter columns (contains)", value="").strip().lower()
+    if col_filter:
+        disp = disp[[c for c in disp.columns]]
+        disp = disp[disp["Column"].str.lower().str.contains(col_filter)]
+
+    # Quick header metrics
+    total_rows = len(prof_df)
+    total_cols = len(prof_df.columns)
+    left, right = st.columns([1, 2])
+    with left:
+        st.metric("Rows (selected timeframe)", f"{total_rows:,}")
+        st.metric("Columns", f"{total_cols:,}")
+    with right:
+        # Quick issues summary
+        high_null = (prof_table["nulls_pct"] >= 0.5).fillna(False)
+        constant = (prof_table["distinct"] <= 1).fillna(False)
+        zeros_only = (prof_table["zeros_pct"] >= 0.99).fillna(False) & pd.to_numeric(prof_table["non_null"], errors="coerce").gt(0)
+        st.caption(
+            f"Potential issues — High-null: {int(high_null.sum()):,} · "
+            f"Constant: {int(constant.sum()):,} · "
+            f"All/Mostly Zero (numeric): {int(zeros_only.sum()):,}"
+        )
+
+    # Show table
+    st.dataframe(
+        disp[
+            [
+                "Column", "Type", "Non-Null", "Nulls", "Nulls %", "Zeros", "Zeros %",
+                "Distinct", "Min", "P10", "Median", "Mean", "P90", "Max", "Std",
+            ]
+        ],
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    # Download (raw numeric profile, not the pretty strings)
+    csv = prof_table.to_csv(index=False).encode("utf-8")
+    st.download_button("Download profile (CSV)", data=csv, file_name="data_profile.csv", mime="text/csv")
