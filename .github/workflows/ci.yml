@@ -337,7 +337,7 @@ jobs:
             echo "Checking if web service is already managed..."
             if ! terraform state show google_cloud_run_service.web_service >/dev/null 2>&1; then
               echo "Web service exists—importing..."
-              terraform import -lock-timeout=5m google_cloud_run_service.web_service projects/$PROJECT_ID/locations/$REGION/services/${SERVICE_NAME}-web || true
+              terraform import -lock-timeout=5m google_cloud_run_service.web_service locations/$REGION/namespaces/$PROJECT_ID/services/${SERVICE_NAME}-web || true
             else
               echo "Web service already managed in Terraform state—skipping import."
             fi
@@ -386,7 +386,7 @@ jobs:
             if gcloud run services describe "${SERVICE_NAME}-web" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
               terraform state rm google_cloud_run_service.web_service || true
               terraform import -lock-timeout=5m google_cloud_run_service.web_service \
-                "projects/$PROJECT_ID/locations/$REGION/services/${SERVICE_NAME}-web" || true
+                "locations/$REGION/namespaces/$PROJECT_ID/services/${SERVICE_NAME}-web" || true
             fi
             if gcloud run jobs describe "${SERVICE_NAME}-training" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
               terraform state rm google_cloud_run_v2_job.training_job || true
