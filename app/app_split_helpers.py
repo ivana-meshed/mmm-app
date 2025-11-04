@@ -954,23 +954,45 @@ def _auto_refresh_and_tick(interval_ms: int = 2000):
     refresh so the page re-runs and we tick again.
     """
     if not st.session_state.get("queue_running"):
-        logger.debug("Queue not running, skipping auto-refresh")
+        logger.info("[QUEUE] Auto-refresh skipped: queue_running is False")
         return
 
-    # If there’s nothing left, stop auto-refreshing.
+    # Check queue before tick
     q = st.session_state.get("job_queue") or []
+    logger.info(f"[QUEUE] Auto-refresh: queue has {len(q)} entries before tick")
+    
     if len(q) == 0:
+        logger.info("[QUEUE] Auto-refresh stopping: queue is empty")
         st.session_state.queue_running = False
         return
+    
+    # Log job statuses before tick
+    pending_count = sum(1 for e in q if e.get("status") == "PENDING")
+    running_count = sum(1 for e in q if e.get("status") in ("RUNNING", "LAUNCHING"))
+    completed_count = sum(1 for e in q if e.get("status") in ("SUCCEEDED", "FAILED", "ERROR", "CANCELLED", "COMPLETED"))
+    logger.info(f"[QUEUE] Before tick: {pending_count} pending, {running_count} running, {completed_count} completed")
 
     # Advance the queue once
     _queue_tick()
+    
+    # Check queue after tick
+    q_after = st.session_state.get("job_queue") or []
+    logger.info(f"[QUEUE] After tick: queue has {len(q_after)} entries")
+    
+    # If queue is now empty, stop running
+    if len(q_after) == 0:
+        logger.info("[QUEUE] Queue is now empty after tick, stopping auto-refresh")
+        st.session_state.queue_running = False
+        return
 
     # Schedule a client-side refresh
+    logger.info(f"[QUEUE] Scheduling page refresh in {interval_ms}ms")
     st.markdown(
         f"<script>setTimeout(function(){{window.location.reload();}}, {interval_ms});</script>",
         unsafe_allow_html=True,
     )
+
+
 
 
 def _sorted_with_controls(
