@@ -386,12 +386,12 @@ jobs:
             if gcloud run services describe "${SERVICE_NAME}-web" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
               terraform state rm google_cloud_run_service.web_service || true
               terraform import -lock-timeout=5m google_cloud_run_service.web_service \
-                "projects/$PROJECT_ID/locations/$REGION/services/${SERVICE_NAME}-web" || true
+                "projects/$PROJECT_ID/locations/$REGION/namespaces/$PROJECT_ID/services/${SERVICE_NAME}-web)" || true
             fi
             if gcloud run jobs describe "${SERVICE_NAME}-training" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
               terraform state rm google_cloud_run_v2_job.training_job || true
               terraform import -lock-timeout=5m google_cloud_run_v2_job.training_job \
-                "projects/$PROJECT_ID/locations/$REGION/jobs/${SERVICE_NAME}-training" || true
+                "projects/$PROJECT_ID/locations/$REGION/namespaces/$PROJECT_ID/services/${SERVICE_NAME}-training" || true
             fi
           fi
 
