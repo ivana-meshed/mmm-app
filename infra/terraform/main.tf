@@ -101,6 +101,11 @@ resource "google_secret_manager_secret_iam_member" "sf_private_key_persistent_ve
 #  member             = "serviceAccount:${google_service_account.web_service_sa.email}"
 #}
 
+# Allow web service to execute and monitor training jobs
+# The run.admin role includes:
+# - run.jobs.run (to execute jobs)
+# - run.executions.get (to view execution status)
+# - run.executions.list (to list executions)
 resource "google_project_iam_member" "web_service_job_admin" {
   project = var.project_id
   role    = "roles/run.admin"
@@ -423,7 +428,12 @@ resource "google_cloud_run_service" "web_service" {
         # If you already know your domain, set it now; otherwise do a 2-pass apply (see note below).
         env {
           name  = "AUTH_REDIRECT_URI"
-          value = "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
+          value = "https://${var.service_name}-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
+        }
+        # Allowed domains for Google OAuth authentication (comma-separated)
+        env {
+          name  = "ALLOWED_DOMAINS"
+          value = var.allowed_domains
         }
 
       }

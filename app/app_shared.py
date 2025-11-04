@@ -213,6 +213,23 @@ def _safe_tick_once(
                     )
                     message = entry["message"]
                     changed = True
+                    
+                    # Enhanced logging for final states
+                    if final_state in ("FAILED", "ERROR", "CANCELLED"):
+                        logger.error(
+                            f"[QUEUE_ERROR] Job {entry.get('id')} transitioned to {final_state}"
+                        )
+                        logger.error(
+                            f"[QUEUE_ERROR] Execution: {entry.get('execution_name', 'N/A')}"
+                        )
+                        logger.error(
+                            f"[QUEUE_ERROR] GCS prefix: {entry.get('gcs_prefix', 'N/A')}"
+                        )
+                        logger.error(f"[QUEUE_ERROR] Error message: {message}")
+                    else:
+                        logger.info(
+                            f"[QUEUE] Job {entry.get('id')} completed with status {final_state}"
+                        )
                 elif entry.get("status") == "LAUNCHING":
                     # Visible execution, promote to RUNNING
                     entry["status"] = "RUNNING"
@@ -223,6 +240,12 @@ def _safe_tick_once(
                 entry["message"] = str(e)
                 message = entry["message"]
                 changed = True
+                logger.error(
+                    f"[QUEUE_ERROR] Failed to get status for job {entry.get('id')}: {e}"
+                )
+                logger.error(
+                    f"[QUEUE_ERROR] Execution: {entry.get('execution_name', 'N/A')}"
+                )
 
             if changed:
                 doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
@@ -270,6 +293,10 @@ def _safe_tick_once(
 
         # --- Outside critical section: perform the actual launch ---
         message = "Launched"
+        logger.info(f"[QUEUE] Attempting to launch job {entry.get('id')}")
+        logger.info(f"[QUEUE] Job params: country={entry.get('params', {}).get('country')}, "
+                   f"revision={entry.get('params', {}).get('revision')}, "
+                   f"iterations={entry.get('params', {}).get('iterations')}")
         try:
             exec_info = launcher(entry["params"])
             time.sleep(SAFE_LAG_SECONDS_AFTER_RUNNING)
@@ -278,10 +305,26 @@ def _safe_tick_once(
             entry["gcs_prefix"] = exec_info.get("gcs_prefix")
             entry["status"] = "RUNNING"
             entry["message"] = "Launched"
+            logger.info(f"[QUEUE] Successfully launched job {entry.get('id')}")
+            logger.info(f"[QUEUE] Execution: {entry['execution_name']}")
+            logger.info(f"[QUEUE] GCS prefix: {entry['gcs_prefix']}")
         except Exception as e:
             entry["status"] = "ERROR"
             entry["message"] = f"launch failed: {e}"
             message = entry["message"]
+            logger.error(f"[QUEUE_ERROR] ========================================")
+            logger.error(f"[QUEUE_ERROR] LAUNCH FAILURE - Job {entry.get('id')}")
+            logger.error(f"[QUEUE_ERROR] ========================================")
+            logger.error(f"[QUEUE_ERROR] Error type: {type(e).__name__}")
+            logger.error(f"[QUEUE_ERROR] Error message: {e}")
+            logger.error(
+                f"[QUEUE_ERROR] Job params: country={entry.get('params', {}).get('country')}, "
+                f"revision={entry.get('params', {}).get('revision')}"
+            )
+            logger.error(f"[QUEUE_ERROR] Full stack trace below:")
+            logger.exception(
+                f"[QUEUE_ERROR] Failed to launch job {entry.get('id')}"
+            )
 
         # Persist the post-launch state with another guarded write
         blob.reload()
@@ -453,6 +496,21 @@ class CloudRunJobManager:
             except Exception:
                 return str(dtobj) if dtobj is not None else None
 
+        # Validate execution_name format
+        if not execution_name or not isinstance(execution_name, str):
+            return {
+                "overall_status": "ERROR",
+                "error": "Invalid execution_name: must be a non-empty string"
+            }
+        
+        # Expected format: projects/{project}/locations/{region}/jobs/{job}/executions/{execution}
+        if not execution_name.startswith("projects/"):
+            return {
+                "overall_status": "ERROR",
+                "error": f"Invalid execution_name format: {execution_name}. "
+                        "Expected format: projects/{{project}}/locations/{{region}}/jobs/{{job}}/executions/{{execution}}"
+            }
+
         try:
             execution = self.executions_client.get_execution(
                 name=execution_name
@@ -487,8 +545,24 @@ class CloudRunJobManager:
                 status["overall_status"] = "PENDING"
             return status
         except Exception as e:
-            logger.error(f"Error getting execution status: {e}", exc_info=True)
-            return {"overall_status": "ERROR", "error": str(e)}
+            logger.error(f"Error getting execution status for '{execution_name}': {e}", exc_info=True)
+            error_msg = str(e)
+            
+            # Provide helpful error messages for common issues
+            if "403" in error_msg or "Permission denied" in error_msg:
+                return {
+                    "overall_status": "ERROR",
+                    "error": f"Permission denied: The service account may not have access to view executions. "
+                            f"Ensure the web service account has 'roles/run.developer' or 'roles/run.admin' permissions. "
+                            f"Original error: {error_msg}"
+                }
+            elif "404" in error_msg or "not found" in error_msg.lower():
+                return {
+                    "overall_status": "ERROR",
+                    "error": f"Execution not found: {execution_name}. The execution may have been deleted or the name is incorrect."
+                }
+            else:
+                return {"overall_status": "ERROR", "error": error_msg}
 
 
 # ─────────────────────────────
@@ -1296,32 +1370,59 @@ def _is_bool_like(series: pd.Series) -> bool:
         return False
 
 
-def require_login_and_domain(allowed_domain: str = "mesheddata.com") -> None:
+def require_login_and_domain(allowed_domain: Optional[str] = None) -> None:
     """
     Hard-stops the current Streamlit run unless the user is logged in
-    with a Google account from the allowed domain.
+    with a Google account from one of the allowed domains.
     Call this at the very top of *every* page.
+    
+    Args:
+        allowed_domain: Legacy parameter for backward compatibility. 
+                       If None, uses the ALLOWED_DOMAINS from settings.
+                       If provided, checks against this single domain only.
     """
     # Allow lightweight health checks to pass through if you use them on pages too
     q = getattr(st, "query_params", {})
     if q.get("health") == "true":
         return  # let the page handle its health endpoint and st.stop() later if needed
 
+    # Determine which domains to allow
+    if allowed_domain is not None:
+        # Legacy: single domain passed as parameter
+        allowed_domains = [allowed_domain.strip().lower()]
+    else:
+        # Use configured domains from settings
+        from config.settings import ALLOWED_DOMAINS
+        allowed_domains = ALLOWED_DOMAINS if ALLOWED_DOMAINS else ["mesheddata.com"]
+    
     is_logged_in = getattr(st.user, "is_logged_in", False)  # type: ignore
     if not is_logged_in:
         st.set_page_config(page_title="Sign in", layout="centered")
         st.title("Robyn MMM")
-        st.write(
-            f"Sign in with your {allowed_domain} Google account to continue."
-        )
+        if len(allowed_domains) == 1:
+            st.write(
+                f"Sign in with your @{allowed_domains[0]} Google account to continue."
+            )
+        else:
+            domains_str = ", ".join(f"@{d}" for d in allowed_domains)
+            st.write(
+                f"Sign in with your Google account from one of these domains: {domains_str}"
+            )
         if st.button("Sign in with Google"):
             st.login()  # type: ignore # flat [auth] config → no provider arg
         st.stop()
 
     email = (getattr(st.user, "email", "") or "").lower().strip()  # type: ignore
-    if not email.endswith(f"@{allowed_domain}"):
+    
+    # Check if email ends with any of the allowed domains
+    email_domain = email.split("@")[-1] if "@" in email else ""
+    if not any(email_domain == domain for domain in allowed_domains):
         st.set_page_config(page_title="Access restricted", layout="centered")
-        st.error(f"This app is restricted to @{allowed_domain} accounts.")
+        if len(allowed_domains) == 1:
+            st.error(f"This app is restricted to @{allowed_domains[0]} accounts.")
+        else:
+            domains_str = ", ".join(f"@{d}" for d in allowed_domains)
+            st.error(f"This app is restricted to accounts from these domains: {domains_str}")
         if st.button("Sign out"):
             st.logout()  # type: ignore # flat [auth] config → no provider arg
         st.stop()

@@ -1,56 +1,51 @@
 """
-Robyn MMM Trainer - Home Page
+Robyn MMM Trainer - Main Entry Point
 
 This is the main entry point for the MMM (Marketing Mix Modeling) application.
-It provides navigation to the main workflows:
-1. Connect Data - Set up Snowflake connection
-2. Map Data - Map columns and configure metadata
-3. Run Experiment - Execute single or batch MMM experiments
-
-The application is built with Streamlit and deployed on Google Cloud Run.
+Uses custom navigation to hide the main page from the sidebar.
 """
 
-# streamlit_app.py (proposed new Home)
 import streamlit as st
 
+# Use custom navigation to control sidebar (Streamlit 1.31+)
 st.set_page_config(
-    page_title="Robyn MMM Trainer", page_icon="📊", layout="wide"
+    page_title="Robyn MMM Trainer",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="collapsed",  # Start with sidebar collapsed
 )
+
 from app_split_helpers import *
 
-st.write(
-    """
-1. **Connect your Data** – set up your Snowflake connection.
-2. **Map Your Data** – map columns and save/load metadata.
-3. **Experiment** – run single or queued Robyn experiments.
-"""
+# Define pages for custom navigation
+connect_page = st.Page(
+    "pages/0_Connect_Data.py", title="Connect Data", icon="🧩"
+)
+map_page = st.Page("pages/1_Map_Data.py", title="Map Data", icon="🗺️")
+
+review_page = st.Page("pages/2_Review_Data.py", title="Review Data", icon="📊")
+
+experiment_page = st.Page(
+    "pages/4_Run_Experiment.py", title="Run Experiment", icon="🧪"
+)
+results_page = st.Page(
+    "pages/5_View_Results.py", title="View Results", icon="📈"
+)
+best_results_page = st.Page(
+    "pages/6_View_Best_Results.py", title="Best Results", icon="🏆"
 )
 
-st.divider()
-col1, col2, col3 = st.columns(3)
-with col1:
-    try:
-        if st.button("🧩 Connect your Data", use_container_width=True):
-            import streamlit as stlib
+# Create navigation - this replaces the default sidebar navigation
+pg = st.navigation(
+    [
+        connect_page,
+        map_page,
+        review_page,
+        experiment_page,
+        results_page,
+        best_results_page,
+    ]
+)
 
-            stlib.switch_page("pages/0_Connect_Data.py")
-    except Exception:
-        st.page_link("pages/0_Connect_Data.py", label="🧩 Connect your Data")
-
-with col2:
-    try:
-        if st.button("🗺️ Map Your Data", use_container_width=True):
-            import streamlit as stlib
-
-            stlib.switch_page("pages/1_Map_Data.py")
-    except Exception:
-        st.page_link("pages/1_Map_Data.py", label="🗺️ Map Your Data")
-
-with col3:
-    try:
-        if st.button("🧪 Experiment", use_container_width=True):
-            import streamlit as stlib
-
-            stlib.switch_page("pages/4_Experiment.py")
-    except Exception:
-        st.page_link("pages/4_Experiment.py", label="🧪 Experiment")
+# Run the selected page
+pg.run()

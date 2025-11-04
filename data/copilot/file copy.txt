@@ -1,4 +1,4 @@
-@copilot When I select "weibul_cdf" as the adstock, i get following console.log
+Identify and fix the following issue. When I run the training job, I get the following in the console.log
 
 ---- reticulate::py_config() ----
 python:         /usr/bin/python3
@@ -13,500 +13,562 @@ NOTE: Python version was forced by RETICULATE_PYTHON
 ✅ Cloud Run Job Parameters
    iter       : 200
    trials     : 3
-   country    : de
+   country    : fr
    revision   : r100
-   date_input : 2025-10-31
+   date_input : 2025-11-03
    train_size : 0.7,0.9
    max_cores  : 8
 ==Google Cloud Storage Object==
-Name:                robyn/r100/de/1031_102422/console.log
+Name:                robyn/r100/fr/1103_131941/console.log
 Type:                application/octet-stream
 Size:                1.2 Kb
-Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log?generation=1761906362242834&alt=media
-Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log
-Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log?generation=1762176155843437&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
 Bucket:              mmm-app-output
-ID:                  mmm-app-output/robyn/r100/de/1031_102422/console.log/1761906362242834
-MD5 Hash:            9PU+NInQSVAWvTjsR+RUjg==
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/console.log/1762176155843437
+MD5 Hash:            q6cNRrlgs5uIMBCheG0hJA==
 Class:               STANDARD
-Created:             2025-10-31 10:26:02
-Updated:             2025-10-31 10:26:02
-Generation:          1761906362242834
+Created:             2025-11-03 13:22:35
+Updated:             2025-11-03 13:22:35
+Generation:          1762176155843437
 Meta Generation:     1
-eTag:                CJKu5daczpADEAE=
-crc32c:              PbaBkw==
-ℹ️ Dropped zero-variance: GA_APP_COST, BING_APP_COST, META_OTHER_COST, GA_APP_SESSIONS, BING_APP_SESSIONS, META_OTHER_SESSIONS, GA_APP_IMPRESSIONS, BING_APP_IMPRESSIONS, META_OTHER_IMPRESSIONS, GA_APP_CLICKS, BING_APP_CLICKS, META_OTHER_CLICKS
-==Google Cloud Storage Object==
-Name:                robyn/r100/de/1031_102422/console.log
-Type:                application/octet-stream
-Size:                7.1 Kb
-Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log?generation=1761906363487619&alt=media
-Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log
-Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log
-Bucket:              mmm-app-output
-ID:                  mmm-app-output/robyn/r100/de/1031_102422/console.log/1761906363487619
-MD5 Hash:            guY76MUWek7vpBvQPVe89g==
-Class:               STANDARD
-Created:             2025-10-31 10:26:03
-Updated:             2025-10-31 10:26:03
-Generation:          1761906363487619
-Meta Generation:     1
-eTag:                CIOrsdeczpADEAE=
-crc32c:              tOD8DA==
+eTag:                CO32s96J1pADEAE=
+crc32c:              h/fBew==
+ℹ️ Dropped zero-variance: GA_APP_COST, BING_OTHER_COST, BING_COMPETITOR_COST, BING_APP_COST, META_OTHER_COST, GA_APP_SESSIONS, BING_COMPETITOR_SESSIONS, BING_APP_SESSIONS, META_OTHER_SESSIONS, GA_APP_IMPRESSIONS, BING_OTHER_IMPRESSIONS, BING_COMPETITOR_IMPRESSIONS, BING_APP_IMPRESSIONS, META_OTHER_IMPRESSIONS, GA_APP_CLICKS, BING_OTHER_CLICKS, BING_COMPETITOR_CLICKS, BING_APP_CLICKS, META_OTHER_CLICKS, NA_WEB_DAILY_SESSIONS
 ✅ Drivers
-   paid_media_spends: GA_SUPPLY_COST, GA_DEMAND_COST, BING_SUPPLY_COST, BING_DEMAND_COST, BING_COMPETITOR_COST, PARTNERSHIP_COSTS, TV_COST, GA_SMALL_COST_CUSTOM, META_TOTAL_COST_CUSTOM
-   paid_media_vars  : GA_SUPPLY_SESSIONS, GA_DEMAND_SESSIONS, BING_SUPPLY_SESSIONS, BING_DEMAND_SESSIONS, BING_COMPETITOR_SESSIONS, PARTNERSHIP_COSTS, TV_DAILY_SESSIONS, GA_SMALL_SESSIONS_CUSTOM, META_TOTAL_SESSIONS_CUSTOM
+   paid_media_spends: GA_SUPPLY_COST, GA_DEMAND_COST, GA_OTHER_COST, GA_COMPETITOR_COST, GA_BRAND_COST, BING_SUPPLY_COST, BING_DEMAND_COST, BING_BRAND_COST, META_DEMAND_COST, META_SUPPLY_COST, PARTNERSHIP_COSTS, TV_COSTS, TV_COST
+   paid_media_vars  : GA_SUPPLY_SESSIONS, GA_DEMAND_SESSIONS, GA_OTHER_SESSIONS, GA_COMPETITOR_SESSIONS, GA_BRAND_SESSIONS, BING_SUPPLY_SESSIONS, BING_DEMAND_SESSIONS, BING_OTHER_SESSIONS, BING_BRAND_SESSIONS, META_DEMAND_SESSIONS, META_SUPPLY_SESSIONS, PARTNERSHIP_COSTS, TV_DAILY_SESSIONS
    context_vars     : TV_IS_ON
    factor_vars      : TV_IS_ON
-   organic_vars     : N_SEARCHES, ORGANIC_ENGINEERING_SESSIONS_CUSTOM, ORGANIC_CONTENT_SESSIONS_CUSTOM
-   adstock          : weibull_cdf
+   organic_vars     :
+   adstock          : geometric
 ==Google Cloud Storage Object==
-Name:                robyn/r100/de/1031_102422/debug/InputCollect_preflight_dt_input_head.csv
+Name:                robyn/r100/fr/1103_131941/debug/InputCollect_preflight_dt_input_head.csv
 Type:                text/csv
-Size:                26.4 Kb
-Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Fde%2F1031_102422%2Fdebug%2FInputCollect_preflight_dt_input_head.csv?generation=1761906363874954&alt=media
-Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fdebug%2FInputCollect_preflight_dt_input_head.csv
-Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fdebug%2FInputCollect_preflight_dt_input_head.csv
+Size:                7.5 Kb
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Fdebug%2FInputCollect_preflight_dt_input_head.csv?generation=1762176156889575&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fdebug%2FInputCollect_preflight_dt_input_head.csv
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fdebug%2FInputCollect_preflight_dt_input_head.csv
 Bucket:              mmm-app-output
-ID:                  mmm-app-output/robyn/r100/de/1031_102422/debug/InputCollect_preflight_dt_input_head.csv/1761906363874954
-MD5 Hash:            Ou3NtrltKc6wfTtyvZ5abA==
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/debug/InputCollect_preflight_dt_input_head.csv/1762176156889575
+MD5 Hash:            HPcbCsEY4nMhcoCRSIywGA==
 Class:               STANDARD
-Created:             2025-10-31 10:26:03
-Updated:             2025-10-31 10:26:03
-Generation:          1761906363874954
+Created:             2025-11-03 13:22:36
+Updated:             2025-11-03 13:22:36
+Generation:          1762176156889575
 Meta Generation:     1
-eTag:                CIr9yNeczpADEAE=
-crc32c:              35T2Mg==
+eTag:                COfj896J1pADEAE=
+crc32c:              o1q4hw==
 ==Google Cloud Storage Object==
-Name:                robyn/r100/de/1031_102422/console.log
+Name:                robyn/r100/fr/1103_131941/console.log
 Type:                application/octet-stream
-Size:                7.9 Kb
-Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log?generation=1761906363965807&alt=media
-Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log
-Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log
+Size:                7.8 Kb
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log?generation=1762176157007134&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
 Bucket:              mmm-app-output
-ID:                  mmm-app-output/robyn/r100/de/1031_102422/console.log/1761906363965807
-MD5 Hash:            2txzZvLVEgdvh/1lcBJehg==
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/console.log/1762176157007134
+MD5 Hash:            KFlT8USFrthTMIqkI9H1qA==
 Class:               STANDARD
-Created:             2025-10-31 10:26:03
-Updated:             2025-10-31 10:26:03
-Generation:          1761906363965807
+Created:             2025-11-03 13:22:37
+Updated:             2025-11-03 13:22:37
+Generation:          1762176157007134
 Meta Generation:     1
-eTag:                CO/CzteczpADEAE=
-crc32c:              YEsakA==
+eTag:                CJ76+t6J1pADEAE=
+crc32c:              XR0hMQ==
 ==Google Cloud Storage Object==
-Name:                robyn/r100/de/1031_102422/debug/hyperparameters.json
+Name:                robyn/r100/fr/1103_131941/debug/InputCollect_preflight_dt_input_head.csv
+Type:                text/csv
+Size:                7.5 Kb
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Fdebug%2FInputCollect_preflight_dt_input_head.csv?generation=1762176157190887&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fdebug%2FInputCollect_preflight_dt_input_head.csv
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fdebug%2FInputCollect_preflight_dt_input_head.csv
+Bucket:              mmm-app-output
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/debug/InputCollect_preflight_dt_input_head.csv/1762176157190887
+MD5 Hash:            HPcbCsEY4nMhcoCRSIywGA==
+Class:               STANDARD
+Created:             2025-11-03 13:22:37
+Updated:             2025-11-03 13:22:37
+Generation:          1762176157190887
+Meta Generation:     1
+eTag:                COeVht+J1pADEAE=
+crc32c:              o1q4hw==
+==Google Cloud Storage Object==
+Name:                robyn/r100/fr/1103_131941/debug/hyperparameters.json
 Type:                application/json
 Size:                1.7 Kb
-Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Fde%2F1031_102422%2Fdebug%2Fhyperparameters.json?generation=1761906364129287&alt=media
-Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fdebug%2Fhyperparameters.json
-Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fdebug%2Fhyperparameters.json
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Fdebug%2Fhyperparameters.json?generation=1762176157294900&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fdebug%2Fhyperparameters.json
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fdebug%2Fhyperparameters.json
 Bucket:              mmm-app-output
-ID:                  mmm-app-output/robyn/r100/de/1031_102422/debug/hyperparameters.json/1761906364129287
-MD5 Hash:            ZUs0Wy6os4sly2fdaWLRRw==
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/debug/hyperparameters.json/1762176157294900
+MD5 Hash:            wCads7nH/1UVguGsq9qTFg==
 Class:               STANDARD
-Created:             2025-10-31 10:26:04
-Updated:             2025-10-31 10:26:04
-Generation:          1761906364129287
+Created:             2025-11-03 13:22:37
+Updated:             2025-11-03 13:22:37
+Generation:          1762176157294900
 Meta Generation:     1
-eTag:                CIfA2NeczpADEAE=
-crc32c:              kcOLwQ==
+eTag:                CLTCjN+J1pADEAE=
+crc32c:              y5wB2g==
 ==Google Cloud Storage Object==
-Name:                robyn/r100/de/1031_102422/console.log
+Name:                robyn/r100/fr/1103_131941/console.log
 Type:                application/octet-stream
-Size:                8.6 Kb
-Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log?generation=1761906364227637&alt=media
-Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log
-Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log
+Size:                8.5 Kb
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log?generation=1762176157389806&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
 Bucket:              mmm-app-output
-ID:                  mmm-app-output/robyn/r100/de/1031_102422/console.log/1761906364227637
-MD5 Hash:            I6fTu7/GUXDpiYcWjDRJMA==
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/console.log/1762176157389806
+MD5 Hash:            woByvLEQWPUO/W/Z1Oi6Dw==
 Class:               STANDARD
-Created:             2025-10-31 10:26:04
-Updated:             2025-10-31 10:26:04
-Generation:          1761906364227637
+Created:             2025-11-03 13:22:37
+Updated:             2025-11-03 13:22:37
+Generation:          1762176157389806
 Meta Generation:     1
-eTag:                CLXA3teczpADEAE=
-crc32c:              BIa9Cg==
+eTag:                CO6nkt+J1pADEAE=
+crc32c:              3vgmKQ==
 ==Google Cloud Storage Object==
-Name:                robyn/r100/de/1031_102422/console.log
-Type:                application/octet-stream
-Size:                9.4 Kb
-Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log?generation=1761906364571373&alt=media
-Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log
-Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Fde%2F1031_102422%2Fconsole.log
+Name:                robyn/r100/fr/1103_131941/debug/InputCollect_with_hp_dt_input_head.csv
+Type:                text/csv
+Size:                7.5 Kb
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Fdebug%2FInputCollect_with_hp_dt_input_head.csv?generation=1762176168017585&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fdebug%2FInputCollect_with_hp_dt_input_head.csv
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fdebug%2FInputCollect_with_hp_dt_input_head.csv
 Bucket:              mmm-app-output
-ID:                  mmm-app-output/robyn/r100/de/1031_102422/console.log/1761906364571373
-MD5 Hash:            IJEXkJJMe6emk6FvmrLS3g==
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/debug/InputCollect_with_hp_dt_input_head.csv/1762176168017585
+MD5 Hash:            HPcbCsEY4nMhcoCRSIywGA==
 Class:               STANDARD
-Created:             2025-10-31 10:26:04
-Updated:             2025-10-31 10:26:04
-Generation:          1761906364571373
+Created:             2025-11-03 13:22:48
+Updated:             2025-11-03 13:22:48
+Generation:          1762176168017585
 Meta Generation:     1
-eTag:                CO2989eczpADEAE=
-crc32c:              usTX9Q==
-10-31 11:26:04.153898: after hyperparameters build
-ℹ 2025-10-31 11:26:04.154844 > File size detected as  8.5 Kb
-Input 'window_end' is adapted to the closest available date from input data: 2025-11-02
-❌ robyn_inputs() FAILED: 49 hyperparameter values are required, and 37 were provided.
- Use hyper_names() function to help you with the correct hyperparameters names.
-Call: check_hyperparameters(hyperparameters, adstock, paid_collect$paid_media_selected,      paid_media_spends, organic_vars, exposure_vars, prophet_vars,      context_vars)
-ℹ 2025-10-31 11:26:04.308812 > File size detected as  454 bytes
-Warning message:
-In check_datadim(dt_input, all_ind_vars, rel = 10) :
-  There are 17 independent variables & 96 data points. We recommend row:column ratio of 10 to 1
-ℹ 2025-10-31 11:26:04.419395 > File size detected as  45 bytes
-📌 LOG SNAPSHOT @ 2025-10-31 11:26:04.515152: after robyn_inputs with hyperparameters
-ℹ 2025-10-31 11:26:04.516424 > File size detected as  9.4 Kb
-FATAL: robyn_inputs() returned NULL
-ℹ 2025-10-31 11:26:04.596721 > File size detected as  182 bytes
+eTag:                CLH9muSJ1pADEAE=
+crc32c:              o1q4hw==
+==Google Cloud Storage Object==
+Name:                robyn/r100/fr/1103_131941/console.log
+Type:                application/octet-stream
+Size:                9.5 Kb
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log?generation=1762176168121606&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Bucket:              mmm-app-output
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/console.log/1762176168121606
+MD5 Hash:            KNL0v5Zg3Mi9ZDbfIH2obA==
+Class:               STANDARD
+Created:             2025-11-03 13:22:48
+Updated:             2025-11-03 13:22:48
+Generation:          1762176168121606
+Meta Generation:     1
+eTag:                CIaqoeSJ1pADEAE=
+crc32c:              U7dINQ==
 
-and input_errors.txt
+================= InputCollect snapshot =================
+adstock        : geometric
+dep_var        : UPLOADS_TOTAL
+dep_var_type   : conversion
+window         : 2024-01-01 → 2025-10-19
+prophet_vars   : trend, season, holiday, weekday
+prophet_country: FR
+paid_spends    : GA_SUPPLY_COST, GA_DEMAND_COST, GA_OTHER_COST, GA_COMPETITOR_COST, GA_BRAND_COST, BING_SUPPLY_COST, BING_DEMAND_COST, BING_BRAND_COST, META_DEMAND_COST, META_SUPPLY_COST, PARTNERSHIP_COSTS, TV_COSTS, TV_COST
+paid_vars      : GA_SUPPLY_SESSIONS, GA_DEMAND_SESSIONS, GA_OTHER_SESSIONS, GA_COMPETITOR_SESSIONS, GA_BRAND_SESSIONS, BING_SUPPLY_SESSIONS, BING_DEMAND_SESSIONS, BING_OTHER_SESSIONS, BING_BRAND_SESSIONS, META_DEMAND_SESSIONS, META_SUPPLY_SESSIONS, PARTNERSHIP_COSTS, TV_DAILY_SESSIONS
+organic_vars   :
+context_vars   : TV_IS_ON
+factor_vars    : TV_IS_ON
+dt_input       : data.frame[658 x 84]
+dt_input cols  : date, MANAGEMENT_REGION, COUNTRY, UPLOADS_TOTAL, UPLOADS_PRIVATE, UPLOADS_COMMERCIAL, UPLOAD_VALUE, GMV, BOOKINGS, GA_SUPPLY_COST, GA_DEMAND_COST, GA_OTHER_COST, GA_COMPETITOR_COST, GA_BRAND_COST, BING_SUPPLY_COST, BING_DEMAND_COST, BING_BRAND_COST, META_DEMAND_COST, META_SUPPLY_COST, PARTNERSHIP_COSTS, GA_SUPPLY_SESSIONS, GA_DEMAND_SESSIONS, GA_OTHER_SESSIONS, GA_COMPETITOR_SESSIONS, GA_BRAND_SESSIONS, BING_SUPPLY_SESSIONS, BING_DEMAND_SESSIONS, BING_OTHER_SESSIONS, BING_BRAND_SESSIONS, META_DEMAND_SESSIONS ... (+54)
 
-robyn_inputs() FAILED
-When: 2025-10-31 11:26:04.30747
-Message: 49 hyperparameter values are required, and 37 were provided.
- Use hyper_names() function to help you with the correct hyperparameters names.
-Call: check_hyperparameters(hyperparameters, adstock, paid_collect$paid_media_selected,      paid_media_spends, organic_vars, exposure_vars, prophet_vars,      context_vars)
-Class: simpleError, error, condition
+-- hyperparameters --
+train_size     : [0.7, 0.9]
+BING_BRAND_SESSIONS_alphas: [1, 3]
+BING_BRAND_SESSIONS_gammas: [0.6, 0.9]
+BING_BRAND_SESSIONS_thetas: [0.1, 0.4]
+BING_DEMAND_SESSIONS_alphas: [1, 3]
+BING_DEMAND_SESSIONS_gammas: [0.6, 0.9]
+BING_DEMAND_SESSIONS_thetas: [0.1, 0.4]
+BING_OTHER_SESSIONS_alphas: [1, 3]
+BING_OTHER_SESSIONS_gammas: [0.6, 0.9]
+BING_OTHER_SESSIONS_thetas: [0.1, 0.4]
+BING_SUPPLY_SESSIONS_alphas: [1, 3]
+BING_SUPPLY_SESSIONS_gammas: [0.6, 0.9]
+BING_SUPPLY_SESSIONS_thetas: [0.1, 0.4]
+GA_BRAND_SESSIONS_alphas: [1, 3]
+GA_BRAND_SESSIONS_gammas: [0.6, 0.9]
+GA_BRAND_SESSIONS_thetas: [0.1, 0.4]
+GA_COMPETITOR_SESSIONS_alphas: [1, 3]
+GA_COMPETITOR_SESSIONS_gammas: [0.6, 0.9]
+GA_COMPETITOR_SESSIONS_thetas: [0.1, 0.4]
+GA_DEMAND_SESSIONS_alphas: [1, 3]
+GA_DEMAND_SESSIONS_gammas: [0.6, 0.9]
+GA_DEMAND_SESSIONS_thetas: [0.1, 0.4]
+GA_OTHER_SESSIONS_alphas: [1, 3]
+GA_OTHER_SESSIONS_gammas: [0.6, 0.9]
+GA_OTHER_SESSIONS_thetas: [0.1, 0.4]
+GA_SUPPLY_SESSIONS_alphas: [1, 3]
+GA_SUPPLY_SESSIONS_gammas: [0.6, 0.9]
+GA_SUPPLY_SESSIONS_thetas: [0.1, 0.4]
+META_DEMAND_SESSIONS_alphas: [1, 3]
+META_DEMAND_SESSIONS_gammas: [0.6, 0.9]
+META_DEMAND_SESSIONS_thetas: [0.1, 0.4]
+META_SUPPLY_SESSIONS_alphas: [1, 3]
+META_SUPPLY_SESSIONS_gammas: [0.6, 0.9]
+META_SUPPLY_SESSIONS_thetas: [0.1, 0.4]
+PARTNERSHIP_COSTS_alphas: [0.65, 2.25]
+PARTNERSHIP_COSTS_gammas: [0.45, 0.875]
+PARTNERSHIP_COSTS_thetas: [0.3, 0.625]
+TV_DAILY_SESSIONS_alphas: [1, 3]
+TV_DAILY_SESSIONS_gammas: [0.6, 0.9]
+TV_DAILY_SESSIONS_thetas: [0.1, 0.4]
+
+-- all fields --
+  - dt_input           data.frame[658 x 84]
+  - dt_holidays        data.frame[87651 x 4]
+  - dt_mod             data.frame[658 x 20]
+  - dt_modRollWind     data.frame[658 x 20]
+  - xDecompAggPrev     NULL
+  - date_var           character(len=1)
+  - dayInterval        integer(len=1)
+  - intervalType       character(len=1)
+  - dep_var            character(len=1)
+  - dep_var_type       character(len=1)
+  - prophet_vars       character(len=4)
+  - prophet_signs      character(len=4)
+  - prophet_country    character(len=1)
+  - context_vars       character(len=1)
+  - context_signs      character(len=1)
+  - paid_media_vars    character(len=13)
+  - paid_media_signs   character(len=13)
+  - paid_media_spends  character(len=13)
+  - paid_media_selected character(len=13)
+  - paid_media_total   numeric(len=1)
+  - exposure_vars      character(len=13)
+  - organic_vars       character(len=0)
+  - organic_signs      character(len=0)
+  - all_media          character(len=13)
+  - all_ind_vars       character(len=18)
+  - factor_vars        character(len=1)
+  - unused_vars        character(len=56)
+  - window_start       Date(len=1)
+  - rollingWindowStartWhich integer(len=1)
+  - window_end         Date(len=1)
+  - rollingWindowEndWhich integer(len=1)
+  - rollingWindowLength numeric(len=1)
+  - totalObservations  integer(len=1)
+  - refreshAddedStart  Date(len=1)
+  - adstock            character(len=1)
+  - hyperparameters    list(len=40)
+  - calibration_input  NULL
+  - custom_params      list(len=0)
+  - ExposureCollect    list(len=4)
+  - version            character(len=1)
+=========================================================
+
+==Google Cloud Storage Object==
+Name:                robyn/r100/fr/1103_131941/console.log
+Type:                application/octet-stream
+Size:                14.6 Kb
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log?generation=1762176168289815&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Bucket:              mmm-app-output
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/console.log/1762176168289815
+MD5 Hash:            kaAxO+yYo5o7vfzPPrWv2g==
+Class:               STANDARD
+Created:             2025-11-03 13:22:48
+Updated:             2025-11-03 13:22:48
+Generation:          1762176168289815
+Meta Generation:     1
+eTag:                CJfMq+SJ1pADEAE=
+crc32c:              g/JYcQ==
+
+  |
+  |                                                                      |   0%
+  |
+  |===                                                                   |   4%
+  |
+  |======                                                                |   8%
+  |
+  |========                                                              |  12%
+  |
+  |===========                                                           |  16%
+  |
+  |==============                                                        |  20%
+  |
+  |=================                                                     |  24%
+  |
+  |====================                                                  |  28%
+  |
+  |======================                                                |  32%
+  |
+  |=========================                                             |  36%
+  |
+  |============================                                          |  40%
+  |
+  |===============================                                       |  44%
+  |
+  |==================================                                    |  48%
+  |
+  |====================================                                  |  52%
+  |
+  |=======================================                               |  56%
+  |
+  |==========================================                            |  60%
+  |
+  |=============================================                         |  64%
+  |
+  |================================================                      |  68%
+  |
+  |==================================================                    |  72%
+  |
+  |=====================================================                 |  76%
+  |
+  |========================================================              |  80%
+  |
+  |===========================================================           |  84%
+  |
+  |==============================================================        |  88%
+  |
+  |================================================================      |  92%
+  |
+  |===================================================================   |  96%
+  |
+  |======================================================================| 100%
+
+  Finished in 0.27 mins
+
+  |
+  |                                                                      |   0%
+  |
+  |===                                                                   |   4%
+  |
+  |======                                                                |   8%
+  |
+  |========                                                              |  12%
+  |
+  |===========                                                           |  16%
+  |
+  |==============                                                        |  20%
+  |
+  |=================                                                     |  24%
+  |
+  |====================                                                  |  28%
+  |
+  |======================                                                |  32%
+  |
+  |=========================                                             |  36%
+  |
+  |============================                                          |  40%
+  |
+  |===============================                                       |  44%
+  |
+  |==================================                                    |  48%
+  |
+  |====================================                                  |  52%
+  |
+  |=======================================                               |  56%
+  |
+  |==========================================                            |  60%
+  |
+  |=============================================                         |  64%
+  |
+  |================================================                      |  68%
+  |
+  |==================================================                    |  72%
+  |
+  |=====================================================                 |  76%
+  |
+  |========================================================              |  80%
+  |
+  |===========================================================           |  84%
+  |
+  |==============================================================        |  88%
+  |
+  |================================================================      |  92%
+  |
+  |===================================================================   |  96%
+  |
+  |======================================================================| 100%
+
+  Finished in 0.24 mins
+
+  |
+  |                                                                      |   0%
+  |
+  |===                                                                   |   4%
+  |
+  |======                                                                |   8%
+  |
+  |========                                                              |  12%
+  |
+  |===========                                                           |  16%
+  |
+  |==============                                                        |  20%
+  |
+  |=================                                                     |  24%
+  |
+  |====================                                                  |  28%
+  |
+  |======================                                                |  32%
+  |
+  |=========================                                             |  36%
+  |
+  |============================                                          |  40%
+  |
+  |===============================                                       |  44%
+  |
+  |==================================                                    |  48%
+  |
+  |====================================                                  |  52%
+  |
+  |=======================================                               |  56%
+  |
+  |==========================================                            |  60%
+  |
+  |=============================================                         |  64%
+  |
+  |================================================                      |  68%
+  |
+  |==================================================                    |  72%
+  |
+  |=====================================================                 |  76%
+  |
+  |========================================================              |  80%
+  |
+  |===========================================================           |  84%
+  |
+  |==============================================================        |  88%
+  |
+  |================================================================      |  92%
+  |
+  |===================================================================   |  96%
+  |
+  |======================================================================| 100%
+
+  Finished in 0.25 mins
+==Google Cloud Storage Object==
+Name:                robyn/r100/fr/1103_131941/console.log
+Type:                application/octet-stream
+Size:                28 Kb
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log?generation=1762176216037886&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Bucket:              mmm-app-output
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/console.log/1762176216037886
+MD5 Hash:            1zUaU/GxwbfVpnSZqRQRkg==
+Class:               STANDARD
+Created:             2025-11-03 13:23:36
+Updated:             2025-11-03 13:23:36
+Generation:          1762176216037886
+Meta Generation:     1
+eTag:                CP7zjfuJ1pADEAE=
+crc32c:              6wu6bg==
+==Google Cloud Storage Object==
+Name:                robyn/r100/fr/1103_131941/timings.csv
+Type:                text/csv
+Size:                98 bytes
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Ftimings.csv?generation=1762176216500762&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Ftimings.csv
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Ftimings.csv
+Bucket:              mmm-app-output
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/timings.csv/1762176216500762
+MD5 Hash:            6uMx9VVx1CGwedNpVRjb3g==
+Class:               STANDARD
+Created:             2025-11-03 13:23:36
+Updated:             2025-11-03 13:23:36
+Generation:          1762176216500762
+Meta Generation:     1
+eTag:                CJqUqvuJ1pADEAE=
+crc32c:              kOtwyw==
+==Google Cloud Storage Object==
+Name:                robyn/r100/fr/1103_131941/timings.csv
+Type:                text/csv
+Size:                98 bytes
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Ftimings.csv?generation=1762176216679313&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Ftimings.csv
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Ftimings.csv
+Bucket:              mmm-app-output
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/timings.csv/1762176216679313
+MD5 Hash:            6uMx9VVx1CGwedNpVRjb3g==
+Class:               STANDARD
+Created:             2025-11-03 13:23:36
+Updated:             2025-11-03 13:23:36
+Generation:          1762176216679313
+Meta Generation:     1
+eTag:                CJGHtfuJ1pADEAE=
+crc32c:              kOtwyw==
+==Google Cloud Storage Object==
+Name:                robyn/r100/fr/1103_131941/InputCollect.RDS
+Type:                application/octet-stream
+Size:                1.4 Mb
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2FInputCollect.RDS?generation=1762176218483185&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2FInputCollect.RDS
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2FInputCollect.RDS
+Bucket:              mmm-app-output
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/InputCollect.RDS/1762176218483185
+MD5 Hash:            CdzIZg90bHJysFr4xfedTw==
+Class:               STANDARD
+Created:             2025-11-03 13:23:38
+Updated:             2025-11-03 13:23:38
+Generation:          1762176218483185
+Meta Generation:     1
+eTag:                CPGTo/yJ1pADEAE=
+crc32c:              WX1ZSg==
+==Google Cloud Storage Object==
+Name:                robyn/r100/fr/1103_131941/console.log
+Type:                application/octet-stream
+Size:                31.7 Kb
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log?generation=1762176218635918&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Bucket:              mmm-app-output
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/console.log/1762176218635918
+MD5 Hash:            r0um2jxFaOmLLBe7k2KzKw==
+Class:               STANDARD
+Created:             2025-11-03 13:23:38
+Updated:             2025-11-03 13:23:38
+Generation:          1762176218635918
+Meta Generation:     1
+eTag:                CI69rPyJ1pADEAE=
+crc32c:              cRJMAQ==
+
+  |
+  |                                                                      |   0%
+  |
+  |                                                                      |   1%
+  |
+  |=                                                                     |   1%
+  |
+  |=                                                                     |   2%
+  |
+  |==                                                                    |   2%
+  |
+  |==                                                                    |   3%==Google Cloud Storage Object==
+Name:                robyn/r100/fr/1103_131941/console.log
+Type:                application/octet-stream
+Size:                33.8 Kb
+Media URL:           https://www.googleapis.com/download/storage/v1/b/mmm-app-output/o/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log?generation=1762176219367101&alt=media
+Download URL:        https://storage.cloud.google.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Public Download URL: https://storage.googleapis.com/mmm-app-output/robyn%2Fr100%2Ffr%2F1103_131941%2Fconsole.log
+Bucket:              mmm-app-output
+ID:                  mmm-app-output/robyn/r100/fr/1103_131941/console.log/1762176219367101
+MD5 Hash:            nG+anOn2AnT2QVpQfOyx7g==
+Class:               STANDARD
+Created:             2025-11-03 13:23:39
+Updated:             2025-11-03 13:23:39
+Generation:          1762176219367101
+Meta Generation:     1
+eTag:                CL2N2fyJ1pADEAE=
+crc32c:              +JQ71g==
+FATAL: robyn_outputs() returned NULL or failed
+ℹ 2025-11-03 14:23:39.394708 > File size detected as  195 bytes
+
+
+and this in the robyn_inputs_error.txt
+
+robyn_outputs() FAILED
+When: 2025-11-03 14:23:39.18631
+Message: Can't extract column with `metric_name_updated`.
+âœ– Subscript `metric_name_updated` must be size 1, not 2.
 
 Stack trace:
 No traceback available
-
-this is the job_config.json
-
-{
-  "country": "de",
-  "iterations": 200,
-  "trials": 3,
-  "train_size": [
-    0.7,
-    0.9
-  ],
-  "revision": "r100",
-  "date_input": "2025-10-31",
-  "start_date": "2024-01-01",
-  "end_date": "2025-10-30",
-  "gcs_bucket": "mmm-app-output",
-  "data_gcs_path": "gs://mmm-app-output/datasets/de/latest/raw.parquet",
-  "annotations_gcs_path": "",
-  "paid_media_spends": [
-    "GA_SUPPLY_COST",
-    "GA_DEMAND_COST",
-    "BING_SUPPLY_COST",
-    "BING_DEMAND_COST",
-    "BING_COMPETITOR_COST",
-    "PARTNERSHIP_COSTS",
-    "TV_COST",
-    "GA_SMALL_COST_CUSTOM",
-    "BING_SMALL_COST_CUSTOM",
-    "META_TOTAL_COST_CUSTOM"
-  ],
-  "paid_media_vars": [
-    "GA_SUPPLY_SESSIONS",
-    "GA_DEMAND_SESSIONS",
-    "BING_SUPPLY_SESSIONS",
-    "BING_DEMAND_SESSIONS",
-    "BING_COMPETITOR_SESSIONS",
-    "PARTNERSHIP_COSTS",
-    "TV_DAILY_SESSIONS",
-    "GA_SMALL_SESSIONS_CUSTOM",
-    "BING_SMALL_SESSIONS_CUSTOM",
-    "META_TOTAL_SESSIONS_CUSTOM"
-  ],
-  "context_vars": [
-    "TV_IS_ON"
-  ],
-  "factor_vars": [
-    "TV_IS_ON"
-  ],
-  "organic_vars": [
-    "N_SEARCHES",
-    "ORGANIC_ENGINEERING_SESSIONS_CUSTOM",
-    "ORGANIC_CONTENT_SESSIONS_CUSTOM"
-  ],
-  "timestamp": "1031_102422",
-  "dep_var": "UPLOAD_VALUE",
-  "dep_var_type": "revenue",
-  "date_var": "date",
-  "adstock": "weibull_cdf",
-  "hyperparameter_preset": "Custom",
-  "resample_freq": "W",
-  "use_parquet": true,
-  "parallel_processing": true,
-  "max_cores": 8,
-  "custom_hyperparameters": {
-    "GA_SUPPLY_SESSIONS_alphas": [
-      1.0,
-      3.0
-    ],
-    "GA_SUPPLY_SESSIONS_shapes": [
-      0.5,
-      2.5
-    ],
-    "GA_SUPPLY_SESSIONS_scales": [
-      0.001,
-      0.15
-    ],
-    "GA_DEMAND_SESSIONS_alphas": [
-      1.0,
-      3.0
-    ],
-    "GA_DEMAND_SESSIONS_shapes": [
-      0.5,
-      2.5
-    ],
-    "GA_DEMAND_SESSIONS_scales": [
-      0.001,
-      0.15
-    ],
-    "BING_SUPPLY_SESSIONS_alphas": [
-      1.0,
-      3.0
-    ],
-    "BING_SUPPLY_SESSIONS_shapes": [
-      0.5,
-      2.5
-    ],
-    "BING_SUPPLY_SESSIONS_scales": [
-      0.001,
-      0.15
-    ],
-    "BING_DEMAND_SESSIONS_alphas": [
-      1.0,
-      3.0
-    ],
-    "BING_DEMAND_SESSIONS_shapes": [
-      0.5,
-      2.5
-    ],
-    "BING_DEMAND_SESSIONS_scales": [
-      0.001,
-      0.15
-    ],
-    "BING_COMPETITOR_SESSIONS_alphas": [
-      1.0,
-      3.0
-    ],
-    "BING_COMPETITOR_SESSIONS_shapes": [
-      0.5,
-      2.5
-    ],
-    "BING_COMPETITOR_SESSIONS_scales": [
-      0.001,
-      0.15
-    ],
-    "PARTNERSHIP_COSTS_alphas": [
-      0.65,
-      2.25
-    ],
-    "PARTNERSHIP_COSTS_shapes": [
-      0.5,
-      2.5
-    ],
-    "PARTNERSHIP_COSTS_scales": [
-      0.001,
-      0.15
-    ],
-    "TV_DAILY_SESSIONS_alphas": [
-      0.8,
-      2.2
-    ],
-    "TV_DAILY_SESSIONS_shapes": [
-      0.5,
-      2.5
-    ],
-    "TV_DAILY_SESSIONS_scales": [
-      0.001,
-      0.15
-    ],
-    "GA_SMALL_SESSIONS_CUSTOM_alphas": [
-      1.0,
-      3.0
-    ],
-    "GA_SMALL_SESSIONS_CUSTOM_shapes": [
-      0.5,
-      2.5
-    ],
-    "GA_SMALL_SESSIONS_CUSTOM_scales": [
-      0.001,
-      0.15
-    ],
-    "BING_SMALL_SESSIONS_CUSTOM_alphas": [
-      1.0,
-      3.0
-    ],
-    "BING_SMALL_SESSIONS_CUSTOM_shapes": [
-      0.5,
-      2.5
-    ],
-    "BING_SMALL_SESSIONS_CUSTOM_scales": [
-      0.001,
-      0.15
-    ],
-    "META_TOTAL_SESSIONS_CUSTOM_alphas": [
-      1.0,
-      3.0
-    ],
-    "META_TOTAL_SESSIONS_CUSTOM_shapes": [
-      0.5,
-      2.5
-    ],
-    "META_TOTAL_SESSIONS_CUSTOM_scales": [
-      0.001,
-      0.15
-    ],
-    "N_SEARCHES_alphas": [
-      1.0,
-      3.0
-    ],
-    "N_SEARCHES_shapes": [
-      0.5,
-      2.5
-    ],
-    "N_SEARCHES_scales": [
-      0.001,
-      0.15
-    ],
-    "ORGANIC_ENGINEERING_SESSIONS_CUSTOM_alphas": [
-      0.5,
-      2.0
-    ],
-    "ORGANIC_ENGINEERING_SESSIONS_CUSTOM_shapes": [
-      0.5,
-      2.5
-    ],
-    "ORGANIC_ENGINEERING_SESSIONS_CUSTOM_scales": [
-      0.001,
-      0.15
-    ],
-    "ORGANIC_CONTENT_SESSIONS_CUSTOM_alphas": [
-      0.5,
-      2.0
-    ],
-    "ORGANIC_CONTENT_SESSIONS_CUSTOM_shapes": [
-      0.5,
-      2.5
-    ],
-    "ORGANIC_CONTENT_SESSIONS_CUSTOM_scales": [
-      0.001,
-      0.15
-    ]
-  },
-  "column_agg_strategies": {
-    "MANAGEMENT_REGION": "auto",
-    "COUNTRY": "auto",
-    "BOOKINGS": "sum",
-    "GA_SUPPLY_COST": "sum",
-    "GA_DEMAND_COST": "sum",
-    "GA_OTHER_COST": "sum",
-    "GA_COMPETITOR_COST": "sum",
-    "GA_BRAND_COST": "sum",
-    "GA_APP_COST": "sum",
-    "BING_SUPPLY_COST": "sum",
-    "BING_DEMAND_COST": "sum",
-    "BING_OTHER_COST": "sum",
-    "BING_COMPETITOR_COST": "sum",
-    "BING_BRAND_COST": "sum",
-    "BING_APP_COST": "sum",
-    "META_DEMAND_COST": "sum",
-    "META_SUPPLY_COST": "sum",
-    "META_OTHER_COST": "sum",
-    "PARTNERSHIP_COSTS": "sum",
-    "GA_SUPPLY_SESSIONS": "sum",
-    "GA_DEMAND_SESSIONS": "sum",
-    "GA_OTHER_SESSIONS": "sum",
-    "GA_COMPETITOR_SESSIONS": "sum",
-    "GA_BRAND_SESSIONS": "sum",
-    "GA_APP_SESSIONS": "sum",
-    "BING_SUPPLY_SESSIONS": "sum",
-    "BING_DEMAND_SESSIONS": "sum",
-    "BING_OTHER_SESSIONS": "sum",
-    "BING_COMPETITOR_SESSIONS": "sum",
-    "BING_BRAND_SESSIONS": "sum",
-    "BING_APP_SESSIONS": "sum",
-    "META_DEMAND_SESSIONS": "sum",
-    "META_SUPPLY_SESSIONS": "sum",
-    "META_OTHER_SESSIONS": "sum",
-    "GA_SUPPLY_IMPRESSIONS": "sum",
-    "GA_DEMAND_IMPRESSIONS": "sum",
-    "GA_OTHER_IMPRESSIONS": "sum",
-    "GA_COMPETITOR_IMPRESSIONS": "sum",
-    "GA_BRAND_IMPRESSIONS": "sum",
-    "GA_APP_IMPRESSIONS": "sum",
-    "BING_SUPPLY_IMPRESSIONS": "sum",
-    "BING_DEMAND_IMPRESSIONS": "sum",
-    "BING_OTHER_IMPRESSIONS": "sum",
-    "BING_COMPETITOR_IMPRESSIONS": "sum",
-    "BING_BRAND_IMPRESSIONS": "sum",
-    "BING_APP_IMPRESSIONS": "sum",
-    "META_DEMAND_IMPRESSIONS": "sum",
-    "META_SUPPLY_IMPRESSIONS": "sum",
-    "META_OTHER_IMPRESSIONS": "sum",
-    "GA_SUPPLY_CLICKS": "sum",
-    "GA_DEMAND_CLICKS": "sum",
-    "GA_OTHER_CLICKS": "sum",
-    "GA_COMPETITOR_CLICKS": "sum",
-    "GA_BRAND_CLICKS": "sum",
-    "GA_APP_CLICKS": "sum",
-    "BING_SUPPLY_CLICKS": "sum",
-    "BING_DEMAND_CLICKS": "sum",
-    "BING_OTHER_CLICKS": "sum",
-    "BING_COMPETITOR_CLICKS": "sum",
-    "BING_BRAND_CLICKS": "sum",
-    "BING_APP_CLICKS": "sum",
-    "META_DEMAND_CLICKS": "sum",
-    "META_SUPPLY_CLICKS": "sum",
-    "META_OTHER_CLICKS": "sum",
-    "NL_DAILY_SESSIONS": "sum",
-    "SEO_DAILY_SESSIONS": "sum",
-    "DIRECT_DAILY_SESSIONS": "sum",
-    "TV_DAILY_SESSIONS": "sum",
-    "DISPLAY_DAILY_SESSIONS": "sum",
-    "CRM_OTHER_DAILY_SESSIONS": "sum",
-    "CRM_DAILY_SESSIONS": "sum",
-    "INFLUENCER_DAILY_SESSIONS": "sum",
-    "AFFILIATE_DAILY_SESSIONS": "sum",
-    "ORGANIC_SOCIAL_DAILY_SESSIONS": "sum",
-    "REFERRALS_SOCIAL_DAILY_SESSIONS": "sum",
-    "OTHER_DAILY_SESSIONS": "sum",
-    "BLOG_DAILY_SESSIONS": "sum",
-    "NA_APP_DAILY_SESSIONS": "sum",
-    "NA_WEB_DAILY_SESSIONS": "sum",
-    "CUM_PRIVATE_UPLOADS14DAY": "sum",
-    "CUM_COMMERCIAL_UPLOADS14DAY": "sum",
-    "TV_COSTS": "sum",
-    "AVG_BUYCYCLE_FEE": "sum",
-    "DISCOUNT_AMT": "sum",
-    "N_DISTINCT_SEARCHES": "sum",
-    "N_SEARCHES": "sum",
-    "TV_COST": "sum",
-    "TV_IS_ON": "sum",
-    "DAILY_ACTIVE_BIKES": "sum",
-    "SIGNUPS_NOTIF_ENABLED": "sum",
-    "GA_SMALL_COST_CUSTOM": "sum",
-    "BING_SMALL_COST_CUSTOM": "sum",
-    "GA_SMALL_SESSIONS_CUSTOM": "sum",
-    "GA_SMALL_IMPRESSIONS_CUSTOM": "sum",
-    "GA_SMALL_CLICKS_CUSTOM": "sum",
-    "BING_SMALL_SESSIONS_CUSTOM": "sum",
-    "BING_SMALL_IMPRESSIONS_CUSTOM": "sum",
-    "BING_SMALL_CLICKS_CUSTOM": "sum",
-    "GA_TOTAL_COST_CUSTOM": "sum",
-    "BING_TOTAL_COST_CUSTOM": "sum",
-    "META_TOTAL_COST_CUSTOM": "sum",
-    "GA_TOTAL_SESSIONS_CUSTOM": "sum",
-    "GA_TOTAL_IMPRESSIONS_CUSTOM": "sum",
-    "GA_TOTAL_CLICKS_CUSTOM": "sum",
-    "BING_TOTAL_SESSIONS_CUSTOM": "sum",
-    "BING_TOTAL_IMPRESSIONS_CUSTOM": "sum",
-    "BING_TOTAL_CLICKS_CUSTOM": "sum",
-    "META_TOTAL_SESSIONS_CUSTOM": "sum",
-    "META_TOTAL_IMPRESSIONS_CUSTOM": "sum",
-    "META_TOTAL_CLICKS_CUSTOM": "sum",
-    "PARTNERSHIP_TOTAL_SESSIONS_CUSTOM": "sum",
-    "ORGANIC_ENGINEERING_SESSIONS_CUSTOM": "sum",
-    "ORGANIC_CONTENT_SESSIONS_CUSTOM": "sum",
-    "ORGANIC_TOTAL_CUSTOM": "sum"
-  }
-}
