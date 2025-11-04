@@ -1370,32 +1370,59 @@ def _is_bool_like(series: pd.Series) -> bool:
         return False
 
 
-def require_login_and_domain(allowed_domain: str = "mesheddata.com") -> None:
+def require_login_and_domain(allowed_domain: Optional[str] = None) -> None:
     """
     Hard-stops the current Streamlit run unless the user is logged in
-    with a Google account from the allowed domain.
+    with a Google account from one of the allowed domains.
     Call this at the very top of *every* page.
+    
+    Args:
+        allowed_domain: Legacy parameter for backward compatibility. 
+                       If None, uses the ALLOWED_DOMAINS from settings.
+                       If provided, checks against this single domain only.
     """
     # Allow lightweight health checks to pass through if you use them on pages too
     q = getattr(st, "query_params", {})
     if q.get("health") == "true":
         return  # let the page handle its health endpoint and st.stop() later if needed
 
+    # Determine which domains to allow
+    if allowed_domain is not None:
+        # Legacy: single domain passed as parameter
+        allowed_domains = [allowed_domain.strip().lower()]
+    else:
+        # Use configured domains from settings
+        from config.settings import ALLOWED_DOMAINS
+        allowed_domains = ALLOWED_DOMAINS if ALLOWED_DOMAINS else ["mesheddata.com"]
+    
     is_logged_in = getattr(st.user, "is_logged_in", False)  # type: ignore
     if not is_logged_in:
         st.set_page_config(page_title="Sign in", layout="centered")
         st.title("Robyn MMM")
-        st.write(
-            f"Sign in with your {allowed_domain} Google account to continue."
-        )
+        if len(allowed_domains) == 1:
+            st.write(
+                f"Sign in with your @{allowed_domains[0]} Google account to continue."
+            )
+        else:
+            domains_str = ", ".join(f"@{d}" for d in allowed_domains)
+            st.write(
+                f"Sign in with your Google account from one of these domains: {domains_str}"
+            )
         if st.button("Sign in with Google"):
             st.login()  # type: ignore # flat [auth] config → no provider arg
         st.stop()
 
     email = (getattr(st.user, "email", "") or "").lower().strip()  # type: ignore
-    if not email.endswith(f"@{allowed_domain}"):
+    
+    # Check if email ends with any of the allowed domains
+    email_domain = email.split("@")[-1] if "@" in email else ""
+    if not any(email_domain == domain for domain in allowed_domains):
         st.set_page_config(page_title="Access restricted", layout="centered")
-        st.error(f"This app is restricted to @{allowed_domain} accounts.")
+        if len(allowed_domains) == 1:
+            st.error(f"This app is restricted to @{allowed_domains[0]} accounts.")
+        else:
+            domains_str = ", ".join(f"@{d}" for d in allowed_domains)
+            st.error(f"This app is restricted to accounts from these domains: {domains_str}")
         if st.button("Sign out"):
             st.logout()  # type: ignore # flat [auth] config → no provider arg
         st.stop()
