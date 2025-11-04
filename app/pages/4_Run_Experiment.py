@@ -238,7 +238,10 @@ with tab_single:
 
         # Load data button with automatic preview
         if st.button(
-            "Load selected data", type="primary", use_container_width=True
+            "Load selected data",
+            type="primary",
+            use_container_width=True,
+            key="load_data_btn",
         ):
             tmp_path = None
             try:
@@ -365,7 +368,11 @@ with tab_single:
                     help=f"Configurations available for {current_country.upper()}",
                 )
 
-                if st.button("📥 Load Configuration", use_container_width=True):
+                if st.button(
+                    "📥 Load Configuration",
+                    use_container_width=True,
+                    key="load_config_btn",
+                ):
                     try:
                         blob_path = f"training-configs/saved/{current_country}/{selected_config}.json"
                         blob = client.bucket(gcs_bucket).blob(blob_path)
@@ -1750,7 +1757,10 @@ with tab_single:
         }
 
     if st.button(
-        "🚀 Start Training Job", type="primary", use_container_width=True
+        "🚀 Start Training Job",
+        type="primary",
+        use_container_width=True,
+        key="start_training_job_btn",
     ):
         # Validate revision is filled
         if not revision or not revision.strip():
