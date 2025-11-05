@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Python dependencies for web interface
 RUN pip install --no-cache-dir \
-    "streamlit==1.36.0" \
+    "streamlit[auth]>=1.43" \
     snowflake-connector-python \
     google-cloud-storage \
     google-cloud-run \
