@@ -1385,11 +1385,11 @@ with tab_single:
             config_countries = st.multiselect(
                 "Select countries",
                 options=["fr", "de", "it", "es", "nl", "uk"],
-                default=[st.session_state.get("selected_country", "fr")],
+                default=[st.session_state.get("selected_country", "de")],
                 help="Countries this configuration applies to",
             )
         else:
-            config_countries = [st.session_state.get("selected_country", "fr")]
+            config_countries = [st.session_state.get("selected_country", "de")]
 
         # Add action buttons (Issue #5 fix: add queue options)
         col_btn1, col_btn2, col_btn3 = st.columns(3)

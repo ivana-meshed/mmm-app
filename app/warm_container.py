@@ -306,7 +306,7 @@ if __name__ == "__main__":
         template = pd.DataFrame(
             [
                 {
-                    "country": "fr",
+                    "country": "de",
                     "revision": "r100",
                     "date_input": time.strftime("%Y-%m-%d"),
                     "iterations": 200,
