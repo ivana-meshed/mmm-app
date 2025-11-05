@@ -12,7 +12,6 @@ st.set_page_config(
     page_title="Robyn MMM Trainer",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="collapsed",  # Start with sidebar collapsed
 )
 
 from app_split_helpers import *
