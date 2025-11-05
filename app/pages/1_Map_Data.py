@@ -1458,34 +1458,26 @@ with st.expander("📺 Custom Marketing Channels", expanded=False):
     channels_input = st.text_area(
         "Marketing Channels (comma-separated)",
         value=", ".join(all_existing_channels),
-        help="Recognized channels from your data are prefilled. Add additional custom channels (e.g., 'spotify', 'podcast') separated by commas.",
+        help="Edit this list to set your marketing channels. These will be used to extract channel names from column names (e.g., 'facebook_spend' → 'facebook'). Add, remove, or modify channels as needed.",
         height=100,
         key="channels_input",
     )
 
     if st.button(
-        "➕ Add Channels", key="add_channels_btn", use_container_width=True
+        "➕ Apply Channels", key="add_channels_btn", use_container_width=True
     ):
         # Parse the input
         entered_channels = [
             ch.strip().lower() for ch in channels_input.split(",") if ch.strip()
         ]
 
-        # Separate into custom vs recognized
-        known_channels_set = set(_get_known_channels())
-        new_custom_channels = []
+        # All entered channels become the new custom channels list
+        # This replaces the old behavior of only adding "new" channels
+        st.session_state["custom_channels"] = entered_channels
 
-        for ch in entered_channels:
-            # If it's not in recognized (from data) and not in known defaults, it's custom
-            if ch not in recognized_channels and ch not in known_channels_set:
-                new_custom_channels.append(ch)
-
-        # Update session state
-        st.session_state["custom_channels"] = new_custom_channels
-
-        # Rebuild mapping_df to include new channels
+        # Rebuild mapping_df to include updated channels
         if not st.session_state["mapping_df"].empty:
-            # Re-extract channels for all variables
+            # Re-extract channels for all variables using the updated channel list
             for idx, row in st.session_state["mapping_df"].iterrows():
                 var_name = str(row["var"])
                 extracted_channel = _extract_channel_from_column(var_name)
@@ -1495,10 +1487,8 @@ with st.expander("📺 Custom Marketing Channels", expanded=False):
                     ] = extracted_channel
 
         st.success(
-            f"✅ Channels updated! Added {len(new_custom_channels)} custom channel(s)."
+            f"✅ Channels updated! Now using {len(entered_channels)} channel(s): {', '.join(entered_channels)}"
         )
-        if new_custom_channels:
-            st.info(f"Custom channels: {', '.join(new_custom_channels)}")
         st.rerun()
 
     st.divider()
