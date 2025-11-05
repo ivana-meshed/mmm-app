@@ -11,7 +11,6 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
-
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -1228,9 +1227,17 @@ with st.expander(
     # Add buttons for Load and Refresh
     col_load, col_refresh = st.columns([1, 1])
     with col_load:
-        load_metadata_clicked = st.button("Load & apply metadata", use_container_width=True, key="load_metadata_btn")
+        load_metadata_clicked = st.button(
+            "Load & apply metadata",
+            use_container_width=True,
+            key="load_metadata_btn",
+        )
     with col_refresh:
-        refresh_metadata_clicked = st.button("↻ Refresh metadata list", use_container_width=True, key="refresh_metadata_btn")
+        refresh_metadata_clicked = st.button(
+            "↻ Refresh metadata list",
+            use_container_width=True,
+            key="refresh_metadata_btn",
+        )
 
     # Handle refresh button
     if refresh_metadata_clicked:
@@ -1453,25 +1460,29 @@ with st.expander("📺 Custom Marketing Channels", expanded=False):
         value=", ".join(all_existing_channels),
         help="Recognized channels from your data are prefilled. Add additional custom channels (e.g., 'spotify', 'podcast') separated by commas.",
         height=100,
-        key="channels_input"
+        key="channels_input",
     )
 
-    if st.button("➕ Add Channels", key="add_channels_btn", use_container_width=True):
+    if st.button(
+        "➕ Add Channels", key="add_channels_btn", use_container_width=True
+    ):
         # Parse the input
-        entered_channels = [ch.strip().lower() for ch in channels_input.split(",") if ch.strip()]
-        
+        entered_channels = [
+            ch.strip().lower() for ch in channels_input.split(",") if ch.strip()
+        ]
+
         # Separate into custom vs recognized
         known_channels_set = set(_get_known_channels())
         new_custom_channels = []
-        
+
         for ch in entered_channels:
             # If it's not in recognized (from data) and not in known defaults, it's custom
             if ch not in recognized_channels and ch not in known_channels_set:
                 new_custom_channels.append(ch)
-        
+
         # Update session state
         st.session_state["custom_channels"] = new_custom_channels
-        
+
         # Rebuild mapping_df to include new channels
         if not st.session_state["mapping_df"].empty:
             # Re-extract channels for all variables
@@ -1479,9 +1490,13 @@ with st.expander("📺 Custom Marketing Channels", expanded=False):
                 var_name = str(row["var"])
                 extracted_channel = _extract_channel_from_column(var_name)
                 if extracted_channel:
-                    st.session_state["mapping_df"].at[idx, "channel"] = extracted_channel
-        
-        st.success(f"✅ Channels updated! Added {len(new_custom_channels)} custom channel(s).")
+                    st.session_state["mapping_df"].at[
+                        idx, "channel"
+                    ] = extracted_channel
+
+        st.success(
+            f"✅ Channels updated! Added {len(new_custom_channels)} custom channel(s)."
+        )
         if new_custom_channels:
             st.info(f"Custom channels: {', '.join(new_custom_channels)}")
         st.rerun()
@@ -1720,7 +1735,7 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
             },
             key="mapping_editor",
         )
-        
+
         # Submit button inside the form to capture edits
         mapping_submit = st.form_submit_button("✅ Apply mapping changes")
 
@@ -1730,7 +1745,7 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
         try:
             # Store original length before updating
             original_length = len(st.session_state["mapping_df"])
-            
+
             # Prepare prefixes dict
             prefixes = {
                 "organic_vars": st.session_state.get(

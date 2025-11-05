@@ -1,56 +1,51 @@
 # streamlit_app_overview.py (v2.23) — fixed top-of-file wiring
 import os
 import re
+import warnings
+
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import r2_score, mean_absolute_error
-from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-import warnings
-
-from app_shared import (
-    # GCS & versions
-    list_data_versions,
-    list_meta_versions,
-    load_data_from_gcs,
-    download_parquet_from_gcs_cached,
-    download_json_from_gcs_cached,
-    data_blob,
-    data_latest_blob,
-    meta_blob,
-    meta_latest_blob,
-    # meta & utilities
+from app_shared import (  # GCS & versions; meta & utilities; sidebar + filters; colors (if exported; otherwise define locally)
+    BASE_PLATFORM_COLORS,
+    GREEN,
+    RED,
     build_meta_views,
     build_plat_map_df,
-    validate_against_metadata,
-    parse_date,
-    pretty,
+    build_platform_colors,
+    data_blob,
+    data_latest_blob,
+    download_json_from_gcs_cached,
+    download_parquet_from_gcs_cached,
+    filter_range,
     fmt_num,
     freq_to_rule,
-    period_label,
-    safe_eff,
     kpi_box,
     kpi_grid,
     kpi_grid_fixed,
-    BASE_PLATFORM_COLORS,
-    build_platform_colors,
-    # sidebar + filters
-    render_sidebar,
-    filter_range,
+    list_data_versions,
+    list_meta_versions,
+    load_data_from_gcs,
+    meta_blob,
+    meta_latest_blob,
+    parse_date,
+    period_label,
+    pretty,
     previous_window,
+    render_sidebar,
     resample_numeric,
-    total_with_prev,
     resolve_meta_blob_from_selection,
-    # colors (if exported; otherwise define locally)
-    GREEN,
-    RED,
+    safe_eff,
+    total_with_prev,
+    validate_against_metadata,
 )
-
 from app_split_helpers import *
+from scipy import stats
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.preprocessing import PolynomialFeatures
 
 require_login_and_domain()
 ensure_session_defaults()
@@ -208,7 +203,9 @@ with tab_load:
                 st.session_state["df"] = df
                 st.session_state["meta"] = meta
                 st.session_state["date_col"] = date_col
-                st.session_state["channels_map"] = meta.get("channels", {}) or {}
+                st.session_state["channels_map"] = (
+                    meta.get("channels", {}) or {}
+                )
 
                 # Validate & notify
                 report = validate_against_metadata(df, meta)

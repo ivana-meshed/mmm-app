@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
-
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -1881,6 +1880,7 @@ with tab_single:
                         # Add job to history immediately after launch
                         try:
                             from datetime import datetime as dt
+
                             from app_shared import append_row_to_job_history
 
                             append_row_to_job_history(
