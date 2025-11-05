@@ -286,12 +286,16 @@ def _extract_channel_from_column(col: str) -> str:
     """
     col_lower = col.lower().strip()
 
-    # Combine known channels with custom channels from session
-    known_channels = _get_known_channels()
+    # Use custom channels if explicitly set, otherwise use known channels
     custom_channels = st.session_state.get("custom_channels", [])
-    all_channels = known_channels + custom_channels
+    if custom_channels:
+        # When custom channels are set, ONLY use those (don't include known channels)
+        all_channels = custom_channels
+    else:
+        # Fall back to known channels if no custom channels are set
+        all_channels = _get_known_channels()
 
-    # Check if column starts with a known channel followed by underscore
+    # Check if column starts with a channel followed by underscore
     for channel in all_channels:
         if col_lower.startswith(f"{channel}_"):
             return channel
