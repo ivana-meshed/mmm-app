@@ -1,58 +1,56 @@
 # streamlit_app_overview.py (v2.23) — fixed top-of-file wiring
 import os
 import re
+import warnings
+
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import r2_score, mean_absolute_error
-from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-import warnings
- 
-st.set_page_config(
-    page_title="Review Business- & Marketing Data", layout="wide"
-)
 
+# Import shared utilities: GCS & versions; meta & utilities; sidebar + filters; colors
 from app_shared import (
-    # GCS & versions
-    list_data_versions,
-    list_meta_versions,
-    load_data_from_gcs,
-    download_parquet_from_gcs_cached,
-    download_json_from_gcs_cached,
-    data_blob,
-    data_latest_blob,
-    meta_blob,
-    meta_latest_blob,
-    # meta & utilities
+    BASE_PLATFORM_COLORS,
+    GREEN,
+    RED,
     build_meta_views,
     build_plat_map_df,
-    validate_against_metadata,
-    parse_date,
-    pretty,
+    build_platform_colors,
+    data_blob,
+    data_latest_blob,
+    download_json_from_gcs_cached,
+    download_parquet_from_gcs_cached,
+    filter_range,
     fmt_num,
     freq_to_rule,
-    period_label,
-    safe_eff,
     kpi_box,
     kpi_grid,
     kpi_grid_fixed,
-    BASE_PLATFORM_COLORS,
-    build_platform_colors,
-    # sidebar + filters
-    render_sidebar,
-    filter_range,
+    list_data_versions,
+    list_meta_versions,
+    load_data_from_gcs,
+    meta_blob,
+    meta_latest_blob,
+    parse_date,
+    period_label,
+    pretty,
     previous_window,
+    render_sidebar,
     resample_numeric,
-    total_with_prev,
     resolve_meta_blob_from_selection,
-    # colors (if exported; otherwise define locally)
-    GREEN,
-    RED,
+    safe_eff,
+    total_with_prev,
+    validate_against_metadata,
 )
+from app_split_helpers import *
+from scipy import stats
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.preprocessing import PolynomialFeatures
+
+require_login_and_domain()
+ensure_session_defaults()
 
 st.title("Review Business- & Marketing Data")
 
@@ -65,14 +63,80 @@ st.session_state.setdefault("country", "de")
 st.session_state.setdefault("picked_data_ts", "Latest")
 st.session_state.setdefault("picked_meta_ts", "Latest")
 
+
+# ---------- Data Profile helpers ----------
+def _num_stats(s: pd.Series) -> dict:
+    s = pd.to_numeric(s, errors="coerce")
+    n = len(s)
+    nn = int(s.notna().sum())
+    na = n - nn
+    if nn == 0:
+        return dict(
+            non_null=nn,
+            nulls=na,
+            nulls_pct=np.nan,
+            zeros=0,
+            zeros_pct=np.nan,
+            distinct=0,
+            min=np.nan,
+            p10=np.nan,
+            median=np.nan,
+            mean=np.nan,
+            p90=np.nan,
+            max=np.nan,
+            std=np.nan,
+        )
+    z = int((s.fillna(0) == 0).sum())
+    s2 = s.dropna()
+    return dict(
+        non_null=nn,
+        nulls=na,
+        nulls_pct=na / n if n else np.nan,
+        zeros=z,
+        zeros_pct=z / n if n else np.nan,
+        distinct=int(s2.nunique(dropna=True)),
+        min=float(s2.min()) if not s2.empty else np.nan,
+        p10=float(np.percentile(s2, 10)) if not s2.empty else np.nan,
+        median=float(s2.median()) if not s2.empty else np.nan,
+        mean=float(s2.mean()) if not s2.empty else np.nan,
+        p90=float(np.percentile(s2, 90)) if not s2.empty else np.nan,
+        max=float(s2.max()) if not s2.empty else np.nan,
+        std=float(s2.std(ddof=1)) if s2.size > 1 else np.nan,
+    )
+
+
+def _cat_stats(s: pd.Series) -> dict:
+    n = len(s)
+    nn = int(s.notna().sum())
+    na = n - nn
+    s2 = s.dropna()
+    # “zeros” not meaningful for cats; leave blank
+    return dict(
+        non_null=nn,
+        nulls=na,
+        nulls_pct=na / n if n else np.nan,
+        zeros=np.nan,
+        zeros_pct=np.nan,
+        distinct=int(s2.nunique(dropna=True)) if nn else 0,
+        min=np.nan,
+        p10=np.nan,
+        median=np.nan,
+        mean=np.nan,
+        p90=np.nan,
+        max=np.nan,
+        std=np.nan,
+    )
+
+
 # -----------------------------
-# Tabs
+# TABS
 # -----------------------------
-tab_load, tab_biz, tab_mkt = st.tabs(
+tab_load, tab_biz, tab_mkt, tab_profile = st.tabs(
     [
         "Select Data To Analyze",
         "Business Data",
         "Marketing Data",
+        "Data Profile",
     ]
 )
 
@@ -115,55 +179,58 @@ with tab_load:
     load_clicked = st.button("Select & Load", type="primary")
 
     if load_clicked:
-        try:
-            # Resolve DATA path (unchanged)
-            db = (
-                data_latest_blob(country)
-                if data_ts == "Latest"
-                else data_blob(country, str(data_ts))
-            )
-
-            # Resolve META path from the UI label safely:
-            # "Latest", "Universal - <ts>", "<CC> - <ts>", or bare "<ts>"
-            mb = resolve_meta_blob_from_selection(
-                GCS_BUCKET, country, str(meta_ts)
-            )
-
-            # Download
-            df = download_parquet_from_gcs_cached(GCS_BUCKET, db)
-            meta = download_json_from_gcs_cached(GCS_BUCKET, mb)
-
-            # Parse dates using metadata
-            df, date_col = parse_date(df, meta)
-
-            # Persist in session
-            st.session_state["df"] = df
-            st.session_state["meta"] = meta
-            st.session_state["date_col"] = date_col
-            st.session_state["channels_map"] = meta.get("channels", {}) or {}
-
-            # Validate & notify
-            report = validate_against_metadata(df, meta)
-            st.success(
-                f"Loaded {len(df):,} rows from gs://{GCS_BUCKET}/{db} and metadata gs://{GCS_BUCKET}/{mb}"
-            )
-
-            c_extra, _ = st.columns([1, 1])
-            with c_extra:
-                st.markdown("**Columns in data but not in metadata**")
-                st.write(report["extra_in_df"] or "— none —")
-
-            if not report["type_mismatches"].empty:
-                st.warning("Declared vs observed type mismatches:")
-                st.dataframe(
-                    report["type_mismatches"],
-                    use_container_width=True,
-                    hide_index=True,
+        with st.spinner("Loading data and metadata from GCS..."):
+            try:
+                # Resolve DATA path (unchanged)
+                db = (
+                    data_latest_blob(country)
+                    if data_ts == "Latest"
+                    else data_blob(country, str(data_ts))
                 )
-            else:
-                st.caption("No type mismatches detected (coarse check).")
-        except Exception as e:
-            st.error(f"Load failed: {e}")
+
+                # Resolve META path from the UI label safely:
+                # "Latest", "Universal - <ts>", "<CC> - <ts>", or bare "<ts>"
+                mb = resolve_meta_blob_from_selection(
+                    GCS_BUCKET, country, str(meta_ts)
+                )
+
+                # Download
+                df = download_parquet_from_gcs_cached(GCS_BUCKET, db)
+                meta = download_json_from_gcs_cached(GCS_BUCKET, mb)
+
+                # Parse dates using metadata
+                df, date_col = parse_date(df, meta)
+
+                # Persist in session
+                st.session_state["df"] = df
+                st.session_state["meta"] = meta
+                st.session_state["date_col"] = date_col
+                st.session_state["channels_map"] = (
+                    meta.get("channels", {}) or {}
+                )
+
+                # Validate & notify
+                report = validate_against_metadata(df, meta)
+                st.success(
+                    f"Loaded {len(df):,} rows from gs://{GCS_BUCKET}/{db} and metadata gs://{GCS_BUCKET}/{mb}"
+                )
+
+                c_extra, _ = st.columns([1, 1])
+                with c_extra:
+                    st.markdown("**Columns in data but not in metadata**")
+                    st.write(report["extra_in_df"] or "— none —")
+
+                if not report["type_mismatches"].empty:
+                    st.warning("Declared vs observed type mismatches:")
+                    st.dataframe(
+                        report["type_mismatches"],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.caption("No type mismatches detected (coarse check).")
+            except Exception as e:
+                st.error(f"Load failed: {e}")
 
 # -----------------------------
 # State
@@ -192,6 +259,7 @@ if df.empty or not meta:
     INSTALL_COLS,
 ) = build_meta_views(meta, df)
 
+
 # ---- Nice label resolver (coalesce: metadata nice() -> pretty()) ----
 def nice_title(col: str) -> str:
     """
@@ -211,6 +279,7 @@ def nice_title(col: str) -> str:
         return pretty(raw)
     except Exception:
         return pretty(raw)
+
 
 # -----------------------------
 # Sidebar
@@ -283,6 +352,7 @@ df_prev = previous_window(df, df_r, DATE_COL, RANGE)
 def total_with_prev_local(collist):
     return total_with_prev(df_r, df_prev, collist)
 
+
 res = resample_numeric(
     df_r, DATE_COL, RULE, ensure_cols=[target, "_TOTAL_SPEND"]
 )
@@ -301,8 +371,14 @@ with tab_biz:
     # Build a stable (nice -> raw col) mapping for goals so we can show friendly labels everywhere
     if goal_cols:
         goal_label_map = {nice_title(g): g for g in goal_cols}
-        goal_labels_sorted = sorted(goal_label_map.keys(), key=lambda s: s.lower())
-        target = GOAL if (GOAL and GOAL in df.columns) else (goal_cols[0] if goal_cols else None)
+        goal_labels_sorted = sorted(
+            goal_label_map.keys(), key=lambda s: s.lower()
+        )
+        target = (
+            GOAL
+            if (GOAL and GOAL in df.columns)
+            else (goal_cols[0] if goal_cols else None)
+        )
     else:
         goal_label_map = {}
         goal_labels_sorted = []
@@ -345,7 +421,11 @@ with tab_biz:
                 diff = cur_eff - prev_eff
                 delta_txt = f"{'+' if diff >= 0 else ''}{diff:.2f}"
             # ROAS only for GMV explicitly; otherwise <NiceGoal> / <Spend label>
-            eff_title = "ROAS" if str(g).upper() == "GMV" else f"{nice_title(g)} / {spend_label}"
+            eff_title = (
+                "ROAS"
+                if str(g).upper() == "GMV"
+                else f"{nice_title(g)} / {spend_label}"
+            )
             kpis2.append(
                 dict(
                     title=eff_title,
@@ -366,7 +446,9 @@ with tab_biz:
     with cA:
         fig1 = go.Figure()
         if target and target in res:
-            fig1.add_bar(x=res["PERIOD_LABEL"], y=res[target], name=nice_title(target))
+            fig1.add_bar(
+                x=res["PERIOD_LABEL"], y=res[target], name=nice_title(target)
+            )
         fig1.add_trace(
             go.Scatter(
                 x=res["PERIOD_LABEL"],
@@ -384,14 +466,20 @@ with tab_biz:
             yaxis2=dict(title=spend_label, overlaying="y", side="right"),
             bargap=0.15,
             hovermode="x unified",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0
+            ),
             margin=dict(b=60),
         )
         st.plotly_chart(fig1, use_container_width=True)
 
     with cB:
         eff_t = res.copy()
-        label_eff = "ROAS" if (target and str(target).upper() == "GMV") else "Efficiency"
+        label_eff = (
+            "ROAS"
+            if (target and str(target).upper() == "GMV")
+            else "Efficiency"
+        )
         if target and target in eff_t.columns and "_TOTAL_SPEND" in eff_t:
             eff_t["EFF"] = np.where(
                 eff_t["_TOTAL_SPEND"] > 0,
@@ -402,7 +490,11 @@ with tab_biz:
             eff_t["EFF"] = np.nan
         fig2e = go.Figure()
         if target and target in eff_t:
-            fig2e.add_bar(x=eff_t["PERIOD_LABEL"], y=eff_t[target], name=nice_title(target))
+            fig2e.add_bar(
+                x=eff_t["PERIOD_LABEL"],
+                y=eff_t[target],
+                name=nice_title(target),
+            )
         fig2e.add_trace(
             go.Scatter(
                 x=eff_t["PERIOD_LABEL"],
@@ -420,7 +512,9 @@ with tab_biz:
             yaxis2=dict(title=label_eff, overlaying="y", side="right"),
             bargap=0.15,
             hovermode="x unified",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0
+            ),
             margin=dict(b=60),
         )
         st.plotly_chart(fig2e, use_container_width=True)
@@ -432,7 +526,9 @@ with tab_biz:
     # -----------------------------
     st.markdown("## Explore Any Metric Over Time")
 
-    numeric_candidates = df_r.select_dtypes(include=[np.number]).columns.tolist()
+    numeric_candidates = df_r.select_dtypes(
+        include=[np.number]
+    ).columns.tolist()
     metrics = [c for c in numeric_candidates if c != "_TOTAL_SPEND"]
 
     if not metrics:
@@ -448,7 +544,9 @@ with tab_biz:
             final = lbl if counts[lbl] == 1 else f"{lbl} · {col}"
             labels.append((final, col))
 
-        labels_sorted = sorted([l for (l, _) in labels], key=lambda s: s.lower())
+        labels_sorted = sorted(
+            [l for (l, _) in labels], key=lambda s: s.lower()
+        )
         label_to_col = {l: c for (l, c) in labels}
 
         # default to current target if available
@@ -458,7 +556,9 @@ with tab_biz:
         )
 
         c_sel, c_spend = st.columns([2, 1])
-        picked_label = c_sel.selectbox("Metric", labels_sorted, index=labels_sorted.index(default_label))
+        picked_label = c_sel.selectbox(
+            "Metric", labels_sorted, index=labels_sorted.index(default_label)
+        )
         picked_col = label_to_col[picked_label]
 
         # ensure selected metric is in res; if not, add via same resample rule
@@ -471,15 +571,23 @@ with tab_biz:
                 .rename(columns={DATE_COL: "DATE_PERIOD"})
             )
             res_plot = res.merge(add, on="DATE_PERIOD", how="left")
-            res_plot["PERIOD_LABEL"] = period_label(res_plot["DATE_PERIOD"], RULE)
+            res_plot["PERIOD_LABEL"] = period_label(
+                res_plot["DATE_PERIOD"], RULE
+            )
         else:
             res_plot = res
 
-        want_overlay = c_spend.checkbox(f"Overlay Total {spend_label}", value=True)
+        want_overlay = c_spend.checkbox(
+            f"Overlay Total {spend_label}", value=True
+        )
         can_overlay = "_TOTAL_SPEND" in res_plot.columns
 
         fig_custom = go.Figure()
-        fig_custom.add_bar(x=res_plot["PERIOD_LABEL"], y=res_plot[picked_col], name=nice_title(picked_col))
+        fig_custom.add_bar(
+            x=res_plot["PERIOD_LABEL"],
+            y=res_plot[picked_col],
+            name=nice_title(picked_col),
+        )
 
         if want_overlay and can_overlay:
             fig_custom.add_trace(
@@ -504,17 +612,21 @@ with tab_biz:
             xaxis=dict(title="Date", title_standoff=8),
             bargap=0.15,
             hovermode="x unified",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0
+            ),
             margin=dict(b=60),
         )
         st.plotly_chart(fig_custom, use_container_width=True)
 
         if want_overlay and not can_overlay:
-            st.caption(f"ℹ️ Overlay disabled: '_TOTAL_SPEND' not available for this selection.")
+            st.caption(
+                f"ℹ️ Overlay disabled: '_TOTAL_SPEND' not available for this selection."
+            )
 
 
 # =============================
-# TAB 3 — MARKETING OVERVIEW
+# TAB 2 — MARKETING OVERVIEW
 # =============================
 with tab_mkt:
     st.subheader(f"Spend & Channels — {TIMEFRAME_LABEL} · {agg_label}")
@@ -927,3 +1039,197 @@ with tab_mkt:
             st.markdown("---")
     else:
         st.info("Platform mapping not available.")
+
+# =============================
+# TAB 4 — DATA PROFILE
+# =============================
+with tab_profile:
+    st.subheader(f"Data Profile — {TIMEFRAME_LABEL}")
+
+    # Which frame to profile (timeframe-adjusted)
+    prof_df = df_r.copy()
+
+    if prof_df.empty:
+        st.info("No data in the selected timeframe to profile.")
+        st.stop()
+
+    # Column type selector
+    numeric_cols = prof_df.select_dtypes(include=[np.number]).columns.tolist()
+    datetime_cols = prof_df.select_dtypes(
+        include=["datetime", "datetimetz"]
+    ).columns.tolist()
+    bool_cols = prof_df.select_dtypes(include=["bool"]).columns.tolist()
+    object_cols = [
+        c
+        for c in prof_df.columns
+        if c not in numeric_cols + datetime_cols + bool_cols
+    ]
+
+    type_opts = {
+        "Numeric": numeric_cols,
+        "Categorical": object_cols + bool_cols,
+        "Datetime": datetime_cols,
+    }
+    type_pick = st.multiselect(
+        "Column types to include",
+        ["Numeric", "Categorical", "Datetime"],
+        default=["Numeric", "Categorical", "Datetime"],
+        help="Profile only selected types.",
+    )
+
+    # Build rows
+    wanted_cols = []
+    for t in type_pick:
+        wanted_cols.extend(type_opts.get(t, []))
+    # keep order as in df
+    wanted_cols = [c for c in prof_df.columns if c in set(wanted_cols)]
+
+    rows = []
+    for col in wanted_cols:
+        s = prof_df[col]
+        col_type = str(s.dtype)
+        if pd.api.types.is_numeric_dtype(s):
+            stats = _num_stats(s)
+        elif pd.api.types.is_datetime64_any_dtype(s):
+            # datetime summary: reuse cat base + min/max/distinct
+            base = _cat_stats(s)
+            ss = s.dropna()
+            base["min"] = ss.min().timestamp() if not ss.empty else np.nan
+            base["max"] = ss.max().timestamp() if not ss.empty else np.nan
+            # keep mean/median/std empty for datetime
+            stats = base
+            col_type = "datetime64"
+        else:
+            stats = _cat_stats(s)
+
+        rows.append(
+            dict(
+                Column=col,
+                Type=col_type,
+                **stats,
+            )
+        )
+
+    prof_table = pd.DataFrame(rows)
+
+    # Friendly display formatting
+    def _fmt_int(x):
+        return "–" if pd.isna(x) else f"{int(x):,}"
+
+    def _fmt_float(x):
+        return "–" if pd.isna(x) else f"{x:,.2f}"
+
+    def _fmt_pct(x):
+        return "–" if pd.isna(x) else f"{x:.1%}"
+
+    disp = prof_table.copy()
+    # Render datetime min/max back to readable timestamps if present
+    if "datetime64" in disp["Type"].unique():
+
+        def _fmt_dt(num_ts):
+            if pd.isna(num_ts):
+                return "–"
+            try:
+                return pd.to_datetime(num_ts, unit="s").strftime("%Y-%m-%d")
+            except Exception:
+                return "–"
+
+        disp.loc[disp["Type"].eq("datetime64"), "min"] = disp.loc[
+            disp["Type"].eq("datetime64"), "min"
+        ].map(_fmt_dt)
+        disp.loc[disp["Type"].eq("datetime64"), "max"] = disp.loc[
+            disp["Type"].eq("datetime64"), "max"
+        ].map(_fmt_dt)
+
+    # Pretty numbers
+    for c in ["non_null", "nulls", "zeros", "distinct"]:
+        if c in disp:
+            disp[c] = disp[c].map(_fmt_int)
+    for c in ["min", "p10", "median", "mean", "p90", "max", "std"]:
+        if c in disp:
+            # don't touch datetime rows (already formatted)
+            mask_dt = disp["Type"].eq("datetime64")
+            disp.loc[~mask_dt, c] = disp.loc[~mask_dt, c].map(_fmt_float)
+    for c in ["nulls_pct", "zeros_pct"]:
+        if c in disp:
+            disp[c] = disp[c].map(_fmt_pct)
+
+    # Nice column headers
+    rename_map = {
+        "non_null": "Non-Null",
+        "nulls": "Nulls",
+        "nulls_pct": "Nulls %",
+        "zeros": "Zeros",
+        "zeros_pct": "Zeros %",
+        "distinct": "Distinct",
+        "min": "Min",
+        "p10": "P10",
+        "median": "Median",
+        "mean": "Mean",
+        "p90": "P90",
+        "max": "Max",
+        "std": "Std",
+    }
+    disp = disp.rename(columns=rename_map)
+
+    # Optional text filter
+    col_filter = (
+        st.text_input("Filter columns (contains)", value="").strip().lower()
+    )
+    if col_filter:
+        disp = disp[[c for c in disp.columns]]
+        disp = disp[disp["Column"].str.lower().str.contains(col_filter)]
+
+    # Quick header metrics
+    total_rows = len(prof_df)
+    total_cols = len(prof_df.columns)
+    left, right = st.columns([1, 2])
+    with left:
+        st.metric("Rows (selected timeframe)", f"{total_rows:,}")
+        st.metric("Columns", f"{total_cols:,}")
+    with right:
+        # Quick issues summary
+        high_null = (prof_table["nulls_pct"] >= 0.5).fillna(False)
+        constant = (prof_table["distinct"] <= 1).fillna(False)
+        zeros_only = (prof_table["zeros_pct"] >= 0.99).fillna(
+            False
+        ) & pd.to_numeric(prof_table["non_null"], errors="coerce").gt(0)
+        st.caption(
+            f"Potential issues — High-null: {int(high_null.sum()):,} · "
+            f"Constant: {int(constant.sum()):,} · "
+            f"All/Mostly Zero (numeric): {int(zeros_only.sum()):,}"
+        )
+
+    # Show table
+    st.dataframe(
+        disp[
+            [
+                "Column",
+                "Type",
+                "Non-Null",
+                "Nulls",
+                "Nulls %",
+                "Zeros",
+                "Zeros %",
+                "Distinct",
+                "Min",
+                "P10",
+                "Median",
+                "Mean",
+                "P90",
+                "Max",
+                "Std",
+            ]
+        ],
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    # Download (raw numeric profile, not the pretty strings)
+    csv = prof_table.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download profile (CSV)",
+        data=csv,
+        file_name="data_profile.csv",
+        mime="text/csv",
+    )

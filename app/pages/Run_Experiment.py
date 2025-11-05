@@ -12,8 +12,6 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
-
-st.set_page_config(page_title="Experiment", page_icon="🧪", layout="wide")
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -1385,11 +1383,11 @@ with tab_single:
             config_countries = st.multiselect(
                 "Select countries",
                 options=["fr", "de", "it", "es", "nl", "uk"],
-                default=[st.session_state.get("selected_country", "fr")],
+                default=[st.session_state.get("selected_country", "de")],
                 help="Countries this configuration applies to",
             )
         else:
-            config_countries = [st.session_state.get("selected_country", "fr")]
+            config_countries = [st.session_state.get("selected_country", "de")]
 
         # Add action buttons (Issue #5 fix: add queue options)
         col_btn1, col_btn2, col_btn3 = st.columns(3)
@@ -1882,6 +1880,7 @@ with tab_single:
                         # Add job to history immediately after launch
                         try:
                             from datetime import datetime as dt
+
                             from app_shared import append_row_to_job_history
 
                             append_row_to_job_history(
