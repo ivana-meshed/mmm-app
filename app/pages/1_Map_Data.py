@@ -1478,13 +1478,13 @@ with st.expander("📺 Custom Marketing Channels", expanded=False):
         # Rebuild mapping_df to include updated channels
         if not st.session_state["mapping_df"].empty:
             # Re-extract channels for all variables using the updated channel list
-            # Always update the channel field, even if extraction returns empty string
+            # Always update the channel field, set to None if extraction returns empty
             for idx, row in st.session_state["mapping_df"].iterrows():
                 var_name = str(row["var"])
                 extracted_channel = _extract_channel_from_column(var_name)
-                # Update channel field regardless of whether it's empty or not
+                # Update channel field: use extracted value or None if empty
                 st.session_state["mapping_df"].at[idx, "channel"] = (
-                    extracted_channel if extracted_channel else ""
+                    extracted_channel if extracted_channel else None
                 )
 
         st.success(
