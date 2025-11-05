@@ -20,7 +20,7 @@ from app_split_helpers import *
 connect_page = st.Page(
     "pages/Connect_Data.py", title="Connect your Data", icon="🧩"
 )
-map_page = st.Page("pages/Map_Data.py", title="Map your data", icon="🗺️")
+map_page = st.Page("pages/Map_Data.py", title="Map your Data", icon="🗺️")
 
 review_page = st.Page(
     "pages/Review_Data.py",

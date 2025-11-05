@@ -322,4 +322,4 @@ try:
     else:
         st.info("Fill in your Snowflake credentials above to enable Next.")
 except Exception:
-    st.page_link("pages/1_Map_Data.py", label="Next → Map Your Data", icon="➡️")
+    st.page_link("pages/Map_Data.py", label="Next → Map Your Data", icon="➡️")

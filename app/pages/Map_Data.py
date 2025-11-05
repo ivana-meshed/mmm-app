@@ -2048,5 +2048,5 @@ if can_go_next:
         except Exception:
             # Fallback: link
             st.page_link(
-                "pages/4_Run_Experiment.py", label="Next → Experiment", icon="➡️"
+                "pages/Run_Experiment.py", label="Next → Experiment", icon="➡️"
             )
