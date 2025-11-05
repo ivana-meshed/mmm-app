@@ -50,7 +50,8 @@ pg = st.navigation(
         experiment_page,
         results_page,
         best_results_page,
-    ]
+    ],
+    position="sidebar",
 )
 
 # Run the selected page
