@@ -8,7 +8,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from app_shared import (  # GCS & versions; meta & utilities; sidebar + filters; colors (if exported; otherwise define locally)
+
+# Import shared utilities: GCS & versions; meta & utilities; sidebar + filters; colors
+from app_shared import (
     BASE_PLATFORM_COLORS,
     GREEN,
     RED,
