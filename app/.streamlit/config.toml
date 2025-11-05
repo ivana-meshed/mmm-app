@@ -11,6 +11,3 @@ level = "info"
 
 [theme]
 base = "light"
-
-[ui]
-hideSidebarNav = false

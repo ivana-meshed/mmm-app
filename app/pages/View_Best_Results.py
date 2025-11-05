@@ -28,10 +28,6 @@ except Exception:
 require_login_and_domain()
 
 # ---------- Page ----------
-st.set_page_config(
-    page_title="Best models per country: Robyn MMM",
-    layout="wide",
-)
 st.title("Best results browser (GCS)")
 
 # ---------- Settings ----------
