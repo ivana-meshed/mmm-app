@@ -129,7 +129,7 @@ def _cat_stats(s: pd.Series) -> dict:
 # -----------------------------
 # TABS
 # -----------------------------
-tab_load, tab_biz, tab_mkt = st.tabs(
+tab_load, tab_biz, tab_mkt, tab_profile = st.tabs(
     [
         "Select Data To Analyze",
         "Business Data",
