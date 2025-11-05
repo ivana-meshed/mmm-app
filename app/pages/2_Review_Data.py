@@ -12,10 +12,6 @@ import plotly.graph_objects as go
 import streamlit as st
 import warnings
 
-st.set_page_config(
-    page_title="Review Business- & Marketing Data", layout="wide"
-)
-
 from app_shared import (
     # GCS & versions
     list_data_versions,
@@ -186,55 +182,56 @@ with tab_load:
     load_clicked = st.button("Select & Load", type="primary")
 
     if load_clicked:
-        try:
-            # Resolve DATA path (unchanged)
-            db = (
-                data_latest_blob(country)
-                if data_ts == "Latest"
-                else data_blob(country, str(data_ts))
-            )
-
-            # Resolve META path from the UI label safely:
-            # "Latest", "Universal - <ts>", "<CC> - <ts>", or bare "<ts>"
-            mb = resolve_meta_blob_from_selection(
-                GCS_BUCKET, country, str(meta_ts)
-            )
-
-            # Download
-            df = download_parquet_from_gcs_cached(GCS_BUCKET, db)
-            meta = download_json_from_gcs_cached(GCS_BUCKET, mb)
-
-            # Parse dates using metadata
-            df, date_col = parse_date(df, meta)
-
-            # Persist in session
-            st.session_state["df"] = df
-            st.session_state["meta"] = meta
-            st.session_state["date_col"] = date_col
-            st.session_state["channels_map"] = meta.get("channels", {}) or {}
-
-            # Validate & notify
-            report = validate_against_metadata(df, meta)
-            st.success(
-                f"Loaded {len(df):,} rows from gs://{GCS_BUCKET}/{db} and metadata gs://{GCS_BUCKET}/{mb}"
-            )
-
-            c_extra, _ = st.columns([1, 1])
-            with c_extra:
-                st.markdown("**Columns in data but not in metadata**")
-                st.write(report["extra_in_df"] or "— none —")
-
-            if not report["type_mismatches"].empty:
-                st.warning("Declared vs observed type mismatches:")
-                st.dataframe(
-                    report["type_mismatches"],
-                    use_container_width=True,
-                    hide_index=True,
+        with st.spinner("Loading data and metadata from GCS..."):
+            try:
+                # Resolve DATA path (unchanged)
+                db = (
+                    data_latest_blob(country)
+                    if data_ts == "Latest"
+                    else data_blob(country, str(data_ts))
                 )
-            else:
-                st.caption("No type mismatches detected (coarse check).")
-        except Exception as e:
-            st.error(f"Load failed: {e}")
+
+                # Resolve META path from the UI label safely:
+                # "Latest", "Universal - <ts>", "<CC> - <ts>", or bare "<ts>"
+                mb = resolve_meta_blob_from_selection(
+                    GCS_BUCKET, country, str(meta_ts)
+                )
+
+                # Download
+                df = download_parquet_from_gcs_cached(GCS_BUCKET, db)
+                meta = download_json_from_gcs_cached(GCS_BUCKET, mb)
+
+                # Parse dates using metadata
+                df, date_col = parse_date(df, meta)
+
+                # Persist in session
+                st.session_state["df"] = df
+                st.session_state["meta"] = meta
+                st.session_state["date_col"] = date_col
+                st.session_state["channels_map"] = meta.get("channels", {}) or {}
+
+                # Validate & notify
+                report = validate_against_metadata(df, meta)
+                st.success(
+                    f"Loaded {len(df):,} rows from gs://{GCS_BUCKET}/{db} and metadata gs://{GCS_BUCKET}/{mb}"
+                )
+
+                c_extra, _ = st.columns([1, 1])
+                with c_extra:
+                    st.markdown("**Columns in data but not in metadata**")
+                    st.write(report["extra_in_df"] or "— none —")
+
+                if not report["type_mismatches"].empty:
+                    st.warning("Declared vs observed type mismatches:")
+                    st.dataframe(
+                        report["type_mismatches"],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.caption("No type mismatches detected (coarse check).")
+            except Exception as e:
+                st.error(f"Load failed: {e}")
 
 # -----------------------------
 # State

@@ -21,10 +21,6 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from gcp_secrets import access_secret, upsert_secret
 
-st.set_page_config(
-    page_title="Connect your Data", page_icon="🧩", layout="wide"
-)
-
 require_login_and_domain()
 ensure_session_defaults()
 
