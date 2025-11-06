@@ -5,11 +5,11 @@ This document summarizes the implementation of improvements to the MMM App's dat
 
 ## Changes Implemented
 
-### 1. Map Your Data (1_Map_Data.py) - Step 2 Improvements
+### 1. Map Your Data (Map_Data.py) - Step 2 Improvements
 
 #### 1.1 Goal Variables Management
 **Before:** Goals were configured in horizontal layout with separate primary/secondary columns
-**After:** 
+**After:**
 - **Vertical Layout**: Primary and secondary goal variables now stack vertically for better space utilization
 - **Main Dependent Variable**: Added a "Main" checkbox column in the goals editor to select the main dependent variable directly in Step 2
 - **Autocomplete Selection**: The "Variable" field is now a SelectboxColumn instead of free text, providing autocomplete from available source data columns
@@ -26,7 +26,7 @@ This document summarizes the implementation of improvements to the MMM App's dat
 
 #### 1.3 Custom Column Naming
 **Before:** TOTAL columns had no suffix (e.g., `GA_TOTAL_COST`)
-**After:** 
+**After:**
 - All TOTAL columns now have `_CUSTOM` suffix (e.g., `GA_TOTAL_COST_CUSTOM`, `ORGANIC_TOTAL_CUSTOM`)
 - TOTAL columns are only created when a channel has multiple subchannels
 - **Example**: If channel `GA` has subchannels `SUPPLY`, `DEMAND`, and `OTHER`, TOTAL columns like `GA_TOTAL_COST_CUSTOM` will be created
@@ -49,7 +49,7 @@ This document summarizes the implementation of improvements to the MMM App's dat
 - When checked: Saves for specific country only
 - Metadata country field is set to "universal" or country code accordingly
 
-### 2. Run Experiment (4_Run_Experiment.py) - Step 4 Improvements
+### 2. Run Experiment (Run_Experiment.py) - Step 4 Improvements
 
 #### 2.1 Metadata Source Selection
 **Before:** Metadata was loaded implicitly from the same source as data
@@ -304,13 +304,13 @@ Created comprehensive test suite in `tests/test_mapping_metadata.py`:
 
 ## Files Modified
 
-1. **app/pages/1_Map_Data.py**
+1. **app/pages/Map_Data.py**
    - Updated goals form layout and validation
    - Enhanced mapping table with sorting
    - Improved metadata save logic
    - Added universal/country-specific toggle
 
-2. **app/pages/4_Run_Experiment.py**
+2. **app/pages/Run_Experiment.py**
    - Added metadata source selector
    - Updated revision field with placeholder
    - Added training configuration save/load

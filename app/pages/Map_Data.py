@@ -2044,9 +2044,9 @@ if can_go_next:
             if st.button("Next → Experiment", use_container_width=True):
                 import streamlit as stlib
 
-                stlib.switch_page("pages/4_Run_Experiment.py")
+                stlib.switch_page("pages/Run_Experiment.py")
         except Exception:
             # Fallback: link
             st.page_link(
-                "pages/4_Run_Experiment.py", label="Next → Experiment", icon="➡️"
+                "pages/Run_Experiment.py", label="Next → Experiment", icon="➡️"
             )
