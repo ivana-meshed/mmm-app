@@ -318,8 +318,8 @@ try:
         if st.button("Next → Map Your Data"):
             import streamlit as stlib
 
-            stlib.switch_page("pages/1_Map_Data.py")
+            stlib.switch_page("pages/Map_Data.py")
     else:
         st.info("Fill in your Snowflake credentials above to enable Next.")
 except Exception:
-    st.page_link("pages/1_Map_Data.py", label="Next → Map Your Data", icon="➡️")
+    st.page_link("pages/Map_Data.py", label="Next → Map Your Data", icon="➡️")

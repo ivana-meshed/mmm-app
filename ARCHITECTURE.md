@@ -21,7 +21,7 @@ The web interface provides:
 - `streamlit_app.py` - Main entry point and home page
 - `pages/` - Multi-page Streamlit application
   - `0_Connect_Data.py` - Snowflake connection setup
-  - `1_Map_Data.py` - Data column mapping and metadata
+  - `Map_Data.py` - Data column mapping and metadata
   - `2_Review_Data.py` - Data validation and preview
   - `3_Prepare_Training_Data.py` / `3_Prepare_Training_Datav2.py` - Data preparation
   - `4_Run_Experiment.py` - Single/batch experiment configuration

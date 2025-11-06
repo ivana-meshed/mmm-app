@@ -30,7 +30,7 @@ app/
     snowflake_connector.py  # Snowflake connection and query utilities
   pages/                    # Streamlit multi-page app
     0_Connect_Data.py       # Snowflake connection setup
-    1_Map_Data.py           # Data mapping and metadata
+    Map_Data.py           # Data mapping and metadata
     2_Review_Data.py        # Data validation
     3_Prepare_Training_Data.py  # Data preparation
     4_Run_Experiment.py     # Job configuration and execution
