@@ -1,16 +1,36 @@
-# MMM Trainer on Google Cloud – README
+# MMM Trainer – Multi-Cloud Deployment
 
-This repo deploys a **Streamlit** web app to **Cloud Run** that orchestrates an **R/Robyn** training pipeline.
-Data is fetched from **Snowflake** with Python, passed as a CSV to R, and the model artifacts are written to **Google Cloud Storage**.
-Infrastructure is managed with **Terraform**; the container image lives in **Artifact Registry**.
+This repo deploys a **Streamlit** web app that orchestrates an **R/Robyn** training pipeline.
+Data is fetched from **Snowflake** with Python, passed as a CSV to R, and the model artifacts are written to cloud storage.
+Infrastructure is managed with **Terraform**; container images are stored in container registries.
+
+## Deployment Options
+
+The application can be deployed on either **Google Cloud Platform (GCP)** or **Amazon Web Services (AWS)**:
+
+### Google Cloud Platform (Default)
+- **Web Service**: Cloud Run Service
+- **Training Jobs**: Cloud Run Jobs
+- **Storage**: Google Cloud Storage (GCS)
+- **Container Registry**: Artifact Registry
+- **Secrets**: Secret Manager
+
+### Amazon Web Services
+- **Web Service**: ECS Fargate Service
+- **Training Jobs**: ECS Fargate Tasks
+- **Storage**: Amazon S3
+- **Container Registry**: Elastic Container Registry (ECR)
+- **Secrets**: AWS Secrets Manager
+
+See [AWS Deployment Guide](docs/AWS_DEPLOYMENT.md) for detailed AWS setup instructions.
 
 ## High-level Architecture
 
-- User accesses the Streamlit UI at the Cloud Run URL.
+- User accesses the Streamlit UI at the service URL.
 - Streamlit (Python) connects to Snowflake, exports a CSV snapshot, and calls `Rscript r/run_all.R job_cfg=/tmp/job.json`.
 - R runs Robyn, using `reticulate` → system Python (`/usr/bin/python3`) for **nevergrad**.
-- R uploads outputs (RDS, plots, one-pagers, metrics) to the GCS bucket.
-- Logs from Python/R appear in the Streamlit UI and in **Cloud Logging**.
+- R uploads outputs (RDS, plots, one-pagers, metrics) to cloud storage (GCS or S3).
+- Logs from Python/R appear in the Streamlit UI and in cloud logging services.
 
 See the diagrams:
 - **Architecture (boxes & arrows):** `mmm_architecture_v2.png`
@@ -26,7 +46,10 @@ app/
     settings.py             # Centralized configuration (env vars, GCP, Snowflake)
     __init__.py
   utils/
-    gcs_utils.py            # GCS operations (upload, download, read/write)
+    cloud_storage.py        # Cloud storage abstraction (GCS/S3)
+    cloud_secrets.py        # Secrets management abstraction
+    container_orchestration.py  # Job orchestration abstraction (Cloud Run/ECS)
+    gcs_utils.py            # Legacy GCS operations (backward compatibility)
     snowflake_connector.py  # Snowflake connection and query utilities
   pages/                    # Streamlit multi-page app
     0_Connect_Data.py       # Snowflake connection setup
@@ -43,19 +66,27 @@ app/
 r/
   run_all.R                 # Robyn training entrypoint (reads job_cfg and csv_path)
 infra/terraform/
-  main.tf                   # Cloud Run, service accounts, IAM, storage
+  main.tf                   # GCP Cloud Run, service accounts, IAM, storage
   variables.tf
   envs/
-    prod.tfvars             # Production environment config
-    dev.tfvars              # Development environment config
+    prod.tfvars             # Production environment config (GCP)
+    dev.tfvars              # Development environment config (GCP)
+infra/terraform-aws/
+  main.tf                   # AWS ECS, IAM, VPC, S3
+  variables.tf
+  envs/
+    prod.tfvars             # Production environment config (AWS)
+    dev.tfvars              # Development environment config (AWS)
 docker/
   Dockerfile.web            # Web service container
   Dockerfile.training       # Training job container
   Dockerfile.training-base  # Base image with R dependencies
   training_entrypoint.sh    # Training job entrypoint
 .github/workflows/
-  ci.yml                    # Production CI/CD (main branch)
-  ci-dev.yml                # Development CI/CD (feat-*, dev branches)
+  ci.yml                    # Production CI/CD (main branch) - GCP
+  ci-dev.yml                # Development CI/CD (feat-*, dev branches) - GCP
+  ci-aws.yml                # Production CI/CD - AWS
+  ci-aws-dev.yml            # Development CI/CD - AWS
 tests/                      # Unit and integration tests
 docs/                       # Additional documentation
 ```
@@ -64,9 +95,25 @@ For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Prerequisites
 
+### For Google Cloud Platform (GCP)
+
 - Google Cloud project with billing enabled
 - `gcloud` CLI authenticated (`gcloud auth login` and `gcloud config set project <PROJECT_ID>`)
 - Docker with Buildx enabled (`docker buildx create --use`)
+- Terraform v1.5+
+- Snowflake credentials for the data source
+- A GCS bucket (e.g. `mmm-app-output`) to store artifacts
+
+### For Amazon Web Services (AWS)
+
+- AWS account with appropriate permissions
+- `aws` CLI configured (`aws configure`)
+- Docker with Buildx enabled (`docker buildx create --use`)
+- Terraform v1.5+
+- Snowflake credentials for the data source
+- An S3 bucket (e.g. `mmm-app-output-aws`) to store artifacts
+
+See [AWS Deployment Guide](docs/AWS_DEPLOYMENT.md) for detailed AWS setup.
 - Terraform v1.5+
 - Snowflake credentials for the data source
 - A GCS bucket (e.g. `mmm-app-output`) to store artifacts
