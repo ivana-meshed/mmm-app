@@ -240,6 +240,12 @@ class AWSECSProvider(ContainerOrchestrationProvider):
 
         self.ecs_client = boto3.client("ecs")
         self.logs_client = boto3.client("logs")
+        self.ec2_client = boto3.client("ec2")
+        
+        # Get AWS account ID dynamically
+        sts_client = boto3.client("sts")
+        self.account_id = sts_client.get_caller_identity()["Account"]
+        
         self.cluster = os.getenv("ECS_CLUSTER")
         self.region = os.getenv("AWS_REGION", "us-east-1")
 
@@ -247,9 +253,55 @@ class AWSECSProvider(ContainerOrchestrationProvider):
             raise ValueError("ECS_CLUSTER environment variable must be set for AWS")
 
         # Get VPC configuration for task execution
-        # In production, these should be environment variables
-        self.subnets = os.getenv("ECS_SUBNETS", "").split(",")
-        self.security_groups = os.getenv("ECS_SECURITY_GROUPS", "").split(",")
+        # Try environment variables first, then query from ECS service
+        self.subnets = self._get_subnets()
+        self.security_groups = self._get_security_groups()
+    
+    def _get_subnets(self) -> list:
+        """Get subnets for task execution from env vars or ECS service."""
+        subnets_env = os.getenv("ECS_SUBNETS", "")
+        if subnets_env:
+            return [s.strip() for s in subnets_env.split(",") if s.strip()]
+        
+        # Try to get from existing service configuration
+        try:
+            services = self.ecs_client.list_services(cluster=self.cluster, maxResults=1)
+            if services.get("serviceArns"):
+                service_details = self.ecs_client.describe_services(
+                    cluster=self.cluster,
+                    services=[services["serviceArns"][0]]
+                )
+                if service_details.get("services"):
+                    network_config = service_details["services"][0].get("networkConfiguration", {})
+                    awsvpc_config = network_config.get("awsvpcConfiguration", {})
+                    return awsvpc_config.get("subnets", [])
+        except Exception:
+            pass
+        
+        return []
+    
+    def _get_security_groups(self) -> list:
+        """Get security groups for task execution from env vars or ECS service."""
+        sg_env = os.getenv("ECS_SECURITY_GROUPS", "")
+        if sg_env:
+            return [s.strip() for s in sg_env.split(",") if s.strip()]
+        
+        # Try to get from existing service configuration
+        try:
+            services = self.ecs_client.list_services(cluster=self.cluster, maxResults=1)
+            if services.get("serviceArns"):
+                service_details = self.ecs_client.describe_services(
+                    cluster=self.cluster,
+                    services=[services["serviceArns"][0]]
+                )
+                if service_details.get("services"):
+                    network_config = service_details["services"][0].get("networkConfiguration", {})
+                    awsvpc_config = network_config.get("awsvpcConfiguration", {})
+                    return awsvpc_config.get("securityGroups", [])
+        except Exception:
+            pass
+        
+        return []
 
     def _map_state(self, ecs_status: str, stop_code: Optional[str] = None) -> JobState:
         """Map ECS task status to unified JobState."""
@@ -310,8 +362,8 @@ class AWSECSProvider(ContainerOrchestrationProvider):
         """Get ECS Task execution details."""
         # execution_id can be short task ID or full ARN
         if not execution_id.startswith("arn:"):
-            # Construct full ARN if needed (requires cluster info)
-            task_arn = f"arn:aws:ecs:{self.region}:{os.getenv('AWS_ACCOUNT_ID')}:task/{self.cluster}/{execution_id}"
+            # Construct full ARN using dynamically retrieved account ID
+            task_arn = f"arn:aws:ecs:{self.region}:{self.account_id}:task/{self.cluster}/{execution_id}"
         else:
             task_arn = execution_id
 
@@ -409,7 +461,7 @@ class AWSECSProvider(ContainerOrchestrationProvider):
     def cancel_execution(self, execution_id: str) -> None:
         """Cancel an ECS Task."""
         if not execution_id.startswith("arn:"):
-            task_arn = f"arn:aws:ecs:{self.region}:{os.getenv('AWS_ACCOUNT_ID')}:task/{self.cluster}/{execution_id}"
+            task_arn = f"arn:aws:ecs:{self.region}:{self.account_id}:task/{self.cluster}/{execution_id}"
         else:
             task_arn = execution_id
 

@@ -6,7 +6,7 @@ provider "aws" {
 # Locals for computed values
 ##############################################################
 locals {
-  web_service_url   = "https://${aws_lb.web_alb.dns_name}"
+  web_service_url   = "http://${aws_lb.web_alb.dns_name}"
   auth_redirect_uri = "${local.web_service_url}/oauth2callback"
   common_tags = {
     Project     = "mmm-app"
@@ -859,6 +859,89 @@ resource "aws_ecs_task_definition" "training_task" {
 ##############################################################
 # EventBridge Scheduler for Queue Ticks
 ##############################################################
+
+# NOTE: Queue scheduler implementation for AWS
+# 
+# The GCP implementation uses Cloud Scheduler to periodically trigger
+# the web service endpoint for queue processing. For AWS, there are
+# several implementation options:
+#
+# Option 1: EventBridge Rule with Lambda
+#   - Create a Lambda function that calls the ALB endpoint
+#   - Schedule with EventBridge Rules (cron expression)
+#
+# Option 2: EventBridge Rule with ECS Task
+#   - Create a scheduled ECS task that processes the queue
+#   - Useful if queue processing is heavy
+#
+# Option 3: Application-level scheduler
+#   - Implement queue processing within the web service
+#   - Use APScheduler or similar library
+#
+# For initial deployment, Option 3 (application-level) is recommended
+# as it requires no additional infrastructure. The web service can
+# run queue ticks on a background thread.
+#
+# To implement Option 1 (EventBridge + Lambda), uncomment and configure below:
+
+# resource "aws_iam_role" "scheduler_lambda_role" {
+#   name = "${var.service_name}-scheduler-lambda-role"
+#
+#   assume_role_policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [
+#       {
+#         Action = "sts:AssumeRole"
+#         Effect = "Allow"
+#         Principal = {
+#           Service = "lambda.amazonaws.com"
+#         }
+#       }
+#     ]
+#   })
+#
+#   tags = local.common_tags
+# }
+#
+# resource "aws_lambda_function" "queue_tick" {
+#   filename      = "lambda/queue_tick.zip"
+#   function_name = "${var.service_name}-queue-tick"
+#   role          = aws_iam_role.scheduler_lambda_role.arn
+#   handler       = "index.handler"
+#   runtime       = "python3.11"
+#
+#   environment {
+#     variables = {
+#       ALB_URL = "http://${aws_lb.web_alb.dns_name}"
+#       QUEUE_NAME = var.queue_name
+#     }
+#   }
+#
+#   tags = local.common_tags
+# }
+#
+# resource "aws_cloudwatch_event_rule" "queue_tick_schedule" {
+#   name                = "${var.service_name}-queue-tick"
+#   description         = "Trigger queue tick every minute"
+#   schedule_expression = "rate(1 minute)"
+#
+#   tags = local.common_tags
+# }
+#
+# resource "aws_cloudwatch_event_target" "queue_tick_lambda" {
+#   rule      = aws_cloudwatch_event_rule.queue_tick_schedule.name
+#   target_id = "QueueTickLambda"
+#   arn       = aws_lambda_function.queue_tick.arn
+# }
+#
+# resource "aws_lambda_permission" "allow_eventbridge" {
+#   statement_id  = "AllowExecutionFromEventBridge"
+#   action        = "lambda:InvokeFunction"
+#   function_name = aws_lambda_function.queue_tick.function_name
+#   principal     = "events.amazonaws.com"
+#   source_arn    = aws_cloudwatch_event_rule.queue_tick_schedule.arn
+# }
+
 resource "aws_iam_role" "scheduler_role" {
   name = "${var.service_name}-scheduler-role"
 
@@ -900,9 +983,3 @@ resource "aws_iam_role_policy" "scheduler_invoke_service" {
     ]
   })
 }
-
-# Note: EventBridge Scheduler to trigger queue ticks via HTTP would require
-# API Gateway or direct ECS task invocation. For simplicity, this can be
-# implemented as a CloudWatch Event Rule that invokes a Lambda function
-# which calls the web service endpoint, or use ECS Scheduled Tasks.
-# This is a placeholder for the scheduler implementation.
