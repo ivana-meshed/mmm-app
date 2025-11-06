@@ -20,11 +20,11 @@ The web interface provides:
 **Key Files**:
 - `streamlit_app.py` - Main entry point and home page
 - `pages/` - Multi-page Streamlit application
-  - `0_Connect_Data.py` - Snowflake connection setup
+  - `Connect_Data.py` - Snowflake connection setup
   - `Map_Data.py` - Data column mapping and metadata
-  - `2_Review_Data.py` - Data validation and preview
+  - `Review_Data.py` - Data validation and preview
   - `3_Prepare_Training_Data.py` / `3_Prepare_Training_Datav2.py` - Data preparation
-  - `4_Run_Experiment.py` - Single/batch experiment configuration
+  - `Run_Experiment.py` - Single/batch experiment configuration
   - `5_View_Results.py` - Results visualization
   - `6_View_Best_Results.py` - Best model results
 

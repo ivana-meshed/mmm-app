@@ -29,11 +29,11 @@ app/
     gcs_utils.py            # GCS operations (upload, download, read/write)
     snowflake_connector.py  # Snowflake connection and query utilities
   pages/                    # Streamlit multi-page app
-    0_Connect_Data.py       # Snowflake connection setup
+    Connect_Data.py       # Snowflake connection setup
     Map_Data.py           # Data mapping and metadata
-    2_Review_Data.py        # Data validation
+    Review_Data.py        # Data validation
     3_Prepare_Training_Data.py  # Data preparation
-    4_Run_Experiment.py     # Job configuration and execution
+    Run_Experiment.py     # Job configuration and execution
     5_View_Results.py       # Results visualization
     6_View_Best_Results.py  # Best model selection
   app_shared.py             # Shared helper functions

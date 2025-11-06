@@ -49,7 +49,7 @@ This document summarizes the implementation of improvements to the MMM App's dat
 - When checked: Saves for specific country only
 - Metadata country field is set to "universal" or country code accordingly
 
-### 2. Run Experiment (4_Run_Experiment.py) - Step 4 Improvements
+### 2. Run Experiment (Run_Experiment.py) - Step 4 Improvements
 
 #### 2.1 Metadata Source Selection
 **Before:** Metadata was loaded implicitly from the same source as data
@@ -310,7 +310,7 @@ Created comprehensive test suite in `tests/test_mapping_metadata.py`:
    - Improved metadata save logic
    - Added universal/country-specific toggle
 
-2. **app/pages/4_Run_Experiment.py**
+2. **app/pages/Run_Experiment.py**
    - Added metadata source selector
    - Updated revision field with placeholder
    - Added training configuration save/load

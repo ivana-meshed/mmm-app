@@ -89,7 +89,7 @@ graph TB
 
 ### 1. Streamlit Application (`app/`)
 
-#### Main Training Interface (`0_Connect_Your_Data.py`)
+#### Main Training Interface (`Connect_Your_Data.py`)
 - **Purpose**: Primary interface for configuring and launching MMM training jobs
 - **Key Features**:
   - Snowflake connection configuration
