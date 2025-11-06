@@ -378,10 +378,15 @@ export TRAINING_JOB_NAME=mmm-app-training
 
 ## Additional Resources
 
-- [AWS Deployment Guide](AWS_DEPLOYMENT.md)
-- [GCP Deployment (README)](../README.md)
-- [Development Guide](../DEVELOPMENT.md)
-- [Architecture Documentation](../ARCHITECTURE.md)
+### Setup Guides
+- [GitHub Actions GCP Setup Guide](GITHUB_ACTIONS_GCP_SETUP.md) - Initial GCP setup with Workload Identity Federation
+- [GitHub Actions AWS Setup Guide](GITHUB_ACTIONS_AWS_SETUP.md) - Initial AWS setup with OIDC
+
+### Deployment Guides
+- [AWS Deployment Guide](AWS_DEPLOYMENT.md) - Complete AWS deployment documentation
+- [GCP Deployment (README)](../README.md) - GCP deployment overview
+- [Development Guide](../DEVELOPMENT.md) - Local development setup
+- [Architecture Documentation](../ARCHITECTURE.md) - System architecture
 
 ## Support
 

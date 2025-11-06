@@ -113,10 +113,9 @@ For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
 - Snowflake credentials for the data source
 - An S3 bucket (e.g. `mmm-app-output-aws`) to store artifacts
 
-See [AWS Deployment Guide](docs/AWS_DEPLOYMENT.md) for detailed AWS setup.
-- Terraform v1.5+
-- Snowflake credentials for the data source
-- A GCS bucket (e.g. `mmm-app-output`) to store artifacts
+See the deployment guides for detailed setup:
+- **GCP**: [GitHub Actions GCP Setup](docs/GITHUB_ACTIONS_GCP_SETUP.md)
+- **AWS**: [GitHub Actions AWS Setup](docs/GITHUB_ACTIONS_AWS_SETUP.md)
 
 ## Local Development
 

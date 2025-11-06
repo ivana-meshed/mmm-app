@@ -1,8 +1,10 @@
 # Deployment Quick Reference
 
-## First-Time AWS Setup
+## First-Time Setup
 
-**For GitHub Actions CI/CD**: Follow the [GitHub Actions AWS Setup Guide](GITHUB_ACTIONS_AWS_SETUP.md) to configure OIDC authentication.
+**For GitHub Actions CI/CD**:
+- **GCP**: [GitHub Actions GCP Setup Guide](GITHUB_ACTIONS_GCP_SETUP.md) - Configure Workload Identity Federation
+- **AWS**: [GitHub Actions AWS Setup Guide](GITHUB_ACTIONS_AWS_SETUP.md) - Configure OIDC authentication
 
 ## Choose Your Deployment
 
