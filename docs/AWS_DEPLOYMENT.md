@@ -138,7 +138,21 @@ Before deployment, you need:
 
 ## AWS Setup
 
-### 1. Configure AWS CLI
+### For GitHub Actions CI/CD (Recommended)
+
+If you want to use the automated GitHub Actions workflows to deploy to AWS, follow the **[GitHub Actions AWS Setup Guide](GITHUB_ACTIONS_AWS_SETUP.md)** first. This guide walks you through:
+- Setting up AWS OIDC authentication for GitHub Actions
+- Creating the IAM role with necessary permissions
+- Creating ECR repositories
+- Configuring GitHub secrets
+
+**→ [Complete GitHub Actions AWS Setup Guide](GITHUB_ACTIONS_AWS_SETUP.md)**
+
+### For Manual/Local Deployment
+
+If you want to deploy manually from your local machine:
+
+#### 1. Configure AWS CLI
 
 ```bash
 # Configure AWS credentials
@@ -154,7 +168,7 @@ aws configure
 aws sts get-caller-identity
 ```
 
-### 2. Set Environment Variables
+#### 2. Set Environment Variables
 
 Create a `.env` file or export variables:
 
@@ -175,7 +189,7 @@ export TF_VAR_auth_client_secret="your-google-oauth-client-secret"
 export TF_VAR_auth_cookie_secret="your-random-cookie-secret"
 ```
 
-### 3. Create S3 Bucket for Terraform State
+#### 3. Create S3 Bucket for Terraform State
 
 ```bash
 # Create bucket for Terraform state
@@ -204,7 +218,7 @@ aws s3api put-public-access-block \
     "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 ```
 
-### 4. Create S3 Bucket for Application Data
+#### 4. Create S3 Bucket for Application Data
 
 ```bash
 # Create application data bucket
@@ -222,24 +236,32 @@ aws s3api put-public-access-block \
     "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 ```
 
-### 5. Configure GitHub OIDC for CI/CD (Optional)
+#### 5. Create ECR Repositories (if not using GitHub Actions)
 
-For automated deployments from GitHub Actions:
+If you're not using the automated GitHub Actions setup:
 
 ```bash
-# Create OIDC provider for GitHub
-aws iam create-open-id-connect-provider \
-  --url https://token.actions.githubusercontent.com \
-  --client-id-list sts.amazonaws.com \
-  --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
-
-# Create IAM role for GitHub Actions
-# (See AWS documentation for detailed role creation)
+# Create ECR repositories
+aws ecr create-repository --repository-name mmm-app-web --region us-east-1
+aws ecr create-repository --repository-name mmm-app-training --region us-east-1
+aws ecr create-repository --repository-name mmm-app-training-base --region us-east-1
 ```
 
 ---
 
 ## Deployment Steps
+
+### Using GitHub Actions (Automated)
+
+After completing the [GitHub Actions AWS Setup](GITHUB_ACTIONS_AWS_SETUP.md):
+
+1. Push to a feature branch or manually trigger the workflow
+2. Monitor progress in the Actions tab
+3. Retrieve the web service URL from workflow outputs
+
+### Using Manual Deployment
+
+If deploying manually from your local machine:
 
 ### Step 1: Build and Push Docker Images
 
