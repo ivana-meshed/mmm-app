@@ -369,7 +369,7 @@ def _distribution_values(s: pd.Series, *, numeric_bins: int = 10, cat_topk: int 
         return (vc / total).tolist() if total else []
     except Exception:
         return []
-        
+
 def _var_platform(col: str, platforms: list[str]) -> str | None:
     """Best-effort platform detection for a var column by token match."""
     cu = str(col).upper()
@@ -497,7 +497,7 @@ with tab_quality:
     if reset_clean:
         st.session_state["dq_dropped_cols"] = set()
         st.session_state["dq_clean_note"] = ""
-        st.experimental_rerun()
+        st.rerun()
 
     # ---- Apply cleaning when requested ----
     if apply_clean and rules:
