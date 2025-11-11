@@ -1,12 +1,10 @@
 import os
-import re
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score, mean_absolute_error
 from scipy import stats
 import streamlit as st
-import warnings
 
 from app_shared import (
     # GCS & versions
@@ -27,15 +25,18 @@ from app_shared import (
     require_login_and_domain,
 )
 
+# =====================================
+# App setup
+# =====================================
 st.set_page_config(page_title="Prepare Training Data for Experimentation", layout="wide")
 require_login_and_domain()
 st.title("Prepare Training Data for Experimentation")
 
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 
-# -----------------------------
+# =====================================
 # Session defaults
-# -----------------------------
+# =====================================
 st.session_state.setdefault("country", "de")
 st.session_state.setdefault("picked_data_ts", "Latest")
 st.session_state.setdefault("picked_meta_ts", "Latest")
@@ -44,17 +45,20 @@ st.session_state.setdefault("dq_clean_note", "")
 st.session_state.setdefault("dq_last_dropped", [])
 st.session_state.setdefault("selected_profile_columns", [])
 st.session_state.setdefault("paid_mapping_overrides", {})  # spend -> var
+st.session_state.setdefault("selected_goal", None)
+st.session_state.setdefault("final_export_columns", [])
+st.session_state.setdefault("final_paid_mapping", {})
 
-# -----------------------------
+# =====================================
 # Tabs
-# -----------------------------
+# =====================================
 tab_load, tab_quality, tab_mapping = st.tabs(
     ["Select Data To Analyze", "Data Quality", "Paid Media Mapping"]
 )
 
-# =============================
+# =====================================
 # TAB 0 — LOAD DATA & METADATA
-# =============================
+# =====================================
 with tab_load:
     st.markdown("### Select country and data versions to analyze")
     c1, c2, c3, c4 = st.columns([1.2, 1, 1, 0.6])
@@ -101,6 +105,7 @@ with tab_load:
             st.session_state["paid_mapping_overrides"] = {}
             st.session_state["final_export_columns"] = []
             st.session_state["final_paid_mapping"] = {}
+            st.session_state["selected_goal"] = None
 
             # Validate metadata vs data
             report = validate_against_metadata(df, meta)
@@ -121,9 +126,9 @@ with tab_load:
         except Exception as e:
             st.error(f"Load failed: {e}")
 
-# -----------------------------
+# =====================================
 # Common state after load
-# -----------------------------
+# =====================================
 df = st.session_state.get("df", pd.DataFrame())
 meta = st.session_state.get("meta", {}) or {}
 DATE_COL = st.session_state.get("date_col", "DATE")
@@ -132,9 +137,9 @@ CHANNELS_MAP = st.session_state.get("channels_map", {}) or {}
 if df.empty or not meta:
     st.stop()
 
-# -----------------------------
-# Meta helpers
-# -----------------------------
+# =====================================
+# Meta helpers & categories
+# =====================================
 (
     display_map,
     nice,
@@ -148,24 +153,24 @@ if df.empty or not meta:
     INSTALL_COLS,
 ) = build_meta_views(meta, df)
 
-# Categories (present columns only)
+# Present columns only
 paid_spend_cols = [c for c in (mapping.get("paid_media_spends", []) or []) if c in df.columns]
 paid_var_cols   = [c for c in (mapping.get("paid_media_vars",   []) or []) if c in df.columns]
 organic_cols    = [c for c in (mapping.get("organic_vars",      []) or []) if c in df.columns]
 context_cols    = [c for c in (mapping.get("context_vars",      []) or []) if c in df.columns]
 factor_cols     = [c for c in (mapping.get("factor_vars",       []) or []) if c in df.columns]
-# Factor > Context precedence (if overlap, show as Factor)
+# Factor > Context precedence
 context_cols = [c for c in context_cols if c not in set(factor_cols)]
 goals_list = [g for g in (goal_cols or []) if g in df.columns]
 
 # Protected columns: DATE, COUNTRY, goals (hidden from editor; always exported)
-def _protect_columns_set(date_col: str, goal_cols: list[str]) -> set[str]:
+def _protect_columns_set(date_col: str, goal_cols_list: list[str]) -> set[str]:
     prot = {str(date_col), "COUNTRY"}
-    prot |= set(goal_cols or [])
+    prot |= set(goal_cols_list or [])
     return set(p.upper() for p in prot)
-_PROTECTED_UP = _protect_columns_set(DATE_COL, goal_cols)
+_PROTECTED_UP = _protect_columns_set(DATE_COL, goals_list)
 
-# Platform mapping for spend columns (used later for candidate var detection)
+# Platform mapping for spend columns (used for candidate grouping)
 plat_map_df, platforms, PLATFORM_COLORS = build_plat_map_df(
     present_spend=paid_spend_cols,
     df=df,
@@ -176,14 +181,16 @@ plat_map_df, platforms, PLATFORM_COLORS = build_plat_map_df(
     CHANNELS_MAP=CHANNELS_MAP,
 )
 
-def _var_platform(col: str, platforms: list[str]) -> str | None:
+def _var_platform(col: str, platforms_list: list[str]) -> str | None:
     cu = str(col).upper()
-    for p in platforms:
+    for p in platforms_list:
         if p.upper() in cu:
             return p
     return None
 
-# ---------- Data profile helpers ----------
+# =====================================
+# Profiling helpers
+# =====================================
 def _num_stats(s: pd.Series) -> dict:
     q = pd.to_numeric(s, errors="coerce")
     n = int(len(q))
@@ -257,17 +264,17 @@ def _cv(mean_val: float, std_val: float) -> float:
     if abs(mean_val) < 1e-12: return np.inf
     return float(abs(std_val) / abs(mean_val))
 
-# =============================
-# TAB 1 — DATA QUALITY (GLOBAL)
-# =============================
+# =====================================
+# TAB 1 — DATA QUALITY (GLOBAL, FULL WINDOW)
+# =====================================
 with tab_quality:
-    st.caption(":information_source: Using the full modeling window of the loaded dataset (no date filtering).")
+    st.caption(":information_source: Using the full modeling window (no date filtering).")
     prof_df = df.copy()
     if prof_df.empty:
         st.info("No data to profile.")
         st.stop()
 
-    # Category lists (for display grouping only)
+    # Category lists (for grouping only)
     categories = [
         ("Paid Spend",  paid_spend_cols),
         ("Paid Vars",   paid_var_cols),
@@ -276,7 +283,6 @@ with tab_quality:
         ("Factor",      factor_cols),
         ("Goals",       goals_list),
     ]
-    # Other = columns not covered by mapping nor goals (hidden protected excluded from view anyway)
     known_set = set().union(*[set(c) for _, c in categories])
     other_cols = [c for c in prof_df.columns if c not in known_set]
     categories.append(("Other", other_cols))
@@ -299,7 +305,7 @@ with tab_quality:
         rows.append(dict(Use=True, Column=col, Type=col_type, Dist=_distribution_values(s), **stats))
     prof_all = pd.DataFrame(rows)
 
-    # ---- Cleaning controls (global; no category scopes) ----
+    # ---- Cleaning controls (global; applies to ALL categories) ----
     with st.expander("Automated cleaning (optional)", expanded=False):
         drop_all_null  = st.checkbox("Drop all-null columns", value=False)
         drop_all_zero  = st.checkbox("Drop all-zero (numeric) columns", value=False)
@@ -341,20 +347,14 @@ with tab_quality:
             mask_low_cv = (cv_series * 100.0) < cv_thr
             to_drop |= set(cv_series[mask_low_cv.fillna(False)].index)
 
-        # Never drop protected
+        # Never drop protected (DATE, COUNTRY, goals)
         to_drop = {c for c in to_drop if str(c).upper() not in _PROTECTED_UP}
 
-        # Never drop paid spend or paid vars here (flag but keep)
-        kept_paid = set(paid_spend_cols) | set(paid_var_cols)
-        flagged_paid = kept_paid & to_drop
-        to_drop -= kept_paid
-
+        # (Important change) Allow dropping PAID SPEND / PAID VARS if unusable
+        # i.e., DO NOT pull them out of to_drop; they can be removed here.
         st.session_state["dq_dropped_cols"] |= set(to_drop)
         st.session_state["dq_last_dropped"] = sorted(to_drop)
-        note = f"Dropped {len(to_drop)} column(s)."
-        if flagged_paid:
-            note += f" (Kept {len(flagged_paid)} paid columns that matched drop rules: {', '.join(sorted(flagged_paid))})"
-        st.session_state["dq_clean_note"] = note
+        st.session_state["dq_clean_note"] = f"Dropped {len(to_drop)} column(s)."
 
     if st.session_state["dq_clean_note"]:
         st.info(st.session_state["dq_clean_note"])
@@ -363,10 +363,7 @@ with tab_quality:
                 st.write(", ".join(st.session_state["dq_last_dropped"]))
 
     # Hide protected from the editor view
-    hidden_in_view = set([c for c in prof_all["Column"] if str(c).upper() in _PROTECTED_UP])
-    # Apply dropped flags to Use default
     prof_all["Use"] = ~prof_all["Column"].isin(st.session_state["dq_dropped_cols"])
-
     use_overrides: dict[str, bool] = {}
 
     def _fmt_num(val) -> str:
@@ -395,7 +392,7 @@ with tab_quality:
         subset["MinDisp"] = np.where(is_dt, subset["min"].map(_fmt_dt_from_seconds), subset["min"].map(_fmt_num))
         subset["MaxDisp"] = np.where(is_dt, subset["max"].map(_fmt_dt_from_seconds), subset["max"].map(_fmt_num))
 
-        # Percent display columns (0–100)
+        # Percent display (0–100)
         subset["nulls_pct_disp"] = subset["nulls_pct"] * 100.0
         subset["zeros_pct_disp"] = subset["zeros_pct"] * 100.0
 
@@ -455,161 +452,196 @@ with tab_quality:
     st.session_state["selected_profile_columns"] = selected_cols
 
     st.markdown("---")
-    if st.button("Continue to Paid Media Mapping ➜", type="primary"):
-        st.rerun()
+    st.caption("Click the next tab when ready.")
+    st.button("Continue to Paid Media Mapping ➜", type="primary")
 
-# =============================
-# TAB 2 — PAID MEDIA MAPPING
-# =============================
+# =====================================
+# TAB 2 — PAID MEDIA MAPPING (vs GOAL)
+# =====================================
 with tab_mapping:
-    st.caption(":information_source: Works on the cleaned set from **Data Quality** (full window).")
+    st.caption(":information_source: Uses the cleaned set from **Data Quality** (full window).")
     if not st.session_state.get("selected_profile_columns"):
         st.warning("Finish the Data Quality step first, then click 'Continue'.")
         st.stop()
 
+    # Goal selector (required for scoring)
+    if not goals_list:
+        st.error("No goal columns found in metadata. Add a goal in your metadata to proceed.")
+        st.stop()
+
+    default_goal = st.session_state.get("selected_goal") or goals_list[0]
+    selected_goal = st.selectbox("Goal variable", options=goals_list, index=goals_list.index(default_goal) if default_goal in goals_list else 0, key="selected_goal")
+
     selected_cols = set(st.session_state["selected_profile_columns"])
-    # Keep only selected columns from df for metrics
-    df_sel = df[list(c for c in df.columns if c in selected_cols or str(c).upper() in _PROTECTED_UP)].copy()
+    # Keep only selected columns (plus protected) for metrics
+    df_sel = df[[c for c in df.columns if (c in selected_cols) or (str(c).upper() in _PROTECTED_UP)]].copy()
 
-    # Helper metrics for candidates
-    def _simple_metrics(spend: pd.Series, var: pd.Series) -> dict:
-        x = pd.to_numeric(spend, errors="coerce")
-        y = pd.to_numeric(var,   errors="coerce")
-        mask = x.notna() & y.notna()
-        if mask.sum() < 5:
-            return dict(n=mask.sum(), coverage=np.nan, zeros_pct=np.nan, distinct=np.nan,
-                        r2=np.nan, mae=np.nan, rho=np.nan, p=np.nan)
-        xs = x[mask].values.reshape(-1, 1)
-        ys = y[mask].values
+    # Ensure goal is present
+    if selected_goal not in df_sel.columns:
+        df_sel[selected_goal] = df[selected_goal].copy() if selected_goal in df.columns else np.nan
 
-        # quality
-        n = int(mask.sum())
-        coverage = n / len(spend) if len(spend) else np.nan
-        zeros_pct = float((ys == 0).sum() / n) if n else np.nan
-        distinct = int(pd.Series(ys).nunique())
+    # Candidate discovery per spend (include spend/cost as fallback candidate)
+    paid_map_meta = (meta.get("paid_media_mapping") or {})
+    spend_to_candidates: dict[str, list[str]] = {}
 
-        # linear fit: var ~ spend
+    # Quick platform guess per spend
+    spend_platforms = {}
+    if not plat_map_df.empty:
+        tmp = plat_map_df.dropna(subset=["col", "platform"]).set_index("col")["platform"].astype(str)
+        for c in paid_spend_cols:
+            spend_platforms[c] = tmp.get(c, _var_platform(c, platforms))
+    else:
+        for c in paid_spend_cols:
+            spend_platforms[c] = _var_platform(c, platforms)
+
+    for spend in paid_spend_cols:
+        if spend not in df_sel.columns:
+            continue
+        # start with metadata mapping if provided
+        meta_cands = [v for v in (paid_map_meta.get(spend) or []) if v in paid_var_cols and v in df_sel.columns]
+        if meta_cands:
+            cands = list(dict.fromkeys(meta_cands))
+        else:
+            plat = spend_platforms.get(spend)
+            if plat:
+                cands = [v for v in paid_var_cols if (plat.upper() in v.upper()) and (v in df_sel.columns)]
+            else:
+                cands = [v for v in paid_var_cols if v in df_sel.columns]
+
+        # add spend itself as fallback candidate if present
+        if spend in df_sel.columns and spend not in cands:
+            cands.append(spend)
+
+        spend_to_candidates[spend] = cands
+
+    # Metrics vs GOAL
+    def _metrics_vs_goal(x: pd.Series, y: pd.Series) -> dict:
+        """
+        x = candidate media variable, y = goal
+        """
+        X = pd.to_numeric(x, errors="coerce")
+        Y = pd.to_numeric(y, errors="coerce")
+        mask_pair = X.notna() & Y.notna()
+        if mask_pair.sum() < 5:
+            return dict(
+                R2=np.nan,
+                MAE_rel=np.nan,
+                rho=np.nan,
+                p=np.nan,
+                n_xpos_pair=int((mask_pair & (X > 0)).sum()),
+                AvgX=float(np.nan),
+                RelVarX=np.nan,
+            )
+        Xp = X[mask_pair]
+        Yp = Y[mask_pair]
+
+        # R² from linear regression Y ~ X
         try:
             lr = LinearRegression()
-            lr.fit(xs, ys)
-            yhat = lr.predict(xs)
-            r2 = float(r2_score(ys, yhat))
-            mae = float(mean_absolute_error(ys, yhat))
+            lr.fit(Xp.values.reshape(-1, 1), Yp.values)
+            yhat = lr.predict(Xp.values.reshape(-1, 1))
+            R2 = float(r2_score(Yp.values, yhat))
+            MAE = float(mean_absolute_error(Yp.values, yhat))
         except Exception:
-            r2, mae = np.nan, np.nan
+            R2, MAE = np.nan, np.nan
 
-        # monotonic direction
+        # MAE (rel): relative to mean(|Y|) to be scale-free
+        denom = float(np.nanmean(np.abs(Yp.values))) if np.isfinite(np.nanmean(np.abs(Yp.values))) else np.nan
+        MAE_rel = (MAE / denom) if (denom and denom > 0) else np.nan
+
+        # Spearman ρ (monotonicity)
         try:
-            rho, p = stats.spearmanr(xs.ravel(), ys)
+            rho, p = stats.spearmanr(Xp.values, Yp.values)
             rho = float(rho) if rho is not None else np.nan
             p = float(p) if p is not None else np.nan
         except Exception:
             rho, p = np.nan, np.nan
 
-        return dict(n=n, coverage=coverage, zeros_pct=zeros_pct, distinct=distinct,
-                    r2=r2, mae=mae, rho=rho, p=p)
+        # n(X>0, pair) and Avg(X) on paired
+        n_xpos_pair = int((Xp > 0).sum())
+        AvgX = float(np.nanmean(Xp.values)) if Xp.size else np.nan
 
-    # Candidate discovery
-    paid_map_meta = (meta.get("paid_media_mapping") or {})
-    spend_to_candidates = {}
-
-    # platform lookup for each spend
-    spend_platforms = {}
-    if not plat_map_df.empty:
-        tmp = plat_map_df.dropna(subset=["col", "platform"]).set_index("col")["platform"].astype(str)
-        for c in paid_spend_cols:
-            if c in tmp.index:
-                spend_platforms[c] = tmp.loc[c]
-            else:
-                spend_platforms[c] = _var_platform(c, platforms)
-
-    for spend in paid_spend_cols:
-        if spend not in df_sel.columns:
-            continue
-        # from metadata first
-        meta_cands = [v for v in (paid_map_meta.get(spend) or []) if v in paid_var_cols and v in df_sel.columns]
-        if meta_cands:
-            spend_to_candidates[spend] = list(dict.fromkeys(meta_cands))
-            continue
-        # otherwise platform-based
-        plat = spend_platforms.get(spend)
-        if plat:
-            cands = [v for v in paid_var_cols if (plat.upper() in v.upper()) and (v in df_sel.columns)]
+        # RelVar(X): coefficient of variation of X on paired rows
+        mx = float(np.nanmean(Xp.values)) if Xp.size else np.nan
+        sx = float(np.nanstd(Xp.values, ddof=1)) if Xp.size > 1 else np.nan
+        if mx is None or np.isnan(mx) or abs(mx) < 1e-12:
+            RelVarX = np.inf
         else:
-            cands = [v for v in paid_var_cols if v in df_sel.columns]
-        spend_to_candidates[spend] = list(dict.fromkeys(cands))
+            RelVarX = abs(sx) / abs(mx) if (sx is not None and not np.isnan(sx)) else np.nan
 
-    # Build metrics table per spend
-    st.markdown("### Candidate metrics per paid spend")
+        return dict(R2=R2, MAE_rel=MAE_rel, rho=rho, p=p, n_xpos_pair=n_xpos_pair, AvgX=AvgX, RelVarX=RelVarX)
+
+    # Build per-spend tables + recommendations
+    st.markdown("### Candidate metrics per paid spend (vs goal)")
     recommended = {}
     overrides = st.session_state.get("paid_mapping_overrides", {})
 
-    rec_rows = []
     for spend, cand_vars in spend_to_candidates.items():
+        st.markdown(f"**{spend}**")
         if not cand_vars:
-            rec_rows.append(dict(spend=spend, candidate="— none —", coverage=np.nan, zeros_pct=np.nan,
-                                 distinct=np.nan, r2=np.nan, mae=np.nan, rho=np.nan, p=np.nan, score=np.nan))
+            st.write("No candidates.")
+            st.markdown("---")
+            recommended[spend] = None
             continue
-        metrics_list = []
-        for var in cand_vars:
-            mtr = _simple_metrics(df_sel[spend], df_sel[var])
-            # basic screening
-            ok = True
-            if pd.notna(mtr["coverage"]) and mtr["coverage"] < 0.80:
-                ok = False
-            if pd.notna(mtr["distinct"]) and mtr["distinct"] < 3:
-                ok = False
-            # scoring (favor positive rho)
-            r2 = mtr["r2"] if pd.notna(mtr["r2"]) else 0.0
-            cov = mtr["coverage"] if pd.notna(mtr["coverage"]) else 0.0
-            rho = mtr["rho"] if (pd.notna(mtr["rho"]) and mtr["rho"] > 0) else 0.0
-            score = (0.4 * cov) + (0.4 * r2) + (0.2 * rho)
-            mtr["score"] = score if ok else -1.0  # fail screen → demote
-            metrics_list.append((var, mtr))
 
-        # choose best (or fallback first)
-        metrics_list_sorted = sorted(metrics_list, key=lambda t: (t[1]["score"], t[1]["r2"]), reverse=True)
-        auto_pick = metrics_list_sorted[0][0] if metrics_list_sorted else (cand_vars[0] if cand_vars else None)
+        rows = []
+        for var in cand_vars:
+            met = _metrics_vs_goal(df_sel[var], df_sel[selected_goal])
+            # screening: require at least some positive coverage and variation
+            ok = True
+            if met["n_xpos_pair"] < 3:  # too few positive observations
+                ok = False
+            if pd.notna(met["RelVarX"]) and met["RelVarX"] == 0:
+                ok = False
+
+            # simple score to rank (favor positive rho)
+            r2 = met["R2"] if pd.notna(met["R2"]) else 0.0
+            rho_pos = met["rho"] if (pd.notna(met["rho"]) and met["rho"] > 0) else 0.0
+            inv_mae_rel = (1.0 / (met["MAE_rel"] + 1e-9)) if pd.notna(met["MAE_rel"]) else 0.0
+            score = (0.5 * r2) + (0.3 * rho_pos) + (0.2 * inv_mae_rel)
+            if not ok:
+                score = -1.0
+
+            rows.append(
+                dict(
+                    Variable=var,
+                    **{
+                        "MAE (rel)": met["MAE_rel"],
+                        "Spearman ρ": met["rho"],
+                        'n (X>0, pair)': met["n_xpos_pair"],
+                        "Avg(X)": met["AvgX"],
+                        "R²": met["R2"],
+                        "RelVar(X)": met["RelVarX"],
+                        "p": met["p"],      # keep p available though not in your preferred display columns
+                        "_score": score,    # internal for sorting
+                    },
+                )
+            )
+
+        table = pd.DataFrame(rows).sort_values(by=["_score", "R²"], ascending=[False, False], na_position="last")
+        auto_pick = table.iloc[0]["Variable"] if not table.empty else (cand_vars[0] if cand_vars else None)
         pick = overrides.get(spend, auto_pick)
 
-        # Show table
-        show_df = pd.DataFrame(
-            [
-                dict(
-                    spend=spend,
-                    candidate=var,
-                    coverage=mt["coverage"],
-                    zeros_pct=mt["zeros_pct"],
-                    distinct=mt["distinct"],
-                    r2=mt["r2"],
-                    mae=mt["mae"],
-                    rho=mt["rho"],
-                    p=mt["p"],
-                    score=mt["score"],
-                )
-                for var, mt in metrics_list_sorted
-            ]
-        )
-        st.markdown(f"**{spend}**")
-        if show_df.empty:
-            st.write("No candidates.")
+        # Display with your column labels
+        display_cols = ["Variable", "MAE (rel)", "Spearman ρ", 'n (X>0, pair)', "Avg(X)", "R²", "RelVar(X)"]
+        if table.empty:
+            st.write("No candidates after screening.")
         else:
             st.dataframe(
-                show_df.style.format(
+                table[display_cols].style.format(
                     {
-                        "coverage": "{:.1%}",
-                        "zeros_pct": "{:.1%}",
-                        "r2": "{:.3f}",
-                        "mae": "{:.3f}",
-                        "rho": "{:.3f}",
-                        "p": "{:.3f}",
-                        "score": "{:.3f}",
+                        "MAE (rel)": "{:.3f}",
+                        "Spearman ρ": "{:.3f}",
+                        "Avg(X)": "{:.3f}",
+                        "R²": "{:.3f}",
+                        "RelVar(X)": "{:.3f}",
                     }
                 ),
                 use_container_width=True,
                 hide_index=True,
             )
-        # override control
+
+        # Override control
         if cand_vars:
             sel = st.selectbox(
                 f"Select variable for {spend}",
@@ -620,12 +652,14 @@ with tab_mapping:
             recommended[spend] = sel
         else:
             recommended[spend] = None
+
         st.markdown("---")
 
     # persist overrides
     st.session_state["paid_mapping_overrides"] = recommended
 
-    # Build final export set: protected + paid_spend + mapped paid_vars + others (organic/context/factor/goals)
+    # Build final export set:
+    # protected + paid_spend + mapped paid_vars + organic/context/factor that survived Data Quality
     mapped_vars = [v for v in recommended.values() if v is not None]
     final_cols = set()
 
@@ -635,16 +669,12 @@ with tab_mapping:
     final_cols |= set([c for c in paid_spend_cols if c in df_sel.columns])
     final_cols |= set([c for c in mapped_vars if c in df_sel.columns])
     # Organic / context / factor (only those that passed Data Quality)
-    final_cols |= set([c for c in organic_cols if c in df_sel.columns])
-    final_cols |= set([c for c in context_cols if c in df_sel.columns])
-    final_cols |= set([c for c in factor_cols if c in df_sel.columns])
+    dq_drop = set(st.session_state.get("dq_dropped_cols", set()))
+    final_cols |= {c for c in organic_cols if (c in df_sel.columns and c not in dq_drop)}
+    final_cols |= {c for c in context_cols if (c in df_sel.columns and c not in dq_drop)}
+    final_cols |= {c for c in factor_cols  if (c in df_sel.columns and c not in dq_drop)}
     # Goals (ensure included)
     final_cols |= set(goals_list)
-
-    # Respect Data Quality drops for non-protected, non-paidvars, non-paidspend
-    dq_drop = set(st.session_state.get("dq_dropped_cols", set()))
-    keep_anyway = set(paid_spend_cols) | set(mapped_vars) | set([c for c in df.columns if str(c).upper() in _PROTECTED_UP])
-    final_cols = {c for c in final_cols if (c not in dq_drop) or (c in keep_anyway)}
 
     final_cols_sorted = sorted(final_cols)
     st.session_state["final_export_columns"] = final_cols_sorted
