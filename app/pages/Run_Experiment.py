@@ -376,10 +376,15 @@ with tab_single:
                         blob = client.bucket(gcs_bucket).blob(blob_path)
                         config_data = json.loads(blob.download_as_bytes())
 
-                        # Store loaded configuration in session state
+                        # Store loaded configuration in session state (including countries)
                         st.session_state["loaded_training_config"] = (
                             config_data.get("config", {})
                         )
+                        st.session_state["loaded_config_countries"] = (
+                            config_data.get("countries", [])
+                        )
+                        # Set a timestamp to force widget refresh
+                        st.session_state["loaded_config_timestamp"] = datetime.utcnow().timestamp()
 
                         st.success(
                             f"✅ Configuration '{selected_config}' loaded successfully!"
@@ -854,6 +859,9 @@ with tab_single:
         if "spend_var_mapping" not in st.session_state:
             st.session_state["spend_var_mapping"] = {}
 
+        # Get loaded configuration to apply defaults
+        loaded_config = st.session_state.get("loaded_training_config", {})
+
         # Get all paid_media_spends from metadata (including CUSTOM columns)
         # Don't filter by all_columns since CUSTOM columns may not be in preview yet
         available_spends = default_values["paid_media_spends"]
@@ -867,10 +875,16 @@ with tab_single:
                 loaded_spends = [
                     s.strip() for s in loaded_spends.split(",") if s.strip()
                 ]
-            # Only include loaded spends that are in available_spends
-            default_paid_media_spends = [
-                s for s in loaded_spends if s in available_spends
-            ]
+            # Use loaded spends as defaults and add them to available options
+            default_paid_media_spends = loaded_spends
+            # Add loaded spends to available options (preserve order: metadata first, then loaded)
+            available_spends = list(dict.fromkeys(available_spends + loaded_spends))
+            
+            # Debug info to help troubleshoot
+            st.info(
+                f"📋 Loaded configuration detected with {len(loaded_spends)} paid_media_spends. "
+                f"Added {len([s for s in loaded_spends if s not in default_values['paid_media_spends']])} new variables not in metadata."
+            )
 
             # Initialize spend_var_mapping from loaded config (Issue #2 fix)
             if "paid_media_vars" in loaded_config:
@@ -879,6 +893,11 @@ with tab_single:
                     loaded_vars = [
                         s.strip() for s in loaded_vars.split(",") if s.strip()
                     ]
+                
+                # Add loaded vars to default_values so they appear in var options
+                default_values["paid_media_vars"] = list(
+                    dict.fromkeys(default_values["paid_media_vars"] + loaded_vars)
+                )
 
                 # Build mapping: for each spend, find the corresponding var from loaded_vars
                 if metadata and "paid_media_mapping" in metadata:
@@ -902,6 +921,11 @@ with tab_single:
                         # Otherwise fall back to the spend itself
                         elif not matched:
                             st.session_state["spend_var_mapping"][spend] = spend
+                    
+                    # Debug: Show mapping being applied
+                    st.caption(
+                        f"🔧 Applied variable mappings from loaded config for {len(loaded_spends)} spends"
+                    )
                 else:
                     # Fallback: try to match by index
                     for i, spend in enumerate(loaded_spends):
@@ -909,12 +933,9 @@ with tab_single:
                             st.session_state["spend_var_mapping"][spend] = (
                                 loaded_vars[i]
                             )
-
-        # Filter defaults to only include items that exist in available_spends
-        # This prevents StreamlitAPIException when defaults aren't in options
-        default_paid_media_spends = [
-            s for s in default_paid_media_spends if s in available_spends
-        ]
+        
+        # Filter defaults to only include items in options (prevents Streamlit error on first load)
+        default_paid_media_spends = [s for s in default_paid_media_spends if s in available_spends]
 
         # Display paid_media_spends first (all selected by default)
         st.markdown("**Paid Media Configuration**")
@@ -922,11 +943,15 @@ with tab_single:
             "Select paid media spend channels. For each spend, you can choose the corresponding variable metric."
         )
 
+        # Use timestamp-based key to force widget refresh when config is loaded
+        config_timestamp = st.session_state.get("loaded_config_timestamp", 0)
+        
         paid_media_spends_list = st.multiselect(
             "paid_media_spends (Select channels to include)",
             options=available_spends,
             default=default_paid_media_spends,
             help="Select media spend columns to include in the model",
+            key=f"paid_media_spends_{config_timestamp}",
         )
 
         # For each selected spend, show corresponding var options
@@ -1005,7 +1030,7 @@ with tab_single:
                         options=var_options,
                         index=default_idx,
                         help=f"Select the metric variable for {spend}",
-                        key=f"var_for_{spend}",
+                        key=f"var_for_{spend}_{config_timestamp}",
                     )
 
                 spend_var_mapping[spend] = selected_var
@@ -1029,17 +1054,18 @@ with tab_single:
                     s.strip() for s in loaded_context.split(",") if s.strip()
                 ]
             default_context_vars = loaded_context
-
-        # Filter defaults to only include items that exist in all_columns
-        default_context_vars = [
-            v for v in default_context_vars if v in all_columns
-        ]
+            # Add loaded context vars to available columns
+            all_columns = list(dict.fromkeys(all_columns + loaded_context))
+        
+        # Filter defaults to only include items in options
+        default_context_vars = [v for v in default_context_vars if v in all_columns]
 
         context_vars_list = st.multiselect(
             "context_vars",
             options=all_columns,
             default=default_context_vars,
             help="Select contextual variables (e.g., seasonality, events)",
+            key=f"context_vars_{config_timestamp}",
         )
 
         # Factor vars - multiselect
@@ -1053,17 +1079,18 @@ with tab_single:
                     s.strip() for s in loaded_factor.split(",") if s.strip()
                 ]
             default_factor_vars = loaded_factor
-
-        # Filter defaults to only include items that exist in all_columns
-        default_factor_vars = [
-            v for v in default_factor_vars if v in all_columns
-        ]
+            # Add loaded factor vars to available columns
+            all_columns = list(dict.fromkeys(all_columns + loaded_factor))
+        
+        # Filter defaults to only include items in options
+        default_factor_vars = [v for v in default_factor_vars if v in all_columns]
 
         factor_vars_list = st.multiselect(
             "factor_vars",
             options=all_columns,
             default=default_factor_vars,
             help="Select factor/categorical variables",
+            key=f"factor_vars_{config_timestamp}",
         )
 
         # Auto-add factor_vars to context_vars (requirement 6)
@@ -1081,17 +1108,18 @@ with tab_single:
                     s.strip() for s in loaded_organic.split(",") if s.strip()
                 ]
             default_organic_vars = loaded_organic
-
-        # Filter defaults to only include items that exist in all_columns
-        default_organic_vars = [
-            v for v in default_organic_vars if v in all_columns
-        ]
+            # Add loaded organic vars to available columns
+            all_columns = list(dict.fromkeys(all_columns + loaded_organic))
+        
+        # Filter defaults to only include items in options
+        default_organic_vars = [v for v in default_organic_vars if v in all_columns]
 
         organic_vars_list = st.multiselect(
             "organic_vars",
             options=all_columns,
             default=default_organic_vars,
             help="Select organic/baseline variables",
+            key=f"organic_vars_{config_timestamp}",
         )
 
         # Custom hyperparameters per variable (when Custom preset is selected)
@@ -1373,17 +1401,27 @@ with tab_single:
                 help="Name for this training configuration",
             )
         with col2:
+            # Pre-check "Multi-country" if loaded config has multiple countries
+            loaded_countries = st.session_state.get("loaded_config_countries", [])
+            default_multi = len(loaded_countries) > 1
             save_for_multi = st.checkbox(
                 "Multi-country",
-                value=False,
+                value=default_multi,
                 help="Save for multiple countries",
             )
 
         if save_for_multi:
+            # Use loaded countries if available, otherwise default to selected_country
+            loaded_countries = st.session_state.get("loaded_config_countries", [])
+            default_countries = (
+                loaded_countries
+                if loaded_countries
+                else [st.session_state.get("selected_country", "de")]
+            )
             config_countries = st.multiselect(
                 "Select countries",
                 options=["fr", "de", "it", "es", "nl", "uk"],
-                default=[st.session_state.get("selected_country", "de")],
+                default=default_countries,
                 help="Countries this configuration applies to",
             )
         else:
