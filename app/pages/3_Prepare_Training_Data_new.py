@@ -411,7 +411,6 @@ def _protect_columns_set(date_col: str, goal_cols: list[str]) -> set[str]:
     return set(p.upper() for p in prot)
 
 
-
 # =============================
 # TAB 1 — Data Quality
 # =============================
@@ -443,6 +442,101 @@ with tab_quality:
         ("Other",       other_cols),
     ]
 
+    # ---- Helpers (local to this tab) ----
+    def _num_stats(s: pd.Series) -> dict:
+        s = pd.to_numeric(s, errors="coerce")
+        n  = len(s)
+        nn = int(s.notna().sum())
+        na = n - nn
+        if nn == 0:
+            return dict(non_null=nn, nulls=na, nulls_pct=np.nan, zeros=0, zeros_pct=np.nan,
+                        distinct=0, min=np.nan, p10=np.nan, median=np.nan, mean=np.nan,
+                        p90=np.nan, max=np.nan, std=np.nan)
+        z  = int((s.fillna(0) == 0).sum())
+        s2 = s.dropna()
+        return dict(
+            non_null=nn,
+            nulls=na,
+            nulls_pct=na / n if n else np.nan,
+            zeros=z,
+            zeros_pct=z / n if n else np.nan,
+            distinct=int(s2.nunique(dropna=True)),
+            min=float(s2.min()) if not s2.empty else np.nan,
+            p10=float(np.percentile(s2, 10)) if not s2.empty else np.nan,
+            median=float(s2.median()) if not s2.empty else np.nan,
+            mean=float(s2.mean()) if not s2.empty else np.nan,
+            p90=float(np.percentile(s2, 90)) if not s2.empty else np.nan,
+            max=float(s2.max()) if not s2.empty else np.nan,
+            std=float(s2.std(ddof=1)) if s2.size > 1 else np.nan,
+        )
+
+    def _cat_stats(s: pd.Series) -> dict:
+        n  = len(s)
+        nn = int(s.notna().sum())
+        na = n - nn
+        s2 = s.dropna()
+        return dict(
+            non_null=nn, nulls=na, nulls_pct=na / n if n else np.nan,
+            zeros=np.nan, zeros_pct=np.nan, distinct=int(s2.nunique(dropna=True)) if nn else 0,
+            min=np.nan, p10=np.nan, median=np.nan, mean=np.nan, p90=np.nan, max=np.nan, std=np.nan,
+        )
+
+    def _distribution_values(s: pd.Series, *, numeric_bins: int = 10, cat_topk: int = 5) -> list[float]:
+        try:
+            if pd.api.types.is_numeric_dtype(s):
+                q = pd.to_numeric(s, errors="coerce").dropna()
+                if q.empty: return []
+                hist, _ = np.histogram(q, bins=numeric_bins)
+                total = hist.sum()
+                return (hist / total).tolist() if total else []
+            if pd.api.types.is_datetime64_any_dtype(s):
+                q = pd.to_datetime(s, errors="coerce").dropna()
+                if q.empty: return []
+                vc = q.dt.to_period("M").value_counts().sort_index()
+                total = vc.sum()
+                return (vc / total).tolist() if total else []
+            q = s.dropna().astype("object")
+            if q.empty: return []
+            vc = q.value_counts().head(cat_topk)
+            total = vc.sum()
+            return (vc / total).tolist() if total else []
+        except Exception:
+            return []
+
+    def _var_platform(col: str, platforms: list[str]) -> str | None:
+        cu = str(col).upper()
+        for p in platforms:
+            if p.upper() in cu:
+                return p
+        return None
+
+    def _active_spend_platforms(df_window: pd.DataFrame, plat_map_df: pd.DataFrame) -> set[str]:
+        if df_window.empty or plat_map_df.empty:
+            return set()
+        vm = plat_map_df.copy()
+        vm = vm.dropna(subset=["col", "platform"])
+        vm = vm[vm["col"].isin(df_window.columns)]
+        if vm.empty:
+            return set()
+        sums = (
+            df_window[vm["col"].tolist()]
+            .melt(value_name="spend")
+            .dropna(subset=["spend"])
+            .groupby(vm.reset_index(drop=True)["platform"])["spend"]
+            .sum(min_count=1)
+        )
+        return set(sums[sums.fillna(0) > 0].index.astype(str))
+
+    def _cv(mean_val: float, std_val: float) -> float:
+        if pd.isna(mean_val) or pd.isna(std_val): return np.nan
+        if abs(mean_val) < 1e-12: return np.inf
+        return float(abs(std_val) / abs(mean_val))
+
+    def _protect_columns_set(date_col: str, goal_cols: list[str]) -> set[str]:
+        prot = {str(date_col), "COUNTRY"}
+        prot |= set(goal_cols or [])
+        return set(p.upper() for p in prot)
+
     # ---- One full profile table (we'll display per-category slices) ----
     rows = []
     for col in prof_df.columns:
@@ -463,29 +557,17 @@ with tab_quality:
         dist_vals = _distribution_values(s)
 
         rows.append(
-            dict(
-                Use=True,
-                Column=col,
-                Type=col_type,
-                Dist=dist_vals,
-                **stats,
-            )
+            dict(Use=True, Column=col, Type=col_type, Dist=dist_vals, **stats)
         )
     prof_all = pd.DataFrame(rows)
 
-    # ---- Cleaning controls ----
+    # ---- Cleaning controls (checkboxes, not multiselect) ----
     with st.expander("Automated cleaning (optional)", expanded=False):
-        rules = st.multiselect(
-            "Choose cleaning rules to APPLY:",
-            [
-                "Drop all-null columns",
-                "Drop all-zero (numeric) columns",
-                "Drop constant (distinct==1)",
-                "Drop low variance (CV < threshold)",
-            ],
-            default=[],
-        )
-        cv_thr = st.slider("Low-variance threshold (CV)", 0.1, 15.0, 3.0, 0.1)
+        drop_all_null  = st.checkbox("Drop all-null columns", value=False)
+        drop_all_zero  = st.checkbox("Drop all-zero (numeric) columns", value=False)
+        drop_constant  = st.checkbox("Drop constant (distinct == 1)", value=False)
+        drop_low_var   = st.checkbox("Drop low variance (CV < threshold)", value=False)
+        cv_thr = st.slider("Low-variance threshold (CV %)", 0.1, 100.0, 3.0, 0.1)
         c1, c2 = st.columns([1, 1])
         apply_clean = c1.button("Apply cleaning")
         reset_clean = c2.button("Reset cleaning")
@@ -493,76 +575,62 @@ with tab_quality:
     # Session state for cleaning persistence
     st.session_state.setdefault("dq_dropped_cols", set())
     st.session_state.setdefault("dq_clean_note", "")
+    st.session_state.setdefault("dq_last_dropped", [])
 
     if reset_clean:
         st.session_state["dq_dropped_cols"] = set()
         st.session_state["dq_clean_note"] = ""
-        st.rerun()
+        st.session_state["dq_last_dropped"] = []
+        st.experimental_rerun()
 
     # ---- Apply cleaning when requested ----
-    if apply_clean and rules:
+    if apply_clean and (drop_all_null or drop_all_zero or drop_constant or drop_low_var):
         to_drop = set()
-
-        # Vectorized helpers from prof_all:
         by_col = prof_all.set_index("Column")
 
-        # Rule: all-null
-        if "Drop all-null columns" in rules:
+        if drop_all_null:
             mask_all_null = by_col["non_null"].fillna(0).eq(0)
             to_drop |= set(by_col[mask_all_null].index)
 
-        # Rule: all-zero (numeric)
-        if "Drop all-zero (numeric) columns" in rules:
-            # non_null>0 AND zeros == non_null
+        if drop_all_zero:
             nn = by_col["non_null"].fillna(0)
             zz = by_col["zeros"].fillna(-1)
             mask_all_zero = (nn > 0) & (zz == nn)
             to_drop |= set(by_col[mask_all_zero].index)
 
-        # Rule: constant (distinct==1)
-        if "Drop constant (distinct==1)" in rules:
+        if drop_constant:
             mask_const = by_col["distinct"].fillna(0).eq(1)
             to_drop |= set(by_col[mask_const].index)
 
-        # Rule: low variance by CV (numeric)
-        if "Drop low variance (CV < threshold)" in rules:
+        if drop_low_var:
             means = by_col["mean"]
             stds  = by_col["std"]
-            # Compute CV; treat non-numeric rows as NaN in mean/std
-            cv_series = pd.Series(
-                [_cv(means.get(i), stds.get(i)) for i in by_col.index],
-                index=by_col.index
-            )
-            mask_low_cv = cv_series < (cv_thr / 100.0)  # slider is in %, convert to ratio
+            cv_series = pd.Series([_cv(means.get(i), stds.get(i)) for i in by_col.index], index=by_col.index)
+            # compare in percent
+            mask_low_cv = (cv_series * 100.0) < cv_thr
             to_drop |= set(cv_series[mask_low_cv.fillna(False)].index)
 
         # Never drop protected
         protected = _protect_columns_set(DATE_COL, goal_cols)
         to_drop = {c for c in to_drop if str(c).upper() not in protected}
 
-        # ---- Guard: keep at least one paid var per platform that has >0 spend ----
-        # Identify active spend platforms
+        # Guard: keep at least one paid var per active spend platform
         active_plats = _active_spend_platforms(prof_df, plat_map_df)
-        # Map var -> platform (best-effort)
         var_map = {v: _var_platform(v, platforms) for v in paid_vars}
-        # For each platform with spend, ensure at least one var remains
         warnings_list = []
         for p in active_plats:
             vars_for_p = [v for v, vp in var_map.items() if vp == p]
             if not vars_for_p:
                 continue
-            # Are we about to drop them all?
             dropping_all = all(v in to_drop for v in vars_for_p)
             if dropping_all:
-                # keep the "least-bad" one (largest std as proxy for signal)
                 by_p = by_col.loc[[v for v in vars_for_p if v in by_col.index]]
                 keep_one = by_p["std"].astype(float).idxmax()
                 to_drop.discard(keep_one)
                 warnings_list.append(f"{p}: kept '{keep_one}' to retain at least one var for active spend.")
 
-        # Update session dropped set
         st.session_state["dq_dropped_cols"] |= set(to_drop)
-
+        st.session_state["dq_last_dropped"] = sorted(to_drop)
         note = f"Dropped {len(to_drop)} column(s)."
         if warnings_list:
             note += " Guards applied — " + "; ".join(warnings_list)
@@ -570,32 +638,30 @@ with tab_quality:
 
     if st.session_state["dq_clean_note"]:
         st.info(st.session_state["dq_clean_note"])
+        if st.session_state["dq_last_dropped"]:
+            with st.expander("Dropped columns (last Apply)"):
+                st.write(", ".join(st.session_state["dq_last_dropped"]))
 
     # ---- Apply dropped flags to 'Use' default ----
     dropped = st.session_state["dq_dropped_cols"]
     prof_all["Use"] = ~prof_all["Column"].isin(dropped)
 
-    # ---- Human-friendly display formats ----
-    # Keep numeric as numeric (so sorting works), just format with commas.
-    is_dt_present = prof_all["Type"].eq("datetime64").any()
-    disp_all = prof_all.copy()
-    if is_dt_present:
-        mask_dt = disp_all["Type"].eq("datetime64")
-        def _fmt_dt(num_ts):
-            if pd.isna(num_ts):
-                return "–"
-            try:
-                return pd.to_datetime(num_ts, unit="s").strftime("%Y-%m-%d")
-            except Exception:
-                return "–"
-        disp_all.loc[mask_dt, "min"] = disp_all.loc[mask_dt, "min"].map(_fmt_dt)
-        disp_all.loc[mask_dt, "max"] = disp_all.loc[mask_dt, "max"].map(_fmt_dt)
-
-    # ---- Render 6 tables, aggregate selection across them ----
+    # ---- Render 6 tables — use display-only Min/Max strings to avoid dtype conflicts ----
     use_overrides: dict[str, bool] = {}
 
+    def _fmt_num(val) -> str:
+        return "–" if pd.isna(val) else f"{float(val):,.2f}"
+
+    def _fmt_dt_from_seconds(val) -> str:
+        if pd.isna(val):
+            return "–"
+        try:
+            return pd.to_datetime(float(val), unit="s").strftime("%Y-%m-%d")
+        except Exception:
+            return "–"
+
     def _render_cat_table(title: str, cols: list[str], key_suffix: str):
-        subset = disp_all[disp_all["Column"].isin(cols)].copy()
+        subset = prof_all[prof_all["Column"].isin(cols)].copy()
         st.markdown(f"### {title} ({len(subset)})")
         if title == "Other" and len(subset):
             st.caption("Unmapped columns (in data but not in metadata): " + ", ".join(sorted(subset["Column"].astype(str).tolist())))
@@ -603,16 +669,17 @@ with tab_quality:
             st.info("No columns in this category.")
             return
 
-        # Dynamic config for min/max
-        min_cfg = st.column_config.TextColumn("Min") if is_dt_present else st.column_config.NumberColumn("Min", format="%,.2f")
-        max_cfg = st.column_config.TextColumn("Max") if is_dt_present else st.column_config.NumberColumn("Max", format="%,.2f")
+        # Build display-only columns for Min/Max as strings (avoid dtype mismatch)
+        is_dt = subset["Type"].eq("datetime64")
+        subset["MinDisp"] = np.where(is_dt, subset["min"].map(_fmt_dt_from_seconds), subset["min"].map(_fmt_num))
+        subset["MaxDisp"] = np.where(is_dt, subset["max"].map(_fmt_dt_from_seconds), subset["max"].map(_fmt_num))
 
         show_cols = [
             "Use", "Column", "Type", "Dist",
             "non_null", "nulls", "nulls_pct",
             "zeros", "zeros_pct",
             "distinct",
-            "min", "p10", "median", "mean", "p90", "max", "std",
+            "MinDisp", "p10", "median", "mean", "p90", "MaxDisp", "std",
         ]
         show_cols = [c for c in show_cols if c in subset.columns]
 
@@ -634,12 +701,12 @@ with tab_quality:
                 "zeros":     st.column_config.NumberColumn("Zeros", format="%,.0f"),
                 "zeros_pct": st.column_config.NumberColumn("Zeros %", format="%.1f%%"),
                 "distinct":  st.column_config.NumberColumn("Distinct", format="%,.0f"),
-                "min":       min_cfg,
+                "MinDisp":   st.column_config.TextColumn("Min"),
                 "p10":       st.column_config.NumberColumn("P10", format="%,.2f"),
                 "median":    st.column_config.NumberColumn("Median", format="%,.2f"),
                 "mean":      st.column_config.NumberColumn("Mean",   format="%,.2f"),
                 "p90":       st.column_config.NumberColumn("P90", format="%,.2f"),
-                "max":       max_cfg,
+                "MaxDisp":   st.column_config.TextColumn("Max"),
                 "std":       st.column_config.NumberColumn("Std", format="%,.2f"),
             },
             key=f"dq_editor_{key_suffix}",
@@ -653,7 +720,7 @@ with tab_quality:
 
     # ---- Aggregate final selection across all tables ----
     final_use = {row["Column"]: bool(row["Use"]) for _, row in prof_all.iterrows()}
-    final_use.update(use_overrides)  # apply user edits
+    final_use.update(use_overrides)
 
     selected_cols = [c for c, u in final_use.items() if u]
     st.session_state["selected_profile_columns"] = selected_cols
@@ -663,7 +730,6 @@ with tab_quality:
     cL, cR = st.columns([1.2, 1])
     with cL:
         sel_prof = prof_all[prof_all["Column"].isin(selected_cols)].copy()
-        # Remove the spark data from export
         csv = sel_prof.drop(columns=["Dist"], errors="ignore").to_csv(index=False).encode("utf-8")
         st.download_button(
             "Export profile (CSV — selected)",
