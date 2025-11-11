@@ -788,6 +788,17 @@ def render_run_from_key(runs: dict, key: tuple, bucket_name: str):
     render_all_files_section(blobs, bucket_name, country, stamp)
 
 
+def build_run_title(country: str, stamp: str, iters, trials):
+    """Build title with country, timestamp, iterations and trials."""
+    meta_bits = []
+    if iters is not None:
+        meta_bits.append(f"iterations={iters}")
+    if trials is not None:
+        meta_bits.append(f"trials={trials}")
+    meta_str = (" · " + " · ".join(meta_bits)) if meta_bits else ""
+    return f"{country.upper()} — `{stamp}`{meta_str}"
+
+
 # ---------- Sidebar / controls ----------
 with st.sidebar:
     bucket_name = st.text_input("GCS bucket", value=DEFAULT_BUCKET)
@@ -965,8 +976,28 @@ if not auto_best:
     for ctry in countries_sel:
         # Use expander if multiple countries
         if len(countries_sel) > 1:
-            with st.expander(f"**{ctry.upper()}**", expanded=True):
-                render_run_for_country(bucket_name, rev, ctry)  # type: ignore
+            # Get the run to build title
+            candidates = sorted(
+                [k for k in runs.keys() if k[0] == rev and k[1] == ctry],
+                key=lambda k: parse_stamp(k[2]),
+                reverse=True,
+            )
+            if candidates:
+                key = next(
+                    (k for k in candidates if run_has_allocator_plot(runs[k])),
+                    candidates[0],
+                )
+                _, iters, trials = parse_best_meta(runs[key])
+                title = build_run_title(ctry, key[2], iters, trials)
+                with st.expander(f"**{title}**", expanded=True):
+                    render_run_for_country(
+                        bucket_name, rev, ctry
+                    )  # type: ignore
+            else:
+                with st.expander(f"**{ctry.upper()}**", expanded=True):
+                    render_run_for_country(
+                        bucket_name, rev, ctry
+                    )  # type: ignore
         else:
             render_run_for_country(bucket_name, rev, ctry)  # type: ignore
 
@@ -1012,7 +1043,9 @@ else:
 
             # Use expander if multiple countries
             if len(countries_sel) > 1:
-                with st.expander(f"**{ctry.upper()}**", expanded=True):
+                _, iters, trials = parse_best_meta(runs[best_key])
+                title = build_run_title(ctry, best_key[2], iters, trials)
+                with st.expander(f"**{title}**", expanded=True):
                     render_run_from_key(runs, best_key, bucket_name)
             else:
                 render_run_from_key(runs, best_key, bucket_name)
@@ -1020,7 +1053,9 @@ else:
 
         # Use expander if multiple countries
         if len(countries_sel) > 1:
-            with st.expander(f"**{ctry.upper()}**", expanded=True):
+            _, iters, trials = parse_best_meta(runs[best_key])
+            title = build_run_title(ctry, best_key[2], iters, trials)
+            with st.expander(f"**{title}**", expanded=True):
                 # Show ranking table
                 with st.expander(
                     "Ranking table (higher score is better)",

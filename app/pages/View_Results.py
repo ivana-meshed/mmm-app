@@ -855,6 +855,17 @@ def render_run_for_country(
     render_all_files_section(blobs, bucket_name, country, stamp)
 
 
+def build_run_title(country: str, stamp: str, iters, trials):
+    """Build title with country, timestamp, iterations and trials."""
+    meta_bits = []
+    if iters is not None:
+        meta_bits.append(f"iterations={iters}")
+    if trials is not None:
+        meta_bits.append(f"trials={trials}")
+    meta_str = (" · " + " · ".join(meta_bits)) if meta_bits else ""
+    return f"{country.upper()} — `{stamp}`{meta_str}"
+
+
 # ---------- Render selected countries ----------
 for ctry in countries_sel:
     # Get all runs for this country and selected timestamps
@@ -865,7 +876,13 @@ for ctry in countries_sel:
 
     # If multiple countries, use expander; otherwise render directly
     if len(countries_sel) > 1:
-        with st.expander(f"**{ctry.upper()}**", expanded=True):
+        # Build title with metadata from the first run
+        first_key = country_runs[0]
+        blobs = runs[first_key]
+        _, iters, trials = parse_best_meta(blobs)
+        title = build_run_title(ctry, first_key[2], iters, trials)
+
+        with st.expander(f"**{title}**", expanded=True):
             for r, c, s in country_runs:
                 render_run_for_country(bucket_name, r, c, s)
                 if len(country_runs) > 1:
