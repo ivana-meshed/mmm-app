@@ -71,7 +71,7 @@ st.session_state.setdefault("picked_meta_ts", "Latest")
 # -----------------------------
 # TABS
 # -----------------------------
-tab_load, tab_biz, tab_mkt, tab_profile = st.tabs(
+tab_load, tab_biz, tab_mkt = st.tabs(
     [
         "Select Data",
         "Business Data",
