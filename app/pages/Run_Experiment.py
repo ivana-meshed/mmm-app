@@ -124,28 +124,48 @@ def _load_metadata_from_gcs(
         return None
 
 
-def _get_latest_revision(bucket: str, country: str) -> str:
-    """Get the latest revision tag from GCS for a country."""
+def _get_revision_tags(bucket: str) -> List[str]:
+    """Get all unique revision tags from GCS."""
     try:
         client = storage.Client()
         prefix = f"robyn/"
-        blobs = list(client.list_blobs(bucket, prefix=prefix, delimiter="/"))
-        # Extract revision folders
-        revisions = set()
+        blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+        # Extract revision folders (format: TAG_NUMBER)
+        revision_tags = set()
         for blob in blobs:
             parts = blob.name.split("/")
-            if len(parts) >= 2:
-                revisions.add(parts[1])
-
-        # Sort revisions (assuming r### format)
-        sorted_revs = sorted(
-            [r for r in revisions if r.startswith("r")],
-            key=lambda x: int(x[1:]) if x[1:].isdigit() else 0,
-            reverse=True,
-        )
-        return sorted_revs[0] if sorted_revs else "r100"
+            if len(parts) >= 2 and "_" in parts[1]:
+                # Extract tag from TAG_NUMBER format
+                tag = parts[1].rsplit("_", 1)[0]
+                revision_tags.add(tag)
+        
+        return sorted(list(revision_tags))
     except Exception:
-        return "r100"
+        return []
+
+
+def _get_next_revision_number(bucket: str, tag: str) -> int:
+    """Get the next revision number for a given tag."""
+    try:
+        client = storage.Client()
+        prefix = f"robyn/"
+        blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+        # Find all numbers for this tag
+        numbers = []
+        for blob in blobs:
+            parts = blob.name.split("/")
+            if len(parts) >= 2 and parts[1].startswith(f"{tag}_"):
+                # Extract number from TAG_NUMBER format
+                try:
+                    num_str = parts[1].split("_")[-1]
+                    numbers.append(int(num_str))
+                except (ValueError, IndexError):
+                    continue
+        
+        # Return max + 1, or 1 if no existing numbers
+        return max(numbers) + 1 if numbers else 1
+    except Exception:
+        return 1
 
 
 # Extracted from streamlit_app.py tab_single (Single run):
@@ -153,7 +173,7 @@ with tab_single:
     st.subheader("Robyn configuration & training")
 
     # Data selection
-    with st.expander("📊 Data selection", expanded=False):
+    with st.expander("📊 Data Selection", expanded=False):
         # Show current loaded state (point 4 - UI representing actual state)
         if (
             "preview_df" in st.session_state
@@ -406,7 +426,7 @@ with tab_single:
             st.warning(f"Could not list configurations: {e}")
 
     # Robyn config (moved outside Data selection expander)
-    with st.expander("⚙️ Robyn configuration", expanded=False):
+    with st.expander("⚙️ Robyn Configuration", expanded=False):
         # Country auto-filled from Data Selection
         country = st.session_state.get("selected_country", "fr")
         st.info(f"**Country:** {country.upper()} (from Data Selection)")
@@ -483,15 +503,6 @@ with tab_single:
                 else "0.7,0.9"
             ),
             help="Comma-separated train/validation split ratios",
-        )
-
-        # Revision tag - with placeholder showing latest
-        latest_revision = _get_latest_revision(gcs_bucket, country)
-        revision = st.text_input(
-            "Revision tag",
-            value=loaded_config.get("revision", "") if loaded_config else "",
-            placeholder=f"Latest revision for country: {latest_revision}",
-            help="Revision identifier for organizing outputs. Required before starting training.",
         )
 
         # Training date range instead of single date tag
@@ -668,7 +679,7 @@ with tab_single:
         # Show info message when Custom is selected
         if hyperparameter_preset == "Custom":
             st.info(
-                "📌 **Custom Hyperparameters Selected**: Scroll down to the **Variable mapping** section below to configure per-variable hyperparameter ranges for each paid media and organic variable."
+                "📌 **Custom Hyperparameters Selected**: Scroll down to the **Variable Mapping** section below to configure per-variable hyperparameter ranges for each paid media and organic variable."
             )
 
         # Custom hyperparameters will be collected later after variables are selected
@@ -724,7 +735,7 @@ with tab_single:
             )
 
     # Variables (moved outside Data selection expander)
-    with st.expander("🗺️ Variable mapping", expanded=False):
+    with st.expander("🗺️ Variable Mapping", expanded=False):
         # Get available columns from loaded data
         preview_df = st.session_state.get("preview_df")
         if preview_df is not None and not preview_df.empty:
@@ -930,7 +941,7 @@ with tab_single:
 
                     # Debug: Show mapping being applied
                     st.caption(
-                        f"🔧 Applied variable mappings from loaded config for {len(loaded_spends)} spends"
+                        f"🔧 Applied Variable Mappings from loaded config for {len(loaded_spends)} spends"
                     )
                 else:
                     # Fallback: try to match by index
@@ -1399,7 +1410,115 @@ with tab_single:
         factor_vars = ", ".join(factor_vars_list)
         organic_vars = ", ".join(organic_vars_list)
 
-    # Save Configuration (moved outside Data selection expander, after Variable mapping)
+    # Revision Configuration (new section above Save Training Configuration)
+    with st.expander("🏷️ Revision Configuration", expanded=True):
+        st.caption(
+            "Configure the revision tag and number for organizing training outputs. "
+            "Outputs will be saved to robyn/{TAG}_{NUMBER}/{COUNTRY}/{TIMESTAMP}/ in GCS."
+        )
+
+        gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
+        
+        # Get existing revision tags
+        existing_tags = _get_revision_tags(gcs_bucket)
+        
+        # Check if there's a loaded configuration
+        loaded_config = st.session_state.get("loaded_training_config", {})
+        
+        # Parse loaded revision if it exists (might be old format "r100" or new format with tag/number)
+        loaded_revision_tag = ""
+        loaded_revision_number = None
+        if loaded_config and "revision" in loaded_config:
+            old_revision = loaded_config["revision"]
+            # Try to parse as TAG_NUMBER format first
+            if "_" in old_revision:
+                parts = old_revision.rsplit("_", 1)
+                loaded_revision_tag = parts[0]
+                try:
+                    loaded_revision_number = int(parts[1])
+                except (ValueError, IndexError):
+                    pass
+            else:
+                # Old format - treat entire string as tag
+                loaded_revision_tag = old_revision
+        
+        # Also check for new format fields
+        if loaded_config.get("revision_tag"):
+            loaded_revision_tag = loaded_config["revision_tag"]
+        if loaded_config.get("revision_number"):
+            loaded_revision_number = loaded_config["revision_number"]
+        
+        # Add option to create new tag
+        tag_options = ["-- Create New Tag --"] + existing_tags
+        
+        # Determine default selection
+        default_tag_index = 0
+        if loaded_revision_tag and loaded_revision_tag in existing_tags:
+            default_tag_index = tag_options.index(loaded_revision_tag)
+        
+        # Revision tag selection/creation
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            selected_tag_option = st.selectbox(
+                "Revision Tag",
+                options=tag_options,
+                index=default_tag_index,
+                help="Select an existing revision tag or create a new one",
+            )
+            
+            # If "Create New Tag" is selected, show text input
+            if selected_tag_option == "-- Create New Tag --":
+                revision_tag = st.text_input(
+                    "Enter new revision tag",
+                    value=loaded_revision_tag if loaded_revision_tag not in existing_tags else "",
+                    placeholder="e.g., your_name or department_name",
+                    help="Insert your name or the department name into the tag field",
+                )
+            else:
+                revision_tag = selected_tag_option
+                st.info(f"Using existing tag: **{revision_tag}**")
+        
+        with col2:
+            # Calculate next revision number for the selected tag
+            if revision_tag and revision_tag != "-- Create New Tag --":
+                next_number = _get_next_revision_number(gcs_bucket, revision_tag)
+                default_number = loaded_revision_number if loaded_revision_number is not None else next_number
+                
+                revision_number = st.number_input(
+                    "Revision Number",
+                    value=default_number,
+                    min_value=1,
+                    step=1,
+                    help=f"Next available number for '{revision_tag}' is {next_number}. You can override if needed.",
+                )
+                
+                if revision_number < next_number:
+                    st.warning(f"⚠️ Number {revision_number} may already exist for tag '{revision_tag}'. Next available: {next_number}")
+            else:
+                revision_number = st.number_input(
+                    "Revision Number",
+                    value=1,
+                    min_value=1,
+                    step=1,
+                    help="Enter the revision number (must be numeric)",
+                    disabled=True,
+                )
+                if not revision_tag or revision_tag == "-- Create New Tag --":
+                    st.info("👆 Please enter a revision tag first")
+        
+        # Show the combined revision identifier
+        if revision_tag and revision_tag != "-- Create New Tag --":
+            combined_revision = f"{revision_tag}_{revision_number}"
+            st.success(f"✅ Training outputs will be saved under: **robyn/{combined_revision}/{{COUNTRY}}/{{TIMESTAMP}}/**")
+        else:
+            combined_revision = ""
+            st.warning("⚠️ Please select or create a revision tag")
+        
+        # For backward compatibility, create a combined "revision" field
+        revision = combined_revision
+
+    # Save Configuration (moved outside Data selection expander, after Variable Mapping)
     with st.expander("💾 Save Training Configuration", expanded=False):
         st.caption(
             "Save the current training configuration to apply it later to other data sources or countries."
@@ -1480,6 +1599,8 @@ with tab_single:
         csv_row = {
             "country": country,
             "revision": revision,
+            "revision_tag": revision_tag if revision_tag != "-- Create New Tag --" else "",
+            "revision_number": revision_number if revision_tag != "-- Create New Tag --" else "",
             "start_date": start_date_str,
             "end_date": end_date_str,
             "iterations": int(iterations),
@@ -1546,6 +1667,8 @@ with tab_single:
                             "trials": int(trials),
                             "train_size": train_size,
                             "revision": revision,
+                            "revision_tag": revision_tag,
+                            "revision_number": revision_number,
                             "start_date": start_date_str,
                             "end_date": end_date_str,
                             "paid_media_spends": paid_media_spends,
@@ -2078,9 +2201,12 @@ with tab_queue:
         with st.expander("📋 Detailed Instructions", expanded=False):
             st.markdown(
                 """
-Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country`, `revision`, and data source):
+Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country` and data source):
 
-- `country`, `revision`, `iterations`, `trials`, `train_size`
+- `country`, `iterations`, `trials`, `train_size`
+- **Revision fields (choose one approach):**
+  - `revision` — Combined format: TAG_NUMBER (e.g., "myname_1") - **backward compatible**
+  - `revision_tag` and `revision_number` — Separate fields (e.g., "myname" and 1) - **recommended for new configs**
 - `start_date`, `end_date` — Training window dates (YYYY-MM-DD format)
 - `paid_media_spends`, `paid_media_vars`, `context_vars`, `factor_vars`, `organic_vars`
 - `dep_var`, `dep_var_type` (revenue|conversion), `date_var`, `adstock`
@@ -2107,7 +2233,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             [
                 {
                     "country": "fr",
-                    "revision": "r101",
+                    "revision_tag": "baseline",
+                    "revision_number": 1,
                     "start_date": "2024-01-01",
                     "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 300,
@@ -2148,7 +2275,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 },
                 {
                     "country": "de",
-                    "revision": "r102",
+                    "revision_tag": "baseline",
+                    "revision_number": 2,
                     "start_date": "2024-01-01",
                     "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 200,
@@ -2189,7 +2317,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 },
                 {
                     "country": "it",
-                    "revision": "r103",
+                    "revision_tag": "experiment",
+                    "revision_number": 1,
                     "start_date": "2024-01-01",
                     "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 250,
@@ -2236,7 +2365,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             [
                 {
                     "country": "fr",
-                    "revision": "r201",
+                    "revision_tag": "team_a",
+                    "revision_number": 1,
                     "start_date": "2024-01-01",
                     "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 300,
@@ -2259,7 +2389,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 },
                 {
                     "country": "de",
-                    "revision": "r202",
+                    "revision_tag": "team_b",
+                    "revision_number": 1,
                     "start_date": "2024-01-01",
                     "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 200,
@@ -2280,7 +2411,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 },
                 {
                     "country": "it",
-                    "revision": "r203",
+                    "revision_tag": "experimental",
+                    "revision_number": 5,
                     "iterations": 250,
                     "trials": 4,
                     "train_size": "0.7,0.9",
