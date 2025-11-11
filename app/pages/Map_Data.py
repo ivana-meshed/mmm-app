@@ -11,9 +11,6 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
-
-st.set_page_config(page_title="Map your data", layout="wide")
-
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -289,12 +286,16 @@ def _extract_channel_from_column(col: str) -> str:
     """
     col_lower = col.lower().strip()
 
-    # Combine known channels with custom channels from session
-    known_channels = _get_known_channels()
+    # Use custom channels if explicitly set, otherwise use known channels
     custom_channels = st.session_state.get("custom_channels", [])
-    all_channels = known_channels + custom_channels
+    if custom_channels:
+        # When custom channels are set, ONLY use those (don't include known channels)
+        all_channels = custom_channels
+    else:
+        # Fall back to known channels if no custom channels are set
+        all_channels = _get_known_channels()
 
-    # Check if column starts with a known channel followed by underscore
+    # Check if column starts with a channel followed by underscore
     for channel in all_channels:
         if col_lower.startswith(f"{channel}_"):
             return channel
@@ -1230,9 +1231,17 @@ with st.expander(
     # Add buttons for Load and Refresh
     col_load, col_refresh = st.columns([1, 1])
     with col_load:
-        load_metadata_clicked = st.button("Load & apply metadata", use_container_width=True, key="load_metadata_btn")
+        load_metadata_clicked = st.button(
+            "Load & apply metadata",
+            use_container_width=True,
+            key="load_metadata_btn",
+        )
     with col_refresh:
-        refresh_metadata_clicked = st.button("↻ Refresh metadata list", use_container_width=True, key="refresh_metadata_btn")
+        refresh_metadata_clicked = st.button(
+            "↻ Refresh metadata list",
+            use_container_width=True,
+            key="refresh_metadata_btn",
+        )
 
     # Handle refresh button
     if refresh_metadata_clicked:
@@ -1453,39 +1462,38 @@ with st.expander("📺 Custom Marketing Channels", expanded=False):
     channels_input = st.text_area(
         "Marketing Channels (comma-separated)",
         value=", ".join(all_existing_channels),
-        help="Recognized channels from your data are prefilled. Add additional custom channels (e.g., 'spotify', 'podcast') separated by commas.",
+        help="Edit this list to set your marketing channels. These will be used to extract channel names from column names (e.g., 'facebook_spend' → 'facebook'). Add, remove, or modify channels as needed.",
         height=100,
-        key="channels_input"
+        key="channels_input",
     )
 
-    if st.button("➕ Add Channels", key="add_channels_btn", use_container_width=True):
+    if st.button(
+        "➕ Apply Channels", key="add_channels_btn", use_container_width=True
+    ):
         # Parse the input
-        entered_channels = [ch.strip().lower() for ch in channels_input.split(",") if ch.strip()]
-        
-        # Separate into custom vs recognized
-        known_channels_set = set(_get_known_channels())
-        new_custom_channels = []
-        
-        for ch in entered_channels:
-            # If it's not in recognized (from data) and not in known defaults, it's custom
-            if ch not in recognized_channels and ch not in known_channels_set:
-                new_custom_channels.append(ch)
-        
-        # Update session state
-        st.session_state["custom_channels"] = new_custom_channels
-        
-        # Rebuild mapping_df to include new channels
+        entered_channels = [
+            ch.strip().lower() for ch in channels_input.split(",") if ch.strip()
+        ]
+
+        # All entered channels become the new custom channels list
+        # This replaces the old behavior of only adding "new" channels
+        st.session_state["custom_channels"] = entered_channels
+
+        # Rebuild mapping_df to include updated channels
         if not st.session_state["mapping_df"].empty:
-            # Re-extract channels for all variables
+            # Re-extract channels for all variables using the updated channel list
+            # Always update the channel field, set to None if extraction returns empty
             for idx, row in st.session_state["mapping_df"].iterrows():
                 var_name = str(row["var"])
                 extracted_channel = _extract_channel_from_column(var_name)
-                if extracted_channel:
-                    st.session_state["mapping_df"].at[idx, "channel"] = extracted_channel
-        
-        st.success(f"✅ Channels updated! Added {len(new_custom_channels)} custom channel(s).")
-        if new_custom_channels:
-            st.info(f"Custom channels: {', '.join(new_custom_channels)}")
+                # Update channel field: use extracted value or None if empty
+                st.session_state["mapping_df"].at[idx, "channel"] = (
+                    extracted_channel if extracted_channel else None
+                )
+
+        st.success(
+            f"✅ Channels updated! Now using {len(entered_channels)} channel(s): {', '.join(entered_channels)}"
+        )
         st.rerun()
 
     st.divider()
@@ -1722,7 +1730,7 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
             },
             key="mapping_editor",
         )
-        
+
         # Submit button inside the form to capture edits
         mapping_submit = st.form_submit_button("✅ Apply mapping changes")
 
@@ -1732,7 +1740,7 @@ with st.expander("🗺️ Variable Mapping", expanded=False):
         try:
             # Store original length before updating
             original_length = len(st.session_state["mapping_df"])
-            
+
             # Prepare prefixes dict
             prefixes = {
                 "organic_vars": st.session_state.get(
@@ -2036,9 +2044,9 @@ if can_go_next:
             if st.button("Next → Experiment", use_container_width=True):
                 import streamlit as stlib
 
-                stlib.switch_page("pages/4_Run_Experiment.py")
+                stlib.switch_page("pages/Run_Experiment.py")
         except Exception:
             # Fallback: link
             st.page_link(
-                "pages/4_Run_Experiment.py", label="Next → Experiment", icon="➡️"
+                "pages/Run_Experiment.py", label="Next → Experiment", icon="➡️"
             )

@@ -1,4 +1,4 @@
-# 0_Connect_Data.py — Streamlit front-end for launching & monitoring Robyn training jobs on Cloud Run Jobs
+# Connect_Data.py — Streamlit front-end for launching & monitoring Robyn training jobs on Cloud Run Jobs
 import json
 import logging
 import os
@@ -154,7 +154,7 @@ st.session_state.setdefault("queue_saved_at", None)
 # ─────────────────────────────
 # One-time Snowflake init for this Streamlit session
 # ─────────────────────────────
-# 0_Connect_Data.py
+# Connect_Data.py
 
 
 def _init_sf_once():
@@ -438,96 +438,112 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     # 1. Queue jobs (RUNNING/LAUNCHING status)
     # 2. Single run jobs from session state
     all_running_jobs = []
-    
+
     # Add queue jobs
     queue = st.session_state.get("job_queue", [])
     for job in queue:
         if job.get("status") in ("RUNNING", "LAUNCHING"):
-            all_running_jobs.append({
-                "Source": "Queue",
-                "Job ID": str(job.get("id", "?")),
-                "Status": job.get("status", "UNKNOWN"),
-                "Country": job.get("params", {}).get("country", "N/A"),
-                "Revision": job.get("params", {}).get("revision", "N/A"),
-                "Iterations": str(job.get("params", {}).get("iterations", "N/A")),
-                "Trials": str(job.get("params", {}).get("trials", "N/A")),
-                "GCS Prefix": job.get("gcs_prefix", ""),
-                "Execution Details": job.get("execution_name", ""),
-            })
-    
+            all_running_jobs.append(
+                {
+                    "Source": "Queue",
+                    "Job ID": str(job.get("id", "?")),
+                    "Status": job.get("status", "UNKNOWN"),
+                    "Country": job.get("params", {}).get("country", "N/A"),
+                    "Revision": job.get("params", {}).get("revision", "N/A"),
+                    "Iterations": str(
+                        job.get("params", {}).get("iterations", "N/A")
+                    ),
+                    "Trials": str(job.get("params", {}).get("trials", "N/A")),
+                    "GCS Prefix": job.get("gcs_prefix", ""),
+                    "Execution Details": job.get("execution_name", ""),
+                }
+            )
+
     # Add single run jobs from session state
     for exec_info in st.session_state.get("job_executions", []):
         exec_name = exec_info.get("execution_name", "")
         if exec_name:
-            all_running_jobs.append({
-                "Source": "Single",
-                "Job ID": f"single-{exec_info.get('timestamp', '?')}",
-                "Status": "RUNNING",
-                "Country": exec_info.get("country", "N/A"),
-                "Revision": exec_info.get("revision", "N/A"),
-                "Iterations": "N/A",
-                "Trials": "N/A",
-                "GCS Prefix": exec_info.get("gcs_prefix", ""),
-                "Execution Details": exec_name,
-            })
-    
+            all_running_jobs.append(
+                {
+                    "Source": "Single",
+                    "Job ID": f"single-{exec_info.get('timestamp', '?')}",
+                    "Status": "RUNNING",
+                    "Country": exec_info.get("country", "N/A"),
+                    "Revision": exec_info.get("revision", "N/A"),
+                    "Iterations": "N/A",
+                    "Trials": "N/A",
+                    "GCS Prefix": exec_info.get("gcs_prefix", ""),
+                    "Execution Details": exec_name,
+                }
+            )
+
     # Refresh button
     if st.button("🔄 Refresh Status", key=f"refresh_status_table_{key_prefix}"):
         st.rerun()
-    
+
     if not all_running_jobs:
         st.info("ℹ️ No jobs currently running")
     else:
         # Create DataFrame for display
         df = pd.DataFrame(all_running_jobs)
-        
+
         # Display table with clickable links
         st.write(f"**{len(all_running_jobs)} job(s) currently running:**")
-        
+
         # Create display dataframe with proper URLs
         display_df = df.copy()
-        
+
         # Convert GCS Prefix to clickable URLs
         gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
         display_df["GCS Prefix"] = display_df["GCS Prefix"].apply(
-            lambda x: f"https://console.cloud.google.com/storage/browser/{gcs_bucket}/{x}" if x else ""
+            lambda x: (
+                f"https://console.cloud.google.com/storage/browser/{gcs_bucket}/{x}"
+                if x
+                else ""
+            )
         )
-        
+
         # For execution details, create links to Cloud Run console
         if PROJECT_ID and REGION:
-            display_df["Execution Details"] = display_df["Execution Details"].apply(
-                lambda x: f"https://console.cloud.google.com/run/jobs/executions/details/{REGION}/{x.split('/')[-1]}?project={PROJECT_ID}" if x and "/" in x else x
+            display_df["Execution Details"] = display_df[
+                "Execution Details"
+            ].apply(
+                lambda x: (
+                    f"https://console.cloud.google.com/run/jobs/executions/details/{REGION}/{x.split('/')[-1]}?project={PROJECT_ID}"
+                    if x and "/" in x
+                    else x
+                )
             )
-        
+
         # Apply color coding to Status column using styled dataframe
         def color_status(val):
             if val == "RUNNING":
-                return 'background-color: #90EE90'  # Light green
+                return "background-color: #90EE90"  # Light green
             elif val == "LAUNCHING":
-                return 'background-color: #FFD700'  # Gold
+                return "background-color: #FFD700"  # Gold
             elif val == "SUCCEEDED":
-                return 'background-color: #32CD32'  # Lime green
+                return "background-color: #32CD32"  # Lime green
             elif val in ["FAILED", "ERROR"]:
-                return 'background-color: #FF6B6B'  # Light red
+                return "background-color: #FF6B6B"  # Light red
             else:
-                return ''
-        
+                return ""
+
         # Use st.dataframe with column configuration for clickable links
         column_config = {
             "GCS Prefix": st.column_config.LinkColumn(
                 "GCS Prefix",
                 help="Click to open GCS folder in new tab",
-                display_text="Open GCS ↗"
+                display_text="Open GCS ↗",
             ),
             "Execution Details": st.column_config.LinkColumn(
                 "Execution Details",
                 help="Click to open Cloud Run execution details in new tab",
-                display_text="Open Execution ↗"
+                display_text="Open Execution ↗",
             ),
         }
-        
+
         st.dataframe(
-            display_df.style.applymap(color_status, subset=['Status']),
+            display_df.style.applymap(color_status, subset=["Status"]),
             column_config=column_config,
             use_container_width=True,
             hide_index=True,
@@ -536,37 +552,43 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     # Manual job status checker (for any execution)
     with st.expander("🔍 Manual Status Check", expanded=False):
         st.write("Check status of any job by entering the execution ID:")
-        
+
         # Build the prefix from environment variables
         exec_prefix = ""
         if PROJECT_ID and REGION and TRAINING_JOB_NAME:
             exec_prefix = f"projects/{PROJECT_ID}/locations/{REGION}/jobs/{TRAINING_JOB_NAME}/executions/"
-        
+
         # Get default execution ID (last part only)
         default_exec_id = ""
         if st.session_state.get("job_executions"):
             last_exec = st.session_state.job_executions[-1]["execution_name"]
             if "/executions/" in last_exec:
                 default_exec_id = last_exec.split("/executions/")[-1]
-        
+
         exec_id = st.text_input(
             "Execution ID (short form)",
             value=default_exec_id,
             key=f"exec_id_manual_{key_prefix}",
-            help="Enter just the execution ID (e.g., 'mmm-app-dev-training-abc123'). The full path will be constructed automatically."
+            help="Enter just the execution ID (e.g., 'mmm-app-dev-training-abc123'). The full path will be constructed automatically.",
         )
-        
-        if exec_prefix:
-            st.caption(f"Full path: `{exec_prefix}{exec_id or '<execution-id>'}`")
 
-        if st.button("🔍 Check Status", key=f"check_status_manual_{key_prefix}"):
+        if exec_prefix:
+            st.caption(
+                f"Full path: `{exec_prefix}{exec_id or '<execution-id>'}`"
+            )
+
+        if st.button(
+            "🔍 Check Status", key=f"check_status_manual_{key_prefix}"
+        ):
             if not exec_id:
                 st.warning("Please enter an execution ID.")
             else:
                 exec_name = exec_prefix + exec_id
                 try:
                     with st.spinner("Fetching status..."):
-                        status_info = job_manager.get_execution_status(exec_name)
+                        status_info = job_manager.get_execution_status(
+                            exec_name
+                        )
                         st.json(status_info)
                 except Exception as e:
                     error_msg = str(e)
@@ -617,7 +639,7 @@ def maybe_refresh_queue_from_gcs(force: bool = False):
 
 # ---- Builder defaults independent of Tab 2 ----
 _builder_defaults = dict(
-    country="fr",
+    country="de",
     iterations=200,
     trials=5,
     train_size="0.7,0.9",
@@ -879,13 +901,13 @@ def _queue_tick():
             launcher=prepare_and_launch_job,
         )
         logger.info(f"Queue tick result: {res}")
-        
+
         # Log launch failures prominently
         if not res.get("ok") and "launch failed" in res.get("message", ""):
             logger.error(f"[QUEUE_ERROR] Launch failure detected in queue tick")
             logger.error(f"[QUEUE_ERROR] Error message: {res.get('message')}")
             logger.error(f"[QUEUE_ERROR] Queue: {st.session_state.queue_name}")
-            
+
     except Exception as e:
         logger.exception(f"Queue tick_once_headless failed: {e}")
         raise
@@ -963,7 +985,7 @@ def _queue_tick():
                 st.session_state.get("gcs_bucket", GCS_BUCKET),
             )
             moved += 1
-            
+
             # Enhanced logging for job history movement
             error_msg = entry.get("message", "")
             if final_state in ("ERROR", "FAILED", "CANCELLED"):
@@ -997,14 +1019,24 @@ def _queue_tick():
         st.session_state["job_history_nonce"] = (
             st.session_state.get("job_history_nonce", 0) + 1
         )
-        
+
         # If jobs were completed and there are still PENDING jobs with no RUNNING jobs,
         # immediately launch the next one
         if remaining:
-            pending_count = sum(1 for e in remaining if e.get("status") == "PENDING")
-            running_count = sum(1 for e in remaining if e.get("status") in ("RUNNING", "LAUNCHING"))
-            
-            if pending_count > 0 and running_count == 0 and st.session_state.get("queue_running"):
+            pending_count = sum(
+                1 for e in remaining if e.get("status") == "PENDING"
+            )
+            running_count = sum(
+                1
+                for e in remaining
+                if e.get("status") in ("RUNNING", "LAUNCHING")
+            )
+
+            if (
+                pending_count > 0
+                and running_count == 0
+                and st.session_state.get("queue_running")
+            ):
                 logger.info(
                     f"[QUEUE] Auto-launching next job: {pending_count} pending, {running_count} running"
                 )
@@ -1034,28 +1066,39 @@ def _auto_refresh_and_tick(interval_ms: int = 2000):
     # Check queue before tick
     q = st.session_state.get("job_queue") or []
     logger.info(f"[QUEUE] Auto-refresh: queue has {len(q)} entries before tick")
-    
+
     if len(q) == 0:
         logger.info("[QUEUE] Auto-refresh stopping: queue is empty")
         st.session_state.queue_running = False
         return
-    
+
     # Log job statuses before tick
     pending_count = sum(1 for e in q if e.get("status") == "PENDING")
-    running_count = sum(1 for e in q if e.get("status") in ("RUNNING", "LAUNCHING"))
-    completed_count = sum(1 for e in q if e.get("status") in ("SUCCEEDED", "FAILED", "ERROR", "CANCELLED", "COMPLETED"))
-    logger.info(f"[QUEUE] Before tick: {pending_count} pending, {running_count} running, {completed_count} completed")
+    running_count = sum(
+        1 for e in q if e.get("status") in ("RUNNING", "LAUNCHING")
+    )
+    completed_count = sum(
+        1
+        for e in q
+        if e.get("status")
+        in ("SUCCEEDED", "FAILED", "ERROR", "CANCELLED", "COMPLETED")
+    )
+    logger.info(
+        f"[QUEUE] Before tick: {pending_count} pending, {running_count} running, {completed_count} completed"
+    )
 
     # Advance the queue once
     _queue_tick()
-    
+
     # Check queue after tick
     q_after = st.session_state.get("job_queue") or []
     logger.info(f"[QUEUE] After tick: queue has {len(q_after)} entries")
-    
+
     # If queue is now empty, stop running
     if len(q_after) == 0:
-        logger.info("[QUEUE] Queue is now empty after tick, stopping auto-refresh")
+        logger.info(
+            "[QUEUE] Queue is now empty after tick, stopping auto-refresh"
+        )
         st.session_state.queue_running = False
         return
 
@@ -1065,8 +1108,6 @@ def _auto_refresh_and_tick(interval_ms: int = 2000):
         f"<script>setTimeout(function(){{window.location.reload();}}, {interval_ms});</script>",
         unsafe_allow_html=True,
     )
-
-
 
 
 def _sorted_with_controls(
