@@ -1023,7 +1023,7 @@ else:
             with st.expander(f"**{ctry.upper()}**", expanded=True):
                 # Show ranking table
                 with st.expander(
-                    f"Ranking table (higher score is better)",
+                    "Ranking table (higher score is better)",
                     expanded=False,
                 ):
                     cols = [
