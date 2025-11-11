@@ -7,7 +7,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-
 # Import shared utilities: GCS & versions; meta & utilities; sidebar + filters; colors
 from app_shared import (
     BASE_PLATFORM_COLORS,
@@ -51,6 +50,10 @@ from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
+
+st.set_page_config(
+    page_title="Review Business- & Marketing Data", layout="wide"
+)
 
 require_login_and_domain()
 ensure_session_defaults()
