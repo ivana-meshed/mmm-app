@@ -496,7 +496,7 @@ with tab_quality:
         st.session_state["dq_dropped_cols"] = set()
         st.session_state["dq_clean_note"] = ""
         st.session_state["dq_last_dropped"] = []
-        st.experimental_rerun()
+        st.rerun()
 
     # ---- Apply cleaning when requested ----
     if apply_clean and (drop_all_null or drop_all_zero or drop_constant or drop_low_var):
@@ -604,15 +604,23 @@ with tab_quality:
             st.info("No columns in this category.")
             return
 
-        # Build display-only columns for Min/Max as strings (avoid dtype mismatch)
+        # Display-only min/max strings
         is_dt = subset["Type"].eq("datetime64")
         subset["MinDisp"] = np.where(is_dt, subset["min"].map(_fmt_dt_from_seconds), subset["min"].map(_fmt_num))
         subset["MaxDisp"] = np.where(is_dt, subset["max"].map(_fmt_dt_from_seconds), subset["max"].map(_fmt_num))
 
+        # Percent display columns (multiply by 100 for human-readable %)
+        # keep originals in the dataframe for export & logic
+        subset["nulls_pct_disp"] = subset["nulls_pct"] * 100.0
+        subset["zeros_pct_disp"] = subset["zeros_pct"] * 100.0
+
+        # Soft visual hint for protected rows (Use is still enforced to True in code)
+        subset["Protected?"] = subset["Column"].str.upper().isin(_PROTECTED_UP)
+
         show_cols = [
-            "Use", "Column", "Type", "Dist",
-            "non_null", "nulls", "nulls_pct",
-            "zeros", "zeros_pct",
+            "Use", "Protected?", "Column", "Type", "Dist",
+            "non_null", "nulls", "nulls_pct_disp",
+            "zeros", "zeros_pct_disp",
             "distinct",
             "MinDisp", "p10", "median", "mean", "p90", "MaxDisp", "std",
         ]
@@ -625,6 +633,10 @@ with tab_quality:
             num_rows="fixed",
             column_config={
                 "Use": st.column_config.CheckboxColumn(required=True),
+                "Protected?": st.column_config.CheckboxColumn(
+                    disabled=True,
+                    help="Protected columns cannot be dropped (DATE, COUNTRY, goals)."
+                ),
                 "Dist": st.column_config.BarChartColumn(
                     "Distribution",
                     help="Numeric: histogram · Categorical: top-k share · Datetime: monthly buckets",
@@ -632,9 +644,10 @@ with tab_quality:
                 ),
                 "non_null":  st.column_config.NumberColumn("Non-Null", format="%.0f"),
                 "nulls":     st.column_config.NumberColumn("Nulls", format="%.0f"),
-                "nulls_pct": st.column_config.NumberColumn("Nulls %", format="%.1f%%", min_value=0.0, max_value=1.0),
+                # NOTE: disp columns are 0–100 now, so format with % and no min/max clamp
+                "nulls_pct_disp": st.column_config.NumberColumn("Nulls %", format="%.1f%%"),
                 "zeros":     st.column_config.NumberColumn("Zeros", format="%.0f"),
-                "zeros_pct": st.column_config.NumberColumn("Zeros %", format="%.1f%%", min_value=0.0, max_value=1.0),
+                "zeros_pct_disp": st.column_config.NumberColumn("Zeros %", format="%.1f%%"),
                 "distinct":  st.column_config.NumberColumn("Distinct", format="%.0f"),
                 "MinDisp":   st.column_config.TextColumn("Min"),
                 "p10":       st.column_config.NumberColumn("P10", format="%.2f"),
@@ -651,8 +664,7 @@ with tab_quality:
         for _, r in edited.iterrows():
             colname = str(r["Column"])
             is_protected = colname.upper() in _PROTECTED_UP
-            use_overrides[colname] = True if is_protected else bool(r["Use"])
-
+            use_overrides[colname] = True if is_protected else bool(r["Use"]) 
     # Render all categories
     for title, cols in categories:
         _render_cat_table(title, cols, key_suffix=title.replace(" ", "_").lower())
