@@ -927,11 +927,16 @@ with tab_single:
             "Select paid media spend channels. For each spend, you can choose the corresponding variable metric."
         )
 
+        # Generate a stable key for the multiselect that changes when config is loaded
+        # Use a hash of the loaded config to detect changes
+        config_hash = hash(str(sorted(default_paid_media_spends))) if loaded_config else 0
+        
         paid_media_spends_list = st.multiselect(
             "paid_media_spends (Select channels to include)",
             options=available_spends,
             default=default_paid_media_spends,
             help="Select media spend columns to include in the model",
+            key=f"paid_media_spends_{config_hash}",
         )
 
         # For each selected spend, show corresponding var options
@@ -1042,6 +1047,7 @@ with tab_single:
             options=all_columns,
             default=default_context_vars,
             help="Select contextual variables (e.g., seasonality, events)",
+            key=f"context_vars_{hash(str(sorted(default_context_vars)))}",
         )
 
         # Factor vars - multiselect
@@ -1063,6 +1069,7 @@ with tab_single:
             options=all_columns,
             default=default_factor_vars,
             help="Select factor/categorical variables",
+            key=f"factor_vars_{hash(str(sorted(default_factor_vars)))}",
         )
 
         # Auto-add factor_vars to context_vars (requirement 6)
@@ -1088,6 +1095,7 @@ with tab_single:
             options=all_columns,
             default=default_organic_vars,
             help="Select organic/baseline variables",
+            key=f"organic_vars_{hash(str(sorted(default_organic_vars)))}",
         )
 
         # Custom hyperparameters per variable (when Custom preset is selected)
