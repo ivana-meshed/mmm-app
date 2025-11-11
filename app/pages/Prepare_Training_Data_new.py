@@ -291,24 +291,26 @@ res["PERIOD_LABEL"] = period_label(res["DATE_PERIOD"], RULE)
 # ===== Data Quality helpers (add above TAB 1) =====
 # ---------- Data Profile helpers ----------
 def _num_stats(s: pd.Series) -> dict:
-    s = pd.to_numeric(s, errors="coerce")
-    n = len(s)
-    nn = int(s.notna().sum())
+    # numeric stats with correct zero handling (NaNs are NOT counted as zeros)
+    q = pd.to_numeric(s, errors="coerce")
+    n = int(len(q))
+    nn = int(q.notna().sum())
     na = n - nn
     if nn == 0:
         return dict(
-            non_null=nn, nulls=na, nulls_pct=np.nan, zeros=0, zeros_pct=np.nan,
-            distinct=0, min=np.nan, p10=np.nan, median=np.nan, mean=np.nan,
+            non_null=0, nulls=na, nulls_pct=(na / n if n else np.nan),
+            zeros=0, zeros_pct=np.nan, distinct=0,
+            min=np.nan, p10=np.nan, median=np.nan, mean=np.nan,
             p90=np.nan, max=np.nan, std=np.nan
         )
-    z = int((s.fillna(0) == 0).sum())
-    s2 = s.dropna()
+    z = int(q.eq(0).sum())  # only true zeros among (possibly) non-nulls
+    s2 = q.dropna()
     return dict(
         non_null=nn,
         nulls=na,
-        nulls_pct=na / n if n else np.nan,
+        nulls_pct=(na / n if n else np.nan),          # % of all rows
         zeros=z,
-        zeros_pct=z / n if n else np.nan,
+        zeros_pct=(z / nn if nn else np.nan),         # % of non-null rows
         distinct=int(s2.nunique(dropna=True)),
         min=float(s2.min()) if not s2.empty else np.nan,
         p10=float(np.percentile(s2, 10)) if not s2.empty else np.nan,
@@ -320,15 +322,15 @@ def _num_stats(s: pd.Series) -> dict:
     )
 
 def _cat_stats(s: pd.Series) -> dict:
-    n = len(s)
+    n = int(len(s))
     nn = int(s.notna().sum())
     na = n - nn
     s2 = s.dropna()
-    # “zeros” not meaningful for cats; leave blank
+    # zeros not meaningful for categoricals
     return dict(
         non_null=nn,
         nulls=na,
-        nulls_pct=na / n if n else np.nan,
+        nulls_pct=(na / n if n else np.nan),
         zeros=np.nan,
         zeros_pct=np.nan,
         distinct=int(s2.nunique(dropna=True)) if nn else 0,
@@ -337,41 +339,35 @@ def _cat_stats(s: pd.Series) -> dict:
     )
 
 def _distribution_values(s: pd.Series, *, numeric_bins: int = 10, cat_topk: int = 5) -> list[float]:
-    """
-    Return a normalized list of values suitable for Streamlit's BarChartColumn.
-    - Numeric: histogram shares over `numeric_bins`
-    - Datetime: monthly bucket shares
-    - Categorical/bool: top-k value shares
-    """
+    """Normalized list for Streamlit BarChartColumn."""
     try:
         if pd.api.types.is_numeric_dtype(s):
             q = pd.to_numeric(s, errors="coerce").dropna()
             if q.empty:
                 return []
             hist, _ = np.histogram(q, bins=numeric_bins)
-            total = hist.sum()
-            return (hist / total).tolist() if total else []
+            tot = hist.sum()
+            return (hist / tot).tolist() if tot else []
 
         if pd.api.types.is_datetime64_any_dtype(s):
             q = pd.to_datetime(s, errors="coerce").dropna()
             if q.empty:
                 return []
             vc = q.dt.to_period("M").value_counts().sort_index()
-            total = vc.sum()
-            return (vc / total).tolist() if total else []
+            tot = vc.sum()
+            return (vc / tot).tolist() if tot else []
 
         # categorical / bool
         q = s.dropna().astype("object")
         if q.empty:
             return []
         vc = q.value_counts().head(cat_topk)
-        total = vc.sum()
-        return (vc / total).tolist() if total else []
+        tot = vc.sum()
+        return (vc / tot).tolist() if tot else []
     except Exception:
         return []
 
 def _var_platform(col: str, platforms: list[str]) -> str | None:
-    """Best-effort platform detection for a var column by token match."""
     cu = str(col).upper()
     for p in platforms:
         if p.upper() in cu:
@@ -382,8 +378,7 @@ def _active_spend_platforms(df_window: pd.DataFrame, plat_map_df: pd.DataFrame) 
     """Platforms with >0 spend in the selected timeframe."""
     if df_window.empty or plat_map_df.empty:
         return set()
-    vm = plat_map_df.copy()
-    vm = vm.dropna(subset=["col", "platform"])
+    vm = plat_map_df.dropna(subset=["col", "platform"]).copy()
     vm = vm[vm["col"].isin(df_window.columns)]
     if vm.empty:
         return set()
@@ -397,7 +392,6 @@ def _active_spend_platforms(df_window: pd.DataFrame, plat_map_df: pd.DataFrame) 
     return set(sums[sums.fillna(0) > 0].index.astype(str))
 
 def _cv(mean_val: float, std_val: float) -> float:
-    """Coefficient of variation; returns np.inf if mean is 0 (so it won't be flagged low-variance)."""
     if pd.isna(mean_val) or pd.isna(std_val):
         return np.nan
     if abs(mean_val) < 1e-12:
@@ -431,7 +425,10 @@ with tab_quality:
     factor_vars  = [c for c in (mapping.get("factor_vars",       []) or []) if c in prof_df.columns]
     goals_list   = [g for g in (goal_cols or []) if g in prof_df.columns]
 
-    # Include goals in the known set so they don't fall into "Other"
+    # Factor > Context precedence (if a col is in both, show only under Factor)
+    context_vars = [c for c in context_vars if c not in set(factor_vars)]
+
+    # Known set includes goals so they don't fall into "Other"
     known_set = set(paid_spend) | set(paid_vars) | set(organic_vars) | set(context_vars) | set(factor_vars) | set(goals_list)
     other_cols = [c for c in prof_df.columns if c not in known_set]
 
@@ -469,16 +466,26 @@ with tab_quality:
         )
     prof_all = pd.DataFrame(rows)
 
-    # ---- Cleaning controls (checkboxes, not multiselect) ----
+    # ---- Cleaning controls (checkboxes, scoped by category) ----
     with st.expander("Automated cleaning (optional)", expanded=False):
+        st.caption("Choose rules and which categories they apply to.")
+        # rules
         drop_all_null  = st.checkbox("Drop all-null columns", value=False)
         drop_all_zero  = st.checkbox("Drop all-zero (numeric) columns", value=False)
         drop_constant  = st.checkbox("Drop constant (distinct == 1)", value=False)
         drop_low_var   = st.checkbox("Drop low variance (CV < threshold)", value=False)
-        cv_thr = st.slider("Low-variance threshold (CV %)", 0.1, 100.0, 3.0, 0.1)
-        c1, c2 = st.columns([1, 1])
-        apply_clean = c1.button("Apply cleaning")
-        reset_clean = c2.button("Reset cleaning")
+        cv_thr = st.slider("Low-variance threshold (CV % of mean)", 0.1, 100.0, 3.0, 0.1)
+
+        st.markdown("**Apply to categories**")
+        c1, c2, c3, c4 = st.columns(4)
+        scope_paid_vars   = c1.checkbox("Paid Vars", value=True)
+        scope_paid_spend  = c2.checkbox("Paid Spend", value=False)  # safer default
+        scope_other       = c3.checkbox("Other", value=True)
+        scope_org_ctx_fac = c4.checkbox("Organic/Context/Factor", value=True)
+
+        cA, cB = st.columns([1, 1])
+        apply_clean = cA.button("Apply cleaning")
+        reset_clean = cB.button("Reset cleaning")
 
     # Session state for cleaning persistence
     st.session_state.setdefault("dq_dropped_cols", set())
@@ -493,36 +500,53 @@ with tab_quality:
 
     # ---- Apply cleaning when requested ----
     if apply_clean and (drop_all_null or drop_all_zero or drop_constant or drop_low_var):
+        # Scope columns by category toggles
+        scope_cols = set()
+        if scope_paid_vars:
+            scope_cols |= set(paid_vars)
+        if scope_paid_spend:
+            scope_cols |= set(paid_spend)
+        if scope_other:
+            scope_cols |= set(other_cols)
+        if scope_org_ctx_fac:
+            scope_cols |= set(organic_vars) | set(context_vars) | set(factor_vars)
+
+        # Always include goals in the *visible* table, but don't allow cleaning rules to drop them
+        scope_cols &= set(prof_all["Column"])
+
         to_drop = set()
         by_col = prof_all.set_index("Column")
 
+        def _col_ok(c):  # helper: in scope and numeric when needed
+            return c in scope_cols
+
         if drop_all_null:
             mask_all_null = by_col["non_null"].fillna(0).eq(0)
-            to_drop |= set(by_col[mask_all_null].index)
+            to_drop |= set(idx for idx in by_col[mask_all_null].index if _col_ok(idx))
 
         if drop_all_zero:
             nn = by_col["non_null"].fillna(0)
             zz = by_col["zeros"].fillna(-1)
+            # all zeros among non-nulls → zeros == non_null
             mask_all_zero = (nn > 0) & (zz == nn)
-            to_drop |= set(by_col[mask_all_zero].index)
+            to_drop |= set(idx for idx in by_col[mask_all_zero].index if _col_ok(idx))
 
         if drop_constant:
             mask_const = by_col["distinct"].fillna(0).eq(1)
-            to_drop |= set(by_col[mask_const].index)
+            to_drop |= set(idx for idx in by_col[mask_const].index if _col_ok(idx))
 
         if drop_low_var:
             means = by_col["mean"]
             stds  = by_col["std"]
             cv_series = pd.Series([_cv(means.get(i), stds.get(i)) for i in by_col.index], index=by_col.index)
-            # compare in percent
             mask_low_cv = (cv_series * 100.0) < cv_thr
-            to_drop |= set(cv_series[mask_low_cv.fillna(False)].index)
+            to_drop |= set(idx for idx in cv_series[mask_low_cv.fillna(False)].index if _col_ok(idx))
 
         # Never drop protected (DATE, COUNTRY, goals)
         protected = _protect_columns_set(DATE_COL, goal_cols)
         to_drop = {c for c in to_drop if str(c).upper() not in protected}
 
-        # Guard: keep at least one paid var per active spend platform
+        # Guard: keep at least one paid VAR per active spend platform
         active_plats = _active_spend_platforms(prof_df, plat_map_df)
         var_map = {v: _var_platform(v, platforms) for v in paid_vars}
         warnings_list = []
@@ -530,8 +554,8 @@ with tab_quality:
             vars_for_p = [v for v, vp in var_map.items() if vp == p]
             if not vars_for_p:
                 continue
-            dropping_all = all(v in to_drop for v in vars_for_p)
-            if dropping_all:
+            dropping_all = all(v in to_drop for v in vars_for_p if v in scope_cols)
+            if dropping_all and vars_for_p:
                 by_p = by_col.loc[[v for v in vars_for_p if v in by_col.index]]
                 keep_one = by_p["std"].astype(float).idxmax()
                 to_drop.discard(keep_one)
@@ -556,6 +580,7 @@ with tab_quality:
 
     # ---- Render tables — use display-only Min/Max strings to avoid dtype conflicts ----
     use_overrides: dict[str, bool] = {}
+    _PROTECTED_UP = _protect_columns_set(DATE_COL, goal_cols)
 
     def _fmt_num(val) -> str:
         return "–" if pd.isna(val) else f"{float(val):.2f}"
@@ -572,9 +597,9 @@ with tab_quality:
         subset = prof_all[prof_all["Column"].isin(cols)].copy()
         st.markdown(f"### {title} ({len(subset)})")
         if title == "Other" and len(subset):
-            st.caption("Unmapped columns (in data but not in metadata): " + ", ".join(sorted(subset["Column"].astype(str).tolist())))
+            st.caption("Unmapped columns (in data but not in metadata).")
         if title == "Goals" and len(subset):
-            st.caption("Goal columns from metadata.")
+            st.caption("Goal columns from metadata (always kept).")
         if subset.empty:
             st.info("No columns in this category.")
             return
@@ -593,7 +618,6 @@ with tab_quality:
         ]
         show_cols = [c for c in show_cols if c in subset.columns]
 
-        # IMPORTANT: remove comma grouping from formats (Streamlit editor's sprintf doesn't support ",")
         edited = st.data_editor(
             subset[show_cols],
             hide_index=True,
@@ -608,9 +632,9 @@ with tab_quality:
                 ),
                 "non_null":  st.column_config.NumberColumn("Non-Null", format="%.0f"),
                 "nulls":     st.column_config.NumberColumn("Nulls", format="%.0f"),
-                "nulls_pct": st.column_config.NumberColumn("Nulls %", format="%.1f%%"),
+                "nulls_pct": st.column_config.NumberColumn("Nulls %", format="%.1f%%", min_value=0.0, max_value=1.0),
                 "zeros":     st.column_config.NumberColumn("Zeros", format="%.0f"),
-                "zeros_pct": st.column_config.NumberColumn("Zeros %", format="%.1f%%"),
+                "zeros_pct": st.column_config.NumberColumn("Zeros %", format="%.1f%%", min_value=0.0, max_value=1.0),
                 "distinct":  st.column_config.NumberColumn("Distinct", format="%.0f"),
                 "MinDisp":   st.column_config.TextColumn("Min"),
                 "p10":       st.column_config.NumberColumn("P10", format="%.2f"),
@@ -622,8 +646,12 @@ with tab_quality:
             },
             key=f"dq_editor_{key_suffix}",
         )
+
+        # Persist Use choices; force protected columns to True
         for _, r in edited.iterrows():
-            use_overrides[str(r["Column"])] = bool(r["Use"])
+            colname = str(r["Column"])
+            is_protected = colname.upper() in _PROTECTED_UP
+            use_overrides[colname] = True if is_protected else bool(r["Use"])
 
     # Render all categories
     for title, cols in categories:
@@ -633,6 +661,11 @@ with tab_quality:
     final_use = {row["Column"]: bool(row["Use"]) for _, row in prof_all.iterrows()}
     final_use.update(use_overrides)
 
+    # Enforce protection one more time
+    for c in list(final_use.keys()):
+        if c.upper() in _PROTECTED_UP:
+            final_use[c] = True
+
     selected_cols = [c for c, u in final_use.items() if u]
     st.session_state["selected_profile_columns"] = selected_cols
 
@@ -641,7 +674,6 @@ with tab_quality:
     cL, cR = st.columns([1.2, 1])
     with cL:
         sel_prof = prof_all[prof_all["Column"].isin(selected_cols)].copy()
-        # Remove the spark data from export
         csv = sel_prof.drop(columns=["Dist"], errors="ignore").to_csv(index=False).encode("utf-8")
         st.download_button(
             "Export profile (CSV — selected)",
