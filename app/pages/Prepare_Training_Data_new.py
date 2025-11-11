@@ -429,8 +429,10 @@ with tab_quality:
     organic_vars = [c for c in (mapping.get("organic_vars",      []) or []) if c in prof_df.columns]
     context_vars = [c for c in (mapping.get("context_vars",      []) or []) if c in prof_df.columns]
     factor_vars  = [c for c in (mapping.get("factor_vars",       []) or []) if c in prof_df.columns]
+    goals_list   = [g for g in (goal_cols or []) if g in prof_df.columns]
 
-    known_set = set(paid_spend) | set(paid_vars) | set(organic_vars) | set(context_vars) | set(factor_vars)
+    # Include goals in the known set so they don't fall into "Other"
+    known_set = set(paid_spend) | set(paid_vars) | set(organic_vars) | set(context_vars) | set(factor_vars) | set(goals_list)
     other_cols = [c for c in prof_df.columns if c not in known_set]
 
     categories = [
@@ -439,105 +441,11 @@ with tab_quality:
         ("Organic",     organic_vars),
         ("Context",     context_vars),
         ("Factor",      factor_vars),
+        ("Goals",       goals_list),
         ("Other",       other_cols),
     ]
 
-    # ---- Helpers (local to this tab) ----
-    def _num_stats(s: pd.Series) -> dict:
-        s = pd.to_numeric(s, errors="coerce")
-        n  = len(s)
-        nn = int(s.notna().sum())
-        na = n - nn
-        if nn == 0:
-            return dict(non_null=nn, nulls=na, nulls_pct=np.nan, zeros=0, zeros_pct=np.nan,
-                        distinct=0, min=np.nan, p10=np.nan, median=np.nan, mean=np.nan,
-                        p90=np.nan, max=np.nan, std=np.nan)
-        z  = int((s.fillna(0) == 0).sum())
-        s2 = s.dropna()
-        return dict(
-            non_null=nn,
-            nulls=na,
-            nulls_pct=na / n if n else np.nan,
-            zeros=z,
-            zeros_pct=z / n if n else np.nan,
-            distinct=int(s2.nunique(dropna=True)),
-            min=float(s2.min()) if not s2.empty else np.nan,
-            p10=float(np.percentile(s2, 10)) if not s2.empty else np.nan,
-            median=float(s2.median()) if not s2.empty else np.nan,
-            mean=float(s2.mean()) if not s2.empty else np.nan,
-            p90=float(np.percentile(s2, 90)) if not s2.empty else np.nan,
-            max=float(s2.max()) if not s2.empty else np.nan,
-            std=float(s2.std(ddof=1)) if s2.size > 1 else np.nan,
-        )
-
-    def _cat_stats(s: pd.Series) -> dict:
-        n  = len(s)
-        nn = int(s.notna().sum())
-        na = n - nn
-        s2 = s.dropna()
-        return dict(
-            non_null=nn, nulls=na, nulls_pct=na / n if n else np.nan,
-            zeros=np.nan, zeros_pct=np.nan, distinct=int(s2.nunique(dropna=True)) if nn else 0,
-            min=np.nan, p10=np.nan, median=np.nan, mean=np.nan, p90=np.nan, max=np.nan, std=np.nan,
-        )
-
-    def _distribution_values(s: pd.Series, *, numeric_bins: int = 10, cat_topk: int = 5) -> list[float]:
-        try:
-            if pd.api.types.is_numeric_dtype(s):
-                q = pd.to_numeric(s, errors="coerce").dropna()
-                if q.empty: return []
-                hist, _ = np.histogram(q, bins=numeric_bins)
-                total = hist.sum()
-                return (hist / total).tolist() if total else []
-            if pd.api.types.is_datetime64_any_dtype(s):
-                q = pd.to_datetime(s, errors="coerce").dropna()
-                if q.empty: return []
-                vc = q.dt.to_period("M").value_counts().sort_index()
-                total = vc.sum()
-                return (vc / total).tolist() if total else []
-            q = s.dropna().astype("object")
-            if q.empty: return []
-            vc = q.value_counts().head(cat_topk)
-            total = vc.sum()
-            return (vc / total).tolist() if total else []
-        except Exception:
-            return []
-
-    def _var_platform(col: str, platforms: list[str]) -> str | None:
-        cu = str(col).upper()
-        for p in platforms:
-            if p.upper() in cu:
-                return p
-        return None
-
-    def _active_spend_platforms(df_window: pd.DataFrame, plat_map_df: pd.DataFrame) -> set[str]:
-        if df_window.empty or plat_map_df.empty:
-            return set()
-        vm = plat_map_df.copy()
-        vm = vm.dropna(subset=["col", "platform"])
-        vm = vm[vm["col"].isin(df_window.columns)]
-        if vm.empty:
-            return set()
-        sums = (
-            df_window[vm["col"].tolist()]
-            .melt(value_name="spend")
-            .dropna(subset=["spend"])
-            .groupby(vm.reset_index(drop=True)["platform"])["spend"]
-            .sum(min_count=1)
-        )
-        return set(sums[sums.fillna(0) > 0].index.astype(str))
-
-    def _cv(mean_val: float, std_val: float) -> float:
-        if pd.isna(mean_val) or pd.isna(std_val): return np.nan
-        if abs(mean_val) < 1e-12: return np.inf
-        return float(abs(std_val) / abs(mean_val))
-
-    def _protect_columns_set(date_col: str, goal_cols: list[str]) -> set[str]:
-        prot = {str(date_col), "COUNTRY"}
-        prot |= set(goal_cols or [])
-        return set(p.upper() for p in prot)
-
-    # ---- One full profile table (we'll display per-category slices) ----
+    # ---- Build one full profile table (we'll display per-category slices) ----
     rows = []
     for col in prof_df.columns:
         s = prof_df[col]
@@ -610,7 +518,7 @@ with tab_quality:
             mask_low_cv = (cv_series * 100.0) < cv_thr
             to_drop |= set(cv_series[mask_low_cv.fillna(False)].index)
 
-        # Never drop protected
+        # Never drop protected (DATE, COUNTRY, goals)
         protected = _protect_columns_set(DATE_COL, goal_cols)
         to_drop = {c for c in to_drop if str(c).upper() not in protected}
 
@@ -646,11 +554,11 @@ with tab_quality:
     dropped = st.session_state["dq_dropped_cols"]
     prof_all["Use"] = ~prof_all["Column"].isin(dropped)
 
-    # ---- Render 6 tables — use display-only Min/Max strings to avoid dtype conflicts ----
+    # ---- Render tables — use display-only Min/Max strings to avoid dtype conflicts ----
     use_overrides: dict[str, bool] = {}
 
     def _fmt_num(val) -> str:
-        return "–" if pd.isna(val) else f"{float(val):,.2f}"
+        return "–" if pd.isna(val) else f"{float(val):.2f}"
 
     def _fmt_dt_from_seconds(val) -> str:
         if pd.isna(val):
@@ -665,6 +573,8 @@ with tab_quality:
         st.markdown(f"### {title} ({len(subset)})")
         if title == "Other" and len(subset):
             st.caption("Unmapped columns (in data but not in metadata): " + ", ".join(sorted(subset["Column"].astype(str).tolist())))
+        if title == "Goals" and len(subset):
+            st.caption("Goal columns from metadata.")
         if subset.empty:
             st.info("No columns in this category.")
             return
@@ -683,6 +593,7 @@ with tab_quality:
         ]
         show_cols = [c for c in show_cols if c in subset.columns]
 
+        # IMPORTANT: remove comma grouping from formats (Streamlit editor's sprintf doesn't support ",")
         edited = st.data_editor(
             subset[show_cols],
             hide_index=True,
@@ -695,19 +606,19 @@ with tab_quality:
                     help="Numeric: histogram · Categorical: top-k share · Datetime: monthly buckets",
                     y_min=0.0, y_max=1.0,
                 ),
-                "non_null":  st.column_config.NumberColumn("Non-Null", format="%,.0f"),
-                "nulls":     st.column_config.NumberColumn("Nulls", format="%,.0f"),
+                "non_null":  st.column_config.NumberColumn("Non-Null", format="%.0f"),
+                "nulls":     st.column_config.NumberColumn("Nulls", format="%.0f"),
                 "nulls_pct": st.column_config.NumberColumn("Nulls %", format="%.1f%%"),
-                "zeros":     st.column_config.NumberColumn("Zeros", format="%,.0f"),
+                "zeros":     st.column_config.NumberColumn("Zeros", format="%.0f"),
                 "zeros_pct": st.column_config.NumberColumn("Zeros %", format="%.1f%%"),
-                "distinct":  st.column_config.NumberColumn("Distinct", format="%,.0f"),
+                "distinct":  st.column_config.NumberColumn("Distinct", format="%.0f"),
                 "MinDisp":   st.column_config.TextColumn("Min"),
-                "p10":       st.column_config.NumberColumn("P10", format="%,.2f"),
-                "median":    st.column_config.NumberColumn("Median", format="%,.2f"),
-                "mean":      st.column_config.NumberColumn("Mean",   format="%,.2f"),
-                "p90":       st.column_config.NumberColumn("P90", format="%,.2f"),
+                "p10":       st.column_config.NumberColumn("P10", format="%.2f"),
+                "median":    st.column_config.NumberColumn("Median", format="%.2f"),
+                "mean":      st.column_config.NumberColumn("Mean",   format="%.2f"),
+                "p90":       st.column_config.NumberColumn("P90", format="%.2f"),
                 "MaxDisp":   st.column_config.TextColumn("Max"),
-                "std":       st.column_config.NumberColumn("Std", format="%,.2f"),
+                "std":       st.column_config.NumberColumn("Std", format="%.2f"),
             },
             key=f"dq_editor_{key_suffix}",
         )
@@ -730,6 +641,7 @@ with tab_quality:
     cL, cR = st.columns([1.2, 1])
     with cL:
         sel_prof = prof_all[prof_all["Column"].isin(selected_cols)].copy()
+        # Remove the spark data from export
         csv = sel_prof.drop(columns=["Dist"], errors="ignore").to_csv(index=False).encode("utf-8")
         st.download_button(
             "Export profile (CSV — selected)",
