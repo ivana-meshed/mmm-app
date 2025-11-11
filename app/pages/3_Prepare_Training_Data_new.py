@@ -10,11 +10,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 import warnings
- 
-st.set_page_config(
-    page_title="Prepare Training Data for Experimentation", layout="wide"
-)
-
 from app_shared import (
     # GCS & versions
     list_data_versions,
@@ -54,9 +49,13 @@ from app_shared import (
     RED,
 )
 
+st.set_page_config(
+    page_title="Prepare Training Data for Experimentation", layout="wide"
+)
+
 require_login_and_domain()
 
-st.title("Review Business- & Marketing Data")
+st.title("Prepare Training Data for Experimentation")
 
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 
@@ -151,10 +150,10 @@ def _distribution_values(s: pd.Series, *, numeric_bins: int = 10, cat_topk: int 
 # -----------------------------
 # TABS
 # -----------------------------
-tab_load, tab_biz, tab_mkt, tab_profile = st.tabs(
+tab_load, tab_quality = st.tabs(
     [
         "Select Data To Analyze",
-        "Data Profile"
+        "Data Quality"
     ]
 )
 
@@ -372,10 +371,10 @@ res["PERIOD_LABEL"] = period_label(res["DATE_PERIOD"], RULE)
 
 
 # =============================
-# TAB 1 — DATA PROFILE
+# TAB 1 — Data Quality
 # =============================
-with tab_profile:
-    st.subheader(f"Data Profile — {TIMEFRAME_LABEL}")
+with tab_quality:
+    st.subheader(f"Data Quality — {TIMEFRAME_LABEL}")
 
     # Timeframe-adjusted frame
     prof_df = df_r.copy()
