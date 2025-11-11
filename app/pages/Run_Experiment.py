@@ -879,6 +879,12 @@ with tab_single:
             default_paid_media_spends = loaded_spends
             # Add loaded spends to available options (preserve order: metadata first, then loaded)
             available_spends = list(dict.fromkeys(available_spends + loaded_spends))
+            
+            # Debug info to help troubleshoot
+            st.info(
+                f"📋 Loaded configuration detected with {len(loaded_spends)} paid_media_spends. "
+                f"Added {len([s for s in loaded_spends if s not in default_values['paid_media_spends']])} new variables not in metadata."
+            )
 
             # Initialize spend_var_mapping from loaded config (Issue #2 fix)
             if "paid_media_vars" in loaded_config:
