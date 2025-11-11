@@ -870,10 +870,10 @@ with tab_single:
                 loaded_spends = [
                     s.strip() for s in loaded_spends.split(",") if s.strip()
                 ]
-            # Only include loaded spends that are in available_spends
-            default_paid_media_spends = [
-                s for s in loaded_spends if s in available_spends
-            ]
+            # Use loaded spends as defaults and add them to available options
+            default_paid_media_spends = loaded_spends
+            # Add loaded spends to available options (preserve order: metadata first, then loaded)
+            available_spends = list(dict.fromkeys(available_spends + loaded_spends))
 
             # Initialize spend_var_mapping from loaded config (Issue #2 fix)
             if "paid_media_vars" in loaded_config:
@@ -882,6 +882,11 @@ with tab_single:
                     loaded_vars = [
                         s.strip() for s in loaded_vars.split(",") if s.strip()
                     ]
+                
+                # Add loaded vars to default_values so they appear in var options
+                default_values["paid_media_vars"] = list(
+                    dict.fromkeys(default_values["paid_media_vars"] + loaded_vars)
+                )
 
                 # Build mapping: for each spend, find the corresponding var from loaded_vars
                 if metadata and "paid_media_mapping" in metadata:
@@ -912,12 +917,6 @@ with tab_single:
                             st.session_state["spend_var_mapping"][spend] = (
                                 loaded_vars[i]
                             )
-
-        # Filter defaults to only include items that exist in available_spends
-        # This prevents StreamlitAPIException when defaults aren't in options
-        default_paid_media_spends = [
-            s for s in default_paid_media_spends if s in available_spends
-        ]
 
         # Display paid_media_spends first (all selected by default)
         st.markdown("**Paid Media Configuration**")
@@ -1032,11 +1031,8 @@ with tab_single:
                     s.strip() for s in loaded_context.split(",") if s.strip()
                 ]
             default_context_vars = loaded_context
-
-        # Filter defaults to only include items that exist in all_columns
-        default_context_vars = [
-            v for v in default_context_vars if v in all_columns
-        ]
+            # Add loaded context vars to available columns
+            all_columns = list(dict.fromkeys(all_columns + loaded_context))
 
         context_vars_list = st.multiselect(
             "context_vars",
@@ -1056,11 +1052,8 @@ with tab_single:
                     s.strip() for s in loaded_factor.split(",") if s.strip()
                 ]
             default_factor_vars = loaded_factor
-
-        # Filter defaults to only include items that exist in all_columns
-        default_factor_vars = [
-            v for v in default_factor_vars if v in all_columns
-        ]
+            # Add loaded factor vars to available columns
+            all_columns = list(dict.fromkeys(all_columns + loaded_factor))
 
         factor_vars_list = st.multiselect(
             "factor_vars",
@@ -1084,11 +1077,8 @@ with tab_single:
                     s.strip() for s in loaded_organic.split(",") if s.strip()
                 ]
             default_organic_vars = loaded_organic
-
-        # Filter defaults to only include items that exist in all_columns
-        default_organic_vars = [
-            v for v in default_organic_vars if v in all_columns
-        ]
+            # Add loaded organic vars to available columns
+            all_columns = list(dict.fromkeys(all_columns + loaded_organic))
 
         organic_vars_list = st.multiselect(
             "organic_vars",
