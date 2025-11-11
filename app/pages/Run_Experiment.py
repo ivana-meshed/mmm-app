@@ -376,9 +376,12 @@ with tab_single:
                         blob = client.bucket(gcs_bucket).blob(blob_path)
                         config_data = json.loads(blob.download_as_bytes())
 
-                        # Store loaded configuration in session state
+                        # Store loaded configuration in session state (including countries)
                         st.session_state["loaded_training_config"] = (
                             config_data.get("config", {})
+                        )
+                        st.session_state["loaded_config_countries"] = (
+                            config_data.get("countries", [])
                         )
 
                         st.success(
@@ -1373,17 +1376,27 @@ with tab_single:
                 help="Name for this training configuration",
             )
         with col2:
+            # Pre-check "Multi-country" if loaded config has multiple countries
+            loaded_countries = st.session_state.get("loaded_config_countries", [])
+            default_multi = len(loaded_countries) > 1
             save_for_multi = st.checkbox(
                 "Multi-country",
-                value=False,
+                value=default_multi,
                 help="Save for multiple countries",
             )
 
         if save_for_multi:
+            # Use loaded countries if available, otherwise default to selected_country
+            loaded_countries = st.session_state.get("loaded_config_countries", [])
+            default_countries = (
+                loaded_countries
+                if loaded_countries
+                else [st.session_state.get("selected_country", "de")]
+            )
             config_countries = st.multiselect(
                 "Select countries",
                 options=["fr", "de", "it", "es", "nl", "uk"],
-                default=[st.session_state.get("selected_country", "de")],
+                default=default_countries,
                 help="Countries this configuration applies to",
             )
         else:
