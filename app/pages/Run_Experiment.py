@@ -384,7 +384,9 @@ with tab_single:
                             config_data.get("countries", [])
                         )
                         # Set a timestamp to force widget refresh
-                        st.session_state["loaded_config_timestamp"] = datetime.utcnow().timestamp()
+                        st.session_state["loaded_config_timestamp"] = (
+                            datetime.utcnow().timestamp()
+                        )
 
                         st.success(
                             f"✅ Configuration '{selected_config}' loaded successfully!"
@@ -415,7 +417,7 @@ with tab_single:
         # Iterations and Trials as presets
         preset_options = {
             "Test run": {"iterations": 200, "trials": 3},
-            "Production": {"iterations": 2000, "trials": 5},
+            "Production": {"iterations": 10000, "trials": 5},
             "Custom": {"iterations": 5000, "trials": 10},
         }
 
@@ -878,8 +880,10 @@ with tab_single:
             # Use loaded spends as defaults and add them to available options
             default_paid_media_spends = loaded_spends
             # Add loaded spends to available options (preserve order: metadata first, then loaded)
-            available_spends = list(dict.fromkeys(available_spends + loaded_spends))
-            
+            available_spends = list(
+                dict.fromkeys(available_spends + loaded_spends)
+            )
+
             # Debug info to help troubleshoot
             st.info(
                 f"📋 Loaded configuration detected with {len(loaded_spends)} paid_media_spends. "
@@ -893,10 +897,12 @@ with tab_single:
                     loaded_vars = [
                         s.strip() for s in loaded_vars.split(",") if s.strip()
                     ]
-                
+
                 # Add loaded vars to default_values so they appear in var options
                 default_values["paid_media_vars"] = list(
-                    dict.fromkeys(default_values["paid_media_vars"] + loaded_vars)
+                    dict.fromkeys(
+                        default_values["paid_media_vars"] + loaded_vars
+                    )
                 )
 
                 # Build mapping: for each spend, find the corresponding var from loaded_vars
@@ -921,7 +927,7 @@ with tab_single:
                         # Otherwise fall back to the spend itself
                         elif not matched:
                             st.session_state["spend_var_mapping"][spend] = spend
-                    
+
                     # Debug: Show mapping being applied
                     st.caption(
                         f"🔧 Applied variable mappings from loaded config for {len(loaded_spends)} spends"
@@ -933,9 +939,11 @@ with tab_single:
                             st.session_state["spend_var_mapping"][spend] = (
                                 loaded_vars[i]
                             )
-        
+
         # Filter defaults to only include items in options (prevents Streamlit error on first load)
-        default_paid_media_spends = [s for s in default_paid_media_spends if s in available_spends]
+        default_paid_media_spends = [
+            s for s in default_paid_media_spends if s in available_spends
+        ]
 
         # Display paid_media_spends first (all selected by default)
         st.markdown("**Paid Media Configuration**")
@@ -945,7 +953,7 @@ with tab_single:
 
         # Use timestamp-based key to force widget refresh when config is loaded
         config_timestamp = st.session_state.get("loaded_config_timestamp", 0)
-        
+
         paid_media_spends_list = st.multiselect(
             "paid_media_spends (Select channels to include)",
             options=available_spends,
@@ -1056,9 +1064,11 @@ with tab_single:
             default_context_vars = loaded_context
             # Add loaded context vars to available columns
             all_columns = list(dict.fromkeys(all_columns + loaded_context))
-        
+
         # Filter defaults to only include items in options
-        default_context_vars = [v for v in default_context_vars if v in all_columns]
+        default_context_vars = [
+            v for v in default_context_vars if v in all_columns
+        ]
 
         context_vars_list = st.multiselect(
             "context_vars",
@@ -1081,9 +1091,11 @@ with tab_single:
             default_factor_vars = loaded_factor
             # Add loaded factor vars to available columns
             all_columns = list(dict.fromkeys(all_columns + loaded_factor))
-        
+
         # Filter defaults to only include items in options
-        default_factor_vars = [v for v in default_factor_vars if v in all_columns]
+        default_factor_vars = [
+            v for v in default_factor_vars if v in all_columns
+        ]
 
         factor_vars_list = st.multiselect(
             "factor_vars",
@@ -1110,9 +1122,11 @@ with tab_single:
             default_organic_vars = loaded_organic
             # Add loaded organic vars to available columns
             all_columns = list(dict.fromkeys(all_columns + loaded_organic))
-        
+
         # Filter defaults to only include items in options
-        default_organic_vars = [v for v in default_organic_vars if v in all_columns]
+        default_organic_vars = [
+            v for v in default_organic_vars if v in all_columns
+        ]
 
         organic_vars_list = st.multiselect(
             "organic_vars",
@@ -1402,7 +1416,9 @@ with tab_single:
             )
         with col2:
             # Pre-check "Multi-country" if loaded config has multiple countries
-            loaded_countries = st.session_state.get("loaded_config_countries", [])
+            loaded_countries = st.session_state.get(
+                "loaded_config_countries", []
+            )
             default_multi = len(loaded_countries) > 1
             save_for_multi = st.checkbox(
                 "Multi-country",
@@ -1412,7 +1428,9 @@ with tab_single:
 
         if save_for_multi:
             # Use loaded countries if available, otherwise default to selected_country
-            loaded_countries = st.session_state.get("loaded_config_countries", [])
+            loaded_countries = st.session_state.get(
+                "loaded_config_countries", []
+            )
             default_countries = (
                 loaded_countries
                 if loaded_countries
