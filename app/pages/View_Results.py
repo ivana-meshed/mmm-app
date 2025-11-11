@@ -825,14 +825,12 @@ all_stamps = sorted(
     {k[2] for k in rev_country_keys}, key=parse_stamp, reverse=True
 )
 
-stamp_sel = st.multiselect(
-    "Timestamps (optional - leave empty to show latest)",
-    all_stamps,
-    default=[],
+# Single timestamp selection - if not selected, will show latest for each country
+stamp_sel = st.selectbox(
+    "Timestamp (optional - select one or leave blank to show latest per country)",
+    [""] + all_stamps,
+    index=0,
 )
-# If no timestamps selected, use all available
-if not stamp_sel:
-    stamp_sel = all_stamps
 
 
 # ---------- Main renderer ----------
@@ -868,27 +866,39 @@ def build_run_title(country: str, stamp: str, iters, trials):
 
 # ---------- Render selected countries ----------
 for ctry in countries_sel:
-    # Get all runs for this country and selected timestamps
-    country_runs = [(rev, ctry, s) for s in stamp_sel if (rev, ctry, s) in runs]
+    # Find the appropriate run for this country
+    if stamp_sel:
+        # User selected a specific timestamp - use it if it exists for this country
+        key = (rev, ctry, stamp_sel)
+        if key not in runs:
+            st.warning(f"No run found for {ctry} with timestamp {stamp_sel}")
+            continue
+        country_run = key
+    else:
+        # No timestamp selected - find the latest run for this country
+        candidates = sorted(
+            [k for k in runs.keys() if k[0] == rev and k[1] == ctry],
+            key=lambda k: parse_stamp(k[2]),
+            reverse=True,
+        )
+        if not candidates:
+            st.warning(f"No runs found for {ctry}")
+            continue
+        # Prefer run with allocator plot, fallback to newest
+        country_run = next(
+            (k for k in candidates if run_has_allocator_plot(runs[k])),
+            candidates[0],
+        )
 
-    if not country_runs:
-        continue
+    # Extract stamp from the selected run
+    _, _, stamp = country_run
+    blobs = runs[country_run]
+    _, iters, trials = parse_best_meta(blobs)
 
     # If multiple countries, use expander; otherwise render directly
     if len(countries_sel) > 1:
-        # Build title with metadata from the first run
-        first_key = country_runs[0]
-        blobs = runs[first_key]
-        _, iters, trials = parse_best_meta(blobs)
-        title = build_run_title(ctry, first_key[2], iters, trials)
-
+        title = build_run_title(ctry, stamp, iters, trials)
         with st.expander(f"**{title}**", expanded=True):
-            for r, c, s in country_runs:
-                render_run_for_country(bucket_name, r, c, s)
-                if len(country_runs) > 1:
-                    st.divider()
+            render_run_for_country(bucket_name, rev, ctry, stamp)
     else:
-        for r, c, s in country_runs:
-            render_run_for_country(bucket_name, r, c, s)
-            if len(country_runs) > 1:
-                st.divider()
+        render_run_for_country(bucket_name, rev, ctry, stamp)
