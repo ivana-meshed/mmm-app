@@ -857,6 +857,9 @@ with tab_single:
         if "spend_var_mapping" not in st.session_state:
             st.session_state["spend_var_mapping"] = {}
 
+        # Get loaded configuration to apply defaults
+        loaded_config = st.session_state.get("loaded_training_config", {})
+
         # Get all paid_media_spends from metadata (including CUSTOM columns)
         # Don't filter by all_columns since CUSTOM columns may not be in preview yet
         available_spends = default_values["paid_media_spends"]
