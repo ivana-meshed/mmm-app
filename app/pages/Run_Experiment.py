@@ -1414,7 +1414,7 @@ with tab_single:
     with st.expander("🏷️ Revision Configuration", expanded=True):
         st.caption(
             "Configure the revision tag and number for organizing training outputs. "
-            "Outputs will be saved to robyn/{TAG}_{NUMBER}/{TIMESTAMP}/ in GCS."
+            "Outputs will be saved to robyn/{TAG}_{NUMBER}/{COUNTRY}/{TIMESTAMP}/ in GCS."
         )
 
         gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
@@ -1510,7 +1510,7 @@ with tab_single:
         # Show the combined revision identifier
         if revision_tag and revision_tag != "-- Create New Tag --":
             combined_revision = f"{revision_tag}_{revision_number}"
-            st.success(f"✅ Training outputs will be saved under: **robyn/{combined_revision}/_{{TIMESTAMP}}/**")
+            st.success(f"✅ Training outputs will be saved under: **robyn/{combined_revision}/{{COUNTRY}}/{{TIMESTAMP}}/**")
         else:
             combined_revision = ""
             st.warning("⚠️ Please select or create a revision tag")
