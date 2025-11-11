@@ -14,7 +14,7 @@ from app_shared import (
 from scipy import stats
 from sklearn.linear_model import LinearRegression
 
-st.set_page_config(page_title="Prepare Training Data (v2)", layout="wide")
+# Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
 st.title("Prepare Training Data (v2) — Guided Wizard")
 
 # ---- Require data loaded by your loader page

@@ -346,7 +346,7 @@ def find_allocator_plots(blobs):
 
 # ---------- Renderers ----------
 def render_metrics_section(blobs, country, stamp):
-    st.subheader("📊 Allocator metrics")
+    st.subheader("Allocator Metrics")
     metrics_csv = find_blob(blobs, "/allocator_metrics.csv")
     metrics_txt = find_blob(blobs, "/allocator_metrics.txt")
 
@@ -409,7 +409,7 @@ def render_metrics_section(blobs, country, stamp):
 
 
 def render_allocator_section(blobs, country, stamp):
-    st.subheader("Allocator plot")
+    st.subheader("Allocator Plot")
     alloc_plots = find_allocator_plots(blobs)
 
     if not alloc_plots:
@@ -507,8 +507,6 @@ def render_onepager_section(blobs, best_id, country, stamp):
 
 
 def render_all_files_section(blobs, bucket_name, country, stamp):
-    st.subheader("All files")
-
     def guess_mime(name: str) -> str:
         n = name.lower()
         if n.endswith(".csv"):
@@ -523,13 +521,12 @@ def render_all_files_section(blobs, bucket_name, country, stamp):
             return "application/octet-stream"
         return "application/octet-stream"
 
-    for i, b in enumerate(sorted(blobs, key=lambda x: x.name)):
-        fn = os.path.basename(b.name)
-        with st.container(border=True):
-            st.write(f"`{fn}` — {b.size:,} bytes")
+    with st.expander("**All Files (Detailed Analysis)**", expanded=False):
+        for i, b in enumerate(sorted(blobs, key=lambda x: x.name)):
+            fn = os.path.basename(b.name)
             download_link_for_blob(
                 b,
-                label=f"Download {fn}",
+                label=f"⬇️ {fn}",
                 mime_hint=guess_mime(fn),
                 key_suffix=f"all|{country}|{stamp}|{i}",
             )
@@ -783,35 +780,23 @@ def render_run_from_key(runs: dict, key: tuple, bucket_name: str):
     rev, country, stamp = key
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
+
+    # Render sections in the specified order
+    render_metrics_section(blobs, country, stamp)
+    render_onepager_section(blobs, best_id, country, stamp)
+    render_allocator_section(blobs, country, stamp)
+    render_all_files_section(blobs, bucket_name, country, stamp)
+
+
+def build_run_title(country: str, stamp: str, iters, trials):
+    """Build title with country, timestamp, iterations and trials."""
     meta_bits = []
     if iters is not None:
         meta_bits.append(f"iterations={iters}")
     if trials is not None:
         meta_bits.append(f"trials={trials}")
     meta_str = (" · " + " · ".join(meta_bits)) if meta_bits else ""
-    has_alloc = (
-        "with allocator plot"
-        if run_has_allocator_plot(blobs)
-        else "no allocator plot found"
-    )
-
-    st.markdown(
-        f"### {country.upper()} — `{rev}` / `{stamp}` ({has_alloc}){meta_str}"
-    )
-    prefix_path = f"robyn/{rev}/{country}/{stamp}/"
-    gcs_url = gcs_console_url(bucket_name, prefix_path)
-    st.markdown(
-        f'**Path:** <a href="{gcs_url}" target="_blank">gs://{bucket_name}/{prefix_path}</a>',
-        unsafe_allow_html=True,
-    )
-    if best_id:
-        st.info(f"**Best Model ID:** {best_id}")
-
-    # reuse the existing sections
-    render_metrics_section(blobs, country, stamp)
-    render_allocator_section(blobs, country, stamp)
-    render_onepager_section(blobs, best_id, country, stamp)
-    render_all_files_section(blobs, bucket_name, country, stamp)
+    return f"{country.upper()} — `{stamp}`{meta_str}"
 
 
 # ---------- Sidebar / controls ----------
@@ -930,33 +915,10 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
 
-    meta_bits = []
-    if iters is not None:
-        meta_bits.append(f"iterations={iters}")
-    if trials is not None:
-        meta_bits.append(f"trials={trials}")
-    meta_str = (" · " + " · ".join(meta_bits)) if meta_bits else ""
-    has_alloc = (
-        "with allocator plot"
-        if run_has_allocator_plot(blobs)
-        else "no allocator plot found"
-    )
-
-    st.markdown(f"### {country.upper()} — `{stamp}` ({has_alloc}){meta_str}")
-
-    prefix_path = f"robyn/{rev}/{country}/{stamp}/"
-    gcs_url = gcs_console_url(bucket_name, prefix_path)
-    st.markdown(
-        f'**Path:** <a href="{gcs_url}" target="_blank">gs://{bucket_name}/{prefix_path}</a>',
-        unsafe_allow_html=True,
-    )
-
-    if best_id:
-        st.info(f"**Best Model ID:** {best_id}")
-
+    # Render sections in the specified order
     render_metrics_section(blobs, country, stamp)
-    render_allocator_section(blobs, country, stamp)
     render_onepager_section(blobs, best_id, country, stamp)
+    render_allocator_section(blobs, country, stamp)
     render_all_files_section(blobs, bucket_name, country, stamp)
 
 
@@ -999,7 +961,7 @@ if not auto_best:
     default_country_in_rev = best_country_key[1]
 
     countries_sel = st.multiselect(
-        "Countries (newest run **with allocator plot** will be shown; falls back to newest)",
+        "Countries",
         rev_countries,
         default=(
             [default_country_in_rev]
@@ -1011,11 +973,33 @@ if not auto_best:
         st.info("Select at least one country.")
         st.stop()
 
-    st.markdown(f"## Detailed View — revision `{rev}`")
     for ctry in countries_sel:
-        with st.container():
+        # Use expander if multiple countries
+        if len(countries_sel) > 1:
+            # Get the run to build title
+            candidates = sorted(
+                [k for k in runs.keys() if k[0] == rev and k[1] == ctry],
+                key=lambda k: parse_stamp(k[2]),
+                reverse=True,
+            )
+            if candidates:
+                key = next(
+                    (k for k in candidates if run_has_allocator_plot(runs[k])),
+                    candidates[0],
+                )
+                _, iters, trials = parse_best_meta(runs[key])
+                title = build_run_title(ctry, key[2], iters, trials)
+                with st.expander(f"**{title}**", expanded=True):
+                    render_run_for_country(
+                        bucket_name, rev, ctry
+                    )  # type: ignore
+            else:
+                with st.expander(f"**{ctry.upper()}**", expanded=True):
+                    render_run_for_country(
+                        bucket_name, rev, ctry
+                    )  # type: ignore
+        else:
             render_run_for_country(bucket_name, rev, ctry)  # type: ignore
-            st.divider()
 
 # ---------- Mode: auto best across all revisions ----------
 else:
@@ -1035,7 +1019,6 @@ else:
         st.info("Select at least one country.")
         st.stop()
 
-    st.markdown("## Detailed View — Best run per country (auto)")
     for ctry in countries_sel:
         best_key, table = rank_runs_for_country(
             runs,
@@ -1057,39 +1040,78 @@ else:
                 st.info(f"No runs at all for {ctry}.")
                 continue
             best_key = candidates[0]
-            render_run_from_key(runs, best_key, bucket_name)
-            st.divider()
+
+            # Use expander if multiple countries
+            if len(countries_sel) > 1:
+                _, iters, trials = parse_best_meta(runs[best_key])
+                title = build_run_title(ctry, best_key[2], iters, trials)
+                with st.expander(f"**{title}**", expanded=True):
+                    render_run_from_key(runs, best_key, bucket_name)
+            else:
+                render_run_from_key(runs, best_key, bucket_name)
             continue
 
-        # Show ranking table
-        with st.expander(
-            f"Ranking table for {ctry.upper()} (higher score is better)",
-            expanded=False,
-        ):
-            cols = [
-                "score",
-                "r2_w",
-                "nrmse_w",
-                "drssd_w",
-                "rev",
-                "stamp",
-                "best_id",
-                "has_alloc",
-                "r2_train",
-                "r2_val",
-                "r2_test",
-                "nrmse_train",
-                "nrmse_val",
-                "nrmse_test",
-                "decomp_rssd_train",
-                "decomp_rssd_val",
-                "decomp_rssd_test",
-            ]
-            display = table[[c for c in cols if c in table.columns]].copy()
-            st.dataframe(display, use_container_width=True)
+        # Use expander if multiple countries
+        if len(countries_sel) > 1:
+            _, iters, trials = parse_best_meta(runs[best_key])
+            title = build_run_title(ctry, best_key[2], iters, trials)
+            with st.expander(f"**{title}**", expanded=True):
+                # Show ranking table
+                with st.expander(
+                    "Ranking table (higher score is better)",
+                    expanded=False,
+                ):
+                    cols = [
+                        "score",
+                        "r2_w",
+                        "nrmse_w",
+                        "drssd_w",
+                        "rev",
+                        "stamp",
+                        "best_id",
+                        "has_alloc",
+                        "r2_train",
+                        "r2_val",
+                        "r2_test",
+                        "nrmse_train",
+                        "nrmse_val",
+                        "nrmse_test",
+                        "decomp_rssd_train",
+                        "decomp_rssd_val",
+                        "decomp_rssd_test",
+                    ]
+                    display = table[
+                        [c for c in cols if c in table.columns]
+                    ].copy()
+                    st.dataframe(display, use_container_width=True)
 
-        st.success(
-            f"Best run for **{ctry.upper()}**: `{best_key[0]}` / `{best_key[2]}`"
-        )
-        render_run_from_key(runs, best_key, bucket_name)
-        st.divider()
+                render_run_from_key(runs, best_key, bucket_name)
+        else:
+            # Show ranking table
+            with st.expander(
+                f"Ranking table for {ctry.upper()} (higher score is better)",
+                expanded=False,
+            ):
+                cols = [
+                    "score",
+                    "r2_w",
+                    "nrmse_w",
+                    "drssd_w",
+                    "rev",
+                    "stamp",
+                    "best_id",
+                    "has_alloc",
+                    "r2_train",
+                    "r2_val",
+                    "r2_test",
+                    "nrmse_train",
+                    "nrmse_val",
+                    "nrmse_test",
+                    "decomp_rssd_train",
+                    "decomp_rssd_val",
+                    "decomp_rssd_test",
+                ]
+                display = table[[c for c in cols if c in table.columns]].copy()
+                st.dataframe(display, use_container_width=True)
+
+            render_run_from_key(runs, best_key, bucket_name)
