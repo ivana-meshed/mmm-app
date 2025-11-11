@@ -119,11 +119,31 @@ def list_blobs(bucket_name: str, prefix: str):
 
 
 def parse_path(name: str):
-    # Expected: robyn/<rev>/<country>/<stamp>/file...
+    # Expected new format: robyn/<TAG_NUMBER>/<country>/<stamp>/file...
+    # Also support old format: robyn/<rev>/<country>/<stamp>/file... for backward compatibility
     parts = name.split("/")
     if len(parts) >= 5 and parts[0] == "robyn":
+        # Parse revision (could be old format like "r100" or new format like "myname_1")
+        rev_part = parts[1]
+        if "_" in rev_part:
+            # New format with TAG_NUMBER
+            tag_num_parts = rev_part.rsplit("_", 1)
+            rev = rev_part  # Keep full TAG_NUMBER as rev
+            tag = tag_num_parts[0]
+            try:
+                number = int(tag_num_parts[1])
+            except (ValueError, IndexError):
+                number = None
+        else:
+            # Old format (e.g., "r100")
+            rev = rev_part
+            tag = rev_part
+            number = None
+        
         return {
-            "rev": parts[1],
+            "rev": rev,
+            "tag": tag,
+            "number": number,
             "country": parts[2],
             "stamp": parts[3],
             "file": "/".join(parts[4:]),
@@ -137,6 +157,7 @@ def group_runs(blobs):
         info = parse_path(b.name)
         if not info or not info["file"]:
             continue
+        # Group by (revision, country, stamp) as before
         key = (info["rev"], info["country"], info["stamp"])
         runs.setdefault(key, []).append(b)
     return runs
