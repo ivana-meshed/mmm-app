@@ -129,7 +129,7 @@ def _get_revision_tags(bucket: str) -> List[str]:
     try:
         client = storage.Client()
         prefix = f"robyn/"
-        blobs = list(client.list_blobs(bucket, prefix=prefix, delimiter="/"))
+        blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
         # Extract revision folders (format: TAG_NUMBER)
         revision_tags = set()
         for blob in blobs:
@@ -149,7 +149,7 @@ def _get_next_revision_number(bucket: str, tag: str) -> int:
     try:
         client = storage.Client()
         prefix = f"robyn/"
-        blobs = list(client.list_blobs(bucket, prefix=prefix, delimiter="/"))
+        blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
         # Find all numbers for this tag
         numbers = []
         for blob in blobs:
@@ -173,7 +173,7 @@ with tab_single:
     st.subheader("Robyn configuration & training")
 
     # Data selection
-    with st.expander("📊 Data selection", expanded=False):
+    with st.expander("📊 Data Selection", expanded=False):
         # Show current loaded state (point 4 - UI representing actual state)
         if (
             "preview_df" in st.session_state
@@ -426,7 +426,7 @@ with tab_single:
             st.warning(f"Could not list configurations: {e}")
 
     # Robyn config (moved outside Data selection expander)
-    with st.expander("⚙️ Robyn configuration", expanded=False):
+    with st.expander("⚙️ Robyn Configuration", expanded=False):
         # Country auto-filled from Data Selection
         country = st.session_state.get("selected_country", "fr")
         st.info(f"**Country:** {country.upper()} (from Data Selection)")
@@ -679,7 +679,7 @@ with tab_single:
         # Show info message when Custom is selected
         if hyperparameter_preset == "Custom":
             st.info(
-                "📌 **Custom Hyperparameters Selected**: Scroll down to the **Variable mapping** section below to configure per-variable hyperparameter ranges for each paid media and organic variable."
+                "📌 **Custom Hyperparameters Selected**: Scroll down to the **Variable Mapping** section below to configure per-variable hyperparameter ranges for each paid media and organic variable."
             )
 
         # Custom hyperparameters will be collected later after variables are selected
@@ -735,7 +735,7 @@ with tab_single:
             )
 
     # Variables (moved outside Data selection expander)
-    with st.expander("🗺️ Variable mapping", expanded=False):
+    with st.expander("🗺️ Variable Mapping", expanded=False):
         # Get available columns from loaded data
         preview_df = st.session_state.get("preview_df")
         if preview_df is not None and not preview_df.empty:
@@ -941,7 +941,7 @@ with tab_single:
 
                     # Debug: Show mapping being applied
                     st.caption(
-                        f"🔧 Applied variable mappings from loaded config for {len(loaded_spends)} spends"
+                        f"🔧 Applied Variable Mappings from loaded config for {len(loaded_spends)} spends"
                     )
                 else:
                     # Fallback: try to match by index
@@ -1518,7 +1518,7 @@ with tab_single:
         # For backward compatibility, create a combined "revision" field
         revision = combined_revision
 
-    # Save Configuration (moved outside Data selection expander, after Variable mapping)
+    # Save Configuration (moved outside Data selection expander, after Variable Mapping)
     with st.expander("💾 Save Training Configuration", expanded=False):
         st.caption(
             "Save the current training configuration to apply it later to other data sources or countries."
