@@ -928,6 +928,9 @@ with tab_single:
                             st.session_state["spend_var_mapping"][spend] = (
                                 loaded_vars[i]
                             )
+        
+        # Filter defaults to only include items in options (prevents Streamlit error on first load)
+        default_paid_media_spends = [s for s in default_paid_media_spends if s in available_spends]
 
         # Display paid_media_spends first (all selected by default)
         st.markdown("**Paid Media Configuration**")
@@ -1048,6 +1051,9 @@ with tab_single:
             default_context_vars = loaded_context
             # Add loaded context vars to available columns
             all_columns = list(dict.fromkeys(all_columns + loaded_context))
+        
+        # Filter defaults to only include items in options
+        default_context_vars = [v for v in default_context_vars if v in all_columns]
 
         context_vars_list = st.multiselect(
             "context_vars",
@@ -1070,6 +1076,9 @@ with tab_single:
             default_factor_vars = loaded_factor
             # Add loaded factor vars to available columns
             all_columns = list(dict.fromkeys(all_columns + loaded_factor))
+        
+        # Filter defaults to only include items in options
+        default_factor_vars = [v for v in default_factor_vars if v in all_columns]
 
         factor_vars_list = st.multiselect(
             "factor_vars",
@@ -1096,6 +1105,9 @@ with tab_single:
             default_organic_vars = loaded_organic
             # Add loaded organic vars to available columns
             all_columns = list(dict.fromkeys(all_columns + loaded_organic))
+        
+        # Filter defaults to only include items in options
+        default_organic_vars = [v for v in default_organic_vars if v in all_columns]
 
         organic_vars_list = st.multiselect(
             "organic_vars",
