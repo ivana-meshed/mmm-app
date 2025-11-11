@@ -29,19 +29,19 @@ review_page = st.Page(
 )
 
 prepare_training_page = st.Page(
-    "pages/Prepare_Training_new.py",
+    "pages/Prepare_Training_Data_new.py",
     title="Prepare Training Data new",
     icon="⚙️",
 )
 
 prepare_training_page_old = st.Page(
-    "pages/Prepare_Training_old.py",
+    "pages/Prepare_Training_Data_old.py",
     title="Prepare Training Data old",
     icon="⚙️",
 )
 
 prepare_training_page_oldv2 = st.Page(
-    "pages/Prepare_Training_oldv2.py",
+    "pages/Prepare_Training_Data_oldv2.py",
     title="Prepare Training Data old v2",
     icon="⚙️",
 )
