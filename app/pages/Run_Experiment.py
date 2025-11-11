@@ -921,6 +921,11 @@ with tab_single:
                         # Otherwise fall back to the spend itself
                         elif not matched:
                             st.session_state["spend_var_mapping"][spend] = spend
+                    
+                    # Debug: Show mapping being applied
+                    st.caption(
+                        f"🔧 Applied variable mappings from loaded config for {len(loaded_spends)} spends"
+                    )
                 else:
                     # Fallback: try to match by index
                     for i, spend in enumerate(loaded_spends):
@@ -1025,7 +1030,7 @@ with tab_single:
                         options=var_options,
                         index=default_idx,
                         help=f"Select the metric variable for {spend}",
-                        key=f"var_for_{spend}",
+                        key=f"var_for_{spend}_{config_timestamp}",
                     )
 
                 spend_var_mapping[spend] = selected_var
