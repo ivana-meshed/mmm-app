@@ -139,7 +139,7 @@ def parse_path(name: str):
             rev = rev_part
             tag = rev_part
             number = None
-        
+
         return {
             "rev": rev,
             "tag": tag,
@@ -398,7 +398,7 @@ def find_allocator_plots(blobs):
 
 # ---------- Renderers ----------
 def render_metrics_section(blobs, country, stamp):
-    st.subheader("📊 Allocator metrics")
+    st.subheader("Allocator Metrics")
     metrics_csv = find_blob(blobs, "/allocator_metrics.csv")
     metrics_txt = find_blob(blobs, "/allocator_metrics.txt")
 
@@ -594,7 +594,7 @@ def render_forecast_allocator_section(blobs, country, stamp):
 
 
 def render_allocator_section(blobs, country, stamp):
-    st.subheader("Allocator plot")
+    st.subheader("Allocator Plot")
     alloc_plots = find_allocator_plots(blobs)
 
     if not alloc_plots:
@@ -692,8 +692,6 @@ def render_onepager_section(blobs, best_id, country, stamp):
 
 
 def render_all_files_section(blobs, bucket_name, country, stamp):
-    st.subheader("All files")
-
     def guess_mime(name: str) -> str:
         n = name.lower()
         if n.endswith(".csv"):
@@ -708,13 +706,12 @@ def render_all_files_section(blobs, bucket_name, country, stamp):
             return "application/octet-stream"
         return "application/octet-stream"
 
-    for i, b in enumerate(sorted(blobs, key=lambda x: x.name)):
-        fn = os.path.basename(b.name)
-        with st.container(border=True):
-            st.write(f"`{fn}` — {b.size:,} bytes")
+    with st.expander("**All Files (Detailed Analysis)**", expanded=False):
+        for i, b in enumerate(sorted(blobs, key=lambda x: x.name)):
+            fn = os.path.basename(b.name)
             download_link_for_blob(
                 b,
-                label=f"Download {fn}",
+                label=f"⬇️ {fn}",
                 mime_hint=guess_mime(fn),
                 key_suffix=f"all|{country}|{stamp}|{i}",
             )
@@ -812,7 +809,7 @@ best_country_key = next(
 default_country_in_rev = best_country_key[1]
 
 countries_sel = st.multiselect(
-    "Countries (newest run **with allocator plot** will be shown; falls back to newest)",
+    "Countries",
     rev_countries,
     default=[default_country_in_rev],
 )
@@ -820,63 +817,61 @@ if not countries_sel:
     st.info("Select at least one country.")
     st.stop()
 
+# Timestamps available for selected revision and countries
+rev_country_keys = [
+    k for k in runs.keys() if k[0] == rev and k[1] in countries_sel
+]
+all_stamps = sorted(
+    {k[2] for k in rev_country_keys}, key=parse_stamp, reverse=True
+)
+
+stamp_sel = st.multiselect(
+    "Timestamps (optional - leave empty to show latest)",
+    all_stamps,
+    default=[],
+)
+# If no timestamps selected, use all available
+if not stamp_sel:
+    stamp_sel = all_stamps
+
 
 # ---------- Main renderer ----------
-def render_run_for_country(bucket_name: str, rev: str, country: str):
-    # All candidate runs for this (rev, country), newest first
-    candidates = sorted(
-        [k for k in runs.keys() if k[0] == rev and k[1] == country],
-        key=lambda k: parse_stamp(k[2]),
-        reverse=True,
-    )
-    if not candidates:
-        st.warning(f"No runs found for {rev}/{country}.")
+def render_run_for_country(
+    bucket_name: str, rev: str, country: str, stamp: str
+):
+    # Find the specific run
+    key = (rev, country, stamp)
+    if key not in runs:
+        st.warning(f"Run not found for {rev}/{country}/{stamp}.")
         return
 
-    # Prefer the newest run that HAS an allocator plot; fallback to newest
-    key = next(
-        (k for k in candidates if run_has_allocator_plot(runs[k])),
-        candidates[0],
-    )
-
-    _, _, stamp = key
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
 
-    meta_bits = []
-    if iters is not None:
-        meta_bits.append(f"iterations={iters}")
-    if trials is not None:
-        meta_bits.append(f"trials={trials}")
-    meta_str = (" · " + " · ".join(meta_bits)) if meta_bits else ""
-    has_alloc = (
-        "with allocator plot"
-        if run_has_allocator_plot(blobs)
-        else "no allocator plot found"
-    )
-
-    st.markdown(f"### {country.upper()} — `{stamp}` ({has_alloc}){meta_str}")
-
-    prefix_path = f"robyn/{rev}/{country}/{stamp}/"
-    gcs_url = gcs_console_url(bucket_name, prefix_path)
-    st.markdown(
-        f'**Path:** <a href="{gcs_url}" target="_blank">gs://{bucket_name}/{prefix_path}</a>',
-        unsafe_allow_html=True,
-    )
-
-    if best_id:
-        st.info(f"**Best Model ID:** {best_id}")
-
+    # Render sections in the specified order
     render_metrics_section(blobs, country, stamp)
-    render_allocator_section(blobs, country, stamp)
-    render_forecast_allocator_section(blobs, country, stamp)
     render_onepager_section(blobs, best_id, country, stamp)
+    render_allocator_section(blobs, country, stamp)
     render_all_files_section(blobs, bucket_name, country, stamp)
 
 
 # ---------- Render selected countries ----------
-st.markdown(f"## Detailed View — revision `{rev}`")
 for ctry in countries_sel:
-    with st.container():
-        render_run_for_country(bucket_name, rev, ctry)  # type: ignore
-        st.divider()
+    # Get all runs for this country and selected timestamps
+    country_runs = [(rev, ctry, s) for s in stamp_sel if (rev, ctry, s) in runs]
+
+    if not country_runs:
+        continue
+
+    # If multiple countries, use expander; otherwise render directly
+    if len(countries_sel) > 1:
+        with st.expander(f"**{ctry.upper()}**", expanded=True):
+            for r, c, s in country_runs:
+                render_run_for_country(bucket_name, r, c, s)
+                if len(country_runs) > 1:
+                    st.divider()
+    else:
+        for r, c, s in country_runs:
+            render_run_for_country(bucket_name, r, c, s)
+            if len(country_runs) > 1:
+                st.divider()
