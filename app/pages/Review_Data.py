@@ -51,9 +51,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
 
-st.set_page_config(
-    page_title="Review Business- & Marketing Data", layout="wide"
-)
+# Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
 
 require_login_and_domain()
 ensure_session_defaults()

@@ -49,9 +49,7 @@ from app_shared import (
     RED,
 )
 
-st.set_page_config(
-    page_title="Prepare Training Data for Experimentation", layout="wide"
-)
+# Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
 
 require_login_and_domain()
 
