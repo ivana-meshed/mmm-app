@@ -1063,11 +1063,14 @@ def build_run_title(country: str, stamp: str, iters, trials):
 
 # ---------- Sidebar / controls ----------
 with st.sidebar:
-    bucket_name = st.text_input("GCS bucket", value=DEFAULT_BUCKET)
+    bucket_name = st.text_input(
+        "GCS bucket", value=DEFAULT_BUCKET, key="view_best_results_bucket"
+    )
     prefix = st.text_input(
         "Root prefix",
         value=DEFAULT_PREFIX,
         help="Usually 'robyn/' or narrower like 'robyn/r100/'",
+        key="view_best_results_prefix",
     )
     if prefix and not prefix.endswith("/"):
         prefix = prefix + "/"
@@ -1080,7 +1083,9 @@ with st.sidebar:
 
     st.subheader("Best-model scoring")
     auto_best = st.checkbox(
-        "Auto-pick best across ALL revisions per country", value=True
+        "Auto-pick best across ALL revisions per country",
+        value=True,
+        key="view_best_results_auto_best",
     )
 
     # Sliders with persistent defaults
@@ -1207,7 +1212,12 @@ if not auto_best:
     all_revs = sorted(
         {k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True
     )
-    rev = st.selectbox("Revision", all_revs, index=all_revs.index(default_rev))
+    rev = st.selectbox(
+        "Revision",
+        all_revs,
+        index=all_revs.index(default_rev),
+        key="view_best_results_revision",
+    )
 
     # Countries available in this revision
     rev_keys = [k for k in runs.keys() if k[0] == rev]
@@ -1231,6 +1241,7 @@ if not auto_best:
             if default_country_in_rev in rev_countries
             else []
         ),
+        key="view_best_results_countries_rev",
     )
     if not countries_sel:
         st.info("Select at least one country.")
@@ -1276,6 +1287,7 @@ else:
         "Countries",
         all_countries,
         default=[all_countries[0]],
+        key="view_best_results_countries_all",
     )
 
     if not countries_sel:

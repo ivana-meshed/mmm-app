@@ -1131,11 +1131,14 @@ def render_all_files_section(blobs, bucket_name, country, stamp):
 
 # ---------- Sidebar / controls ----------
 with st.sidebar:
-    bucket_name = st.text_input("GCS bucket", value=DEFAULT_BUCKET)
+    bucket_name = st.text_input(
+        "GCS bucket", value=DEFAULT_BUCKET, key="view_results_bucket"
+    )
     prefix = st.text_input(
         "Root prefix",
         value=DEFAULT_PREFIX,
         help="Usually 'robyn/' or narrower like 'robyn/r100/'",
+        key="view_results_prefix",
     )
 
     if prefix and not prefix.endswith("/"):
@@ -1204,7 +1207,12 @@ default_rev = seed_key[0]
 
 # UI: revision choices
 all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
-rev = st.selectbox("Revision", all_revs, index=all_revs.index(default_rev))
+rev = st.selectbox(
+    "Revision",
+    all_revs,
+    index=all_revs.index(default_rev),
+    key="view_results_revision",
+)
 
 # Countries available in this revision
 rev_keys = [k for k in runs.keys() if k[0] == rev]
@@ -1224,6 +1232,7 @@ countries_sel = st.multiselect(
     "Countries",
     rev_countries,
     default=[default_country_in_rev],
+    key="view_results_countries",
 )
 if not countries_sel:
     st.info("Select at least one country.")
@@ -1242,6 +1251,7 @@ stamp_sel = st.selectbox(
     "Timestamp (optional - select one or leave blank to show latest per country)",
     [""] + all_stamps,
     index=0,
+    key="view_results_timestamp",
 )
 
 
