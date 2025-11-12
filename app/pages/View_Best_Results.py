@@ -1234,13 +1234,8 @@ if not auto_best:
     # Initialize revision in session state only if not already set
     if "view_best_results_revision" not in st.session_state:
         st.session_state["view_best_results_revision"] = default_rev
-
-    # Get the current value from session state, or use default if session state value is invalid
-    current_rev = st.session_state.get(
-        "view_best_results_revision", default_rev
-    )
-    if current_rev not in all_revs:
-        current_rev = default_rev
+    elif st.session_state["view_best_results_revision"] not in all_revs:
+        # Only reset if current value is invalid (e.g., after data refresh)
         st.session_state["view_best_results_revision"] = default_rev
 
     rev = st.selectbox(
@@ -1263,27 +1258,24 @@ if not auto_best:
     )
     default_country_in_rev = best_country_key[1]
 
-    # Initialize countries in session state only if not already set
+    # Initialize countries in session state only if not already set or if invalid
     if "view_best_results_countries_rev" not in st.session_state:
         st.session_state["view_best_results_countries_rev"] = (
             [default_country_in_rev]
             if default_country_in_rev in rev_countries
             else []
         )
-
-    # Get current value from session state, validate it's still valid
-    current_countries = st.session_state.get(
-        "view_best_results_countries_rev", [default_country_in_rev]
-    )
-    # Filter out any countries that are no longer available in this revision
-    valid_countries = [c for c in current_countries if c in rev_countries]
-    if not valid_countries:
-        valid_countries = (
-            [default_country_in_rev]
-            if default_country_in_rev in rev_countries
-            else []
-        )
-        st.session_state["view_best_results_countries_rev"] = valid_countries
+    else:
+        # Validate current selection - only update if completely invalid
+        current_countries = st.session_state["view_best_results_countries_rev"]
+        valid_countries = [c for c in current_countries if c in rev_countries]
+        # Only reset if NO valid countries remain (e.g., switched to a revision without those countries)
+        if not valid_countries and rev_countries:
+            st.session_state["view_best_results_countries_rev"] = (
+                [default_country_in_rev]
+                if default_country_in_rev in rev_countries
+                else []
+            )
 
     countries_sel = st.multiselect(
         "Countries",
@@ -1330,19 +1322,16 @@ else:
         st.info("No countries found in the provided prefix.")
         st.stop()
 
-    # Initialize countries in session state only if not already set
+    # Initialize countries in session state only if not already set or if invalid
     if "view_best_results_countries_all" not in st.session_state:
         st.session_state["view_best_results_countries_all"] = [all_countries[0]]
-
-    # Get current value from session state, validate it's still valid
-    current_countries = st.session_state.get(
-        "view_best_results_countries_all", [all_countries[0]]
-    )
-    # Filter out any countries that are no longer available
-    valid_countries = [c for c in current_countries if c in all_countries]
-    if not valid_countries:
-        valid_countries = [all_countries[0]]
-        st.session_state["view_best_results_countries_all"] = valid_countries
+    else:
+        # Validate current selection - only update if completely invalid
+        current_countries = st.session_state["view_best_results_countries_all"]
+        valid_countries = [c for c in current_countries if c in all_countries]
+        # Only reset if NO valid countries remain
+        if not valid_countries and all_countries:
+            st.session_state["view_best_results_countries_all"] = [all_countries[0]]
 
     countries_sel = st.multiselect(
         "Countries",
