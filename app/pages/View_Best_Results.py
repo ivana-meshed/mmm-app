@@ -982,6 +982,7 @@ def extract_core_metrics_from_blobs(blobs: list) -> dict:
     return {}
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def rank_runs_for_country(
     runs: dict, country: str, weights=(0.2, 0.5, 0.3), alpha=1.0, beta=1.0
 ) -> tuple[tuple, pd.DataFrame]:
@@ -989,6 +990,8 @@ def rank_runs_for_country(
     Build a summary table for all (rev, country, stamp) runs, compute a score:
       score = weighted_r2 - alpha*norm_weighted_nrmse - beta*norm_weighted_drssd
     Return (best_key, dataframe_sorted_desc_by_score).
+    
+    Cached for 10 minutes to avoid recomputing scores on every page load.
     """
     rows = []
     for (rev, ctry, stamp), blobs in runs.items():
@@ -1162,11 +1165,12 @@ if (
     or st.session_state.get("last_bucket") != bucket_name
     or st.session_state.get("last_prefix") != prefix
 ):
-    blobs = list_blobs(bucket_name, prefix)
-    runs = group_runs(blobs)
-    st.session_state["runs_cache"] = runs
-    st.session_state["last_bucket"] = bucket_name
-    st.session_state["last_prefix"] = prefix
+    with st.spinner("Loading runs from GCS..."):
+        blobs = list_blobs(bucket_name, prefix)
+        runs = group_runs(blobs)
+        st.session_state["runs_cache"] = runs
+        st.session_state["last_bucket"] = bucket_name
+        st.session_state["last_prefix"] = prefix
 else:
     runs = st.session_state["runs_cache"]
 
@@ -1310,16 +1314,19 @@ if not auto_best:
                 _, iters, trials = parse_best_meta(runs[key])
                 title = build_run_title(ctry, key[2], iters, trials)
                 with st.expander(f"**{title}**", expanded=True):
-                    render_run_for_country(
-                        bucket_name, rev, ctry
-                    )  # type: ignore
+                    with st.spinner(f"Loading results for {ctry.upper()}..."):
+                        render_run_for_country(
+                            bucket_name, rev, ctry
+                        )  # type: ignore
             else:
                 with st.expander(f"**{ctry.upper()}**", expanded=True):
-                    render_run_for_country(
-                        bucket_name, rev, ctry
-                    )  # type: ignore
+                    with st.spinner(f"Loading results for {ctry.upper()}..."):
+                        render_run_for_country(
+                            bucket_name, rev, ctry
+                        )  # type: ignore
         else:
-            render_run_for_country(bucket_name, rev, ctry)  # type: ignore
+            with st.spinner(f"Loading results for {ctry.upper()}..."):
+                render_run_for_country(bucket_name, rev, ctry)  # type: ignore
 
 # ---------- Mode: auto best across all revisions ----------
 else:
@@ -1360,13 +1367,14 @@ else:
         st.stop()
 
     for ctry in countries_sel:
-        best_key, table = rank_runs_for_country(
-            runs,
-            ctry,
-            weights=st.session_state["weights"],
-            alpha=st.session_state["alpha"],
-            beta=st.session_state["beta"],
-        )
+        with st.spinner(f"Loading best results for {ctry.upper()}..."):
+            best_key, table = rank_runs_for_country(
+                runs,
+                ctry,
+                weights=st.session_state["weights"],
+                alpha=st.session_state["alpha"],
+                beta=st.session_state["beta"],
+            )
         if best_key is None:
             st.warning(
                 f"No metric-bearing runs found for {ctry}. Showing newest run instead."
@@ -1386,9 +1394,11 @@ else:
                 _, iters, trials = parse_best_meta(runs[best_key])
                 title = build_run_title(ctry, best_key[2], iters, trials)
                 with st.expander(f"**{title}**", expanded=True):
-                    render_run_from_key(runs, best_key, bucket_name)
+                    with st.spinner("Rendering results..."):
+                        render_run_from_key(runs, best_key, bucket_name)
             else:
-                render_run_from_key(runs, best_key, bucket_name)
+                with st.spinner("Rendering results..."):
+                    render_run_from_key(runs, best_key, bucket_name)
             continue
 
         # Use expander if multiple countries
@@ -1425,7 +1435,8 @@ else:
                     ].copy()
                     st.dataframe(display, use_container_width=True)
 
-                render_run_from_key(runs, best_key, bucket_name)
+                with st.spinner("Rendering best results..."):
+                    render_run_from_key(runs, best_key, bucket_name)
         else:
             # Show ranking table
             with st.expander(
@@ -1454,4 +1465,5 @@ else:
                 display = table[[c for c in cols if c in table.columns]].copy()
                 st.dataframe(display, use_container_width=True)
 
-            render_run_from_key(runs, best_key, bucket_name)
+            with st.spinner("Rendering best results..."):
+                render_run_from_key(runs, best_key, bucket_name)

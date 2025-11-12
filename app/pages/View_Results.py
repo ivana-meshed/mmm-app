@@ -1191,11 +1191,12 @@ if (
     or st.session_state.get("last_bucket") != bucket_name
     or st.session_state.get("last_prefix") != prefix
 ):
-    blobs = list_blobs(bucket_name, prefix)
-    runs = group_runs(blobs)
-    st.session_state["runs_cache"] = runs
-    st.session_state["last_bucket"] = bucket_name
-    st.session_state["last_prefix"] = prefix
+    with st.spinner("Loading runs from GCS..."):
+        blobs = list_blobs(bucket_name, prefix)
+        runs = group_runs(blobs)
+        st.session_state["runs_cache"] = runs
+        st.session_state["last_bucket"] = bucket_name
+        st.session_state["last_prefix"] = prefix
 else:
     runs = st.session_state["runs_cache"]
 
