@@ -7,11 +7,12 @@ Uses custom navigation to hide the main page from the sidebar.
 
 import streamlit as st
 
-# Use custom navigation to control sidebar (Streamlit 1.31+)
+# MUST be called before any other Streamlit commands (Streamlit 1.31+)
 st.set_page_config(
     page_title="Robyn MMM Trainer",
     page_icon="📊",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 from app_split_helpers import *
