@@ -1076,13 +1076,18 @@ def build_run_title(country: str, stamp: str, iters, trials):
 
 
 # ---------- Sidebar / controls ----------
+# Initialize session state for filter persistence
+if "view_best_results_bucket" not in st.session_state:
+    st.session_state["view_best_results_bucket"] = DEFAULT_BUCKET
+if "view_best_results_prefix" not in st.session_state:
+    st.session_state["view_best_results_prefix"] = DEFAULT_PREFIX
+if "view_best_results_auto_best" not in st.session_state:
+    st.session_state["view_best_results_auto_best"] = True
+
 with st.sidebar:
-    bucket_name = st.text_input(
-        "GCS bucket", value=DEFAULT_BUCKET, key="view_best_results_bucket"
-    )
+    bucket_name = st.text_input("GCS bucket", key="view_best_results_bucket")
     prefix = st.text_input(
         "Root prefix",
-        value=DEFAULT_PREFIX,
         help="Usually 'robyn/' or narrower like 'robyn/r100/'",
         key="view_best_results_prefix",
     )
@@ -1098,7 +1103,6 @@ with st.sidebar:
     st.subheader("Best-model scoring")
     auto_best = st.checkbox(
         "Auto-pick best across ALL revisions per country",
-        value=True,
         key="view_best_results_auto_best",
     )
 
@@ -1226,10 +1230,23 @@ if not auto_best:
     all_revs = sorted(
         {k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True
     )
+
+    # Initialize revision in session state only if not already set
+    if "view_best_results_revision" not in st.session_state:
+        st.session_state["view_best_results_revision"] = default_rev
+
+    # Get the current value from session state, or use default if session state value is invalid
+    current_rev = st.session_state.get(
+        "view_best_results_revision", default_rev
+    )
+    if current_rev not in all_revs:
+        current_rev = default_rev
+        st.session_state["view_best_results_revision"] = default_rev
+
     rev = st.selectbox(
         "Revision",
         all_revs,
-        index=all_revs.index(default_rev),
+        index=all_revs.index(current_rev) if current_rev in all_revs else 0,
         key="view_best_results_revision",
     )
 
@@ -1247,14 +1264,32 @@ if not auto_best:
     )
     default_country_in_rev = best_country_key[1]
 
-    countries_sel = st.multiselect(
-        "Countries",
-        rev_countries,
-        default=(
+    # Initialize countries in session state only if not already set
+    if "view_best_results_countries_rev" not in st.session_state:
+        st.session_state["view_best_results_countries_rev"] = (
             [default_country_in_rev]
             if default_country_in_rev in rev_countries
             else []
-        ),
+        )
+
+    # Get current value from session state, validate it's still valid
+    current_countries = st.session_state.get(
+        "view_best_results_countries_rev", [default_country_in_rev]
+    )
+    # Filter out any countries that are no longer available in this revision
+    valid_countries = [c for c in current_countries if c in rev_countries]
+    if not valid_countries:
+        valid_countries = (
+            [default_country_in_rev]
+            if default_country_in_rev in rev_countries
+            else []
+        )
+        st.session_state["view_best_results_countries_rev"] = valid_countries
+
+    countries_sel = st.multiselect(
+        "Countries",
+        rev_countries,
+        default=valid_countries,
         key="view_best_results_countries_rev",
     )
     if not countries_sel:
@@ -1297,10 +1332,24 @@ else:
         st.info("No countries found in the provided prefix.")
         st.stop()
 
+    # Initialize countries in session state only if not already set
+    if "view_best_results_countries_all" not in st.session_state:
+        st.session_state["view_best_results_countries_all"] = [all_countries[0]]
+
+    # Get current value from session state, validate it's still valid
+    current_countries = st.session_state.get(
+        "view_best_results_countries_all", [all_countries[0]]
+    )
+    # Filter out any countries that are no longer available
+    valid_countries = [c for c in current_countries if c in all_countries]
+    if not valid_countries:
+        valid_countries = [all_countries[0]]
+        st.session_state["view_best_results_countries_all"] = valid_countries
+
     countries_sel = st.multiselect(
         "Countries",
         all_countries,
-        default=[all_countries[0]],
+        default=valid_countries,
         key="view_best_results_countries_all",
     )
 

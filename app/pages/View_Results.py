@@ -1145,13 +1145,16 @@ def render_all_files_section(blobs, bucket_name, country, stamp):
 
 
 # ---------- Sidebar / controls ----------
+# Initialize session state for filter persistence
+if "view_results_bucket" not in st.session_state:
+    st.session_state["view_results_bucket"] = DEFAULT_BUCKET
+if "view_results_prefix" not in st.session_state:
+    st.session_state["view_results_prefix"] = DEFAULT_PREFIX
+
 with st.sidebar:
-    bucket_name = st.text_input(
-        "GCS bucket", value=DEFAULT_BUCKET, key="view_results_bucket"
-    )
+    bucket_name = st.text_input("GCS bucket", key="view_results_bucket")
     prefix = st.text_input(
         "Root prefix",
-        value=DEFAULT_PREFIX,
         help="Usually 'robyn/' or narrower like 'robyn/r100/'",
         key="view_results_prefix",
     )
@@ -1222,10 +1225,21 @@ default_rev = seed_key[0]
 
 # UI: revision choices
 all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
+
+# Initialize revision in session state only if not already set
+if "view_results_revision" not in st.session_state:
+    st.session_state["view_results_revision"] = default_rev
+
+# Get the current value from session state, or use default if session state value is invalid
+current_rev = st.session_state.get("view_results_revision", default_rev)
+if current_rev not in all_revs:
+    current_rev = default_rev
+    st.session_state["view_results_revision"] = default_rev
+
 rev = st.selectbox(
     "Revision",
     all_revs,
-    index=all_revs.index(default_rev),
+    index=all_revs.index(current_rev) if current_rev in all_revs else 0,
     key="view_results_revision",
 )
 
@@ -1243,10 +1257,28 @@ best_country_key = next(
 )
 default_country_in_rev = best_country_key[1]
 
+# Initialize countries in session state only if not already set
+if "view_results_countries" not in st.session_state:
+    st.session_state["view_results_countries"] = [default_country_in_rev]
+
+# Get current value from session state, validate it's still valid
+current_countries = st.session_state.get(
+    "view_results_countries", [default_country_in_rev]
+)
+# Filter out any countries that are no longer available in this revision
+valid_countries = [c for c in current_countries if c in rev_countries]
+if not valid_countries:
+    valid_countries = (
+        [default_country_in_rev]
+        if default_country_in_rev in rev_countries
+        else []
+    )
+    st.session_state["view_results_countries"] = valid_countries
+
 countries_sel = st.multiselect(
     "Countries",
     rev_countries,
-    default=[default_country_in_rev],
+    default=valid_countries,
     key="view_results_countries",
 )
 if not countries_sel:
@@ -1261,11 +1293,26 @@ all_stamps = sorted(
     {k[2] for k in rev_country_keys}, key=parse_stamp, reverse=True
 )
 
+# Initialize timestamp in session state only if not already set
+if "view_results_timestamp" not in st.session_state:
+    st.session_state["view_results_timestamp"] = ""
+
+# Get current value from session state, validate it's still valid
+current_stamp = st.session_state.get("view_results_timestamp", "")
+if current_stamp and current_stamp not in all_stamps:
+    current_stamp = ""
+    st.session_state["view_results_timestamp"] = ""
+
 # Single timestamp selection - if not selected, will show latest for each country
+stamp_options = [""] + all_stamps
+current_index = (
+    stamp_options.index(current_stamp) if current_stamp in stamp_options else 0
+)
+
 stamp_sel = st.selectbox(
     "Timestamp (optional - select one or leave blank to show latest per country)",
-    [""] + all_stamps,
-    index=0,
+    stamp_options,
+    index=current_index,
     key="view_results_timestamp",
 )
 
