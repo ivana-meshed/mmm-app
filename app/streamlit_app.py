@@ -57,19 +57,19 @@ best_results_page = st.Page(
     icon="🏆",
 )
 
-# Create navigation - this replaces the default sidebar navigation
+# Create navigation with grouped sections for better organization
 pg = st.navigation(
-    [
-        connect_page,
-        map_page,
-        review_page,
-        prepare_training_page,
-        prepare_training_page_old,
-        prepare_training_page_oldv2,
-        experiment_page,
-        results_page,
-        best_results_page,
-    ],
+    {
+        "Data Setup": [connect_page, map_page],
+        "Data Review": [review_page],
+        "Training Preparation": [
+            prepare_training_page,
+            prepare_training_page_old,
+            prepare_training_page_oldv2,
+        ],
+        "Execution": [experiment_page],
+        "Results": [results_page, best_results_page],
+    },
     position="sidebar",
 )
 
