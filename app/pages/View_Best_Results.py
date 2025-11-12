@@ -356,18 +356,35 @@ def find_allocator_plots(blobs):
 
 
 # ---------- Renderers ----------
-def render_model_config_section(blobs, country, stamp, bucket_name):
-    """Render model configuration from training-configs/{stamp}/job_config.json"""
-    st.subheader("Model Configuration")
-
-    # Try to fetch config from training-configs/{stamp}/job_config.json
+@st.cache_data(ttl=3600, show_spinner="Loading model configuration...")
+def _fetch_model_config(bucket_name: str, stamp: str):
+    """Fetch and parse model configuration. Cached for performance."""
     try:
         config_path = f"training-configs/{stamp}/job_config.json"
         bucket = client.bucket(bucket_name)
         config_blob = bucket.blob(config_path)
 
-        if not config_blob.exists():
-            # Fallback to debug path in robyn results
+        if config_blob.exists():
+            config_data = config_blob.download_as_bytes()
+            if config_data:
+                import json
+
+                return json.loads(config_data.decode("utf-8"))
+    except Exception:
+        pass
+    return None
+
+
+def render_model_config_section(blobs, country, stamp, bucket_name):
+    """Render model configuration from training-configs/{stamp}/job_config.json"""
+    st.subheader("Model Configuration")
+
+    # Try to fetch config from cache first
+    config = _fetch_model_config(bucket_name, stamp)
+
+    # Fallback to debug path if not found in training-configs
+    if not config:
+        try:
             config_blob = find_blob(
                 blobs, "/debug/job_config.copy.json"
             ) or find_blob(blobs, "job_config.copy.json")
@@ -377,16 +394,20 @@ def render_model_config_section(blobs, country, stamp, bucket_name):
                 )
                 return
 
-        config_data = download_bytes_safe(config_blob)
-        if not config_data:
-            st.warning("Could not read model configuration.")
+            config_data = download_bytes_safe(config_blob)
+            if not config_data:
+                st.warning("Could not read model configuration.")
+                return
+
+            import json
+
+            config = json.loads(config_data.decode("utf-8"))
+        except Exception as e:
+            st.warning(f"Couldn't parse model configuration: {e}")
             return
 
-        import json
-
-        config = json.loads(config_data.decode("utf-8"))
-
-        # Display configuration parameters in a single column
+    # Display configuration parameters in a single column
+    if config:
         with st.container(border=True):
             # Helper function to format list values
             def format_list(val):
@@ -447,28 +468,21 @@ def render_model_config_section(blobs, country, stamp, bucket_name):
             with st.expander("View full configuration", expanded=False):
                 st.json(config)
 
-        # Provide download link
-        if hasattr(config_blob, "name"):
-            fn = os.path.basename(config_blob.name)
-        else:
-            fn = "job_config.json"
-        download_link_for_blob(
-            config_blob,
-            label=f"📥 Download {fn}",
-            mime_hint="application/json",
-            key_suffix=f"config|{country}|{stamp}",
-        )
-
-    except Exception as e:
-        st.warning(f"Couldn't parse model configuration: {e}")
-
 
 def render_model_metrics_table(blobs, country, stamp):
     """Render model metrics in a formatted table with color coding"""
     st.subheader("Model Performance Metrics")
 
-    # Extract metrics from blobs
-    metrics = extract_core_metrics_from_blobs(blobs)
+    # Create a cache key from blob names
+    blob_names = tuple(sorted([b.name for b in blobs]))
+
+    # Extract metrics from blobs (with caching)
+    @st.cache_data(ttl=3600, show_spinner="Loading metrics...")
+    def _extract_cached_metrics(blob_names_key):
+        # Re-extract metrics (blobs aren't directly cacheable, but results are)
+        return extract_core_metrics_from_blobs(blobs)
+
+    metrics = _extract_cached_metrics(blob_names)
 
     if not metrics:
         st.info("No model metrics found.")
