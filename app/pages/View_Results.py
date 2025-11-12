@@ -1236,23 +1236,28 @@ default_rev = seed_key[0]
 # UI: revision choices
 all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
 
-# Initialize revision in session state only if not already set
-if "view_results_revision" not in st.session_state:
-    st.session_state["view_results_revision"] = default_rev
+# Debug: Show session state keys at page load
+if st.session_state.get("_debug_filters"):
+    st.sidebar.write("🔍 Session state keys:", list(st.session_state.keys()))
+    if "view_results_revision" in st.session_state:
+        st.sidebar.write(f"📌 Existing revision value: {st.session_state['view_results_revision']}")
+
+# Determine the index for the selectbox (preserve user selection or use default)
+if "view_results_revision" in st.session_state and st.session_state["view_results_revision"] in all_revs:
+    # User has a valid saved selection - use it
+    default_rev_index = all_revs.index(st.session_state["view_results_revision"])
     if st.session_state.get("_debug_filters"):
-        st.sidebar.info(f"🔧 DEBUG: Initialized revision to default: {default_rev}")
-elif st.session_state["view_results_revision"] not in all_revs:
-    # Only reset if current value is invalid (e.g., after data refresh)
-    old_val = st.session_state["view_results_revision"]
-    st.session_state["view_results_revision"] = default_rev
+        st.sidebar.success(f"🔧 DEBUG: Preserved revision: {st.session_state['view_results_revision']}")
+else:
+    # First time or invalid selection - use default
+    default_rev_index = all_revs.index(default_rev) if default_rev in all_revs else 0
     if st.session_state.get("_debug_filters"):
-        st.sidebar.warning(f"🔧 DEBUG: Reset invalid revision {old_val} -> {default_rev}")
-elif st.session_state.get("_debug_filters"):
-    st.sidebar.success(f"🔧 DEBUG: Preserved revision: {st.session_state['view_results_revision']}")
+        st.sidebar.info(f"🔧 DEBUG: Using default revision: {all_revs[default_rev_index]}")
 
 rev = st.selectbox(
     "Revision",
     all_revs,
+    index=default_rev_index,
     key="view_results_revision",
 )
 
@@ -1270,28 +1275,31 @@ best_country_key = next(
 )
 default_country_in_rev = best_country_key[1]
 
-# Initialize countries in session state only if not already set or if invalid
-if "view_results_countries" not in st.session_state:
-    st.session_state["view_results_countries"] = [default_country_in_rev]
-    if st.session_state.get("_debug_filters"):
-        st.sidebar.info(f"🔧 DEBUG: Initialized countries to: {[default_country_in_rev]}")
-else:
-    # Validate current selection - only update if completely invalid
+# Determine default countries for multiselect
+if "view_results_countries" in st.session_state:
+    # User has saved selections - validate and preserve
     current_countries = st.session_state["view_results_countries"]
     valid_countries = [c for c in current_countries if c in rev_countries]
-    # Only reset if NO valid countries remain (e.g., switched to a revision without those countries)
-    if not valid_countries and rev_countries:
-        st.session_state["view_results_countries"] = (
-            [default_country_in_rev] if default_country_in_rev in rev_countries else []
-        )
+    if valid_countries:
+        # Has valid selections - use them
+        default_countries = valid_countries
         if st.session_state.get("_debug_filters"):
-            st.sidebar.warning(f"🔧 DEBUG: Reset countries {current_countries} -> {st.session_state['view_results_countries']}")
-    elif st.session_state.get("_debug_filters"):
-        st.sidebar.success(f"🔧 DEBUG: Preserved countries: {current_countries}")
+            st.sidebar.success(f"🔧 DEBUG: Preserved countries: {valid_countries}")
+    else:
+        # All selections are invalid - use default
+        default_countries = [default_country_in_rev] if default_country_in_rev in rev_countries else []
+        if st.session_state.get("_debug_filters"):
+            st.sidebar.warning(f"🔧 DEBUG: Reset invalid countries {current_countries} -> {default_countries}")
+else:
+    # First time - use default
+    default_countries = [default_country_in_rev]
+    if st.session_state.get("_debug_filters"):
+        st.sidebar.info(f"🔧 DEBUG: Using default countries: {default_countries}")
 
 countries_sel = st.multiselect(
     "Countries",
     rev_countries,
+    default=default_countries,
     key="view_results_countries",
 )
 if not countries_sel:
@@ -1306,26 +1314,31 @@ all_stamps = sorted(
     {k[2] for k in rev_country_keys}, key=parse_stamp, reverse=True
 )
 
-# Initialize timestamp in session state only if not already set
-if "view_results_timestamp" not in st.session_state:
-    st.session_state["view_results_timestamp"] = ""
-    if st.session_state.get("_debug_filters"):
-        st.sidebar.info(f"🔧 DEBUG: Initialized timestamp to empty")
-elif st.session_state["view_results_timestamp"] and st.session_state["view_results_timestamp"] not in all_stamps:
-    # Only reset if current timestamp is invalid (not in available stamps)
-    old_val = st.session_state["view_results_timestamp"]
-    st.session_state["view_results_timestamp"] = ""
-    if st.session_state.get("_debug_filters"):
-        st.sidebar.warning(f"🔧 DEBUG: Reset invalid timestamp {old_val} -> empty")
-elif st.session_state.get("_debug_filters"):
-    st.sidebar.success(f"🔧 DEBUG: Preserved timestamp: {st.session_state['view_results_timestamp'] or '(empty)'}")
-
-# Single timestamp selection - if not selected, will show latest for each country
+# Determine default timestamp for selectbox
 stamp_options = [""] + all_stamps
+if "view_results_timestamp" in st.session_state:
+    # User has a saved selection
+    saved_timestamp = st.session_state["view_results_timestamp"]
+    if saved_timestamp in stamp_options:
+        # Valid saved selection - use it
+        default_stamp_index = stamp_options.index(saved_timestamp)
+        if st.session_state.get("_debug_filters"):
+            st.sidebar.success(f"🔧 DEBUG: Preserved timestamp: {saved_timestamp or '(empty)'}")
+    else:
+        # Invalid saved selection - use default (empty)
+        default_stamp_index = 0
+        if st.session_state.get("_debug_filters"):
+            st.sidebar.warning(f"🔧 DEBUG: Reset invalid timestamp {saved_timestamp} -> empty")
+else:
+    # First time - use default (empty)
+    default_stamp_index = 0
+    if st.session_state.get("_debug_filters"):
+        st.sidebar.info(f"🔧 DEBUG: Using default timestamp: empty")
 
 stamp_sel = st.selectbox(
     "Timestamp (optional - select one or leave blank to show latest per country)",
     stamp_options,
+    index=default_stamp_index,
     key="view_results_timestamp",
 )
 
