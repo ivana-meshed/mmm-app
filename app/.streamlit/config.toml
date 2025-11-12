@@ -12,7 +12,5 @@ level = "info"
 [theme]
 base = "light"
 
-[ui]
-# Ensure wide layout takes full width
-hideTopBar = false
-hideSidebarNav = false
+[client]
+showSidebarNavigation = false
