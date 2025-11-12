@@ -396,6 +396,156 @@ def find_allocator_plots(blobs):
     return plots
 
 
+# --- METRICS EXTRACTION HELPERS ---------------------------------------------
+_METRIC_ALIASES = {
+    "r.squared": "r2",
+    "rsq": "r2",
+    "r2": "r2",
+    "nrmse": "nrmse",
+    "nrmsd": "nrmse",
+    "decomp_rssd": "decomp_rssd",
+    "decomprssd": "decomp_rssd",
+    "decomp.rssd": "decomp_rssd",
+    "rssd": "decomp_rssd",
+}
+_SPLIT_ALIASES = {
+    "train": "train",
+    "training": "train",
+    "val": "val",
+    "valid": "val",
+    "validation": "val",
+    "test": "test",
+    "holdout": "test",
+}
+
+
+def _lower_cols(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    return df
+
+
+def _extract_from_long(df: pd.DataFrame) -> dict:
+    """
+    Long format example:
+    split | r2 | nrmse | decomp_rssd
+    train | .. |  ...  | ...
+    val   | .. |  ...  | ...
+    test  | .. |  ...  | ...
+    """
+    df = _lower_cols(df)
+    split_col = next(
+        (c for c in df.columns if c in ("split", "set", "phase")), None
+    )
+    if not split_col:
+        return {}
+    df["_split"] = df[split_col].map(
+        lambda s: _SPLIT_ALIASES.get(str(s).strip().lower(), None)
+    )
+    df = df[df["_split"].notna()].copy()
+    out = {}
+    for metric_col in df.columns:
+        if metric_col in (split_col, "_split"):
+            continue
+        # normalize punctuation to underscores before alias lookup
+        norm = re.sub(r"[()\[\]{}:.\s\-]+", "_", str(metric_col).lower()).strip(
+            "_"
+        )
+        m_std = _METRIC_ALIASES.get(norm, None)
+        if not m_std:
+            continue
+        for sp, val in df.groupby("_split")[metric_col].first().items():
+            out[f"{m_std}_{sp}"] = pd.to_numeric(val, errors="coerce")
+    return out
+
+
+def _extract_from_wide(df: pd.DataFrame) -> dict:
+    """
+    Wide format examples:
+      r2_train, r2_val, r2_test, nrmse_train, ...
+    or train_r2, validation_nrmse, etc.
+    """
+    df = _lower_cols(df)
+    if len(df) == 0:
+        return {}
+    row = df.iloc[0]
+    out = {}
+    for col, val in row.items():
+        col_l = str(col).lower()
+        # normalize parens/colons into underscores first
+        clean = re.sub(r"[()\[\]{}:]+", "_", col_l)
+        # split on underscore, dot, hyphen or whitespace
+        parts = re.split(r"[ _.\-]+", clean)
+        parts = [p for p in parts if p]
+        metric = None
+        split = None
+        for p in parts:
+            if p in _METRIC_ALIASES:
+                metric = _METRIC_ALIASES[p]
+            if p in _SPLIT_ALIASES:
+                split = _SPLIT_ALIASES[p]
+        if metric and split:
+            out[f"{metric}_{split}"] = pd.to_numeric(val, errors="coerce")
+        # Optional fallback: if a "metric with no split" column exists, copy to all splits
+        if metric and not split and metric not in ("r2",):  # keep r2 strict
+            v = pd.to_numeric(val, errors="coerce")
+            for sp in ("train", "val", "test"):
+                out.setdefault(f"{metric}_{sp}", v)
+    return out
+
+
+def _try_read_csv(blob) -> pd.DataFrame | None:  # type: ignore
+    try:
+        data = download_bytes_safe(blob)
+        if data is None:
+            return None
+        return pd.read_csv(io.BytesIO(data))
+    except Exception:
+        return None
+
+
+def extract_core_metrics_from_blobs(blobs: list) -> dict:
+    """
+    Try to find a CSV that contains r2 / nrmse / decomp_rssd across train/val/test.
+    We scan likely metric/summary CSVs and fall back to anything that looks right.
+    Returns dict like:
+      {'r2_train':..., 'r2_val':..., 'r2_test':..., 'nrmse_train':..., ..., 'decomp_rssd_test':...}
+    Missing keys are OK.
+    """
+    csvs = [b for b in blobs if b.name.lower().endswith(".csv")]
+    preferred = [
+        b
+        for b in csvs
+        if re.search(r"(metrics|summary|performance)", b.name.lower())
+    ]
+    candidates = preferred + [b for b in csvs if b not in preferred]
+
+    for b in candidates:
+        df = _try_read_csv(b)
+        if df is None:
+            continue
+        extracted = {}
+        cols_l = [c.lower() for c in df.columns]
+        if any(c in cols_l for c in ("split", "set", "phase")):
+            extracted = _extract_from_long(df)
+        else:
+            extracted = _extract_from_wide(df)
+        if any(k.startswith("r2_") for k in extracted.keys()) or any(
+            k.startswith("nrmse_") for k in extracted.keys()
+        ):
+            return extracted
+
+    # Fallback: allocator_metrics.csv
+    alloc = find_blob(blobs, "/allocator_metrics.csv")
+    if alloc:
+        df = _try_read_csv(alloc)
+        if df is not None:
+            e = _extract_from_wide(df)
+            if e:
+                return e
+    return {}
+
+
 # ---------- Renderers ----------
 def render_model_config_section(blobs, country, stamp):
     """Render model configuration from job_config.copy.json"""
