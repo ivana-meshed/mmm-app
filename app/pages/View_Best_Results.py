@@ -984,7 +984,7 @@ def extract_core_metrics_from_blobs(blobs: list) -> dict:
 
 @st.cache_data(ttl=600, show_spinner=False)
 def rank_runs_for_country(
-    runs: dict, country: str, weights=(0.2, 0.5, 0.3), alpha=1.0, beta=1.0
+    _runs: dict, country: str, weights=(0.2, 0.5, 0.3), alpha=1.0, beta=1.0
 ) -> tuple[tuple, pd.DataFrame]:
     """
     Build a summary table for all (rev, country, stamp) runs, compute a score:
@@ -992,9 +992,10 @@ def rank_runs_for_country(
     Return (best_key, dataframe_sorted_desc_by_score).
     
     Cached for 10 minutes to avoid recomputing scores on every page load.
+    Note: _runs is prefixed with underscore to prevent Streamlit from hashing it.
     """
     rows = []
-    for (rev, ctry, stamp), blobs in runs.items():
+    for (rev, ctry, stamp), blobs in _runs.items():
         if ctry != country:
             continue
         metrics = extract_core_metrics_from_blobs(blobs) or {}
