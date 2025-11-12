@@ -397,6 +397,203 @@ def find_allocator_plots(blobs):
 
 
 # ---------- Renderers ----------
+def render_model_config_section(blobs, country, stamp):
+    """Render model configuration from job_config.copy.json"""
+    st.subheader("Model Configuration")
+    
+    # Look for the job config file
+    config_blob = find_blob(blobs, "/debug/job_config.copy.json") or find_blob(
+        blobs, "job_config.copy.json"
+    )
+    
+    if not config_blob:
+        st.info("No model configuration found (debug/job_config.copy.json).")
+        return
+    
+    try:
+        config_data = download_bytes_safe(config_blob)
+        if not config_data:
+            st.warning("Could not read model configuration.")
+            return
+        
+        import json
+        config = json.loads(config_data.decode("utf-8"))
+        
+        # Display key configuration parameters in a clean format
+        with st.container(border=True):
+            # Create columns for better layout
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Training Parameters**")
+                if "iterations" in config:
+                    st.metric("Iterations", config["iterations"])
+                if "trials" in config:
+                    st.metric("Trials", config["trials"])
+                if "calibration_period" in config:
+                    st.metric("Calibration Period", config["calibration_period"])
+            
+            with col2:
+                st.markdown("**Data Configuration**")
+                if "date_min" in config:
+                    st.metric("Start Date", config["date_min"])
+                if "date_max" in config:
+                    st.metric("End Date", config["date_max"])
+                if "dep_var" in config:
+                    st.metric("Dependent Variable", config["dep_var"])
+            
+            # Display additional parameters in an expander
+            with st.expander("View full configuration", expanded=False):
+                st.json(config)
+        
+        # Provide download link
+        fn = os.path.basename(config_blob.name)
+        download_link_for_blob(
+            config_blob,
+            label=f"📥 Download {fn}",
+            mime_hint="application/json",
+            key_suffix=f"config|{country}|{stamp}",
+        )
+    
+    except Exception as e:
+        st.warning(f"Couldn't parse model configuration: {e}")
+
+
+def render_model_metrics_table(blobs, country, stamp):
+    """Render model metrics in a formatted table with color coding"""
+    st.subheader("Model Performance Metrics")
+    
+    # Extract metrics from blobs
+    metrics = extract_core_metrics_from_blobs(blobs)
+    
+    if not metrics:
+        st.info("No model metrics found.")
+        return
+    
+    # Define thresholds based on Robyn documentation
+    # R2: higher is better (0-1 scale)
+    r2_thresholds = {"good": 0.7, "acceptable": 0.5}
+    # NRMSE: lower is better (percentage)
+    nrmse_thresholds = {"good": 0.15, "acceptable": 0.25}
+    # DECOMP.RSSD: lower is better
+    decomp_thresholds = {"good": 0.1, "acceptable": 0.2}
+    
+    def get_color(value, metric_type):
+        """Return color based on value and metric type"""
+        if pd.isna(value):
+            return "background-color: #f0f0f0"  # gray for missing
+        
+        if metric_type == "r2":
+            # Higher is better
+            if value >= r2_thresholds["good"]:
+                return "background-color: #d4edda; color: #155724"  # green
+            elif value >= r2_thresholds["acceptable"]:
+                return "background-color: #fff3cd; color: #856404"  # yellow
+            else:
+                return "background-color: #f8d7da; color: #721c24"  # red
+        
+        elif metric_type == "nrmse":
+            # Lower is better
+            if value <= nrmse_thresholds["good"]:
+                return "background-color: #d4edda; color: #155724"  # green
+            elif value <= nrmse_thresholds["acceptable"]:
+                return "background-color: #fff3cd; color: #856404"  # yellow
+            else:
+                return "background-color: #f8d7da; color: #721c24"  # red
+        
+        elif metric_type == "decomp_rssd":
+            # Lower is better
+            if value <= decomp_thresholds["good"]:
+                return "background-color: #d4edda; color: #155724"  # green
+            elif value <= decomp_thresholds["acceptable"]:
+                return "background-color: #fff3cd; color: #856404"  # yellow
+            else:
+                return "background-color: #f8d7da; color: #721c24"  # red
+        
+        return ""
+    
+    # Build the metrics table
+    table_data = {
+        "Split": ["Train", "Validation", "Test"],
+        "Predictive Power (R²)": [
+            metrics.get("r2_train"),
+            metrics.get("r2_val"),
+            metrics.get("r2_test"),
+        ],
+        "Prediction Accuracy (NRMSE)": [
+            metrics.get("nrmse_train"),
+            metrics.get("nrmse_val"),
+            metrics.get("nrmse_test"),
+        ],
+        "Business Error (DECOMP.RSSD)": [
+            metrics.get("decomp_rssd_train"),
+            metrics.get("decomp_rssd_val"),
+            metrics.get("decomp_rssd_test"),
+        ],
+    }
+    
+    df = pd.DataFrame(table_data)
+    
+    # Apply styling
+    def style_metrics(row):
+        styles = [""] * len(row)
+        if row.name == "Split":
+            return styles
+        
+        idx = row.name
+        styles[1] = get_color(table_data["Predictive Power (R²)"][idx], "r2")
+        styles[2] = get_color(table_data["Prediction Accuracy (NRMSE)"][idx], "nrmse")
+        styles[3] = get_color(table_data["Business Error (DECOMP.RSSD)"][idx], "decomp_rssd")
+        return styles
+    
+    # Format the values
+    def format_value(val):
+        if pd.isna(val):
+            return "N/A"
+        return f"{val:.4f}"
+    
+    # Create HTML table with styling
+    html = "<table style='width:100%; border-collapse: collapse;'>"
+    html += "<thead><tr style='background-color: #f8f9fa;'>"
+    for col in df.columns:
+        html += f"<th style='padding: 12px; text-align: left; border: 1px solid #dee2e6;'>{col}</th>"
+    html += "</tr></thead><tbody>"
+    
+    for i, row in df.iterrows():
+        html += "<tr>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; font-weight: bold;'>{row['Split']}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Predictive Power (R²)'], 'r2')}'>{format_value(row['Predictive Power (R²)'])}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Prediction Accuracy (NRMSE)'], 'nrmse')}'>{format_value(row['Prediction Accuracy (NRMSE)'])}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Business Error (DECOMP.RSSD)'], 'decomp_rssd')}'>{format_value(row['Business Error (DECOMP.RSSD)'])}</td>"
+        html += "</tr>"
+    
+    html += "</tbody></table>"
+    
+    st.markdown(html, unsafe_allow_html=True)
+    
+    # Add legend
+    st.caption("🟢 Green = Good | 🟡 Yellow = Acceptable | 🔴 Red = Needs Improvement")
+    
+    # Display threshold information in an expander
+    with st.expander("View metric thresholds", expanded=False):
+        st.markdown(f"""
+        **R² (Predictive Power)** - Higher is better:
+        - Good: ≥ {r2_thresholds['good']}
+        - Acceptable: ≥ {r2_thresholds['acceptable']}
+        - Poor: < {r2_thresholds['acceptable']}
+        
+        **NRMSE (Prediction Accuracy)** - Lower is better:
+        - Good: ≤ {nrmse_thresholds['good']}
+        - Acceptable: ≤ {nrmse_thresholds['acceptable']}
+        - Poor: > {nrmse_thresholds['acceptable']}
+        
+        **DECOMP.RSSD (Business Error)** - Lower is better:
+        - Good: ≤ {decomp_thresholds['good']}
+        - Acceptable: ≤ {decomp_thresholds['acceptable']}
+        - Poor: > {decomp_thresholds['acceptable']}
+        """)
+
+
 def render_metrics_section(blobs, country, stamp):
     st.subheader("Allocator Metrics")
     metrics_csv = find_blob(blobs, "/allocator_metrics.csv")
@@ -847,6 +1044,8 @@ def render_run_for_country(
     best_id, iters, trials = parse_best_meta(blobs)
 
     # Render sections in the specified order
+    render_model_config_section(blobs, country, stamp)
+    render_model_metrics_table(blobs, country, stamp)
     render_metrics_section(blobs, country, stamp)
     render_onepager_section(blobs, best_id, country, stamp)
     render_allocator_section(blobs, country, stamp)
