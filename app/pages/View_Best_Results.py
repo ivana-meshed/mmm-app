@@ -27,6 +27,17 @@ except Exception:
 
 require_login_and_domain()
 
+# Initialize session state defaults
+try:
+    from app_split_helpers import ensure_session_defaults
+
+    ensure_session_defaults()
+except ImportError:
+    # Fallback if app_split_helpers is not available
+    st.session_state.setdefault(
+        "gcs_bucket", os.getenv("GCS_BUCKET", "mmm-app-output")
+    )
+
 # ---------- Page ----------
 st.title("Best results browser (GCS)")
 
@@ -345,6 +356,270 @@ def find_allocator_plots(blobs):
 
 
 # ---------- Renderers ----------
+@st.cache_data(ttl=3600, show_spinner="Loading model configuration...")
+def _fetch_model_config(bucket_name: str, stamp: str):
+    """Fetch and parse model configuration. Cached for performance."""
+    try:
+        config_path = f"training-configs/{stamp}/job_config.json"
+        bucket = client.bucket(bucket_name)
+        config_blob = bucket.blob(config_path)
+
+        if config_blob.exists():
+            config_data = config_blob.download_as_bytes()
+            if config_data:
+                import json
+
+                return json.loads(config_data.decode("utf-8"))
+    except Exception:
+        pass
+    return None
+
+
+def render_model_config_section(blobs, country, stamp, bucket_name):
+    """Render model configuration from training-configs/{stamp}/job_config.json"""
+    st.subheader("Model Configuration")
+
+    # Try to fetch config from cache first
+    config = _fetch_model_config(bucket_name, stamp)
+
+    # Fallback to debug path if not found in training-configs
+    if not config:
+        try:
+            config_blob = find_blob(
+                blobs, "/debug/job_config.copy.json"
+            ) or find_blob(blobs, "job_config.copy.json")
+            if not config_blob:
+                st.info(
+                    f"No model configuration found (tried training-configs/{stamp}/job_config.json)."
+                )
+                return
+
+            config_data = download_bytes_safe(config_blob)
+            if not config_data:
+                st.warning("Could not read model configuration.")
+                return
+
+            import json
+
+            config = json.loads(config_data.decode("utf-8"))
+        except Exception as e:
+            st.warning(f"Couldn't parse model configuration: {e}")
+            return
+
+    # Display configuration parameters in a single column
+    if config:
+        with st.container(border=True):
+            # Helper function to format list values
+            def format_list(val):
+                if isinstance(val, list):
+                    return ", ".join(str(v) for v in val)
+                return str(val)
+
+            # 1. Iterations
+            if "iterations" in config:
+                st.markdown(f"**Iterations:** {config['iterations']}")
+
+            # 2. Trials
+            if "trials" in config:
+                st.markdown(f"**Trials:** {config['trials']}")
+
+            # 3. Train Size
+            if "train_size" in config:
+                train_size = format_list(config["train_size"])
+                st.markdown(f"**Train Size:** [{train_size}]")
+
+            # 4. Adstock
+            if "adstock" in config:
+                st.markdown(f"**Adstock:** {config['adstock']}")
+
+            # 5. Goal Variable / Goal Type
+            goal_var = config.get("dep_var", "N/A")
+            goal_type = config.get("dep_var_type", "N/A")
+            st.markdown(
+                f"**Goal Variable / Goal Type:** {goal_var} / {goal_type}"
+            )
+
+            # 6. Paid Media Spends
+            if "paid_media_spends" in config:
+                spends = format_list(config["paid_media_spends"])
+                st.markdown(f"**Paid Media Spends:** {spends}")
+
+            # 7. Paid Media Variables
+            if "paid_media_vars" in config:
+                vars = format_list(config["paid_media_vars"])
+                st.markdown(f"**Paid Media Variables:** {vars}")
+
+            # 8. Context Variables
+            if "context_vars" in config:
+                ctx = format_list(config["context_vars"])
+                st.markdown(f"**Context Variables:** {ctx}")
+
+            # 9. Factor Variables
+            if "factor_vars" in config:
+                factors = format_list(config["factor_vars"])
+                st.markdown(f"**Factor Variables:** {factors}")
+
+            # 10. Organic Variables
+            if "organic_vars" in config:
+                organic = format_list(config["organic_vars"])
+                st.markdown(f"**Organic Variables:** {organic}")
+
+            # Display additional parameters in an expander
+            with st.expander("View full configuration", expanded=False):
+                st.json(config)
+
+
+def render_model_metrics_table(blobs, country, stamp):
+    """Render model metrics in a formatted table with color coding"""
+    st.subheader("Model Performance Metrics")
+
+    # Create a cache key from blob names
+    blob_names = tuple(sorted([b.name for b in blobs]))
+
+    # Extract metrics from blobs (with caching)
+    @st.cache_data(ttl=3600, show_spinner="Loading metrics...")
+    def _extract_cached_metrics(blob_names_key):
+        # Re-extract metrics (blobs aren't directly cacheable, but results are)
+        return extract_core_metrics_from_blobs(blobs)
+
+    metrics = _extract_cached_metrics(blob_names)
+
+    if not metrics:
+        st.info("No model metrics found.")
+        return
+
+    # Define thresholds based on Robyn documentation
+    # R2: higher is better (0-1 scale)
+    r2_thresholds = {"good": 0.7, "acceptable": 0.5}
+    # NRMSE: lower is better (percentage)
+    nrmse_thresholds = {"good": 0.15, "acceptable": 0.25}
+    # DECOMP.RSSD: lower is better
+    decomp_thresholds = {"good": 0.1, "acceptable": 0.2}
+
+    def get_color(value, metric_type):
+        """Return color based on value and metric type"""
+        if pd.isna(value):
+            return "background-color: #f0f0f0"  # gray for missing
+
+        if metric_type == "r2":
+            # Higher is better
+            if value >= r2_thresholds["good"]:
+                return "background-color: #d4edda; color: #155724"  # green
+            elif value >= r2_thresholds["acceptable"]:
+                return "background-color: #fff3cd; color: #856404"  # yellow
+            else:
+                return "background-color: #f8d7da; color: #721c24"  # red
+
+        elif metric_type == "nrmse":
+            # Lower is better
+            if value <= nrmse_thresholds["good"]:
+                return "background-color: #d4edda; color: #155724"  # green
+            elif value <= nrmse_thresholds["acceptable"]:
+                return "background-color: #fff3cd; color: #856404"  # yellow
+            else:
+                return "background-color: #f8d7da; color: #721c24"  # red
+
+        elif metric_type == "decomp_rssd":
+            # Lower is better
+            if value <= decomp_thresholds["good"]:
+                return "background-color: #d4edda; color: #155724"  # green
+            elif value <= decomp_thresholds["acceptable"]:
+                return "background-color: #fff3cd; color: #856404"  # yellow
+            else:
+                return "background-color: #f8d7da; color: #721c24"  # red
+
+        return ""
+
+    # Build the metrics table
+    table_data = {
+        "Split": ["Train", "Validation", "Test"],
+        "Predictive Power (R²)": [
+            metrics.get("r2_train"),
+            metrics.get("r2_val"),
+            metrics.get("r2_test"),
+        ],
+        "Prediction Accuracy (NRMSE)": [
+            metrics.get("nrmse_train"),
+            metrics.get("nrmse_val"),
+            metrics.get("nrmse_test"),
+        ],
+        "Business Error (DECOMP.RSSD)": [
+            metrics.get("decomp_rssd_train"),
+            metrics.get("decomp_rssd_val"),
+            metrics.get("decomp_rssd_test"),
+        ],
+    }
+
+    df = pd.DataFrame(table_data)
+
+    # Apply styling
+    def style_metrics(row):
+        styles = [""] * len(row)
+        if row.name == "Split":
+            return styles
+
+        idx = row.name
+        styles[1] = get_color(table_data["Predictive Power (R²)"][idx], "r2")
+        styles[2] = get_color(
+            table_data["Prediction Accuracy (NRMSE)"][idx], "nrmse"
+        )
+        styles[3] = get_color(
+            table_data["Business Error (DECOMP.RSSD)"][idx], "decomp_rssd"
+        )
+        return styles
+
+    # Format the values
+    def format_value(val):
+        if pd.isna(val):
+            return "N/A"
+        return f"{val:.4f}"
+
+    # Create HTML table with styling
+    html = "<table style='width:100%; border-collapse: collapse;'>"
+    html += "<thead><tr style='background-color: #f8f9fa;'>"
+    for col in df.columns:
+        html += f"<th style='padding: 12px; text-align: left; border: 1px solid #dee2e6;'>{col}</th>"
+    html += "</tr></thead><tbody>"
+
+    for i, row in df.iterrows():
+        html += "<tr>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; font-weight: bold;'>{row['Split']}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Predictive Power (R²)'], 'r2')}'>{format_value(row['Predictive Power (R²)'])}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Prediction Accuracy (NRMSE)'], 'nrmse')}'>{format_value(row['Prediction Accuracy (NRMSE)'])}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Business Error (DECOMP.RSSD)'], 'decomp_rssd')}'>{format_value(row['Business Error (DECOMP.RSSD)'])}</td>"
+        html += "</tr>"
+
+    html += "</tbody></table>"
+
+    st.markdown(html, unsafe_allow_html=True)
+
+    # Add legend
+    st.caption(
+        "🟢 Green = Good | 🟡 Yellow = Acceptable | 🔴 Red = Needs Improvement"
+    )
+
+    # Display threshold information in an expander
+    with st.expander("View metric thresholds", expanded=False):
+        st.markdown(
+            f"""
+        **R² (Predictive Power)** - Higher is better:
+        - Good: ≥ {r2_thresholds['good']}
+        - Acceptable: ≥ {r2_thresholds['acceptable']}
+        - Poor: < {r2_thresholds['acceptable']}
+        
+        **NRMSE (Prediction Accuracy)** - Lower is better:
+        - Good: ≤ {nrmse_thresholds['good']}
+        - Acceptable: ≤ {nrmse_thresholds['acceptable']}
+        - Poor: > {nrmse_thresholds['acceptable']}
+        
+        **DECOMP.RSSD (Business Error)** - Lower is better:
+        - Good: ≤ {decomp_thresholds['good']}
+        - Acceptable: ≤ {decomp_thresholds['acceptable']}
+        - Poor: > {decomp_thresholds['acceptable']}
+        """
+        )
+
+
 def render_metrics_section(blobs, country, stamp):
     st.subheader("Allocator Metrics")
     metrics_csv = find_blob(blobs, "/allocator_metrics.csv")
@@ -782,7 +1057,8 @@ def render_run_from_key(runs: dict, key: tuple, bucket_name: str):
     best_id, iters, trials = parse_best_meta(blobs)
 
     # Render sections in the specified order
-    render_metrics_section(blobs, country, stamp)
+    render_model_config_section(blobs, country, stamp, bucket_name)
+    render_model_metrics_table(blobs, country, stamp)
     render_onepager_section(blobs, best_id, country, stamp)
     render_allocator_section(blobs, country, stamp)
     render_all_files_section(blobs, bucket_name, country, stamp)
@@ -800,12 +1076,20 @@ def build_run_title(country: str, stamp: str, iters, trials):
 
 
 # ---------- Sidebar / controls ----------
+# Initialize session state for filter persistence
+if "view_best_results_bucket" not in st.session_state:
+    st.session_state["view_best_results_bucket"] = DEFAULT_BUCKET
+if "view_best_results_prefix" not in st.session_state:
+    st.session_state["view_best_results_prefix"] = DEFAULT_PREFIX
+if "view_best_results_auto_best" not in st.session_state:
+    st.session_state["view_best_results_auto_best"] = True
+
 with st.sidebar:
-    bucket_name = st.text_input("GCS bucket", value=DEFAULT_BUCKET)
+    bucket_name = st.text_input("GCS bucket", key="view_best_results_bucket")
     prefix = st.text_input(
         "Root prefix",
-        value=DEFAULT_PREFIX,
         help="Usually 'robyn/' or narrower like 'robyn/r100/'",
+        key="view_best_results_prefix",
     )
     if prefix and not prefix.endswith("/"):
         prefix = prefix + "/"
@@ -818,7 +1102,8 @@ with st.sidebar:
 
     st.subheader("Best-model scoring")
     auto_best = st.checkbox(
-        "Auto-pick best across ALL revisions per country", value=True
+        "Auto-pick best across ALL revisions per country",
+        key="view_best_results_auto_best",
     )
 
     # Sliders with persistent defaults
@@ -916,7 +1201,8 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
     best_id, iters, trials = parse_best_meta(blobs)
 
     # Render sections in the specified order
-    render_metrics_section(blobs, country, stamp)
+    render_model_config_section(blobs, country, stamp, bucket_name)
+    render_model_metrics_table(blobs, country, stamp)
     render_onepager_section(blobs, best_id, country, stamp)
     render_allocator_section(blobs, country, stamp)
     render_all_files_section(blobs, bucket_name, country, stamp)
@@ -944,7 +1230,24 @@ if not auto_best:
     all_revs = sorted(
         {k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True
     )
-    rev = st.selectbox("Revision", all_revs, index=all_revs.index(default_rev))
+
+    # Initialize revision in session state only if not already set
+    if "view_best_results_revision" not in st.session_state:
+        st.session_state["view_best_results_revision"] = default_rev
+
+    # Get the current value from session state, or use default if session state value is invalid
+    current_rev = st.session_state.get(
+        "view_best_results_revision", default_rev
+    )
+    if current_rev not in all_revs:
+        current_rev = default_rev
+        st.session_state["view_best_results_revision"] = default_rev
+
+    rev = st.selectbox(
+        "Revision",
+        all_revs,
+        key="view_best_results_revision",
+    )
 
     # Countries available in this revision
     rev_keys = [k for k in runs.keys() if k[0] == rev]
@@ -960,14 +1263,32 @@ if not auto_best:
     )
     default_country_in_rev = best_country_key[1]
 
-    countries_sel = st.multiselect(
-        "Countries",
-        rev_countries,
-        default=(
+    # Initialize countries in session state only if not already set
+    if "view_best_results_countries_rev" not in st.session_state:
+        st.session_state["view_best_results_countries_rev"] = (
             [default_country_in_rev]
             if default_country_in_rev in rev_countries
             else []
-        ),
+        )
+
+    # Get current value from session state, validate it's still valid
+    current_countries = st.session_state.get(
+        "view_best_results_countries_rev", [default_country_in_rev]
+    )
+    # Filter out any countries that are no longer available in this revision
+    valid_countries = [c for c in current_countries if c in rev_countries]
+    if not valid_countries:
+        valid_countries = (
+            [default_country_in_rev]
+            if default_country_in_rev in rev_countries
+            else []
+        )
+        st.session_state["view_best_results_countries_rev"] = valid_countries
+
+    countries_sel = st.multiselect(
+        "Countries",
+        rev_countries,
+        key="view_best_results_countries_rev",
     )
     if not countries_sel:
         st.info("Select at least one country.")
@@ -1009,10 +1330,24 @@ else:
         st.info("No countries found in the provided prefix.")
         st.stop()
 
+    # Initialize countries in session state only if not already set
+    if "view_best_results_countries_all" not in st.session_state:
+        st.session_state["view_best_results_countries_all"] = [all_countries[0]]
+
+    # Get current value from session state, validate it's still valid
+    current_countries = st.session_state.get(
+        "view_best_results_countries_all", [all_countries[0]]
+    )
+    # Filter out any countries that are no longer available
+    valid_countries = [c for c in current_countries if c in all_countries]
+    if not valid_countries:
+        valid_countries = [all_countries[0]]
+        st.session_state["view_best_results_countries_all"] = valid_countries
+
     countries_sel = st.multiselect(
         "Countries",
         all_countries,
-        default=[all_countries[0]],
+        key="view_best_results_countries_all",
     )
 
     if not countries_sel:

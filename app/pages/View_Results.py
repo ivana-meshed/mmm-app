@@ -28,6 +28,18 @@ except Exception:
     _sf_params_from_env = None
 
 require_login_and_domain()
+
+# Initialize session state defaults
+try:
+    from app_split_helpers import ensure_session_defaults
+
+    ensure_session_defaults()
+except ImportError:
+    # Fallback if app_split_helpers is not available
+    st.session_state.setdefault(
+        "gcs_bucket", os.getenv("GCS_BUCKET", "mmm-app-output")
+    )
+
 # ---------- Page ----------
 st.title("Results browser (GCS)")
 
@@ -396,7 +408,422 @@ def find_allocator_plots(blobs):
     return plots
 
 
+# --- METRICS EXTRACTION HELPERS ---------------------------------------------
+_METRIC_ALIASES = {
+    "r.squared": "r2",
+    "rsq": "r2",
+    "r2": "r2",
+    "nrmse": "nrmse",
+    "nrmsd": "nrmse",
+    "decomp_rssd": "decomp_rssd",
+    "decomprssd": "decomp_rssd",
+    "decomp.rssd": "decomp_rssd",
+    "rssd": "decomp_rssd",
+}
+_SPLIT_ALIASES = {
+    "train": "train",
+    "training": "train",
+    "val": "val",
+    "valid": "val",
+    "validation": "val",
+    "test": "test",
+    "holdout": "test",
+}
+
+
+def _lower_cols(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    return df
+
+
+def _extract_from_long(df: pd.DataFrame) -> dict:
+    """
+    Long format example:
+    split | r2 | nrmse | decomp_rssd
+    train | .. |  ...  | ...
+    val   | .. |  ...  | ...
+    test  | .. |  ...  | ...
+    """
+    df = _lower_cols(df)
+    split_col = next(
+        (c for c in df.columns if c in ("split", "set", "phase")), None
+    )
+    if not split_col:
+        return {}
+    df["_split"] = df[split_col].map(
+        lambda s: _SPLIT_ALIASES.get(str(s).strip().lower(), None)
+    )
+    df = df[df["_split"].notna()].copy()
+    out = {}
+    for metric_col in df.columns:
+        if metric_col in (split_col, "_split"):
+            continue
+        # normalize punctuation to underscores before alias lookup
+        norm = re.sub(r"[()\[\]{}:.\s\-]+", "_", str(metric_col).lower()).strip(
+            "_"
+        )
+        m_std = _METRIC_ALIASES.get(norm, None)
+        if not m_std:
+            continue
+        for sp, val in df.groupby("_split")[metric_col].first().items():
+            out[f"{m_std}_{sp}"] = pd.to_numeric(val, errors="coerce")
+    return out
+
+
+def _extract_from_wide(df: pd.DataFrame) -> dict:
+    """
+    Wide format examples:
+      r2_train, r2_val, r2_test, nrmse_train, ...
+    or train_r2, validation_nrmse, etc.
+    """
+    df = _lower_cols(df)
+    if len(df) == 0:
+        return {}
+    row = df.iloc[0]
+    out = {}
+    for col, val in row.items():
+        col_l = str(col).lower()
+        # normalize parens/colons into underscores first
+        clean = re.sub(r"[()\[\]{}:]+", "_", col_l)
+        # split on underscore, dot, hyphen or whitespace
+        parts = re.split(r"[ _.\-]+", clean)
+        parts = [p for p in parts if p]
+        metric = None
+        split = None
+        for p in parts:
+            if p in _METRIC_ALIASES:
+                metric = _METRIC_ALIASES[p]
+            if p in _SPLIT_ALIASES:
+                split = _SPLIT_ALIASES[p]
+        if metric and split:
+            out[f"{metric}_{split}"] = pd.to_numeric(val, errors="coerce")
+        # Optional fallback: if a "metric with no split" column exists, copy to all splits
+        if metric and not split and metric not in ("r2",):  # keep r2 strict
+            v = pd.to_numeric(val, errors="coerce")
+            for sp in ("train", "val", "test"):
+                out.setdefault(f"{metric}_{sp}", v)
+    return out
+
+
+def _try_read_csv(blob) -> pd.DataFrame | None:  # type: ignore
+    try:
+        data = download_bytes_safe(blob)
+        if data is None:
+            return None
+        return pd.read_csv(io.BytesIO(data))
+    except Exception:
+        return None
+
+
+def extract_core_metrics_from_blobs(blobs: list) -> dict:
+    """
+    Try to find a CSV that contains r2 / nrmse / decomp_rssd across train/val/test.
+    We scan likely metric/summary CSVs and fall back to anything that looks right.
+    Returns dict like:
+      {'r2_train':..., 'r2_val':..., 'r2_test':..., 'nrmse_train':..., ..., 'decomp_rssd_test':...}
+    Missing keys are OK.
+    """
+    csvs = [b for b in blobs if b.name.lower().endswith(".csv")]
+    preferred = [
+        b
+        for b in csvs
+        if re.search(r"(metrics|summary|performance)", b.name.lower())
+    ]
+    candidates = preferred + [b for b in csvs if b not in preferred]
+
+    for b in candidates:
+        df = _try_read_csv(b)
+        if df is None:
+            continue
+        extracted = {}
+        cols_l = [c.lower() for c in df.columns]
+        if any(c in cols_l for c in ("split", "set", "phase")):
+            extracted = _extract_from_long(df)
+        else:
+            extracted = _extract_from_wide(df)
+        if any(k.startswith("r2_") for k in extracted.keys()) or any(
+            k.startswith("nrmse_") for k in extracted.keys()
+        ):
+            return extracted
+
+    # Fallback: allocator_metrics.csv
+    alloc = find_blob(blobs, "/allocator_metrics.csv")
+    if alloc:
+        df = _try_read_csv(alloc)
+        if df is not None:
+            e = _extract_from_wide(df)
+            if e:
+                return e
+    return {}
+
+
 # ---------- Renderers ----------
+@st.cache_data(ttl=3600, show_spinner="Loading model configuration...")
+def _fetch_model_config(bucket_name: str, stamp: str):
+    """Fetch and parse model configuration. Cached for performance."""
+    try:
+        config_path = f"training-configs/{stamp}/job_config.json"
+        bucket = client.bucket(bucket_name)
+        config_blob = bucket.blob(config_path)
+
+        if config_blob.exists():
+            config_data = config_blob.download_as_bytes()
+            if config_data:
+                import json
+
+                return json.loads(config_data.decode("utf-8"))
+    except Exception:
+        pass
+    return None
+
+
+def render_model_config_section(blobs, country, stamp, bucket_name):
+    """Render model configuration from training-configs/{stamp}/job_config.json"""
+    st.subheader("Model Configuration")
+
+    # Try to fetch config from cache first
+    config = _fetch_model_config(bucket_name, stamp)
+
+    # Fallback to debug path if not found in training-configs
+    if not config:
+        try:
+            config_blob = find_blob(
+                blobs, "/debug/job_config.copy.json"
+            ) or find_blob(blobs, "job_config.copy.json")
+
+            if not config_blob:
+                st.info(
+                    f"No model configuration found (tried training-configs/{stamp}/job_config.json)."
+                )
+                return
+
+            config_data = download_bytes_safe(config_blob)
+            if not config_data:
+                st.warning("Could not read model configuration.")
+                return
+
+            import json
+
+            config = json.loads(config_data.decode("utf-8"))
+        except Exception as e:
+            st.warning(f"Couldn't parse model configuration: {e}")
+            return
+
+    # Display configuration parameters in a single column
+    if config:
+        with st.container(border=True):
+            # Helper function to format list values
+            def format_list(val):
+                if isinstance(val, list):
+                    return ", ".join(str(v) for v in val)
+                return str(val)
+
+            # 1. Iterations
+            if "iterations" in config:
+                st.markdown(f"**Iterations:** {config['iterations']}")
+
+            # 2. Trials
+            if "trials" in config:
+                st.markdown(f"**Trials:** {config['trials']}")
+
+            # 3. Train Size
+            if "train_size" in config:
+                train_size = format_list(config["train_size"])
+                st.markdown(f"**Train Size:** [{train_size}]")
+
+            # 4. Adstock
+            if "adstock" in config:
+                st.markdown(f"**Adstock:** {config['adstock']}")
+
+            # 5. Goal Variable / Goal Type
+            goal_var = config.get("dep_var", "N/A")
+            goal_type = config.get("dep_var_type", "N/A")
+            st.markdown(
+                f"**Goal Variable / Goal Type:** {goal_var} / {goal_type}"
+            )
+
+            # 6. Paid Media Spends
+            if "paid_media_spends" in config:
+                spends = format_list(config["paid_media_spends"])
+                st.markdown(f"**Paid Media Spends:** {spends}")
+
+            # 7. Paid Media Variables
+            if "paid_media_vars" in config:
+                vars = format_list(config["paid_media_vars"])
+                st.markdown(f"**Paid Media Variables:** {vars}")
+
+            # 8. Context Variables
+            if "context_vars" in config:
+                ctx = format_list(config["context_vars"])
+                st.markdown(f"**Context Variables:** {ctx}")
+
+            # 9. Factor Variables
+            if "factor_vars" in config:
+                factors = format_list(config["factor_vars"])
+                st.markdown(f"**Factor Variables:** {factors}")
+
+            # 10. Organic Variables
+            if "organic_vars" in config:
+                organic = format_list(config["organic_vars"])
+                st.markdown(f"**Organic Variables:** {organic}")
+
+            # Display additional parameters in an expander
+            with st.expander("View full configuration", expanded=False):
+                st.json(config)
+
+
+def render_model_metrics_table(blobs, country, stamp):
+    """Render model metrics in a formatted table with color coding"""
+    st.subheader("Model Performance Metrics")
+
+    # Create a cache key from blob names
+    blob_names = tuple(sorted([b.name for b in blobs]))
+
+    # Extract metrics from blobs (with caching)
+    @st.cache_data(ttl=3600, show_spinner="Loading metrics...")
+    def _extract_cached_metrics(blob_names_key):
+        # Re-extract metrics (blobs aren't directly cacheable, but results are)
+        return extract_core_metrics_from_blobs(blobs)
+
+    metrics = _extract_cached_metrics(blob_names)
+
+    if not metrics:
+        st.info("No model metrics found.")
+        return
+
+    # Define thresholds based on Robyn documentation
+    # R2: higher is better (0-1 scale)
+    r2_thresholds = {"good": 0.7, "acceptable": 0.5}
+    # NRMSE: lower is better (percentage)
+    nrmse_thresholds = {"good": 0.15, "acceptable": 0.25}
+    # DECOMP.RSSD: lower is better
+    decomp_thresholds = {"good": 0.1, "acceptable": 0.2}
+
+    def get_color(value, metric_type):
+        """Return color based on value and metric type"""
+        if pd.isna(value):
+            return "background-color: #f0f0f0"  # gray for missing
+
+        if metric_type == "r2":
+            # Higher is better
+            if value >= r2_thresholds["good"]:
+                return "background-color: #d4edda; color: #155724"  # green
+            elif value >= r2_thresholds["acceptable"]:
+                return "background-color: #fff3cd; color: #856404"  # yellow
+            else:
+                return "background-color: #f8d7da; color: #721c24"  # red
+
+        elif metric_type == "nrmse":
+            # Lower is better
+            if value <= nrmse_thresholds["good"]:
+                return "background-color: #d4edda; color: #155724"  # green
+            elif value <= nrmse_thresholds["acceptable"]:
+                return "background-color: #fff3cd; color: #856404"  # yellow
+            else:
+                return "background-color: #f8d7da; color: #721c24"  # red
+
+        elif metric_type == "decomp_rssd":
+            # Lower is better
+            if value <= decomp_thresholds["good"]:
+                return "background-color: #d4edda; color: #155724"  # green
+            elif value <= decomp_thresholds["acceptable"]:
+                return "background-color: #fff3cd; color: #856404"  # yellow
+            else:
+                return "background-color: #f8d7da; color: #721c24"  # red
+
+        return ""
+
+    # Build the metrics table
+    table_data = {
+        "Split": ["Train", "Validation", "Test"],
+        "Predictive Power (R²)": [
+            metrics.get("r2_train"),
+            metrics.get("r2_val"),
+            metrics.get("r2_test"),
+        ],
+        "Prediction Accuracy (NRMSE)": [
+            metrics.get("nrmse_train"),
+            metrics.get("nrmse_val"),
+            metrics.get("nrmse_test"),
+        ],
+        "Business Error (DECOMP.RSSD)": [
+            metrics.get("decomp_rssd_train"),
+            metrics.get("decomp_rssd_val"),
+            metrics.get("decomp_rssd_test"),
+        ],
+    }
+
+    df = pd.DataFrame(table_data)
+
+    # Apply styling
+    def style_metrics(row):
+        styles = [""] * len(row)
+        if row.name == "Split":
+            return styles
+
+        idx = row.name
+        styles[1] = get_color(table_data["Predictive Power (R²)"][idx], "r2")
+        styles[2] = get_color(
+            table_data["Prediction Accuracy (NRMSE)"][idx], "nrmse"
+        )
+        styles[3] = get_color(
+            table_data["Business Error (DECOMP.RSSD)"][idx], "decomp_rssd"
+        )
+        return styles
+
+    # Format the values
+    def format_value(val):
+        if pd.isna(val):
+            return "N/A"
+        return f"{val:.4f}"
+
+    # Create HTML table with styling
+    html = "<table style='width:100%; border-collapse: collapse;'>"
+    html += "<thead><tr style='background-color: #f8f9fa;'>"
+    for col in df.columns:
+        html += f"<th style='padding: 12px; text-align: left; border: 1px solid #dee2e6;'>{col}</th>"
+    html += "</tr></thead><tbody>"
+
+    for i, row in df.iterrows():
+        html += "<tr>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; font-weight: bold;'>{row['Split']}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Predictive Power (R²)'], 'r2')}'>{format_value(row['Predictive Power (R²)'])}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Prediction Accuracy (NRMSE)'], 'nrmse')}'>{format_value(row['Prediction Accuracy (NRMSE)'])}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Business Error (DECOMP.RSSD)'], 'decomp_rssd')}'>{format_value(row['Business Error (DECOMP.RSSD)'])}</td>"
+        html += "</tr>"
+
+    html += "</tbody></table>"
+
+    st.markdown(html, unsafe_allow_html=True)
+
+    # Add legend
+    st.caption(
+        "🟢 Green = Good | 🟡 Yellow = Acceptable | 🔴 Red = Needs Improvement"
+    )
+
+    # Display threshold information in an expander
+    with st.expander("View metric thresholds", expanded=False):
+        st.markdown(
+            f"""
+        **R² (Predictive Power)** - Higher is better:
+        - Good: ≥ {r2_thresholds['good']}
+        - Acceptable: ≥ {r2_thresholds['acceptable']}
+        - Poor: < {r2_thresholds['acceptable']}
+        
+        **NRMSE (Prediction Accuracy)** - Lower is better:
+        - Good: ≤ {nrmse_thresholds['good']}
+        - Acceptable: ≤ {nrmse_thresholds['acceptable']}
+        - Poor: > {nrmse_thresholds['acceptable']}
+        
+        **DECOMP.RSSD (Business Error)** - Lower is better:
+        - Good: ≤ {decomp_thresholds['good']}
+        - Acceptable: ≤ {decomp_thresholds['acceptable']}
+        - Poor: > {decomp_thresholds['acceptable']}
+        """
+        )
+
+
 def render_metrics_section(blobs, country, stamp):
     st.subheader("Allocator Metrics")
     metrics_csv = find_blob(blobs, "/allocator_metrics.csv")
@@ -718,12 +1145,18 @@ def render_all_files_section(blobs, bucket_name, country, stamp):
 
 
 # ---------- Sidebar / controls ----------
+# Initialize session state for filter persistence
+if "view_results_bucket" not in st.session_state:
+    st.session_state["view_results_bucket"] = DEFAULT_BUCKET
+if "view_results_prefix" not in st.session_state:
+    st.session_state["view_results_prefix"] = DEFAULT_PREFIX
+
 with st.sidebar:
-    bucket_name = st.text_input("GCS bucket", value=DEFAULT_BUCKET)
+    bucket_name = st.text_input("GCS bucket", key="view_results_bucket")
     prefix = st.text_input(
         "Root prefix",
-        value=DEFAULT_PREFIX,
         help="Usually 'robyn/' or narrower like 'robyn/r100/'",
+        key="view_results_prefix",
     )
 
     if prefix and not prefix.endswith("/"):
@@ -792,7 +1225,22 @@ default_rev = seed_key[0]
 
 # UI: revision choices
 all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
-rev = st.selectbox("Revision", all_revs, index=all_revs.index(default_rev))
+
+# Initialize revision in session state only if not already set
+if "view_results_revision" not in st.session_state:
+    st.session_state["view_results_revision"] = default_rev
+
+# Get the current value from session state, or use default if session state value is invalid
+current_rev = st.session_state.get("view_results_revision", default_rev)
+if current_rev not in all_revs:
+    current_rev = default_rev
+    st.session_state["view_results_revision"] = default_rev
+
+rev = st.selectbox(
+    "Revision",
+    all_revs,
+    key="view_results_revision",
+)
 
 # Countries available in this revision
 rev_keys = [k for k in runs.keys() if k[0] == rev]
@@ -808,10 +1256,28 @@ best_country_key = next(
 )
 default_country_in_rev = best_country_key[1]
 
+# Initialize countries in session state only if not already set
+if "view_results_countries" not in st.session_state:
+    st.session_state["view_results_countries"] = [default_country_in_rev]
+
+# Get current value from session state, validate it's still valid
+current_countries = st.session_state.get(
+    "view_results_countries", [default_country_in_rev]
+)
+# Filter out any countries that are no longer available in this revision
+valid_countries = [c for c in current_countries if c in rev_countries]
+if not valid_countries:
+    valid_countries = (
+        [default_country_in_rev]
+        if default_country_in_rev in rev_countries
+        else []
+    )
+    st.session_state["view_results_countries"] = valid_countries
+
 countries_sel = st.multiselect(
     "Countries",
     rev_countries,
-    default=[default_country_in_rev],
+    key="view_results_countries",
 )
 if not countries_sel:
     st.info("Select at least one country.")
@@ -825,15 +1291,44 @@ all_stamps = sorted(
     {k[2] for k in rev_country_keys}, key=parse_stamp, reverse=True
 )
 
+# Initialize timestamp in session state only if not already set
+if "view_results_timestamp" not in st.session_state:
+    st.session_state["view_results_timestamp"] = ""
+
+# Get current value from session state, validate it's still valid
+current_stamp = st.session_state.get("view_results_timestamp", "")
+if current_stamp and current_stamp not in all_stamps:
+    current_stamp = ""
+    st.session_state["view_results_timestamp"] = ""
+
 # Single timestamp selection - if not selected, will show latest for each country
+stamp_options = [""] + all_stamps
+
 stamp_sel = st.selectbox(
     "Timestamp (optional - select one or leave blank to show latest per country)",
-    [""] + all_stamps,
-    index=0,
+    stamp_options,
+    key="view_results_timestamp",
 )
 
 
 # ---------- Main renderer ----------
+@st.cache_data(ttl=3600, show_spinner=False)
+def _get_cached_run_data(
+    bucket_name: str, rev: str, country: str, stamp: str, run_key: tuple
+):
+    """Cache the heavy data operations for a run. Returns cached blobs metadata."""
+    # This function caches the fact that we've processed this run
+    # The actual blob objects can't be cached (not serializable), but we cache the metadata
+    return {
+        "bucket": bucket_name,
+        "rev": rev,
+        "country": country,
+        "stamp": stamp,
+        "key": run_key,
+        "cached_at": dt.datetime.now().isoformat(),
+    }
+
+
 def render_run_for_country(
     bucket_name: str, rev: str, country: str, stamp: str
 ):
@@ -846,8 +1341,12 @@ def render_run_for_country(
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
 
+    # Try to use cached data
+    _get_cached_run_data(bucket_name, rev, country, stamp, key)
+
     # Render sections in the specified order
-    render_metrics_section(blobs, country, stamp)
+    render_model_config_section(blobs, country, stamp, bucket_name)
+    render_model_metrics_table(blobs, country, stamp)
     render_onepager_section(blobs, best_id, country, stamp)
     render_allocator_section(blobs, country, stamp)
     render_all_files_section(blobs, bucket_name, country, stamp)
