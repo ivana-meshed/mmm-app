@@ -547,20 +547,27 @@ def extract_core_metrics_from_blobs(blobs: list) -> dict:
 
 
 # ---------- Renderers ----------
-def render_model_config_section(blobs, country, stamp):
-    """Render model configuration from job_config.copy.json"""
+def render_model_config_section(blobs, country, stamp, bucket_name):
+    """Render model configuration from training-configs/{stamp}/job_config.json"""
     st.subheader("Model Configuration")
 
-    # Look for the job config file
-    config_blob = find_blob(blobs, "/debug/job_config.copy.json") or find_blob(
-        blobs, "job_config.copy.json"
-    )
-
-    if not config_blob:
-        st.info("No model configuration found (debug/job_config.copy.json).")
-        return
-
+    # Try to fetch config from training-configs/{stamp}/job_config.json
     try:
+        config_path = f"training-configs/{stamp}/job_config.json"
+        bucket = client.bucket(bucket_name)
+        config_blob = bucket.blob(config_path)
+
+        if not config_blob.exists():
+            # Fallback to debug path in robyn results
+            config_blob = find_blob(
+                blobs, "/debug/job_config.copy.json"
+            ) or find_blob(blobs, "job_config.copy.json")
+            if not config_blob:
+                st.info(
+                    f"No model configuration found (tried training-configs/{stamp}/job_config.json)."
+                )
+                return
+
         config_data = download_bytes_safe(config_blob)
         if not config_data:
             st.warning("Could not read model configuration.")
@@ -600,7 +607,10 @@ def render_model_config_section(blobs, country, stamp):
                 st.json(config)
 
         # Provide download link
-        fn = os.path.basename(config_blob.name)
+        if hasattr(config_blob, "name"):
+            fn = os.path.basename(config_blob.name)
+        else:
+            fn = "job_config.json"
         download_link_for_blob(
             config_blob,
             label=f"📥 Download {fn}",
@@ -1205,9 +1215,8 @@ def render_run_for_country(
     best_id, iters, trials = parse_best_meta(blobs)
 
     # Render sections in the specified order
-    render_model_config_section(blobs, country, stamp)
+    render_model_config_section(blobs, country, stamp, bucket_name)
     render_model_metrics_table(blobs, country, stamp)
-    render_metrics_section(blobs, country, stamp)
     render_onepager_section(blobs, best_id, country, stamp)
     render_allocator_section(blobs, country, stamp)
     render_all_files_section(blobs, bucket_name, country, stamp)
