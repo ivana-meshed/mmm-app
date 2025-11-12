@@ -1240,23 +1240,24 @@ all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
 if st.session_state.get("_debug_filters"):
     st.sidebar.write("🔍 All session state keys:", sorted([k for k in st.session_state.keys() if not k.startswith('_')]))
     st.sidebar.write("🔍 Filter keys present:", {
-        "view_results_revision": "view_results_revision" in st.session_state,
-        "view_results_countries": "view_results_countries" in st.session_state,
-        "view_results_timestamp": "view_results_timestamp" in st.session_state,
+        "view_results_revision_value": "view_results_revision_value" in st.session_state,
+        "view_results_countries_value": "view_results_countries_value" in st.session_state,
+        "view_results_timestamp_value": "view_results_timestamp_value" in st.session_state,
     })
-    if "view_results_revision" in st.session_state:
-        st.sidebar.write(f"📌 Revision value: {st.session_state['view_results_revision']}")
-    if "view_results_countries" in st.session_state:
-        st.sidebar.write(f"📌 Countries value: {st.session_state['view_results_countries']}")
-    if "view_results_timestamp" in st.session_state:
-        st.sidebar.write(f"📌 Timestamp value: {st.session_state['view_results_timestamp']}")
+    if "view_results_revision_value" in st.session_state:
+        st.sidebar.write(f"📌 Revision value: {st.session_state['view_results_revision_value']}")
+    if "view_results_countries_value" in st.session_state:
+        st.sidebar.write(f"📌 Countries value: {st.session_state['view_results_countries_value']}")
+    if "view_results_timestamp_value" in st.session_state:
+        st.sidebar.write(f"📌 Timestamp value: {st.session_state['view_results_timestamp_value']}")
 
 # Determine the index for the selectbox (preserve user selection or use default)
-if "view_results_revision" in st.session_state and st.session_state["view_results_revision"] in all_revs:
+# Use separate session state key that persists across navigation
+if "view_results_revision_value" in st.session_state and st.session_state["view_results_revision_value"] in all_revs:
     # User has a valid saved selection - use it
-    default_rev_index = all_revs.index(st.session_state["view_results_revision"])
+    default_rev_index = all_revs.index(st.session_state["view_results_revision_value"])
     if st.session_state.get("_debug_filters"):
-        st.sidebar.success(f"🔧 DEBUG: Preserved revision: {st.session_state['view_results_revision']}")
+        st.sidebar.success(f"🔧 DEBUG: Preserved revision: {st.session_state['view_results_revision_value']}")
 else:
     # First time or invalid selection - use default
     default_rev_index = all_revs.index(default_rev) if default_rev in all_revs else 0
@@ -1267,8 +1268,11 @@ rev = st.selectbox(
     "Revision",
     all_revs,
     index=default_rev_index,
-    key="view_results_revision",
 )
+
+# Store selection in persistent session state key (not widget key)
+if rev != st.session_state.get("view_results_revision_value"):
+    st.session_state["view_results_revision_value"] = rev
 
 # Countries available in this revision
 rev_keys = [k for k in runs.keys() if k[0] == rev]
@@ -1285,9 +1289,10 @@ best_country_key = next(
 default_country_in_rev = best_country_key[1]
 
 # Determine default countries for multiselect
-if "view_results_countries" in st.session_state:
+# Use separate session state key that persists across navigation
+if "view_results_countries_value" in st.session_state:
     # User has saved selections - validate and preserve
-    current_countries = st.session_state["view_results_countries"]
+    current_countries = st.session_state["view_results_countries_value"]
     valid_countries = [c for c in current_countries if c in rev_countries]
     if valid_countries:
         # Has valid selections - use them
@@ -1309,8 +1314,11 @@ countries_sel = st.multiselect(
     "Countries",
     rev_countries,
     default=default_countries,
-    key="view_results_countries",
 )
+
+# Store selection in persistent session state key (not widget key)
+if countries_sel != st.session_state.get("view_results_countries_value"):
+    st.session_state["view_results_countries_value"] = countries_sel
 if not countries_sel:
     st.info("Select at least one country.")
     st.stop()
@@ -1324,10 +1332,11 @@ all_stamps = sorted(
 )
 
 # Determine default timestamp for selectbox
+# Use separate session state key that persists across navigation
 stamp_options = [""] + all_stamps
-if "view_results_timestamp" in st.session_state:
+if "view_results_timestamp_value" in st.session_state:
     # User has a saved selection
-    saved_timestamp = st.session_state["view_results_timestamp"]
+    saved_timestamp = st.session_state["view_results_timestamp_value"]
     if saved_timestamp in stamp_options:
         # Valid saved selection - use it
         default_stamp_index = stamp_options.index(saved_timestamp)
@@ -1348,8 +1357,11 @@ stamp_sel = st.selectbox(
     "Timestamp (optional - select one or leave blank to show latest per country)",
     stamp_options,
     index=default_stamp_index,
-    key="view_results_timestamp",
 )
+
+# Store selection in persistent session state key (not widget key)
+if stamp_sel != st.session_state.get("view_results_timestamp_value"):
+    st.session_state["view_results_timestamp_value"] = stamp_sel
 
 
 # ---------- Main renderer ----------
