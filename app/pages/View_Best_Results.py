@@ -1246,7 +1246,6 @@ if not auto_best:
     rev = st.selectbox(
         "Revision",
         all_revs,
-        index=all_revs.index(current_rev) if current_rev in all_revs else 0,
         key="view_best_results_revision",
     )
 
@@ -1289,7 +1288,6 @@ if not auto_best:
     countries_sel = st.multiselect(
         "Countries",
         rev_countries,
-        default=valid_countries,
         key="view_best_results_countries_rev",
     )
     if not countries_sel:
@@ -1349,7 +1347,6 @@ else:
     countries_sel = st.multiselect(
         "Countries",
         all_countries,
-        default=valid_countries,
         key="view_best_results_countries_all",
     )
 

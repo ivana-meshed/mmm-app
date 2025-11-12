@@ -1239,7 +1239,6 @@ if current_rev not in all_revs:
 rev = st.selectbox(
     "Revision",
     all_revs,
-    index=all_revs.index(current_rev) if current_rev in all_revs else 0,
     key="view_results_revision",
 )
 
@@ -1278,7 +1277,6 @@ if not valid_countries:
 countries_sel = st.multiselect(
     "Countries",
     rev_countries,
-    default=valid_countries,
     key="view_results_countries",
 )
 if not countries_sel:
@@ -1305,14 +1303,10 @@ if current_stamp and current_stamp not in all_stamps:
 
 # Single timestamp selection - if not selected, will show latest for each country
 stamp_options = [""] + all_stamps
-current_index = (
-    stamp_options.index(current_stamp) if current_stamp in stamp_options else 0
-)
 
 stamp_sel = st.selectbox(
     "Timestamp (optional - select one or leave blank to show latest per country)",
     stamp_options,
-    index=current_index,
     key="view_results_timestamp",
 )
 
