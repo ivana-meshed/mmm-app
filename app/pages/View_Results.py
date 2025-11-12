@@ -43,6 +43,16 @@ except ImportError:
 # ---------- Page ----------
 st.title("Results browser (GCS)")
 
+# Debug toggle
+col1, col2 = st.columns([6, 1])
+with col2:
+    if st.button("🐛 Debug" if not st.session_state.get("_debug_filters") else "🐛 Debug ✓"):
+        st.session_state["_debug_filters"] = not st.session_state.get("_debug_filters", False)
+        st.rerun()
+
+if st.session_state.get("_debug_filters"):
+    st.info("🔧 Debug mode enabled - filter state changes will be logged in sidebar")
+
 # ---------- Settings ----------
 DEFAULT_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 DEFAULT_PREFIX = "robyn/"
@@ -1229,9 +1239,16 @@ all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
 # Initialize revision in session state only if not already set
 if "view_results_revision" not in st.session_state:
     st.session_state["view_results_revision"] = default_rev
+    if st.session_state.get("_debug_filters"):
+        st.sidebar.info(f"🔧 DEBUG: Initialized revision to default: {default_rev}")
 elif st.session_state["view_results_revision"] not in all_revs:
     # Only reset if current value is invalid (e.g., after data refresh)
+    old_val = st.session_state["view_results_revision"]
     st.session_state["view_results_revision"] = default_rev
+    if st.session_state.get("_debug_filters"):
+        st.sidebar.warning(f"🔧 DEBUG: Reset invalid revision {old_val} -> {default_rev}")
+elif st.session_state.get("_debug_filters"):
+    st.sidebar.success(f"🔧 DEBUG: Preserved revision: {st.session_state['view_results_revision']}")
 
 rev = st.selectbox(
     "Revision",
@@ -1256,6 +1273,8 @@ default_country_in_rev = best_country_key[1]
 # Initialize countries in session state only if not already set or if invalid
 if "view_results_countries" not in st.session_state:
     st.session_state["view_results_countries"] = [default_country_in_rev]
+    if st.session_state.get("_debug_filters"):
+        st.sidebar.info(f"🔧 DEBUG: Initialized countries to: {[default_country_in_rev]}")
 else:
     # Validate current selection - only update if completely invalid
     current_countries = st.session_state["view_results_countries"]
@@ -1265,6 +1284,10 @@ else:
         st.session_state["view_results_countries"] = (
             [default_country_in_rev] if default_country_in_rev in rev_countries else []
         )
+        if st.session_state.get("_debug_filters"):
+            st.sidebar.warning(f"🔧 DEBUG: Reset countries {current_countries} -> {st.session_state['view_results_countries']}")
+    elif st.session_state.get("_debug_filters"):
+        st.sidebar.success(f"🔧 DEBUG: Preserved countries: {current_countries}")
 
 countries_sel = st.multiselect(
     "Countries",
@@ -1286,9 +1309,16 @@ all_stamps = sorted(
 # Initialize timestamp in session state only if not already set
 if "view_results_timestamp" not in st.session_state:
     st.session_state["view_results_timestamp"] = ""
+    if st.session_state.get("_debug_filters"):
+        st.sidebar.info(f"🔧 DEBUG: Initialized timestamp to empty")
 elif st.session_state["view_results_timestamp"] and st.session_state["view_results_timestamp"] not in all_stamps:
     # Only reset if current timestamp is invalid (not in available stamps)
+    old_val = st.session_state["view_results_timestamp"]
     st.session_state["view_results_timestamp"] = ""
+    if st.session_state.get("_debug_filters"):
+        st.sidebar.warning(f"🔧 DEBUG: Reset invalid timestamp {old_val} -> empty")
+elif st.session_state.get("_debug_filters"):
+    st.sidebar.success(f"🔧 DEBUG: Preserved timestamp: {st.session_state['view_results_timestamp'] or '(empty)'}")
 
 # Single timestamp selection - if not selected, will show latest for each country
 stamp_options = [""] + all_stamps

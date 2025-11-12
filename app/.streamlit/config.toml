@@ -11,3 +11,12 @@ level = "info"
 
 [theme]
 base = "light"
+
+[runner]
+# Disable automatic page discovery when using custom st.navigation()
+magicEnabled = true
+
+[client]
+# Show error details for debugging
+showErrorDetails = true
+toolbarMode = "minimal"
