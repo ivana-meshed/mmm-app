@@ -41,16 +41,6 @@ except ImportError:
 # ---------- Page ----------
 st.title("Best results browser (GCS)")
 
-# Debug toggle
-col1, col2 = st.columns([6, 1])
-with col2:
-    if st.button("🐛 Debug" if not st.session_state.get("_debug_filters") else "🐛 Debug ✓"):
-        st.session_state["_debug_filters"] = not st.session_state.get("_debug_filters", False)
-        st.rerun()
-
-if st.session_state.get("_debug_filters"):
-    st.info("🔧 Debug mode enabled - filter state changes will be logged in sidebar")
-
 # ---------- Settings ----------
 DEFAULT_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 DEFAULT_PREFIX = "robyn/"
@@ -1246,13 +1236,9 @@ if not auto_best:
     if "view_best_results_revision_value" in st.session_state and st.session_state["view_best_results_revision_value"] in all_revs:
         # User has a valid saved selection - use it
         default_rev_index = all_revs.index(st.session_state["view_best_results_revision_value"])
-        if st.session_state.get("_debug_filters"):
-            st.sidebar.success(f"🔧 DEBUG: Preserved revision: {st.session_state['view_best_results_revision_value']}")
     else:
         # First time or invalid selection - use default
         default_rev_index = all_revs.index(default_rev) if default_rev in all_revs else 0
-        if st.session_state.get("_debug_filters"):
-            st.sidebar.info(f"🔧 DEBUG: Using default revision: {all_revs[default_rev_index]}")
 
     rev = st.selectbox(
         "Revision",
@@ -1287,18 +1273,12 @@ if not auto_best:
         if valid_countries:
             # Has valid selections - use them
             default_countries = valid_countries
-            if st.session_state.get("_debug_filters"):
-                st.sidebar.success(f"🔧 DEBUG: Preserved countries: {valid_countries}")
         else:
             # All selections are invalid - use default
             default_countries = [default_country_in_rev] if default_country_in_rev in rev_countries else []
-            if st.session_state.get("_debug_filters"):
-                st.sidebar.warning(f"🔧 DEBUG: Reset invalid countries {current_countries} -> {default_countries}")
     else:
         # First time - use default
         default_countries = [default_country_in_rev] if default_country_in_rev in rev_countries else []
-        if st.session_state.get("_debug_filters"):
-            st.sidebar.info(f"🔧 DEBUG: Using default countries: {default_countries}")
 
     countries_sel = st.multiselect(
         "Countries",
@@ -1358,18 +1338,12 @@ else:
         if valid_countries:
             # Has valid selections - use them
             default_countries = valid_countries
-            if st.session_state.get("_debug_filters"):
-                st.sidebar.success(f"🔧 DEBUG: Preserved countries: {valid_countries}")
         else:
             # All selections are invalid - use default
             default_countries = [all_countries[0]]
-            if st.session_state.get("_debug_filters"):
-                st.sidebar.warning(f"🔧 DEBUG: Reset invalid countries {current_countries} -> {default_countries}")
     else:
         # First time - use default
         default_countries = [all_countries[0]]
-        if st.session_state.get("_debug_filters"):
-            st.sidebar.info(f"🔧 DEBUG: Using default countries: {default_countries}")
 
     countries_sel = st.multiselect(
         "Countries",
