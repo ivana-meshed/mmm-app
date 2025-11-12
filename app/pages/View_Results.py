@@ -43,24 +43,6 @@ except ImportError:
 # ---------- Page ----------
 st.title("Results browser (GCS)")
 
-# Debug toggle
-col1, col2 = st.columns([6, 1])
-with col2:
-    if st.button(
-        "🐛 Debug"
-        if not st.session_state.get("_debug_filters")
-        else "🐛 Debug ✓"
-    ):
-        st.session_state["_debug_filters"] = not st.session_state.get(
-            "_debug_filters", False
-        )
-        st.rerun()
-
-if st.session_state.get("_debug_filters"):
-    st.info(
-        "🔧 Debug mode enabled - filter state changes will be logged in sidebar"
-    )
-
 # ---------- Settings ----------
 DEFAULT_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 DEFAULT_PREFIX = "robyn/"
@@ -1209,11 +1191,12 @@ if (
     or st.session_state.get("last_bucket") != bucket_name
     or st.session_state.get("last_prefix") != prefix
 ):
-    blobs = list_blobs(bucket_name, prefix)
-    runs = group_runs(blobs)
-    st.session_state["runs_cache"] = runs
-    st.session_state["last_bucket"] = bucket_name
-    st.session_state["last_prefix"] = prefix
+    with st.spinner("Loading runs from GCS..."):
+        blobs = list_blobs(bucket_name, prefix)
+        runs = group_runs(blobs)
+        st.session_state["runs_cache"] = runs
+        st.session_state["last_bucket"] = bucket_name
+        st.session_state["last_prefix"] = prefix
 else:
     runs = st.session_state["runs_cache"]
 
@@ -1244,36 +1227,6 @@ default_rev = seed_key[0]
 # UI: revision choices
 all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
 
-# Debug: Show session state keys at page load
-if st.session_state.get("_debug_filters"):
-    st.sidebar.write(
-        "🔍 All session state keys:",
-        sorted([k for k in st.session_state.keys() if not k.startswith("_")]),
-    )
-    st.sidebar.write(
-        "🔍 Filter keys present:",
-        {
-            "view_results_revision_value": "view_results_revision_value"
-            in st.session_state,
-            "view_results_countries_value": "view_results_countries_value"
-            in st.session_state,
-            "view_results_timestamp_value": "view_results_timestamp_value"
-            in st.session_state,
-        },
-    )
-    if "view_results_revision_value" in st.session_state:
-        st.sidebar.write(
-            f"📌 Revision value: {st.session_state['view_results_revision_value']}"
-        )
-    if "view_results_countries_value" in st.session_state:
-        st.sidebar.write(
-            f"📌 Countries value: {st.session_state['view_results_countries_value']}"
-        )
-    if "view_results_timestamp_value" in st.session_state:
-        st.sidebar.write(
-            f"📌 Timestamp value: {st.session_state['view_results_timestamp_value']}"
-        )
-
 # Determine the index for the selectbox (preserve user selection or use default)
 # Use separate session state key that persists across navigation
 if (
@@ -1284,19 +1237,11 @@ if (
     default_rev_index = all_revs.index(
         st.session_state["view_results_revision_value"]
     )
-    if st.session_state.get("_debug_filters"):
-        st.sidebar.success(
-            f"🔧 DEBUG: Preserved revision: {st.session_state['view_results_revision_value']}"
-        )
 else:
     # First time or invalid selection - use default
     default_rev_index = (
         all_revs.index(default_rev) if default_rev in all_revs else 0
     )
-    if st.session_state.get("_debug_filters"):
-        st.sidebar.info(
-            f"🔧 DEBUG: Using default revision: {all_revs[default_rev_index]}"
-        )
 
 rev = st.selectbox(
     "Revision",
@@ -1331,10 +1276,6 @@ if "view_results_countries_value" in st.session_state:
     if valid_countries:
         # Has valid selections - use them
         default_countries = valid_countries
-        if st.session_state.get("_debug_filters"):
-            st.sidebar.success(
-                f"🔧 DEBUG: Preserved countries: {valid_countries}"
-            )
     else:
         # All selections are invalid - use default
         default_countries = (
@@ -1342,17 +1283,9 @@ if "view_results_countries_value" in st.session_state:
             if default_country_in_rev in rev_countries
             else []
         )
-        if st.session_state.get("_debug_filters"):
-            st.sidebar.warning(
-                f"🔧 DEBUG: Reset invalid countries {current_countries} -> {default_countries}"
-            )
 else:
     # First time - use default
     default_countries = [default_country_in_rev]
-    if st.session_state.get("_debug_filters"):
-        st.sidebar.info(
-            f"🔧 DEBUG: Using default countries: {default_countries}"
-        )
 
 countries_sel = st.multiselect(
     "Countries",
@@ -1384,22 +1317,12 @@ if "view_results_timestamp_value" in st.session_state:
     if saved_timestamp in stamp_options:
         # Valid saved selection - use it
         default_stamp_index = stamp_options.index(saved_timestamp)
-        if st.session_state.get("_debug_filters"):
-            st.sidebar.success(
-                f"🔧 DEBUG: Preserved timestamp: {saved_timestamp or '(empty)'}"
-            )
     else:
         # Invalid saved selection - use default (empty)
         default_stamp_index = 0
-        if st.session_state.get("_debug_filters"):
-            st.sidebar.warning(
-                f"🔧 DEBUG: Reset invalid timestamp {saved_timestamp} -> empty"
-            )
 else:
     # First time - use default (empty)
     default_stamp_index = 0
-    if st.session_state.get("_debug_filters"):
-        st.sidebar.info(f"🔧 DEBUG: Using default timestamp: empty")
 
 stamp_sel = st.selectbox(
     "Timestamp (optional - select one or leave blank to show latest per country)",
