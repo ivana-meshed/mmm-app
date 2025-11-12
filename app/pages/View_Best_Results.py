@@ -982,16 +982,20 @@ def extract_core_metrics_from_blobs(blobs: list) -> dict:
     return {}
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def rank_runs_for_country(
-    runs: dict, country: str, weights=(0.2, 0.5, 0.3), alpha=1.0, beta=1.0
+    _runs: dict, country: str, weights=(0.2, 0.5, 0.3), alpha=1.0, beta=1.0
 ) -> tuple[tuple, pd.DataFrame]:
     """
     Build a summary table for all (rev, country, stamp) runs, compute a score:
       score = weighted_r2 - alpha*norm_weighted_nrmse - beta*norm_weighted_drssd
     Return (best_key, dataframe_sorted_desc_by_score).
+    
+    Cached for 10 minutes to avoid recomputing scores on every page load.
+    Note: _runs is prefixed with underscore to prevent Streamlit from hashing it.
     """
     rows = []
-    for (rev, ctry, stamp), blobs in runs.items():
+    for (rev, ctry, stamp), blobs in _runs.items():
         if ctry != country:
             continue
         metrics = extract_core_metrics_from_blobs(blobs) or {}
@@ -1162,11 +1166,12 @@ if (
     or st.session_state.get("last_bucket") != bucket_name
     or st.session_state.get("last_prefix") != prefix
 ):
-    blobs = list_blobs(bucket_name, prefix)
-    runs = group_runs(blobs)
-    st.session_state["runs_cache"] = runs
-    st.session_state["last_bucket"] = bucket_name
-    st.session_state["last_prefix"] = prefix
+    with st.spinner("Loading runs from GCS..."):
+        blobs = list_blobs(bucket_name, prefix)
+        runs = group_runs(blobs)
+        st.session_state["runs_cache"] = runs
+        st.session_state["last_bucket"] = bucket_name
+        st.session_state["last_prefix"] = prefix
 else:
     runs = st.session_state["runs_cache"]
 
@@ -1231,23 +1236,24 @@ if not auto_best:
         {k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True
     )
 
-    # Initialize revision in session state only if not already set
-    if "view_best_results_revision" not in st.session_state:
-        st.session_state["view_best_results_revision"] = default_rev
-
-    # Get the current value from session state, or use default if session state value is invalid
-    current_rev = st.session_state.get(
-        "view_best_results_revision", default_rev
-    )
-    if current_rev not in all_revs:
-        current_rev = default_rev
-        st.session_state["view_best_results_revision"] = default_rev
+    # Determine the index for the selectbox (preserve user selection or use default)
+    # Use separate session state key that persists across navigation
+    if "view_best_results_revision_value" in st.session_state and st.session_state["view_best_results_revision_value"] in all_revs:
+        # User has a valid saved selection - use it
+        default_rev_index = all_revs.index(st.session_state["view_best_results_revision_value"])
+    else:
+        # First time or invalid selection - use default
+        default_rev_index = all_revs.index(default_rev) if default_rev in all_revs else 0
 
     rev = st.selectbox(
         "Revision",
         all_revs,
-        key="view_best_results_revision",
+        index=default_rev_index,
     )
+
+    # Store selection in persistent session state key (not widget key)
+    if rev != st.session_state.get("view_best_results_revision_value"):
+        st.session_state["view_best_results_revision_value"] = rev
 
     # Countries available in this revision
     rev_keys = [k for k in runs.keys() if k[0] == rev]
@@ -1263,33 +1269,31 @@ if not auto_best:
     )
     default_country_in_rev = best_country_key[1]
 
-    # Initialize countries in session state only if not already set
-    if "view_best_results_countries_rev" not in st.session_state:
-        st.session_state["view_best_results_countries_rev"] = (
-            [default_country_in_rev]
-            if default_country_in_rev in rev_countries
-            else []
-        )
-
-    # Get current value from session state, validate it's still valid
-    current_countries = st.session_state.get(
-        "view_best_results_countries_rev", [default_country_in_rev]
-    )
-    # Filter out any countries that are no longer available in this revision
-    valid_countries = [c for c in current_countries if c in rev_countries]
-    if not valid_countries:
-        valid_countries = (
-            [default_country_in_rev]
-            if default_country_in_rev in rev_countries
-            else []
-        )
-        st.session_state["view_best_results_countries_rev"] = valid_countries
+    # Determine default countries for multiselect
+    # Use separate session state key that persists across navigation
+    if "view_best_results_countries_rev_value" in st.session_state:
+        # User has saved selections - validate and preserve
+        current_countries = st.session_state["view_best_results_countries_rev_value"]
+        valid_countries = [c for c in current_countries if c in rev_countries]
+        if valid_countries:
+            # Has valid selections - use them
+            default_countries = valid_countries
+        else:
+            # All selections are invalid - use default
+            default_countries = [default_country_in_rev] if default_country_in_rev in rev_countries else []
+    else:
+        # First time - use default
+        default_countries = [default_country_in_rev] if default_country_in_rev in rev_countries else []
 
     countries_sel = st.multiselect(
         "Countries",
         rev_countries,
-        key="view_best_results_countries_rev",
+        default=default_countries,
     )
+
+    # Store selection in persistent session state key (not widget key)
+    if countries_sel != st.session_state.get("view_best_results_countries_rev_value"):
+        st.session_state["view_best_results_countries_rev_value"] = countries_sel
     if not countries_sel:
         st.info("Select at least one country.")
         st.stop()
@@ -1311,16 +1315,19 @@ if not auto_best:
                 _, iters, trials = parse_best_meta(runs[key])
                 title = build_run_title(ctry, key[2], iters, trials)
                 with st.expander(f"**{title}**", expanded=True):
-                    render_run_for_country(
-                        bucket_name, rev, ctry
-                    )  # type: ignore
+                    with st.spinner(f"Loading results for {ctry.upper()}..."):
+                        render_run_for_country(
+                            bucket_name, rev, ctry
+                        )  # type: ignore
             else:
                 with st.expander(f"**{ctry.upper()}**", expanded=True):
-                    render_run_for_country(
-                        bucket_name, rev, ctry
-                    )  # type: ignore
+                    with st.spinner(f"Loading results for {ctry.upper()}..."):
+                        render_run_for_country(
+                            bucket_name, rev, ctry
+                        )  # type: ignore
         else:
-            render_run_for_country(bucket_name, rev, ctry)  # type: ignore
+            with st.spinner(f"Loading results for {ctry.upper()}..."):
+                render_run_for_country(bucket_name, rev, ctry)  # type: ignore
 
 # ---------- Mode: auto best across all revisions ----------
 else:
@@ -1330,38 +1337,45 @@ else:
         st.info("No countries found in the provided prefix.")
         st.stop()
 
-    # Initialize countries in session state only if not already set
-    if "view_best_results_countries_all" not in st.session_state:
-        st.session_state["view_best_results_countries_all"] = [all_countries[0]]
-
-    # Get current value from session state, validate it's still valid
-    current_countries = st.session_state.get(
-        "view_best_results_countries_all", [all_countries[0]]
-    )
-    # Filter out any countries that are no longer available
-    valid_countries = [c for c in current_countries if c in all_countries]
-    if not valid_countries:
-        valid_countries = [all_countries[0]]
-        st.session_state["view_best_results_countries_all"] = valid_countries
+    # Determine default countries for multiselect
+    # Use separate session state key that persists across navigation
+    if "view_best_results_countries_all_value" in st.session_state:
+        # User has saved selections - validate and preserve
+        current_countries = st.session_state["view_best_results_countries_all_value"]
+        valid_countries = [c for c in current_countries if c in all_countries]
+        if valid_countries:
+            # Has valid selections - use them
+            default_countries = valid_countries
+        else:
+            # All selections are invalid - use default
+            default_countries = [all_countries[0]]
+    else:
+        # First time - use default
+        default_countries = [all_countries[0]]
 
     countries_sel = st.multiselect(
         "Countries",
         all_countries,
-        key="view_best_results_countries_all",
+        default=default_countries,
     )
+
+    # Store selection in persistent session state key (not widget key)
+    if countries_sel != st.session_state.get("view_best_results_countries_all_value"):
+        st.session_state["view_best_results_countries_all_value"] = countries_sel
 
     if not countries_sel:
         st.info("Select at least one country.")
         st.stop()
 
     for ctry in countries_sel:
-        best_key, table = rank_runs_for_country(
-            runs,
-            ctry,
-            weights=st.session_state["weights"],
-            alpha=st.session_state["alpha"],
-            beta=st.session_state["beta"],
-        )
+        with st.spinner(f"Loading best results for {ctry.upper()}..."):
+            best_key, table = rank_runs_for_country(
+                runs,
+                ctry,
+                weights=st.session_state["weights"],
+                alpha=st.session_state["alpha"],
+                beta=st.session_state["beta"],
+            )
         if best_key is None:
             st.warning(
                 f"No metric-bearing runs found for {ctry}. Showing newest run instead."
@@ -1381,9 +1395,11 @@ else:
                 _, iters, trials = parse_best_meta(runs[best_key])
                 title = build_run_title(ctry, best_key[2], iters, trials)
                 with st.expander(f"**{title}**", expanded=True):
-                    render_run_from_key(runs, best_key, bucket_name)
+                    with st.spinner("Rendering results..."):
+                        render_run_from_key(runs, best_key, bucket_name)
             else:
-                render_run_from_key(runs, best_key, bucket_name)
+                with st.spinner("Rendering results..."):
+                    render_run_from_key(runs, best_key, bucket_name)
             continue
 
         # Use expander if multiple countries
@@ -1420,7 +1436,8 @@ else:
                     ].copy()
                     st.dataframe(display, use_container_width=True)
 
-                render_run_from_key(runs, best_key, bucket_name)
+                with st.spinner("Rendering best results..."):
+                    render_run_from_key(runs, best_key, bucket_name)
         else:
             # Show ranking table
             with st.expander(
@@ -1449,4 +1466,5 @@ else:
                 display = table[[c for c in cols if c in table.columns]].copy()
                 st.dataframe(display, use_container_width=True)
 
-            render_run_from_key(runs, best_key, bucket_name)
+            with st.spinner("Rendering best results..."):
+                render_run_from_key(runs, best_key, bucket_name)
