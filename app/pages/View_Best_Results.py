@@ -27,6 +27,17 @@ except Exception:
 
 require_login_and_domain()
 
+# Initialize session state defaults
+try:
+    from app_split_helpers import ensure_session_defaults
+
+    ensure_session_defaults()
+except ImportError:
+    # Fallback if app_split_helpers is not available
+    st.session_state.setdefault(
+        "gcs_bucket", os.getenv("GCS_BUCKET", "mmm-app-output")
+    )
+
 # ---------- Page ----------
 st.title("Best results browser (GCS)")
 
@@ -375,30 +386,62 @@ def render_model_config_section(blobs, country, stamp, bucket_name):
 
         config = json.loads(config_data.decode("utf-8"))
 
-        # Display key configuration parameters in a clean format
+        # Display configuration parameters in a single column
         with st.container(border=True):
-            # Create columns for better layout
-            col1, col2 = st.columns(2)
+            # Helper function to format list values
+            def format_list(val):
+                if isinstance(val, list):
+                    return ", ".join(str(v) for v in val)
+                return str(val)
 
-            with col1:
-                st.markdown("**Training Parameters**")
-                if "iterations" in config:
-                    st.metric("Iterations", config["iterations"])
-                if "trials" in config:
-                    st.metric("Trials", config["trials"])
-                if "calibration_period" in config:
-                    st.metric(
-                        "Calibration Period", config["calibration_period"]
-                    )
+            # 1. Iterations
+            if "iterations" in config:
+                st.markdown(f"**Iterations:** {config['iterations']}")
 
-            with col2:
-                st.markdown("**Data Configuration**")
-                if "date_min" in config:
-                    st.metric("Start Date", config["date_min"])
-                if "date_max" in config:
-                    st.metric("End Date", config["date_max"])
-                if "dep_var" in config:
-                    st.metric("Dependent Variable", config["dep_var"])
+            # 2. Trials
+            if "trials" in config:
+                st.markdown(f"**Trials:** {config['trials']}")
+
+            # 3. Train Size
+            if "train_size" in config:
+                train_size = format_list(config["train_size"])
+                st.markdown(f"**Train Size:** [{train_size}]")
+
+            # 4. Adstock
+            if "adstock" in config:
+                st.markdown(f"**Adstock:** {config['adstock']}")
+
+            # 5. Goal Variable / Goal Type
+            goal_var = config.get("dep_var", "N/A")
+            goal_type = config.get("dep_var_type", "N/A")
+            st.markdown(
+                f"**Goal Variable / Goal Type:** {goal_var} / {goal_type}"
+            )
+
+            # 6. Paid Media Spends
+            if "paid_media_spends" in config:
+                spends = format_list(config["paid_media_spends"])
+                st.markdown(f"**Paid Media Spends:** {spends}")
+
+            # 7. Paid Media Variables
+            if "paid_media_vars" in config:
+                vars = format_list(config["paid_media_vars"])
+                st.markdown(f"**Paid Media Variables:** {vars}")
+
+            # 8. Context Variables
+            if "context_vars" in config:
+                ctx = format_list(config["context_vars"])
+                st.markdown(f"**Context Variables:** {ctx}")
+
+            # 9. Factor Variables
+            if "factor_vars" in config:
+                factors = format_list(config["factor_vars"])
+                st.markdown(f"**Factor Variables:** {factors}")
+
+            # 10. Organic Variables
+            if "organic_vars" in config:
+                organic = format_list(config["organic_vars"])
+                st.markdown(f"**Organic Variables:** {organic}")
 
             # Display additional parameters in an expander
             with st.expander("View full configuration", expanded=False):
