@@ -1238,9 +1238,18 @@ all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
 
 # Debug: Show session state keys at page load
 if st.session_state.get("_debug_filters"):
-    st.sidebar.write("🔍 Session state keys:", list(st.session_state.keys()))
+    st.sidebar.write("🔍 All session state keys:", sorted([k for k in st.session_state.keys() if not k.startswith('_')]))
+    st.sidebar.write("🔍 Filter keys present:", {
+        "view_results_revision": "view_results_revision" in st.session_state,
+        "view_results_countries": "view_results_countries" in st.session_state,
+        "view_results_timestamp": "view_results_timestamp" in st.session_state,
+    })
     if "view_results_revision" in st.session_state:
-        st.sidebar.write(f"📌 Existing revision value: {st.session_state['view_results_revision']}")
+        st.sidebar.write(f"📌 Revision value: {st.session_state['view_results_revision']}")
+    if "view_results_countries" in st.session_state:
+        st.sidebar.write(f"📌 Countries value: {st.session_state['view_results_countries']}")
+    if "view_results_timestamp" in st.session_state:
+        st.sidebar.write(f"📌 Timestamp value: {st.session_state['view_results_timestamp']}")
 
 # Determine the index for the selectbox (preserve user selection or use default)
 if "view_results_revision" in st.session_state and st.session_state["view_results_revision"] in all_revs:
