@@ -57,14 +57,21 @@ class ModelSummaryAggregator:
         prefix = "robyn/"
         if revision:
             prefix += f"{revision}/"
+            logger.info(f"Filtering by revision: {revision}")
         if country:
             prefix += f"{country}/"
+            logger.info(f"Filtering by country: {country}")
+
+        logger.info(f"Scanning GCS with prefix: {prefix}")
 
         # Get all blobs without delimiter to see all files
         blobs = self.client.list_blobs(self.bucket_name, prefix=prefix)
 
         # Track unique run paths we've seen
         seen_runs = set()
+        # Track revisions and countries found
+        found_revisions = set()
+        found_countries = set()
 
         for blob in blobs:
             # Look for OutputCollect.RDS files which indicate a run
@@ -79,9 +86,14 @@ class ModelSummaryAggregator:
                         continue
                     seen_runs.add(run_path)
 
+                    revision_found = parts[1]
+                    country_found = parts[2]
+                    found_revisions.add(revision_found)
+                    found_countries.add(country_found)
+
                     run_info = {
-                        "revision": parts[1],
-                        "country": parts[2],
+                        "revision": revision_found,
+                        "country": country_found,
                         "timestamp": parts[3],
                         "path": run_path,
                     }
@@ -93,6 +105,15 @@ class ModelSummaryAggregator:
                     runs.append(run_info)
 
         logger.info(f"Found {len(runs)} total runs in GCS")
+        logger.info(
+            f"Unique revisions found ({len(found_revisions)}): "
+            f"{sorted(found_revisions)}"
+        )
+        logger.info(
+            f"Unique countries found ({len(found_countries)}): "
+            f"{sorted(found_countries)}"
+        )
+
         return runs
 
     def read_summary(self, run_path: str) -> Optional[Dict[str, Any]]:
@@ -188,7 +209,17 @@ class ModelSummaryAggregator:
         Returns:
             GCS path where summary was saved
         """
+        logger.info(
+            f"Aggregating summaries for country={country}, "
+            f"revision={revision if revision else 'all'}"
+        )
+
         summary = self.aggregate_by_country(country, revision)
+
+        logger.info(
+            f"Aggregated {summary.get('total_runs', 0)} runs, "
+            f"{summary.get('runs_with_summaries', 0)} with summaries"
+        )
 
         # Save to GCS
         # Path: robyn-summaries/{country}/summary.json
@@ -205,7 +236,7 @@ class ModelSummaryAggregator:
         )
 
         logger.info(
-            f"Saved country summary to gs://{self.bucket_name}/{summary_path}"
+            f"✓ Saved country summary to gs://{self.bucket_name}/{summary_path}"
         )
         return summary_path
 
@@ -368,6 +399,10 @@ def main():
     aggregator = ModelSummaryAggregator(args.bucket, args.project)
 
     if args.generate_missing:
+        logger.info("=" * 60)
+        logger.info("STEP: Generating missing summaries")
+        logger.info("=" * 60)
+
         runs = aggregator.list_model_runs(args.country, args.revision)
         runs_without_summary = [r for r in runs if not r["has_summary"]]
 
@@ -376,22 +411,67 @@ def main():
             f"(out of {len(runs)} total runs)"
         )
 
+        # Group runs by revision for better visibility
+        runs_by_revision = {}
         for run in runs_without_summary:
-            logger.info(f"Generating summary for {run['path']}")
-            aggregator.generate_summary_for_existing_run(run["path"])
+            rev = run["revision"]
+            if rev not in runs_by_revision:
+                runs_by_revision[rev] = []
+            runs_by_revision[rev].append(run)
+
+        logger.info(
+            f"Runs to process by revision: "
+            f"{dict((k, len(v)) for k, v in runs_by_revision.items())}"
+        )
+
+        success_count = 0
+        fail_count = 0
+
+        for i, run in enumerate(runs_without_summary, 1):
+            logger.info(
+                f"[{i}/{len(runs_without_summary)}] Generating summary for "
+                f"{run['path']} (revision={run['revision']}, "
+                f"country={run['country']})"
+            )
+            result = aggregator.generate_summary_for_existing_run(run["path"])
+            if result:
+                success_count += 1
+                logger.info(f"  ✓ Successfully created summary at {result}")
+            else:
+                fail_count += 1
+                logger.warning(f"  ✗ Failed to create summary")
+
+        logger.info("=" * 60)
+        logger.info(
+            f"Summary generation complete: {success_count} succeeded, "
+            f"{fail_count} failed"
+        )
+        logger.info("=" * 60)
 
     if args.aggregate:
+        logger.info("=" * 60)
+        logger.info("STEP: Aggregating summaries by country")
+        logger.info("=" * 60)
+
         if not args.country:
             # Get all unique countries
             runs = aggregator.list_model_runs()
             countries = set(r["country"] for r in runs)
-            logger.info(f"Found {len(countries)} countries: {countries}")
+            logger.info(
+                f"Found {len(countries)} countries to aggregate: "
+                f"{sorted(countries)}"
+            )
 
-            for country in countries:
-                logger.info(f"Aggregating summaries for {country}")
+            for country in sorted(countries):
+                logger.info(f"Aggregating summaries for country: {country}")
                 aggregator.save_country_summary(country, args.revision)
         else:
+            logger.info(f"Aggregating summaries for country: {args.country}")
             aggregator.save_country_summary(args.country, args.revision)
+
+        logger.info("=" * 60)
+        logger.info("Aggregation complete")
+        logger.info("=" * 60)
 
 
 if __name__ == "__main__":

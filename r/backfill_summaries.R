@@ -45,49 +45,101 @@ if (!file.exists(python_script)) {
     }
 }
 
-cmd_args <- c(
+# STEP 1: Generate missing summaries
+message("\n=== Step 1: Generating missing summaries ===")
+
+cmd_args_generate <- c(
     python_script,
     "--bucket", opt$bucket,
     "--generate-missing"
 )
 
 if (!is.null(opt$project) && nzchar(opt$project)) {
-    cmd_args <- c(cmd_args, "--project", opt$project)
+    cmd_args_generate <- c(cmd_args_generate, "--project", opt$project)
 }
 
 if (!is.null(opt$country) && nzchar(opt$country)) {
-    cmd_args <- c(cmd_args, "--country", opt$country)
+    cmd_args_generate <- c(cmd_args_generate, "--country", opt$country)
 }
 
 if (!is.null(opt$revision) && nzchar(opt$revision)) {
-    cmd_args <- c(cmd_args, "--revision", opt$revision)
+    cmd_args_generate <- c(cmd_args_generate, "--revision", opt$revision)
 }
 
-message("\nExecuting backfill...")
-message(paste("Command: python3", paste(cmd_args, collapse = " ")))
+message(paste("Command: python3", paste(cmd_args_generate, collapse = " ")))
 
-# Execute the Python script
-result <- system2(
+# Execute the generation step
+result_generate <- system2(
     "python3",
-    args = cmd_args,
+    args = cmd_args_generate,
     stdout = TRUE,
     stderr = TRUE,
     wait = TRUE
 )
 
 # Check result
-exit_code <- attr(result, "status")
-if (is.null(exit_code)) {
-    exit_code <- 0
+exit_code_generate <- attr(result_generate, "status")
+if (is.null(exit_code_generate)) {
+    exit_code_generate <- 0
 }
 
 # Print output
-cat(result, sep = "\n")
+cat(result_generate, sep = "\n")
 
-if (exit_code != 0) {
-    message("\n❌ Backfill failed with exit code: ", exit_code)
-    quit(status = exit_code)
-} else {
-    message("\n✅ Backfill completed successfully")
-    quit(status = 0)
+if (exit_code_generate != 0) {
+    message("\n❌ Summary generation failed with exit code: ", exit_code_generate)
+    quit(status = exit_code_generate)
 }
+
+message("\n✅ Summary generation completed")
+
+# STEP 2: Aggregate summaries by country
+message("\n=== Step 2: Aggregating summaries by country ===")
+
+cmd_args_aggregate <- c(
+    python_script,
+    "--bucket", opt$bucket,
+    "--aggregate"
+)
+
+if (!is.null(opt$project) && nzchar(opt$project)) {
+    cmd_args_aggregate <- c(cmd_args_aggregate, "--project", opt$project)
+}
+
+if (!is.null(opt$country) && nzchar(opt$country)) {
+    cmd_args_aggregate <- c(cmd_args_aggregate, "--country", opt$country)
+}
+
+if (!is.null(opt$revision) && nzchar(opt$revision)) {
+    cmd_args_aggregate <- c(cmd_args_aggregate, "--revision", opt$revision)
+}
+
+message(paste("Command: python3", paste(cmd_args_aggregate, collapse = " ")))
+
+# Execute the aggregation step
+result_aggregate <- system2(
+    "python3",
+    args = cmd_args_aggregate,
+    stdout = TRUE,
+    stderr = TRUE,
+    wait = TRUE
+)
+
+# Check result
+exit_code_aggregate <- attr(result_aggregate, "status")
+if (is.null(exit_code_aggregate)) {
+    exit_code_aggregate <- 0
+}
+
+# Print output
+cat(result_aggregate, sep = "\n")
+
+if (exit_code_aggregate != 0) {
+    message("\n⚠️ Aggregation failed with exit code: ", exit_code_aggregate)
+    message("Note: This is non-critical. Individual summaries were generated successfully.")
+    quit(status = 0)  # Don't fail the whole job
+}
+
+message("\n✅ Aggregation completed successfully")
+message("\n✅ All backfill operations completed successfully")
+quit(status = 0)
