@@ -849,7 +849,7 @@ if (length(duplicates) > 0) {
     message("⚠️ Warning: The following variables appear in both paid_media_spends and paid_media_vars: ", 
             paste(duplicates, collapse = ", "))
     message("   This may indicate a configuration issue. For proper Robyn behavior,")
-    message("   spends and vars should typically be different (e.g., COST vs SESSIONS).")
+    message("   spends and vars should typically be different (e.g., COST vs CLICKS).")
     message("   Continuing with current configuration...")
 }
 
