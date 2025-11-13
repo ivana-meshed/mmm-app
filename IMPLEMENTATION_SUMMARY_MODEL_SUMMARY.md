@@ -225,7 +225,11 @@ Potential improvements for future iterations:
 ## Deployment Notes
 
 1. The R helper script (`extract_model_summary.R`) must be deployed alongside `run_all.R`
-2. The training Dockerfile (`docker/Dockerfile.training`) has been updated to copy `extract_model_summary.R` to `/app/`
+2. The training Dockerfile (`docker/Dockerfile.training`) has been updated to include:
+   - `extract_model_summary.R` - Helper for generating summaries during training
+   - `generate_summary_from_rds.R` - Standalone script for reading RDS files
+   - `backfill_summaries.R` - Wrapper script for backfilling via Cloud Run Job
+   - `aggregate_model_summaries.py` - Python utility for aggregation
 3. The `run_all.R` script checks multiple locations for the helper file:
    - Same directory as `run_all.R` (when both are in `/app/`)
    - `/app/extract_model_summary.R` (Docker container)
@@ -234,11 +238,15 @@ Potential improvements for future iterations:
    - The web Dockerfile (`docker/Dockerfile.web`) copies the `scripts/` directory
    - Scripts can be run from within the web container for aggregation operations
    - Note: Backfilling (--generate-missing) requires R and cannot be done from web container
-5. **Backfilling existing models**:
-   - Generating summaries from existing `OutputCollect.RDS` files requires R/Rscript
-   - Must be done from an environment with R installed (local machine or VM with R)
-   - New runs automatically generate summaries, so backfilling is optional
-6. No changes required to Terraform configuration
+5. **Automatic backfilling via CI/CD**:
+   - Both production (`ci.yml`) and development (`ci-dev.yml`) workflows now execute backfilling
+   - Uses the training container with R installed to run `backfill_summaries.R`
+   - Runs as a one-time Cloud Run Job execution after deployment
+   - Non-fatal: deployment continues even if backfill fails or times out
+6. **Manual backfilling**:
+   - Can be triggered anytime using `gcloud run jobs execute` with the training job
+   - Also works from local machine or VM with R installed
+7. No changes required to Terraform configuration
 
 ## Validation Checklist
 

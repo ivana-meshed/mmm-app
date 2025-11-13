@@ -205,11 +205,33 @@ Configuration used for the model run:
 
 Summaries are automatically generated for every new model run. No manual intervention is required.
 
-### Generating Summaries for Existing Models
+### Automatic Backfilling via CI/CD
 
-To generate summaries for models that were run before this feature was added, you need an environment with R installed (to read RDS files).
+**New!** Model summaries for existing runs are automatically backfilled during deployment:
+- The CI/CD pipeline executes a one-time Cloud Run Job using the training container
+- This runs after each deployment to generate summaries for any existing runs that don't have them
+- The process is non-fatal and won't block deployment if it fails
+- Uses the training container which has R installed to read `OutputCollect.RDS` files
 
-**Important:** Backfilling requires R/Rscript to be available, as it needs to read the `OutputCollect.RDS` files. This cannot be done from the web container or CI/CD pipeline as they don't have R installed.
+### Manual Backfilling for Existing Models
+
+You can also manually trigger backfilling using the training container:
+
+#### Using Cloud Run Job (Recommended)
+
+```bash
+# Execute backfill as a one-time Cloud Run Job
+gcloud run jobs execute mmm-app-training \
+  --region europe-west1 \
+  --args="Rscript,/app/backfill_summaries.R,--bucket,mmm-app-output,--project,your-project-id" \
+  --wait
+
+# For a specific country
+gcloud run jobs execute mmm-app-training \
+  --region europe-west1 \
+  --args="Rscript,/app/backfill_summaries.R,--bucket,mmm-app-output,--country,US" \
+  --wait
+```
 
 #### From Local Environment with R
 
@@ -226,22 +248,6 @@ python3 scripts/aggregate_model_summaries.py \
 python3 scripts/aggregate_model_summaries.py \
   --bucket mmm-app-output \
   --country US \
-  --generate-missing
-```
-
-#### From a VM/Server with R Installed
-
-If you need to backfill from a cloud environment:
-
-```bash
-# SSH into a VM with R installed, or use Cloud Shell with R
-# Authenticate to GCP
-gcloud auth application-default login
-
-# Run the backfill script
-python3 scripts/aggregate_model_summaries.py \
-  --bucket mmm-app-output \
-  --project your-project-id \
   --generate-missing
 ```
 
