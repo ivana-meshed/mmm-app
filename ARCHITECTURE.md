@@ -132,7 +132,14 @@ gs://{bucket}/
 │               ├── robyn_console.log
 │               ├── status.json
 │               ├── timings.csv
+│               ├── model_summary.json
+│               ├── OutputCollect.RDS
+│               ├── InputCollect.RDS
 │               └── results/
+├── robyn-summaries/
+│   └── {country}/
+│       ├── summary.json
+│       └── {revision}_summary.json
 ├── datasets/
 │   └── {country}/
 │       └── {timestamp}/
@@ -147,6 +154,18 @@ gs://{bucket}/
 └── robyn-jobs/
     └── job_history.csv
 ```
+
+### Model Summaries
+
+Each training run generates a `model_summary.json` file containing:
+- Candidate models and their performance metrics
+- Pareto optimal models (if any were identified)
+- Best model information
+- Training metadata and configuration
+
+Aggregated summaries by country are stored in `robyn-summaries/` for easy access to historical model performance.
+
+See [docs/MODEL_SUMMARY.md](../docs/MODEL_SUMMARY.md) for detailed documentation.
 
 ## Deployment
 

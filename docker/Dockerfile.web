@@ -34,6 +34,7 @@ ENV GIT_SHA=$GIT_SHA
 LABEL org.opencontainers.image.revision=$GIT_SHA
 
 COPY app/ /app/
+COPY scripts/ /app/scripts/
 COPY requirements.txt /app/requirements.txt
 COPY docker/web_entrypoint.sh /app/entrypoint.sh
 

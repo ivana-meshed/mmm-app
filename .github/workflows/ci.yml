@@ -438,6 +438,7 @@ jobs:
           TF_VAR_web_image: ${{ env.WEB_IMAGE_REF }}
           TF_VAR_training_image: ${{ env.TRAINING_IMAGE_REF }}
         run: terraform apply -input=false -auto-approve tfplan
+      
       - name: Print deployment info
         working-directory: infra/terraform
         run: |
@@ -453,3 +454,23 @@ jobs:
           echo "  - Web Interface: Cloud Run Service (2 CPUs, 4GB)"
           echo "  - Training Jobs: Cloud Run Jobs (up to 32 CPUs, 128GB)"
           echo "  - Storage: GCS Bucket ($BUCKET)"
+
+      - name: Backfill model summaries for existing runs
+        shell: bash
+        run: |
+          echo "Backfilling model summaries using training container..."
+          
+          # Execute the backfill script as a one-time Cloud Run Job
+          # This uses the training container which has R installed
+          gcloud run jobs execute ${{ env.SERVICE_NAME }}-training \
+            --region ${{ env.REGION }} \
+            --task-timeout 3600 \
+            --args="Rscript,/app/backfill_summaries.R,--bucket,${{ env.BUCKET }},--project,${{ env.PROJECT_ID }}" \
+            --wait || {
+              echo "⚠️ Warning: Backfill job failed or timed out."
+              echo "This is non-fatal. You can manually trigger backfill later with:"
+              echo "gcloud run jobs execute ${{ env.SERVICE_NAME }}-training --region ${{ env.REGION }} --args='Rscript,/app/backfill_summaries.R,--bucket,${{ env.BUCKET }}'"
+              exit 0
+            }
+          
+          echo "✅ Model summary backfill completed"
