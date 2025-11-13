@@ -1573,19 +1573,42 @@ gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "Ou
 
 ## ---------- GENERATE MODEL SUMMARY ----------
 message("→ Generating model summary...")
-# Source the helper script (it's in the same directory as this script)
-extract_summary_script <- file.path(
+# Source the helper script - try multiple locations
+extract_summary_script <- NULL
+
+# 1. Try same directory as this script
+candidate <- file.path(
     dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE)),
     "extract_model_summary.R"
 )
-# Fallback to current working directory
-if (!file.exists(extract_summary_script)) {
-    extract_summary_script <- "r/extract_model_summary.R"
+if (file.exists(candidate)) {
+    extract_summary_script <- candidate
 }
-if (file.exists(extract_summary_script)) {
+
+# 2. Try /app directory (Docker container location)
+if (is.null(extract_summary_script)) {
+    candidate <- "/app/extract_model_summary.R"
+    if (file.exists(candidate)) {
+        extract_summary_script <- candidate
+    }
+}
+
+# 3. Try r/ subdirectory (local development)
+if (is.null(extract_summary_script)) {
+    candidate <- "r/extract_model_summary.R"
+    if (file.exists(candidate)) {
+        extract_summary_script <- candidate
+    }
+}
+
+if (!is.null(extract_summary_script)) {
+    message("   Using extract_model_summary.R from: ", extract_summary_script)
     source(extract_summary_script)
 } else {
-    message("⚠️ Could not find extract_model_summary.R, skipping summary generation")
+    message(
+        "⚠️ Could not find extract_model_summary.R, ",
+        "skipping summary generation"
+    )
 }
 
 if (exists("extract_model_summary")) {

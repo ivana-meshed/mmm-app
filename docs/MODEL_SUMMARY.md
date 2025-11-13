@@ -349,6 +349,12 @@ Check the run logs for errors in the "GENERATE MODEL SUMMARY" section. Common is
 - OutputCollect.RDS corrupted or incomplete
 - Insufficient permissions to write to GCS
 - R script errors (check console.log)
+- Missing `extract_model_summary.R` file in Docker container (check Dockerfile)
+
+If the log shows "Could not find extract_model_summary.R", ensure that:
+1. The training Docker image includes `extract_model_summary.R`
+2. The Dockerfile has: `COPY r/extract_model_summary.R /app/extract_model_summary.R`
+3. The image was rebuilt and redeployed after adding the helper file
 
 ### Missing summaries for old runs
 

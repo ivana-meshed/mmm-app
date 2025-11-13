@@ -4,6 +4,7 @@ FROM ${BASE_REF}
 
 WORKDIR /app
 COPY r/run_all.R /app/run_all.R
+COPY r/extract_model_summary.R /app/extract_model_summary.R
 COPY docker/training_entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh && mkdir -p /tmp/training-workspace && chmod 777 /tmp/training-workspace
 

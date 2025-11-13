@@ -225,9 +225,13 @@ Potential improvements for future iterations:
 ## Deployment Notes
 
 1. The R helper script (`extract_model_summary.R`) must be deployed alongside `run_all.R`
-2. Both should be in the same directory or accessible via `r/` relative path
-3. Python scripts are optional (only needed for aggregation/backfilling)
-4. No changes required to Terraform or CI/CD
+2. The training Dockerfile (`docker/Dockerfile.training`) has been updated to copy `extract_model_summary.R` to `/app/`
+3. The `run_all.R` script checks multiple locations for the helper file:
+   - Same directory as `run_all.R` (when both are in `/app/`)
+   - `/app/extract_model_summary.R` (Docker container)
+   - `r/extract_model_summary.R` (local development)
+4. Python scripts are optional (only needed for aggregation/backfilling, run manually)
+5. No changes required to Terraform or CI/CD workflows
 
 ## Validation Checklist
 
