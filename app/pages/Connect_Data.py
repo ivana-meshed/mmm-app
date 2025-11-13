@@ -21,10 +21,6 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from gcp_secrets import access_secret, upsert_secret
 
-st.set_page_config(
-    page_title="Connect your Data", page_icon="🧩", layout="wide"
-)
-
 require_login_and_domain()
 ensure_session_defaults()
 
@@ -286,7 +282,34 @@ if st.session_state.sf_connected:
 else:
     st.info("Not connected. Fill the form above and click **Connect**.")
 
-# ============= TAB 2: Configure & Train =============
+# ============= Outputs Configuration =============
+st.divider()
+st.subheader("Outputs Configuration")
+
+with st.expander("📤 Outputs", expanded=False):
+    gcs_bucket = st.text_input(
+        "GCS bucket for outputs",
+        value=st.session_state.get("gcs_bucket", GCS_BUCKET),
+        help="Google Cloud Storage bucket where training outputs will be stored",
+    )
+    st.session_state["gcs_bucket"] = gcs_bucket
+
+    ann_file = st.file_uploader(
+        "Optional: enriched_annotations.csv",
+        type=["csv"],
+        help="Upload an annotations file to enrich your model training",
+    )
+    # Store annotation file in session state if uploaded
+    if ann_file is not None:
+        st.session_state["annotations_file"] = ann_file
+        st.success(f"Annotations file '{ann_file.name}' uploaded successfully.")
+
+    if st.session_state.get("annotations_file") is not None:
+        st.info(
+            f"Current annotations file: {st.session_state['annotations_file'].name}"
+        )
+
+# ============= Navigation =============
 
 # Once Snowflake is connected, allow navigation to mapping
 st.divider()
@@ -295,8 +318,8 @@ try:
         if st.button("Next → Map Your Data"):
             import streamlit as stlib
 
-            stlib.switch_page("pages/1_Map_Data.py")
+            stlib.switch_page("pages/Map_Data.py")
     else:
         st.info("Fill in your Snowflake credentials above to enable Next.")
 except Exception:
-    st.page_link("pages/1_Map_Data.py", label="Next → Map Your Data", icon="➡️")
+    st.page_link("pages/Map_Data.py", label="Next → Map Your Data", icon="➡️")

@@ -27,11 +27,18 @@ except Exception:
 
 require_login_and_domain()
 
+# Initialize session state defaults
+try:
+    from app_split_helpers import ensure_session_defaults
+
+    ensure_session_defaults()
+except ImportError:
+    # Fallback if app_split_helpers is not available
+    st.session_state.setdefault(
+        "gcs_bucket", os.getenv("GCS_BUCKET", "mmm-app-output")
+    )
+
 # ---------- Page ----------
-st.set_page_config(
-    page_title="Best models per country: Robyn MMM",
-    layout="wide",
-)
 st.title("Best results browser (GCS)")
 
 # ---------- Settings ----------
@@ -349,8 +356,272 @@ def find_allocator_plots(blobs):
 
 
 # ---------- Renderers ----------
+@st.cache_data(ttl=3600, show_spinner="Loading model configuration...")
+def _fetch_model_config(bucket_name: str, stamp: str):
+    """Fetch and parse model configuration. Cached for performance."""
+    try:
+        config_path = f"training-configs/{stamp}/job_config.json"
+        bucket = client.bucket(bucket_name)
+        config_blob = bucket.blob(config_path)
+
+        if config_blob.exists():
+            config_data = config_blob.download_as_bytes()
+            if config_data:
+                import json
+
+                return json.loads(config_data.decode("utf-8"))
+    except Exception:
+        pass
+    return None
+
+
+def render_model_config_section(blobs, country, stamp, bucket_name):
+    """Render model configuration from training-configs/{stamp}/job_config.json"""
+    st.subheader("Model Configuration")
+
+    # Try to fetch config from cache first
+    config = _fetch_model_config(bucket_name, stamp)
+
+    # Fallback to debug path if not found in training-configs
+    if not config:
+        try:
+            config_blob = find_blob(
+                blobs, "/debug/job_config.copy.json"
+            ) or find_blob(blobs, "job_config.copy.json")
+            if not config_blob:
+                st.info(
+                    f"No model configuration found (tried training-configs/{stamp}/job_config.json)."
+                )
+                return
+
+            config_data = download_bytes_safe(config_blob)
+            if not config_data:
+                st.warning("Could not read model configuration.")
+                return
+
+            import json
+
+            config = json.loads(config_data.decode("utf-8"))
+        except Exception as e:
+            st.warning(f"Couldn't parse model configuration: {e}")
+            return
+
+    # Display configuration parameters in a single column
+    if config:
+        with st.container(border=True):
+            # Helper function to format list values
+            def format_list(val):
+                if isinstance(val, list):
+                    return ", ".join(str(v) for v in val)
+                return str(val)
+
+            # 1. Iterations
+            if "iterations" in config:
+                st.markdown(f"**Iterations:** {config['iterations']}")
+
+            # 2. Trials
+            if "trials" in config:
+                st.markdown(f"**Trials:** {config['trials']}")
+
+            # 3. Train Size
+            if "train_size" in config:
+                train_size = format_list(config["train_size"])
+                st.markdown(f"**Train Size:** [{train_size}]")
+
+            # 4. Adstock
+            if "adstock" in config:
+                st.markdown(f"**Adstock:** {config['adstock']}")
+
+            # 5. Goal Variable / Goal Type
+            goal_var = config.get("dep_var", "N/A")
+            goal_type = config.get("dep_var_type", "N/A")
+            st.markdown(
+                f"**Goal Variable / Goal Type:** {goal_var} / {goal_type}"
+            )
+
+            # 6. Paid Media Spends
+            if "paid_media_spends" in config:
+                spends = format_list(config["paid_media_spends"])
+                st.markdown(f"**Paid Media Spends:** {spends}")
+
+            # 7. Paid Media Variables
+            if "paid_media_vars" in config:
+                vars = format_list(config["paid_media_vars"])
+                st.markdown(f"**Paid Media Variables:** {vars}")
+
+            # 8. Context Variables
+            if "context_vars" in config:
+                ctx = format_list(config["context_vars"])
+                st.markdown(f"**Context Variables:** {ctx}")
+
+            # 9. Factor Variables
+            if "factor_vars" in config:
+                factors = format_list(config["factor_vars"])
+                st.markdown(f"**Factor Variables:** {factors}")
+
+            # 10. Organic Variables
+            if "organic_vars" in config:
+                organic = format_list(config["organic_vars"])
+                st.markdown(f"**Organic Variables:** {organic}")
+
+            # Display additional parameters in an expander
+            with st.expander("View full configuration", expanded=False):
+                st.json(config)
+
+
+def render_model_metrics_table(blobs, country, stamp):
+    """Render model metrics in a formatted table with color coding"""
+    st.subheader("Model Performance Metrics")
+
+    # Create a cache key from blob names
+    blob_names = tuple(sorted([b.name for b in blobs]))
+
+    # Extract metrics from blobs (with caching)
+    @st.cache_data(ttl=3600, show_spinner="Loading metrics...")
+    def _extract_cached_metrics(blob_names_key):
+        # Re-extract metrics (blobs aren't directly cacheable, but results are)
+        return extract_core_metrics_from_blobs(blobs)
+
+    metrics = _extract_cached_metrics(blob_names)
+
+    if not metrics:
+        st.info("No model metrics found.")
+        return
+
+    # Define thresholds based on Robyn documentation
+    # R2: higher is better (0-1 scale)
+    r2_thresholds = {"good": 0.7, "acceptable": 0.5}
+    # NRMSE: lower is better (percentage)
+    nrmse_thresholds = {"good": 0.15, "acceptable": 0.25}
+    # DECOMP.RSSD: lower is better
+    decomp_thresholds = {"good": 0.1, "acceptable": 0.2}
+
+    def get_color(value, metric_type):
+        """Return color based on value and metric type"""
+        if pd.isna(value):
+            return "background-color: #f0f0f0"  # gray for missing
+
+        if metric_type == "r2":
+            # Higher is better
+            if value >= r2_thresholds["good"]:
+                return "background-color: #d4edda; color: #155724"  # green
+            elif value >= r2_thresholds["acceptable"]:
+                return "background-color: #fff3cd; color: #856404"  # yellow
+            else:
+                return "background-color: #f8d7da; color: #721c24"  # red
+
+        elif metric_type == "nrmse":
+            # Lower is better
+            if value <= nrmse_thresholds["good"]:
+                return "background-color: #d4edda; color: #155724"  # green
+            elif value <= nrmse_thresholds["acceptable"]:
+                return "background-color: #fff3cd; color: #856404"  # yellow
+            else:
+                return "background-color: #f8d7da; color: #721c24"  # red
+
+        elif metric_type == "decomp_rssd":
+            # Lower is better
+            if value <= decomp_thresholds["good"]:
+                return "background-color: #d4edda; color: #155724"  # green
+            elif value <= decomp_thresholds["acceptable"]:
+                return "background-color: #fff3cd; color: #856404"  # yellow
+            else:
+                return "background-color: #f8d7da; color: #721c24"  # red
+
+        return ""
+
+    # Build the metrics table
+    table_data = {
+        "Split": ["Train", "Validation", "Test"],
+        "Predictive Power (R²)": [
+            metrics.get("r2_train"),
+            metrics.get("r2_val"),
+            metrics.get("r2_test"),
+        ],
+        "Prediction Accuracy (NRMSE)": [
+            metrics.get("nrmse_train"),
+            metrics.get("nrmse_val"),
+            metrics.get("nrmse_test"),
+        ],
+        "Business Error (DECOMP.RSSD)": [
+            metrics.get("decomp_rssd_train"),
+            metrics.get("decomp_rssd_val"),
+            metrics.get("decomp_rssd_test"),
+        ],
+    }
+
+    df = pd.DataFrame(table_data)
+
+    # Apply styling
+    def style_metrics(row):
+        styles = [""] * len(row)
+        if row.name == "Split":
+            return styles
+
+        idx = row.name
+        styles[1] = get_color(table_data["Predictive Power (R²)"][idx], "r2")
+        styles[2] = get_color(
+            table_data["Prediction Accuracy (NRMSE)"][idx], "nrmse"
+        )
+        styles[3] = get_color(
+            table_data["Business Error (DECOMP.RSSD)"][idx], "decomp_rssd"
+        )
+        return styles
+
+    # Format the values
+    def format_value(val):
+        if pd.isna(val):
+            return "N/A"
+        return f"{val:.4f}"
+
+    # Create HTML table with styling
+    html = "<table style='width:100%; border-collapse: collapse;'>"
+    html += "<thead><tr style='background-color: #f8f9fa;'>"
+    for col in df.columns:
+        html += f"<th style='padding: 12px; text-align: left; border: 1px solid #dee2e6;'>{col}</th>"
+    html += "</tr></thead><tbody>"
+
+    for i, row in df.iterrows():
+        html += "<tr>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; font-weight: bold;'>{row['Split']}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Predictive Power (R²)'], 'r2')}'>{format_value(row['Predictive Power (R²)'])}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Prediction Accuracy (NRMSE)'], 'nrmse')}'>{format_value(row['Prediction Accuracy (NRMSE)'])}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Business Error (DECOMP.RSSD)'], 'decomp_rssd')}'>{format_value(row['Business Error (DECOMP.RSSD)'])}</td>"
+        html += "</tr>"
+
+    html += "</tbody></table>"
+
+    st.markdown(html, unsafe_allow_html=True)
+
+    # Add legend
+    st.caption(
+        "🟢 Green = Good | 🟡 Yellow = Acceptable | 🔴 Red = Needs Improvement"
+    )
+
+    # Display threshold information in an expander
+    with st.expander("View metric thresholds", expanded=False):
+        st.markdown(
+            f"""
+        **R² (Predictive Power)** - Higher is better:
+        - Good: ≥ {r2_thresholds['good']}
+        - Acceptable: ≥ {r2_thresholds['acceptable']}
+        - Poor: < {r2_thresholds['acceptable']}
+        
+        **NRMSE (Prediction Accuracy)** - Lower is better:
+        - Good: ≤ {nrmse_thresholds['good']}
+        - Acceptable: ≤ {nrmse_thresholds['acceptable']}
+        - Poor: > {nrmse_thresholds['acceptable']}
+        
+        **DECOMP.RSSD (Business Error)** - Lower is better:
+        - Good: ≤ {decomp_thresholds['good']}
+        - Acceptable: ≤ {decomp_thresholds['acceptable']}
+        - Poor: > {decomp_thresholds['acceptable']}
+        """
+        )
+
+
 def render_metrics_section(blobs, country, stamp):
-    st.subheader("📊 Allocator metrics")
+    st.subheader("Allocator Metrics")
     metrics_csv = find_blob(blobs, "/allocator_metrics.csv")
     metrics_txt = find_blob(blobs, "/allocator_metrics.txt")
 
@@ -413,7 +684,7 @@ def render_metrics_section(blobs, country, stamp):
 
 
 def render_allocator_section(blobs, country, stamp):
-    st.subheader("Allocator plot")
+    st.subheader("Allocator Plot")
     alloc_plots = find_allocator_plots(blobs)
 
     if not alloc_plots:
@@ -511,8 +782,6 @@ def render_onepager_section(blobs, best_id, country, stamp):
 
 
 def render_all_files_section(blobs, bucket_name, country, stamp):
-    st.subheader("All files")
-
     def guess_mime(name: str) -> str:
         n = name.lower()
         if n.endswith(".csv"):
@@ -527,13 +796,12 @@ def render_all_files_section(blobs, bucket_name, country, stamp):
             return "application/octet-stream"
         return "application/octet-stream"
 
-    for i, b in enumerate(sorted(blobs, key=lambda x: x.name)):
-        fn = os.path.basename(b.name)
-        with st.container(border=True):
-            st.write(f"`{fn}` — {b.size:,} bytes")
+    with st.expander("**All Files (Detailed Analysis)**", expanded=False):
+        for i, b in enumerate(sorted(blobs, key=lambda x: x.name)):
+            fn = os.path.basename(b.name)
             download_link_for_blob(
                 b,
-                label=f"Download {fn}",
+                label=f"⬇️ {fn}",
                 mime_hint=guess_mime(fn),
                 key_suffix=f"all|{country}|{stamp}|{i}",
             )
@@ -714,16 +982,20 @@ def extract_core_metrics_from_blobs(blobs: list) -> dict:
     return {}
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def rank_runs_for_country(
-    runs: dict, country: str, weights=(0.2, 0.5, 0.3), alpha=1.0, beta=1.0
+    _runs: dict, country: str, weights=(0.2, 0.5, 0.3), alpha=1.0, beta=1.0
 ) -> tuple[tuple, pd.DataFrame]:
     """
     Build a summary table for all (rev, country, stamp) runs, compute a score:
       score = weighted_r2 - alpha*norm_weighted_nrmse - beta*norm_weighted_drssd
     Return (best_key, dataframe_sorted_desc_by_score).
+    
+    Cached for 10 minutes to avoid recomputing scores on every page load.
+    Note: _runs is prefixed with underscore to prevent Streamlit from hashing it.
     """
     rows = []
-    for (rev, ctry, stamp), blobs in runs.items():
+    for (rev, ctry, stamp), blobs in _runs.items():
         if ctry != country:
             continue
         metrics = extract_core_metrics_from_blobs(blobs) or {}
@@ -787,44 +1059,41 @@ def render_run_from_key(runs: dict, key: tuple, bucket_name: str):
     rev, country, stamp = key
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
+
+    # Render sections in the specified order
+    render_model_config_section(blobs, country, stamp, bucket_name)
+    render_model_metrics_table(blobs, country, stamp)
+    render_onepager_section(blobs, best_id, country, stamp)
+    render_allocator_section(blobs, country, stamp)
+    render_all_files_section(blobs, bucket_name, country, stamp)
+
+
+def build_run_title(country: str, stamp: str, iters, trials):
+    """Build title with country, timestamp, iterations and trials."""
     meta_bits = []
     if iters is not None:
         meta_bits.append(f"iterations={iters}")
     if trials is not None:
         meta_bits.append(f"trials={trials}")
     meta_str = (" · " + " · ".join(meta_bits)) if meta_bits else ""
-    has_alloc = (
-        "with allocator plot"
-        if run_has_allocator_plot(blobs)
-        else "no allocator plot found"
-    )
-
-    st.markdown(
-        f"### {country.upper()} — `{rev}` / `{stamp}` ({has_alloc}){meta_str}"
-    )
-    prefix_path = f"robyn/{rev}/{country}/{stamp}/"
-    gcs_url = gcs_console_url(bucket_name, prefix_path)
-    st.markdown(
-        f'**Path:** <a href="{gcs_url}" target="_blank">gs://{bucket_name}/{prefix_path}</a>',
-        unsafe_allow_html=True,
-    )
-    if best_id:
-        st.info(f"**Best Model ID:** {best_id}")
-
-    # reuse the existing sections
-    render_metrics_section(blobs, country, stamp)
-    render_allocator_section(blobs, country, stamp)
-    render_onepager_section(blobs, best_id, country, stamp)
-    render_all_files_section(blobs, bucket_name, country, stamp)
+    return f"{country.upper()} — `{stamp}`{meta_str}"
 
 
 # ---------- Sidebar / controls ----------
+# Initialize session state for filter persistence
+if "view_best_results_bucket" not in st.session_state:
+    st.session_state["view_best_results_bucket"] = DEFAULT_BUCKET
+if "view_best_results_prefix" not in st.session_state:
+    st.session_state["view_best_results_prefix"] = DEFAULT_PREFIX
+if "view_best_results_auto_best" not in st.session_state:
+    st.session_state["view_best_results_auto_best"] = True
+
 with st.sidebar:
-    bucket_name = st.text_input("GCS bucket", value=DEFAULT_BUCKET)
+    bucket_name = st.text_input("GCS bucket", key="view_best_results_bucket")
     prefix = st.text_input(
         "Root prefix",
-        value=DEFAULT_PREFIX,
         help="Usually 'robyn/' or narrower like 'robyn/r100/'",
+        key="view_best_results_prefix",
     )
     if prefix and not prefix.endswith("/"):
         prefix = prefix + "/"
@@ -837,7 +1106,8 @@ with st.sidebar:
 
     st.subheader("Best-model scoring")
     auto_best = st.checkbox(
-        "Auto-pick best across ALL revisions per country", value=True
+        "Auto-pick best across ALL revisions per country",
+        key="view_best_results_auto_best",
     )
 
     # Sliders with persistent defaults
@@ -896,11 +1166,12 @@ if (
     or st.session_state.get("last_bucket") != bucket_name
     or st.session_state.get("last_prefix") != prefix
 ):
-    blobs = list_blobs(bucket_name, prefix)
-    runs = group_runs(blobs)
-    st.session_state["runs_cache"] = runs
-    st.session_state["last_bucket"] = bucket_name
-    st.session_state["last_prefix"] = prefix
+    with st.spinner("Loading runs from GCS..."):
+        blobs = list_blobs(bucket_name, prefix)
+        runs = group_runs(blobs)
+        st.session_state["runs_cache"] = runs
+        st.session_state["last_bucket"] = bucket_name
+        st.session_state["last_prefix"] = prefix
 else:
     runs = st.session_state["runs_cache"]
 
@@ -934,33 +1205,11 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
 
-    meta_bits = []
-    if iters is not None:
-        meta_bits.append(f"iterations={iters}")
-    if trials is not None:
-        meta_bits.append(f"trials={trials}")
-    meta_str = (" · " + " · ".join(meta_bits)) if meta_bits else ""
-    has_alloc = (
-        "with allocator plot"
-        if run_has_allocator_plot(blobs)
-        else "no allocator plot found"
-    )
-
-    st.markdown(f"### {country.upper()} — `{stamp}` ({has_alloc}){meta_str}")
-
-    prefix_path = f"robyn/{rev}/{country}/{stamp}/"
-    gcs_url = gcs_console_url(bucket_name, prefix_path)
-    st.markdown(
-        f'**Path:** <a href="{gcs_url}" target="_blank">gs://{bucket_name}/{prefix_path}</a>',
-        unsafe_allow_html=True,
-    )
-
-    if best_id:
-        st.info(f"**Best Model ID:** {best_id}")
-
-    render_metrics_section(blobs, country, stamp)
-    render_allocator_section(blobs, country, stamp)
+    # Render sections in the specified order
+    render_model_config_section(blobs, country, stamp, bucket_name)
+    render_model_metrics_table(blobs, country, stamp)
     render_onepager_section(blobs, best_id, country, stamp)
+    render_allocator_section(blobs, country, stamp)
     render_all_files_section(blobs, bucket_name, country, stamp)
 
 
@@ -986,7 +1235,25 @@ if not auto_best:
     all_revs = sorted(
         {k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True
     )
-    rev = st.selectbox("Revision", all_revs, index=all_revs.index(default_rev))
+
+    # Determine the index for the selectbox (preserve user selection or use default)
+    # Use separate session state key that persists across navigation
+    if "view_best_results_revision_value" in st.session_state and st.session_state["view_best_results_revision_value"] in all_revs:
+        # User has a valid saved selection - use it
+        default_rev_index = all_revs.index(st.session_state["view_best_results_revision_value"])
+    else:
+        # First time or invalid selection - use default
+        default_rev_index = all_revs.index(default_rev) if default_rev in all_revs else 0
+
+    rev = st.selectbox(
+        "Revision",
+        all_revs,
+        index=default_rev_index,
+    )
+
+    # Store selection in persistent session state key (not widget key)
+    if rev != st.session_state.get("view_best_results_revision_value"):
+        st.session_state["view_best_results_revision_value"] = rev
 
     # Countries available in this revision
     rev_keys = [k for k in runs.keys() if k[0] == rev]
@@ -1002,24 +1269,65 @@ if not auto_best:
     )
     default_country_in_rev = best_country_key[1]
 
+    # Determine default countries for multiselect
+    # Use separate session state key that persists across navigation
+    if "view_best_results_countries_rev_value" in st.session_state:
+        # User has saved selections - validate and preserve
+        current_countries = st.session_state["view_best_results_countries_rev_value"]
+        valid_countries = [c for c in current_countries if c in rev_countries]
+        if valid_countries:
+            # Has valid selections - use them
+            default_countries = valid_countries
+        else:
+            # All selections are invalid - use default
+            default_countries = [default_country_in_rev] if default_country_in_rev in rev_countries else []
+    else:
+        # First time - use default
+        default_countries = [default_country_in_rev] if default_country_in_rev in rev_countries else []
+
     countries_sel = st.multiselect(
-        "Countries (newest run **with allocator plot** will be shown; falls back to newest)",
+        "Countries",
         rev_countries,
-        default=(
-            [default_country_in_rev]
-            if default_country_in_rev in rev_countries
-            else []
-        ),
+        default=default_countries,
     )
+
+    # Store selection in persistent session state key (not widget key)
+    if countries_sel != st.session_state.get("view_best_results_countries_rev_value"):
+        st.session_state["view_best_results_countries_rev_value"] = countries_sel
     if not countries_sel:
         st.info("Select at least one country.")
         st.stop()
 
-    st.markdown(f"## Detailed View — revision `{rev}`")
     for ctry in countries_sel:
-        with st.container():
-            render_run_for_country(bucket_name, rev, ctry)  # type: ignore
-            st.divider()
+        # Use expander if multiple countries
+        if len(countries_sel) > 1:
+            # Get the run to build title
+            candidates = sorted(
+                [k for k in runs.keys() if k[0] == rev and k[1] == ctry],
+                key=lambda k: parse_stamp(k[2]),
+                reverse=True,
+            )
+            if candidates:
+                key = next(
+                    (k for k in candidates if run_has_allocator_plot(runs[k])),
+                    candidates[0],
+                )
+                _, iters, trials = parse_best_meta(runs[key])
+                title = build_run_title(ctry, key[2], iters, trials)
+                with st.expander(f"**{title}**", expanded=True):
+                    with st.spinner(f"Loading results for {ctry.upper()}..."):
+                        render_run_for_country(
+                            bucket_name, rev, ctry
+                        )  # type: ignore
+            else:
+                with st.expander(f"**{ctry.upper()}**", expanded=True):
+                    with st.spinner(f"Loading results for {ctry.upper()}..."):
+                        render_run_for_country(
+                            bucket_name, rev, ctry
+                        )  # type: ignore
+        else:
+            with st.spinner(f"Loading results for {ctry.upper()}..."):
+                render_run_for_country(bucket_name, rev, ctry)  # type: ignore
 
 # ---------- Mode: auto best across all revisions ----------
 else:
@@ -1029,25 +1337,45 @@ else:
         st.info("No countries found in the provided prefix.")
         st.stop()
 
+    # Determine default countries for multiselect
+    # Use separate session state key that persists across navigation
+    if "view_best_results_countries_all_value" in st.session_state:
+        # User has saved selections - validate and preserve
+        current_countries = st.session_state["view_best_results_countries_all_value"]
+        valid_countries = [c for c in current_countries if c in all_countries]
+        if valid_countries:
+            # Has valid selections - use them
+            default_countries = valid_countries
+        else:
+            # All selections are invalid - use default
+            default_countries = [all_countries[0]]
+    else:
+        # First time - use default
+        default_countries = [all_countries[0]]
+
     countries_sel = st.multiselect(
         "Countries",
         all_countries,
-        default=[all_countries[0]],
+        default=default_countries,
     )
+
+    # Store selection in persistent session state key (not widget key)
+    if countries_sel != st.session_state.get("view_best_results_countries_all_value"):
+        st.session_state["view_best_results_countries_all_value"] = countries_sel
 
     if not countries_sel:
         st.info("Select at least one country.")
         st.stop()
 
-    st.markdown("## Detailed View — Best run per country (auto)")
     for ctry in countries_sel:
-        best_key, table = rank_runs_for_country(
-            runs,
-            ctry,
-            weights=st.session_state["weights"],
-            alpha=st.session_state["alpha"],
-            beta=st.session_state["beta"],
-        )
+        with st.spinner(f"Loading best results for {ctry.upper()}..."):
+            best_key, table = rank_runs_for_country(
+                runs,
+                ctry,
+                weights=st.session_state["weights"],
+                alpha=st.session_state["alpha"],
+                beta=st.session_state["beta"],
+            )
         if best_key is None:
             st.warning(
                 f"No metric-bearing runs found for {ctry}. Showing newest run instead."
@@ -1061,39 +1389,82 @@ else:
                 st.info(f"No runs at all for {ctry}.")
                 continue
             best_key = candidates[0]
-            render_run_from_key(runs, best_key, bucket_name)
-            st.divider()
+
+            # Use expander if multiple countries
+            if len(countries_sel) > 1:
+                _, iters, trials = parse_best_meta(runs[best_key])
+                title = build_run_title(ctry, best_key[2], iters, trials)
+                with st.expander(f"**{title}**", expanded=True):
+                    with st.spinner("Rendering results..."):
+                        render_run_from_key(runs, best_key, bucket_name)
+            else:
+                with st.spinner("Rendering results..."):
+                    render_run_from_key(runs, best_key, bucket_name)
             continue
 
-        # Show ranking table
-        with st.expander(
-            f"Ranking table for {ctry.upper()} (higher score is better)",
-            expanded=False,
-        ):
-            cols = [
-                "score",
-                "r2_w",
-                "nrmse_w",
-                "drssd_w",
-                "rev",
-                "stamp",
-                "best_id",
-                "has_alloc",
-                "r2_train",
-                "r2_val",
-                "r2_test",
-                "nrmse_train",
-                "nrmse_val",
-                "nrmse_test",
-                "decomp_rssd_train",
-                "decomp_rssd_val",
-                "decomp_rssd_test",
-            ]
-            display = table[[c for c in cols if c in table.columns]].copy()
-            st.dataframe(display, use_container_width=True)
+        # Use expander if multiple countries
+        if len(countries_sel) > 1:
+            _, iters, trials = parse_best_meta(runs[best_key])
+            title = build_run_title(ctry, best_key[2], iters, trials)
+            with st.expander(f"**{title}**", expanded=True):
+                # Show ranking table
+                with st.expander(
+                    "Ranking table (higher score is better)",
+                    expanded=False,
+                ):
+                    cols = [
+                        "score",
+                        "r2_w",
+                        "nrmse_w",
+                        "drssd_w",
+                        "rev",
+                        "stamp",
+                        "best_id",
+                        "has_alloc",
+                        "r2_train",
+                        "r2_val",
+                        "r2_test",
+                        "nrmse_train",
+                        "nrmse_val",
+                        "nrmse_test",
+                        "decomp_rssd_train",
+                        "decomp_rssd_val",
+                        "decomp_rssd_test",
+                    ]
+                    display = table[
+                        [c for c in cols if c in table.columns]
+                    ].copy()
+                    st.dataframe(display, use_container_width=True)
 
-        st.success(
-            f"Best run for **{ctry.upper()}**: `{best_key[0]}` / `{best_key[2]}`"
-        )
-        render_run_from_key(runs, best_key, bucket_name)
-        st.divider()
+                with st.spinner("Rendering best results..."):
+                    render_run_from_key(runs, best_key, bucket_name)
+        else:
+            # Show ranking table
+            with st.expander(
+                f"Ranking table for {ctry.upper()} (higher score is better)",
+                expanded=False,
+            ):
+                cols = [
+                    "score",
+                    "r2_w",
+                    "nrmse_w",
+                    "drssd_w",
+                    "rev",
+                    "stamp",
+                    "best_id",
+                    "has_alloc",
+                    "r2_train",
+                    "r2_val",
+                    "r2_test",
+                    "nrmse_train",
+                    "nrmse_val",
+                    "nrmse_test",
+                    "decomp_rssd_train",
+                    "decomp_rssd_val",
+                    "decomp_rssd_test",
+                ]
+                display = table[[c for c in cols if c in table.columns]].copy()
+                st.dataframe(display, use_container_width=True)
+
+            with st.spinner("Rendering best results..."):
+                render_run_from_key(runs, best_key, bucket_name)

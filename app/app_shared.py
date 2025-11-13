@@ -213,6 +213,23 @@ def _safe_tick_once(
                     )
                     message = entry["message"]
                     changed = True
+                    
+                    # Enhanced logging for final states
+                    if final_state in ("FAILED", "ERROR", "CANCELLED"):
+                        logger.error(
+                            f"[QUEUE_ERROR] Job {entry.get('id')} transitioned to {final_state}"
+                        )
+                        logger.error(
+                            f"[QUEUE_ERROR] Execution: {entry.get('execution_name', 'N/A')}"
+                        )
+                        logger.error(
+                            f"[QUEUE_ERROR] GCS prefix: {entry.get('gcs_prefix', 'N/A')}"
+                        )
+                        logger.error(f"[QUEUE_ERROR] Error message: {message}")
+                    else:
+                        logger.info(
+                            f"[QUEUE] Job {entry.get('id')} completed with status {final_state}"
+                        )
                 elif entry.get("status") == "LAUNCHING":
                     # Visible execution, promote to RUNNING
                     entry["status"] = "RUNNING"
@@ -223,6 +240,12 @@ def _safe_tick_once(
                 entry["message"] = str(e)
                 message = entry["message"]
                 changed = True
+                logger.error(
+                    f"[QUEUE_ERROR] Failed to get status for job {entry.get('id')}: {e}"
+                )
+                logger.error(
+                    f"[QUEUE_ERROR] Execution: {entry.get('execution_name', 'N/A')}"
+                )
 
             if changed:
                 doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
@@ -270,6 +293,10 @@ def _safe_tick_once(
 
         # --- Outside critical section: perform the actual launch ---
         message = "Launched"
+        logger.info(f"[QUEUE] Attempting to launch job {entry.get('id')}")
+        logger.info(f"[QUEUE] Job params: country={entry.get('params', {}).get('country')}, "
+                   f"revision={entry.get('params', {}).get('revision')}, "
+                   f"iterations={entry.get('params', {}).get('iterations')}")
         try:
             exec_info = launcher(entry["params"])
             time.sleep(SAFE_LAG_SECONDS_AFTER_RUNNING)
@@ -278,10 +305,26 @@ def _safe_tick_once(
             entry["gcs_prefix"] = exec_info.get("gcs_prefix")
             entry["status"] = "RUNNING"
             entry["message"] = "Launched"
+            logger.info(f"[QUEUE] Successfully launched job {entry.get('id')}")
+            logger.info(f"[QUEUE] Execution: {entry['execution_name']}")
+            logger.info(f"[QUEUE] GCS prefix: {entry['gcs_prefix']}")
         except Exception as e:
             entry["status"] = "ERROR"
             entry["message"] = f"launch failed: {e}"
             message = entry["message"]
+            logger.error(f"[QUEUE_ERROR] ========================================")
+            logger.error(f"[QUEUE_ERROR] LAUNCH FAILURE - Job {entry.get('id')}")
+            logger.error(f"[QUEUE_ERROR] ========================================")
+            logger.error(f"[QUEUE_ERROR] Error type: {type(e).__name__}")
+            logger.error(f"[QUEUE_ERROR] Error message: {e}")
+            logger.error(
+                f"[QUEUE_ERROR] Job params: country={entry.get('params', {}).get('country')}, "
+                f"revision={entry.get('params', {}).get('revision')}"
+            )
+            logger.error(f"[QUEUE_ERROR] Full stack trace below:")
+            logger.exception(
+                f"[QUEUE_ERROR] Failed to launch job {entry.get('id')}"
+            )
 
         # Persist the post-launch state with another guarded write
         blob.reload()
@@ -453,6 +496,21 @@ class CloudRunJobManager:
             except Exception:
                 return str(dtobj) if dtobj is not None else None
 
+        # Validate execution_name format
+        if not execution_name or not isinstance(execution_name, str):
+            return {
+                "overall_status": "ERROR",
+                "error": "Invalid execution_name: must be a non-empty string"
+            }
+        
+        # Expected format: projects/{project}/locations/{region}/jobs/{job}/executions/{execution}
+        if not execution_name.startswith("projects/"):
+            return {
+                "overall_status": "ERROR",
+                "error": f"Invalid execution_name format: {execution_name}. "
+                        "Expected format: projects/{{project}}/locations/{{region}}/jobs/{{job}}/executions/{{execution}}"
+            }
+
         try:
             execution = self.executions_client.get_execution(
                 name=execution_name
@@ -487,8 +545,24 @@ class CloudRunJobManager:
                 status["overall_status"] = "PENDING"
             return status
         except Exception as e:
-            logger.error(f"Error getting execution status: {e}", exc_info=True)
-            return {"overall_status": "ERROR", "error": str(e)}
+            logger.error(f"Error getting execution status for '{execution_name}': {e}", exc_info=True)
+            error_msg = str(e)
+            
+            # Provide helpful error messages for common issues
+            if "403" in error_msg or "Permission denied" in error_msg:
+                return {
+                    "overall_status": "ERROR",
+                    "error": f"Permission denied: The service account may not have access to view executions. "
+                            f"Ensure the web service account has 'roles/run.developer' or 'roles/run.admin' permissions. "
+                            f"Original error: {error_msg}"
+                }
+            elif "404" in error_msg or "not found" in error_msg.lower():
+                return {
+                    "overall_status": "ERROR",
+                    "error": f"Execution not found: {execution_name}. The execution may have been deleted or the name is incorrect."
+                }
+            else:
+                return {"overall_status": "ERROR", "error": error_msg}
 
 
 # ─────────────────────────────
@@ -1296,32 +1370,59 @@ def _is_bool_like(series: pd.Series) -> bool:
         return False
 
 
-def require_login_and_domain(allowed_domain: str = "mesheddata.com") -> None:
+def require_login_and_domain(allowed_domain: Optional[str] = None) -> None:
     """
     Hard-stops the current Streamlit run unless the user is logged in
-    with a Google account from the allowed domain.
+    with a Google account from one of the allowed domains.
     Call this at the very top of *every* page.
+    
+    Args:
+        allowed_domain: Legacy parameter for backward compatibility. 
+                       If None, uses the ALLOWED_DOMAINS from settings.
+                       If provided, checks against this single domain only.
     """
     # Allow lightweight health checks to pass through if you use them on pages too
     q = getattr(st, "query_params", {})
     if q.get("health") == "true":
         return  # let the page handle its health endpoint and st.stop() later if needed
 
+    # Determine which domains to allow
+    if allowed_domain is not None:
+        # Legacy: single domain passed as parameter
+        allowed_domains = [allowed_domain.strip().lower()]
+    else:
+        # Use configured domains from settings
+        from config.settings import ALLOWED_DOMAINS
+        allowed_domains = ALLOWED_DOMAINS if ALLOWED_DOMAINS else ["mesheddata.com"]
+    
     is_logged_in = getattr(st.user, "is_logged_in", False)  # type: ignore
     if not is_logged_in:
         st.set_page_config(page_title="Sign in", layout="centered")
         st.title("Robyn MMM")
-        st.write(
-            f"Sign in with your {allowed_domain} Google account to continue."
-        )
+        if len(allowed_domains) == 1:
+            st.write(
+                f"Sign in with your @{allowed_domains[0]} Google account to continue."
+            )
+        else:
+            domains_str = ", ".join(f"@{d}" for d in allowed_domains)
+            st.write(
+                f"Sign in with your Google account from one of these domains: {domains_str}"
+            )
         if st.button("Sign in with Google"):
             st.login()  # type: ignore # flat [auth] config → no provider arg
         st.stop()
 
     email = (getattr(st.user, "email", "") or "").lower().strip()  # type: ignore
-    if not email.endswith(f"@{allowed_domain}"):
+    
+    # Check if email ends with any of the allowed domains
+    email_domain = email.split("@")[-1] if "@" in email else ""
+    if not any(email_domain == domain for domain in allowed_domains):
         st.set_page_config(page_title="Access restricted", layout="centered")
-        st.error(f"This app is restricted to @{allowed_domain} accounts.")
+        if len(allowed_domains) == 1:
+            st.error(f"This app is restricted to @{allowed_domains[0]} accounts.")
+        else:
+            domains_str = ", ".join(f"@{d}" for d in allowed_domains)
+            st.error(f"This app is restricted to accounts from these domains: {domains_str}")
         if st.button("Sign out"):
             st.logout()  # type: ignore # flat [auth] config → no provider arg
         st.stop()
@@ -1487,9 +1588,8 @@ def _require_sf_session():
 
 ## FE additions below
 
-
 # =========================
-# Date Parser
+# Date Parser (unchanged)
 # =========================
 def parse_date(df: pd.DataFrame, meta: dict) -> Tuple[pd.DataFrame, str]:
     wanted = str(meta.get("data", {}).get("date_field") or "DATE")
@@ -1516,7 +1616,6 @@ def parse_date(df: pd.DataFrame, meta: dict) -> Tuple[pd.DataFrame, str]:
 def data_root(country: str) -> str:
     return f"datasets/{country.lower().strip()}"
 
-
 def data_blob(country: str, ts: str) -> str:
     return f"{data_root(country)}/{ts}/raw.parquet"
 
@@ -1524,14 +1623,28 @@ def data_blob(country: str, ts: str) -> str:
 def data_latest_blob(country: str) -> str:
     return f"{data_root(country)}/latest/raw.parquet"
 
-
+# --- metadata paths (country + universal)
 def meta_blob(country: str, ts: str) -> str:
+    """Country-scoped metadata path."""
     return f"metadata/{country.lower().strip()}/{ts}/mapping.json"
 
+def meta_blob_universal(ts: str) -> str:
+    """Universal metadata path."""
+    return f"metadata/universal/{ts}/mapping.json"
 
 def meta_latest_blob(country: str) -> str:
+    """Country-scoped 'latest' pointer."""
     return f"metadata/{country.lower().strip()}/latest/mapping.json"
 
+def meta_latest_blob_universal() -> str:
+    """Universal 'latest' pointer."""
+    return "metadata/universal/latest/mapping.json"
+
+# --- small helper
+def _blob_exists(bucket: str, blob_path: str) -> bool:
+    client = storage.Client()
+    blob = client.bucket(bucket).blob(blob_path)
+    return blob.exists()
 
 @st.cache_data(show_spinner=False)
 def sorted_versions_newest_first(ts_list: List[str]) -> List[str]:
@@ -1572,19 +1685,106 @@ def list_data_versions(
 
 
 @st.cache_data(show_spinner=False)
-def list_meta_versions(
-    bucket: str, country: str, refresh_key: str = ""
-) -> List[str]:
+def list_meta_versions(bucket: str, country: str, refresh_key: str = "") -> List[str]:
+    """
+    Returns labels for the UI in the form:
+      ["Latest", "Universal - <ts1>", "Universal - <ts2>", ..., "<CC> - <ts1>", "<CC> - <ts2>", ...]
+    Universal entries are listed first (newest → oldest), then country entries (newest → oldest).
+    """
     client = storage.Client()
-    prefix = f"metadata/{country.lower().strip()}/"
-    blobs = client.list_blobs(bucket, prefix=prefix)
-    ts = set()
-    for b in blobs:
+    cc = country.upper().strip()
+    country_prefix = f"metadata/{country.lower().strip()}/"
+    universal_prefix = "metadata/universal/"
+
+    ts_country, ts_universal = set(), set()
+
+    # country-scoped
+    for b in client.list_blobs(bucket, prefix=country_prefix):
         parts = b.name.split("/")
         if len(parts) >= 4 and parts[-1] == "mapping.json":
-            ts.add(parts[-2])
-    out = sorted_versions_newest_first(list(ts))
-    return ["Latest"] + out
+            ts_country.add(parts[-2])
+
+    # universal
+    for b in client.list_blobs(bucket, prefix=universal_prefix):
+        parts = b.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "mapping.json":
+            ts_universal.add(parts[-2])
+
+    country_sorted = sorted_versions_newest_first(list(ts_country))
+    universal_sorted = sorted_versions_newest_first(list(ts_universal))
+
+    labels = ["Latest"]
+    labels += [f"Universal - {t}" for t in universal_sorted]
+    labels += [f"{cc} - {t}" for t in country_sorted]
+    return labels
+
+def resolve_meta_blob_from_selection(bucket: str, country: str, meta_selection: str) -> str:
+    """
+    Convert a UI label selection into a real GCS blob path.
+    Accepts:
+      - "Latest"
+      - "Universal - <ts>"
+      - "<CC> - <ts>" (CC = current country code, case-insensitive)
+      - "<ts>" (bare)  → try country first, then universal
+    Never returns a label path; always a real "metadata/<scope>/<ts>/mapping.json".
+    Raises FileNotFoundError if nothing resolves.
+    """
+    s = (meta_selection or "").strip()
+    cc = country.upper().strip()
+
+    # Latest: prefer country latest if exists, else universal latest, else newest explicit across both
+    if s.lower() == "latest":
+        cand_country = meta_latest_blob(country)
+        cand_universal = meta_latest_blob_universal()
+        if _blob_exists(bucket, cand_country):
+            return cand_country
+        if _blob_exists(bucket, cand_universal):
+            return cand_universal
+
+        # fallback: pick newest explicit across both scopes using list_meta_versions order
+        versions = list_meta_versions(bucket, country)
+        explicit = [v for v in versions if v != "Latest"]
+        if not explicit:
+            raise FileNotFoundError("No metadata mapping.json found in country or universal scope.")
+        pick = explicit[0]  # list_meta_versions already orders universal first, newest first
+        if pick.startswith("Universal - "):
+            ts = pick.split(" - ", 1)[1].strip()
+            return meta_blob_universal(ts)
+        else:
+            ts = pick.split(" - ", 1)[1].strip()
+            return meta_blob(country, ts)
+
+    # Labeled selection?
+    if " - " in s:
+        scope_lbl, ts_lbl = s.split(" - ", 1)
+        scope_lbl = scope_lbl.strip()
+        ts_lbl = ts_lbl.strip()
+        if scope_lbl.lower() == "universal":
+            cand = meta_blob_universal(ts_lbl)
+            if _blob_exists(bucket, cand):
+                return cand
+            raise FileNotFoundError(f"Universal metadata not found: gs://{bucket}/{cand}")
+        if scope_lbl.upper() == cc:
+            cand = meta_blob(country, ts_lbl)
+            if _blob_exists(bucket, cand):
+                return cand
+            raise FileNotFoundError(f"Country metadata not found: gs://{bucket}/{cand}")
+        # Unknown label → treat as bare ts
+        s = ts_lbl
+
+    # Bare ts: try country then universal
+    ts_str = s
+    cand_country = meta_blob(country, ts_str)
+    if _blob_exists(bucket, cand_country):
+        return cand_country
+    cand_universal = meta_blob_universal(ts_str)
+    if _blob_exists(bucket, cand_universal):
+        return cand_universal
+
+    raise FileNotFoundError(
+        f"Metadata not found for ts='{ts_str}' in either "
+        f"gs://{bucket}/{cand_country} or gs://{bucket}/{cand_universal}"
+    )
 
 
 def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
@@ -1618,24 +1818,25 @@ def download_json_from_gcs_cached(bucket: str, blob_path: str) -> dict:
 
 
 @st.cache_data(show_spinner=False)
-def load_data_from_gcs(
-    bucket: str, country: str, data_ts: str, meta_ts: str
-) -> Tuple[pd.DataFrame, dict, str]:
-    db = (
-        data_latest_blob(country)
-        if data_ts == "Latest"
-        else data_blob(country, str(data_ts))
-    )
-    mb = (
-        meta_latest_blob(country)
-        if meta_ts == "Latest"
-        else meta_blob(country, str(meta_ts))
-    )
+def load_data_from_gcs(bucket: str, country: str, data_ts: str, meta_ts: str) -> Tuple[pd.DataFrame, dict, str]:
+    """
+    Data: unchanged (country only).
+    Meta: supports label formats:
+          - "Latest"
+          - "Universal - <ts>"
+          - "<CC> - <ts>"  (CC = current country code)
+          - "<ts>" (bare)  → try country first, then universal
+    """
+    # data
+    db = data_latest_blob(country) if data_ts == "Latest" else data_blob(country, str(data_ts))
     df = _download_parquet_from_gcs(bucket, db)
+
+    # meta (use the resolver so display labels never leak into paths)
+    mb = resolve_meta_blob_from_selection(bucket, country, str(meta_ts))
     meta = _download_json_from_gcs(bucket, mb)
+
     df, date_col = parse_date(df, meta)
     return df, meta, date_col
-
 
 # =========================
 # KPI tiles
@@ -1959,9 +2160,7 @@ def render_sidebar(meta: dict, df: pd.DataFrame, nice, goal_cols: List[str]):
             df["COUNTRY"].dropna().astype(str).unique().tolist()
         )
         default_countries = country_list or []
-        sel_countries = st.sidebar.multiselect(
-            "Country (multi-select)", country_list, default=default_countries
-        )
+        sel_countries = st.sidebar.multiselect("Country", country_list, default=default_countries)
     else:
         sel_countries = []
         st.sidebar.caption("Dataset has no COUNTRY column — showing all rows.")

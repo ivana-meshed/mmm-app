@@ -1,56 +1,77 @@
 """
-Robyn MMM Trainer - Home Page
+Robyn MMM Trainer - Main Entry Point
 
 This is the main entry point for the MMM (Marketing Mix Modeling) application.
-It provides navigation to the main workflows:
-1. Connect Data - Set up Snowflake connection
-2. Map Data - Map columns and configure metadata
-3. Run Experiment - Execute single or batch MMM experiments
-
-The application is built with Streamlit and deployed on Google Cloud Run.
+Uses custom navigation to hide the main page from the sidebar.
 """
 
-# streamlit_app.py (proposed new Home)
 import streamlit as st
 
+# Use custom navigation to control sidebar (Streamlit 1.31+)
 st.set_page_config(
-    page_title="Robyn MMM Trainer", page_icon="📊", layout="wide"
+    page_title="Robyn MMM Trainer",
+    page_icon="📊",
+    layout="wide",
 )
+
 from app_split_helpers import *
 
-st.write(
-    """
-1. **Connect your Data** – set up your Snowflake connection.
-2. **Map Your Data** – map columns and save/load metadata.
-3. **Experiment** – run single or queued Robyn experiments.
-"""
+# Define pages for custom navigation
+connect_page = st.Page(
+    "pages/Connect_Data.py", title="Connect your Data", icon="🧩"
+)
+map_page = st.Page("pages/Map_Data.py", title="Map your Data", icon="🗺️")
+
+review_page = st.Page(
+    "pages/Review_Data.py",
+    title="Review Business- & Marketing Data",
+    icon="📊",
 )
 
-st.divider()
-col1, col2, col3 = st.columns(3)
-with col1:
-    try:
-        if st.button("🧩 Connect your Data", use_container_width=True):
-            import streamlit as stlib
+prepare_training_page = st.Page(
+    "pages/Prepare_Training_Data_new.py",
+    title="Prepare Training Data new",
+    icon="⚙️",
+)
 
-            stlib.switch_page("pages/0_Connect_Data.py")
-    except Exception:
-        st.page_link("pages/0_Connect_Data.py", label="🧩 Connect your Data")
+prepare_training_page_old = st.Page(
+    "pages/Prepare_Training_Data_old.py",
+    title="Prepare Training Data old",
+    icon="⚙️",
+)
 
-with col2:
-    try:
-        if st.button("🗺️ Map Your Data", use_container_width=True):
-            import streamlit as stlib
+prepare_training_page_oldv2 = st.Page(
+    "pages/Prepare_Training_Data_oldv2.py",
+    title="Prepare Training Data old v2",
+    icon="⚙️",
+)
+experiment_page = st.Page(
+    "pages/Run_Experiment.py", title="Experiment", icon="🧪"
+)
+results_page = st.Page(
+    "pages/View_Results.py", title="Results: Robyn MMM", icon="📈"
+)
+best_results_page = st.Page(
+    "pages/View_Best_Results.py",
+    title="Best models per country: Robyn MMM",
+    icon="🏆",
+)
 
-            stlib.switch_page("pages/1_Map_Data.py")
-    except Exception:
-        st.page_link("pages/1_Map_Data.py", label="🗺️ Map Your Data")
+# Create navigation - this replaces the default sidebar navigation
+pg = st.navigation(
+    [
+        connect_page,
+        map_page,
+        review_page,
+        prepare_training_page,
+        prepare_training_page_old,
+        prepare_training_page_oldv2,
+        experiment_page,
+        results_page,
+        best_results_page,
+    ],
+    position="sidebar",
+)
 
-with col3:
-    try:
-        if st.button("🧪 Experiment", use_container_width=True):
-            import streamlit as stlib
-
-            stlib.switch_page("pages/4_Experiment.py")
-    except Exception:
-        st.page_link("pages/4_Experiment.py", label="🧪 Experiment")
+# Run the selected page
+pg.run()

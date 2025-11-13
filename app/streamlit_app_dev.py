@@ -988,7 +988,7 @@ with tab_single:
 
         # Robyn config
         with st.expander("Robyn configuration"):
-            country = st.text_input("Country", value="fr")
+            country = st.text_input("Country", value="de")
             iterations = st.number_input("Iterations", value=200, min_value=50)
             trials = st.number_input("Trials", value=5, min_value=1)
             train_size = st.text_input("Train size", value="0.7,0.9")

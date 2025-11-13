@@ -12,8 +12,6 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
-
-st.set_page_config(page_title="Experiment", page_icon="🧪", layout="wide")
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -39,14 +37,15 @@ ensure_session_defaults()
 
 st.title("Experiment")
 
-# Check if we should show a message to switch to Queue tab (Issue #5)
+# Check if we should show a message to switch to Queue tab (Requirement 8)
 if st.session_state.get("switch_to_queue_tab", False):
-    st.success(
-        "✅ Configuration added to queue! Please switch to the **Queue** tab to monitor progress."
+    st.success("✅ **Configuration added to queue successfully!**")
+    st.info(
+        "👉 **Please click on the 'Queue' tab above** to monitor your job's progress."
     )
     st.session_state["switch_to_queue_tab"] = False
 
-tab_single, tab_queue = st.tabs(["Single run", "Queue"])
+tab_single, tab_queue, tab_status = st.tabs(["Single run", "Queue", "Status"])
 
 # Prefill fields from saved metadata if present (session_state keys should already be set by Map Your Data page).
 
@@ -125,28 +124,48 @@ def _load_metadata_from_gcs(
         return None
 
 
-def _get_latest_revision(bucket: str, country: str) -> str:
-    """Get the latest revision tag from GCS for a country."""
+def _get_revision_tags(bucket: str) -> List[str]:
+    """Get all unique revision tags from GCS."""
     try:
         client = storage.Client()
         prefix = f"robyn/"
-        blobs = list(client.list_blobs(bucket, prefix=prefix, delimiter="/"))
-        # Extract revision folders
-        revisions = set()
+        blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+        # Extract revision folders (format: TAG_NUMBER)
+        revision_tags = set()
         for blob in blobs:
             parts = blob.name.split("/")
-            if len(parts) >= 2:
-                revisions.add(parts[1])
-
-        # Sort revisions (assuming r### format)
-        sorted_revs = sorted(
-            [r for r in revisions if r.startswith("r")],
-            key=lambda x: int(x[1:]) if x[1:].isdigit() else 0,
-            reverse=True,
-        )
-        return sorted_revs[0] if sorted_revs else "r100"
+            if len(parts) >= 2 and "_" in parts[1]:
+                # Extract tag from TAG_NUMBER format
+                tag = parts[1].rsplit("_", 1)[0]
+                revision_tags.add(tag)
+        
+        return sorted(list(revision_tags))
     except Exception:
-        return "r100"
+        return []
+
+
+def _get_next_revision_number(bucket: str, tag: str) -> int:
+    """Get the next revision number for a given tag."""
+    try:
+        client = storage.Client()
+        prefix = f"robyn/"
+        blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+        # Find all numbers for this tag
+        numbers = []
+        for blob in blobs:
+            parts = blob.name.split("/")
+            if len(parts) >= 2 and parts[1].startswith(f"{tag}_"):
+                # Extract number from TAG_NUMBER format
+                try:
+                    num_str = parts[1].split("_")[-1]
+                    numbers.append(int(num_str))
+                except (ValueError, IndexError):
+                    continue
+        
+        # Return max + 1, or 1 if no existing numbers
+        return max(numbers) + 1 if numbers else 1
+    except Exception:
+        return 1
 
 
 # Extracted from streamlit_app.py tab_single (Single run):
@@ -154,7 +173,7 @@ with tab_single:
     st.subheader("Robyn configuration & training")
 
     # Data selection
-    with st.expander("📊 Data selection", expanded=False):
+    with st.expander("📊 Data Selection", expanded=False):
         # Show current loaded state (point 4 - UI representing actual state)
         if (
             "preview_df" in st.session_state
@@ -237,7 +256,10 @@ with tab_single:
 
         # Load data button with automatic preview
         if st.button(
-            "Load selected data", type="primary", use_container_width=True
+            "Load selected data",
+            type="primary",
+            use_container_width=True,
+            key="load_data_btn",
         ):
             tmp_path = None
             try:
@@ -364,15 +386,26 @@ with tab_single:
                     help=f"Configurations available for {current_country.upper()}",
                 )
 
-                if st.button("📥 Load Configuration", use_container_width=True):
+                if st.button(
+                    "📥 Load Configuration",
+                    use_container_width=True,
+                    key="load_config_btn",
+                ):
                     try:
                         blob_path = f"training-configs/saved/{current_country}/{selected_config}.json"
                         blob = client.bucket(gcs_bucket).blob(blob_path)
                         config_data = json.loads(blob.download_as_bytes())
 
-                        # Store loaded configuration in session state
+                        # Store loaded configuration in session state (including countries)
                         st.session_state["loaded_training_config"] = (
                             config_data.get("config", {})
+                        )
+                        st.session_state["loaded_config_countries"] = (
+                            config_data.get("countries", [])
+                        )
+                        # Set a timestamp to force widget refresh
+                        st.session_state["loaded_config_timestamp"] = (
+                            datetime.utcnow().timestamp()
                         )
 
                         st.success(
@@ -393,7 +426,7 @@ with tab_single:
             st.warning(f"Could not list configurations: {e}")
 
     # Robyn config (moved outside Data selection expander)
-    with st.expander("⚙️ Robyn configuration", expanded=False):
+    with st.expander("⚙️ Robyn Configuration", expanded=False):
         # Country auto-filled from Data Selection
         country = st.session_state.get("selected_country", "fr")
         st.info(f"**Country:** {country.upper()} (from Data Selection)")
@@ -404,7 +437,7 @@ with tab_single:
         # Iterations and Trials as presets
         preset_options = {
             "Test run": {"iterations": 200, "trials": 3},
-            "Production": {"iterations": 2000, "trials": 5},
+            "Production": {"iterations": 10000, "trials": 5},
             "Custom": {"iterations": 5000, "trials": 10},
         }
 
@@ -470,15 +503,6 @@ with tab_single:
                 else "0.7,0.9"
             ),
             help="Comma-separated train/validation split ratios",
-        )
-
-        # Revision tag - with placeholder showing latest
-        latest_revision = _get_latest_revision(gcs_bucket, country)
-        revision = st.text_input(
-            "Revision tag",
-            value=loaded_config.get("revision", "") if loaded_config else "",
-            placeholder=f"Latest revision for country: {latest_revision}",
-            help="Revision identifier for organizing outputs. Required before starting training.",
         )
 
         # Training date range instead of single date tag
@@ -655,7 +679,7 @@ with tab_single:
         # Show info message when Custom is selected
         if hyperparameter_preset == "Custom":
             st.info(
-                "📌 **Custom Hyperparameters Selected**: Scroll down to the **Variable mapping** section below to configure per-variable hyperparameter ranges for each paid media and organic variable."
+                "📌 **Custom Hyperparameters Selected**: Scroll down to the **Variable Mapping** section below to configure per-variable hyperparameter ranges for each paid media and organic variable."
             )
 
         # Custom hyperparameters will be collected later after variables are selected
@@ -711,7 +735,7 @@ with tab_single:
             )
 
     # Variables (moved outside Data selection expander)
-    with st.expander("🗺️ Variable mapping", expanded=False):
+    with st.expander("🗺️ Variable Mapping", expanded=False):
         # Get available columns from loaded data
         preview_df = st.session_state.get("preview_df")
         if preview_df is not None and not preview_df.empty:
@@ -848,6 +872,9 @@ with tab_single:
         if "spend_var_mapping" not in st.session_state:
             st.session_state["spend_var_mapping"] = {}
 
+        # Get loaded configuration to apply defaults
+        loaded_config = st.session_state.get("loaded_training_config", {})
+
         # Get all paid_media_spends from metadata (including CUSTOM columns)
         # Don't filter by all_columns since CUSTOM columns may not be in preview yet
         available_spends = default_values["paid_media_spends"]
@@ -861,10 +888,18 @@ with tab_single:
                 loaded_spends = [
                     s.strip() for s in loaded_spends.split(",") if s.strip()
                 ]
-            # Only include loaded spends that are in available_spends
-            default_paid_media_spends = [
-                s for s in loaded_spends if s in available_spends
-            ]
+            # Use loaded spends as defaults and add them to available options
+            default_paid_media_spends = loaded_spends
+            # Add loaded spends to available options (preserve order: metadata first, then loaded)
+            available_spends = list(
+                dict.fromkeys(available_spends + loaded_spends)
+            )
+
+            # Debug info to help troubleshoot
+            st.info(
+                f"📋 Loaded configuration detected with {len(loaded_spends)} paid_media_spends. "
+                f"Added {len([s for s in loaded_spends if s not in default_values['paid_media_spends']])} new variables not in metadata."
+            )
 
             # Initialize spend_var_mapping from loaded config (Issue #2 fix)
             if "paid_media_vars" in loaded_config:
@@ -873,6 +908,13 @@ with tab_single:
                     loaded_vars = [
                         s.strip() for s in loaded_vars.split(",") if s.strip()
                     ]
+
+                # Add loaded vars to default_values so they appear in var options
+                default_values["paid_media_vars"] = list(
+                    dict.fromkeys(
+                        default_values["paid_media_vars"] + loaded_vars
+                    )
+                )
 
                 # Build mapping: for each spend, find the corresponding var from loaded_vars
                 if metadata and "paid_media_mapping" in metadata:
@@ -896,6 +938,11 @@ with tab_single:
                         # Otherwise fall back to the spend itself
                         elif not matched:
                             st.session_state["spend_var_mapping"][spend] = spend
+
+                    # Debug: Show mapping being applied
+                    st.caption(
+                        f"🔧 Applied Variable Mappings from loaded config for {len(loaded_spends)} spends"
+                    )
                 else:
                     # Fallback: try to match by index
                     for i, spend in enumerate(loaded_spends):
@@ -904,8 +951,7 @@ with tab_single:
                                 loaded_vars[i]
                             )
 
-        # Filter defaults to only include items that exist in available_spends
-        # This prevents StreamlitAPIException when defaults aren't in options
+        # Filter defaults to only include items in options (prevents Streamlit error on first load)
         default_paid_media_spends = [
             s for s in default_paid_media_spends if s in available_spends
         ]
@@ -916,11 +962,15 @@ with tab_single:
             "Select paid media spend channels. For each spend, you can choose the corresponding variable metric."
         )
 
+        # Use timestamp-based key to force widget refresh when config is loaded
+        config_timestamp = st.session_state.get("loaded_config_timestamp", 0)
+
         paid_media_spends_list = st.multiselect(
             "paid_media_spends (Select channels to include)",
             options=available_spends,
             default=default_paid_media_spends,
             help="Select media spend columns to include in the model",
+            key=f"paid_media_spends_{config_timestamp}",
         )
 
         # For each selected spend, show corresponding var options
@@ -999,7 +1049,7 @@ with tab_single:
                         options=var_options,
                         index=default_idx,
                         help=f"Select the metric variable for {spend}",
-                        key=f"var_for_{spend}",
+                        key=f"var_for_{spend}_{config_timestamp}",
                     )
 
                 spend_var_mapping[spend] = selected_var
@@ -1023,8 +1073,10 @@ with tab_single:
                     s.strip() for s in loaded_context.split(",") if s.strip()
                 ]
             default_context_vars = loaded_context
+            # Add loaded context vars to available columns
+            all_columns = list(dict.fromkeys(all_columns + loaded_context))
 
-        # Filter defaults to only include items that exist in all_columns
+        # Filter defaults to only include items in options
         default_context_vars = [
             v for v in default_context_vars if v in all_columns
         ]
@@ -1034,6 +1086,7 @@ with tab_single:
             options=all_columns,
             default=default_context_vars,
             help="Select contextual variables (e.g., seasonality, events)",
+            key=f"context_vars_{config_timestamp}",
         )
 
         # Factor vars - multiselect
@@ -1047,8 +1100,10 @@ with tab_single:
                     s.strip() for s in loaded_factor.split(",") if s.strip()
                 ]
             default_factor_vars = loaded_factor
+            # Add loaded factor vars to available columns
+            all_columns = list(dict.fromkeys(all_columns + loaded_factor))
 
-        # Filter defaults to only include items that exist in all_columns
+        # Filter defaults to only include items in options
         default_factor_vars = [
             v for v in default_factor_vars if v in all_columns
         ]
@@ -1058,6 +1113,7 @@ with tab_single:
             options=all_columns,
             default=default_factor_vars,
             help="Select factor/categorical variables",
+            key=f"factor_vars_{config_timestamp}",
         )
 
         # Auto-add factor_vars to context_vars (requirement 6)
@@ -1075,8 +1131,10 @@ with tab_single:
                     s.strip() for s in loaded_organic.split(",") if s.strip()
                 ]
             default_organic_vars = loaded_organic
+            # Add loaded organic vars to available columns
+            all_columns = list(dict.fromkeys(all_columns + loaded_organic))
 
-        # Filter defaults to only include items that exist in all_columns
+        # Filter defaults to only include items in options
         default_organic_vars = [
             v for v in default_organic_vars if v in all_columns
         ]
@@ -1086,6 +1144,7 @@ with tab_single:
             options=all_columns,
             default=default_organic_vars,
             help="Select organic/baseline variables",
+            key=f"organic_vars_{config_timestamp}",
         )
 
         # Custom hyperparameters per variable (when Custom preset is selected)
@@ -1351,7 +1410,115 @@ with tab_single:
         factor_vars = ", ".join(factor_vars_list)
         organic_vars = ", ".join(organic_vars_list)
 
-    # Save Configuration (moved outside Data selection expander, after Variable mapping)
+    # Revision Configuration (new section above Save Training Configuration)
+    with st.expander("🏷️ Revision Configuration", expanded=True):
+        st.caption(
+            "Configure the revision tag and number for organizing training outputs. "
+            "Outputs will be saved to robyn/{TAG}_{NUMBER}/{COUNTRY}/{TIMESTAMP}/ in GCS."
+        )
+
+        gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
+        
+        # Get existing revision tags
+        existing_tags = _get_revision_tags(gcs_bucket)
+        
+        # Check if there's a loaded configuration
+        loaded_config = st.session_state.get("loaded_training_config", {})
+        
+        # Parse loaded revision if it exists (might be old format "r100" or new format with tag/number)
+        loaded_revision_tag = ""
+        loaded_revision_number = None
+        if loaded_config and "revision" in loaded_config:
+            old_revision = loaded_config["revision"]
+            # Try to parse as TAG_NUMBER format first
+            if "_" in old_revision:
+                parts = old_revision.rsplit("_", 1)
+                loaded_revision_tag = parts[0]
+                try:
+                    loaded_revision_number = int(parts[1])
+                except (ValueError, IndexError):
+                    pass
+            else:
+                # Old format - treat entire string as tag
+                loaded_revision_tag = old_revision
+        
+        # Also check for new format fields
+        if loaded_config.get("revision_tag"):
+            loaded_revision_tag = loaded_config["revision_tag"]
+        if loaded_config.get("revision_number"):
+            loaded_revision_number = loaded_config["revision_number"]
+        
+        # Add option to create new tag
+        tag_options = ["-- Create New Tag --"] + existing_tags
+        
+        # Determine default selection
+        default_tag_index = 0
+        if loaded_revision_tag and loaded_revision_tag in existing_tags:
+            default_tag_index = tag_options.index(loaded_revision_tag)
+        
+        # Revision tag selection/creation
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            selected_tag_option = st.selectbox(
+                "Revision Tag",
+                options=tag_options,
+                index=default_tag_index,
+                help="Select an existing revision tag or create a new one",
+            )
+            
+            # If "Create New Tag" is selected, show text input
+            if selected_tag_option == "-- Create New Tag --":
+                revision_tag = st.text_input(
+                    "Enter new revision tag",
+                    value=loaded_revision_tag if loaded_revision_tag not in existing_tags else "",
+                    placeholder="e.g., your_name or department_name",
+                    help="Insert your name or the department name into the tag field",
+                )
+            else:
+                revision_tag = selected_tag_option
+                st.info(f"Using existing tag: **{revision_tag}**")
+        
+        with col2:
+            # Calculate next revision number for the selected tag
+            if revision_tag and revision_tag != "-- Create New Tag --":
+                next_number = _get_next_revision_number(gcs_bucket, revision_tag)
+                default_number = loaded_revision_number if loaded_revision_number is not None else next_number
+                
+                revision_number = st.number_input(
+                    "Revision Number",
+                    value=default_number,
+                    min_value=1,
+                    step=1,
+                    help=f"Next available number for '{revision_tag}' is {next_number}. You can override if needed.",
+                )
+                
+                if revision_number < next_number:
+                    st.warning(f"⚠️ Number {revision_number} may already exist for tag '{revision_tag}'. Next available: {next_number}")
+            else:
+                revision_number = st.number_input(
+                    "Revision Number",
+                    value=1,
+                    min_value=1,
+                    step=1,
+                    help="Enter the revision number (must be numeric)",
+                    disabled=True,
+                )
+                if not revision_tag or revision_tag == "-- Create New Tag --":
+                    st.info("👆 Please enter a revision tag first")
+        
+        # Show the combined revision identifier
+        if revision_tag and revision_tag != "-- Create New Tag --":
+            combined_revision = f"{revision_tag}_{revision_number}"
+            st.success(f"✅ Training outputs will be saved under: **robyn/{combined_revision}/{{COUNTRY}}/{{TIMESTAMP}}/**")
+        else:
+            combined_revision = ""
+            st.warning("⚠️ Please select or create a revision tag")
+        
+        # For backward compatibility, create a combined "revision" field
+        revision = combined_revision
+
+    # Save Configuration (moved outside Data selection expander, after Variable Mapping)
     with st.expander("💾 Save Training Configuration", expanded=False):
         st.caption(
             "Save the current training configuration to apply it later to other data sources or countries."
@@ -1367,21 +1534,35 @@ with tab_single:
                 help="Name for this training configuration",
             )
         with col2:
+            # Pre-check "Multi-country" if loaded config has multiple countries
+            loaded_countries = st.session_state.get(
+                "loaded_config_countries", []
+            )
+            default_multi = len(loaded_countries) > 1
             save_for_multi = st.checkbox(
                 "Multi-country",
-                value=False,
+                value=default_multi,
                 help="Save for multiple countries",
             )
 
         if save_for_multi:
+            # Use loaded countries if available, otherwise default to selected_country
+            loaded_countries = st.session_state.get(
+                "loaded_config_countries", []
+            )
+            default_countries = (
+                loaded_countries
+                if loaded_countries
+                else [st.session_state.get("selected_country", "de")]
+            )
             config_countries = st.multiselect(
                 "Select countries",
                 options=["fr", "de", "it", "es", "nl", "uk"],
-                default=[st.session_state.get("selected_country", "fr")],
+                default=default_countries,
                 help="Countries this configuration applies to",
             )
         else:
-            config_countries = [st.session_state.get("selected_country", "fr")]
+            config_countries = [st.session_state.get("selected_country", "de")]
 
         # Add action buttons (Issue #5 fix: add queue options)
         col_btn1, col_btn2, col_btn3 = st.columns(3)
@@ -1418,6 +1599,8 @@ with tab_single:
         csv_row = {
             "country": country,
             "revision": revision,
+            "revision_tag": revision_tag if revision_tag != "-- Create New Tag --" else "",
+            "revision_number": revision_number if revision_tag != "-- Create New Tag --" else "",
             "start_date": start_date_str,
             "end_date": end_date_str,
             "iterations": int(iterations),
@@ -1484,6 +1667,8 @@ with tab_single:
                             "trials": int(trials),
                             "train_size": train_size,
                             "revision": revision,
+                            "revision_tag": revision_tag,
+                            "revision_number": revision_number,
                             "start_date": start_date_str,
                             "end_date": end_date_str,
                             "paid_media_spends": paid_media_spends,
@@ -1551,6 +1736,13 @@ with tab_single:
 
                     # Create queue entries for each country
                     new_entries = []
+                    logging.info(
+                        f"[QUEUE] Adding jobs from Single Run tab for countries: {config_countries}"
+                    )
+                    logging.info(
+                        f"[QUEUE] Starting queue ID: {next_id}, Queue name: {st.session_state.get('queue_name')}"
+                    )
+
                     for i, ctry in enumerate(config_countries):
                         # Get data source information
                         # Use GCS path pattern from loaded data
@@ -1565,7 +1757,9 @@ with tab_single:
                         params = {
                             "country": ctry,
                             "revision": revision,
-                            "date_input": end_date_str,  # Use end date as date_input
+                            "date_input": time.strftime(
+                                "%Y-%m-%d"
+                            ),  # Current date when job is added to queue
                             "iterations": int(iterations),
                             "trials": int(trials),
                             "train_size": train_size,
@@ -1609,6 +1803,12 @@ with tab_single:
 
                     # Add to queue
                     st.session_state.job_queue.extend(new_entries)
+                    logging.info(
+                        f"[QUEUE] Added {len(new_entries)} new entries to queue (IDs: {[e['id'] for e in new_entries]})"
+                    )
+                    logging.info(
+                        f"[QUEUE] Total queue size after addition: {len(st.session_state.job_queue)}"
+                    )
 
                     # Save queue to GCS
                     st.session_state.queue_saved_at = save_queue_to_gcs(
@@ -1619,12 +1819,21 @@ with tab_single:
 
                     # Start queue if "Add & Start" was clicked
                     if add_and_start_clicked:
+                        logging.info(
+                            f"[QUEUE] Starting queue '{st.session_state.queue_name}' via 'Add & Start' button"
+                        )
                         set_queue_running(st.session_state.queue_name, True)
                         st.session_state.queue_running = True
+                        logging.info(
+                            f"[QUEUE] Queue running state set to: {st.session_state.queue_running}"
+                        )
 
                     # Show success message
                     countries_str = ", ".join(
                         [c.upper() for c in config_countries]
+                    )
+                    logging.info(
+                        f"[QUEUE] Successfully added jobs to queue for: {countries_str}"
                     )
                     st.success(
                         f"✅ Added {len(new_entries)} job(s) to queue for: {countries_str}"
@@ -1638,16 +1847,6 @@ with tab_single:
 
                 except Exception as e:
                     st.error(f"Failed to add to queue: {e}")
-
-    # Outputs (moved outside Save Configuration expander)
-    with st.expander("📤 Outputs"):
-        gcs_bucket = st.text_input(
-            "GCS bucket for outputs", value=st.session_state["gcs_bucket"]
-        )
-        st.session_state["gcs_bucket"] = gcs_bucket
-        ann_file = st.file_uploader(
-            "Optional: enriched_annotations.csv", type=["csv"]
-        )
 
     # =============== Single-run button ===============
     def create_job_config_single(
@@ -1735,7 +1934,10 @@ with tab_single:
         }
 
     if st.button(
-        "🚀 Start Training Job", type="primary", use_container_width=True
+        "🚀 Start Training Job",
+        type="primary",
+        use_container_width=True,
+        key="start_training_job_btn",
     ):
         # Validate revision is filled
         if not revision or not revision.strip():
@@ -1777,19 +1979,30 @@ with tab_single:
                     # No need to query and upload - data is already in GCS
                     st.info(f"Using data from: {data_gcs_path}")
 
+                    # Get annotation file from session state (set in Connect_Data page)
+                    ann_file = st.session_state.get("annotations_file")
                     if ann_file is not None:
                         with timed_step("Upload annotations to GCS", timings):
                             annotations_path = os.path.join(
                                 td, "enriched_annotations.csv"
                             )
-                            with open(annotations_path, "wb") as f:
-                                f.write(ann_file.read())
-                            annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
-                            annotations_gcs_path = upload_to_gcs(
-                                gcs_bucket,  # type: ignore
-                                annotations_path,
-                                annotations_blob,
-                            )
+                            # Reset file pointer and read (with error handling)
+                            try:
+                                if hasattr(ann_file, "seek"):
+                                    ann_file.seek(0)
+                                with open(annotations_path, "wb") as f:
+                                    f.write(ann_file.read())
+                                annotations_blob = f"training-data/{timestamp}/enriched_annotations.csv"
+                                annotations_gcs_path = upload_to_gcs(
+                                    gcs_bucket,  # type: ignore
+                                    annotations_path,
+                                    annotations_blob,
+                                )
+                            except (AttributeError, IOError) as e:
+                                st.warning(
+                                    f"Could not read annotations file: {e}. Continuing without annotations."
+                                )
+                                annotations_gcs_path = None
 
                     # 4) Create job config
                     with timed_step("Create job configuration", timings):
@@ -1834,6 +2047,61 @@ with tab_single:
                             f"**Execution ID**: `{execution_name.split('/')[-1]}`"
                         )
 
+                        # Store the latest job info for status monitoring
+                        st.session_state["latest_job_execution"] = {
+                            "execution_name": execution_name,
+                            "timestamp": timestamp,
+                            "revision": revision,
+                            "country": country,
+                            "gcs_prefix": gcs_prefix,
+                        }
+
+                        # Add job to history immediately after launch
+                        try:
+                            from datetime import datetime as dt
+
+                            from app_shared import append_row_to_job_history
+
+                            append_row_to_job_history(
+                                {
+                                    "job_id": gcs_prefix,
+                                    "state": "RUNNING",  # Initial state
+                                    "country": country,
+                                    "revision": revision,
+                                    "date_input": dt.utcnow().strftime(
+                                        "%Y-%m-%d"
+                                    ),  # Current date when job is run
+                                    "iterations": int(iterations),
+                                    "trials": int(trials),
+                                    "train_size": train_size,
+                                    "paid_media_spends": paid_media_spends,
+                                    "paid_media_vars": paid_media_vars,
+                                    "context_vars": context_vars,
+                                    "factor_vars": factor_vars,
+                                    "organic_vars": organic_vars,
+                                    "gcs_bucket": gcs_bucket,
+                                    "table": "",
+                                    "query": "",
+                                    "dep_var": dep_var,
+                                    "date_var": date_var,
+                                    "adstock": adstock,
+                                    "start_time": dt.utcnow().isoformat(
+                                        timespec="seconds"
+                                    )
+                                    + "Z",
+                                    "end_time": None,
+                                    "duration_minutes": None,
+                                    "gcs_prefix": gcs_prefix,
+                                    "bucket": gcs_bucket,
+                                    "exec_name": execution_name.split("/")[-1],
+                                    "execution_name": execution_name,
+                                    "message": "Job launched from single run",
+                                },
+                                gcs_bucket,
+                            )
+                        except Exception as e:
+                            st.warning(f"Could not add job to history: {e}")
+
         finally:
             if timings:
                 df_times = pd.DataFrame(timings)
@@ -1867,7 +2135,11 @@ with tab_single:
                 "gcs_bucket": gcs_bucket,
             }
 
-    render_jobs_job_history(key_prefix="single")
+    # =============== Job Status Display (Requirement 7) ===============
+    st.divider()
+    st.info(
+        "👉 **View current and past job executions in the 'Status' tab above.**"
+    )
 
     # ===================== BATCH QUEUE (CSV) =====================
 
@@ -1882,42 +2154,59 @@ with tab_queue:
     st.subheader(
         "Batch queue (CSV) — queue & run multiple jobs sequentially",
     )
-    with st.expander(
-        "📚 Batch queue (CSV) — queue & run multiple jobs sequentially",
-        expanded=False,
-    ):
-        _render_flash("batch_dupes")
-        maybe_refresh_queue_from_gcs()
-        # Queue name + Load/Save
-        cqn1, cqn2, cqn3 = st.columns([2, 1, 1])
-        new_qname = cqn1.text_input(
-            "Queue name",
-            value=st.session_state["queue_name"],
-            help="Persists to GCS under robyn-queues/<name>/queue.json",
+
+    # Initialize expander state tracking if not present
+    if "csv_upload_expanded" not in st.session_state:
+        st.session_state.csv_upload_expanded = False
+    if "queue_builder_expanded" not in st.session_state:
+        st.session_state.queue_builder_expanded = False
+    if "current_queue_expanded" not in st.session_state:
+        st.session_state.current_queue_expanded = False
+
+    _render_flash("batch_dupes")
+    maybe_refresh_queue_from_gcs()
+
+    # Queue name + Load/Save (outside expanders, always visible)
+    cqn1, cqn2, cqn3 = st.columns([2, 1, 1])
+    new_qname = cqn1.text_input(
+        "Queue name",
+        value=st.session_state["queue_name"],
+        help="Persists to GCS under robyn-queues/<name>/queue.json",
+    )
+    if new_qname != st.session_state["queue_name"]:
+        st.session_state["queue_name"] = new_qname
+
+    if cqn2.button("⬇️ Load from GCS", key="load_queue_from_gcs"):
+        payload = load_queue_payload(st.session_state.queue_name)
+        st.session_state.job_queue = payload["entries"]
+        st.session_state.queue_running = payload.get("queue_running", False)
+        st.session_state.queue_saved_at = payload.get("saved_at")
+        st.success(f"Loaded queue '{st.session_state.queue_name}' from GCS")
+
+    if cqn3.button("⬆️ Save to GCS", key="save_queue_to_gcs"):
+        st.session_state.queue_saved_at = save_queue_to_gcs(
+            st.session_state.queue_name,
+            st.session_state.job_queue,
+            queue_running=st.session_state.queue_running,
         )
-        if new_qname != st.session_state["queue_name"]:
-            st.session_state["queue_name"] = new_qname
+        st.success(f"Saved queue '{st.session_state.queue_name}' to GCS")
 
-        if cqn2.button("⬇️ Load from GCS"):
-            payload = load_queue_payload(st.session_state.queue_name)
-            st.session_state.job_queue = payload["entries"]
-            st.session_state.queue_running = payload.get("queue_running", False)
-            st.session_state.queue_saved_at = payload.get("saved_at")
-            st.success(f"Loaded queue '{st.session_state.queue_name}' from GCS")
+    # ========== EXPANDER 1: CSV Upload ==========
+    with st.expander(
+        "📤 CSV Upload",
+        expanded=st.session_state.csv_upload_expanded,
+    ):
 
-        if cqn3.button("⬆️ Save to GCS"):
-            st.session_state.queue_saved_at = save_queue_to_gcs(
-                st.session_state.queue_name,
-                st.session_state.job_queue,
-                queue_running=st.session_state.queue_running,
-            )
-            st.success(f"Saved queue '{st.session_state.queue_name}' to GCS")
+        # Detailed instructions in expander
+        with st.expander("📋 Detailed Instructions", expanded=False):
+            st.markdown(
+                """
+Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country` and data source):
 
-        st.markdown(
-            """
-Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country`, `revision`, and data source):
-
-- `country`, `revision`, `iterations`, `trials`, `train_size`
+- `country`, `iterations`, `trials`, `train_size`
+- **Revision fields (choose one approach):**
+  - `revision` — Combined format: TAG_NUMBER (e.g., "myname_1") - **backward compatible**
+  - `revision_tag` and `revision_number` — Separate fields (e.g., "myname" and 1) - **recommended for new configs**
 - `start_date`, `end_date` — Training window dates (YYYY-MM-DD format)
 - `paid_media_spends`, `paid_media_vars`, `context_vars`, `factor_vars`, `organic_vars`
 - `dep_var`, `dep_var_type` (revenue|conversion), `date_var`, `adstock`
@@ -1925,6 +2214,7 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 - **Custom hyperparameters** (only when hyperparameter_preset=Custom):
   - For geometric adstock: `alphas_min`, `alphas_max`, `gammas_min`, `gammas_max`, `thetas_min`, `thetas_max`
   - For weibull adstock: `alphas_min`, `alphas_max`, `shapes_min`, `shapes_max`, `scales_min`, `scales_max`
+  - **Per-variable hyperparameters**: `{VAR_NAME}_alphas`, `{VAR_NAME}_gammas`, `{VAR_NAME}_thetas` (for geometric) or `{VAR_NAME}_shapes`, `{VAR_NAME}_scales` (for weibull)
 - `resample_freq` (none|W|M) - Column aggregations from metadata will be used when resampling
 - `gcs_bucket` (optional override per row)
 - **Data source (choose one):**
@@ -1932,46 +2222,19 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
   - `query` or `table` — For Snowflake-based workflows
 - `annotations_gcs_path` (optional gs:// path)
 
-**Note:** For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows. Column aggregations are automatically loaded from metadata.json when resampling is enabled.
-            """
-        )
+**Note on CSV flexibility**: Not all rows need to have the same columns. For example, rows with Custom preset can include per-variable hyperparameters while other rows can omit them. The CSV parser will fill missing columns with empty values automatically. This allows you to mix different job configurations in the same CSV file, similar to how single run jobs can have different configurations.
 
-        # Template & Example CSVs (Issue #4 fix: align with Single run)
-        template = pd.DataFrame(
-            [
-                {
-                    "country": "fr",
-                    "revision": "r100",
-                    "start_date": "2024-01-01",
-                    "end_date": time.strftime("%Y-%m-%d"),
-                    "iterations": 200,
-                    "trials": 5,
-                    "train_size": "0.7,0.9",
-                    "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-                    "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-                    "context_vars": "IS_WEEKEND,TV_IS_ON",
-                    "factor_vars": "IS_WEEKEND,TV_IS_ON",
-                    "organic_vars": "ORGANIC_TRAFFIC",
-                    "gcs_bucket": st.session_state["gcs_bucket"],
-                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
-                    "table": "",
-                    "query": "",
-                    "dep_var": "UPLOAD_VALUE",
-                    "dep_var_type": "revenue",
-                    "date_var": "date",
-                    "adstock": "geometric",
-                    "hyperparameter_preset": "Meshed recommend",
-                    "resample_freq": "none",
-                    "annotations_gcs_path": "",
-                }
-            ]
-        )
+**Note on GCS workflows**: For GCS-based workflows (matching Single run), use `data_gcs_path`. The legacy `query`/`table` fields are still supported for Snowflake-based workflows. Column aggregations are automatically loaded from metadata.json when resampling is enabled.
+                """
+            )
 
+        # Example CSV with 3 jobs including per-variable hyperparameters
         example = pd.DataFrame(
             [
                 {
                     "country": "fr",
-                    "revision": "r101",
+                    "revision_tag": "baseline",
+                    "revision_number": 1,
                     "start_date": "2024-01-01",
                     "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 300,
@@ -1991,22 +2254,29 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "geometric",
                     "hyperparameter_preset": "Meshed recommend",
-                    "alphas_min": "",
-                    "alphas_max": "",
-                    "gammas_min": "",
-                    "gammas_max": "",
-                    "thetas_min": "",
-                    "thetas_max": "",
-                    "shapes_min": "",
-                    "shapes_max": "",
-                    "scales_min": "",
-                    "scales_max": "",
                     "resample_freq": "none",
                     "annotations_gcs_path": "",
+                    # Per-variable hyperparameters (empty for non-Custom preset)
+                    "GA_SUPPLY_COST_alphas": "",
+                    "GA_SUPPLY_COST_gammas": "",
+                    "GA_SUPPLY_COST_thetas": "",
+                    "GA_DEMAND_COST_alphas": "",
+                    "GA_DEMAND_COST_gammas": "",
+                    "GA_DEMAND_COST_thetas": "",
+                    "BING_DEMAND_COST_alphas": "",
+                    "BING_DEMAND_COST_gammas": "",
+                    "BING_DEMAND_COST_thetas": "",
+                    "META_DEMAND_COST_alphas": "",
+                    "META_DEMAND_COST_gammas": "",
+                    "META_DEMAND_COST_thetas": "",
+                    "ORGANIC_TRAFFIC_alphas": "",
+                    "ORGANIC_TRAFFIC_gammas": "",
+                    "ORGANIC_TRAFFIC_thetas": "",
                 },
                 {
                     "country": "de",
-                    "revision": "r102",
+                    "revision_tag": "baseline",
+                    "revision_number": 2,
                     "start_date": "2024-01-01",
                     "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 200,
@@ -2014,8 +2284,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "train_size": "0.75,0.9",
                     "paid_media_spends": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
                     "paid_media_vars": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST, PARTNERSHIP_COSTS",
-                    "context_vars": "IS_WEEKEND",
-                    "factor_vars": "IS_WEEKEND",
+                    "context_vars": "",
+                    "factor_vars": "",
                     "organic_vars": "ORGANIC_TRAFFIC",
                     "gcs_bucket": st.session_state["gcs_bucket"],
                     "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
@@ -2026,22 +2296,29 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "weibull_cdf",
                     "hyperparameter_preset": "Facebook recommend",
-                    "alphas_min": "",
-                    "alphas_max": "",
-                    "gammas_min": "",
-                    "gammas_max": "",
-                    "thetas_min": "",
-                    "thetas_max": "",
-                    "shapes_min": "",
-                    "shapes_max": "",
-                    "scales_min": "",
-                    "scales_max": "",
                     "resample_freq": "W",
                     "annotations_gcs_path": "",
+                    # Per-variable hyperparameters (empty for non-Custom preset)
+                    "GA_SUPPLY_COST_alphas": "",
+                    "GA_SUPPLY_COST_gammas": "",
+                    "GA_SUPPLY_COST_thetas": "",
+                    "GA_DEMAND_COST_alphas": "",
+                    "GA_DEMAND_COST_gammas": "",
+                    "GA_DEMAND_COST_thetas": "",
+                    "BING_DEMAND_COST_alphas": "",
+                    "BING_DEMAND_COST_gammas": "",
+                    "BING_DEMAND_COST_thetas": "",
+                    "META_DEMAND_COST_alphas": "",
+                    "META_DEMAND_COST_gammas": "",
+                    "META_DEMAND_COST_thetas": "",
+                    "ORGANIC_TRAFFIC_alphas": "",
+                    "ORGANIC_TRAFFIC_gammas": "",
+                    "ORGANIC_TRAFFIC_thetas": "",
                 },
                 {
                     "country": "it",
-                    "revision": "r103",
+                    "revision_tag": "experiment",
+                    "revision_number": 1,
                     "start_date": "2024-01-01",
                     "end_date": time.strftime("%Y-%m-%d"),
                     "iterations": 250,
@@ -2061,6 +2338,8 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "date_var": "date",
                     "adstock": "geometric",
                     "hyperparameter_preset": "Custom",
+                    "resample_freq": "none",
+                    "annotations_gcs_path": "",
                     # Per-variable hyperparameters for Custom preset
                     "GA_SUPPLY_COST_alphas": "[0.8, 2.5]",
                     "GA_SUPPLY_COST_gammas": "[0.5, 0.85]",
@@ -2077,25 +2356,107 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     "ORGANIC_TRAFFIC_alphas": "[0.5, 2.0]",
                     "ORGANIC_TRAFFIC_gammas": "[0.3, 0.7]",
                     "ORGANIC_TRAFFIC_thetas": "[0.9, 0.99]",
-                    "resample_freq": "none",
-                    "annotations_gcs_path": "",
                 },
             ]
         )
 
-        col_dl1, col_dl2 = st.columns(2)
-        col_dl1.download_button(
-            "Download CSV template",
-            data=template.to_csv(index=False),
-            file_name="robyn_batch_template.csv",
-            mime="text/csv",
+        # Example with varying columns - demonstrates CSV flexibility
+        example_varied = pd.DataFrame(
+            [
+                {
+                    "country": "fr",
+                    "revision_tag": "team_a",
+                    "revision_number": 1,
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
+                    "iterations": 300,
+                    "trials": 3,
+                    "train_size": "0.7,0.9",
+                    "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, META_DEMAND_COST, TV_COST",
+                    "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, META_DEMAND_COST, TV_COST",
+                    "context_vars": "IS_WEEKEND,TV_IS_ON",
+                    "factor_vars": "IS_WEEKEND,TV_IS_ON",
+                    "organic_vars": "ORGANIC_TRAFFIC",
+                    "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
+                    "dep_var": "UPLOAD_VALUE",
+                    "dep_var_type": "revenue",
+                    "date_var": "date",
+                    "adstock": "geometric",
+                    "hyperparameter_preset": "Meshed recommend",
+                    "resample_freq": "none",
+                    # Note: This row omits table, query, annotations_gcs_path, and per-variable hyperparameters
+                },
+                {
+                    "country": "de",
+                    "revision_tag": "team_b",
+                    "revision_number": 1,
+                    "start_date": "2024-01-01",
+                    "end_date": time.strftime("%Y-%m-%d"),
+                    "iterations": 200,
+                    "trials": 5,
+                    "train_size": "0.75,0.9",
+                    "paid_media_spends": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST",
+                    "paid_media_vars": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST",
+                    "context_vars": "",
+                    "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
+                    "dep_var": "UPLOAD_VALUE",
+                    "date_var": "date",
+                    "adstock": "weibull_cdf",
+                    "hyperparameter_preset": "Facebook recommend",
+                    "resample_freq": "W",
+                    # Note: This row omits factor_vars, organic_vars, dep_var_type, and other optional fields
+                    # Note: IS_WEEKEND is removed because weekly resampling makes it constant (no variance)
+                },
+                {
+                    "country": "it",
+                    "revision_tag": "experimental",
+                    "revision_number": 5,
+                    "iterations": 250,
+                    "trials": 4,
+                    "train_size": "0.7,0.9",
+                    "paid_media_spends": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST",
+                    "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST",
+                    "organic_vars": "ORGANIC_TRAFFIC",
+                    "gcs_bucket": st.session_state["gcs_bucket"],
+                    "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/it/latest/raw.parquet",
+                    "dep_var": "UPLOAD_VALUE",
+                    "date_var": "date",
+                    "adstock": "geometric",
+                    "hyperparameter_preset": "Custom",
+                    # Per-variable hyperparameters for Custom preset (only for some variables)
+                    "GA_SUPPLY_COST_alphas": "[0.8, 2.5]",
+                    "GA_SUPPLY_COST_gammas": "[0.5, 0.85]",
+                    "GA_SUPPLY_COST_thetas": "[0.15, 0.5]",
+                    "BING_DEMAND_COST_alphas": "[1.0, 3.0]",
+                    "BING_DEMAND_COST_gammas": "[0.6, 0.9]",
+                    "BING_DEMAND_COST_thetas": "[0.1, 0.4]",
+                    # Note: This row omits start_date, end_date, context_vars, factor_vars, dep_var_type, resample_freq
+                },
+            ]
         )
-        col_dl2.download_button(
-            "Download example CSV (3 jobs)",
-            data=example.to_csv(index=False),
-            file_name="robyn_batch_example.csv",
-            mime="text/csv",
-        )
+
+        # Download buttons for both examples
+        col_ex1, col_ex2 = st.columns(2)
+        with col_ex1:
+            st.download_button(
+                "📥 Download Example CSV (consistent columns)",
+                data=example.to_csv(index=False),
+                file_name="robyn_batch_example_consistent.csv",
+                mime="text/csv",
+                use_container_width=True,
+                help="All rows have the same columns - recommended for beginners",
+            )
+        with col_ex2:
+            st.download_button(
+                "📥 Download Example CSV (varying columns)",
+                data=example_varied.to_csv(index=False),
+                file_name="robyn_batch_example_varied.csv",
+                mime="text/csv",
+                use_container_width=True,
+                help="Rows have different columns - demonstrates CSV flexibility",
+            )
 
         # --- CSV upload (editable, persistent, deletable) ---
         up = st.file_uploader("Upload batch CSV", type=["csv"], key="batch_csv")
@@ -2111,12 +2472,28 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
             fingerprint = f"{getattr(up, 'name', '')}:{getattr(up, 'size', '')}"
             if st.session_state.uploaded_fingerprint != fingerprint:
                 try:
-                    st.session_state.uploaded_df = pd.read_csv(up)
+                    # Read CSV with flexible parsing - allows missing columns per row
+                    # This mimics single run behavior where not all fields are required
+                    logging.info(
+                        f"[QUEUE] Uploading CSV file: {getattr(up, 'name', 'unknown')}, size: {getattr(up, 'size', 0)} bytes"
+                    )
+                    st.session_state.uploaded_df = pd.read_csv(
+                        up, keep_default_na=True
+                    )
+
+                    # Fill any missing columns that might be expected but not present
+                    # This makes the CSV structure more forgiving
                     st.session_state.uploaded_fingerprint = fingerprint
+                    logging.info(
+                        f"[QUEUE] Successfully loaded CSV with {len(st.session_state.uploaded_df)} rows and {len(st.session_state.uploaded_df.columns)} columns"
+                    )
                     st.success(
                         f"Loaded {len(st.session_state.uploaded_df)} rows from CSV"
                     )
                 except Exception as e:
+                    logging.error(
+                        f"[QUEUE] Failed to parse CSV: {e}", exc_info=True
+                    )
                     st.error(f"Failed to parse CSV: {e}")
         else:
             # If user clears the file input, allow re-uploading the same file later
@@ -2195,6 +2572,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.rerun()
 
             if append_uploaded_clicked:
+                logging.info(
+                    f"[QUEUE] Processing 'Append uploaded rows to builder' - {len(uploaded_edited)} rows in uploaded table"
+                )
                 # Canonical, edited upload table as seen in the UI (including any user sorting)
                 up_base = (
                     uploaded_edited.drop(columns="Delete", errors="ignore")
@@ -2298,6 +2678,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 )
 
                 if added_count > 0:
+                    logging.info(
+                        f"[QUEUE] Appending {added_count} unique rows to queue builder"
+                    )
                     # Append to builder (use builder schema)
                     to_append = up_base.loc[to_append_mask]
                     if need_cols:
@@ -2313,12 +2696,23 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                         ~to_append_mask
                     ].reset_index(drop=True)
 
+                    logging.info(
+                        f"[QUEUE] Successfully appended {added_count} rows. {len(st.session_state.uploaded_df)} rows remaining in upload table (duplicates/invalid)"
+                    )
                     st.success(
                         f"Appended {added_count} row(s) to the builder. "
                         f"Remaining in upload: {len(st.session_state.uploaded_df)} duplicate/invalid row(s)."
                     )
+                    # Auto-transition to Queue Builder expander
+                    st.session_state.csv_upload_expanded = False
+                    st.session_state.queue_builder_expanded = True
                     st.rerun()
 
+    # ========== EXPANDER 2: Queue Builder ==========
+    with st.expander(
+        "✏️ Queue Builder",
+        expanded=st.session_state.queue_builder_expanded,
+    ):
         # Seed once from current GCS queue (do NOT re-seed on every rerun)
         # ===== Queue Builder (parameters only, editable) =====
         payload = load_queue_payload(st.session_state.queue_name)
@@ -2499,6 +2893,9 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
         need_cols = list(st.session_state.qb_df.columns)
 
         if enqueue_clicked:
+            logging.info(
+                f"[QUEUE] Processing 'Enqueue' from Queue Builder - {len(st.session_state.qb_df)} rows in builder"
+            )
             # Build separate sets so we can categorize reasons
             if st.session_state.qb_df.dropna(how="all").empty:
                 st.warning(
@@ -2588,9 +2985,18 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
 
                 if not new_entries:
                     # nothing to enqueue
+                    logging.info(
+                        f"[QUEUE] No new entries to enqueue (all duplicates or invalid)"
+                    )
                     pass
                 else:
+                    logging.info(
+                        f"[QUEUE] Enqueuing {len(new_entries)} new jobs from builder (IDs: {[e['id'] for e in new_entries]})"
+                    )
                     st.session_state.job_queue.extend(new_entries)
+                    logging.info(
+                        f"[QUEUE] Total queue size after enqueue: {len(st.session_state.job_queue)}"
+                    )
                     st.session_state.queue_saved_at = save_queue_to_gcs(
                         st.session_state.queue_name,
                         st.session_state.job_queue,
@@ -2611,40 +3017,69 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                     st.success(
                         f"Enqueued {len(new_entries)} new job(s), saved to GCS, and removed them from the builder."
                     )
+                    # Auto-transition to Current Queue expander
+                    st.session_state.queue_builder_expanded = False
+                    st.session_state.current_queue_expanded = True
                     st.rerun()
 
+    # ========== EXPANDER 3: Current Queue ==========
+    with st.expander(
+        "📋 Current Queue",
+        expanded=st.session_state.current_queue_expanded,
+    ):
         # Queue controls
         st.caption(
             f"Queue status: {'▶️ RUNNING' if st.session_state.queue_running else '⏸️ STOPPED'} · "
             f"{sum(e['status'] in ('RUNNING','LAUNCHING') for e in st.session_state.job_queue)} running"
         )
 
-        if st.button("🔁 Refresh from GCS", use_container_width=True):
+        if st.button(
+            "🔁 Refresh from GCS",
+            use_container_width=True,
+            key="refresh_queue_from_gcs",
+        ):
             maybe_refresh_queue_from_gcs(force=True)
             st.success("Refreshed from GCS.")
             st.rerun()
 
         qc1, qc2, qc3, qc4 = st.columns(4)
         if qc1.button(
-            "▶️ Start Queue", disabled=(len(st.session_state.job_queue) == 0)
+            "▶️ Start Queue",
+            disabled=(len(st.session_state.job_queue) == 0),
+            key="start_queue_btn",
         ):
+            logging.info(
+                f"[QUEUE] Starting queue '{st.session_state.queue_name}' via Start button - {len(st.session_state.job_queue)} jobs in queue"
+            )
             set_queue_running(st.session_state.queue_name, True)
+            st.session_state.queue_running = True
             st.success("Queue set to RUNNING.")
+            st.info(
+                "👉 **View current and past job executions in the 'Status' tab above.**"
+            )
             st.rerun()
-        if qc2.button("⏸️ Stop Queue"):
+        if qc2.button("⏸️ Stop Queue", key="stop_queue_btn"):
+            logging.info(
+                f"[QUEUE] Stopping queue '{st.session_state.queue_name}' via Stop button"
+            )
             set_queue_running(st.session_state.queue_name, False)
+            st.session_state.queue_running = False
             st.info("Queue paused.")
             st.rerun()
-        if qc3.button("⏭️ Process Next Step"):
+        if qc3.button("⏭️ Process Next Step", key="process_next_step_btn"):
+            logging.info(
+                f"[QUEUE] Manual queue tick triggered for '{st.session_state.queue_name}'"
+            )
             _queue_tick()
             st.toast("Ticked queue")
             st.rerun()
 
-        if qc4.button("💾 Save now"):
+        if qc4.button("💾 Save now", key="save_queue_now_btn"):
             save_queue_to_gcs(
                 st.session_state.queue_name, st.session_state.job_queue
             )
             st.success("Queue saved to GCS.")
+            # No rerun needed for save operation
 
         _auto_refresh_and_tick(interval_ms=2000)
 
@@ -2748,26 +3183,18 @@ Upload a CSV where each row defines a training run. **Supported columns** (all o
                 st.success("Queue updated.")
                 st.rerun()
 
-    render_jobs_job_history(key_prefix="queue")
-    render_job_status_monitor(key_prefix="queue")
 
-    # ─────────────────────────────
-    # Execution timeline & timings.csv (single latest)
-    # ─────────────────────────────
-    if st.session_state.last_timings:
-        with st.expander("⏱️ Execution Timeline", expanded=False):
-            df_times = st.session_state.last_timings["df"]
-            total = (
-                float(df_times["Time (s)"].sum()) if not df_times.empty else 0.0
-            )
-            if total > 0:
-                df_times = df_times.copy()
-                df_times["% of total"] = (
-                    df_times["Time (s)"] / total * 100
-                ).round(1)
-            st.markdown("**Setup steps (this session)**")
-            st.dataframe(df_times, width="stretch")  # type: ignore
-            st.write(f"**Total setup time:** {_fmt_secs(total)}")
-            st.write(
-                "**Note**: Training runs asynchronously in Cloud Run Jobs."
-            )
+# ===================== STATUS TAB =====================
+with tab_status:
+    st.subheader("Job Status & History")
+    st.write(
+        "Track all your training jobs - both from Single run and Queue tabs."
+    )
+
+    # Job Status Monitor
+    render_job_status_monitor(key_prefix="status")
+
+    st.divider()
+
+    # Job History
+    render_jobs_job_history(key_prefix="status")

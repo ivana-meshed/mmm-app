@@ -2,20 +2,13 @@
 import os
 import re
 import warnings
-
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from scipy import stats
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, r2_score
-from sklearn.preprocessing import PolynomialFeatures
-
-st.set_page_config(page_title="Marketing Overview & Analytics", layout="wide")
-
-from app_shared import (  # GCS & versions; meta & utilities; sidebar + filters; colors (if exported; otherwise define locally)
+# Import shared utilities: GCS & versions; meta & utilities; sidebar + filters; colors
+from app_shared import (
     BASE_PLATFORM_COLORS,
     GREEN,
     RED,
@@ -43,12 +36,29 @@ from app_shared import (  # GCS & versions; meta & utilities; sidebar + filters;
     previous_window,
     render_sidebar,
     resample_numeric,
+    resolve_meta_blob_from_selection,
+    require_login_and_domain,
+    # colors (if exported; otherwise define locally)
+    GREEN,
+    RED,
     safe_eff,
     total_with_prev,
     validate_against_metadata,
 )
+from app_split_helpers import *
+from scipy import stats
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.preprocessing import PolynomialFeatures
 
-st.title("Marketing Overview & Analytics")
+# Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
+
+require_login_and_domain()
+ensure_session_defaults()
+
+require_login_and_domain()
+
+st.title("Review Business- & Marketing Data")
 
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 
@@ -60,33 +70,32 @@ st.session_state.setdefault("picked_data_ts", "Latest")
 st.session_state.setdefault("picked_meta_ts", "Latest")
 
 # -----------------------------
-# Tabs
+# TABS
 # -----------------------------
-tab_load, tab_biz, tab_reg, tab_mkt = st.tabs(
+tab_load, tab_biz, tab_mkt = st.tabs(
     [
         "Select Data",
-        "Business, Overview",
-        "Business, Regional",
-        "Marketing",
-    ]
+        "Business Data",
+        "Marketing Data"
+]
 )
 
 # =============================
-# TAB 0 — DATA & METADATA LOADER
+# TAB 0 — DATA & METADATA LOADING
 # =============================
 with tab_load:
-    st.markdown("### 📥 Load dataset & metadata from GCS")
+    st.markdown("### Select country and data versions to analyze")
     c1, c2, c3, c4 = st.columns([1.2, 1, 1, 0.6])
 
     country = (
-        c1.text_input("Country (ISO2)", value=st.session_state["country"])
+        c1.text_input("Country", value=st.session_state["country"])
         .strip()
         .lower()
     )
     if country:
         st.session_state["country"] = country
 
-    refresh_clicked = c4.button("↻ Refresh")
+    refresh_clicked = c4.button("↻ Refresh Lists")
     refresh_key = str(pd.Timestamp.utcnow().value) if refresh_clicked else ""
 
     data_versions = (
@@ -107,52 +116,61 @@ with tab_load:
         "Metadata version", options=meta_versions, index=0, key="picked_meta_ts"
     )
 
-    load_clicked = st.button("Load from GCS", type="primary")
+    load_clicked = st.button("Select & Load", type="primary")
 
     if load_clicked:
-        try:
-            db = (
-                data_latest_blob(country)
-                if data_ts == "Latest"
-                else data_blob(country, str(data_ts))
-            )
-            mb = (
-                meta_latest_blob(country)
-                if meta_ts == "Latest"
-                else meta_blob(country, str(meta_ts))
-            )
-
-            df = download_parquet_from_gcs_cached(GCS_BUCKET, db)
-            meta = download_json_from_gcs_cached(GCS_BUCKET, mb)
-            df, date_col = parse_date(df, meta)
-
-            st.session_state["df"] = df
-            st.session_state["meta"] = meta
-            st.session_state["date_col"] = date_col
-            st.session_state["channels_map"] = meta.get("channels", {}) or {}
-
-            report = validate_against_metadata(df, meta)
-            st.success(
-                f"Loaded {len(df):,} rows from gs://{GCS_BUCKET}/{db} and metadata gs://{GCS_BUCKET}/{mb}"
-            )
-
-            c_extra, _ = st.columns([1, 1])
-            with c_extra:
-                st.markdown("**Columns in data but not in metadata**")
-                st.write(report["extra_in_df"] or "— none —")
-
-            if not report["type_mismatches"].empty:
-                st.warning("Declared vs observed type mismatches:")
-                st.dataframe(
-                    report["type_mismatches"],
-                    use_container_width=True,
-                    hide_index=True,
+        with st.spinner("Loading data and metadata from GCS..."):
+            try:
+                # Resolve DATA path (unchanged)
+                db = (
+                    data_latest_blob(country)
+                    if data_ts == "Latest"
+                    else data_blob(country, str(data_ts))
                 )
-            else:
-                st.caption("No type mismatches detected (coarse check).")
 
-        except Exception as e:
-            st.error(f"Load failed: {e}")
+                # Resolve META path from the UI label safely:
+                # "Latest", "Universal - <ts>", "<CC> - <ts>", or bare "<ts>"
+                mb = resolve_meta_blob_from_selection(
+                    GCS_BUCKET, country, str(meta_ts)
+                )
+
+                # Download
+                df = download_parquet_from_gcs_cached(GCS_BUCKET, db)
+                meta = download_json_from_gcs_cached(GCS_BUCKET, mb)
+
+                # Parse dates using metadata
+                df, date_col = parse_date(df, meta)
+
+                # Persist in session
+                st.session_state["df"] = df
+                st.session_state["meta"] = meta
+                st.session_state["date_col"] = date_col
+                st.session_state["channels_map"] = (
+                    meta.get("channels", {}) or {}
+                )
+
+                # Validate & notify
+                report = validate_against_metadata(df, meta)
+                st.success(
+                    f"Loaded {len(df):,} rows from gs://{GCS_BUCKET}/{db} and metadata gs://{GCS_BUCKET}/{mb}"
+                )
+
+                c_extra, _ = st.columns([1, 1])
+                with c_extra:
+                    st.markdown("**Columns in data but not in metadata**")
+                    st.write(report["extra_in_df"] or "— none —")
+
+                if not report["type_mismatches"].empty:
+                    st.warning("Declared vs observed type mismatches:")
+                    st.dataframe(
+                        report["type_mismatches"],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.caption("No type mismatches detected (coarse check).")
+            except Exception as e:
+                st.error(f"Load failed: {e}")
 
 # -----------------------------
 # State
@@ -181,11 +199,33 @@ if df.empty or not meta:
     INSTALL_COLS,
 ) = build_meta_views(meta, df)
 
+
+# ---- Nice label resolver (coalesce: metadata nice() -> pretty()) ----
+def nice_title(col: str) -> str:
+    """
+    Coalesce-style label resolver:
+      1) try metadata-based nice(col)
+      2) fallback to pretty(col) when missing/identical
+    """
+    raw = str(col)
+    try:
+        nice_val = nice(col)
+        if (
+            isinstance(nice_val, str)
+            and nice_val.strip()
+            and nice_val.strip().upper() != raw.strip().upper()
+        ):
+            return nice_val.strip()
+        return pretty(raw)
+    except Exception:
+        return pretty(raw)
+
+
 # -----------------------------
 # Sidebar
 # -----------------------------
 GOAL, sel_countries, TIMEFRAME_LABEL, RANGE, agg_label, FREQ = render_sidebar(
-    meta, df, nice, goal_cols
+    meta, df, nice_title, goal_cols
 )
 
 # Country filter
@@ -219,10 +259,6 @@ context_cols = [
 factor_cols = [
     c for c in (mapping.get("factor_vars", []) or []) if c in df.columns
 ]
-
-# Convenience unions used later
-present_spend = paid_spend_cols
-present_vars = paid_var_cols + organic_cols + context_cols + factor_cols
 
 RULE = freq_to_rule(FREQ)
 spend_label = (
@@ -258,15 +294,34 @@ res = resample_numeric(
 )
 res["PERIOD_LABEL"] = period_label(res["DATE_PERIOD"], RULE)
 
+
 # =============================
 # TAB 1 — BUSINESS OVERVIEW
 # =============================
 with tab_biz:
+    # Small helper to guarantee a nice label even if metadata is incomplete
     st.markdown("## KPI Overview")
 
     has_prev = not df_prev.empty
 
-    # --- KPI block: totals per goal ---
+    # Build a stable (nice -> raw col) mapping for goals so we can show friendly labels everywhere
+    if goal_cols:
+        goal_label_map = {nice_title(g): g for g in goal_cols}
+        goal_labels_sorted = sorted(
+            goal_label_map.keys(), key=lambda s: s.lower()
+        )
+        target = (
+            GOAL
+            if (GOAL and GOAL in df.columns)
+            else (goal_cols[0] if goal_cols else None)
+        )
+    else:
+        goal_label_map = {}
+        goal_labels_sorted = []
+        target = None
+
+    # ----- KPI — Outcomes (TOTALS only) -----
+    st.markdown("### Outcomes (Goals)")
     if goal_cols:
         kpis = []
         for g in goal_cols:
@@ -282,7 +337,7 @@ with tab_biz:
                 delta_txt = f"{'+' if diff >= 0 else ''}{fmt_num(diff)}"
             kpis.append(
                 dict(
-                    title=f"{nice(g)}",
+                    title=nice_title(g),
                     value=fmt_num(cur),
                     delta=delta_txt,
                     good_when="up",
@@ -291,7 +346,8 @@ with tab_biz:
         kpi_grid(kpis, per_row=5)
         st.markdown("---")
 
-        # --- KPI block: avg efficiency (goal per spend, or ROAS for GMV) ---
+        # ----- KPI — Goal Efficiency -----
+        st.markdown("### Goal Efficiency")
         kpis2 = []
         for g in goal_cols:
             cur_eff = safe_eff(df_r, g)
@@ -300,10 +356,11 @@ with tab_biz:
             if pd.notna(cur_eff) and pd.notna(prev_eff):
                 diff = cur_eff - prev_eff
                 delta_txt = f"{'+' if diff >= 0 else ''}{diff:.2f}"
+            # ROAS only for GMV explicitly; otherwise <NiceGoal> / <Spend label>
             eff_title = (
                 "ROAS"
                 if str(g).upper() == "GMV"
-                else f"{nice(g)} / {spend_label}"
+                else f"{nice_title(g)} / {spend_label}"
             )
             kpis2.append(
                 dict(
@@ -316,7 +373,9 @@ with tab_biz:
         kpi_grid(kpis2, per_row=5)
         st.markdown("---")
 
-    # --- Goal vs Spend (bar + line) ---
+    # -----------------------------
+    # Goal vs Spend (bar + line)
+    # -----------------------------
     st.markdown("## Goal vs Spend")
     cA, cB = st.columns(2)
 
@@ -324,7 +383,7 @@ with tab_biz:
         fig1 = go.Figure()
         if target and target in res:
             fig1.add_bar(
-                x=res["PERIOD_LABEL"], y=res[target], name=nice(target)
+                x=res["PERIOD_LABEL"], y=res[target], name=nice_title(target)
             )
         fig1.add_trace(
             go.Scatter(
@@ -337,9 +396,9 @@ with tab_biz:
             )
         )
         fig1.update_layout(
-            title=f"{nice(target) if target else 'Goal'} vs Total {spend_label} — {TIMEFRAME_LABEL}, {agg_label}",
+            title=f"{nice_title(target) if target else 'Goal'} vs Total {spend_label} — {TIMEFRAME_LABEL}, {agg_label}",
             xaxis=dict(title="Date", title_standoff=8),
-            yaxis=dict(title=nice(target) if target else "Goal"),
+            yaxis=dict(title=nice_title(target) if target else "Goal"),
             yaxis2=dict(title=spend_label, overlaying="y", side="right"),
             bargap=0.15,
             hovermode="x unified",
@@ -368,7 +427,9 @@ with tab_biz:
         fig2e = go.Figure()
         if target and target in eff_t:
             fig2e.add_bar(
-                x=eff_t["PERIOD_LABEL"], y=eff_t[target], name=nice(target)
+                x=eff_t["PERIOD_LABEL"],
+                y=eff_t[target],
+                name=nice_title(target),
             )
         fig2e.add_trace(
             go.Scatter(
@@ -381,9 +442,9 @@ with tab_biz:
             )
         )
         fig2e.update_layout(
-            title=f"{nice(target) if target else 'Goal'} & {label_eff} Over Time — {TIMEFRAME_LABEL}, {agg_label}",
+            title=f"{nice_title(target) if target else 'Goal'} & {label_eff} Over Time — {TIMEFRAME_LABEL}, {agg_label}",
             xaxis=dict(title="Date", title_standoff=8),
-            yaxis=dict(title=nice(target) if target else "Goal"),
+            yaxis=dict(title=nice_title(target) if target else "Goal"),
             yaxis2=dict(title=label_eff, overlaying="y", side="right"),
             bargap=0.15,
             hovermode="x unified",
@@ -396,8 +457,10 @@ with tab_biz:
 
     st.markdown("---")
 
-    # --- Custom metric over time (optional spend overlay) ---
-    st.markdown("## Custom Metric Over Time")
+    # -----------------------------
+    # Explore Any Metric Over Time
+    # -----------------------------
+    st.markdown("## Explore Any Metric Over Time")
 
     numeric_candidates = df_r.select_dtypes(
         include=[np.number]
@@ -407,10 +470,10 @@ with tab_biz:
     if not metrics:
         st.info("No numeric columns available to plot.")
     else:
-        # Build simple, collision-safe labels (no brackets)
         from collections import Counter
 
-        base_labels = [(nice(c), c) for c in metrics]
+        # Build label list using nice() and disambiguate duplicates by appending the raw col
+        base_labels = [(nice_title(c), c) for c in metrics]
         counts = Counter(lbl for (lbl, _) in base_labels)
         labels = []
         for lbl, col in base_labels:
@@ -434,12 +497,6 @@ with tab_biz:
         )
         picked_col = label_to_col[picked_label]
 
-        # Only show overlay toggle if we actually have _TOTAL_SPEND after resampling
-        can_overlay = True  # will verify after res_plot is built
-        want_overlay = c_spend.checkbox(
-            f"Overlay Total {spend_label}", value=True
-        )
-
         # ensure selected metric is in res; if not, add via same resample rule
         if picked_col not in res.columns and picked_col in df_r.columns:
             add = (
@@ -456,13 +513,16 @@ with tab_biz:
         else:
             res_plot = res
 
+        want_overlay = c_spend.checkbox(
+            f"Overlay Total {spend_label}", value=True
+        )
         can_overlay = "_TOTAL_SPEND" in res_plot.columns
 
         fig_custom = go.Figure()
         fig_custom.add_bar(
             x=res_plot["PERIOD_LABEL"],
             y=res_plot[picked_col],
-            name=nice(picked_col),
+            name=nice_title(picked_col),
         )
 
         if want_overlay and can_overlay:
@@ -477,16 +537,14 @@ with tab_biz:
                 )
             )
             fig_custom.update_layout(
-                yaxis=dict(title=nice(picked_col)),
+                yaxis=dict(title=nice_title(picked_col)),
                 yaxis2=dict(title=spend_label, overlaying="y", side="right"),
             )
         else:
-            fig_custom.update_layout(
-                yaxis=dict(title=nice(picked_col)),
-            )
+            fig_custom.update_layout(yaxis=dict(title=nice_title(picked_col)))
 
         fig_custom.update_layout(
-            title=f"{nice(picked_col)} Over Time — {TIMEFRAME_LABEL}, {agg_label}",
+            title=f"{nice_title(picked_col)} Over Time — {TIMEFRAME_LABEL}, {agg_label}",
             xaxis=dict(title="Date", title_standoff=8),
             bargap=0.15,
             hovermode="x unified",
@@ -502,376 +560,9 @@ with tab_biz:
                 f"ℹ️ Overlay disabled: '_TOTAL_SPEND' not available for this selection."
             )
 
-# =============================
-# TAB 2 — REGIONAL COMPARISON
-# =============================
-with tab_reg:
-    st.subheader("Regional Comparison")
-
-    # ---- Goal by country over time (stacked) ----
-    if ("COUNTRY" in df_r.columns) and target and (target in df_r.columns):
-        agg = (
-            df_r.set_index(DATE_COL)
-            .groupby("COUNTRY")[target]
-            .resample(RULE)
-            .sum(min_count=1)
-            .reset_index()
-            .rename(columns={DATE_COL: "DATE_PERIOD"})
-        )
-        agg["PERIOD_LABEL"] = period_label(agg["DATE_PERIOD"], RULE)
-        tot = (
-            agg.groupby("COUNTRY")[target]
-            .sum()
-            .sort_values(ascending=False)
-            .index.tolist()
-        )
-        fig_cty = px.bar(
-            agg,
-            x="PERIOD_LABEL",
-            y=target,
-            color="COUNTRY",
-            category_orders={"COUNTRY": tot},
-            title=f"{nice(target)} by Country — Stacked Over Time",
-            barmode="stack",
-        )
-        fig_cty.update_layout(
-            xaxis_title="Date",
-            yaxis_title=nice(target),
-            legend=dict(orientation="h"),
-        )
-        st.plotly_chart(fig_cty, use_container_width=True)
-
-    # -----------------------------
-    # Channel mapping (from metadata)
-    # -----------------------------
-    if CHANNELS_MAP:
-        ch_map_all = pd.DataFrame(
-            [
-                (col, CHANNELS_MAP[col])
-                for col in df.columns
-                if col in CHANNELS_MAP
-            ],
-            columns=["col", "channel"],
-        ).dropna()
-        ch_map_all["channel"] = ch_map_all["channel"].astype(str).str.upper()
-    else:
-        ch_map_all = pd.DataFrame(columns=["col", "channel"])
-
-    ch_map_spend = (
-        ch_map_all[ch_map_all["col"].isin(paid_spend_cols)].copy()
-        if not ch_map_all.empty
-        else pd.DataFrame(columns=["col", "channel"])
-    )
-
-    # -----------------------------
-    # Country comparison table (outcomes, spend & conversions)
-    # -----------------------------
-    if "COUNTRY" in df_r.columns:
-        g = df_r.groupby("COUNTRY", dropna=False)
-        spend_s = g["_TOTAL_SPEND"].sum()
-        target_s = g[target].sum() if (target in df_r.columns) else spend_s
-
-        imps_row = (
-            df_r[IMPR_COLS].sum(axis=1)
-            if IMPR_COLS
-            else pd.Series(0.0, index=df_r.index)
-        )
-        clicks_row = (
-            df_r[CLICK_COLS].sum(axis=1)
-            if CLICK_COLS
-            else pd.Series(0.0, index=df_r.index)
-        )
-        sessions_row = (
-            df_r[SESSION_COLS].sum(axis=1)
-            if SESSION_COLS
-            else pd.Series(0.0, index=df_r.index)
-        )
-
-        imps_s = imps_row.groupby(df_r["COUNTRY"]).sum()
-        clicks_s = clicks_row.groupby(df_r["COUNTRY"]).sum()
-        sessions_s = sessions_row.groupby(df_r["COUNTRY"]).sum()
-
-        by_cty = pd.DataFrame(
-            {
-                "spend": spend_s,
-                "target": target_s,
-                "imps": imps_s.reindex(spend_s.index, fill_value=0.0),
-                "clicks": clicks_s.reindex(spend_s.index, fill_value=0.0),
-                "sessions": sessions_s.reindex(spend_s.index, fill_value=0.0),
-            }
-        ).reset_index()
-
-        by_cty["Impression→Click"] = by_cty["clicks"] / by_cty["imps"].replace(
-            0, np.nan
-        )
-        by_cty["Click→Session"] = by_cty["sessions"] / by_cty["clicks"].replace(
-            0, np.nan
-        )
-        by_cty["Efficiency"] = by_cty["target"] / by_cty["spend"].replace(
-            0, np.nan
-        )
-
-        disp = by_cty.sort_values("spend", ascending=False)
-        disp_fmt = disp.copy()
-        disp_fmt["Impressions"] = disp["imps"].map(fmt_num)
-        disp_fmt["Clicks"] = disp["clicks"].map(fmt_num)
-        disp_fmt["Sessions"] = disp["sessions"].map(fmt_num)
-        disp_fmt["Total Spend"] = disp["spend"].map(fmt_num)
-        disp_fmt[f"Total {nice(target)}"] = disp["target"].map(fmt_num)
-        disp_fmt["Impression→Click"] = disp["Impression→Click"].map(
-            lambda x: f"{x:.2%}" if pd.notna(x) else "–"
-        )
-        disp_fmt["Click→Session"] = disp["Click→Session"].map(
-            lambda x: f"{x:.2%}" if pd.notna(x) else "–"
-        )
-        perf_col_name = "ROAS" if target == "GMV" else f"{nice(target)}/Spend"
-        disp_fmt[perf_col_name] = disp["Efficiency"].map(
-            lambda x: f"{x:.2f}" if pd.notna(x) else "–"
-        )
-
-        st.markdown("### Country Comparison — Outcomes, Spend & Conversions")
-        st.dataframe(
-            disp_fmt[
-                [
-                    "COUNTRY",
-                    "Impressions",
-                    "Clicks",
-                    "Sessions",
-                    "Total Spend",
-                    f"Total {nice(target)}",
-                    "Impression→Click",
-                    "Click→Session",
-                    perf_col_name,
-                ]
-            ].rename(columns={"COUNTRY": "Country"}),
-            use_container_width=True,
-        )
-    st.markdown("---")
-
-    # -----------------------------
-    # Channel KPIs — Outcomes & Costs (totals, unchanged)
-    # -----------------------------
-    if not ch_map_all.empty:
-        ch_to_cols = ch_map_all.groupby("channel")["col"].apply(list).to_dict()
-
-        def _sum_cols(cols: list[str]) -> float:
-            return df_r[cols].sum().sum() if cols else 0.0
-
-        # Precompute per-channel spend totals from mapped spend cols
-        if not ch_map_spend.empty:
-            spend_long = df_r.melt(
-                id_vars=[DATE_COL],
-                value_vars=ch_map_spend["col"].tolist(),
-                var_name="col",
-                value_name="spend",
-            ).merge(ch_map_spend, on="col", how="left")
-            ch_spend_tot = spend_long.groupby("channel")["spend"].sum()
-        else:
-            ch_spend_tot = pd.Series(dtype=float)
-
-        rows = []
-        channels = sorted(ch_to_cols.keys())
-        for ch in channels:
-            cols_all = ch_to_cols.get(ch, [])
-            ch_impr = [c for c in IMPR_COLS if c in cols_all]
-            ch_clicks = [c for c in CLICK_COLS if c in cols_all]
-            ch_sessions = [c for c in SESSION_COLS if c in cols_all]
-            ch_installs = [c for c in INSTALL_COLS if c in cols_all]
-
-            imps = _sum_cols(ch_impr)
-            clicks = _sum_cols(ch_clicks)
-            sessions = _sum_cols(ch_sessions)
-            installs = _sum_cols(ch_installs)
-            spend_total = float(ch_spend_tot.get(ch, 0.0))
-
-            cpm = (spend_total / imps * 1000) if imps > 0 else np.nan
-            cpc = (spend_total / clicks) if clicks > 0 else np.nan
-            cps = (spend_total / sessions) if sessions > 0 else np.nan
-            cpi = (spend_total / installs) if installs > 0 else np.nan
-
-            rows.append(
-                [ch, imps, clicks, sessions, spend_total, cpm, cpc, cps, cpi]
-            )
-
-        ch_cmp = pd.DataFrame(
-            rows,
-            columns=[
-                "Channel",
-                "Impressions",
-                "Clicks",
-                "Sessions",
-                "Spend",
-                "Cost per 1k Impressions",
-                "Cost per Click",
-                "Cost per Session",
-                "Cost per Install",
-            ],
-        ).sort_values("Spend", ascending=False)
-
-        ch_disp = ch_cmp.copy()
-        for c in ["Impressions", "Clicks", "Sessions", "Spend"]:
-            ch_disp[c] = ch_disp[c].map(fmt_num)
-        for c in [
-            "Cost per 1k Impressions",
-            "Cost per Click",
-            "Cost per Session",
-            "Cost per Install",
-        ]:
-            ch_disp[c] = ch_cmp[c].map(
-                lambda x: f"{x:.2f}" if pd.notna(x) else "–"
-            )
-
-        st.markdown("### Channel KPIs — Outcomes & Costs")
-        st.dataframe(ch_disp, use_container_width=True)
-
-        # -----------------------------
-        # Channel breakdown (selector → component table with same columns)
-        # -----------------------------
-        st.markdown("### Channel breakdown - PLACEHOLDER")
-        if not channels:
-            st.info("No channels found in metadata mapping.")
-        else:
-            sel_ch = st.selectbox("Channel", channels, index=0)
-
-            # Component spend cols mapped to the selected channel
-            comp_spend_cols = ch_map_spend.loc[
-                ch_map_spend["channel"] == sel_ch, "col"
-            ].tolist()
-
-            if not comp_spend_cols:
-                st.caption(
-                    "No component spend columns mapped for the selected channel."
-                )
-            else:
-                # For component-level non-spend metrics, use a simple token heuristic:
-                # take the spend column's leading token (before first '_') to match IMPR/CLICK/SESSION cols.
-                def leading_token(colname: str) -> str:
-                    m0 = re.match(r"([A-Za-z0-9]+)_", str(colname))
-                    return (m0.group(1) if m0 else str(colname)).upper()
-
-                ch_cols_all = ch_to_cols.get(sel_ch, [])
-                ch_impr_all = [c for c in IMPR_COLS if c in ch_cols_all]
-                ch_click_all = [c for c in CLICK_COLS if c in ch_cols_all]
-                ch_sess_all = [c for c in SESSION_COLS if c in ch_cols_all]
-                ch_inst_all = [c for c in INSTALL_COLS if c in ch_cols_all]
-
-                rows_comp = []
-                for spend_col in comp_spend_cols:
-                    tok = leading_token(spend_col)
-                    spend_total = df_r[spend_col].sum()
-
-                    imps = (
-                        df_r[[c for c in ch_impr_all if tok in c.upper()]]
-                        .sum()
-                        .sum()
-                        if ch_impr_all
-                        else 0.0
-                    )
-                    clicks = (
-                        df_r[[c for c in ch_click_all if tok in c.upper()]]
-                        .sum()
-                        .sum()
-                        if ch_click_all
-                        else 0.0
-                    )
-                    sessions = (
-                        df_r[[c for c in ch_sess_all if tok in c.upper()]]
-                        .sum()
-                        .sum()
-                        if ch_sess_all
-                        else 0.0
-                    )
-                    installs = (
-                        df_r[[c for c in ch_inst_all if tok in c.upper()]]
-                        .sum()
-                        .sum()
-                        if ch_inst_all
-                        else 0.0
-                    )
-
-                    cpm = (spend_total / imps * 1000) if imps > 0 else np.nan
-                    cpc = (spend_total / clicks) if clicks > 0 else np.nan
-                    cps = (spend_total / sessions) if sessions > 0 else np.nan
-                    cpi = (spend_total / installs) if installs > 0 else np.nan
-
-                    rows_comp.append(
-                        [
-                            spend_col,
-                            imps,
-                            clicks,
-                            sessions,
-                            spend_total,
-                            cpm,
-                            cpc,
-                            cps,
-                            cpi,
-                        ]
-                    )
-
-                comp_df = pd.DataFrame(
-                    rows_comp,
-                    columns=[
-                        "Column",
-                        "Impressions",
-                        "Clicks",
-                        "Sessions",
-                        "Spend",
-                        "Cost per 1k Impressions",
-                        "Cost per Click",
-                        "Cost per Session",
-                        "Cost per Install",
-                    ],
-                ).sort_values("Spend", ascending=False)
-
-                comp_disp = comp_df.copy()
-                for c in ["Impressions", "Clicks", "Sessions", "Spend"]:
-                    comp_disp[c] = comp_disp[c].map(fmt_num)
-                for c in [
-                    "Cost per 1k Impressions",
-                    "Cost per Click",
-                    "Cost per Session",
-                    "Cost per Install",
-                ]:
-                    comp_disp[c] = comp_df[c].map(
-                        lambda x: f"{x:.2f}" if pd.notna(x) else "–"
-                    )
-
-                st.dataframe(comp_disp, use_container_width=True)
-    else:
-        st.info("No channel mapping available in metadata.")
-
-    st.markdown("---")
-
-    # -----------------------------
-    # Channel × Country Spend Matrix
-    # -----------------------------
-    st.markdown("### Channel × Country Spend Matrix")
-    if not ch_map_spend.empty and "COUNTRY" in df_r.columns:
-        spend_long_cty = (
-            df_r.melt(
-                id_vars=[DATE_COL, "COUNTRY"],
-                value_vars=ch_map_spend["col"].tolist(),
-                var_name="col",
-                value_name="spend",
-            )
-            .merge(ch_map_spend, on="col", how="left")
-            .dropna(subset=["spend"])
-        )
-        mat = (
-            spend_long_cty.groupby(["channel", "COUNTRY"])["spend"]
-            .sum()
-            .unstack("COUNTRY")
-            .fillna(0.0)
-        )
-        # Order channels (rows) by total spend desc, then transpose to Country x Channel
-        mat = mat.loc[mat.sum(axis=1).sort_values(ascending=False).index]
-        mat_t = mat.T  # TRANSPOSE: Countries as rows, Channels as columns
-        st.dataframe(mat_t.applymap(fmt_num), use_container_width=True)
-    else:
-        st.info("Channel mapping or COUNTRY column not available.")
 
 # =============================
-# TAB 3 — MARKETING OVERVIEW
+# TAB 2 — MARKETING OVERVIEW
 # =============================
 with tab_mkt:
     st.subheader(f"Spend & Channels — {TIMEFRAME_LABEL} · {agg_label}")

@@ -146,6 +146,6 @@ If deleting fails:
 
 ## Code References
 
-- **UI Implementation**: `app/pages/0_Connect_Your_Data.py`
+- **UI Implementation**: `app/pages/Connect_Your_Data.py`
 - **Connection Logic**: `app/app_shared.py` (`ensure_sf_conn()`)
 - **Secret Manager Helpers**: `app/gcp_secrets.py`
