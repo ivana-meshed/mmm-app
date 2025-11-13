@@ -1,7 +1,12 @@
 streamlit[auth]>=1.43
 pandas
 snowflake-connector-python
+
+# Google Cloud dependencies
 google-cloud-secret-manager
 google-cloud-storage
 google-cloud-run
 protobuf<5
+
+# AWS dependencies
+boto3>=1.28.0

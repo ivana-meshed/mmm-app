@@ -526,8 +526,26 @@ Test the full workflow:
 The repository uses GitHub Actions for automated deployments.
 
 ### Pipeline Files
-- **`.github/workflows/ci.yml`**: Production deployment (main branch)
-- **`.github/workflows/ci-dev.yml`**: Development deployment (copilot/* branches)
+- **`.github/workflows/ci.yml`**: GCP production deployment (main branch)
+- **`.github/workflows/ci-dev.yml`**: GCP development deployment (copilot/* branches)
+- **`.github/workflows/ci-aws.yml`**: AWS production deployment (main branch)
+- **`.github/workflows/ci-aws-dev.yml`**: AWS development deployment (copilot/* branches)
+
+### Initial Setup for GitHub Actions
+
+Before the workflows can run, you need to configure authentication:
+
+**For GCP**: Follow the [GitHub Actions GCP Setup Guide](docs/GITHUB_ACTIONS_GCP_SETUP.md) to configure Workload Identity Federation. This creates:
+- Workload Identity Pool and Provider
+- Service accounts with proper permissions
+- Artifact Registry repository
+- GCS buckets for state and application data
+
+**For AWS**: Follow the [GitHub Actions AWS Setup Guide](docs/GITHUB_ACTIONS_AWS_SETUP.md) to configure OIDC authentication. This creates:
+- OIDC Identity Provider
+- IAM role with proper permissions
+- ECR repositories
+- S3 buckets for state and application data
 
 ### Pipeline Workflow
 1. **Checkout code**

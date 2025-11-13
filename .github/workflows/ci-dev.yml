@@ -1,4 +1,4 @@
-name: CI (dev)
+name: CI (GCP Dev)
 
 on:
   push:
@@ -11,9 +11,20 @@ on:
         - 'docker/training_entrypoint.sh'
         - '!docker/Dockerfile.training-base'
         - 'infra/terraform/**'  # exclude base so normal builds skip base
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: 'Deployment target'
+        required: true
+        type: choice
+        options:
+          - both
+          - gcp-only
+          - aws-only
+        default: 'both'
 
 concurrency:
-  group: terraform-dev
+  group: terraform-gcp-dev
   cancel-in-progress: false
 
 permissions:
@@ -21,7 +32,9 @@ permissions:
   contents: read
 
 jobs:
-  ci:
+  ci-gcp-dev:
+    # Skip if manually triggered with aws-only
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.deploy_target != 'aws-only'
     runs-on: ubuntu-latest
     env:
       PROJECT_ID: datawarehouse-422511

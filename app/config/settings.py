@@ -4,9 +4,9 @@ Centralized settings module for the MMM application.
 This module consolidates all configuration settings that were previously
 scattered across multiple files. It provides a single source of truth for:
 - Environment variables
-- GCP project configuration
+- Cloud provider configuration (GCP/AWS)
 - Snowflake connection parameters
-- Cloud Run job settings
+- Container orchestration settings (Cloud Run/ECS)
 - Storage bucket configuration
 - Queue management settings
 - Authentication settings
@@ -14,6 +14,13 @@ scattered across multiple files. It provides a single source of truth for:
 
 import os
 from typing import Dict, List, Optional
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cloud Provider Settings
+# ─────────────────────────────────────────────────────────────────────────────
+
+CLOUD_PROVIDER: str = os.getenv("CLOUD_PROVIDER", "gcp").lower()
+"""Cloud provider: 'gcp' (default) or 'aws'"""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GCP Project Settings
@@ -25,11 +32,24 @@ PROJECT_ID: Optional[str] = os.getenv("PROJECT_ID")
 PROJECT_NUMBER: Optional[str] = os.getenv("PROJECT_NUMBER")
 """GCP Project Number"""
 
-REGION: str = os.getenv("REGION", "europe-west1")
-"""GCP Region for resources"""
+REGION: str = os.getenv("REGION", "europe-west1" if CLOUD_PROVIDER == "gcp" else "us-east-1")
+"""Cloud region for resources (GCP: europe-west1, AWS: us-east-1)"""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Cloud Run Settings
+# AWS Settings
+# ─────────────────────────────────────────────────────────────────────────────
+
+AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
+"""AWS Region for resources"""
+
+ECS_CLUSTER: Optional[str] = os.getenv("ECS_CLUSTER")
+"""ECS cluster name (for AWS)"""
+
+TRAINING_TASK_FAMILY: Optional[str] = os.getenv("TRAINING_TASK_FAMILY")
+"""ECS task family name for training tasks (for AWS)"""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cloud Run Settings (GCP)
 # ─────────────────────────────────────────────────────────────────────────────
 
 SERVICE_NAME: Optional[str] = os.getenv("SERVICE_NAME")
@@ -42,11 +62,23 @@ TRAINING_JOB_NAME: Optional[str] = os.getenv("TRAINING_JOB_NAME")
 # Storage Settings
 # ─────────────────────────────────────────────────────────────────────────────
 
+# GCS settings
 GCS_BUCKET: str = os.getenv("GCS_BUCKET", "mmm-app-output")
 """Default GCS bucket for application data"""
 
+# S3 settings
+S3_BUCKET: str = os.getenv("S3_BUCKET", "mmm-app-output-aws")
+"""Default S3 bucket for application data"""
+
+# Unified bucket name based on provider
+STORAGE_BUCKET: str = os.getenv(
+    "STORAGE_BUCKET",
+    S3_BUCKET if CLOUD_PROVIDER == "aws" else GCS_BUCKET
+)
+"""Cloud storage bucket name (abstracts GCS_BUCKET/S3_BUCKET)"""
+
 ARTIFACT_REPO: str = os.getenv("ARTIFACT_REPO", "mmm-repo")
-"""Artifact Registry repository name"""
+"""Artifact Registry/ECR repository name"""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Snowflake Settings
