@@ -205,9 +205,32 @@ Configuration used for the model run:
 
 Summaries are automatically generated for every new model run. No manual intervention is required.
 
+### Automatic Initialization via CI/CD
+
+Missing summaries are automatically initialized during deployment:
+- Both production and development CI/CD pipelines include a summary initialization step
+- This runs after each deployment to backfill any missing summary files
+- The process is non-fatal and won't block deployment if some summaries fail
+
 ### Generating Summaries for Existing Models
 
-To generate summaries for models that were run before this feature was added:
+To manually generate summaries for models that were run before this feature was added:
+
+#### From Web Container
+
+The aggregation scripts are available in the web container at `/app/scripts/`:
+
+```bash
+# Connect to the web service container (Cloud Run)
+gcloud run services exec mmm-app-web --region europe-west1
+
+# Inside the container, run:
+python3 /app/scripts/aggregate_model_summaries.py \
+  --bucket mmm-app-output \
+  --generate-missing
+```
+
+#### From Local Environment
 
 ```bash
 # Generate summaries for all existing runs
