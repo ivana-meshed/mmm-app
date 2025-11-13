@@ -150,7 +150,8 @@ RUN R -q -e "options(Ncpus=8); \
 # This fixes an issue where check_metric_type() can return a vector of length 2
 # instead of a single value, causing robyn_outputs() to fail
 COPY docker/robyn_check_metric_type.patch /tmp/robyn_check_metric_type.patch
-RUN ROBYN_PATH=$(R -q -e "cat(system.file(package='Robyn'))" | tail -n1) && \
+RUN ROBYN_PATH=$(R --slave -e "cat(system.file(package='Robyn'))") && \
+    echo "Detected Robyn path: ${ROBYN_PATH}" && \
     if [ -f "${ROBYN_PATH}/R/checks.R" ]; then \
         echo "Applying Robyn patch to ${ROBYN_PATH}/R/checks.R" && \
         patch --dry-run -p1 -d "${ROBYN_PATH}/.." < /tmp/robyn_check_metric_type.patch && \
@@ -159,8 +160,8 @@ RUN ROBYN_PATH=$(R -q -e "cat(system.file(package='Robyn'))" | tail -n1) && \
         grep -A 2 "name_loc\[1\]" "${ROBYN_PATH}/R/checks.R" && \
         echo "Patch verification: metric_name_updated line found"; \
     else \
-        echo "Warning: Could not find Robyn checks.R file at ${ROBYN_PATH}/R/checks.R" && \
-        ls -la "${ROBYN_PATH}/R/" || echo "R directory not found"; \
+        echo "ERROR: Could not find Robyn checks.R file at ${ROBYN_PATH}/R/checks.R" && \
+        ls -la "${ROBYN_PATH}/R/" 2>/dev/null || echo "R directory not found"; \
         exit 1; \
     fi && \
     rm /tmp/robyn_check_metric_type.patch
