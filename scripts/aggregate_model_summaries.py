@@ -12,7 +12,7 @@ import logging
 import os
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -129,7 +129,7 @@ class ModelSummaryAggregator:
         aggregated = {
             "country": country,
             "revision": revision,
-            "aggregated_at": datetime.utcnow().isoformat(),
+            "aggregated_at": datetime.now(timezone.utc).isoformat(),
             "total_runs": len(summaries),
             "runs": summaries,
         }
@@ -144,9 +144,7 @@ class ModelSummaryAggregator:
 
             # Get best model across all runs (by NRMSE)
             best_models = [
-                s.get("best_model")
-                for s in summaries
-                if s.get("best_model")
+                s.get("best_model") for s in summaries if s.get("best_model")
             ]
             if best_models:
                 # Find model with lowest NRMSE
@@ -195,9 +193,7 @@ class ModelSummaryAggregator:
         )
         return summary_path
 
-    def generate_summary_for_existing_run(
-        self, run_path: str
-    ) -> Optional[str]:
+    def generate_summary_for_existing_run(self, run_path: str) -> Optional[str]:
         """
         Generate summary for an existing model run that doesn't have one
 
@@ -254,8 +250,11 @@ class ModelSummaryAggregator:
                 return None
 
             # Run R script to generate summary
-            r_script = Path(__file__).parent.parent / "r" / \
-                "generate_summary_from_rds.R"
+            r_script = (
+                Path(__file__).parent.parent
+                / "r"
+                / "generate_summary_from_rds.R"
+            )
             if not r_script.exists():
                 logger.error(f"R script not found: {r_script}")
                 return None
@@ -356,9 +355,7 @@ def main():
         runs = aggregator.list_model_runs(args.country, args.revision)
         runs_without_summary = [r for r in runs if not r["has_summary"]]
 
-        logger.info(
-            f"Found {len(runs_without_summary)} runs without summaries"
-        )
+        logger.info(f"Found {len(runs_without_summary)} runs without summaries")
 
         for run in runs_without_summary:
             logger.info(f"Generating summary for {run['path']}")
