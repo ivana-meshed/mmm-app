@@ -453,24 +453,3 @@ jobs:
           echo "  - Web Interface: Cloud Run Service (2 CPUs, 4GB)"
           echo "  - Training Jobs: Cloud Run Jobs (up to 32 CPUs, 128GB)"
           echo "  - Storage: GCS Bucket ($BUCKET)"
-
-      - name: Initialize model summaries for existing runs
-        shell: bash
-        run: |
-          echo "Initializing model summaries for existing model runs..."
-          echo "This will generate summary JSON files for any runs missing them."
-          
-          # Install Python dependencies needed for aggregation script
-          pip install --quiet google-cloud-storage
-          
-          # Run the aggregation script to generate missing summaries
-          # This runs non-interactively and processes all existing runs
-          python3 scripts/aggregate_model_summaries.py \
-            --bucket ${{ env.BUCKET }} \
-            --project ${{ env.PROJECT_ID }} \
-            --generate-missing || {
-              echo "Warning: Some summaries may have failed to generate."
-              echo "This is non-fatal and can be retried later."
-            }
-          
-          echo "Model summary initialization completed."

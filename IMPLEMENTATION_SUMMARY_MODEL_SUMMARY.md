@@ -230,13 +230,14 @@ Potential improvements for future iterations:
    - Same directory as `run_all.R` (when both are in `/app/`)
    - `/app/extract_model_summary.R` (Docker container)
    - `r/extract_model_summary.R` (local development)
-4. **Python aggregation scripts are now available in the web container**:
+4. **Python aggregation scripts are available in the web container**:
    - The web Dockerfile (`docker/Dockerfile.web`) copies the `scripts/` directory
-   - Scripts can be run from within the web container for manual operations
-5. **Automatic initialization in CI/CD**:
-   - Both production (`ci.yml`) and development (`ci-dev.yml`) workflows now include a step to initialize missing summaries
-   - This runs automatically after each deployment to backfill any missing summary files
-   - The step is non-fatal and will not block deployment if some summaries fail
+   - Scripts can be run from within the web container for aggregation operations
+   - Note: Backfilling (--generate-missing) requires R and cannot be done from web container
+5. **Backfilling existing models**:
+   - Generating summaries from existing `OutputCollect.RDS` files requires R/Rscript
+   - Must be done from an environment with R installed (local machine or VM with R)
+   - New runs automatically generate summaries, so backfilling is optional
 6. No changes required to Terraform configuration
 
 ## Validation Checklist
