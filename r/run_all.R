@@ -1571,6 +1571,52 @@ if (is.null(OutputCollect)) {
 saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
 
+## ---------- GENERATE MODEL SUMMARY ----------
+message("→ Generating model summary...")
+# Source the helper script (it's in the same directory as this script)
+extract_summary_script <- file.path(
+    dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE)),
+    "extract_model_summary.R"
+)
+# Fallback to current working directory
+if (!file.exists(extract_summary_script)) {
+    extract_summary_script <- "r/extract_model_summary.R"
+}
+if (file.exists(extract_summary_script)) {
+    source(extract_summary_script)
+} else {
+    message("⚠️ Could not find extract_model_summary.R, skipping summary generation")
+}
+
+if (exists("extract_model_summary")) {
+    tryCatch(
+        {
+            model_summary <- extract_model_summary(
+                output_collect = OutputCollect,
+                input_collect = InputCollect,
+                country = country,
+                revision = revision,
+                timestamp = timestamp,
+                training_time_mins = round(training_time, 2)
+            )
+            summary_path <- file.path(dir_path, "model_summary.json")
+            save_model_summary(model_summary, summary_path)
+            gcs_put_safe(
+                summary_path,
+                file.path(gcs_prefix, "model_summary.json")
+            )
+            message("✅ Model summary generated and uploaded")
+        },
+        error = function(e) {
+            message(
+                "⚠️ Failed to generate model summary: ",
+                conditionMessage(e)
+            )
+            # Non-fatal: continue with execution
+        }
+    )
+}
+
 best_id <- OutputCollect$resultHypParam$solID[1]
 writeLines(
     c(
