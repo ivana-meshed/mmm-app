@@ -50,33 +50,49 @@ class ModelSummaryAggregator:
         Returns:
             List of dicts with run metadata
         """
+        runs = []
+
+        # List all files under robyn/ to find OutputCollect.RDS files
+        # which indicate a model run exists
         prefix = "robyn/"
         if revision:
             prefix += f"{revision}/"
         if country:
             prefix += f"{country}/"
 
-        blobs = self.client.list_blobs(
-            self.bucket_name, prefix=prefix, delimiter="/"
-        )
+        # Get all blobs without delimiter to see all files
+        blobs = self.client.list_blobs(self.bucket_name, prefix=prefix)
 
-        runs = []
+        # Track unique run paths we've seen
+        seen_runs = set()
+
         for blob in blobs:
-            # Structure: robyn/{revision}/{country}/{timestamp}/
-            parts = blob.name.split("/")
-            if len(parts) >= 4 and parts[0] == "robyn":
-                run_info = {
-                    "revision": parts[1],
-                    "country": parts[2],
-                    "timestamp": parts[3],
-                    "path": "/".join(parts[:4]),
-                }
-                # Check if model_summary.json exists
-                summary_path = f"{run_info['path']}/model_summary.json"
-                summary_blob = self.bucket.blob(summary_path)
-                run_info["has_summary"] = summary_blob.exists()
-                runs.append(run_info)
+            # Look for OutputCollect.RDS files which indicate a run
+            if blob.name.endswith("OutputCollect.RDS"):
+                # Structure: robyn/{revision}/{country}/{timestamp}/OutputCollect.RDS
+                parts = blob.name.split("/")
+                if len(parts) >= 5 and parts[0] == "robyn":
+                    run_path = "/".join(parts[:4])
 
+                    # Skip if we've already processed this run
+                    if run_path in seen_runs:
+                        continue
+                    seen_runs.add(run_path)
+
+                    run_info = {
+                        "revision": parts[1],
+                        "country": parts[2],
+                        "timestamp": parts[3],
+                        "path": run_path,
+                    }
+
+                    # Check if model_summary.json exists
+                    summary_path = f"{run_path}/model_summary.json"
+                    summary_blob = self.bucket.blob(summary_path)
+                    run_info["has_summary"] = summary_blob.exists()
+                    runs.append(run_info)
+
+        logger.info(f"Found {len(runs)} total runs in GCS")
         return runs
 
     def read_summary(self, run_path: str) -> Optional[Dict[str, Any]]:
@@ -355,7 +371,10 @@ def main():
         runs = aggregator.list_model_runs(args.country, args.revision)
         runs_without_summary = [r for r in runs if not r["has_summary"]]
 
-        logger.info(f"Found {len(runs_without_summary)} runs without summaries")
+        logger.info(
+            f"Found {len(runs_without_summary)} runs without summaries "
+            f"(out of {len(runs)} total runs)"
+        )
 
         for run in runs_without_summary:
             logger.info(f"Generating summary for {run['path']}")
