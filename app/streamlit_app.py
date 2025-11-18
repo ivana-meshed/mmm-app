@@ -6,6 +6,7 @@ Uses custom navigation to hide the main page from the sidebar.
 """
 
 import streamlit as st
+from __version__ import __version__
 
 # Use custom navigation to control sidebar (Streamlit 1.31+)
 st.set_page_config(
@@ -76,6 +77,10 @@ pg = st.navigation(
     ],
     position="sidebar",
 )
+
+# Display version in sidebar
+with st.sidebar:
+    st.caption(f"Version {__version__}")
 
 # Run the selected page
 pg.run()

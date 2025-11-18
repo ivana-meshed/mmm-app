@@ -56,6 +56,10 @@ docs/*.png
 *credentials*.json
 secrets/
 
+# Native App build artifacts
+native_app/.snowflake/
+native_app/__pycache__/
+
 # Reports
 baseline_report.md
 performance_report.md

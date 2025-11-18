@@ -148,6 +148,34 @@ terraform apply -var-file="terraform.tfvars"
 
 For more details on persistent private key storage, see [docs/persistent_private_key.md](docs/persistent_private_key.md).
 
+## Releases
+
+This project uses [Semantic Versioning](https://semver.org/). Version information is tracked in:
+- `VERSION` file at repository root
+- Git tags in the format `vX.Y.Z` (e.g., `v1.0.0`)
+- Docker image tags matching release versions
+
+### Creating a Release
+
+1. Update the `VERSION` file with the new version number
+2. Update `CHANGELOG.md` with release notes
+3. Commit changes: `git commit -am "Prepare release vX.Y.Z"`
+4. Create and push a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
+5. GitHub Actions will automatically build images and create a release
+
+### Release Artifacts
+
+Each release includes:
+- Versioned Docker images in Artifact Registry
+- GitHub release with changelog
+- Source code snapshots
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
+
+## Snowflake Marketplace Deployment
+
+The MMM Trainer can be deployed to Snowflake Marketplace as a Native App or through Snowpark Container Services. See [docs/SNOWFLAKE_MARKETPLACE.md](docs/SNOWFLAKE_MARKETPLACE.md) for detailed deployment instructions.
+
 ### Verifying SA on the revision
 
 ```bash
