@@ -170,6 +170,19 @@ gcloud run services describe mmm-trainer \
 8. Click **Train**:
    - App pulls data → writes `/tmp/input_snapshot.csv` → invokes `Rscript r/run_all.R job_cfg=...`.
    - R uploads artifacts into `gs://<bucket>/robyn/<revision>/<country>/<timestamp>/`.
+   - A `model_summary.json` file is automatically generated with candidate models, Pareto models, and performance metrics.
+
+## Model Summaries
+
+Every training run automatically generates a summary file (`model_summary.json`) capturing:
+- All candidate models and their performance metrics
+- Pareto optimal models (if any were identified)
+- Best model information
+- Training configuration and metadata
+
+These summaries are stored in GCS alongside other run artifacts and can be aggregated by country for easy historical tracking.
+
+**Learn more:** See [docs/MODEL_SUMMARY.md](docs/MODEL_SUMMARY.md) for detailed documentation on summary file structure, fields, and usage.
 
 ## Google Authentication
 

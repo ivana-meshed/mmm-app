@@ -4,8 +4,12 @@ FROM ${BASE_REF}
 
 WORKDIR /app
 COPY r/run_all.R /app/run_all.R
+COPY r/extract_model_summary.R /app/extract_model_summary.R
+COPY r/generate_summary_from_rds.R /app/generate_summary_from_rds.R
+COPY r/backfill_summaries.R /app/backfill_summaries.R
+COPY scripts/aggregate_model_summaries.py /app/scripts/aggregate_model_summaries.py
 COPY docker/training_entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh && mkdir -p /tmp/training-workspace && chmod 777 /tmp/training-workspace
+RUN chmod +x /app/entrypoint.sh /app/backfill_summaries.R && mkdir -p /tmp/training-workspace && chmod 777 /tmp/training-workspace
 
 ENV APP_ROOT=/app TRAINING_MODE=1 TZ=Europe/Berlin R_GSCMD=/usr/bin/gs \
     RETICULATE_PYTHON=/usr/bin/python3 RETICULATE_AUTOCONFIGURE=0
