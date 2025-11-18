@@ -591,6 +591,17 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
         ):
             if not exec_id:
                 st.warning("Please enter an execution ID.")
+            elif not exec_prefix:
+                st.error(
+                    "⚠️ Configuration Error: Missing required environment variables."
+                )
+                st.info(
+                    "**Required environment variables:**\n"
+                    "- `PROJECT_ID`\n"
+                    "- `REGION`\n"
+                    "- `TRAINING_JOB_NAME`\n\n"
+                    "Please ensure these are set in the web service environment."
+                )
             else:
                 exec_name = exec_prefix + exec_id
                 try:
