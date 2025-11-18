@@ -80,6 +80,7 @@ __all__ = [
     "load_queue_payload",
     "queue_tick_once_headless",
     "handle_queue_tick_from_query_params",
+    "handle_queue_tick_if_requested",
     "get_job_manager",
     "get_data_processor",
     "_fmt_secs",
@@ -333,14 +334,22 @@ def prepare_and_launch_job(params: dict) -> dict:
 # ─────────────────────────────
 # Early stateless tick endpoint (?queue_tick=1)
 # ─────────────────────────────
-res = handle_queue_tick_from_query_params(
-    st.query_params,  # type: ignore
-    st.session_state.get("gcs_bucket", GCS_BUCKET),
-    launcher=prepare_and_launch_job,
-)
-if isinstance(res, dict) and res:
-    st.json(res)
-    st.stop()
+def handle_queue_tick_if_requested():
+    """
+    Handle queue tick endpoint if requested via query params.
+    Call this explicitly in your main app or pages that need it.
+    Returns True if tick was handled (and st.stop() was called), False otherwise.
+    """
+    res = handle_queue_tick_from_query_params(
+        st.query_params,  # type: ignore
+        st.session_state.get("gcs_bucket", GCS_BUCKET),
+        launcher=prepare_and_launch_job,
+    )
+    if isinstance(res, dict) and res:
+        st.json(res)
+        st.stop()
+        return True
+    return False
 
 
 # ─────────────────────────────

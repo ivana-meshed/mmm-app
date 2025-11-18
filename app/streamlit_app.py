@@ -16,6 +16,10 @@ st.set_page_config(
 
 from app_split_helpers import *
 
+# Handle queue tick endpoint early (before navigation setup)
+# This needs to be called explicitly, not at module import time
+handle_queue_tick_if_requested()
+
 # Define pages for custom navigation
 connect_page = st.Page(
     "pages/Connect_Data.py", title="Connect your Data", icon="🧩"
