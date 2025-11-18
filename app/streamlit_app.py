@@ -22,41 +22,41 @@ handle_queue_tick_if_requested()
 
 # Define pages for custom navigation
 connect_page = st.Page(
-    "pages/Connect_Data.py", title="Connect your Data", icon="🧩"
+    "nav/Connect_Data.py", title="Connect your Data", icon="🧩"
 )
-map_page = st.Page("pages/Map_Data.py", title="Map your Data", icon="🗺️")
+map_page = st.Page("nav/Map_Data.py", title="Map your Data", icon="🗺️")
 
 review_page = st.Page(
-    "pages/Review_Data.py",
+    "nav/Review_Data.py",
     title="Review Business- & Marketing Data",
     icon="📊",
 )
 
 prepare_training_page = st.Page(
-    "pages/Prepare_Training_Data_new.py",
+    "nav/Prepare_Training_Data_new.py",
     title="Prepare Training Data new",
     icon="⚙️",
 )
 
 prepare_training_page_old = st.Page(
-    "pages/Prepare_Training_Data_old.py",
+    "nav/Prepare_Training_Data_old.py",
     title="Prepare Training Data old",
     icon="⚙️",
 )
 
 prepare_training_page_oldv2 = st.Page(
-    "pages/Prepare_Training_Data_oldv2.py",
+    "nav/Prepare_Training_Data_oldv2.py",
     title="Prepare Training Data old v2",
     icon="⚙️",
 )
 experiment_page = st.Page(
-    "pages/Run_Experiment.py", title="Experiment", icon="🧪"
+    "nav/Run_Experiment.py", title="Experiment", icon="🧪"
 )
 results_page = st.Page(
-    "pages/View_Results.py", title="Results: Robyn MMM", icon="📈"
+    "nav/View_Results.py", title="Results: Robyn MMM", icon="📈"
 )
 best_results_page = st.Page(
-    "pages/View_Best_Results.py",
+    "nav/View_Best_Results.py",
     title="Best models per country: Robyn MMM",
     icon="🏆",
 )
