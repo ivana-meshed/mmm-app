@@ -1,53 +1,50 @@
 import os
 import re
+import warnings
+
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import r2_score, mean_absolute_error
-from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-import warnings
-from app_shared import (
-    # GCS & versions
-    list_data_versions,
-    list_meta_versions,
-    load_data_from_gcs,
-    download_parquet_from_gcs_cached,
-    download_json_from_gcs_cached,
-    data_blob,
-    data_latest_blob,
-    meta_blob,
-    meta_latest_blob,
-    # meta & utilities
+from app_shared import (  # GCS & versions; meta & utilities; sidebar + filters; colors (if exported; otherwise define locally)
+    BASE_PLATFORM_COLORS,
+    GREEN,
+    RED,
     build_meta_views,
     build_plat_map_df,
-    validate_against_metadata,
-    parse_date,
-    pretty,
+    build_platform_colors,
+    data_blob,
+    data_latest_blob,
+    download_json_from_gcs_cached,
+    download_parquet_from_gcs_cached,
+    filter_range,
     fmt_num,
     freq_to_rule,
-    period_label,
-    safe_eff,
     kpi_box,
     kpi_grid,
     kpi_grid_fixed,
-    BASE_PLATFORM_COLORS,
-    build_platform_colors,
-    # sidebar + filters
-    render_sidebar,
-    filter_range,
+    list_data_versions,
+    list_meta_versions,
+    load_data_from_gcs,
+    meta_blob,
+    meta_latest_blob,
+    parse_date,
+    period_label,
+    pretty,
     previous_window,
-    resample_numeric,
-    total_with_prev,
-    resolve_meta_blob_from_selection,
+    render_sidebar,
     require_login_and_domain,
-    # colors (if exported; otherwise define locally)
-    GREEN,
-    RED,
+    resample_numeric,
+    resolve_meta_blob_from_selection,
+    safe_eff,
+    total_with_prev,
+    validate_against_metadata,
 )
+from scipy import stats
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.preprocessing import PolynomialFeatures
 
 # Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
 
@@ -67,12 +64,7 @@ st.session_state.setdefault("picked_meta_ts", "Latest")
 # -----------------------------
 # TABS
 # -----------------------------
-tab_load, tab_quality = st.tabs(
-    [
-        "Select Data To Analyze",
-        "Data Quality"
-    ]
-)
+tab_load, tab_quality = st.tabs(["Select Data To Analyze", "Data Quality"])
 
 # =============================
 # TAB 0 — DATA & METADATA LOADING
@@ -190,6 +182,7 @@ if df.empty or not meta:
     INSTALL_COLS,
 ) = build_meta_views(meta, df)
 
+
 # ---- Nice label resolver (coalesce: metadata nice() -> pretty()) ----
 def nice_title(col: str) -> str:
     """
@@ -209,6 +202,7 @@ def nice_title(col: str) -> str:
         return pretty(raw)
     except Exception:
         return pretty(raw)
+
 
 # -----------------------------
 # Sidebar
@@ -281,10 +275,12 @@ df_prev = previous_window(df, df_r, DATE_COL, RANGE)
 def total_with_prev_local(collist):
     return total_with_prev(df_r, df_prev, collist)
 
+
 res = resample_numeric(
     df_r, DATE_COL, RULE, ensure_cols=[target, "_TOTAL_SPEND"]
 )
 res["PERIOD_LABEL"] = period_label(res["DATE_PERIOD"], RULE)
+
 
 # ===== Data Quality helpers (add above TAB 1) =====
 # ---------- Data Profile helpers ----------
@@ -295,9 +291,19 @@ def _num_stats(s: pd.Series) -> dict:
     na = n - nn
     if nn == 0:
         return dict(
-            non_null=nn, nulls=na, nulls_pct=np.nan, zeros=0, zeros_pct=np.nan,
-            distinct=0, min=np.nan, p10=np.nan, median=np.nan, mean=np.nan,
-            p90=np.nan, max=np.nan, std=np.nan
+            non_null=nn,
+            nulls=na,
+            nulls_pct=np.nan,
+            zeros=0,
+            zeros_pct=np.nan,
+            distinct=0,
+            min=np.nan,
+            p10=np.nan,
+            median=np.nan,
+            mean=np.nan,
+            p90=np.nan,
+            max=np.nan,
+            std=np.nan,
         )
     z = int((s.fillna(0) == 0).sum())
     s2 = s.dropna()
@@ -317,6 +323,7 @@ def _num_stats(s: pd.Series) -> dict:
         std=float(s2.std(ddof=1)) if s2.size > 1 else np.nan,
     )
 
+
 def _cat_stats(s: pd.Series) -> dict:
     n = len(s)
     nn = int(s.notna().sum())
@@ -330,11 +337,19 @@ def _cat_stats(s: pd.Series) -> dict:
         zeros=np.nan,
         zeros_pct=np.nan,
         distinct=int(s2.nunique(dropna=True)) if nn else 0,
-        min=np.nan, p10=np.nan, median=np.nan, mean=np.nan,
-        p90=np.nan, max=np.nan, std=np.nan,
+        min=np.nan,
+        p10=np.nan,
+        median=np.nan,
+        mean=np.nan,
+        p90=np.nan,
+        max=np.nan,
+        std=np.nan,
     )
 
-def _distribution_values(s: pd.Series, *, numeric_bins: int = 10, cat_topk: int = 5) -> list[float]:
+
+def _distribution_values(
+    s: pd.Series, *, numeric_bins: int = 10, cat_topk: int = 5
+) -> list[float]:
     """
     Return a normalized list of values suitable for Streamlit's BarChartColumn.
     - Numeric: histogram shares over `numeric_bins`
@@ -368,6 +383,7 @@ def _distribution_values(s: pd.Series, *, numeric_bins: int = 10, cat_topk: int 
     except Exception:
         return []
 
+
 def _var_platform(col: str, platforms: list[str]) -> str | None:
     """Best-effort platform detection for a var column by token match."""
     cu = str(col).upper()
@@ -376,7 +392,10 @@ def _var_platform(col: str, platforms: list[str]) -> str | None:
             return p
     return None
 
-def _active_spend_platforms(df_window: pd.DataFrame, plat_map_df: pd.DataFrame) -> set[str]:
+
+def _active_spend_platforms(
+    df_window: pd.DataFrame, plat_map_df: pd.DataFrame
+) -> set[str]:
     """Platforms with >0 spend in the selected timeframe."""
     if df_window.empty or plat_map_df.empty:
         return set()
@@ -394,6 +413,7 @@ def _active_spend_platforms(df_window: pd.DataFrame, plat_map_df: pd.DataFrame) 
     )
     return set(sums[sums.fillna(0) > 0].index.astype(str))
 
+
 def _cv(mean_val: float, std_val: float) -> float:
     """Coefficient of variation; returns np.inf if mean is 0 (so it won't be flagged low-variance)."""
     if pd.isna(mean_val) or pd.isna(std_val):
@@ -401,6 +421,7 @@ def _cv(mean_val: float, std_val: float) -> float:
     if abs(mean_val) < 1e-12:
         return np.inf
     return float(abs(std_val) / abs(mean_val))
+
 
 def _protect_columns_set(date_col: str, goal_cols: list[str]) -> set[str]:
     """Case-insensitive protected names (DATE, COUNTRY, all goals)."""
@@ -422,35 +443,73 @@ with tab_quality:
         st.stop()
 
     # ---- Build metadata categories strictly from metadata ----
-    paid_spend   = [c for c in (mapping.get("paid_media_spends", []) or []) if c in prof_df.columns]
-    paid_vars    = [c for c in (mapping.get("paid_media_vars",   []) or []) if c in prof_df.columns]
-    organic_vars = [c for c in (mapping.get("organic_vars",      []) or []) if c in prof_df.columns]
-    context_vars = [c for c in (mapping.get("context_vars",      []) or []) if c in prof_df.columns]
-    factor_vars  = [c for c in (mapping.get("factor_vars",       []) or []) if c in prof_df.columns]
+    paid_spend = [
+        c
+        for c in (mapping.get("paid_media_spends", []) or [])
+        if c in prof_df.columns
+    ]
+    paid_vars = [
+        c
+        for c in (mapping.get("paid_media_vars", []) or [])
+        if c in prof_df.columns
+    ]
+    organic_vars = [
+        c
+        for c in (mapping.get("organic_vars", []) or [])
+        if c in prof_df.columns
+    ]
+    context_vars = [
+        c
+        for c in (mapping.get("context_vars", []) or [])
+        if c in prof_df.columns
+    ]
+    factor_vars = [
+        c
+        for c in (mapping.get("factor_vars", []) or [])
+        if c in prof_df.columns
+    ]
 
-    known_set = set(paid_spend) | set(paid_vars) | set(organic_vars) | set(context_vars) | set(factor_vars)
+    known_set = (
+        set(paid_spend)
+        | set(paid_vars)
+        | set(organic_vars)
+        | set(context_vars)
+        | set(factor_vars)
+    )
     other_cols = [c for c in prof_df.columns if c not in known_set]
 
     categories = [
-        ("Paid Spend",  paid_spend),
-        ("Paid Vars",   paid_vars),
-        ("Organic",     organic_vars),
-        ("Context",     context_vars),
-        ("Factor",      factor_vars),
-        ("Other",       other_cols),
+        ("Paid Spend", paid_spend),
+        ("Paid Vars", paid_vars),
+        ("Organic", organic_vars),
+        ("Context", context_vars),
+        ("Factor", factor_vars),
+        ("Other", other_cols),
     ]
 
     # ---- Helpers (local to this tab) ----
     def _num_stats(s: pd.Series) -> dict:
         s = pd.to_numeric(s, errors="coerce")
-        n  = len(s)
+        n = len(s)
         nn = int(s.notna().sum())
         na = n - nn
         if nn == 0:
-            return dict(non_null=nn, nulls=na, nulls_pct=np.nan, zeros=0, zeros_pct=np.nan,
-                        distinct=0, min=np.nan, p10=np.nan, median=np.nan, mean=np.nan,
-                        p90=np.nan, max=np.nan, std=np.nan)
-        z  = int((s.fillna(0) == 0).sum())
+            return dict(
+                non_null=nn,
+                nulls=na,
+                nulls_pct=np.nan,
+                zeros=0,
+                zeros_pct=np.nan,
+                distinct=0,
+                min=np.nan,
+                p10=np.nan,
+                median=np.nan,
+                mean=np.nan,
+                p90=np.nan,
+                max=np.nan,
+                std=np.nan,
+            )
+        z = int((s.fillna(0) == 0).sum())
         s2 = s.dropna()
         return dict(
             non_null=nn,
@@ -469,32 +528,47 @@ with tab_quality:
         )
 
     def _cat_stats(s: pd.Series) -> dict:
-        n  = len(s)
+        n = len(s)
         nn = int(s.notna().sum())
         na = n - nn
         s2 = s.dropna()
         return dict(
-            non_null=nn, nulls=na, nulls_pct=na / n if n else np.nan,
-            zeros=np.nan, zeros_pct=np.nan, distinct=int(s2.nunique(dropna=True)) if nn else 0,
-            min=np.nan, p10=np.nan, median=np.nan, mean=np.nan, p90=np.nan, max=np.nan, std=np.nan,
+            non_null=nn,
+            nulls=na,
+            nulls_pct=na / n if n else np.nan,
+            zeros=np.nan,
+            zeros_pct=np.nan,
+            distinct=int(s2.nunique(dropna=True)) if nn else 0,
+            min=np.nan,
+            p10=np.nan,
+            median=np.nan,
+            mean=np.nan,
+            p90=np.nan,
+            max=np.nan,
+            std=np.nan,
         )
 
-    def _distribution_values(s: pd.Series, *, numeric_bins: int = 10, cat_topk: int = 5) -> list[float]:
+    def _distribution_values(
+        s: pd.Series, *, numeric_bins: int = 10, cat_topk: int = 5
+    ) -> list[float]:
         try:
             if pd.api.types.is_numeric_dtype(s):
                 q = pd.to_numeric(s, errors="coerce").dropna()
-                if q.empty: return []
+                if q.empty:
+                    return []
                 hist, _ = np.histogram(q, bins=numeric_bins)
                 total = hist.sum()
                 return (hist / total).tolist() if total else []
             if pd.api.types.is_datetime64_any_dtype(s):
                 q = pd.to_datetime(s, errors="coerce").dropna()
-                if q.empty: return []
+                if q.empty:
+                    return []
                 vc = q.dt.to_period("M").value_counts().sort_index()
                 total = vc.sum()
                 return (vc / total).tolist() if total else []
             q = s.dropna().astype("object")
-            if q.empty: return []
+            if q.empty:
+                return []
             vc = q.value_counts().head(cat_topk)
             total = vc.sum()
             return (vc / total).tolist() if total else []
@@ -508,7 +582,9 @@ with tab_quality:
                 return p
         return None
 
-    def _active_spend_platforms(df_window: pd.DataFrame, plat_map_df: pd.DataFrame) -> set[str]:
+    def _active_spend_platforms(
+        df_window: pd.DataFrame, plat_map_df: pd.DataFrame
+    ) -> set[str]:
         if df_window.empty or plat_map_df.empty:
             return set()
         vm = plat_map_df.copy()
@@ -526,8 +602,10 @@ with tab_quality:
         return set(sums[sums.fillna(0) > 0].index.astype(str))
 
     def _cv(mean_val: float, std_val: float) -> float:
-        if pd.isna(mean_val) or pd.isna(std_val): return np.nan
-        if abs(mean_val) < 1e-12: return np.inf
+        if pd.isna(mean_val) or pd.isna(std_val):
+            return np.nan
+        if abs(mean_val) < 1e-12:
+            return np.inf
         return float(abs(std_val) / abs(mean_val))
 
     def _protect_columns_set(date_col: str, goal_cols: list[str]) -> set[str]:
@@ -561,11 +639,19 @@ with tab_quality:
 
     # ---- Cleaning controls (checkboxes, not multiselect) ----
     with st.expander("Automated cleaning (optional)", expanded=False):
-        drop_all_null  = st.checkbox("Drop all-null columns", value=False)
-        drop_all_zero  = st.checkbox("Drop all-zero (numeric) columns", value=False)
-        drop_constant  = st.checkbox("Drop constant (distinct == 1)", value=False)
-        drop_low_var   = st.checkbox("Drop low variance (CV < threshold)", value=False)
-        cv_thr = st.slider("Low-variance threshold (CV %)", 0.1, 100.0, 3.0, 0.1)
+        drop_all_null = st.checkbox("Drop all-null columns", value=False)
+        drop_all_zero = st.checkbox(
+            "Drop all-zero (numeric) columns", value=False
+        )
+        drop_constant = st.checkbox(
+            "Drop constant (distinct == 1)", value=False
+        )
+        drop_low_var = st.checkbox(
+            "Drop low variance (CV < threshold)", value=False
+        )
+        cv_thr = st.slider(
+            "Low-variance threshold (CV %)", 0.1, 100.0, 3.0, 0.1
+        )
         c1, c2 = st.columns([1, 1])
         apply_clean = c1.button("Apply cleaning")
         reset_clean = c2.button("Reset cleaning")
@@ -582,7 +668,9 @@ with tab_quality:
         st.experimental_rerun()
 
     # ---- Apply cleaning when requested ----
-    if apply_clean and (drop_all_null or drop_all_zero or drop_constant or drop_low_var):
+    if apply_clean and (
+        drop_all_null or drop_all_zero or drop_constant or drop_low_var
+    ):
         to_drop = set()
         by_col = prof_all.set_index("Column")
 
@@ -602,8 +690,11 @@ with tab_quality:
 
         if drop_low_var:
             means = by_col["mean"]
-            stds  = by_col["std"]
-            cv_series = pd.Series([_cv(means.get(i), stds.get(i)) for i in by_col.index], index=by_col.index)
+            stds = by_col["std"]
+            cv_series = pd.Series(
+                [_cv(means.get(i), stds.get(i)) for i in by_col.index],
+                index=by_col.index,
+            )
             # compare in percent
             mask_low_cv = (cv_series * 100.0) < cv_thr
             to_drop |= set(cv_series[mask_low_cv.fillna(False)].index)
@@ -625,7 +716,9 @@ with tab_quality:
                 by_p = by_col.loc[[v for v in vars_for_p if v in by_col.index]]
                 keep_one = by_p["std"].astype(float).idxmax()
                 to_drop.discard(keep_one)
-                warnings_list.append(f"{p}: kept '{keep_one}' to retain at least one var for active spend.")
+                warnings_list.append(
+                    f"{p}: kept '{keep_one}' to retain at least one var for active spend."
+                )
 
         st.session_state["dq_dropped_cols"] |= set(to_drop)
         st.session_state["dq_last_dropped"] = sorted(to_drop)
@@ -662,22 +755,45 @@ with tab_quality:
         subset = prof_all[prof_all["Column"].isin(cols)].copy()
         st.markdown(f"### {title} ({len(subset)})")
         if title == "Other" and len(subset):
-            st.caption("Unmapped columns (in data but not in metadata): " + ", ".join(sorted(subset["Column"].astype(str).tolist())))
+            st.caption(
+                "Unmapped columns (in data but not in metadata): "
+                + ", ".join(sorted(subset["Column"].astype(str).tolist()))
+            )
         if subset.empty:
             st.info("No columns in this category.")
             return
 
         # Build display-only columns for Min/Max as strings (avoid dtype mismatch)
         is_dt = subset["Type"].eq("datetime64")
-        subset["MinDisp"] = np.where(is_dt, subset["min"].map(_fmt_dt_from_seconds), subset["min"].map(_fmt_num))
-        subset["MaxDisp"] = np.where(is_dt, subset["max"].map(_fmt_dt_from_seconds), subset["max"].map(_fmt_num))
+        subset["MinDisp"] = np.where(
+            is_dt,
+            subset["min"].map(_fmt_dt_from_seconds),
+            subset["min"].map(_fmt_num),
+        )
+        subset["MaxDisp"] = np.where(
+            is_dt,
+            subset["max"].map(_fmt_dt_from_seconds),
+            subset["max"].map(_fmt_num),
+        )
 
         show_cols = [
-            "Use", "Column", "Type", "Dist",
-            "non_null", "nulls", "nulls_pct",
-            "zeros", "zeros_pct",
+            "Use",
+            "Column",
+            "Type",
+            "Dist",
+            "non_null",
+            "nulls",
+            "nulls_pct",
+            "zeros",
+            "zeros_pct",
             "distinct",
-            "MinDisp", "p10", "median", "mean", "p90", "MaxDisp", "std",
+            "MinDisp",
+            "p10",
+            "median",
+            "mean",
+            "p90",
+            "MaxDisp",
+            "std",
         ]
         show_cols = [c for c in show_cols if c in subset.columns]
 
@@ -691,21 +807,32 @@ with tab_quality:
                 "Dist": st.column_config.BarChartColumn(
                     "Distribution",
                     help="Numeric: histogram · Categorical: top-k share · Datetime: monthly buckets",
-                    y_min=0.0, y_max=1.0,
+                    y_min=0.0,
+                    y_max=1.0,
                 ),
-                "non_null":  st.column_config.NumberColumn("Non-Null", format="%,.0f"),
-                "nulls":     st.column_config.NumberColumn("Nulls", format="%,.0f"),
-                "nulls_pct": st.column_config.NumberColumn("Nulls %", format="%.1f%%"),
-                "zeros":     st.column_config.NumberColumn("Zeros", format="%,.0f"),
-                "zeros_pct": st.column_config.NumberColumn("Zeros %", format="%.1f%%"),
-                "distinct":  st.column_config.NumberColumn("Distinct", format="%,.0f"),
-                "MinDisp":   st.column_config.TextColumn("Min"),
-                "p10":       st.column_config.NumberColumn("P10", format="%,.2f"),
-                "median":    st.column_config.NumberColumn("Median", format="%,.2f"),
-                "mean":      st.column_config.NumberColumn("Mean",   format="%,.2f"),
-                "p90":       st.column_config.NumberColumn("P90", format="%,.2f"),
-                "MaxDisp":   st.column_config.TextColumn("Max"),
-                "std":       st.column_config.NumberColumn("Std", format="%,.2f"),
+                "non_null": st.column_config.NumberColumn(
+                    "Non-Null", format="%,.0f"
+                ),
+                "nulls": st.column_config.NumberColumn("Nulls", format="%,.0f"),
+                "nulls_pct": st.column_config.NumberColumn(
+                    "Nulls %", format="%.1f%%"
+                ),
+                "zeros": st.column_config.NumberColumn("Zeros", format="%,.0f"),
+                "zeros_pct": st.column_config.NumberColumn(
+                    "Zeros %", format="%.1f%%"
+                ),
+                "distinct": st.column_config.NumberColumn(
+                    "Distinct", format="%,.0f"
+                ),
+                "MinDisp": st.column_config.TextColumn("Min"),
+                "p10": st.column_config.NumberColumn("P10", format="%,.2f"),
+                "median": st.column_config.NumberColumn(
+                    "Median", format="%,.2f"
+                ),
+                "mean": st.column_config.NumberColumn("Mean", format="%,.2f"),
+                "p90": st.column_config.NumberColumn("P90", format="%,.2f"),
+                "MaxDisp": st.column_config.TextColumn("Max"),
+                "std": st.column_config.NumberColumn("Std", format="%,.2f"),
             },
             key=f"dq_editor_{key_suffix}",
         )
@@ -714,10 +841,14 @@ with tab_quality:
 
     # Render all categories
     for title, cols in categories:
-        _render_cat_table(title, cols, key_suffix=title.replace(" ", "_").lower())
+        _render_cat_table(
+            title, cols, key_suffix=title.replace(" ", "_").lower()
+        )
 
     # ---- Aggregate final selection across all tables ----
-    final_use = {row["Column"]: bool(row["Use"]) for _, row in prof_all.iterrows()}
+    final_use = {
+        row["Column"]: bool(row["Use"]) for _, row in prof_all.iterrows()
+    }
     final_use.update(use_overrides)
 
     selected_cols = [c for c, u in final_use.items() if u]
@@ -728,7 +859,11 @@ with tab_quality:
     cL, cR = st.columns([1.2, 1])
     with cL:
         sel_prof = prof_all[prof_all["Column"].isin(selected_cols)].copy()
-        csv = sel_prof.drop(columns=["Dist"], errors="ignore").to_csv(index=False).encode("utf-8")
+        csv = (
+            sel_prof.drop(columns=["Dist"], errors="ignore")
+            .to_csv(index=False)
+            .encode("utf-8")
+        )
         st.download_button(
             "Export profile (CSV — selected)",
             data=csv,
@@ -736,7 +871,11 @@ with tab_quality:
             mime="text/csv",
         )
     with cR:
-        cols_csv = pd.DataFrame({"column": selected_cols}).to_csv(index=False).encode("utf-8")
+        cols_csv = (
+            pd.DataFrame({"column": selected_cols})
+            .to_csv(index=False)
+            .encode("utf-8")
+        )
         st.download_button(
             "Export selected column names (CSV)",
             data=cols_csv,

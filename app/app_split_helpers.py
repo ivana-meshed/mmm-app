@@ -747,8 +747,12 @@ def _make_normalizer(defaults: dict):
         # Otherwise, use revision field directly
         revision_tag_val = _g("revision_tag", "")
         revision_number_val = _g("revision_number", "")
-        
-        if revision_tag_val and str(revision_tag_val).strip() and revision_number_val:
+
+        if (
+            revision_tag_val
+            and str(revision_tag_val).strip()
+            and revision_number_val
+        ):
             # New format: construct revision from tag and number
             try:
                 revision_val = f"{str(revision_tag_val).strip()}_{int(float(revision_number_val))}"
@@ -758,7 +762,7 @@ def _make_normalizer(defaults: dict):
         else:
             # Old format: use revision field directly
             revision_val = str(_g("revision", defaults["revision"]))
-        
+
         result = {
             "country": str(_g("country", defaults["country"])),
             "revision": revision_val,

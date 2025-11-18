@@ -2,13 +2,15 @@
 import os
 import re
 import warnings
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
 # Import shared utilities: GCS & versions; meta & utilities; sidebar + filters; colors
-from app_shared import (
+from app_shared import (  # colors (if exported; otherwise define locally)
     BASE_PLATFORM_COLORS,
     GREEN,
     RED,
@@ -35,12 +37,9 @@ from app_shared import (
     pretty,
     previous_window,
     render_sidebar,
+    require_login_and_domain,
     resample_numeric,
     resolve_meta_blob_from_selection,
-    require_login_and_domain,
-    # colors (if exported; otherwise define locally)
-    GREEN,
-    RED,
     safe_eff,
     total_with_prev,
     validate_against_metadata,
@@ -73,11 +72,7 @@ st.session_state.setdefault("picked_meta_ts", "Latest")
 # TABS
 # -----------------------------
 tab_load, tab_biz, tab_mkt = st.tabs(
-    [
-        "Select Data",
-        "Business Data",
-        "Marketing Data"
-]
+    ["Select Data", "Business Data", "Marketing Data"]
 )
 
 # =============================

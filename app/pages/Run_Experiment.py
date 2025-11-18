@@ -138,7 +138,7 @@ def _get_revision_tags(bucket: str) -> List[str]:
                 # Extract tag from TAG_NUMBER format
                 tag = parts[1].rsplit("_", 1)[0]
                 revision_tags.add(tag)
-        
+
         return sorted(list(revision_tags))
     except Exception:
         return []
@@ -161,7 +161,7 @@ def _get_next_revision_number(bucket: str, tag: str) -> int:
                     numbers.append(int(num_str))
                 except (ValueError, IndexError):
                     continue
-        
+
         # Return max + 1, or 1 if no existing numbers
         return max(numbers) + 1 if numbers else 1
     except Exception:
@@ -732,6 +732,24 @@ with tab_single:
         elif resample_freq != "none" and not column_agg_strategies:
             st.warning(
                 "⚠️ No column aggregations found in metadata. Default 'sum' will be used for all numeric columns."
+            )
+
+        # Annotations file upload (moved from Connect Data page)
+        ann_file = st.file_uploader(
+            "Optional: enriched_annotations.csv",
+            type=["csv"],
+            help="Upload an annotations file to enrich your model training",
+        )
+        # Store annotation file in session state if uploaded
+        if ann_file is not None:
+            st.session_state["annotations_file"] = ann_file
+            st.success(
+                f"Annotations file '{ann_file.name}' uploaded successfully."
+            )
+
+        if st.session_state.get("annotations_file") is not None:
+            st.info(
+                f"Current annotations file: {st.session_state['annotations_file'].name}"
             )
 
     # Variables (moved outside Data selection expander)
@@ -1418,13 +1436,13 @@ with tab_single:
         )
 
         gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
-        
+
         # Get existing revision tags
         existing_tags = _get_revision_tags(gcs_bucket)
-        
+
         # Check if there's a loaded configuration
         loaded_config = st.session_state.get("loaded_training_config", {})
-        
+
         # Parse loaded revision if it exists (might be old format "r100" or new format with tag/number)
         loaded_revision_tag = ""
         loaded_revision_number = None
@@ -1441,24 +1459,24 @@ with tab_single:
             else:
                 # Old format - treat entire string as tag
                 loaded_revision_tag = old_revision
-        
+
         # Also check for new format fields
         if loaded_config.get("revision_tag"):
             loaded_revision_tag = loaded_config["revision_tag"]
         if loaded_config.get("revision_number"):
             loaded_revision_number = loaded_config["revision_number"]
-        
+
         # Add option to create new tag
         tag_options = ["-- Create New Tag --"] + existing_tags
-        
+
         # Determine default selection
         default_tag_index = 0
         if loaded_revision_tag and loaded_revision_tag in existing_tags:
             default_tag_index = tag_options.index(loaded_revision_tag)
-        
+
         # Revision tag selection/creation
         col1, col2 = st.columns(2)
-        
+
         with col1:
             selected_tag_option = st.selectbox(
                 "Revision Tag",
@@ -1466,25 +1484,35 @@ with tab_single:
                 index=default_tag_index,
                 help="Select an existing revision tag or create a new one",
             )
-            
+
             # If "Create New Tag" is selected, show text input
             if selected_tag_option == "-- Create New Tag --":
                 revision_tag = st.text_input(
                     "Enter new revision tag",
-                    value=loaded_revision_tag if loaded_revision_tag not in existing_tags else "",
+                    value=(
+                        loaded_revision_tag
+                        if loaded_revision_tag not in existing_tags
+                        else ""
+                    ),
                     placeholder="e.g., your_name or department_name",
                     help="Insert your name or the department name into the tag field",
                 )
             else:
                 revision_tag = selected_tag_option
                 st.info(f"Using existing tag: **{revision_tag}**")
-        
+
         with col2:
             # Calculate next revision number for the selected tag
             if revision_tag and revision_tag != "-- Create New Tag --":
-                next_number = _get_next_revision_number(gcs_bucket, revision_tag)
-                default_number = loaded_revision_number if loaded_revision_number is not None else next_number
-                
+                next_number = _get_next_revision_number(
+                    gcs_bucket, revision_tag
+                )
+                default_number = (
+                    loaded_revision_number
+                    if loaded_revision_number is not None
+                    else next_number
+                )
+
                 revision_number = st.number_input(
                     "Revision Number",
                     value=default_number,
@@ -1492,9 +1520,11 @@ with tab_single:
                     step=1,
                     help=f"Next available number for '{revision_tag}' is {next_number}. You can override if needed.",
                 )
-                
+
                 if revision_number < next_number:
-                    st.warning(f"⚠️ Number {revision_number} may already exist for tag '{revision_tag}'. Next available: {next_number}")
+                    st.warning(
+                        f"⚠️ Number {revision_number} may already exist for tag '{revision_tag}'. Next available: {next_number}"
+                    )
             else:
                 revision_number = st.number_input(
                     "Revision Number",
@@ -1506,15 +1536,17 @@ with tab_single:
                 )
                 if not revision_tag or revision_tag == "-- Create New Tag --":
                     st.info("👆 Please enter a revision tag first")
-        
+
         # Show the combined revision identifier
         if revision_tag and revision_tag != "-- Create New Tag --":
             combined_revision = f"{revision_tag}_{revision_number}"
-            st.success(f"✅ Training outputs will be saved under: **robyn/{combined_revision}/{{COUNTRY}}/{{TIMESTAMP}}/**")
+            st.success(
+                f"✅ Training outputs will be saved under: **robyn/{combined_revision}/{{COUNTRY}}/{{TIMESTAMP}}/**"
+            )
         else:
             combined_revision = ""
             st.warning("⚠️ Please select or create a revision tag")
-        
+
         # For backward compatibility, create a combined "revision" field
         revision = combined_revision
 
@@ -1599,8 +1631,14 @@ with tab_single:
         csv_row = {
             "country": country,
             "revision": revision,
-            "revision_tag": revision_tag if revision_tag != "-- Create New Tag --" else "",
-            "revision_number": revision_number if revision_tag != "-- Create New Tag --" else "",
+            "revision_tag": (
+                revision_tag if revision_tag != "-- Create New Tag --" else ""
+            ),
+            "revision_number": (
+                revision_number
+                if revision_tag != "-- Create New Tag --"
+                else ""
+            ),
             "start_date": start_date_str,
             "end_date": end_date_str,
             "iterations": int(iterations),
@@ -1979,7 +2017,7 @@ with tab_single:
                     # No need to query and upload - data is already in GCS
                     st.info(f"Using data from: {data_gcs_path}")
 
-                    # Get annotation file from session state (set in Connect_Data page)
+                    # Get annotation file from session state (set in Robyn Configuration section above)
                     ann_file = st.session_state.get("annotations_file")
                     if ann_file is not None:
                         with timed_step("Upload annotations to GCS", timings):
