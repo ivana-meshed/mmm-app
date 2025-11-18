@@ -39,7 +39,10 @@ class TestMappingMetadata(unittest.TestCase):
                     "main": False,
                 },
             ],
-            "dep_variable_type": {"REVENUE": "revenue", "CONVERSIONS": "conversion"},
+            "dep_variable_type": {
+                "REVENUE": "revenue",
+                "CONVERSIONS": "conversion",
+            },
             "autotag_rules": {
                 "paid_media_spends": ["_cost"],
                 "paid_media_vars": ["_impressions"],
@@ -56,9 +59,7 @@ class TestMappingMetadata(unittest.TestCase):
                 "date": "date",
             },
             "agg_strategies": {"GA_COST": "sum", "GA_IMPRESSIONS": "sum"},
-            "paid_media_mapping": {
-                "GA_COST": ["GA_IMPRESSIONS", "GA_CLICKS"]
-            },
+            "paid_media_mapping": {"GA_COST": ["GA_IMPRESSIONS", "GA_CLICKS"]},
             "dep_var": "REVENUE",
         }
 
@@ -169,7 +170,9 @@ class TestMappingMetadata(unittest.TestCase):
         }
 
         self.assertEqual(
-            data_types.get("date"), "date", "Date field must have data_type 'date'"
+            data_types.get("date"),
+            "date",
+            "Date field must have data_type 'date'",
         )
 
     def test_custom_column_naming(self):
@@ -216,8 +219,16 @@ class TestMappingMetadata(unittest.TestCase):
 
         # Variables that should be included (at least one field is non-empty)
         valid_vars = [
-            {"var": "GA_COST", "category": "paid_media_spends", "channel": "ga"},
-            {"var": "ORGANIC_SESSIONS", "category": "organic_vars", "channel": ""},
+            {
+                "var": "GA_COST",
+                "category": "paid_media_spends",
+                "channel": "ga",
+            },
+            {
+                "var": "ORGANIC_SESSIONS",
+                "category": "organic_vars",
+                "channel": "",
+            },
             {"var": "IS_WEEKEND", "category": "", "channel": "context"},
         ]
 
@@ -229,7 +240,8 @@ class TestMappingMetadata(unittest.TestCase):
             ch = v.get("channel", "").strip()
             # At least one should be non-empty
             self.assertTrue(
-                cat or ch, f"Variable {v['var']} should have category or channel"
+                cat or ch,
+                f"Variable {v['var']} should have category or channel",
             )
 
         # Invalid should have both empty
@@ -286,7 +298,9 @@ class TestTrainingConfiguration(unittest.TestCase):
         # Valid revisions
         valid_revisions = ["r100", "r101", "baseline_v1"]
         for rev in valid_revisions:
-            self.assertTrue(rev and rev.strip(), f"Revision '{rev}' should be valid")
+            self.assertTrue(
+                rev and rev.strip(), f"Revision '{rev}' should be valid"
+            )
 
         # Invalid revisions
         invalid_revisions = ["", "   ", None]

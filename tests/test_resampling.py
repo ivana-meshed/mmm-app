@@ -27,7 +27,7 @@ class TestResamplingConfiguration(unittest.TestCase):
                 "IS_WEEKEND": "auto",
             },
         }
-        
+
         # Verify resample parameters exist
         self.assertIn("resample_freq", config)
         self.assertIn("column_agg_strategies", config)
@@ -44,7 +44,7 @@ class TestResamplingConfiguration(unittest.TestCase):
                 "TEMPERATURE": "mean",
             },
         }
-        
+
         # Verify resample parameters
         self.assertEqual(config["resample_freq"], "W")
         self.assertIn("column_agg_strategies", config)
@@ -60,7 +60,7 @@ class TestResamplingConfiguration(unittest.TestCase):
                 "IS_WEEKEND": "auto",
             },
         }
-        
+
         # Verify resample parameters
         self.assertEqual(config["resample_freq"], "M")
         self.assertEqual(len(config["column_agg_strategies"]), 4)
@@ -82,22 +82,28 @@ class TestColumnAggregationStrategies(unittest.TestCase):
             "MIN_PRICE": "min",
             "IS_WEEKEND": "auto",
         }
-        
+
         # Verify all aggregation types are valid
         valid_aggs = ["sum", "mean", "max", "min", "auto"]
         for col, agg in strategies.items():
-            self.assertIn(agg, valid_aggs, f"Invalid aggregation '{agg}' for column '{col}'")
-    
+            self.assertIn(
+                agg,
+                valid_aggs,
+                f"Invalid aggregation '{agg}' for column '{col}'",
+            )
+
     def test_column_agg_from_json_string(self):
         """Test parsing column aggregations from JSON string."""
-        json_str = '{"GA_COST": "sum", "TEMPERATURE": "mean", "IS_WEEKEND": "auto"}'
+        json_str = (
+            '{"GA_COST": "sum", "TEMPERATURE": "mean", "IS_WEEKEND": "auto"}'
+        )
         strategies = json.loads(json_str)
-        
+
         self.assertIsInstance(strategies, dict)
         self.assertEqual(strategies["GA_COST"], "sum")
         self.assertEqual(strategies["TEMPERATURE"], "mean")
         self.assertEqual(strategies["IS_WEEKEND"], "auto")
-    
+
     def test_metadata_agg_strategies_format(self):
         """Test that metadata agg_strategies format is correct."""
         metadata = {
@@ -115,19 +121,22 @@ class TestColumnAggregationStrategies(unittest.TestCase):
                 "IS_WEEKEND": "auto",
             },
         }
-        
+
         # Verify metadata structure
         self.assertIn("mapping", metadata)
         self.assertIn("agg_strategies", metadata)
-        
+
         # Verify all mapped variables have aggregation strategies
         all_vars = []
         for vars_list in metadata["mapping"].values():
             all_vars.extend(vars_list)
-        
+
         for var in all_vars:
-            self.assertIn(var, metadata["agg_strategies"], 
-                        f"Variable '{var}' missing from agg_strategies")
+            self.assertIn(
+                var,
+                metadata["agg_strategies"],
+                f"Variable '{var}' missing from agg_strategies",
+            )
 
 
 class TestResamplingAggregations(unittest.TestCase):
@@ -136,7 +145,7 @@ class TestResamplingAggregations(unittest.TestCase):
     def test_aggregation_options(self):
         """Test that all aggregation options are valid."""
         valid_aggs = ["sum", "mean", "max", "min", "auto"]
-        
+
         for agg in valid_aggs:
             # Should not raise any errors
             self.assertIn(agg, valid_aggs)
@@ -144,7 +153,7 @@ class TestResamplingAggregations(unittest.TestCase):
     def test_frequency_options(self):
         """Test that all frequency options are valid."""
         valid_freqs = ["none", "W", "M"]
-        
+
         for freq in valid_freqs:
             # Should not raise any errors
             self.assertIn(freq, valid_freqs)
@@ -190,15 +199,17 @@ class TestQueueEntryWithResampling(unittest.TestCase):
             "gcs_prefix": None,
             "message": "",
         }
-        
+
         # Verify resample fields are present
         self.assertIn("resample_freq", entry["params"])
         self.assertIn("column_agg_strategies", entry["params"])
-        
+
         # Verify values
         self.assertEqual(entry["params"]["resample_freq"], "W")
         self.assertIsInstance(entry["params"]["column_agg_strategies"], dict)
-        self.assertEqual(entry["params"]["column_agg_strategies"]["GA_COST"], "sum")
+        self.assertEqual(
+            entry["params"]["column_agg_strategies"]["GA_COST"], "sum"
+        )
 
 
 class TestBatchCSVWithResampling(unittest.TestCase):
@@ -231,17 +242,17 @@ class TestBatchCSVWithResampling(unittest.TestCase):
             "resample_freq": "none",
             "annotations_gcs_path": "",
         }
-        
+
         # Verify resample_freq is present
         self.assertIn("resample_freq", template_row)
-        
+
         # Verify resample_agg is NOT present (removed)
         self.assertNotIn("resample_agg", template_row)
 
 
 class TestEndToEndResampling(unittest.TestCase):
     """Test end-to-end resampling scenario."""
-    
+
     def test_training_config_with_column_agg(self):
         """Test that training config includes column aggregations."""
         config = {
@@ -263,18 +274,18 @@ class TestEndToEndResampling(unittest.TestCase):
             "paid_media_vars": "GA_IMPRESSIONS",
             "dep_var": "REVENUE",
         }
-        
+
         # Verify config structure
         self.assertEqual(config["resample_freq"], "W")
         self.assertIn("column_agg_strategies", config)
         self.assertIsInstance(config["column_agg_strategies"], dict)
-        
+
         # Verify mixed aggregations
         self.assertEqual(config["column_agg_strategies"]["GA_COST"], "sum")
         self.assertEqual(config["column_agg_strategies"]["TEMPERATURE"], "mean")
         self.assertEqual(config["column_agg_strategies"]["PEAK_DEMAND"], "max")
         self.assertEqual(config["column_agg_strategies"]["IS_WEEKEND"], "auto")
-    
+
     def test_column_agg_as_json_string(self):
         """Test that column_agg_strategies can be serialized as JSON string."""
         strategies = {
@@ -282,10 +293,10 @@ class TestEndToEndResampling(unittest.TestCase):
             "TEMPERATURE": "mean",
             "IS_WEEKEND": "auto",
         }
-        
+
         # Serialize to JSON
         json_str = json.dumps(strategies)
-        
+
         # Verify it can be deserialized
         deserialized = json.loads(json_str)
         self.assertEqual(deserialized, strategies)
