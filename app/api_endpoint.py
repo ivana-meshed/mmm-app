@@ -17,7 +17,6 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 import streamlit as st
-
 from utils.validation import validate_training_config
 
 logger = logging.getLogger(__name__)
@@ -92,7 +91,11 @@ def handle_train_api():
             # Extract and validate parameters
             country = request_data.get("country")
             if not country:
-                st.json(_create_error_response("Missing required parameter: country"))
+                st.json(
+                    _create_error_response(
+                        "Missing required parameter: country"
+                    )
+                )
                 st.stop()
 
             iterations = request_data.get("iterations", 2000)
@@ -129,7 +132,9 @@ def handle_train_api():
             # Validate configuration
             is_valid, error_msg = validate_training_config(job_config)
             if not is_valid:
-                st.json(_create_error_response("Invalid configuration", error_msg))
+                st.json(
+                    _create_error_response("Invalid configuration", error_msg)
+                )
                 st.stop()
 
             # Execute training (simplified for API)
@@ -196,7 +201,9 @@ def handle_status_api():
     try:
         job_id = st.query_params.get("job_id")
         if not job_id:
-            st.json(_create_error_response("Missing required parameter: job_id"))
+            st.json(
+                _create_error_response("Missing required parameter: job_id")
+            )
             st.stop()
 
         # TODO: Implement actual job status lookup from GCS/job history
@@ -235,7 +242,9 @@ def handle_metadata_api():
     try:
         country = st.query_params.get("country")
         if not country:
-            st.json(_create_error_response("Missing required parameter: country"))
+            st.json(
+                _create_error_response("Missing required parameter: country")
+            )
             st.stop()
 
         version = st.query_params.get("version", "latest")

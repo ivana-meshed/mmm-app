@@ -58,14 +58,17 @@ Centralized settings for:
 #### Utilities (`app/utils/`)
 
 Common operations:
-- `gcs_utils.py` - Google Cloud Storage operations
+- `gcs_utils.py` - Google Cloud Storage operations (with caching)
 - `snowflake_connector.py` - Snowflake connections and queries
+- `validation.py` - Data and configuration validation utilities
+- `cache.py` - Caching decorators with TTL support
 
 #### Core Modules
 
 - `app_shared.py` - Shared helper functions (job management, queue operations, GCS operations)
 - `data_processor.py` - Data optimization and Parquet conversion
 - `gcp_secrets.py` - Secret Manager integration
+- `api_endpoint.py` - REST-like API endpoints for programmatic access
 
 ## Data Flow
 
@@ -294,10 +297,13 @@ All configuration is centralized in `app/config/settings.py`:
 
 ## Future Improvements
 
-- [ ] Extract more common utilities to reduce code duplication
-- [ ] Add API endpoints for programmatic access
-- [ ] Implement caching for expensive operations
-- [ ] Add more comprehensive error handling
+See the GitHub issues for planned enhancements. Recent additions include:
+
+- [x] Extracted common utilities to reduce code duplication (validation, caching, GCS helpers)
+- [x] Added API endpoints for programmatic access (train, status, metadata)
+- [x] Implemented caching for expensive operations (GCS lists, metadata reads)
+- [x] Added comprehensive error handling with standardized responses
+- [x] Added data quality checks and validation utilities
 - [ ] Improve job queue concurrency control
-- [ ] Add data quality checks and validation
 - [ ] Implement result comparison tools
+- [ ] Add more comprehensive monitoring and alerting

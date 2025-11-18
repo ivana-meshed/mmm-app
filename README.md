@@ -215,6 +215,38 @@ For detailed instructions, see [docs/google_auth_domain_configuration.md](docs/g
   # os.environ["STREAMLIT_SERVER_ENABLEWEBSOCKETCOMPRESSION"] = "true"
   ```
 
+## API Access
+
+The application provides REST-like API endpoints for programmatic access:
+
+### Training API
+Submit a training job programmatically:
+```bash
+curl "https://your-app-url.run.app/?api=train&country=fr&iterations=2000&trials=5"
+```
+
+### Status API
+Check job status:
+```bash
+curl "https://your-app-url.run.app/?api=status&job_id=abc123"
+```
+
+### Metadata API
+Retrieve metadata for a country:
+```bash
+curl "https://your-app-url.run.app/?api=metadata&country=fr&version=latest"
+```
+
+All API responses follow a standardized format:
+```json
+{
+  "status": "success|error",
+  "timestamp": "2025-11-18T14:00:00",
+  "data": { ... },
+  "message": "Optional message"
+}
+```
+
 ## Troubleshooting
 
 - **Build fails at Robyn**: ensure `nloptr` and `patchwork>=1.3.1` are installed first; the Dockerfile handles this.
