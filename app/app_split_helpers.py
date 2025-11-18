@@ -80,6 +80,7 @@ __all__ = [
     "load_queue_payload",
     "queue_tick_once_headless",
     "handle_queue_tick_from_query_params",
+    "handle_queue_tick_if_requested",
     "get_job_manager",
     "get_data_processor",
     "_fmt_secs",
@@ -333,14 +334,22 @@ def prepare_and_launch_job(params: dict) -> dict:
 # ─────────────────────────────
 # Early stateless tick endpoint (?queue_tick=1)
 # ─────────────────────────────
-res = handle_queue_tick_from_query_params(
-    st.query_params,  # type: ignore
-    st.session_state.get("gcs_bucket", GCS_BUCKET),
-    launcher=prepare_and_launch_job,
-)
-if isinstance(res, dict) and res:
-    st.json(res)
-    st.stop()
+def handle_queue_tick_if_requested():
+    """
+    Handle queue tick endpoint if requested via query params.
+    Call this explicitly in your main app or pages that need it.
+    Returns True if tick was handled (and st.stop() was called), False otherwise.
+    """
+    res = handle_queue_tick_from_query_params(
+        st.query_params,  # type: ignore
+        st.session_state.get("gcs_bucket", GCS_BUCKET),
+        launcher=prepare_and_launch_job,
+    )
+    if isinstance(res, dict) and res:
+        st.json(res)
+        st.stop()
+        return True
+    return False
 
 
 # ─────────────────────────────
@@ -582,6 +591,17 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
         ):
             if not exec_id:
                 st.warning("Please enter an execution ID.")
+            elif not exec_prefix:
+                st.error(
+                    "⚠️ Configuration Error: Missing required environment variables."
+                )
+                st.info(
+                    "**Required environment variables:**\n"
+                    "- `PROJECT_ID`\n"
+                    "- `REGION`\n"
+                    "- `TRAINING_JOB_NAME`\n\n"
+                    "Please ensure these are set in the web service environment."
+                )
             else:
                 exec_name = exec_prefix + exec_id
                 try:
@@ -747,8 +767,12 @@ def _make_normalizer(defaults: dict):
         # Otherwise, use revision field directly
         revision_tag_val = _g("revision_tag", "")
         revision_number_val = _g("revision_number", "")
-        
-        if revision_tag_val and str(revision_tag_val).strip() and revision_number_val:
+
+        if (
+            revision_tag_val
+            and str(revision_tag_val).strip()
+            and revision_number_val
+        ):
             # New format: construct revision from tag and number
             try:
                 revision_val = f"{str(revision_tag_val).strip()}_{int(float(revision_number_val))}"
@@ -758,7 +782,7 @@ def _make_normalizer(defaults: dict):
         else:
             # Old format: use revision field directly
             revision_val = str(_g("revision", defaults["revision"]))
-        
+
         result = {
             "country": str(_g("country", defaults["country"])),
             "revision": revision_val,

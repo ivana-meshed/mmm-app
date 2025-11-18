@@ -216,11 +216,11 @@ class TestQueueFunctionality(unittest.TestCase):
             "query": "",
             "table": "",
         }
-        
+
         # Validation should pass (has data_gcs_path)
         has_data_source = bool(
-            params_with_gcs.get("query") 
-            or params_with_gcs.get("table") 
+            params_with_gcs.get("query")
+            or params_with_gcs.get("table")
             or params_with_gcs.get("data_gcs_path")
         )
         self.assertTrue(has_data_source)
@@ -234,10 +234,10 @@ class TestQueueFunctionality(unittest.TestCase):
             "table": "",
             "data_gcs_path": "",
         }
-        
+
         has_data_source = bool(
-            params_with_query.get("query") 
-            or params_with_query.get("table") 
+            params_with_query.get("query")
+            or params_with_query.get("table")
             or params_with_query.get("data_gcs_path")
         )
         self.assertTrue(has_data_source)
@@ -251,10 +251,10 @@ class TestQueueFunctionality(unittest.TestCase):
             "table": "",
             "data_gcs_path": "",
         }
-        
+
         has_data_source = bool(
-            params_no_source.get("query") 
-            or params_no_source.get("table") 
+            params_no_source.get("query")
+            or params_no_source.get("table")
             or params_no_source.get("data_gcs_path")
         )
         self.assertFalse(has_data_source)
@@ -291,19 +291,21 @@ class TestQueueFunctionality(unittest.TestCase):
             "gcs_prefix": None,
             "message": "",
         }
-        
+
         # Verify new fields are present
         self.assertIn("start_date", entry["params"])
         self.assertIn("end_date", entry["params"])
         self.assertIn("dep_var_type", entry["params"])
         self.assertIn("hyperparameter_preset", entry["params"])
         self.assertIn("data_gcs_path", entry["params"])
-        
+
         # Verify values
         self.assertEqual(entry["params"]["start_date"], "2024-01-01")
         self.assertEqual(entry["params"]["end_date"], "2024-12-31")
         self.assertEqual(entry["params"]["dep_var_type"], "revenue")
-        self.assertEqual(entry["params"]["hyperparameter_preset"], "Meshed recommend")
+        self.assertEqual(
+            entry["params"]["hyperparameter_preset"], "Meshed recommend"
+        )
         self.assertTrue(entry["params"]["data_gcs_path"].startswith("gs://"))
 
     def test_example_csv_format(self):
@@ -334,19 +336,28 @@ class TestQueueFunctionality(unittest.TestCase):
             "resample_agg": "sum",
             "annotations_gcs_path": "",
         }
-        
+
         # Verify all required fields
         required_fields = [
-            "country", "revision", "start_date", "end_date",
-            "iterations", "trials", "data_gcs_path", "dep_var", "dep_var_type"
+            "country",
+            "revision",
+            "start_date",
+            "end_date",
+            "iterations",
+            "trials",
+            "data_gcs_path",
+            "dep_var",
+            "dep_var_type",
         ]
         for field in required_fields:
-            self.assertIn(field, example_row, f"Missing required field: {field}")
-        
+            self.assertIn(
+                field, example_row, f"Missing required field: {field}"
+            )
+
         # Verify data source is present
         has_data_source = bool(
-            example_row.get("query") 
-            or example_row.get("table") 
+            example_row.get("query")
+            or example_row.get("table")
             or example_row.get("data_gcs_path")
         )
         self.assertTrue(has_data_source, "Example row must have a data source")

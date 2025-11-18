@@ -990,7 +990,7 @@ def rank_runs_for_country(
     Build a summary table for all (rev, country, stamp) runs, compute a score:
       score = weighted_r2 - alpha*norm_weighted_nrmse - beta*norm_weighted_drssd
     Return (best_key, dataframe_sorted_desc_by_score).
-    
+
     Cached for 10 minutes to avoid recomputing scores on every page load.
     Note: _runs is prefixed with underscore to prevent Streamlit from hashing it.
     """
@@ -1238,12 +1238,19 @@ if not auto_best:
 
     # Determine the index for the selectbox (preserve user selection or use default)
     # Use separate session state key that persists across navigation
-    if "view_best_results_revision_value" in st.session_state and st.session_state["view_best_results_revision_value"] in all_revs:
+    if (
+        "view_best_results_revision_value" in st.session_state
+        and st.session_state["view_best_results_revision_value"] in all_revs
+    ):
         # User has a valid saved selection - use it
-        default_rev_index = all_revs.index(st.session_state["view_best_results_revision_value"])
+        default_rev_index = all_revs.index(
+            st.session_state["view_best_results_revision_value"]
+        )
     else:
         # First time or invalid selection - use default
-        default_rev_index = all_revs.index(default_rev) if default_rev in all_revs else 0
+        default_rev_index = (
+            all_revs.index(default_rev) if default_rev in all_revs else 0
+        )
 
     rev = st.selectbox(
         "Revision",
@@ -1273,17 +1280,27 @@ if not auto_best:
     # Use separate session state key that persists across navigation
     if "view_best_results_countries_rev_value" in st.session_state:
         # User has saved selections - validate and preserve
-        current_countries = st.session_state["view_best_results_countries_rev_value"]
+        current_countries = st.session_state[
+            "view_best_results_countries_rev_value"
+        ]
         valid_countries = [c for c in current_countries if c in rev_countries]
         if valid_countries:
             # Has valid selections - use them
             default_countries = valid_countries
         else:
             # All selections are invalid - use default
-            default_countries = [default_country_in_rev] if default_country_in_rev in rev_countries else []
+            default_countries = (
+                [default_country_in_rev]
+                if default_country_in_rev in rev_countries
+                else []
+            )
     else:
         # First time - use default
-        default_countries = [default_country_in_rev] if default_country_in_rev in rev_countries else []
+        default_countries = (
+            [default_country_in_rev]
+            if default_country_in_rev in rev_countries
+            else []
+        )
 
     countries_sel = st.multiselect(
         "Countries",
@@ -1292,8 +1309,12 @@ if not auto_best:
     )
 
     # Store selection in persistent session state key (not widget key)
-    if countries_sel != st.session_state.get("view_best_results_countries_rev_value"):
-        st.session_state["view_best_results_countries_rev_value"] = countries_sel
+    if countries_sel != st.session_state.get(
+        "view_best_results_countries_rev_value"
+    ):
+        st.session_state["view_best_results_countries_rev_value"] = (
+            countries_sel
+        )
     if not countries_sel:
         st.info("Select at least one country.")
         st.stop()
@@ -1341,7 +1362,9 @@ else:
     # Use separate session state key that persists across navigation
     if "view_best_results_countries_all_value" in st.session_state:
         # User has saved selections - validate and preserve
-        current_countries = st.session_state["view_best_results_countries_all_value"]
+        current_countries = st.session_state[
+            "view_best_results_countries_all_value"
+        ]
         valid_countries = [c for c in current_countries if c in all_countries]
         if valid_countries:
             # Has valid selections - use them
@@ -1360,8 +1383,12 @@ else:
     )
 
     # Store selection in persistent session state key (not widget key)
-    if countries_sel != st.session_state.get("view_best_results_countries_all_value"):
-        st.session_state["view_best_results_countries_all_value"] = countries_sel
+    if countries_sel != st.session_state.get(
+        "view_best_results_countries_all_value"
+    ):
+        st.session_state["view_best_results_countries_all_value"] = (
+            countries_sel
+        )
 
     if not countries_sel:
         st.info("Select at least one country.")

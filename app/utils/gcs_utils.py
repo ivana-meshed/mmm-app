@@ -6,16 +6,22 @@ Provides common operations for:
 - Reading and writing JSON/CSV data
 - Managing blob paths and URIs
 - Listing and searching blobs
+- Caching for performance
 """
 
 import io
 import json
+import logging
 import re
 import tempfile
 from typing import List, Optional
 
 import pandas as pd
 from google.cloud import storage
+
+from .cache import cached
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_blob_path(path: str) -> str:
@@ -81,13 +87,25 @@ def upload_to_gcs(bucket_name: str, local_path: str, dest_blob: str) -> str:
 
     Returns:
         Full GCS URI (gs://bucket/path)
+
+    Raises:
+        FileNotFoundError: If local file doesn't exist
+        RuntimeError: If upload fails
     """
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    blob_path = normalize_blob_path(dest_blob)
-    blob = bucket.blob(blob_path)
-    blob.upload_from_filename(local_path)
-    return f"gs://{bucket_name}/{blob_path}"
+    try:
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob_path = normalize_blob_path(dest_blob)
+        blob = bucket.blob(blob_path)
+        blob.upload_from_filename(local_path)
+        logger.info(f"Uploaded {local_path} to gs://{bucket_name}/{blob_path}")
+        return f"gs://{bucket_name}/{blob_path}"
+    except FileNotFoundError:
+        logger.error(f"Local file not found: {local_path}")
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload to GCS: {e}")
+        raise RuntimeError(f"GCS upload failed: {e}")
 
 
 def download_from_gcs(
@@ -99,17 +117,40 @@ def download_from_gcs(
     Args:
         bucket_name: Name of the GCS bucket
         blob_path: Path to the blob in GCS
-        local_path: Local path where file will be saved
+        local_path: Destination path on local filesystem
+
+    Raises:
+        FileNotFoundError: If blob doesn't exist
+        RuntimeError: If download fails
     """
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(blob_path)
-    blob.download_to_filename(local_path)
+    try:
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob_path = normalize_blob_path(blob_path)
+        blob = bucket.blob(blob_path)
+
+        if not blob.exists():
+            raise FileNotFoundError(
+                f"Blob not found: gs://{bucket_name}/{blob_path}"
+            )
+
+        blob.download_to_filename(local_path)
+        logger.info(
+            f"Downloaded gs://{bucket_name}/{blob_path} to {local_path}"
+        )
+    except FileNotFoundError:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to download from GCS: {e}")
+        raise RuntimeError(f"GCS download failed: {e}")
 
 
+@cached(ttl_seconds=300)  # Cache for 5 minutes
 def read_json_from_gcs(bucket_name: str, blob_path: str) -> dict:
     """
     Read and parse a JSON file from GCS.
+
+    Results are cached for 5 minutes to improve performance.
 
     Args:
         bucket_name: Name of the GCS bucket
@@ -120,12 +161,23 @@ def read_json_from_gcs(bucket_name: str, blob_path: str) -> dict:
 
     Raises:
         FileNotFoundError: If blob doesn't exist
+        RuntimeError: If read fails
     """
-    client = storage.Client()
-    blob = client.bucket(bucket_name).blob(blob_path)
-    if not blob.exists():
-        raise FileNotFoundError(f"gs://{bucket_name}/{blob_path} not found")
-    return json.loads(blob.download_as_bytes())
+    try:
+        client = storage.Client()
+        blob = client.bucket(bucket_name).blob(blob_path)
+        if not blob.exists():
+            raise FileNotFoundError(
+                f"Blob not found: gs://{bucket_name}/{blob_path}"
+            )
+        data = json.loads(blob.download_as_bytes())
+        logger.debug(f"Read JSON from gs://{bucket_name}/{blob_path}")
+        return data
+    except FileNotFoundError:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to read JSON from GCS: {e}")
+        raise RuntimeError(f"GCS JSON read failed: {e}")
 
 
 def write_json_to_gcs(
@@ -222,6 +274,7 @@ def read_parquet_from_gcs(bucket_name: str, blob_path: str) -> pd.DataFrame:
         return pd.read_parquet(tmp.name)
 
 
+@cached(ttl_seconds=600)  # Cache for 10 minutes
 def list_blobs(
     bucket_name: str,
     prefix: Optional[str] = None,
@@ -230,6 +283,8 @@ def list_blobs(
     """
     List blobs in a GCS bucket with optional prefix filtering.
 
+    Results are cached for 10 minutes to improve performance.
+
     Args:
         bucket_name: Name of the GCS bucket
         prefix: Optional prefix to filter blobs
@@ -237,15 +292,31 @@ def list_blobs(
 
     Returns:
         List of blob names
+
+    Raises:
+        RuntimeError: If listing fails
     """
-    client = storage.Client()
-    blobs = client.list_blobs(bucket_name, prefix=prefix, delimiter=delimiter)
-    return [blob.name for blob in blobs]
+    try:
+        client = storage.Client()
+        blobs = client.list_blobs(
+            bucket_name, prefix=prefix, delimiter=delimiter
+        )
+        result = [blob.name for blob in blobs]
+        logger.debug(
+            f"Listed {len(result)} blobs from gs://{bucket_name}/{prefix or ''}"
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Failed to list blobs: {e}")
+        raise RuntimeError(f"GCS list failed: {e}")
 
 
+@cached(ttl_seconds=300)  # Cache for 5 minutes
 def blob_exists(bucket_name: str, blob_path: str) -> bool:
     """
     Check if a blob exists in GCS.
+
+    Results are cached for 5 minutes to improve performance.
 
     Args:
         bucket_name: Name of the GCS bucket
@@ -254,6 +325,13 @@ def blob_exists(bucket_name: str, blob_path: str) -> bool:
     Returns:
         True if blob exists, False otherwise
     """
-    client = storage.Client()
-    blob = client.bucket(bucket_name).blob(blob_path)
-    return blob.exists()
+    try:
+        client = storage.Client()
+        blob = client.bucket(bucket_name).blob(blob_path)
+        exists = blob.exists()
+        logger.debug(f"Blob gs://{bucket_name}/{blob_path} exists: {exists}")
+        return exists
+    except Exception as e:
+        logger.error(f"Failed to check blob existence: {e}")
+        # Return False rather than raising on existence checks
+        return False

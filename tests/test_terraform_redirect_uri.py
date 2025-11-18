@@ -16,11 +16,11 @@ class TestTerraformRedirectURI(unittest.TestCase):
         service_name = "mmm-app"
         expected_url = f"https://{service_name}-web-wuepn6nq5a-ew.a.run.app"
         expected_redirect_uri = f"{expected_url}/oauth2callback"
-        
+
         # The actual URL pattern for prod
         self.assertEqual(
             expected_redirect_uri,
-            "https://mmm-app-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
+            "https://mmm-app-web-wuepn6nq5a-ew.a.run.app/oauth2callback",
         )
 
     def test_dev_redirect_uri(self):
@@ -28,21 +28,30 @@ class TestTerraformRedirectURI(unittest.TestCase):
         service_name = "mmm-app-dev"
         expected_url = f"https://{service_name}-web-wuepn6nq5a-ew.a.run.app"
         expected_redirect_uri = f"{expected_url}/oauth2callback"
-        
+
         # The actual URL pattern for dev
         self.assertEqual(
             expected_redirect_uri,
-            "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
+            "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app/oauth2callback",
         )
 
     def test_redirect_uri_pattern(self):
         """Test that redirect URI follows the correct pattern."""
         test_cases = [
-            ("mmm-app", "https://mmm-app-web-wuepn6nq5a-ew.a.run.app/oauth2callback"),
-            ("mmm-app-dev", "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app/oauth2callback"),
-            ("test-service", "https://test-service-web-wuepn6nq5a-ew.a.run.app/oauth2callback"),
+            (
+                "mmm-app",
+                "https://mmm-app-web-wuepn6nq5a-ew.a.run.app/oauth2callback",
+            ),
+            (
+                "mmm-app-dev",
+                "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app/oauth2callback",
+            ),
+            (
+                "test-service",
+                "https://test-service-web-wuepn6nq5a-ew.a.run.app/oauth2callback",
+            ),
         ]
-        
+
         for service_name, expected_uri in test_cases:
             with self.subTest(service_name=service_name):
                 computed_uri = f"https://{service_name}-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
@@ -51,22 +60,28 @@ class TestTerraformRedirectURI(unittest.TestCase):
     def test_redirect_uri_has_oauth2callback(self):
         """Test that redirect URI always ends with /oauth2callback."""
         service_name = "mmm-app"
-        redirect_uri = f"https://{service_name}-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
-        
+        redirect_uri = (
+            f"https://{service_name}-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
+        )
+
         self.assertTrue(redirect_uri.endswith("/oauth2callback"))
 
     def test_redirect_uri_has_https(self):
         """Test that redirect URI uses HTTPS protocol."""
         service_name = "mmm-app"
-        redirect_uri = f"https://{service_name}-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
-        
+        redirect_uri = (
+            f"https://{service_name}-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
+        )
+
         self.assertTrue(redirect_uri.startswith("https://"))
 
     def test_redirect_uri_contains_service_name(self):
         """Test that redirect URI contains the service name."""
         service_name = "mmm-app"
-        redirect_uri = f"https://{service_name}-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
-        
+        redirect_uri = (
+            f"https://{service_name}-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
+        )
+
         self.assertIn(service_name, redirect_uri)
 
 

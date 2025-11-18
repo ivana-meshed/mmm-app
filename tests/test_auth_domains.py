@@ -16,6 +16,7 @@ class TestAllowedDomains(unittest.TestCase):
     def _reload_settings(self):
         """Helper method to reload settings module."""
         from app.config import settings
+
         importlib.reload(settings)
         return settings
 
@@ -23,15 +24,18 @@ class TestAllowedDomains(unittest.TestCase):
         """Test parsing a single domain from environment variable."""
         with patch.dict(os.environ, {"ALLOWED_DOMAINS": "mesheddata.com"}):
             settings = self._reload_settings()
-            
+
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
             self.assertEqual(len(settings.ALLOWED_DOMAINS), 1)
 
     def test_multiple_domains_parsing(self):
         """Test parsing multiple domains from environment variable."""
-        with patch.dict(os.environ, {"ALLOWED_DOMAINS": "mesheddata.com,example.com,test.org"}):
+        with patch.dict(
+            os.environ,
+            {"ALLOWED_DOMAINS": "mesheddata.com,example.com,test.org"},
+        ):
             settings = self._reload_settings()
-            
+
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
             self.assertIn("example.com", settings.ALLOWED_DOMAINS)
             self.assertIn("test.org", settings.ALLOWED_DOMAINS)
@@ -39,9 +43,12 @@ class TestAllowedDomains(unittest.TestCase):
 
     def test_domains_with_spaces(self):
         """Test parsing domains with extra whitespace."""
-        with patch.dict(os.environ, {"ALLOWED_DOMAINS": " mesheddata.com , example.com , test.org "}):
+        with patch.dict(
+            os.environ,
+            {"ALLOWED_DOMAINS": " mesheddata.com , example.com , test.org "},
+        ):
             settings = self._reload_settings()
-            
+
             # Should be trimmed
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
             self.assertIn("example.com", settings.ALLOWED_DOMAINS)
@@ -51,13 +58,15 @@ class TestAllowedDomains(unittest.TestCase):
 
     def test_domains_normalized_to_lowercase(self):
         """Test that domains are normalized to lowercase."""
-        with patch.dict(os.environ, {"ALLOWED_DOMAINS": "MeshedData.COM,EXAMPLE.COM"}):
+        with patch.dict(
+            os.environ, {"ALLOWED_DOMAINS": "MeshedData.COM,EXAMPLE.COM"}
+        ):
             settings = self._reload_settings()
-            
+
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
             self.assertIn("example.com", settings.ALLOWED_DOMAINS)
             # Should not contain uppercase versions
-            
+
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
             self.assertIn("example.com", settings.ALLOWED_DOMAINS)
             # Should not contain uppercase versions
@@ -65,9 +74,12 @@ class TestAllowedDomains(unittest.TestCase):
 
     def test_empty_domains_filtered(self):
         """Test that empty domains are filtered out."""
-        with patch.dict(os.environ, {"ALLOWED_DOMAINS": "mesheddata.com,,example.com,  ,test.org"}):
+        with patch.dict(
+            os.environ,
+            {"ALLOWED_DOMAINS": "mesheddata.com,,example.com,  ,test.org"},
+        ):
             settings = self._reload_settings()
-            
+
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
             self.assertIn("example.com", settings.ALLOWED_DOMAINS)
             self.assertIn("test.org", settings.ALLOWED_DOMAINS)
@@ -75,9 +87,15 @@ class TestAllowedDomains(unittest.TestCase):
 
     def test_backward_compatibility_allowed_domain(self):
         """Test backward compatibility with ALLOWED_DOMAIN (singular) env var."""
-        with patch.dict(os.environ, {"ALLOWED_DOMAIN": "legacy.com", "ALLOWED_DOMAINS": "mesheddata.com"}):
+        with patch.dict(
+            os.environ,
+            {
+                "ALLOWED_DOMAIN": "legacy.com",
+                "ALLOWED_DOMAINS": "mesheddata.com",
+            },
+        ):
             settings = self._reload_settings()
-            
+
             # Both should be present
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
             self.assertIn("legacy.com", settings.ALLOWED_DOMAINS)
@@ -90,9 +108,9 @@ class TestAllowedDomains(unittest.TestCase):
                 del os.environ["ALLOWED_DOMAINS"]
             if "ALLOWED_DOMAIN" in os.environ:
                 del os.environ["ALLOWED_DOMAIN"]
-            
+
             settings = self._reload_settings()
-            
+
             # Should default to mesheddata.com
             self.assertIn("mesheddata.com", settings.ALLOWED_DOMAINS)
 
@@ -103,13 +121,13 @@ class TestEmailDomainValidation(unittest.TestCase):
     def test_valid_email_single_domain(self):
         """Test validation with a single allowed domain."""
         allowed_domains = ["mesheddata.com"]
-        
+
         # Valid email
         email = "user@mesheddata.com"
         email_domain = email.split("@")[-1] if "@" in email else ""
         is_valid = any(email_domain == domain for domain in allowed_domains)
         self.assertTrue(is_valid)
-        
+
         # Invalid email
         email = "user@example.com"
         email_domain = email.split("@")[-1] if "@" in email else ""
@@ -119,13 +137,17 @@ class TestEmailDomainValidation(unittest.TestCase):
     def test_valid_email_multiple_domains(self):
         """Test validation with multiple allowed domains."""
         allowed_domains = ["mesheddata.com", "example.com", "test.org"]
-        
+
         # Valid emails
-        for email in ["user@mesheddata.com", "user@example.com", "user@test.org"]:
+        for email in [
+            "user@mesheddata.com",
+            "user@example.com",
+            "user@test.org",
+        ]:
             email_domain = email.split("@")[-1] if "@" in email else ""
             is_valid = any(email_domain == domain for domain in allowed_domains)
             self.assertTrue(is_valid, f"{email} should be valid")
-        
+
         # Invalid email
         email = "user@blocked.com"
         email_domain = email.split("@")[-1] if "@" in email else ""
@@ -135,18 +157,24 @@ class TestEmailDomainValidation(unittest.TestCase):
     def test_case_insensitive_validation(self):
         """Test that email validation is case-insensitive."""
         allowed_domains = ["mesheddata.com"]
-        
+
         # These should all be valid after normalization
-        for email in ["user@MeshedData.com", "user@MESHEDDATA.COM", "user@mesheddata.COM"]:
+        for email in [
+            "user@MeshedData.com",
+            "user@MESHEDDATA.COM",
+            "user@mesheddata.COM",
+        ]:
             email_lower = email.lower()
-            email_domain = email_lower.split("@")[-1] if "@" in email_lower else ""
+            email_domain = (
+                email_lower.split("@")[-1] if "@" in email_lower else ""
+            )
             is_valid = any(email_domain == domain for domain in allowed_domains)
             self.assertTrue(is_valid, f"{email} should be valid")
 
     def test_email_without_at_symbol(self):
         """Test handling of malformed email without @ symbol."""
         allowed_domains = ["mesheddata.com"]
-        
+
         email = "notanemail"
         email_domain = email.split("@")[-1] if "@" in email else ""
         is_valid = any(email_domain == domain for domain in allowed_domains)
@@ -155,12 +183,14 @@ class TestEmailDomainValidation(unittest.TestCase):
     def test_subdomain_not_matched(self):
         """Test that subdomains are not automatically allowed."""
         allowed_domains = ["mesheddata.com"]
-        
+
         # subdomain.mesheddata.com should NOT be allowed
         email = "user@subdomain.mesheddata.com"
         email_domain = email.split("@")[-1] if "@" in email else ""
         is_valid = any(email_domain == domain for domain in allowed_domains)
-        self.assertFalse(is_valid, "Subdomains should not be automatically allowed")
+        self.assertFalse(
+            is_valid, "Subdomains should not be automatically allowed"
+        )
 
 
 if __name__ == "__main__":

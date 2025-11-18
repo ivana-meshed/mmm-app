@@ -294,21 +294,6 @@ with st.expander("📤 Outputs", expanded=False):
     )
     st.session_state["gcs_bucket"] = gcs_bucket
 
-    ann_file = st.file_uploader(
-        "Optional: enriched_annotations.csv",
-        type=["csv"],
-        help="Upload an annotations file to enrich your model training",
-    )
-    # Store annotation file in session state if uploaded
-    if ann_file is not None:
-        st.session_state["annotations_file"] = ann_file
-        st.success(f"Annotations file '{ann_file.name}' uploaded successfully.")
-
-    if st.session_state.get("annotations_file") is not None:
-        st.info(
-            f"Current annotations file: {st.session_state['annotations_file'].name}"
-        )
-
 # ============= Navigation =============
 
 # Once Snowflake is connected, allow navigation to mapping
@@ -318,8 +303,8 @@ try:
         if st.button("Next → Map Your Data"):
             import streamlit as stlib
 
-            stlib.switch_page("pages/Map_Data.py")
+            stlib.switch_page("nav/Map_Data.py")
     else:
         st.info("Fill in your Snowflake credentials above to enable Next.")
 except Exception:
-    st.page_link("pages/Map_Data.py", label="Next → Map Your Data", icon="➡️")
+    st.page_link("nav/Map_Data.py", label="Next → Map Your Data", icon="➡️")
