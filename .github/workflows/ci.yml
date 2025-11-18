@@ -1,11 +1,22 @@
-name: CI
+name: CI (GCP)
 
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: 'Deployment target'
+        required: true
+        type: choice
+        options:
+          - both
+          - gcp-only
+          - aws-only
+        default: 'both'
 
 concurrency:
-  group: terraform-prod
+  group: terraform-gcp-prod
   cancel-in-progress: false
 
 permissions:
@@ -13,7 +24,9 @@ permissions:
   contents: read
 
 jobs:
-  ci:
+  ci-gcp:
+    # Skip if manually triggered with aws-only
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.deploy_target != 'aws-only'
     runs-on: ubuntu-latest
     env:
       PROJECT_ID: datawarehouse-422511
