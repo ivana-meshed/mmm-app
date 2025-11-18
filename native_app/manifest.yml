@@ -1,0 +1,26 @@
+manifest_version: 1
+
+version:
+  name: "1.0.0"
+  label: "MMM Trainer v1.0.0"
+  comment: "Marketing Mix Modeling Trainer powered by R/Robyn"
+
+artifacts:
+  setup_script: setup.sql
+  readme: README.md
+  default_streamlit: streamlit_native_app.py
+  extension_code: true
+
+configuration:
+  log_level: INFO
+  trace_level: OFF
+
+references:
+  - snowflake_ml
+  - snowpark_container_services
+
+privileges:
+  - EXECUTE TASK
+  - EXECUTE MANAGED TASK
+  - CREATE COMPUTE POOL
+  - CREATE SERVICE
