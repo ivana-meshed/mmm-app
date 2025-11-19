@@ -1,5 +1,12 @@
 #!/bin/bash
 # Manual script to backfill model summaries for existing runs
+# 
+# NOTE: Backfill runs AUTOMATICALLY in CI/CD during each deployment.
+# This script is only needed for:
+#   - Manual testing or debugging
+#   - One-off backfill outside of deployments
+#   - Backfilling specific countries or revisions
+#
 # This can be run from Cloud Shell or any environment with gcloud access
 
 set -e
@@ -11,8 +18,12 @@ REGION="${REGION:-europe-west1}"
 TRAINING_JOB="${TRAINING_JOB:-mmm-app-training}"
 
 echo "=========================================="
-echo "Model Summary Backfill Script"
+echo "Model Summary Backfill Script (MANUAL)"
 echo "=========================================="
+echo ""
+echo "⚠️  NOTE: Backfill runs automatically in CI/CD!"
+echo "    This script is for manual use only."
+echo ""
 echo "Project: $PROJECT_ID"
 echo "Bucket: $BUCKET"
 echo "Region: $REGION"

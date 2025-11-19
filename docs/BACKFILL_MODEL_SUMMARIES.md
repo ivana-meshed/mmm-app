@@ -11,23 +11,24 @@ This guide explains how to generate `model_summary.json` files for existing Roby
 
 ## Automatic Backfilling (CI/CD)
 
-The backfill process runs automatically during each deployment:
+**The backfill process runs automatically during each deployment** - no manual action required!
 
 ### Production (main branch)
 - Triggered on: Push to `main` branch
 - Job: `mmm-app-training`
-- Timeout: 1 hour
+- Timeout: 6 hours (sufficient for large datasets)
 
 ### Development (feature branches)
 - Triggered on: Push to `feat-*`, `copilot/*`, `dev` branches  
 - Job: `mmm-app-dev-training`
-- Timeout: 1 hour
+- Timeout: 6 hours (sufficient for large datasets)
 
 ### How it works
 1. After deployment completes, CI/CD executes the training container as a one-time job
 2. Runs `backfill_summaries.R` which calls Python aggregation script
 3. Step 1: Generates missing summaries (scans all runs in GCS)
 4. Step 2: Aggregates by country into `model_summary/{country}/`
+5. **The deployment will wait for backfill to complete before finishing**
 
 ### Checking if backfill ran
 ```bash
@@ -44,9 +45,9 @@ gcloud logging read \
   --format json
 ```
 
-## Manual Backfilling
+## Manual Backfilling (Optional)
 
-If automatic backfilling didn't run or failed, you can trigger it manually.
+Manual backfilling is only needed in rare cases (e.g., debugging, testing, or if CI/CD failed).
 
 ### Option 1: Using the convenience script
 
