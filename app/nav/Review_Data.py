@@ -55,11 +55,9 @@ from sklearn.preprocessing import PolynomialFeatures
 require_login_and_domain()
 ensure_session_defaults()
 
-# Show loading spinner while page initializes
-with st.spinner("Loading page..."):
-    require_login_and_domain()
+require_login_and_domain()
 
-    st.title("Review Business- & Marketing Data")
+st.title("Review Business- & Marketing Data")
 
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 

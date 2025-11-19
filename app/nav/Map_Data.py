@@ -42,10 +42,8 @@ ALLOWED_CATEGORIES = [
 require_login_and_domain()
 ensure_session_defaults()
 
-# Show loading spinner while page initializes
-with st.spinner("Loading page..."):
-    dp = get_data_processor()
-    BUCKET = st.session_state.get("gcs_bucket", GCS_BUCKET)
+dp = get_data_processor()
+BUCKET = st.session_state.get("gcs_bucket", GCS_BUCKET)
 
 
 # Helper: GCS paths we’ll standardize on

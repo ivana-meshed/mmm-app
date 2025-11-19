@@ -35,9 +35,7 @@ from app_split_helpers import *  # bring in all helper functions/constants
 require_login_and_domain()
 ensure_session_defaults()
 
-# Show loading spinner while page initializes
-with st.spinner("Loading page..."):
-    st.title("Experiment")
+st.title("Experiment")
 
 # Check if we should show a message to switch to Queue tab (Requirement 8)
 if st.session_state.get("switch_to_queue_tab", False):
