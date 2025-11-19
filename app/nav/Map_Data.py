@@ -2054,3 +2054,5 @@ if can_go_next:
             st.page_link(
                 "nav/Run_Experiment.py", label="Next → Experiment", icon="➡️"
             )
+
+# Deployment trigger
