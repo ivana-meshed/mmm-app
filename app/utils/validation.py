@@ -40,9 +40,7 @@ def validate_dataframe_schema(
     return True, ""
 
 
-def validate_date_range(
-    start_date: str, end_date: str
-) -> Tuple[bool, str]:
+def validate_date_range(start_date: str, end_date: str) -> Tuple[bool, str]:
     """
     Validate date range format and logic.
 
