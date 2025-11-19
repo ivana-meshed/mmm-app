@@ -459,18 +459,15 @@ jobs:
         shell: bash
         run: |
           echo "Backfilling model summaries using training container..."
+          echo "This will generate model_summary.json for all runs missing it and aggregate by country."
           
           # Execute the backfill script as a one-time Cloud Run Job
           # This uses the training container which has R installed
+          # Increased timeout to 6 hours to handle large number of runs
           gcloud run jobs execute ${{ env.SERVICE_NAME }}-training \
             --region ${{ env.REGION }} \
-            --task-timeout 3600 \
+            --task-timeout 21600 \
             --args="Rscript,/app/backfill_summaries.R,--bucket,${{ env.BUCKET }},--project,${{ env.PROJECT_ID }}" \
-            --wait || {
-              echo "⚠️ Warning: Backfill job failed or timed out."
-              echo "This is non-fatal. You can manually trigger backfill later with:"
-              echo "gcloud run jobs execute ${{ env.SERVICE_NAME }}-training --region ${{ env.REGION }} --args='Rscript,/app/backfill_summaries.R,--bucket,${{ env.BUCKET }}'"
-              exit 0
-            }
+            --wait
           
-          echo "✅ Model summary backfill completed"
+          echo "✅ Model summary backfill completed successfully"

@@ -45,6 +45,20 @@ if (!file.exists(python_script)) {
     }
 }
 
+# Determine working directory for subprocess calls
+# The Python script needs to run from the repo root to find R scripts
+work_dir <- "/app"
+if (!dir.exists(work_dir)) {
+    work_dir <- getwd()
+    message("Using current working directory: ", work_dir)
+} else {
+    message("Using working directory: ", work_dir)
+}
+
+# Save current directory and change to work_dir
+old_wd <- getwd()
+setwd(work_dir)
+
 # STEP 1: Generate missing summaries
 message("\n=== Step 1: Generating missing summaries ===")
 
@@ -142,4 +156,8 @@ if (exit_code_aggregate != 0) {
 
 message("\n✅ Aggregation completed successfully")
 message("\n✅ All backfill operations completed successfully")
+
+# Restore original working directory
+setwd(old_wd)
+
 quit(status = 0)

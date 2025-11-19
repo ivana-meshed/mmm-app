@@ -54,12 +54,15 @@ class ModelSummaryAggregator:
 
         # List all files under robyn/ to find OutputCollect.RDS files
         # which indicate a model run exists
+        # Structure: robyn/{revision}/{country}/{timestamp}/
         prefix = "robyn/"
         if revision:
             prefix += f"{revision}/"
             logger.info(f"Filtering by revision: {revision}")
-        if country:
-            prefix += f"{country}/"
+        # Note: We cannot add country to prefix unless revision is specified
+        # because the structure is robyn/{revision}/{country}/{timestamp}
+        # If only country filter is provided, we scan all and filter results
+        if country and not revision:
             logger.info(f"Filtering by country: {country}")
 
         logger.info(f"Scanning GCS with prefix: {prefix}")
@@ -88,6 +91,11 @@ class ModelSummaryAggregator:
 
                     revision_found = parts[1]
                     country_found = parts[2]
+
+                    # Apply country filter if specified
+                    if country and country_found != country:
+                        continue
+
                     found_revisions.add(revision_found)
                     found_countries.add(country_found)
 
@@ -216,19 +224,19 @@ class ModelSummaryAggregator:
 
         summary = self.aggregate_by_country(country, revision)
 
-        logger.info(
-            f"Aggregated {summary.get('total_runs', 0)} runs, "
-            f"{summary.get('runs_with_summaries', 0)} with summaries"
-        )
+        # Skip if no summaries found
+        if summary.get("total_runs", 0) == 0:
+            logger.warning(
+                f"No summaries found for country={country}, skipping"
+            )
+            return None
+
+        logger.info(f"Aggregated {summary.get('total_runs', 0)} runs")
 
         # Save to GCS
-        # Path: robyn-summaries/{country}/summary.json
-        # or robyn-summaries/{country}/{revision}_summary.json if revision
-        # specified
-        if revision:
-            summary_path = f"robyn-summaries/{country}/{revision}_summary.json"
-        else:
-            summary_path = f"robyn-summaries/{country}/summary.json"
+        # Path: model_summary/{country}/summary.json
+        # This combines all revisions for the country
+        summary_path = f"model_summary/{country}/summary.json"
 
         blob = self.bucket.blob(summary_path)
         blob.upload_from_string(
@@ -332,6 +340,9 @@ class ModelSummaryAggregator:
                     text=True,
                     timeout=300,
                     check=True,
+                    cwd=str(
+                        Path(__file__).parent.parent
+                    ),  # Set working directory to repo root
                 )
                 logger.info(f"R script output: {result.stdout}")
                 if result.stderr:
@@ -388,6 +399,11 @@ def main():
         action="store_true",
         help="Aggregate summaries by country",
     )
+    parser.add_argument(
+        "--test-run",
+        type=str,
+        help="Test summary generation for a specific run path (e.g., robyn/r100/de/1104_082103)",
+    )
 
     args = parser.parse_args()
 
@@ -397,6 +413,82 @@ def main():
     )
 
     aggregator = ModelSummaryAggregator(args.bucket, args.project)
+
+    # Test mode: check if a specific run can be processed
+    if args.test_run:
+        logger.info("=" * 60)
+        logger.info(f"TEST MODE: Testing run {args.test_run}")
+        logger.info("=" * 60)
+
+        # Parse the run path
+        parts = args.test_run.rstrip("/").split("/")
+        if len(parts) >= 4 and parts[0] == "robyn":
+            logger.info(f"✓ Run path format is valid")
+            logger.info(f"  Revision: {parts[1]}")
+            logger.info(f"  Country: {parts[2]}")
+            logger.info(f"  Timestamp: {parts[3]}")
+
+            # Check if OutputCollect.RDS exists
+            output_path = f"{args.test_run}/OutputCollect.RDS"
+            output_blob = aggregator.bucket.blob(output_path)
+            if output_blob.exists():
+                logger.info(f"✓ OutputCollect.RDS found at {output_path}")
+            else:
+                logger.error(f"✗ OutputCollect.RDS NOT found at {output_path}")
+                logger.error("  Cannot generate summary without this file")
+                return
+
+            # Check if summary already exists
+            summary_path = f"{args.test_run}/model_summary.json"
+            summary_blob = aggregator.bucket.blob(summary_path)
+            if summary_blob.exists():
+                logger.info(
+                    f"✓ model_summary.json already exists at {summary_path}"
+                )
+                logger.info("  No need to generate")
+            else:
+                logger.info(
+                    f"○ model_summary.json does NOT exist at {summary_path}"
+                )
+                logger.info("  Will attempt to generate...")
+
+                # Try to generate the summary
+                result = aggregator.generate_summary_for_existing_run(
+                    args.test_run
+                )
+                if result:
+                    logger.info(f"✅ SUCCESS: Summary generated at {result}")
+
+                    # Also run aggregation for this country
+                    logger.info("")
+                    logger.info(
+                        f"Aggregating summaries for country: {parts[2]}"
+                    )
+                    try:
+                        agg_path = aggregator.save_country_summary(
+                            parts[2], revision=None
+                        )
+                        if agg_path:
+                            logger.info(
+                                f"✅ Country summary aggregated at {agg_path}"
+                            )
+                        else:
+                            logger.warning(
+                                f"⚠️ Country aggregation returned None (may have no summaries)"
+                            )
+                    except Exception as e:
+                        logger.error(f"❌ Country aggregation failed: {e}")
+                else:
+                    logger.error(f"❌ FAILED: Could not generate summary")
+        else:
+            logger.error(f"✗ Invalid run path format: {args.test_run}")
+            logger.error(
+                f"  Expected: robyn/{{revision}}/{{country}}/{{timestamp}}"
+            )
+            logger.error(f"  Got: {args.test_run}")
+
+        logger.info("=" * 60)
+        return
 
     if args.generate_missing:
         logger.info("=" * 60)
@@ -454,20 +546,38 @@ def main():
         logger.info("=" * 60)
 
         if not args.country:
-            # Get all unique countries
+            # Get all unique countries that have at least one summary
             runs = aggregator.list_model_runs()
-            countries = set(r["country"] for r in runs)
+            # Only include countries that have at least one summary
+            countries_with_summaries = set(
+                r["country"] for r in runs if r.get("has_summary", False)
+            )
             logger.info(
-                f"Found {len(countries)} countries to aggregate: "
-                f"{sorted(countries)}"
+                f"Found {len(countries_with_summaries)} countries with "
+                f"summaries to aggregate: {sorted(countries_with_summaries)}"
             )
 
-            for country in sorted(countries):
+            success_count = 0
+            skip_count = 0
+
+            for country in sorted(countries_with_summaries):
                 logger.info(f"Aggregating summaries for country: {country}")
-                aggregator.save_country_summary(country, args.revision)
+                # Don't pass revision - aggregate ALL revisions for the country
+                result = aggregator.save_country_summary(country, revision=None)
+                if result:
+                    success_count += 1
+                else:
+                    skip_count += 1
+
+            logger.info(
+                f"Aggregated {success_count} countries, skipped {skip_count}"
+            )
         else:
             logger.info(f"Aggregating summaries for country: {args.country}")
-            aggregator.save_country_summary(args.country, args.revision)
+            # Don't pass revision unless explicitly specified
+            aggregator.save_country_summary(
+                args.country, revision=args.revision if args.revision else None
+            )
 
         logger.info("=" * 60)
         logger.info("Aggregation complete")
