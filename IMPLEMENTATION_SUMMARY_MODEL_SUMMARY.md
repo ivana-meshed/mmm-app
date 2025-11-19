@@ -171,14 +171,15 @@ gs://mmm-app-output/robyn/v1/US/1234567890/model_summary.json
 
 ### Aggregated Country Summaries
 ```
-gs://{bucket}/robyn-summaries/{country}/summary.json
-gs://{bucket}/robyn-summaries/{country}/{revision}_summary.json
+gs://{bucket}/model_summary/{country}/summary.json
 ```
+
+This file combines all model summaries for a country across all revisions.
 
 Examples:
 ```
-gs://mmm-app-output/robyn-summaries/US/summary.json
-gs://mmm-app-output/robyn-summaries/US/v1_summary.json
+gs://mmm-app-output/model_summary/US/summary.json
+gs://mmm-app-output/model_summary/UK/summary.json
 ```
 
 ## Benefits

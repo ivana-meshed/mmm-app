@@ -24,19 +24,15 @@ gs://mmm-app-output/robyn/v1/US/1234567890/model_summary.json
 Aggregated summaries combining all runs for a country are stored at:
 
 ```
-gs://{bucket}/robyn-summaries/{country}/summary.json
+gs://{bucket}/model_summary/{country}/summary.json
 ```
 
-Or with revision filtering:
-
-```
-gs://{bucket}/robyn-summaries/{country}/{revision}_summary.json
-```
+This file contains all model summaries for a given country across all revisions.
 
 **Examples:**
 ```
-gs://mmm-app-output/robyn-summaries/US/summary.json
-gs://mmm-app-output/robyn-summaries/UK/v1_summary.json
+gs://mmm-app-output/model_summary/US/summary.json
+gs://mmm-app-output/model_summary/UK/summary.json
 ```
 
 ## Summary File Schema

@@ -139,10 +139,9 @@ gs://{bucket}/
 │               ├── OutputCollect.RDS
 │               ├── InputCollect.RDS
 │               └── results/
-├── robyn-summaries/
+├── model_summary/
 │   └── {country}/
-│       ├── summary.json
-│       └── {revision}_summary.json
+│       └── summary.json (aggregated summaries for all revisions)
 ├── datasets/
 │   └── {country}/
 │       └── {timestamp}/
@@ -166,7 +165,7 @@ Each training run generates a `model_summary.json` file containing:
 - Best model information
 - Training metadata and configuration
 
-Aggregated summaries by country are stored in `robyn-summaries/` for easy access to historical model performance.
+Aggregated summaries by country are stored in `model_summary/` for easy access to historical model performance across all revisions.
 
 See [docs/MODEL_SUMMARY.md](../docs/MODEL_SUMMARY.md) for detailed documentation.
 

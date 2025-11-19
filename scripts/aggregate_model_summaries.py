@@ -216,19 +216,19 @@ class ModelSummaryAggregator:
 
         summary = self.aggregate_by_country(country, revision)
 
-        logger.info(
-            f"Aggregated {summary.get('total_runs', 0)} runs, "
-            f"{summary.get('runs_with_summaries', 0)} with summaries"
-        )
+        # Skip if no summaries found
+        if summary.get("total_runs", 0) == 0:
+            logger.warning(
+                f"No summaries found for country={country}, skipping"
+            )
+            return None
+
+        logger.info(f"Aggregated {summary.get('total_runs', 0)} runs")
 
         # Save to GCS
-        # Path: robyn-summaries/{country}/summary.json
-        # or robyn-summaries/{country}/{revision}_summary.json if revision
-        # specified
-        if revision:
-            summary_path = f"robyn-summaries/{country}/{revision}_summary.json"
-        else:
-            summary_path = f"robyn-summaries/{country}/summary.json"
+        # Path: model_summary/{country}/summary.json
+        # This combines all revisions for the country
+        summary_path = f"model_summary/{country}/summary.json"
 
         blob = self.bucket.blob(summary_path)
         blob.upload_from_string(
@@ -454,20 +454,38 @@ def main():
         logger.info("=" * 60)
 
         if not args.country:
-            # Get all unique countries
+            # Get all unique countries that have at least one summary
             runs = aggregator.list_model_runs()
-            countries = set(r["country"] for r in runs)
+            # Only include countries that have at least one summary
+            countries_with_summaries = set(
+                r["country"] for r in runs if r.get("has_summary", False)
+            )
             logger.info(
-                f"Found {len(countries)} countries to aggregate: "
-                f"{sorted(countries)}"
+                f"Found {len(countries_with_summaries)} countries with "
+                f"summaries to aggregate: {sorted(countries_with_summaries)}"
             )
 
-            for country in sorted(countries):
+            success_count = 0
+            skip_count = 0
+
+            for country in sorted(countries_with_summaries):
                 logger.info(f"Aggregating summaries for country: {country}")
-                aggregator.save_country_summary(country, args.revision)
+                # Don't pass revision - aggregate ALL revisions for the country
+                result = aggregator.save_country_summary(country, revision=None)
+                if result:
+                    success_count += 1
+                else:
+                    skip_count += 1
+
+            logger.info(
+                f"Aggregated {success_count} countries, skipped {skip_count}"
+            )
         else:
             logger.info(f"Aggregating summaries for country: {args.country}")
-            aggregator.save_country_summary(args.country, args.revision)
+            # Don't pass revision unless explicitly specified
+            aggregator.save_country_summary(
+                args.country, revision=args.revision if args.revision else None
+            )
 
         logger.info("=" * 60)
         logger.info("Aggregation complete")
