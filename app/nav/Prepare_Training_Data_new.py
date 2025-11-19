@@ -50,9 +50,11 @@ from sklearn.preprocessing import PolynomialFeatures
 
 require_login_and_domain()
 
-st.title("Prepare Training Data for Experimentation")
+# Show loading spinner while page initializes
+with st.spinner("Loading page..."):
+    st.title("Prepare Training Data for Experimentation")
 
-GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
+    GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 
 # -----------------------------
 # Session defaults

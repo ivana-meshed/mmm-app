@@ -24,10 +24,12 @@ from gcp_secrets import access_secret, upsert_secret
 require_login_and_domain()
 ensure_session_defaults()
 
-# Secret ID for persistent private key storage
-PERSISTENT_KEY_SECRET_ID = os.getenv(
-    "SF_PERSISTENT_KEY_SECRET", "sf-private-key-persistent"
-)
+# Show loading spinner while page initializes
+with st.spinner("Loading page..."):
+    # Secret ID for persistent private key storage
+    PERSISTENT_KEY_SECRET_ID = os.getenv(
+        "SF_PERSISTENT_KEY_SECRET", "sf-private-key-persistent"
+    )
 
 
 def load_persisted_key() -> Optional[bytes]:

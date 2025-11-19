@@ -15,13 +15,16 @@ from scipy import stats
 from sklearn.linear_model import LinearRegression
 
 # Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
-st.title("Prepare Training Data (v2) — Guided Wizard")
 
-# ---- Require data loaded by your loader page
-df = st.session_state.get("df", pd.DataFrame())
-meta = st.session_state.get("meta", {}) or {}
-DATE_COL = st.session_state.get("date_col", "DATE")
-CHANNELS_MAP = st.session_state.get("channels_map", {}) or {}
+# Show loading spinner while page initializes
+with st.spinner("Loading page..."):
+    st.title("Prepare Training Data (v2) — Guided Wizard")
+
+    # ---- Require data loaded by your loader page
+    df = st.session_state.get("df", pd.DataFrame())
+    meta = st.session_state.get("meta", {}) or {}
+    DATE_COL = st.session_state.get("date_col", "DATE")
+    CHANNELS_MAP = st.session_state.get("channels_map", {}) or {}
 
 if df.empty or not meta:
     st.info("Load data & metadata first in **Select Data**.")

@@ -42,8 +42,10 @@ ALLOWED_CATEGORIES = [
 require_login_and_domain()
 ensure_session_defaults()
 
-dp = get_data_processor()
-BUCKET = st.session_state.get("gcs_bucket", GCS_BUCKET)
+# Show loading spinner while page initializes
+with st.spinner("Loading page..."):
+    dp = get_data_processor()
+    BUCKET = st.session_state.get("gcs_bucket", GCS_BUCKET)
 
 
 # Helper: GCS paths we’ll standardize on
@@ -2054,5 +2056,3 @@ if can_go_next:
             st.page_link(
                 "nav/Run_Experiment.py", label="Next → Experiment", icon="➡️"
             )
-
-# Deployment trigger

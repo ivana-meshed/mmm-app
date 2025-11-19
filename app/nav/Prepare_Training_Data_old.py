@@ -27,11 +27,13 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
 
-# ---- Pull state from the loader page ----
-df = st.session_state.get("df", pd.DataFrame())
-meta = st.session_state.get("meta", {}) or {}
-DATE_COL = st.session_state.get("date_col", "DATE")
-CHANNELS_MAP = st.session_state.get("channels_map", {}) or {}
+# Show loading spinner while page initializes
+with st.spinner("Loading page..."):
+    # ---- Pull state from the loader page ----
+    df = st.session_state.get("df", pd.DataFrame())
+    meta = st.session_state.get("meta", {}) or {}
+    DATE_COL = st.session_state.get("date_col", "DATE")
+    CHANNELS_MAP = st.session_state.get("channels_map", {}) or {}
 
 if df.empty or not meta:
     st.stop()
