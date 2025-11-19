@@ -125,7 +125,9 @@ def clear_cache(pattern: Optional[str] = None):
     for key in keys_to_remove:
         del _cache[key]
 
-    logger.info(f"Cleared {len(keys_to_remove)} cache entries matching '{pattern}'")
+    logger.info(
+        f"Cleared {len(keys_to_remove)} cache entries matching '{pattern}'"
+    )
     return len(keys_to_remove)
 
 

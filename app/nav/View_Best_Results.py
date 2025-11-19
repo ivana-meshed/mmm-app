@@ -377,7 +377,7 @@ def _fetch_model_config(bucket_name: str, stamp: str):
 
 def render_model_config_section(blobs, country, stamp, bucket_name):
     """Render model configuration from training-configs/{stamp}/job_config.json"""
-    st.subheader("Model Configuration")
+    # Model Configuration now has its own expander (no subheader needed here)
 
     # Try to fetch config from cache first
     config = _fetch_model_config(bucket_name, stamp)
@@ -684,7 +684,7 @@ def render_metrics_section(blobs, country, stamp):
 
 
 def render_allocator_section(blobs, country, stamp):
-    st.subheader("Allocator Plot")
+    # Budget Allocator section - no subheader needed, will be in tab
     alloc_plots = find_allocator_plots(blobs)
 
     if not alloc_plots:
@@ -736,21 +736,23 @@ def render_allocator_section(blobs, country, stamp):
 
 
 def render_onepager_section(blobs, best_id, country, stamp):
-    st.subheader("Onepager")
+    # Executive Summary section - no subheader needed, will be in tab
     if not best_id:
-        st.warning("best_model_id.txt not found; cannot locate onepager.")
+        st.warning(
+            "best_model_id.txt not found; cannot locate executive summary."
+        )
         return
 
     op_blob = find_onepager_blob(blobs, best_id)
     if not op_blob:
         st.warning(
-            f"No onepager found for best model id '{best_id}' using standard patterns."
+            f"No executive summary found for best model id '{best_id}' using standard patterns."
         )
         return
 
     name = os.path.basename(op_blob.name)
     lower = name.lower()
-    st.success(f"Found onepager: **{name}** ({op_blob.size:,} bytes)")
+    st.success(f"Found executive summary: **{name}** ({op_blob.size:,} bytes)")
 
     if lower.endswith(".png"):
         try:
@@ -760,7 +762,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                 return
             b64 = base64.b64encode(image_data).decode()
             st.markdown(
-                f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="Onepager">',
+                f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="Executive Summary">',
                 unsafe_allow_html=True,
             )
             download_link_for_blob(
@@ -772,7 +774,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
         except Exception as e:
             st.error(f"Couldn't preview `{name}`: {e}")
     elif lower.endswith(".pdf"):
-        st.info("Onepager available as PDF (preview not supported).")
+        st.info("Executive summary available as PDF (preview not supported).")
         download_link_for_blob(
             op_blob,
             label=f"Download {name}",
@@ -1060,11 +1062,23 @@ def render_run_from_key(runs: dict, key: tuple, bucket_name: str):
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
 
-    # Render sections in the specified order
-    render_model_config_section(blobs, country, stamp, bucket_name)
+    # Render model metrics first
     render_model_metrics_table(blobs, country, stamp)
-    render_onepager_section(blobs, best_id, country, stamp)
-    render_allocator_section(blobs, country, stamp)
+
+    # Create tabs for Executive Summary and Budget Allocator
+    tab1, tab2 = st.tabs(["Executive Summary", "Budget Allocator"])
+
+    with tab1:
+        render_onepager_section(blobs, best_id, country, stamp)
+
+    with tab2:
+        render_allocator_section(blobs, country, stamp)
+
+    # Model Configuration in its own expander (just above All Files)
+    with st.expander("**Model Configuration**", expanded=False):
+        render_model_config_section(blobs, country, stamp, bucket_name)
+
+    # All Files at the end
     render_all_files_section(blobs, bucket_name, country, stamp)
 
 
@@ -1205,11 +1219,23 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
 
-    # Render sections in the specified order
-    render_model_config_section(blobs, country, stamp, bucket_name)
+    # Render model metrics first
     render_model_metrics_table(blobs, country, stamp)
-    render_onepager_section(blobs, best_id, country, stamp)
-    render_allocator_section(blobs, country, stamp)
+
+    # Create tabs for Executive Summary and Budget Allocator
+    tab1, tab2 = st.tabs(["Executive Summary", "Budget Allocator"])
+
+    with tab1:
+        render_onepager_section(blobs, best_id, country, stamp)
+
+    with tab2:
+        render_allocator_section(blobs, country, stamp)
+
+    # Model Configuration in its own expander (just above All Files)
+    with st.expander("**Model Configuration**", expanded=False):
+        render_model_config_section(blobs, country, stamp, bucket_name)
+
+    # All Files at the end
     render_all_files_section(blobs, bucket_name, country, stamp)
 
 
