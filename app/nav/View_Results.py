@@ -29,19 +29,21 @@ except Exception:
 
 require_login_and_domain()
 
-# Initialize session state defaults
-try:
-    from app_split_helpers import ensure_session_defaults
+# Show loading spinner while page initializes
+with st.spinner("Loading page..."):
+    # Initialize session state defaults
+    try:
+        from app_split_helpers import ensure_session_defaults
 
-    ensure_session_defaults()
-except ImportError:
-    # Fallback if app_split_helpers is not available
-    st.session_state.setdefault(
-        "gcs_bucket", os.getenv("GCS_BUCKET", "mmm-app-output")
-    )
+        ensure_session_defaults()
+    except ImportError:
+        # Fallback if app_split_helpers is not available
+        st.session_state.setdefault(
+            "gcs_bucket", os.getenv("GCS_BUCKET", "mmm-app-output")
+        )
 
-# ---------- Page ----------
-st.title("Results browser (GCS)")
+    # ---------- Page ----------
+    st.title("Results browser (GCS)")
 
 # ---------- Settings ----------
 DEFAULT_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
