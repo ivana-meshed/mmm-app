@@ -65,38 +65,45 @@ EOF
 gcloud storage buckets update gs://mmm-app-output --lifecycle-file=lifecycle.json
 ```
 
-### 3. 📝 Request Caching for Snowflake (RECOMMENDATION)
+### 3. ✅ Request Caching for Snowflake (IMPLEMENTED)
 **Savings: Up to 70% of Snowflake costs when using cached data**
 
-The cost estimate has been updated to reflect 70% cache hit rate, reducing Snowflake costs significantly.
+Implemented a two-tier caching strategy for Snowflake queries.
 
-**Implementation options:**
+**What was implemented:**
 
-#### Option A: Application-level caching (Recommended)
-Add caching to `app/utils/snowflake_connector.py`:
+1. **Created `app/utils/snowflake_cache.py`**
+   - In-memory cache (TTL: 1 hour) for immediate access
+   - GCS persistent cache (TTL: 24 hours) for durability
+   - Automatic query normalization (ignores whitespace/case differences)
+
+2. **Updated `app/app_shared.py`**
+   - Modified `run_sql()` function to use caching by default
+   - Added `use_cache` parameter for fine-grained control
+   - Automatically initializes cache on application startup
+
+3. **Created Cache Management UI** (`app/nav/Cache_Management.py`)
+   - View cache statistics (in-memory and GCS)
+   - Clear cache when needed
+   - Cost savings calculator
+   - Cache hit rate monitoring
+
+**How it works:**
 
 ```python
-from functools import lru_cache
-import hashlib
+# Queries are automatically cached
+df = run_sql("SELECT * FROM table")  # First call: hits Snowflake
+df = run_sql("SELECT * FROM table")  # Second call: uses cache
 
-@lru_cache(maxsize=100)
-def cached_query(query_hash, connection_params):
-    """Cache query results for 1 hour"""
-    # Implementation in snowflake_connector.py
-    pass
+# Disable caching for specific queries
+df = run_sql("INSERT INTO table VALUES ...", use_cache=False)
 ```
 
-#### Option B: GCS-based caching
-Store query results in GCS with TTL-based invalidation:
-
-```python
-def get_or_cache_query_result(query, ttl_hours=24):
-    """Check GCS for cached result before querying Snowflake"""
-    cache_key = f"cache/queries/{hashlib.md5(query.encode()).hexdigest()}.parquet"
-    # Check if cache exists and is fresh
-    # If not, query Snowflake and cache result
-    pass
-```
+**Cache behavior:**
+- Tier 1: In-memory cache (fast, 1-hour TTL)
+- Tier 2: GCS cache (persistent, 24-hour TTL)
+- Queries are normalized (whitespace/case-insensitive)
+- Write operations automatically bypass cache
 
 **Expected savings with 70% cache hit rate:**
 - 100 calls/month: $10.00 → $3.00 (save $7/month)
@@ -194,10 +201,12 @@ Currently using regional GCS (europe-west1) which is already the most cost-effec
 1. **High Priority (Implemented)**
    - ✅ Set min_instances to 0
    - ✅ Document GCS lifecycle policies
+   - ✅ Implement Snowflake query caching (two-tier: in-memory + GCS)
+   - ✅ Create cache management UI
 
 2. **Medium Priority (Recommended Next)**
-   - Implement Snowflake query caching
-   - Apply GCS lifecycle policies
+   - Apply GCS lifecycle policies to production bucket
+   - Monitor cache hit rate and adjust TTLs if needed
    - Implement result compression
 
 3. **Low Priority (Future)**
