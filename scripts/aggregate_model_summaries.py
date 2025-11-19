@@ -332,6 +332,9 @@ class ModelSummaryAggregator:
                     text=True,
                     timeout=300,
                     check=True,
+                    cwd=str(
+                        Path(__file__).parent.parent
+                    ),  # Set working directory to repo root
                 )
                 logger.info(f"R script output: {result.stdout}")
                 if result.stderr:

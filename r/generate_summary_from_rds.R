@@ -39,8 +39,33 @@ if (!file.exists(opt$`output-collect`)) {
 }
 
 # Source the helper functions
-script_dir <- dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE))
-source(file.path(script_dir, "extract_model_summary.R"))
+# Try multiple methods to find the script directory (for both interactive and subprocess calls)
+script_dir <- tryCatch({
+    # Method 1: Try sys.frame (works when sourced or run interactively)
+    dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE))
+}, error = function(e) {
+    # Method 2: Try commandArgs (works when run via Rscript)
+    tryCatch({
+        dirname(normalizePath(sub("^--file=", "", commandArgs()[grep("^--file=", commandArgs())]), mustWork = FALSE))
+    }, error = function(e2) {
+        # Method 3: Try current working directory + r/
+        if (file.exists("r/extract_model_summary.R")) {
+            "r"
+        } else if (file.exists("extract_model_summary.R")) {
+            "."
+        } else if (file.exists("/app/extract_model_summary.R")) {
+            "/app"
+        } else {
+            stop("Cannot find extract_model_summary.R in any expected location")
+        }
+    })
+})
+
+helper_path <- file.path(script_dir, "extract_model_summary.R")
+if (!file.exists(helper_path)) {
+    stop("Helper script not found at: ", helper_path)
+}
+source(helper_path)
 
 # Load RDS files
 message("Loading OutputCollect.RDS...")
