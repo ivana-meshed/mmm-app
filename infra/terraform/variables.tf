@@ -56,9 +56,9 @@ variable "memory_limit" {
 }
 
 variable "min_instances" {
-  description = "Minimum number of instances for pre-warming"
+  description = "Minimum number of instances for pre-warming. Set to 0 to eliminate idle costs (adds cold start latency)"
   type        = number
-  default     = 2
+  default     = 0
 }
 
 variable "max_instances" {
