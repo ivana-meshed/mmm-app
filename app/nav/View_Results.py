@@ -1373,10 +1373,6 @@ def render_run_for_country(
     # Render model metrics first
     render_model_metrics_table(blobs, country, stamp)
 
-    # Model Configuration in its own expander
-    with st.expander("**Model Configuration**", expanded=False):
-        render_model_config_section(blobs, country, stamp, bucket_name)
-
     # Create tabs for Executive Summary and Budget Allocator
     tab1, tab2 = st.tabs(["Executive Summary", "Budget Allocator"])
 
@@ -1385,6 +1381,10 @@ def render_run_for_country(
 
     with tab2:
         render_allocator_section(blobs, country, stamp)
+
+    # Model Configuration in its own expander (just above All Files)
+    with st.expander("**Model Configuration**", expanded=False):
+        render_model_config_section(blobs, country, stamp, bucket_name)
 
     # All Files at the end
     render_all_files_section(blobs, bucket_name, country, stamp)
