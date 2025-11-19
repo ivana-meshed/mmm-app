@@ -54,12 +54,15 @@ class ModelSummaryAggregator:
 
         # List all files under robyn/ to find OutputCollect.RDS files
         # which indicate a model run exists
+        # Structure: robyn/{revision}/{country}/{timestamp}/
         prefix = "robyn/"
         if revision:
             prefix += f"{revision}/"
             logger.info(f"Filtering by revision: {revision}")
-        if country:
-            prefix += f"{country}/"
+        # Note: We cannot add country to prefix unless revision is specified
+        # because the structure is robyn/{revision}/{country}/{timestamp}
+        # If only country filter is provided, we scan all and filter results
+        if country and not revision:
             logger.info(f"Filtering by country: {country}")
 
         logger.info(f"Scanning GCS with prefix: {prefix}")
@@ -88,6 +91,11 @@ class ModelSummaryAggregator:
 
                     revision_found = parts[1]
                     country_found = parts[2]
+
+                    # Apply country filter if specified
+                    if country and country_found != country:
+                        continue
+
                     found_revisions.add(revision_found)
                     found_countries.add(country_found)
 
