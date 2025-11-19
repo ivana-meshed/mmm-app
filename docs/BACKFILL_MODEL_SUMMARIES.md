@@ -64,6 +64,7 @@ python scripts/aggregate_model_summaries.py \
 # 2. Check if OutputCollect.RDS exists
 # 3. Check if model_summary.json already exists
 # 4. Attempt to generate the summary if missing
+# 5. Aggregate summaries for the country (creates model_summary/{country}/summary.json)
 ```
 
 Example output:
@@ -79,6 +80,9 @@ TEST MODE: Testing run robyn/r100/de/1104_082103
 ○ model_summary.json does NOT exist at robyn/r100/de/1104_082103/model_summary.json
   Will attempt to generate...
 ✅ SUCCESS: Summary generated at robyn/r100/de/1104_082103/model_summary.json
+
+Aggregating summaries for country: de
+✅ Country summary aggregated at model_summary/de/summary.json
 ============================================================
 ```
 

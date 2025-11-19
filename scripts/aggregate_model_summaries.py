@@ -450,6 +450,26 @@ def main():
                 )
                 if result:
                     logger.info(f"✅ SUCCESS: Summary generated at {result}")
+
+                    # Also run aggregation for this country
+                    logger.info("")
+                    logger.info(
+                        f"Aggregating summaries for country: {parts[2]}"
+                    )
+                    try:
+                        agg_path = aggregator.save_country_summary(
+                            parts[2], revision=None
+                        )
+                        if agg_path:
+                            logger.info(
+                                f"✅ Country summary aggregated at {agg_path}"
+                            )
+                        else:
+                            logger.warning(
+                                f"⚠️ Country aggregation returned None (may have no summaries)"
+                            )
+                    except Exception as e:
+                        logger.error(f"❌ Country aggregation failed: {e}")
                 else:
                     logger.error(f"❌ FAILED: Could not generate summary")
         else:
