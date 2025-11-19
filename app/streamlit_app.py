@@ -62,6 +62,12 @@ best_results_page = st.Page(
     icon="🏆",
 )
 
+cache_management_page = st.Page(
+    "nav/Cache_Management.py",
+    title="Cache Management",
+    icon="⚡",
+)
+
 # Create navigation - this replaces the default sidebar navigation
 pg = st.navigation(
     [
@@ -74,6 +80,7 @@ pg = st.navigation(
         experiment_page,
         results_page,
         best_results_page,
+        cache_management_page,
     ],
     position="sidebar",
 )

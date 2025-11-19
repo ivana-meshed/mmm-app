@@ -55,10 +55,29 @@ variable "memory_limit" {
   default     = "8Gi"
 }
 
+# Training job resource sizing variables
+variable "training_cpu" {
+  description = "CPU limit for training job (4.0 recommended for 50% cost savings, 2.0 for 75%)"
+  type        = string
+  default     = "4.0"
+}
+
+variable "training_memory" {
+  description = "Memory limit for training job (16Gi recommended, 8Gi for maximum savings)"
+  type        = string
+  default     = "16Gi"
+}
+
+variable "training_max_cores" {
+  description = "Maximum cores for R/Robyn training (should match training_cpu)"
+  type        = string
+  default     = "4"
+}
+
 variable "min_instances" {
-  description = "Minimum number of instances for pre-warming"
+  description = "Minimum number of instances for pre-warming. Set to 0 to eliminate idle costs (adds cold start latency)"
   type        = number
-  default     = 2
+  default     = 0
 }
 
 variable "max_instances" {

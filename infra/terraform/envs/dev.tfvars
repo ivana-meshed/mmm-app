@@ -17,6 +17,12 @@ sf_database  = "MESHED_BUYCYCLE"
 sf_schema    = "GROWTH"
 sf_role      = "ACCOUNTADMIN"
 
+# Training job resource sizing (cost optimization)
+# Start with smaller config for dev to save costs
+training_cpu       = "2.0"
+training_memory    = "8Gi"
+training_max_cores = "2"
+
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"
 # Default: allowed_domains = "mesheddata.com"
