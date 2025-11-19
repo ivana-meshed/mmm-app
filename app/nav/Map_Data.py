@@ -979,7 +979,7 @@ with st.expander("📊 Data Selection", expanded=False):
             st.rerun()
 
         if not load_clicked:
-            df = st.session_state["df_raw"]
+            df = st.session_state.get("df_raw", pd.DataFrame())
             if not df.empty:
                 st.caption("Preview (from session):")
                 st.dataframe(
@@ -1132,7 +1132,7 @@ with st.expander("📊 Data Selection", expanded=False):
 
     # Save snapshot (button callback uses session data; no manual st.rerun())
     def _save_current_raw():
-        df = st.session_state["df_raw"]
+        df = st.session_state.get("df_raw", pd.DataFrame())
         if df.empty:
             st.warning("No dataset loaded.")
             return
