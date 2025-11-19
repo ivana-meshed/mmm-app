@@ -15,6 +15,7 @@ from scipy import stats
 from sklearn.linear_model import LinearRegression
 
 # Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
+
 st.title("Prepare Training Data (v2) — Guided Wizard")
 
 # ---- Require data loaded by your loader page
