@@ -1,0 +1,56 @@
+Service,Component,Metric,Idle Cost ($/month),100 calls/month ($),500 calls/month ($),1000 calls/month ($),5000 calls/month ($),Notes
+Cloud Run,Web Service - CPU,Allocated CPU-seconds,0.00,24.00,120.00,240.00,1200.00,"2 min instances @ 1 vCPU = 2 vCPU * 730 hrs * $0.00002400 = $35.04/month base. Per-request: avg 30s @ 2 vCPU"
+Cloud Run,Web Service - Memory,Allocated Memory GB-seconds,0.00,4.80,24.00,48.00,240.00,"2 min instances @ 2GB = 4GB * 730 hrs * $0.00000250 = $7.30/month base. Per-request: avg 30s @ 4GB"
+Cloud Run,Web Service - Requests,Request count,0.00,0.40,2.00,4.00,20.00,"$0.40 per million requests"
+Cloud Run,Web Service - Idle Instances,Always-on minimum instances,42.34,42.34,42.34,42.34,42.34,"2 min instances * (1 vCPU * $0.00002400 + 2GB * $0.00000250) * 730 hours/month"
+Cloud Run,Training Job - CPU,Allocated CPU-seconds,0.00,32.00,160.00,320.00,1600.00,"Per execution: 8 vCPU * 3600s avg * $0.00002400. Assumes 1 job per 10 requests"
+Cloud Run,Training Job - Memory,Allocated Memory GB-seconds,0.00,28.80,144.00,288.00,1440.00,"Per execution: 32GB * 3600s avg * $0.00000250. Assumes 1 job per 10 requests"
+Cloud Run,Training Job - Executions,Execution count,0.00,0.10,0.50,1.00,5.00,"$0.10 per execution (1 job per ~10 web requests)"
+Cloud Storage,GCS Bucket,Storage (GB-months),1.60,1.80,2.80,4.30,12.80,"$0.020 per GB/month. Idle: 80GB base data. Active: +1GB per 100 requests for results"
+Cloud Storage,GCS Bucket,Class A Operations,0.01,0.06,0.26,0.51,2.51,"$0.05 per 10K ops. Idle: 2K ops. Active: ~100 ops per request (writes/metadata)"
+Cloud Storage,GCS Bucket,Class B Operations,0.00,0.02,0.08,0.16,0.80,"$0.004 per 10K ops. Idle: 5K ops. Active: ~200 ops per request (reads)"
+Cloud Storage,GCS Bucket,Network Egress,0.00,1.20,6.00,12.00,60.00,"$0.12 per GB egress. Assumes 1GB data transfer per 10 requests (downloading results)"
+Artifact Registry,Docker Repository,Storage,0.10,0.10,0.10,0.10,0.10,"$0.10 per GB/month for images. ~1GB for web+training images"
+Secret Manager,Secrets Storage,Active secret versions,0.18,0.18,0.18,0.18,0.18,"6 secrets * $0.06 per secret/month (sf-private-key, sf-private-key-persistent, auth-client-id, auth-client-secret, auth-cookie-secret, metadata)"
+Secret Manager,Secret Access,Access operations,0.00,0.30,1.50,3.00,15.00,"$0.03 per 10K accesses. ~10 secret reads per request"
+Cloud Scheduler,Job Scheduler,Jobs,0.30,0.30,0.30,0.30,0.30,"$0.10 per job/month. 3 jobs (queue tick prod, queue tick dev, health check)"
+Cloud Scheduler,Job Invocations,Invocations,0.00,0.00,0.00,0.00,0.00,"First 3 jobs free, then $0.10/job. Scheduler invokes queue tick every minute = ~43.8K/month but within free tier"
+Snowflake,Warehouse Usage,Compute credits,0.00,10.00,50.00,100.00,500.00,"Small warehouse: $2/credit. Idle: 0. Active: Assumes 1 credit per 10 requests (varies by query complexity)"
+Cloud Logging,Log Ingestion,Log volume (GB),0.50,1.00,2.50,4.50,17.50,"First 50GB/month free. $0.50/GB above. Idle: 10GB. Active: +0.5GB per 100 requests"
+Cloud Logging,Log Storage,Log retention (GB),0.00,0.00,0.00,0.00,0.00,"First 30 days included in ingestion. Long-term storage minimal"
+IAM & Admin,Service Accounts,Service accounts,0.00,0.00,0.00,0.00,0.00,"Free - 3 service accounts (web-service-sa, training-job-sa, scheduler)"
+Cloud Build,Container Builds,Build minutes,0.00,0.00,0.00,0.00,0.00,"First 120 build-minutes/day free. CI/CD builds only on deploys, not per request"
+Networking,Load Balancing,Ingress traffic,0.00,0.60,3.00,6.00,30.00,"Cloud Run ingress free. But includes Cloud Armor/Load Balancer forwarding rules if used: ~$0.006/GB ingress"
+,,,,,,,,
+TOTAL,All Services,Monthly Cost,45.03,148.00,519.56,1073.39,5142.33,Rounded to nearest cent
+,,,,,,,,
+ASSUMPTIONS,,,,,,,
+,"Average Web Request Duration: 30 seconds (CPU + memory time)",,,,,,
+,"Average Training Job Duration: 1 hour (3600 seconds)",,,,,,
+,"Training Job Frequency: 1 job per 10 web requests",,,,,,
+,"Data Transfer: 1GB per 10 requests for downloading results",,,,,,
+,"Base Storage: 80GB for historical data and artifacts",,,,,,
+,"Storage Growth: +1GB per 100 requests for new results",,,,,,
+,"Secret Access: ~10 reads per request (Snowflake, OAuth)",,,,,,
+,"GCS Operations: ~100 Class A (writes), ~200 Class B (reads) per request",,,,,,
+,"Snowflake: 1 compute credit per 10 requests (varies by query)",,,,,,
+,"Log Volume: 10GB/month idle, +0.5GB per 100 requests",,,,,,
+,"Region: europe-west1 (Belgium) pricing",,,,,,
+,"Currency: USD as of November 2025",,,,,,
+,,,,,,,,
+OPTIMIZATION NOTES,,,,,,,
+,"1. Reduce min_instances from 2 to 0 to eliminate $42.34/month idle cost (trade-off: cold starts)",,,,,,
+,"2. Use Cloud Storage lifecycle policies to archive old results to Nearline ($0.010/GB) or Coldline ($0.004/GB)",,,,,,
+,"3. Configure log retention policies to reduce log storage costs",,,,,,
+,"4. Implement request caching to reduce Snowflake query costs",,,,,,
+,"5. Compress training results before uploading to GCS to reduce storage and egress costs",,,,,,
+,"6. Use Cloud Run jobs with spot/preemptible instances when available (up to 50% savings)",,,,,,
+,"7. Consider regional vs. multi-regional GCS for cost vs. availability trade-off",,,,,,
+,"8. Optimize Docker images to reduce Artifact Registry storage",,,,,,
+,,,,,,,,
+COST BREAKDOWN BY USAGE,,,,,,,
+,Idle (no usage),Fixed infrastructure costs only,45.03,100%,,,
+,100 calls/month,Low usage - mainly idle costs,148.00,29% idle | 71% variable,,,
+,500 calls/month,Medium usage,519.56,8% idle | 92% variable,,,
+,1000 calls/month,High usage,1073.39,4% idle | 96% variable,,,
+,5000 calls/month,Very high usage,5142.33,1% idle | 99% variable,,,
