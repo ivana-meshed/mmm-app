@@ -42,11 +42,23 @@ if (!file.exists(opt$`output-collect`)) {
 # Try multiple methods to find the script directory (for both interactive and subprocess calls)
 script_dir <- tryCatch({
     # Method 1: Try sys.frame (works when sourced or run interactively)
-    dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE))
+    ofile <- tryCatch(sys.frame(1)$ofile, error = function(e) NULL)
+    if (!is.null(ofile) && nzchar(ofile)) {
+        dirname(normalizePath(ofile, mustWork = FALSE))
+    } else {
+        stop("sys.frame method not available")
+    }
 }, error = function(e) {
     # Method 2: Try commandArgs (works when run via Rscript)
     tryCatch({
-        dirname(normalizePath(sub("^--file=", "", commandArgs()[grep("^--file=", commandArgs())]), mustWork = FALSE))
+        args <- commandArgs()
+        file_arg <- grep("^--file=", args, value = TRUE)
+        if (length(file_arg) > 0) {
+            file_path <- sub("^--file=", "", file_arg[1])
+            dirname(normalizePath(file_path, mustWork = FALSE))
+        } else {
+            stop("No --file argument found")
+        }
     }, error = function(e2) {
         # Method 3: Try current working directory + r/
         if (file.exists("r/extract_model_summary.R")) {
