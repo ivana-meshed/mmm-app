@@ -498,8 +498,8 @@ resource "google_cloud_run_v2_job" "training_job" {
 
         resources {
           limits = {
-            cpu    = "8.0"  # Maximum available CPUs
-            memory = "32Gi" # Maximum available memory
+            cpu    = var.training_cpu    # Configurable: 4.0 (recommended) or 2.0 for more savings
+            memory = var.training_memory # Configurable: 16Gi (recommended) or 8Gi for more savings
           }
         }
 
@@ -515,17 +515,17 @@ resource "google_cloud_run_v2_job" "training_job" {
 
         env {
           name  = "R_MAX_CORES"
-          value = "8"
+          value = var.training_max_cores # Matches training_cpu
         }
 
         env {
           name  = "OMP_NUM_THREADS"
-          value = "8"
+          value = var.training_max_cores
         }
 
         env {
           name  = "OPENBLAS_NUM_THREADS"
-          value = "8"
+          value = var.training_max_cores
         }
 
         env {

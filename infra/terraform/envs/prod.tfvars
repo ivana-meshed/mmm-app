@@ -16,6 +16,13 @@ sf_database  = "MESHED_BUYCYCLE"
 sf_schema    = "GROWTH"
 sf_role      = "ACCOUNTADMIN"
 
+# Training job resource sizing (cost optimization)
+# Reduced from 8 vCPU/32GB to 4 vCPU/16GB for 50% cost savings
+# Change to 2.0/8Gi for 75% savings (but longer training time)
+training_cpu       = "4.0"
+training_memory    = "16Gi"
+training_max_cores = "4"
+
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"
 # Default: allowed_domains = "mesheddata.com"
