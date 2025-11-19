@@ -388,6 +388,11 @@ def main():
         action="store_true",
         help="Aggregate summaries by country",
     )
+    parser.add_argument(
+        "--test-run",
+        type=str,
+        help="Test summary generation for a specific run path (e.g., robyn/r100/de/1104_082103)",
+    )
 
     args = parser.parse_args()
 
@@ -397,6 +402,62 @@ def main():
     )
 
     aggregator = ModelSummaryAggregator(args.bucket, args.project)
+
+    # Test mode: check if a specific run can be processed
+    if args.test_run:
+        logger.info("=" * 60)
+        logger.info(f"TEST MODE: Testing run {args.test_run}")
+        logger.info("=" * 60)
+
+        # Parse the run path
+        parts = args.test_run.rstrip("/").split("/")
+        if len(parts) >= 4 and parts[0] == "robyn":
+            logger.info(f"✓ Run path format is valid")
+            logger.info(f"  Revision: {parts[1]}")
+            logger.info(f"  Country: {parts[2]}")
+            logger.info(f"  Timestamp: {parts[3]}")
+
+            # Check if OutputCollect.RDS exists
+            output_path = f"{args.test_run}/OutputCollect.RDS"
+            output_blob = aggregator.bucket.blob(output_path)
+            if output_blob.exists():
+                logger.info(f"✓ OutputCollect.RDS found at {output_path}")
+            else:
+                logger.error(f"✗ OutputCollect.RDS NOT found at {output_path}")
+                logger.error("  Cannot generate summary without this file")
+                return
+
+            # Check if summary already exists
+            summary_path = f"{args.test_run}/model_summary.json"
+            summary_blob = aggregator.bucket.blob(summary_path)
+            if summary_blob.exists():
+                logger.info(
+                    f"✓ model_summary.json already exists at {summary_path}"
+                )
+                logger.info("  No need to generate")
+            else:
+                logger.info(
+                    f"○ model_summary.json does NOT exist at {summary_path}"
+                )
+                logger.info("  Will attempt to generate...")
+
+                # Try to generate the summary
+                result = aggregator.generate_summary_for_existing_run(
+                    args.test_run
+                )
+                if result:
+                    logger.info(f"✅ SUCCESS: Summary generated at {result}")
+                else:
+                    logger.error(f"❌ FAILED: Could not generate summary")
+        else:
+            logger.error(f"✗ Invalid run path format: {args.test_run}")
+            logger.error(
+                f"  Expected: robyn/{{revision}}/{{country}}/{{timestamp}}"
+            )
+            logger.error(f"  Got: {args.test_run}")
+
+        logger.info("=" * 60)
+        return
 
     if args.generate_missing:
         logger.info("=" * 60)

@@ -49,6 +49,39 @@ gcloud logging read \
 
 Manual backfilling is only needed in rare cases (e.g., debugging, testing, or if CI/CD failed).
 
+### Testing a Specific Run
+
+To test if summary generation works for a specific run:
+
+```bash
+# Test a specific run path
+python scripts/aggregate_model_summaries.py \
+  --bucket mmm-app-output \
+  --test-run robyn/r100/de/1104_082103
+
+# This will:
+# 1. Check if the run path format is valid
+# 2. Check if OutputCollect.RDS exists
+# 3. Check if model_summary.json already exists
+# 4. Attempt to generate the summary if missing
+```
+
+Example output:
+```
+============================================================
+TEST MODE: Testing run robyn/r100/de/1104_082103
+============================================================
+✓ Run path format is valid
+  Revision: r100
+  Country: de
+  Timestamp: 1104_082103
+✓ OutputCollect.RDS found at robyn/r100/de/1104_082103/OutputCollect.RDS
+○ model_summary.json does NOT exist at robyn/r100/de/1104_082103/model_summary.json
+  Will attempt to generate...
+✅ SUCCESS: Summary generated at robyn/r100/de/1104_082103/model_summary.json
+============================================================
+```
+
 ### Option 1: Using the convenience script
 
 ```bash
