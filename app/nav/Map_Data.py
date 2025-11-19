@@ -1158,15 +1158,13 @@ with st.expander("📊 Data Selection", expanded=False):
         )
 
     st.divider()
-    df_raw = st.session_state["df_raw"]
-    if df_raw.empty:
-        st.info("Load or select a dataset to continue.")
-        st.stop()
 
 # ──────────────────────────────────────────────────────────────
 # Step 2) Map your data
 # ──────────────────────────────────────────────────────────────
 st.header("Step 2) Map your data")
+
+df_raw = st.session_state["df_raw"]
 
 with st.expander("🗺️ Data Mapping Configuration", expanded=False):
     # Show current data state (point 4 - UI representing actual state)
@@ -1179,9 +1177,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
             f"🔵 **Currently Loaded:** {data_origin.upper()} | Country: {country.upper()} | Timestamp: {picked_ts} | Rows: {len(df_raw):,} | Columns: {len(df_raw.columns)}"
         )
     else:
-        st.warning("⚪ No data loaded yet")
+        st.warning("⚪ No data loaded yet - load data in Step 1 to configure mapping")
 
-    all_cols = df_raw.columns.astype(str).tolist()
+    all_cols = df_raw.columns.astype(str).tolist() if not df_raw.empty else []
 
     # ---- Load saved metadata (moved to beginning of Step 2) ----
     with st.expander(
@@ -1315,8 +1313,11 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                 or c.lower().endswith("_dt")
             }
         )
+        date_field_options = date_candidates or all_cols or ["date"]
         date_field = st.selectbox(
-            "Date field", options=(date_candidates or all_cols), index=0
+            "Date field", 
+            options=date_field_options, 
+            index=0 if date_field_options else None
         )
 
         st.divider()
