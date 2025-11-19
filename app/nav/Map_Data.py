@@ -1164,7 +1164,7 @@ with st.expander("📊 Data Selection", expanded=False):
 # ──────────────────────────────────────────────────────────────
 st.header("Step 2) Map your data")
 
-df_raw = st.session_state["df_raw"]
+df_raw = st.session_state.get("df_raw", pd.DataFrame())
 
 with st.expander("🗺️ Data Mapping Configuration", expanded=False):
     # Show current data state (point 4 - UI representing actual state)
