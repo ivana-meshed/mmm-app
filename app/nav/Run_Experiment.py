@@ -1429,7 +1429,7 @@ with tab_single:
         organic_vars = ", ".join(organic_vars_list)
 
     # Revision Configuration (new section above Save Training Configuration)
-    with st.expander("🏷️ Revision Configuration", expanded=True):
+    with st.expander("🏷️ Revision Configuration", expanded=False):
         st.caption(
             "Configure the revision tag and number for organizing training outputs. "
             "Outputs will be saved to robyn/{TAG}_{NUMBER}/{COUNTRY}/{TIMESTAMP}/ in GCS."
