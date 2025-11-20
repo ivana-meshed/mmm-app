@@ -25,7 +25,10 @@ from cryptography.hazmat.primitives import serialization
 from data_processor import DataProcessor
 from google.api_core.exceptions import PreconditionFailed
 from google.cloud import run_v2, secretmanager, storage
-from utils.snowflake_cache import get_cached_query_result, init_cache as init_snowflake_cache
+from utils.snowflake_cache import (
+    get_cached_query_result,
+    init_cache as init_snowflake_cache,
+)
 
 # Environment constants
 PROJECT_ID = os.getenv("PROJECT_ID")
@@ -217,6 +220,67 @@ def _safe_tick_once(
                     )
                     message = entry["message"]
                     changed = True
+
+                    # Update job_history when job completes
+                    try:
+                        # Find the matching job in job_history and update its status
+                        df_history = read_job_history_from_gcs(bucket_name)
+                        job_id = entry.get("gcs_prefix") or entry.get("job_id")
+
+                        if job_id and not df_history.empty:
+                            # Find the row with matching job_id or gcs_prefix
+                            mask = (df_history["job_id"] == job_id) | (
+                                df_history["gcs_prefix"] == job_id
+                            )
+                            if mask.any():
+                                # Update the existing row
+                                df_history.loc[mask, "state"] = final_state
+                                df_history.loc[mask, "message"] = message
+                                df_history.loc[mask, "end_time"] = (
+                                    datetime.utcnow().isoformat(
+                                        timespec="seconds"
+                                    )
+                                    + "Z"
+                                )
+
+                                # Calculate duration if start_time exists
+                                if "start_time" in df_history.columns:
+                                    for idx in df_history[mask].index:
+                                        start_time_str = df_history.loc[
+                                            idx, "start_time"
+                                        ]
+                                        if (
+                                            start_time_str
+                                            and str(start_time_str).strip()
+                                        ):
+                                            try:
+                                                from datetime import (
+                                                    datetime as dt,
+                                                )
+
+                                                start_time = dt.fromisoformat(
+                                                    str(start_time_str).replace(
+                                                        "Z", "+00:00"
+                                                    )
+                                                )
+                                                end_time = dt.utcnow()
+                                                duration = (
+                                                    end_time - start_time
+                                                ).total_seconds() / 60.0
+                                                df_history.loc[
+                                                    idx, "duration_minutes"
+                                                ] = round(duration, 2)
+                                            except Exception:
+                                                pass
+
+                                save_job_history_to_gcs(df_history, bucket_name)
+                                logger.info(
+                                    f"[QUEUE] Updated job_history for job {job_id} with status {final_state}"
+                                )
+                    except Exception as e:
+                        logger.warning(
+                            f"[QUEUE] Failed to update job_history for completed job: {e}"
+                        )
 
                     # Enhanced logging for final states
                     if final_state in ("FAILED", "ERROR", "CANCELLED"):
@@ -943,19 +1007,20 @@ def keepalive_ping(conn):
 def run_sql(sql: str, use_cache: bool = True) -> pd.DataFrame:
     """
     Execute a SQL query against Snowflake with optional caching.
-    
+
     Args:
         sql: SQL query to execute
         use_cache: Whether to use query result caching (default: True)
                   Set to False for queries that must be fresh (e.g., writes)
-    
+
     Returns:
         DataFrame with query results
-        
+
     Note:
         Caching reduces Snowflake compute costs by ~70% with typical usage patterns.
         Cache TTL: 1 hour in-memory, 24 hours in GCS.
     """
+
     def _execute_query(query: str) -> pd.DataFrame:
         """Internal function to execute query without cache."""
         conn = ensure_sf_conn()
@@ -968,7 +1033,7 @@ def run_sql(sql: str, use_cache: bool = True) -> pd.DataFrame:
                 cur.close()
             except Exception:
                 pass
-    
+
     if use_cache:
         return get_cached_query_result(sql, _execute_query)
     else:
