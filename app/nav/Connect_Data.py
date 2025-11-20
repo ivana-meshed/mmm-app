@@ -66,7 +66,7 @@ def save_persisted_key(pem: str) -> bool:
 
 st.title("Connect your Data")
 
-st.subheader("Connect to Snowflake")
+st.subheader("Snowflake Connection")
 
 # Check if there's a persisted key available
 persisted_key_available = False
@@ -107,22 +107,22 @@ with st.form("sf_connect_form", clear_on_submit=False):
             "**Upload Private key (PEM)**"
         )
         sf_pk_pem = st.text_area(
-            "Paste PEM key",
+            "Paste Private Key (PEM format)",
             value="",
             placeholder="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
             + ("\n(Using saved key)" if persisted_key_available else ""),
             help="Upload a new key or use the previously saved one.",
-            height=120,
+            height=150,
         )
         sf_pk_file = st.file_uploader(
-            "…or upload a .pem file", type=["pem", "key", "p8"]
+            "…or upload a .pem file instead", type=["pem", "key", "p8"]
         )
 
         # Add checkbox to persist the key
         save_key = st.checkbox(
             "💾 Save this key for future sessions (Recommended)",
             value=False,
-            help="Store the private key in Google Secret Manager so you don't have to upload it every time.",
+            help="Securely store this key so you won’t need to upload it again in future sessions (Google Secret Manager).",
         )
 
     with c2:
@@ -144,9 +144,9 @@ with st.form("sf_connect_form", clear_on_submit=False):
 
         # ✅ NEW: default MMM_RAW; allow fully-qualified or relative to DB/SCHEMA above
         preview_table = st.text_input(
-            "Preview table after connect",
+            "Table Name",
             value=st.session_state.get("sf_preview_table", "MMM_RAW"),
-            help="Use DB.SCHEMA.TABLE or a table in the selected Database/Schema.",
+            help="Enter a table name (e.g. MMM_daily) or a full-qualified path (DB.SCHEMA.TABLE).",
         )
 
     submitted = st.form_submit_button("🔌 Connect")
@@ -186,11 +186,11 @@ if submitted:
             if save_key:
                 if save_persisted_key(pem):
                     st.success(
-                        "✅ Private key saved to Secret Manager for future use."
+                        "✅ Your private key has been saved securely for future sessions (Secret Manager)."
                     )
                 else:
                     st.warning(
-                        "⚠️ Failed to save key to Secret Manager, but connection will proceed."
+                        "⚠️ Failed to save key to Secret Manager, but we'll continue with the connection attempt."
                     )
 
         # Build connection using the key
@@ -221,14 +221,14 @@ if submitted:
         if (preview_table or "").strip():
             try:
                 df_prev = run_sql(f"SELECT * FROM {preview_table} LIMIT 20")
-                st.caption(f"Preview: first 20 rows of `{preview_table}`")
+                st.caption(f"Preview: Showing first 20 rows of `{preview_table}`")
                 st.dataframe(df_prev, use_container_width=True, hide_index=True)
             except Exception as e:
                 st.warning(f"Could not preview table `{preview_table}`: {e}")
 
     except Exception as e:
         st.session_state["sf_connected"] = False
-        st.error(f"Connection failed: {e}")
+        st.error(f"Connection could not be established. Error: {e}")
 
 if st.session_state.sf_connected:
     with st.container(border=True):
@@ -272,7 +272,7 @@ if st.session_state.sf_connected:
                     st.session_state.pop("_sf_private_key_bytes", None)
                     st.session_state["_checked_persisted_key"] = False
                     st.success(
-                        "✅ Saved private key deleted from Secret Manager."
+                        "✅ Your saved private key has been removed from Secret Manager."
                     )
                 except Exception as e:
                     st.warning(f"Could not delete saved key: {e}")
@@ -280,17 +280,17 @@ if st.session_state.sf_connected:
                 st.error(f"Failed to clear saved key: {e}")
 
 else:
-    st.info("Not connected. Fill the form above and click **Connect**.")
+    st.info("You're not connected yet. Enter your Snowflake details above and click **Connect**.")
 
 # ============= Outputs Configuration =============
 st.divider()
-st.subheader("Outputs Configuration")
+st.subheader("Output Location")
 
-with st.expander("📤 Outputs", expanded=False):
+with st.expander("📤 Output Setting", expanded=False):
     gcs_bucket = st.text_input(
-        "GCS bucket for outputs",
+        "Google Cloud Storage bucket for outputs:",
         value=st.session_state.get("gcs_bucket", GCS_BUCKET),
-        help="Google Cloud Storage bucket where training outputs will be stored",
+        help="All outputs will be stored in this bucket.",
     )
     st.session_state["gcs_bucket"] = gcs_bucket
 
