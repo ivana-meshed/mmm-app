@@ -490,7 +490,9 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     # Refresh button - force a full rerun to get latest status
     if st.button("🔄 Refresh Status", key=f"refresh_status_table_{key_prefix}"):
         # Clear any cached data
-        st.session_state["status_refresh_timestamp"] = datetime.utcnow().timestamp()
+        st.session_state["status_refresh_timestamp"] = (
+            datetime.utcnow().timestamp()
+        )
         st.rerun()
 
     if not all_running_jobs:
