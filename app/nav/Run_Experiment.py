@@ -1196,7 +1196,7 @@ with tab_single:
                 st.info(
                     "💡 **To fix this:** Go to the 'Map Data' page, load your data, "
                     "apply mapping changes to create custom variables, "
-                    "then save both the dataset AND metadata to GCS before loading here."
+                    "then click 'Save dataset & metadata to GCS' (this now saves both automatically)."
                 )
 
         # Custom hyperparameters per variable (when Custom preset is selected)
