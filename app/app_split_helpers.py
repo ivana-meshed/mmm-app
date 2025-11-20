@@ -408,14 +408,15 @@ def _empty_job_history_df() -> pd.DataFrame:
 @st.fragment
 def render_jobs_job_history(key_prefix: str = "single") -> None:
     with st.expander("📚 Job History (from GCS)", expanded=False):
-        # Refresh control first (button triggers fragment rerun only)
+        # Refresh control first
         if st.button(
             "🔁 Refresh job_history", key=f"refresh_job_history_{key_prefix}"
         ):
-            # bump a nonce so the dataframe widget key changes and re-renders
+            # Clear any cached data and bump nonce
             st.session_state["job_history_nonce"] = (
                 st.session_state.get("job_history_nonce", 0) + 1
             )
+            # Use fragment rerun to avoid full page refresh
             st.rerun(scope="fragment")
 
         try:
@@ -429,7 +430,7 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
         df_job_history = df_job_history.reindex(columns=JOB_HISTORY_COLUMNS)
 
         st.caption(
-            "JOB_HISTORY entries are view-only and auto-updated when jobs finish."
+            "JOB_HISTORY entries are automatically updated when jobs complete."
         )
         st.dataframe(
             df_job_history,
@@ -479,15 +480,19 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                     "Status": "RUNNING",
                     "Country": exec_info.get("country", "N/A"),
                     "Revision": exec_info.get("revision", "N/A"),
-                    "Iterations": "N/A",
-                    "Trials": "N/A",
+                    "Iterations": str(exec_info.get("iterations", "N/A")),
+                    "Trials": str(exec_info.get("trials", "N/A")),
                     "GCS Prefix": exec_info.get("gcs_prefix", ""),
                     "Execution Details": exec_name,
                 }
             )
 
-    # Refresh button
+    # Refresh button - force a full rerun to get latest status
     if st.button("🔄 Refresh Status", key=f"refresh_status_table_{key_prefix}"):
+        # Clear any cached data
+        st.session_state["status_refresh_timestamp"] = (
+            datetime.utcnow().timestamp()
+        )
         st.rerun()
 
     if not all_running_jobs:

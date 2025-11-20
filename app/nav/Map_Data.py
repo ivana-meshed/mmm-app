@@ -1177,7 +1177,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
             f"🔵 **Currently Loaded:** {data_origin.upper()} | Country: {country.upper()} | Timestamp: {picked_ts} | Rows: {len(df_raw):,} | Columns: {len(df_raw.columns)}"
         )
     else:
-        st.warning("⚪ No data loaded yet - load data in Step 1 to configure mapping")
+        st.warning(
+            "⚪ No data loaded yet - load data in Step 1 to configure mapping"
+        )
 
     all_cols = df_raw.columns.astype(str).tolist() if not df_raw.empty else []
 
@@ -1257,7 +1259,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                     if meta_parts[0] == "Universal"
                     else st.session_state["country"]
                 )
-                meta_version = meta_parts[1] if len(meta_parts) > 1 else "Latest"
+                meta_version = (
+                    meta_parts[1] if len(meta_parts) > 1 else "Latest"
+                )
 
                 # Construct blob path
                 if meta_version == "Latest" or meta_version.lower() == "latest":
@@ -1285,12 +1289,16 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                         st.write(f"**Variable Categories:**")
                         for cat, vars_list in meta["mapping"].items():
                             if vars_list:
-                                st.write(f"  - {cat}: {len(vars_list)} variable(s)")
+                                st.write(
+                                    f"  - {cat}: {len(vars_list)} variable(s)"
+                                )
 
                     if "data" in meta:
                         data_info = meta["data"]
                         st.write(f"**Data Info:**")
-                        st.write(f"  - Origin: {data_info.get('origin', 'N/A')}")
+                        st.write(
+                            f"  - Origin: {data_info.get('origin', 'N/A')}"
+                        )
                         st.write(
                             f"  - Date field: {data_info.get('date_field', 'N/A')}"
                         )
@@ -1315,9 +1323,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
         )
         date_field_options = date_candidates or all_cols or ["date"]
         date_field = st.selectbox(
-            "Date field", 
-            options=date_field_options, 
-            index=0 if date_field_options else None
+            "Date field",
+            options=date_field_options,
+            index=0 if date_field_options else None,
         )
 
         st.divider()
@@ -1335,11 +1343,16 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                 return pd.DataFrame(
                     {
                         "var": pd.Series(selected, dtype="object"),
-                        "group": pd.Series([group] * len(selected), dtype="object"),
-                        "type": pd.Series(
-                            [_guess_goal_type(v) for v in selected], dtype="object"
+                        "group": pd.Series(
+                            [group] * len(selected), dtype="object"
                         ),
-                        "main": pd.Series([False] * len(selected), dtype="object"),
+                        "type": pd.Series(
+                            [_guess_goal_type(v) for v in selected],
+                            dtype="object",
+                        ),
+                        "main": pd.Series(
+                            [False] * len(selected), dtype="object"
+                        ),
                     }
                 )
 
@@ -1354,7 +1367,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                     ignore_index=True,
                 )
                 goals_src = pd.concat([manual, heur], ignore_index=True)
-                goals_src = goals_src.drop_duplicates(subset=["var"], keep="first")
+                goals_src = goals_src.drop_duplicates(
+                    subset=["var"], keep="first"
+                )
             else:
                 # Keep only what's in session - don't add heuristics if user has edited
                 goals_src = st.session_state["goals_df"]
@@ -1418,13 +1433,14 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                 merged = (
                     edited.drop_duplicates(subset=["var"], keep="last")
                     .fillna({"var": "", "group": "", "type": "", "main": False})
-                    .astype({"var": "object", "group": "object", "type": "object"})
+                    .astype(
+                        {"var": "object", "group": "object", "type": "object"}
+                    )
                 )
                 merged["main"] = merged["main"].astype(bool)
 
                 st.session_state["goals_df"] = merged
                 st.success("Goals updated.")
-
 
     # ---- Custom channels UI ----
     with st.expander("📺 Custom Marketing Channels", expanded=False):
@@ -1458,7 +1474,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
 
         # Combine recognized channels with existing custom channels for prefill
         existing_custom = st.session_state.get("custom_channels", [])
-        all_existing_channels = sorted(set(recognized_channels + existing_custom))
+        all_existing_channels = sorted(
+            set(recognized_channels + existing_custom)
+        )
 
         # Single input field with prefilled recognized channels
         channels_input = st.text_area(
@@ -1470,11 +1488,15 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
         )
 
         if st.button(
-            "➕ Apply Channels", key="add_channels_btn", use_container_width=True
+            "➕ Apply Channels",
+            key="add_channels_btn",
+            use_container_width=True,
         ):
             # Parse the input
             entered_channels = [
-                ch.strip().lower() for ch in channels_input.split(",") if ch.strip()
+                ch.strip().lower()
+                for ch in channels_input.split(",")
+                if ch.strip()
             ]
 
             # All entered channels become the new custom channels list
@@ -1528,20 +1550,26 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
             "context_vars": _parse_sfx(
                 rcol2.text_input(
                     "context_vars suffixes",
-                    value=", ".join(st.session_state["auto_rules"]["context_vars"]),
+                    value=", ".join(
+                        st.session_state["auto_rules"]["context_vars"]
+                    ),
                 )
             ),
             "organic_vars": _parse_sfx(
                 rcol2.text_input(
                     "organic_vars suffixes",
-                    value=", ".join(st.session_state["auto_rules"]["organic_vars"]),
+                    value=", ".join(
+                        st.session_state["auto_rules"]["organic_vars"]
+                    ),
                     key="org_vars",
                 )
             ),
             "factor_vars": _parse_sfx(
                 rcol3.text_input(
                     "factor_vars suffixes",
-                    value=", ".join(st.session_state["auto_rules"]["factor_vars"]),
+                    value=", ".join(
+                        st.session_state["auto_rules"]["factor_vars"]
+                    ),
                 )
             ),
         }
@@ -1590,7 +1618,6 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
         st.session_state["organic_vars_prefix"] = organic_prefix
         st.session_state["context_vars_prefix"] = context_prefix
         st.session_state["factor_vars_prefix"] = factor_prefix
-
 
     # ---- Mapping editor (form) ----
 
@@ -1649,7 +1676,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                             else:
                                 return ""
 
-                        m["_sort_key"] = m["var"].apply(extract_channel_subchannel)
+                        m["_sort_key"] = m["var"].apply(
+                            extract_channel_subchannel
+                        )
                         st.session_state["mapping_df"] = (
                             m.sort_values(by="_sort_key", ascending=ascending)
                             .drop(columns=["_sort_key"])
@@ -1757,7 +1786,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                 }
                 # Use mapping_edit which has the user's edits from the data_editor
                 updated_mapping, updated_df = _apply_automatic_aggregations(
-                    mapping_edit.copy(), st.session_state["df_raw"].copy(), prefixes
+                    mapping_edit.copy(),
+                    st.session_state["df_raw"].copy(),
+                    prefixes,
                 )
                 st.session_state["mapping_df"] = updated_mapping
                 st.session_state["df_raw"] = updated_df
@@ -1785,9 +1816,13 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
 # ──────────────────────────────────────────────────────────────
 # Step 3) Save your mapping
 # ──────────────────────────────────────────────────────────────
-st.header("Step 3) Save your mapping")
+st.header("Step 3) Save your data & mapping")
 
-with st.expander("💾 Save Mapping Configuration", expanded=False):
+with st.expander("💾 Save Dataset & Mapping Configuration", expanded=False):
+    st.caption(
+        "Save both your dataset (including custom aggregated variables) and mapping metadata to GCS. "
+        "Both will be automatically saved together to ensure they stay in sync."
+    )
     goals_df = st.session_state["goals_df"]
     mapping_df = st.session_state["mapping_df"]
     auto_rules = st.session_state["auto_rules"]
@@ -1981,7 +2016,27 @@ with st.expander("💾 Save Mapping Configuration", expanded=False):
 
     def _save_metadata():
         try:
-            # Determine the country for saving
+            # First, save the dataset if it's loaded
+            df = st.session_state.get("df_raw", pd.DataFrame())
+            if not df.empty:
+                try:
+                    # Save dataset for the current country (not universal)
+                    res = _save_raw_to_gcs(
+                        df, BUCKET, st.session_state["country"]
+                    )
+                    st.session_state["picked_ts"] = res["timestamp"]
+                    st.session_state["data_origin"] = "gcs_latest"
+                    st.session_state["last_saved_raw_path"] = res[
+                        "data_gcs_path"
+                    ]
+                    st.success(f"✅ Saved dataset → {res['data_gcs_path']}")
+                except Exception as e:
+                    st.error(f"Failed to save dataset: {e}")
+                    return  # Don't save metadata if dataset save failed
+            else:
+                st.warning("⚠️ No dataset loaded - saving metadata only")
+
+            # Determine the country for saving metadata
             save_country = (
                 st.session_state["country"]
                 if save_country_specific
@@ -2001,20 +2056,21 @@ with st.expander("💾 Save Mapping Configuration", expanded=False):
                 else "as universal mapping"
             )
             st.success(
-                f"Saved metadata {location_msg} → gs://{BUCKET}/{vblob} (and updated latest)"
+                f"✅ Saved metadata {location_msg} → gs://{BUCKET}/{vblob} (and updated latest)"
             )
         except Exception as e:
             st.error(f"Failed to save metadata: {e}")
 
     cmeta1, cmeta2 = st.columns([1, 2])
     cmeta1.button(
-        "💾 Save metadata to GCS",
+        "💾 Save dataset & metadata to GCS",
         on_click=_save_metadata,
         use_container_width=True,
+        help="Saves both the current dataset (with custom variables) and metadata configuration to GCS",
     )
     if st.session_state["last_saved_meta_path"]:
         cmeta2.caption(
-            f"Last saved: `{st.session_state['last_saved_meta_path']}`"
+            f"Last saved metadata: `{st.session_state['last_saved_meta_path']}`"
         )
 
     with st.expander("Preview metadata JSON", expanded=False):
