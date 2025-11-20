@@ -104,7 +104,7 @@ with st.form("sf_connect_form", clear_on_submit=False):
         )
 
         st.markdown(
-            "**Private key (PEM)** — paste or upload (optional if key is already saved):"
+            "**Upload Private key (PEM)**"
         )
         sf_pk_pem = st.text_area(
             "Paste PEM key",
@@ -120,7 +120,7 @@ with st.form("sf_connect_form", clear_on_submit=False):
 
         # Add checkbox to persist the key
         save_key = st.checkbox(
-            "💾 Save this key for future sessions",
+            "💾 Save this key for future sessions (Recommended)",
             value=False,
             help="Store the private key in Google Secret Manager so you don't have to upload it every time.",
         )
