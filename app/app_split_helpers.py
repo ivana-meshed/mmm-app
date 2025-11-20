@@ -408,7 +408,7 @@ def _empty_job_history_df() -> pd.DataFrame:
 @st.fragment
 def render_jobs_job_history(key_prefix: str = "single") -> None:
     with st.expander("📚 Job History (from GCS)", expanded=False):
-        # Refresh control first (button triggers fragment rerun only)
+        # Refresh control first (button triggers full rerun to reload data)
         if st.button(
             "🔁 Refresh job_history", key=f"refresh_job_history_{key_prefix}"
         ):
@@ -416,7 +416,8 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
             st.session_state["job_history_nonce"] = (
                 st.session_state.get("job_history_nonce", 0) + 1
             )
-            st.rerun(scope="fragment")
+            # Use full rerun instead of fragment rerun to force data reload
+            st.rerun()
 
         try:
             df_job_history = read_job_history_from_gcs(
@@ -479,15 +480,17 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                     "Status": "RUNNING",
                     "Country": exec_info.get("country", "N/A"),
                     "Revision": exec_info.get("revision", "N/A"),
-                    "Iterations": "N/A",
-                    "Trials": "N/A",
+                    "Iterations": str(exec_info.get("iterations", "N/A")),
+                    "Trials": str(exec_info.get("trials", "N/A")),
                     "GCS Prefix": exec_info.get("gcs_prefix", ""),
                     "Execution Details": exec_name,
                 }
             )
 
-    # Refresh button
+    # Refresh button - force a full rerun to get latest status
     if st.button("🔄 Refresh Status", key=f"refresh_status_table_{key_prefix}"):
+        # Clear any cached data
+        st.session_state["status_refresh_timestamp"] = datetime.utcnow().timestamp()
         st.rerun()
 
     if not all_running_jobs:
