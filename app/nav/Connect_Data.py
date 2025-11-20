@@ -64,9 +64,9 @@ def save_persisted_key(pem: str) -> bool:
         return False
 
 
-st.title("Connect your Data")
+st.title("Connect your Data Source")
 
-st.subheader("Snowflake Connection")
+st.subheader("Connect to Snowflake")
 
 # Check if there's a persisted key available
 persisted_key_available = False
@@ -76,7 +76,7 @@ if not st.session_state.get("_checked_persisted_key"):
         st.session_state["_sf_private_key_bytes"] = persisted_key
         persisted_key_available = True
         st.info(
-            "✅ Found a previously saved private key. You can connect without uploading a new one."
+            "✅ Found a previously saved private key. You can use it to connect without uploading a new key. "
         )
     st.session_state["_checked_persisted_key"] = True
 else:
@@ -107,11 +107,11 @@ with st.form("sf_connect_form", clear_on_submit=False):
             "**Upload Private key (PEM)**"
         )
         sf_pk_pem = st.text_area(
-            "Paste Private Key (PEM format)",
+            "Private Key (PEM format)",
             value="",
             placeholder="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
             + ("\n(Using saved key)" if persisted_key_available else ""),
-            help="Upload a new key or use the previously saved one.",
+            help="Paste a new key or continue with your saved key.",
             height=150,
         )
         sf_pk_file = st.file_uploader(
