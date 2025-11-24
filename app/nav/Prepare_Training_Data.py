@@ -279,9 +279,9 @@ def _num_stats(s: pd.Series) -> dict:
     return dict(
         non_null=nn,
         nulls=na,
-        nulls_pct=na / n if n else np.nan,
+        nulls_pct=(na / n * 100) if n else np.nan,
         zeros=z,
-        zeros_pct=z / n if n else np.nan,
+        zeros_pct=(z / n * 100) if n else np.nan,
         distinct=int(s2.nunique(dropna=True)),
         min=float(s2.min()) if not s2.empty else np.nan,
         p10=float(np.percentile(s2, 10)) if not s2.empty else np.nan,
@@ -301,7 +301,7 @@ def _cat_stats(s: pd.Series) -> dict:
     return dict(
         non_null=nn,
         nulls=na,
-        nulls_pct=na / n if n else np.nan,
+        nulls_pct=(na / n * 100) if n else np.nan,
         zeros=np.nan,
         zeros_pct=np.nan,
         distinct=int(s2.nunique(dropna=True)) if nn else 0,
@@ -450,20 +450,20 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         col_type = str(s.dtype)
 
         if pd.api.types.is_numeric_dtype(s):
-            stats = _num_stats(s)
+            col_stats = _num_stats(s)
         elif pd.api.types.is_datetime64_any_dtype(s):
-            stats = _cat_stats(s)
+            col_stats = _cat_stats(s)
             ss = pd.to_datetime(s, errors="coerce").dropna()
-            stats["min"] = ss.min().timestamp() if not ss.empty else np.nan
-            stats["max"] = ss.max().timestamp() if not ss.empty else np.nan
+            col_stats["min"] = ss.min().timestamp() if not ss.empty else np.nan
+            col_stats["max"] = ss.max().timestamp() if not ss.empty else np.nan
             col_type = "datetime64"
         else:
-            stats = _cat_stats(s)
+            col_stats = _cat_stats(s)
 
         dist_vals = _distribution_values(s)
 
         rows.append(
-            dict(Use=True, Column=col, Type=col_type, Dist=dist_vals, **stats)
+            dict(Use=True, Column=col, Type=col_type, Dist=dist_vals, **col_stats)
         )
     prof_all = pd.DataFrame(rows)
 
@@ -593,14 +593,17 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     def _render_cat_table(title: str, cols: list[str], key_suffix: str):
         subset = prof_all[prof_all["Column"].isin(cols)].copy()
         st.markdown(f"### {title} ({len(subset)})")
-        if title == "Other" and len(subset):
+        
+        if subset.empty:
+            st.info("No columns in this category.")
+            return
+
+        # For "Other" section, add caption explaining what it shows
+        if title == "Other":
             st.caption(
                 "Unmapped columns (in data but not in metadata): "
                 + ", ".join(sorted(subset["Column"].astype(str).tolist()))
             )
-        if subset.empty:
-            st.info("No columns in this category.")
-            return
 
         # Build display-only columns for Min/Max as strings
         is_dt = subset["Type"].eq("datetime64")
