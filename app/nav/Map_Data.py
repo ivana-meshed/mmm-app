@@ -39,7 +39,7 @@ ALLOWED_CATEGORIES = [
 # ──────────────────────────────────────────────────────────────
 # Setup
 # ──────────────────────────────────────────────────────────────
-#require_login_and_domain()
+require_login_and_domain()
 ensure_session_defaults()
 
 dp = get_data_processor()

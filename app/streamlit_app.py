@@ -22,13 +22,13 @@ handle_queue_tick_if_requested()
 
 # Define pages for custom navigation
 connect_page = st.Page(
-    "nav/Connect_Data.py", title="Connect your Data", icon="🧩"
+    "nav/Connect_Data.py", title="1. Connect Data", icon="🧩"
 )
-map_page = st.Page("nav/Map_Data.py", title="Map your Data", icon="🗺️")
+map_page = st.Page("nav/Map_Data.py", title="2. Map Data", icon="🗺️")
 
 review_page = st.Page(
-    "nav/Review_Data.py",
-    title="Review Business- & Marketing Data",
+    "nav/Validate_Mapping.py",
+    title="3. Validate Mapping",
     icon="📊",
 )
 

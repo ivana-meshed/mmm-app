@@ -55,9 +55,9 @@ from sklearn.preprocessing import PolynomialFeatures
 require_login_and_domain()
 ensure_session_defaults()
 
-require_login_and_domain()
+st.title("Validate Mapping")
+st.caption("Make sure your data, channels, and goals are recognized as intended.")
 
-st.title("Review Business- & Marketing Data")
 
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 
@@ -71,15 +71,15 @@ st.session_state.setdefault("picked_meta_ts", "Latest")
 # -----------------------------
 # TABS
 # -----------------------------
-tab_load, tab_biz, tab_mkt = st.tabs(
-    ["Select Data", "Business Data", "Marketing Data"]
+tab_load, tab_biz, tab_mkt, tab_driver = st.tabs(
+    ["Select Data", "Goals Overview", "Marketing Overview", "Metrics Explorer"]
 )
 
 # =============================
 # TAB 0 — DATA & METADATA LOADING
 # =============================
 with tab_load:
-    st.markdown("### Select country and data versions to analyze")
+    st.markdown("### Select country and data to analyze")
     c1, c2, c3, c4 = st.columns([1.2, 1, 1, 0.6])
 
     country = (
@@ -291,11 +291,13 @@ res["PERIOD_LABEL"] = period_label(res["DATE_PERIOD"], RULE)
 
 
 # =============================
-# TAB 1 — BUSINESS OVERVIEW
+# TAB 1 — Goals OVERVIEW
 # =============================
 with tab_biz:
     # Small helper to guarantee a nice label even if metadata is incomplete
-    st.markdown("## KPI Overview")
+    st.markdown("## Goals Overview")
+    st.caption("Review total outcomes and efficiency for all goals over the selected timeframe.")
+    st.markdown(f"Selected timeframe: {TIMEFRAME_LABEL}")
 
     has_prev = not df_prev.empty
 
@@ -316,8 +318,8 @@ with tab_biz:
         target = None
 
     # ----- KPI — Outcomes (TOTALS only) -----
-    st.markdown("### Outcomes (Goals)")
     if goal_cols:
+        # Build KPI list for totals
         kpis = []
         for g in goal_cols:
             cur = df_r[g].sum() if (g in df_r.columns) else np.nan
@@ -338,11 +340,8 @@ with tab_biz:
                     good_when="up",
                 )
             )
-        kpi_grid(kpis, per_row=5)
-        st.markdown("---")
 
-        # ----- KPI — Goal Efficiency -----
-        st.markdown("### Goal Efficiency")
+        # Build KPI list for efficiency
         kpis2 = []
         for g in goal_cols:
             cur_eff = safe_eff(df_r, g)
@@ -351,6 +350,7 @@ with tab_biz:
             if pd.notna(cur_eff) and pd.notna(prev_eff):
                 diff = cur_eff - prev_eff
                 delta_txt = f"{'+' if diff >= 0 else ''}{diff:.2f}"
+
             # ROAS only for GMV explicitly; otherwise <NiceGoal> / <Spend label>
             eff_title = (
                 "ROAS"
@@ -365,13 +365,25 @@ with tab_biz:
                     good_when="up",
                 )
             )
-        kpi_grid(kpis2, per_row=5)
+
+        # Side-by-side layout
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("### Summary")
+            kpi_grid(kpis, per_row=5)
+
+        with col2:
+            st.markdown("### Efficiency")
+            kpi_grid(kpis2, per_row=5)
+
         st.markdown("---")
 
     # -----------------------------
     # Goal vs Spend (bar + line)
     # -----------------------------
-    st.markdown("## Goal vs Spend")
+    st.markdown("## Goal & Efficiency Over Time")
+    st.caption("Select Goal, Timeframe and Aggregation in the sidebar to update the charts.")
+    
     cA, cB = st.columns(2)
 
     with cA:
@@ -429,7 +441,7 @@ with tab_biz:
         fig2e.add_trace(
             go.Scatter(
                 x=eff_t["PERIOD_LABEL"],
-                y=eff_t["EFF"],
+                y=eff_t["EFF"], 
                 name=label_eff,
                 yaxis="y2",
                 mode="lines+markers",
@@ -450,120 +462,17 @@ with tab_biz:
         )
         st.plotly_chart(fig2e, use_container_width=True)
 
-    st.markdown("---")
-
-    # -----------------------------
-    # Explore Any Metric Over Time
-    # -----------------------------
-    st.markdown("## Explore Any Metric Over Time")
-
-    numeric_candidates = df_r.select_dtypes(
-        include=[np.number]
-    ).columns.tolist()
-    metrics = [c for c in numeric_candidates if c != "_TOTAL_SPEND"]
-
-    if not metrics:
-        st.info("No numeric columns available to plot.")
-    else:
-        from collections import Counter
-
-        # Build label list using nice() and disambiguate duplicates by appending the raw col
-        base_labels = [(nice_title(c), c) for c in metrics]
-        counts = Counter(lbl for (lbl, _) in base_labels)
-        labels = []
-        for lbl, col in base_labels:
-            final = lbl if counts[lbl] == 1 else f"{lbl} · {col}"
-            labels.append((final, col))
-
-        labels_sorted = sorted(
-            [l for (l, _) in labels], key=lambda s: s.lower()
-        )
-        label_to_col = {l: c for (l, c) in labels}
-
-        # default to current target if available
-        default_label = (
-            next((l for l, c in label_to_col.items() if c == target), None)
-            or labels_sorted[0]
-        )
-
-        c_sel, c_spend = st.columns([2, 1])
-        picked_label = c_sel.selectbox(
-            "Metric", labels_sorted, index=labels_sorted.index(default_label)
-        )
-        picked_col = label_to_col[picked_label]
-
-        # ensure selected metric is in res; if not, add via same resample rule
-        if picked_col not in res.columns and picked_col in df_r.columns:
-            add = (
-                df_r.set_index(DATE_COL)[[picked_col]]
-                .resample(RULE)
-                .sum(min_count=1)
-                .reset_index()
-                .rename(columns={DATE_COL: "DATE_PERIOD"})
-            )
-            res_plot = res.merge(add, on="DATE_PERIOD", how="left")
-            res_plot["PERIOD_LABEL"] = period_label(
-                res_plot["DATE_PERIOD"], RULE
-            )
-        else:
-            res_plot = res
-
-        want_overlay = c_spend.checkbox(
-            f"Overlay Total {spend_label}", value=True
-        )
-        can_overlay = "_TOTAL_SPEND" in res_plot.columns
-
-        fig_custom = go.Figure()
-        fig_custom.add_bar(
-            x=res_plot["PERIOD_LABEL"],
-            y=res_plot[picked_col],
-            name=nice_title(picked_col),
-        )
-
-        if want_overlay and can_overlay:
-            fig_custom.add_trace(
-                go.Scatter(
-                    x=res_plot["PERIOD_LABEL"],
-                    y=res_plot["_TOTAL_SPEND"],
-                    name=f"Total {spend_label}",
-                    yaxis="y2",
-                    mode="lines+markers",
-                    line=dict(color=RED),
-                )
-            )
-            fig_custom.update_layout(
-                yaxis=dict(title=nice_title(picked_col)),
-                yaxis2=dict(title=spend_label, overlaying="y", side="right"),
-            )
-        else:
-            fig_custom.update_layout(yaxis=dict(title=nice_title(picked_col)))
-
-        fig_custom.update_layout(
-            title=f"{nice_title(picked_col)} Over Time — {TIMEFRAME_LABEL}, {agg_label}",
-            xaxis=dict(title="Date", title_standoff=8),
-            bargap=0.15,
-            hovermode="x unified",
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0
-            ),
-            margin=dict(b=60),
-        )
-        st.plotly_chart(fig_custom, use_container_width=True)
-
-        if want_overlay and not can_overlay:
-            st.caption(
-                f"ℹ️ Overlay disabled: '_TOTAL_SPEND' not available for this selection."
-            )
+  
 
 
 # =============================
 # TAB 2 — MARKETING OVERVIEW
 # =============================
 with tab_mkt:
-    st.subheader(f"Spend & Channels — {TIMEFRAME_LABEL} · {agg_label}")
-
+    st.subheader("Marketing Overview")
+    st.caption(f"Selected timeframe: {TIMEFRAME_LABEL}, Aggregation: {agg_label}")
     # ----- KPI — Outcomes (TOTALS only) -----
-    st.markdown("#### Outcomes (Total)")
+    st.markdown("#### Reach & Traffic")
     cur_imps, d_imps = total_with_prev_local(IMPR_COLS)
     cur_clicks, d_clicks = total_with_prev_local(CLICK_COLS)
     cur_sessions, d_sessions = total_with_prev_local(SESSION_COLS)
@@ -606,7 +515,7 @@ with tab_mkt:
     )
 
     # ----- KPI — Spend (TOTALS + per-platform tiles) -----
-    st.markdown("#### Spend (Total)")
+    st.markdown("#### Spend")
     cur_spend, d_spend = total_with_prev_local(["_TOTAL_SPEND"])
     spend_boxes = [
         dict(
@@ -677,9 +586,18 @@ with tab_mkt:
     st.markdown("---")
 
     # ===== View selector =====
-    st.markdown("#### View")
+    st.subheader("Channel Breakdown")
+    st.caption(f"Selected timeframe: {TIMEFRAME_LABEL}, Aggregation: {agg_label}")
+
     channel_options = ["All channels"] + platforms
-    view_sel = st.selectbox("Channel view", channel_options, index=0)
+    
+    col_select, col_spacer = st.columns([1, 4])
+    with col_select:
+        view_sel = st.selectbox(
+            "Select channel",
+            channel_options,
+            index=0,
+        )
 
     # --- helpers to handle TOTAL columns cleanly ---
     def _is_total_col(col: str, plat: str | None = None) -> bool:
@@ -739,149 +657,155 @@ with tab_mkt:
     long_prev_view = (
         spend_long_filtered(df_prev) if not df_prev.empty else pd.DataFrame()
     )
-
-    # ----- Waterfall — platform (all) OR sub-channel (single) -----
-    st.markdown("#### Change vs Previous — Waterfall")
-    if not long_cur_view.empty:
-        if view_sel == "All channels":
-            cur_grp = long_cur_view.groupby("platform")["spend"].sum()
-            prev_grp = (
-                long_prev_view.groupby("platform")["spend"].sum()
-                if not long_prev_view.empty
-                else pd.Series(dtype=float)
-            )
-            name_series = cur_grp
-            title_suffix = "by Platform"
-        else:
-            sel_platform = view_sel
-            cur_sub = long_cur_view.copy()
-            cur_sub["sub"] = cur_sub["col"].map(
-                lambda c: _sub_label(c, sel_platform)
-            )
-            # exclude any 'Total' bucket that might still slip through
-            cur_sub = cur_sub[cur_sub["sub"].str.upper() != "TOTAL"]
-            cur_grp = cur_sub.groupby("sub")["spend"].sum()
-
-            if not long_prev_view.empty:
-                prev_sub = long_prev_view.copy()
-                prev_sub["sub"] = prev_sub["col"].map(
-                    lambda c: _sub_label(c, sel_platform)
-                )
-                prev_sub = prev_sub[prev_sub["sub"].str.upper() != "TOTAL"]
-                prev_grp = prev_sub.groupby("sub")["spend"].sum()
-            else:
-                prev_grp = pd.Series(dtype=float)
-
-            name_series = cur_grp
-            title_suffix = f"{sel_platform} — by Sub-Channel"
-
-        all_keys = sorted(
-            set(cur_grp.index).union(prev_grp.index),
-            key=lambda x: name_series.get(x, 0.0),
-            reverse=True,
-        )
-
-        steps, total_delta = [], 0.0
-        for k in all_keys:
-            dv = cur_grp.get(k, 0.0) - prev_grp.get(k, 0.0)
-            total_delta += dv
-            steps.append(dict(name=k, measure="relative", y=float(dv)))
-        steps.insert(
-            0,
-            dict(
-                name="Start (Prev Total)",
-                measure="absolute",
-                y=float(prev_grp.sum()),
-            ),
-        )
-        steps.append(
-            dict(
-                name="End (Current Total)",
-                measure="total",
-                y=float(prev_grp.sum() + total_delta),
-            )
-        )
-
-        fig_w = go.Figure(
-            go.Waterfall(
-                name="Delta",
-                orientation="v",
-                measure=[s["measure"] for s in steps],
-                x=[s["name"] for s in steps],
-                y=[s["y"] for s in steps],
-            )
-        )
-        fig_w.update_layout(
-            title=f"Spend Change — Waterfall ({title_suffix})",
-            showlegend=False,
-        )
-        st.plotly_chart(fig_w, use_container_width=True)
-    else:
-        st.info("No spend data for the selected view.")
-    st.markdown("---")
+ 
+     # ===== Spend over time & waterfall side-by-side =====
+    col_left, col_right = st.columns(2)
 
     # ----- Channel Mix (stacked) — platform (all) OR sub-channel (single) -----
-    st.markdown("#### Channel Mix")
-    if not long_cur_view.empty:
-        if view_sel == "All channels":
-            freq_df = (
-                long_cur_view.set_index(DATE_COL)
-                .groupby("platform")["spend"]
-                .resample(RULE)
-                .sum(min_count=1)
-                .reset_index()
-                .rename(columns={DATE_COL: "DATE_PERIOD"})
+    with col_left:
+        if not long_cur_view.empty:
+            if view_sel == "All channels":
+                freq_df = (
+                    long_cur_view.set_index(DATE_COL)
+                    .groupby("platform")["spend"]
+                    .resample(RULE)
+                    .sum(min_count=1)
+                    .reset_index()
+                    .rename(columns={DATE_COL: "DATE_PERIOD"})
+                )
+                freq_df["series"] = freq_df["platform"]
+                chart_title = (
+                    f"{spend_label} by Platform"
+                )
+            else:
+                sel_platform = view_sel
+                sub_df = long_cur_view.copy()
+                sub_df["sub"] = sub_df["col"].map(
+                    lambda c: _sub_label(c, sel_platform)
+                )
+                # exclude TOTAL bucket
+                sub_df = sub_df[sub_df["sub"].str.upper() != "TOTAL"]
+                freq_df = (
+                    sub_df.set_index(DATE_COL)
+                    .groupby("sub")["spend"]
+                    .resample(RULE)
+                    .sum(min_count=1)
+                    .reset_index()
+                    .rename(columns={DATE_COL: "DATE_PERIOD"})
+                )
+                freq_df["series"] = freq_df["sub"]
+                chart_title = (
+                    f"{spend_label} by Sub-Channel ({sel_platform})"
+                )
+
+            freq_df["PERIOD_LABEL"] = period_label(freq_df["DATE_PERIOD"], RULE)
+            order = (
+                freq_df.groupby("series")["spend"]
+                .sum()
+                .sort_values(ascending=False)
+                .index.tolist()
             )
-            freq_df["series"] = freq_df["platform"]
-            chart_title = (
-                f"{spend_label} by Platform — {TIMEFRAME_LABEL}, {agg_label}"
+
+            fig2 = px.bar(
+                freq_df,
+                x="PERIOD_LABEL",
+                y="spend",
+                color="series",
+                category_orders={"series": order},
+                color_discrete_map=PLATFORM_COLORS,  # OK if some series use fallback colors
+                title=chart_title,
             )
+            fig2.update_layout(
+                barmode="stack",
+                xaxis_title="Date",
+                yaxis_title=spend_label,
+                legend=dict(orientation="h"),
+            )
+            st.plotly_chart(fig2, use_container_width=True)
         else:
-            sel_platform = view_sel
-            sub_df = long_cur_view.copy()
-            sub_df["sub"] = sub_df["col"].map(
-                lambda c: _sub_label(c, sel_platform)
-            )
-            # exclude TOTAL bucket
-            sub_df = sub_df[sub_df["sub"].str.upper() != "TOTAL"]
-            freq_df = (
-                sub_df.set_index(DATE_COL)
-                .groupby("sub")["spend"]
-                .resample(RULE)
-                .sum(min_count=1)
-                .reset_index()
-                .rename(columns={DATE_COL: "DATE_PERIOD"})
-            )
-            freq_df["series"] = freq_df["sub"]
-            chart_title = f"{spend_label} by Sub-Channel ({sel_platform}) — {TIMEFRAME_LABEL}, {agg_label}"
+            st.info("No spend data for the selected view.")
 
-        freq_df["PERIOD_LABEL"] = period_label(freq_df["DATE_PERIOD"], RULE)
-        order = (
-            freq_df.groupby("series")["spend"]
-            .sum()
-            .sort_values(ascending=False)
-            .index.tolist()
-        )
+    # ----- Waterfall — platform (all) OR sub-channel (single) -----
+    with col_right:
+        if not long_cur_view.empty:
+            if view_sel == "All channels":
+                cur_grp = long_cur_view.groupby("platform")["spend"].sum()
+                prev_grp = (
+                    long_prev_view.groupby("platform")["spend"].sum()
+                    if not long_prev_view.empty
+                    else pd.Series(dtype=float)
+                )
+                name_series = cur_grp
+                title_suffix = "by Platform"
+            else:
+                sel_platform = view_sel
+                cur_sub = long_cur_view.copy()
+                cur_sub["sub"] = cur_sub["col"].map(
+                    lambda c: _sub_label(c, sel_platform)
+                )
+                # exclude any 'Total' bucket that might still slip through
+                cur_sub = cur_sub[cur_sub["sub"].str.upper() != "TOTAL"]
+                cur_grp = cur_sub.groupby("sub")["spend"].sum()
 
-        fig2 = px.bar(
-            freq_df,
-            x="PERIOD_LABEL",
-            y="spend",
-            color="series",
-            category_orders={"series": order},
-            color_discrete_map=PLATFORM_COLORS,  # OK if some series use fallback colors
-            title=chart_title,
-        )
-        fig2.update_layout(
-            barmode="stack",
-            xaxis_title="Date",
-            yaxis_title=spend_label,
-            legend=dict(orientation="h"),
-        )
-        st.plotly_chart(fig2, use_container_width=True)
-    else:
-        st.info("No spend data for the selected view.")
+                if not long_prev_view.empty:
+                    prev_sub = long_prev_view.copy()
+                    prev_sub["sub"] = prev_sub["col"].map(
+                        lambda c: _sub_label(c, sel_platform)
+                    )
+                    prev_sub = prev_sub[prev_sub["sub"].str.upper() != "TOTAL"]
+                    prev_grp = prev_sub.groupby("sub")["spend"].sum()
+                else:
+                    prev_grp = pd.Series(dtype=float)
+
+                name_series = cur_grp
+                title_suffix = f"{sel_platform} — by Sub-Channel"
+
+            all_keys = sorted(
+                set(cur_grp.index).union(prev_grp.index),
+                key=lambda x: name_series.get(x, 0.0),
+                reverse=True,
+            )
+
+            steps, total_delta = [], 0.0
+            for k in all_keys:
+                dv = cur_grp.get(k, 0.0) - prev_grp.get(k, 0.0)
+                total_delta += dv
+                steps.append(dict(name=k, measure="relative", y=float(dv)))
+            steps.insert(
+                0,
+                dict(
+                    name="Start (Prev Total)",
+                    measure="absolute",
+                    y=float(prev_grp.sum()),
+                ),
+            )
+            steps.append(
+                dict(
+                    name="End (Current Total)",
+                    measure="total",
+                    y=float(prev_grp.sum() + total_delta),
+                )
+            )
+
+            fig_w = go.Figure(
+                go.Waterfall(
+                    name="Delta",
+                    orientation="v",
+                    measure=[s["measure"] for s in steps],
+                    x=[s["name"] for s in steps],
+                    y=[s["y"] for s in steps],
+                )
+            )
+            fig_w.update_layout(
+                title=f"Spend Change ({title_suffix})",
+                showlegend=False,
+            )
+            st.plotly_chart(fig_w, use_container_width=True)
+        else:
+            st.info("No spend data for the selected view.")
+
     st.markdown("---")
+
 
     # ----- Funnels (INDEPENDENT from selector; always per platform) -----
     st.markdown("#### Channel Funnels")
@@ -911,7 +835,7 @@ with tab_mkt:
             cpc = (spend_total / clicks) if clicks > 0 else np.nan
             cps = (spend_total / sessions) if sessions > 0 else np.nan
 
-            col_left, col_right = st.columns([2, 1])
+            col_left, col_div, col_right = st.columns([1, 0.05, 1])
             with col_left:
                 st.markdown(f"**{plat} Funnel**")
                 steps = []
@@ -939,6 +863,8 @@ with tab_mkt:
                     st.plotly_chart(figf, use_container_width=True)
                 else:
                     st.info("No funnel metrics found.")
+            with col_div:
+                st.markdown("<div style='border-left: 1px solid #DDD; height: 100%;'></div>", unsafe_allow_html=True)
             with col_right:
                 tbl = pd.DataFrame(
                     {
@@ -950,8 +876,8 @@ with tab_mkt:
                             "Cost per 1k Impressions",
                             "Cost per Click",
                             "Cost per Session",
-                            "Impression→Click rate",
-                            "Click→Session rate",
+                            "Impression → Click rate",
+                            "Click → Session rate",
                         ],
                         "Value": [
                             fmt_num(spend_total),
@@ -970,3 +896,107 @@ with tab_mkt:
             st.markdown("---")
     else:
         st.info("Platform mapping not available.")
+
+with tab_driver:
+      # -----------------------------
+    # Explore Any Metric Over Time
+    # -----------------------------
+    st.markdown("## Metrics Explorer")
+    st.caption(f"Selected timeframe: {TIMEFRAME_LABEL}, Aggregation level: {agg_label}")
+    numeric_candidates = df_r.select_dtypes(
+        include=[np.number]
+    ).columns.tolist()
+    metrics = [c for c in numeric_candidates if c != "_TOTAL_SPEND"]
+
+    if not metrics:
+        st.info("No numeric columns available to plot.")
+    else:
+        from collections import Counter
+
+        # Build label list using nice() and disambiguate duplicates by appending the raw col
+        base_labels = [(nice_title(c), c) for c in metrics]
+        counts = Counter(lbl for (lbl, _) in base_labels)
+        labels = []
+        for lbl, col in base_labels:
+            final = lbl if counts[lbl] == 1 else f"{lbl} · {col}"
+            labels.append((final, col))
+
+        labels_sorted = sorted(
+            [l for (l, _) in labels], key=lambda s: s.lower()
+        )
+        label_to_col = {l: c for (l, c) in labels}
+
+        # default to current target if available
+        default_label = (
+            next((l for l, c in label_to_col.items() if c == target), None)
+            or labels_sorted[0]
+        )
+
+        c_sel, c_spend = st.columns([2, 1])
+        picked_label = c_sel.selectbox(
+            "Select a metric to explore:", labels_sorted, index=labels_sorted.index(default_label)
+        )
+        picked_col = label_to_col[picked_label]
+
+        # ensure selected metric is in res; if not, add via same resample rule
+        if picked_col not in res.columns and picked_col in df_r.columns:
+            add = (
+                df_r.set_index(DATE_COL)[[picked_col]]
+                .resample(RULE)
+                .sum(min_count=1)
+                .reset_index()
+                .rename(columns={DATE_COL: "DATE_PERIOD"})
+            )
+            res_plot = res.merge(add, on="DATE_PERIOD", how="left")
+            res_plot["PERIOD_LABEL"] = period_label(
+                res_plot["DATE_PERIOD"], RULE
+            )
+        else:
+            res_plot = res
+
+        want_overlay = c_spend.checkbox(
+            f"Overlay Total {spend_label}", value=True
+        )
+        can_overlay = "_TOTAL_SPEND" in res_plot.columns
+
+        fig_custom = go.Figure()
+        fig_custom.add_bar(
+            x=res_plot["PERIOD_LABEL"],
+            y=res_plot[picked_col],
+            name=nice_title(picked_col),
+        )
+
+        if want_overlay and can_overlay:
+            fig_custom.add_trace(
+                go.Scatter(
+                    x=res_plot["PERIOD_LABEL"],
+                    y=res_plot["_TOTAL_SPEND"],
+                    name=f"Total {spend_label}",
+                    yaxis="y2",
+                    mode="lines+markers",
+                    line=dict(color=RED),
+                )
+            )
+            fig_custom.update_layout(
+                yaxis=dict(title=nice_title(picked_col)),
+                yaxis2=dict(title=spend_label, overlaying="y", side="right"),
+            )
+        else:
+            fig_custom.update_layout(yaxis=dict(title=nice_title(picked_col)))
+
+        fig_custom.update_layout(
+            title=f"{nice_title(picked_col)} Over Time",
+            xaxis=dict(title="Date", title_standoff=8),
+            bargap=0.15,
+            hovermode="x unified",
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0
+            ),
+            margin=dict(b=60),
+        )
+        st.plotly_chart(fig_custom, use_container_width=True)
+
+        if want_overlay and not can_overlay:
+            st.caption(
+                f"ℹ️ Overlay disabled: '_TOTAL_SPEND' not available for this selection."
+            )
