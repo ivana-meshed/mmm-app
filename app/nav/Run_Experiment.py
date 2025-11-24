@@ -2136,7 +2136,7 @@ with tab_single:
 
                             from app_shared import append_row_to_job_history
 
-                            append_row_to_job_history(
+                            result = append_row_to_job_history(
                                 {
                                     "job_id": gcs_prefix,
                                     "state": "RUNNING",  # Initial state
@@ -2173,8 +2173,19 @@ with tab_single:
                                 },
                                 gcs_bucket,
                             )
+                            if result:
+                                st.success(
+                                    f"✅ Job added to history: {gcs_prefix}"
+                                )
+                            else:
+                                st.error(
+                                    f"❌ Failed to add job to history (returned False)"
+                                )
                         except Exception as e:
-                            st.warning(f"Could not add job to history: {e}")
+                            st.error(f"❌ Could not add job to history: {e}")
+                            import traceback
+
+                            st.code(traceback.format_exc())
 
         finally:
             if timings:

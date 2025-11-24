@@ -1145,18 +1145,34 @@ def save_job_history_to_gcs(df, bucket_name: str):
 
     from google.cloud import storage
 
-    df = normalize_job_history_df(df)
-    b = io.BytesIO()
-    df.to_csv(b, index=False)
-    b.seek(0)
-    client = storage.Client()
-    blob = client.bucket(bucket_name).blob("robyn-jobs/job_history.csv")
-    blob.upload_from_file(b, content_type="text/csv")
-    return True
+    logger.info(
+        f"[JOB_HISTORY] Saving job_history to GCS bucket: {bucket_name}"
+    )
+    logger.info(f"[JOB_HISTORY] DataFrame shape: {df.shape}")
+
+    try:
+        df = normalize_job_history_df(df)
+        b = io.BytesIO()
+        df.to_csv(b, index=False)
+        b.seek(0)
+        client = storage.Client()
+        blob = client.bucket(bucket_name).blob("robyn-jobs/job_history.csv")
+        blob.upload_from_file(b, content_type="text/csv")
+        logger.info(
+            f"[JOB_HISTORY] Successfully saved to gs://{bucket_name}/robyn-jobs/job_history.csv"
+        )
+        return True
+    except Exception as e:
+        logger.error(f"[JOB_HISTORY] Failed to save to GCS: {e}")
+        raise
 
 
 def append_row_to_job_history(row_dict: dict, bucket_name: str):
     import pandas as pd
+
+    logger.info(
+        f"[JOB_HISTORY] Attempting to add/update job: {row_dict.get('job_id')}"
+    )
 
     # Ensure all expected keys exist
     for c in JOB_HISTORY_COLUMNS:
@@ -1170,24 +1186,45 @@ def append_row_to_job_history(row_dict: dict, bucket_name: str):
 
     # New row (normalized)
     df_new = normalize_job_history_df(pd.DataFrame([row_dict]))
+    logger.info(
+        f"[JOB_HISTORY] New row created with job_id: {df_new['job_id'].iloc[0] if not df_new.empty else 'EMPTY'}"
+    )
 
     # Existing job_history (may be empty)
-    df_old = read_job_history_from_gcs(bucket_name)
+    try:
+        df_old = read_job_history_from_gcs(bucket_name)
+        logger.info(
+            f"[JOB_HISTORY] Loaded existing history with {len(df_old)} rows"
+        )
+    except Exception as e:
+        logger.error(f"[JOB_HISTORY] Failed to read existing history: {e}")
+        df_old = _empty_job_history_df()
+
     if df_old is None or df_old.empty:
-        return save_job_history_to_gcs(df_new, bucket_name)
+        logger.info(f"[JOB_HISTORY] No existing history, creating new file")
+        result = save_job_history_to_gcs(df_new, bucket_name)
+        logger.info(f"[JOB_HISTORY] Save result: {result}")
+        return result
 
     # Merge by job_id: fill missing values in existing row with new values (combine_first)
     df_old = df_old.set_index("job_id")
     df_new = df_new.set_index("job_id")
     for jid, s in df_new.iterrows():
         if jid in df_old.index:
+            logger.info(f"[JOB_HISTORY] Updating existing job: {jid}")
             df_old.loc[jid] = df_old.loc[jid].combine_first(s)  # type: ignore
         else:
+            logger.info(f"[JOB_HISTORY] Adding new job: {jid}")
             df_old.loc[jid] = s  # type: ignore
 
     df_merged = df_old.reset_index()
     df_merged = normalize_job_history_df(df_merged)
-    return save_job_history_to_gcs(df_merged, bucket_name)
+    logger.info(
+        f"[JOB_HISTORY] Saving merged history with {len(df_merged)} rows"
+    )
+    result = save_job_history_to_gcs(df_merged, bucket_name)
+    logger.info(f"[JOB_HISTORY] Save result: {result}")
+    return result
 
 
 def read_status_json(bucket_name: str, prefix: str) -> Optional[dict]:
