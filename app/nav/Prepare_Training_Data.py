@@ -431,10 +431,10 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     channels_map = meta.get("channels", {}) or {}
     
     # Other columns are those in data_types but NOT in channels
-    # (columns that have data types defined but no channel mapping)
+    # Filter to only those present in the dataframe for display
     other_cols = [
-        c for c in prof_df.columns 
-        if c in data_types_map and c not in channels_map
+        c for c in data_types_map.keys()
+        if c not in channels_map and c in prof_df.columns
     ]
 
     categories = [
