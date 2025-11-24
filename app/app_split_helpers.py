@@ -406,12 +406,120 @@ def _empty_job_history_df() -> pd.DataFrame:
 
 
 @st.fragment
+def update_running_jobs_in_history(bucket_name: str) -> int:
+    """
+    Check all RUNNING jobs in job_history and update their status if they've completed.
+    Returns the number of jobs updated.
+    """
+    try:
+        df_history = read_job_history_from_gcs(bucket_name)
+        if df_history.empty:
+            return 0
+
+        # Find all RUNNING jobs
+        running_mask = df_history["state"] == "RUNNING"
+        if not running_mask.any():
+            return 0
+
+        running_jobs = df_history[running_mask]
+        logger.info(
+            f"[JOB_HISTORY] Found {len(running_jobs)} RUNNING jobs to check"
+        )
+
+        job_manager = get_job_manager()
+        updated_count = 0
+
+        for idx, row in running_jobs.iterrows():
+            exec_name = row.get("execution_name")
+            if not exec_name or pd.isna(exec_name):
+                continue
+
+            try:
+                # Check actual status from Cloud Run
+                status_info = job_manager.get_execution_status(str(exec_name))
+                actual_status = (
+                    status_info.get("overall_status") or ""
+                ).upper()
+
+                # If job has completed, update it
+                if actual_status in (
+                    "SUCCEEDED",
+                    "FAILED",
+                    "CANCELLED",
+                    "COMPLETED",
+                    "ERROR",
+                ):
+                    final_state = (
+                        "SUCCEEDED"
+                        if actual_status in ("SUCCEEDED", "COMPLETED")
+                        else actual_status
+                    )
+                    df_history.loc[idx, "state"] = final_state
+                    df_history.loc[idx, "message"] = (
+                        status_info.get("error", "") or final_state
+                    )
+                    df_history.loc[idx, "end_time"] = (
+                        datetime.utcnow().isoformat(timespec="seconds") + "Z"
+                    )
+
+                    # Calculate duration
+                    start_time_str = row.get("start_time")
+                    if start_time_str and not pd.isna(start_time_str):
+                        try:
+                            from datetime import datetime as dt
+
+                            start_time = dt.fromisoformat(
+                                str(start_time_str).replace("Z", "+00:00")
+                            )
+                            end_time = dt.utcnow()
+                            duration = (
+                                end_time - start_time
+                            ).total_seconds() / 60.0
+                            df_history.loc[idx, "duration_minutes"] = round(
+                                duration, 2
+                            )
+                        except Exception:
+                            pass
+
+                    updated_count += 1
+                    logger.info(
+                        f"[JOB_HISTORY] Updated job {row.get('job_id')} from RUNNING to {final_state}"
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    f"[JOB_HISTORY] Failed to check status for {row.get('job_id')}: {e}"
+                )
+                continue
+
+        # Save updated history if any changes were made
+        if updated_count > 0:
+            save_job_history_to_gcs(df_history, bucket_name)
+            logger.info(
+                f"[JOB_HISTORY] Updated {updated_count} job(s) in history"
+            )
+
+        return updated_count
+
+    except Exception as e:
+        logger.error(f"[JOB_HISTORY] Failed to update running jobs: {e}")
+        return 0
+
+
 def render_jobs_job_history(key_prefix: str = "single") -> None:
     with st.expander("📚 Job History (from GCS)", expanded=False):
         # Refresh control first
         if st.button(
             "🔁 Refresh job_history", key=f"refresh_job_history_{key_prefix}"
         ):
+            # Update any RUNNING jobs that have actually completed
+            with st.spinner("Checking status of running jobs..."):
+                updated = update_running_jobs_in_history(
+                    st.session_state.get("gcs_bucket", GCS_BUCKET)
+                )
+                if updated > 0:
+                    st.success(f"✅ Updated {updated} completed job(s)")
+
             # Clear any cached data and bump nonce
             st.session_state["job_history_nonce"] = (
                 st.session_state.get("job_history_nonce", 0) + 1
@@ -430,7 +538,7 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
         df_job_history = df_job_history.reindex(columns=JOB_HISTORY_COLUMNS)
 
         st.caption(
-            "JOB_HISTORY entries are automatically updated when jobs complete."
+            "JOB_HISTORY entries are automatically updated when you click 'Refresh job_history'."
         )
         st.dataframe(
             df_job_history,
