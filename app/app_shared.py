@@ -25,7 +25,10 @@ from cryptography.hazmat.primitives import serialization
 from data_processor import DataProcessor
 from google.api_core.exceptions import PreconditionFailed
 from google.cloud import run_v2, secretmanager, storage
-from utils.snowflake_cache import get_cached_query_result, init_cache as init_snowflake_cache
+from utils.snowflake_cache import (
+    get_cached_query_result,
+    init_cache as init_snowflake_cache,
+)
 
 # Environment constants
 PROJECT_ID = os.getenv("PROJECT_ID")
@@ -218,6 +221,67 @@ def _safe_tick_once(
                     message = entry["message"]
                     changed = True
 
+                    # Update job_history when job completes
+                    try:
+                        # Find the matching job in job_history and update its status
+                        df_history = read_job_history_from_gcs(bucket_name)
+                        job_id = entry.get("gcs_prefix") or entry.get("job_id")
+
+                        if job_id and not df_history.empty:
+                            # Find the row with matching job_id or gcs_prefix
+                            mask = (df_history["job_id"] == job_id) | (
+                                df_history["gcs_prefix"] == job_id
+                            )
+                            if mask.any():
+                                # Update the existing row
+                                df_history.loc[mask, "state"] = final_state
+                                df_history.loc[mask, "message"] = message
+                                df_history.loc[mask, "end_time"] = (
+                                    datetime.utcnow().isoformat(
+                                        timespec="seconds"
+                                    )
+                                    + "Z"
+                                )
+
+                                # Calculate duration if start_time exists
+                                if "start_time" in df_history.columns:
+                                    for idx in df_history[mask].index:
+                                        start_time_str = df_history.loc[
+                                            idx, "start_time"
+                                        ]
+                                        if (
+                                            start_time_str
+                                            and str(start_time_str).strip()
+                                        ):
+                                            try:
+                                                from datetime import (
+                                                    datetime as dt,
+                                                )
+
+                                                start_time = dt.fromisoformat(
+                                                    str(start_time_str).replace(
+                                                        "Z", "+00:00"
+                                                    )
+                                                )
+                                                end_time = dt.utcnow()
+                                                duration = (
+                                                    end_time - start_time
+                                                ).total_seconds() / 60.0
+                                                df_history.loc[
+                                                    idx, "duration_minutes"
+                                                ] = round(duration, 2)
+                                            except Exception:
+                                                pass
+
+                                save_job_history_to_gcs(df_history, bucket_name)
+                                logger.info(
+                                    f"[QUEUE] Updated job_history for job {job_id} with status {final_state}"
+                                )
+                    except Exception as e:
+                        logger.warning(
+                            f"[QUEUE] Failed to update job_history for completed job: {e}"
+                        )
+
                     # Enhanced logging for final states
                     if final_state in ("FAILED", "ERROR", "CANCELLED"):
                         logger.error(
@@ -314,6 +378,55 @@ def _safe_tick_once(
             logger.info(f"[QUEUE] Successfully launched job {entry.get('id')}")
             logger.info(f"[QUEUE] Execution: {entry['execution_name']}")
             logger.info(f"[QUEUE] GCS prefix: {entry['gcs_prefix']}")
+
+            # Add job to job_history when it starts
+            try:
+                params = entry.get("params", {})
+                append_row_to_job_history(
+                    {
+                        "job_id": entry.get("gcs_prefix"),
+                        "state": "RUNNING",
+                        "country": params.get("country"),
+                        "revision": params.get("revision"),
+                        "date_input": params.get("date_input"),
+                        "iterations": params.get("iterations"),
+                        "trials": params.get("trials"),
+                        "train_size": params.get("train_size"),
+                        "paid_media_spends": params.get("paid_media_spends"),
+                        "paid_media_vars": params.get("paid_media_vars"),
+                        "context_vars": params.get("context_vars"),
+                        "factor_vars": params.get("factor_vars"),
+                        "organic_vars": params.get("organic_vars"),
+                        "gcs_bucket": params.get("gcs_bucket", bucket_name),
+                        "table": params.get("table", ""),
+                        "query": params.get("query", ""),
+                        "dep_var": params.get("dep_var"),
+                        "date_var": params.get("date_var"),
+                        "adstock": params.get("adstock"),
+                        "start_time": datetime.utcnow().isoformat(
+                            timespec="seconds"
+                        )
+                        + "Z",
+                        "end_time": None,
+                        "duration_minutes": None,
+                        "gcs_prefix": entry.get("gcs_prefix"),
+                        "bucket": params.get("gcs_bucket", bucket_name),
+                        "exec_name": (
+                            entry["execution_name"].split("/")[-1]
+                            if entry.get("execution_name")
+                            else ""
+                        ),
+                        "execution_name": entry.get("execution_name"),
+                        "message": "Job launched from queue",
+                    },
+                    bucket_name,
+                )
+                logger.info(
+                    f"[QUEUE] Added job {entry.get('gcs_prefix')} to job_history"
+                )
+            except Exception as e:
+                logger.warning(f"[QUEUE] Failed to add job to job_history: {e}")
+
         except Exception as e:
             entry["status"] = "ERROR"
             entry["message"] = f"launch failed: {e}"
@@ -943,19 +1056,20 @@ def keepalive_ping(conn):
 def run_sql(sql: str, use_cache: bool = True) -> pd.DataFrame:
     """
     Execute a SQL query against Snowflake with optional caching.
-    
+
     Args:
         sql: SQL query to execute
         use_cache: Whether to use query result caching (default: True)
                   Set to False for queries that must be fresh (e.g., writes)
-    
+
     Returns:
         DataFrame with query results
-        
+
     Note:
         Caching reduces Snowflake compute costs by ~70% with typical usage patterns.
         Cache TTL: 1 hour in-memory, 24 hours in GCS.
     """
+
     def _execute_query(query: str) -> pd.DataFrame:
         """Internal function to execute query without cache."""
         conn = ensure_sf_conn()
@@ -968,7 +1082,7 @@ def run_sql(sql: str, use_cache: bool = True) -> pd.DataFrame:
                 cur.close()
             except Exception:
                 pass
-    
+
     if use_cache:
         return get_cached_query_result(sql, _execute_query)
     else:
@@ -1031,18 +1145,34 @@ def save_job_history_to_gcs(df, bucket_name: str):
 
     from google.cloud import storage
 
-    df = normalize_job_history_df(df)
-    b = io.BytesIO()
-    df.to_csv(b, index=False)
-    b.seek(0)
-    client = storage.Client()
-    blob = client.bucket(bucket_name).blob("robyn-jobs/job_history.csv")
-    blob.upload_from_file(b, content_type="text/csv")
-    return True
+    logger.info(
+        f"[JOB_HISTORY] Saving job_history to GCS bucket: {bucket_name}"
+    )
+    logger.info(f"[JOB_HISTORY] DataFrame shape: {df.shape}")
+
+    try:
+        df = normalize_job_history_df(df)
+        b = io.BytesIO()
+        df.to_csv(b, index=False)
+        b.seek(0)
+        client = storage.Client()
+        blob = client.bucket(bucket_name).blob("robyn-jobs/job_history.csv")
+        blob.upload_from_file(b, content_type="text/csv")
+        logger.info(
+            f"[JOB_HISTORY] Successfully saved to gs://{bucket_name}/robyn-jobs/job_history.csv"
+        )
+        return True
+    except Exception as e:
+        logger.error(f"[JOB_HISTORY] Failed to save to GCS: {e}")
+        raise
 
 
 def append_row_to_job_history(row_dict: dict, bucket_name: str):
     import pandas as pd
+
+    logger.info(
+        f"[JOB_HISTORY] Attempting to add/update job: {row_dict.get('job_id')}"
+    )
 
     # Ensure all expected keys exist
     for c in JOB_HISTORY_COLUMNS:
@@ -1056,24 +1186,45 @@ def append_row_to_job_history(row_dict: dict, bucket_name: str):
 
     # New row (normalized)
     df_new = normalize_job_history_df(pd.DataFrame([row_dict]))
+    logger.info(
+        f"[JOB_HISTORY] New row created with job_id: {df_new['job_id'].iloc[0] if not df_new.empty else 'EMPTY'}"
+    )
 
     # Existing job_history (may be empty)
-    df_old = read_job_history_from_gcs(bucket_name)
+    try:
+        df_old = read_job_history_from_gcs(bucket_name)
+        logger.info(
+            f"[JOB_HISTORY] Loaded existing history with {len(df_old)} rows"
+        )
+    except Exception as e:
+        logger.error(f"[JOB_HISTORY] Failed to read existing history: {e}")
+        df_old = _empty_job_history_df()
+
     if df_old is None or df_old.empty:
-        return save_job_history_to_gcs(df_new, bucket_name)
+        logger.info(f"[JOB_HISTORY] No existing history, creating new file")
+        result = save_job_history_to_gcs(df_new, bucket_name)
+        logger.info(f"[JOB_HISTORY] Save result: {result}")
+        return result
 
     # Merge by job_id: fill missing values in existing row with new values (combine_first)
     df_old = df_old.set_index("job_id")
     df_new = df_new.set_index("job_id")
     for jid, s in df_new.iterrows():
         if jid in df_old.index:
+            logger.info(f"[JOB_HISTORY] Updating existing job: {jid}")
             df_old.loc[jid] = df_old.loc[jid].combine_first(s)  # type: ignore
         else:
+            logger.info(f"[JOB_HISTORY] Adding new job: {jid}")
             df_old.loc[jid] = s  # type: ignore
 
     df_merged = df_old.reset_index()
     df_merged = normalize_job_history_df(df_merged)
-    return save_job_history_to_gcs(df_merged, bucket_name)
+    logger.info(
+        f"[JOB_HISTORY] Saving merged history with {len(df_merged)} rows"
+    )
+    result = save_job_history_to_gcs(df_merged, bucket_name)
+    logger.info(f"[JOB_HISTORY] Save result: {result}")
+    return result
 
 
 def read_status_json(bucket_name: str, prefix: str) -> Optional[dict]:
