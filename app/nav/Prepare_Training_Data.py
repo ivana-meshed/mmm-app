@@ -8,11 +8,8 @@ This page guides users through preparing training data in 4 steps:
 4. Select strongest drivers and reduce noise
 """
 
-import io
-import json
 import os
 import tempfile
-import warnings
 from datetime import datetime, timezone
 
 import numpy as np
@@ -42,7 +39,6 @@ from app_shared import (
     upload_to_gcs,
     validate_against_metadata,
 )
-from google.cloud import storage
 from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
@@ -786,7 +782,7 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                     # Calculate NMAE (Normalized Mean Absolute Error)
                     mae = mean_absolute_error(y, y_pred)
                     y_range = y.max() - y.min() if y.max() != y.min() else 1.0
-                    nmae = mae / y_range if y_range > 0 else np.nan
+                    nmae = mae / y_range
                     
                     # Calculate Spearman's rho
                     spearman_rho, _ = stats.spearmanr(
@@ -882,7 +878,7 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                         # Calculate NMAE
                         mae = mean_absolute_error(y, y_pred)
                         y_range = y.max() - y.min() if y.max() != y.min() else 1.0
-                        nmae = mae / y_range if y_range > 0 else np.nan
+                        nmae = mae / y_range
                         
                         # Calculate Spearman's rho
                         spearman_rho, _ = stats.spearmanr(
