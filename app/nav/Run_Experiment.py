@@ -1165,6 +1165,40 @@ with tab_single:
             key=f"organic_vars_{config_timestamp}",
         )
 
+        # Validate selected variables against loaded data
+        # Check if any selected variables contain _CUSTOM and are not in preview_df
+        preview_df = st.session_state.get("preview_df")
+        if preview_df is not None:
+            preview_columns = set(preview_df.columns)
+            all_selected_vars = (
+                paid_media_spends_list
+                + paid_media_vars_list
+                + context_vars_list
+                + factor_vars_list
+                + organic_vars_list
+            )
+            missing_custom_vars = [
+                v
+                for v in all_selected_vars
+                if "_CUSTOM" in v and v not in preview_columns
+            ]
+
+            if missing_custom_vars:
+                st.warning(
+                    f"⚠️ **Warning:** {len(missing_custom_vars)} custom variable(s) selected but not found in loaded data: "
+                    f"{', '.join(missing_custom_vars[:5])}"
+                    + (
+                        f" and {len(missing_custom_vars) - 5} more..."
+                        if len(missing_custom_vars) > 5
+                        else ""
+                    )
+                )
+                st.info(
+                    "💡 **To fix this:** Go to the 'Map Data' page, load your data, "
+                    "apply mapping changes to create custom variables, "
+                    "then click 'Save dataset & metadata to GCS' (this now saves both automatically)."
+                )
+
         # Custom hyperparameters per variable (when Custom preset is selected)
         if hyperparameter_preset == "Custom":
             st.markdown("---")
@@ -2078,6 +2112,8 @@ with tab_single:
                             "country": country,
                             "gcs_prefix": gcs_prefix,
                             "gcs_bucket": gcs_bucket,
+                            "iterations": int(iterations),
+                            "trials": int(trials),
                         }
                         st.session_state.job_executions.append(exec_info)
                         st.success("🎉 Training job launched!")
@@ -2100,7 +2136,7 @@ with tab_single:
 
                             from app_shared import append_row_to_job_history
 
-                            append_row_to_job_history(
+                            result = append_row_to_job_history(
                                 {
                                     "job_id": gcs_prefix,
                                     "state": "RUNNING",  # Initial state
@@ -2137,8 +2173,19 @@ with tab_single:
                                 },
                                 gcs_bucket,
                             )
+                            if result:
+                                st.success(
+                                    f"✅ Job added to history: {gcs_prefix}"
+                                )
+                            else:
+                                st.error(
+                                    f"❌ Failed to add job to history (returned False)"
+                                )
                         except Exception as e:
-                            st.warning(f"Could not add job to history: {e}")
+                            st.error(f"❌ Could not add job to history: {e}")
+                            import traceback
+
+                            st.code(traceback.format_exc())
 
         finally:
             if timings:

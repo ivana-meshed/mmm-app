@@ -406,16 +406,208 @@ def _empty_job_history_df() -> pd.DataFrame:
 
 
 @st.fragment
+def update_running_jobs_in_history(bucket_name: str) -> int:
+    """
+    Check all RUNNING jobs in job_history and update their status if they've completed.
+    Gets end_time and duration from timings.csv on GCS.
+    Returns the number of jobs updated.
+    """
+    try:
+        df_history = read_job_history_from_gcs(bucket_name)
+        if df_history.empty:
+            return 0
+
+        # Find all RUNNING jobs
+        running_mask = df_history["state"] == "RUNNING"
+        if not running_mask.any():
+            return 0
+
+        running_jobs = df_history[running_mask]
+        logger.info(
+            f"[JOB_HISTORY] Found {len(running_jobs)} RUNNING jobs to check"
+        )
+
+        job_manager = get_job_manager()
+        updated_count = 0
+
+        for idx, row in running_jobs.iterrows():
+            exec_name = row.get("execution_name")
+            if not exec_name or pd.isna(exec_name):
+                continue
+
+            try:
+                # Check actual status from Cloud Run
+                status_info = job_manager.get_execution_status(str(exec_name))
+                actual_status = (
+                    status_info.get("overall_status") or ""
+                ).upper()
+
+                # If job has completed, update it
+                if actual_status in (
+                    "SUCCEEDED",
+                    "FAILED",
+                    "CANCELLED",
+                    "COMPLETED",
+                    "ERROR",
+                ):
+                    final_state = (
+                        "SUCCEEDED"
+                        if actual_status in ("SUCCEEDED", "COMPLETED")
+                        else actual_status
+                    )
+                    df_history.loc[idx, "state"] = final_state
+                    df_history.loc[idx, "message"] = (
+                        status_info.get("error", "") or final_state
+                    )
+
+                    # Try to get training time from timings.csv on GCS
+                    gcs_prefix = row.get("gcs_prefix")
+                    if gcs_prefix and not pd.isna(gcs_prefix):
+                        try:
+                            client = storage.Client()
+                            timings_blob = client.bucket(bucket_name).blob(
+                                f"{gcs_prefix}/timings.csv"
+                            )
+                            if timings_blob.exists():
+                                import io
+
+                                timings_csv = timings_blob.download_as_bytes()
+                                df_timings = pd.read_csv(
+                                    io.BytesIO(timings_csv)
+                                )
+
+                                # Find the row with "R training (robyn_run)" and extract training_time
+                                if (
+                                    not df_timings.empty
+                                    and len(df_timings.columns) >= 2
+                                ):
+                                    # Look for the R training row
+                                    robyn_mask = (
+                                        df_timings.iloc[:, 0]
+                                        .astype(str)
+                                        .str.contains(
+                                            "R training.*robyn_run",
+                                            case=False,
+                                            na=False,
+                                            regex=True,
+                                        )
+                                    )
+                                    if robyn_mask.any():
+                                        robyn_row = df_timings[robyn_mask].iloc[
+                                            0
+                                        ]
+                                        # Second column should be the training time
+                                        training_time_sec = float(
+                                            robyn_row.iloc[1]
+                                        )
+
+                                        # Calculate duration in minutes
+                                        duration_minutes = round(
+                                            training_time_sec / 60.0, 2
+                                        )
+                                        df_history.loc[
+                                            idx, "duration_minutes"
+                                        ] = duration_minutes
+
+                                        # Calculate end_time from start_time + training_time
+                                        start_time_str = row.get("start_time")
+                                        if start_time_str and not pd.isna(
+                                            start_time_str
+                                        ):
+                                            try:
+                                                from datetime import (
+                                                    datetime as dt,
+                                                    timedelta,
+                                                )
+
+                                                start_time = dt.fromisoformat(
+                                                    str(start_time_str).replace(
+                                                        "Z", "+00:00"
+                                                    )
+                                                )
+                                                end_time = start_time + timedelta(
+                                                    seconds=training_time_sec
+                                                )
+                                                df_history.loc[
+                                                    idx, "end_time"
+                                                ] = end_time.isoformat(
+                                                    timespec="seconds"
+                                                ).replace(
+                                                    "+00:00", "Z"
+                                                )
+                                                logger.info(
+                                                    f"[JOB_HISTORY] Got training_time={training_time_sec}s ({duration_minutes}m) from timings.csv for {gcs_prefix}"
+                                                )
+                                            except Exception as e:
+                                                logger.warning(
+                                                    f"[JOB_HISTORY] Could not calculate end_time for {gcs_prefix}: {e}"
+                                                )
+                                        else:
+                                            logger.warning(
+                                                f"[JOB_HISTORY] No start_time available for {gcs_prefix}"
+                                            )
+                                    else:
+                                        logger.warning(
+                                            f"[JOB_HISTORY] Could not find 'R training (robyn_run)' row in timings.csv for {gcs_prefix}"
+                                        )
+                                else:
+                                    logger.warning(
+                                        f"[JOB_HISTORY] timings.csv is empty or has insufficient columns for {gcs_prefix}"
+                                    )
+                        except Exception as e:
+                            logger.warning(
+                                f"[JOB_HISTORY] Could not read timings.csv for {gcs_prefix}: {e}"
+                            )
+                    else:
+                        logger.warning(
+                            f"[JOB_HISTORY] No gcs_prefix available for job {row.get('job_id')}"
+                        )
+
+                    updated_count += 1
+                    logger.info(
+                        f"[JOB_HISTORY] Updated job {row.get('job_id')} from RUNNING to {final_state}"
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    f"[JOB_HISTORY] Failed to check status for {row.get('job_id')}: {e}"
+                )
+                continue
+
+        # Save updated history if any changes were made
+        if updated_count > 0:
+            save_job_history_to_gcs(df_history, bucket_name)
+            logger.info(
+                f"[JOB_HISTORY] Updated {updated_count} job(s) in history"
+            )
+
+        return updated_count
+
+    except Exception as e:
+        logger.error(f"[JOB_HISTORY] Failed to update running jobs: {e}")
+        return 0
+
+
+@st.fragment
 def render_jobs_job_history(key_prefix: str = "single") -> None:
     with st.expander("📚 Job History (from GCS)", expanded=False):
-        # Refresh control first (button triggers fragment rerun only)
+        # Refresh control first
         if st.button(
             "🔁 Refresh job_history", key=f"refresh_job_history_{key_prefix}"
         ):
-            # bump a nonce so the dataframe widget key changes and re-renders
+            # Update any RUNNING jobs that have actually completed
+            with st.spinner("Checking status of running jobs..."):
+                updated = update_running_jobs_in_history(
+                    st.session_state.get("gcs_bucket", GCS_BUCKET)
+                )
+                if updated > 0:
+                    st.success(f"✅ Updated {updated} completed job(s)")
+
+            # Clear any cached data and bump nonce
             st.session_state["job_history_nonce"] = (
                 st.session_state.get("job_history_nonce", 0) + 1
             )
+            # Use fragment rerun to avoid full page refresh
             st.rerun(scope="fragment")
 
         try:
@@ -429,7 +621,7 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
         df_job_history = df_job_history.reindex(columns=JOB_HISTORY_COLUMNS)
 
         st.caption(
-            "JOB_HISTORY entries are view-only and auto-updated when jobs finish."
+            "JOB_HISTORY entries are automatically updated when you click 'Refresh job_history'."
         )
         st.dataframe(
             df_job_history,
@@ -443,10 +635,21 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     """Status UI showing all currently running jobs as a table."""
     st.subheader("📊 Job Status Monitor")
 
+    # Refresh button - force a reload of queue and check job statuses
+    if st.button("🔄 Refresh Status", key=f"refresh_status_table_{key_prefix}"):
+        # Refresh queue from GCS to get latest status
+        maybe_refresh_queue_from_gcs(force=True)
+        # Clear cached timestamp to force re-check of single run jobs
+        st.session_state["status_refresh_timestamp"] = (
+            datetime.utcnow().timestamp()
+        )
+        st.rerun()
+
     # Collect all running jobs from two sources:
     # 1. Queue jobs (RUNNING/LAUNCHING status)
-    # 2. Single run jobs from session state
+    # 2. Single run jobs from session state (check actual status)
     all_running_jobs = []
+    job_manager = get_job_manager()
 
     # Add queue jobs
     queue = st.session_state.get("job_queue", [])
@@ -468,27 +671,66 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                 }
             )
 
-    # Add single run jobs from session state
-    for exec_info in st.session_state.get("job_executions", []):
+    # Add single run jobs from session state - check their actual status
+    jobs_to_remove = []
+    for idx, exec_info in enumerate(st.session_state.get("job_executions", [])):
         exec_name = exec_info.get("execution_name", "")
         if exec_name:
-            all_running_jobs.append(
-                {
-                    "Source": "Single",
-                    "Job ID": f"single-{exec_info.get('timestamp', '?')}",
-                    "Status": "RUNNING",
-                    "Country": exec_info.get("country", "N/A"),
-                    "Revision": exec_info.get("revision", "N/A"),
-                    "Iterations": "N/A",
-                    "Trials": "N/A",
-                    "GCS Prefix": exec_info.get("gcs_prefix", ""),
-                    "Execution Details": exec_name,
-                }
-            )
+            # Check actual execution status
+            try:
+                status_info = job_manager.get_execution_status(exec_name)
+                actual_status = (
+                    status_info.get("overall_status") or "RUNNING"
+                ).upper()
 
-    # Refresh button
-    if st.button("🔄 Refresh Status", key=f"refresh_status_table_{key_prefix}"):
-        st.rerun()
+                # If job is complete, mark it for removal from session state
+                if actual_status in (
+                    "SUCCEEDED",
+                    "FAILED",
+                    "CANCELLED",
+                    "COMPLETED",
+                    "ERROR",
+                ):
+                    jobs_to_remove.append(idx)
+                    # Don't add to running jobs list
+                    continue
+
+                # Job is still running, add to list
+                all_running_jobs.append(
+                    {
+                        "Source": "Single",
+                        "Job ID": f"single-{exec_info.get('timestamp', '?')}",
+                        "Status": actual_status,
+                        "Country": exec_info.get("country", "N/A"),
+                        "Revision": exec_info.get("revision", "N/A"),
+                        "Iterations": str(exec_info.get("iterations", "N/A")),
+                        "Trials": str(exec_info.get("trials", "N/A")),
+                        "GCS Prefix": exec_info.get("gcs_prefix", ""),
+                        "Execution Details": exec_name,
+                    }
+                )
+            except Exception as e:
+                # If we can't check status, assume it's still running
+                all_running_jobs.append(
+                    {
+                        "Source": "Single",
+                        "Job ID": f"single-{exec_info.get('timestamp', '?')}",
+                        "Status": "RUNNING",
+                        "Country": exec_info.get("country", "N/A"),
+                        "Revision": exec_info.get("revision", "N/A"),
+                        "Iterations": str(exec_info.get("iterations", "N/A")),
+                        "Trials": str(exec_info.get("trials", "N/A")),
+                        "GCS Prefix": exec_info.get("gcs_prefix", ""),
+                        "Execution Details": exec_name,
+                    }
+                )
+
+    # Remove completed jobs from session state
+    if jobs_to_remove:
+        current_jobs = st.session_state.get("job_executions", [])
+        st.session_state["job_executions"] = [
+            job for i, job in enumerate(current_jobs) if i not in jobs_to_remove
+        ]
 
     if not all_running_jobs:
         st.info("ℹ️ No jobs currently running")
