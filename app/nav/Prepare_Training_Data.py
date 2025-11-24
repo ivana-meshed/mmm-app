@@ -426,15 +426,6 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     mapped_cols = set(data_types_map.keys()) | set(channels_map.keys())
     
     # Other columns are those in the dataframe but not in metadata
-    known_set = (
-        set(paid_spend)
-        | set(paid_vars)
-        | set(organic_vars)
-        | set(context_vars)
-        | set(factor_vars)
-        | {DATE_COL}
-        | {"COUNTRY"}
-    )
     other_cols = [c for c in prof_df.columns if c not in mapped_cols]
 
     categories = [
