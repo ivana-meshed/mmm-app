@@ -42,6 +42,7 @@ from app_shared import (
 )
 from google.cloud import storage
 from scipy import stats
+from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 
 # Authentication
@@ -769,7 +770,6 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                     y = temp_df[selected_goal].values
                     
                     # Calculate R2
-                    from sklearn.linear_model import LinearRegression
                     model = LinearRegression()
                     model.fit(X, y)
                     y_pred = model.predict(X)
