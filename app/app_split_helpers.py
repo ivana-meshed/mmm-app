@@ -409,6 +409,7 @@ def _empty_job_history_df() -> pd.DataFrame:
 def update_running_jobs_in_history(bucket_name: str) -> int:
     """
     Check all RUNNING jobs in job_history and update their status if they've completed.
+    Gets end_time and duration from timings.csv on GCS.
     Returns the number of jobs updated.
     """
     try:
@@ -458,28 +459,72 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                     df_history.loc[idx, "message"] = (
                         status_info.get("error", "") or final_state
                     )
-                    df_history.loc[idx, "end_time"] = (
-                        datetime.utcnow().isoformat(timespec="seconds") + "Z"
-                    )
 
-                    # Calculate duration
-                    start_time_str = row.get("start_time")
-                    if start_time_str and not pd.isna(start_time_str):
+                    # Try to get end_time and duration from timings.csv on GCS
+                    gcs_prefix = row.get("gcs_prefix")
+                    if gcs_prefix and not pd.isna(gcs_prefix):
                         try:
-                            from datetime import datetime as dt
+                            client = storage.Client()
+                            timings_blob = client.bucket(bucket_name).blob(
+                                f"{gcs_prefix}/timings.csv"
+                            )
+                            if timings_blob.exists():
+                                import io
 
-                            start_time = dt.fromisoformat(
-                                str(start_time_str).replace("Z", "+00:00")
+                                timings_csv = timings_blob.download_as_bytes()
+                                df_timings = pd.read_csv(
+                                    io.BytesIO(timings_csv)
+                                )
+
+                                # Get the last row which should have the total duration
+                                if not df_timings.empty:
+                                    last_row = df_timings.iloc[-1]
+                                    if "end_time" in df_timings.columns:
+                                        df_history.loc[idx, "end_time"] = (
+                                            last_row["end_time"]
+                                        )
+                                    if "duration_sec" in df_timings.columns:
+                                        duration_sec = last_row["duration_sec"]
+                                        df_history.loc[
+                                            idx, "duration_minutes"
+                                        ] = round(float(duration_sec) / 60.0, 2)
+                                    logger.info(
+                                        f"[JOB_HISTORY] Got end_time and duration from timings.csv for {gcs_prefix}"
+                                    )
+                        except Exception as e:
+                            logger.warning(
+                                f"[JOB_HISTORY] Could not read timings.csv for {gcs_prefix}: {e}"
                             )
-                            end_time = dt.utcnow()
-                            duration = (
-                                end_time - start_time
-                            ).total_seconds() / 60.0
-                            df_history.loc[idx, "duration_minutes"] = round(
-                                duration, 2
+                            # Fallback: calculate based on current time
+                            df_history.loc[idx, "end_time"] = (
+                                datetime.utcnow().isoformat(timespec="seconds")
+                                + "Z"
                             )
-                        except Exception:
-                            pass
+                            start_time_str = row.get("start_time")
+                            if start_time_str and not pd.isna(start_time_str):
+                                try:
+                                    from datetime import datetime as dt
+
+                                    start_time = dt.fromisoformat(
+                                        str(start_time_str).replace(
+                                            "Z", "+00:00"
+                                        )
+                                    )
+                                    end_time = dt.utcnow()
+                                    duration = (
+                                        end_time - start_time
+                                    ).total_seconds() / 60.0
+                                    df_history.loc[idx, "duration_minutes"] = (
+                                        round(duration, 2)
+                                    )
+                                except Exception:
+                                    pass
+                    else:
+                        # No gcs_prefix, fallback to calculation
+                        df_history.loc[idx, "end_time"] = (
+                            datetime.utcnow().isoformat(timespec="seconds")
+                            + "Z"
+                        )
 
                     updated_count += 1
                     logger.info(
@@ -506,6 +551,7 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
         return 0
 
 
+@st.fragment
 def render_jobs_job_history(key_prefix: str = "single") -> None:
     with st.expander("📚 Job History (from GCS)", expanded=False):
         # Refresh control first
@@ -524,8 +570,8 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
             st.session_state["job_history_nonce"] = (
                 st.session_state.get("job_history_nonce", 0) + 1
             )
-            # Use regular rerun to reload the page
-            st.rerun()
+            # Use fragment rerun to avoid full page refresh
+            st.rerun(scope="fragment")
 
         try:
             df_job_history = read_job_history_from_gcs(
