@@ -444,10 +444,21 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     """Status UI showing all currently running jobs as a table."""
     st.subheader("📊 Job Status Monitor")
 
+    # Refresh button - force a reload of queue and check job statuses
+    if st.button("🔄 Refresh Status", key=f"refresh_status_table_{key_prefix}"):
+        # Refresh queue from GCS to get latest status
+        maybe_refresh_queue_from_gcs(force=True)
+        # Clear cached timestamp to force re-check of single run jobs
+        st.session_state["status_refresh_timestamp"] = (
+            datetime.utcnow().timestamp()
+        )
+        st.rerun()
+
     # Collect all running jobs from two sources:
     # 1. Queue jobs (RUNNING/LAUNCHING status)
-    # 2. Single run jobs from session state
+    # 2. Single run jobs from session state (check actual status)
     all_running_jobs = []
+    job_manager = get_job_manager()
 
     # Add queue jobs
     queue = st.session_state.get("job_queue", [])
@@ -469,31 +480,66 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                 }
             )
 
-    # Add single run jobs from session state
-    for exec_info in st.session_state.get("job_executions", []):
+    # Add single run jobs from session state - check their actual status
+    jobs_to_remove = []
+    for idx, exec_info in enumerate(st.session_state.get("job_executions", [])):
         exec_name = exec_info.get("execution_name", "")
         if exec_name:
-            all_running_jobs.append(
-                {
-                    "Source": "Single",
-                    "Job ID": f"single-{exec_info.get('timestamp', '?')}",
-                    "Status": "RUNNING",
-                    "Country": exec_info.get("country", "N/A"),
-                    "Revision": exec_info.get("revision", "N/A"),
-                    "Iterations": str(exec_info.get("iterations", "N/A")),
-                    "Trials": str(exec_info.get("trials", "N/A")),
-                    "GCS Prefix": exec_info.get("gcs_prefix", ""),
-                    "Execution Details": exec_name,
-                }
-            )
+            # Check actual execution status
+            try:
+                status_info = job_manager.get_execution_status(exec_name)
+                actual_status = (
+                    status_info.get("overall_status") or "RUNNING"
+                ).upper()
 
-    # Refresh button - force a full rerun to get latest status
-    if st.button("🔄 Refresh Status", key=f"refresh_status_table_{key_prefix}"):
-        # Clear any cached data
-        st.session_state["status_refresh_timestamp"] = (
-            datetime.utcnow().timestamp()
-        )
-        st.rerun()
+                # If job is complete, mark it for removal from session state
+                if actual_status in (
+                    "SUCCEEDED",
+                    "FAILED",
+                    "CANCELLED",
+                    "COMPLETED",
+                    "ERROR",
+                ):
+                    jobs_to_remove.append(idx)
+                    # Don't add to running jobs list
+                    continue
+
+                # Job is still running, add to list
+                all_running_jobs.append(
+                    {
+                        "Source": "Single",
+                        "Job ID": f"single-{exec_info.get('timestamp', '?')}",
+                        "Status": actual_status,
+                        "Country": exec_info.get("country", "N/A"),
+                        "Revision": exec_info.get("revision", "N/A"),
+                        "Iterations": str(exec_info.get("iterations", "N/A")),
+                        "Trials": str(exec_info.get("trials", "N/A")),
+                        "GCS Prefix": exec_info.get("gcs_prefix", ""),
+                        "Execution Details": exec_name,
+                    }
+                )
+            except Exception as e:
+                # If we can't check status, assume it's still running
+                all_running_jobs.append(
+                    {
+                        "Source": "Single",
+                        "Job ID": f"single-{exec_info.get('timestamp', '?')}",
+                        "Status": "RUNNING",
+                        "Country": exec_info.get("country", "N/A"),
+                        "Revision": exec_info.get("revision", "N/A"),
+                        "Iterations": str(exec_info.get("iterations", "N/A")),
+                        "Trials": str(exec_info.get("trials", "N/A")),
+                        "GCS Prefix": exec_info.get("gcs_prefix", ""),
+                        "Execution Details": exec_name,
+                    }
+                )
+
+    # Remove completed jobs from session state
+    if jobs_to_remove:
+        current_jobs = st.session_state.get("job_executions", [])
+        st.session_state["job_executions"] = [
+            job for i, job in enumerate(current_jobs) if i not in jobs_to_remove
+        ]
 
     if not all_running_jobs:
         st.info("ℹ️ No jobs currently running")
