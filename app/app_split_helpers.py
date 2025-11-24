@@ -524,8 +524,8 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
             st.session_state["job_history_nonce"] = (
                 st.session_state.get("job_history_nonce", 0) + 1
             )
-            # Use fragment rerun to avoid full page refresh
-            st.rerun(scope="fragment")
+            # Use regular rerun to reload the page
+            st.rerun()
 
         try:
             df_job_history = read_job_history_from_gcs(
