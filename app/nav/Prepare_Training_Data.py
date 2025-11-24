@@ -429,10 +429,13 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     # Get all columns mapped in metadata
     data_types_map = meta.get("data_types", {}) or {}
     channels_map = meta.get("channels", {}) or {}
-    mapped_cols = set(data_types_map.keys()) | set(channels_map.keys())
     
-    # Other columns are those in the dataframe but not in metadata
-    other_cols = [c for c in prof_df.columns if c not in mapped_cols]
+    # Other columns are those in data_types but NOT in channels
+    # (columns that have data types defined but no channel mapping)
+    other_cols = [
+        c for c in prof_df.columns 
+        if c in data_types_map and c not in channels_map
+    ]
 
     categories = [
         ("Paid Spend", paid_spend),
@@ -601,7 +604,7 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         # For "Other" section, add caption explaining what it shows
         if title == "Other":
             st.caption(
-                "Unmapped columns (in data but not in metadata): "
+                "Columns in data_types but not in channels: "
                 + ", ".join(sorted(subset["Column"].astype(str).tolist()))
             )
 
