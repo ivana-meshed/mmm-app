@@ -51,7 +51,7 @@ prepare_training_page_oldv2 = st.Page(
 )
 
 experiment_page = st.Page(
-    "nav/Run_Experiment.py", title="Experiment", icon="🧪"
+    "nav/Run_Experiment.py", title="5. Run Experiments", icon="🧪"
 )
 results_page = st.Page(
     "nav/View_Results.py", title="Results: Robyn MMM", icon="📈"

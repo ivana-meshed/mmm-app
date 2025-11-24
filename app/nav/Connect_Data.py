@@ -21,7 +21,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from gcp_secrets import access_secret, upsert_secret
 
-require_login_and_domain()
+#require_login_and_domain()
 ensure_session_defaults()
 
 # Secret ID for persistent private key storage

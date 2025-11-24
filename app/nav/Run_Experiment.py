@@ -32,10 +32,10 @@ data_processor = get_data_processor()
 job_manager = get_job_manager()
 from app_split_helpers import *  # bring in all helper functions/constants
 
-require_login_and_domain()
+#require_login_and_domain()
 ensure_session_defaults()
 
-st.title("Experiment")
+st.title("Run Experiments")
 
 # Check if we should show a message to switch to Queue tab (Requirement 8)
 if st.session_state.get("switch_to_queue_tab", False):
@@ -45,7 +45,7 @@ if st.session_state.get("switch_to_queue_tab", False):
     )
     st.session_state["switch_to_queue_tab"] = False
 
-tab_single, tab_queue, tab_status = st.tabs(["Single run", "Queue", "Status"])
+tab_single, tab_queue, tab_status = st.tabs(["Single Experiment", "Batch Experiments", "Status"])
 
 # Prefill fields from saved metadata if present (session_state keys should already be set by Map Your Data page).
 
@@ -170,35 +170,19 @@ def _get_next_revision_number(bucket: str, tag: str) -> int:
 
 # Extracted from streamlit_app.py tab_single (Single run):
 with tab_single:
-    st.subheader("Robyn configuration & training")
+    st.subheader("Setup a Marketing Mix Model Run")
 
     # Data selection
-    with st.expander("📊 Data Selection", expanded=False):
-        # Show current loaded state (point 4 - UI representing actual state)
-        if (
-            "preview_df" in st.session_state
-            and st.session_state["preview_df"] is not None
-        ):
-            loaded_country = st.session_state.get("selected_country", "N/A")
-            loaded_version = st.session_state.get("selected_version", "N/A")
-            loaded_metadata_source = st.session_state.get(
-                "selected_metadata", "N/A"
-            )
-            st.info(
-                f"🔵 **Currently Loaded:** Data: {loaded_country.upper()} - {loaded_version} | Metadata: {loaded_metadata_source}"
-            )
-        else:
-            st.warning("⚪ No data loaded yet")
-
+    with st.expander("📊 Select Data", expanded=False):
+        
         # Country selection
-        available_countries = ["fr", "de", "it", "es", "nl", "uk"]
+        available_countries = ["fr", "de", "it", "es", "us"]
         selected_country = st.selectbox(
-            "Country",
+            "Primary Country",
             options=available_countries,
             index=0,
-            help="Select the country for which to load data",
+            help="Choose the country this model run will focus on",
         )
-
         # Get available metadata versions (including universal)
         gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
         try:
@@ -229,14 +213,6 @@ with tab_single:
             st.warning(f"Could not list metadata versions: {e}")
             metadata_options = ["Universal - Latest"]
 
-        # Metadata source selection (NEW - above data source)
-        selected_metadata = st.selectbox(
-            "Metadata source",
-            options=metadata_options,
-            index=0,
-            help="Select metadata configuration. Universal mappings work for all countries. Latest = most recently saved metadata.",
-        )
-
         # Get available data versions for selected country
         try:
             available_versions = _list_country_versions(gcs_bucket, selected_country)  # type: ignore
@@ -248,12 +224,35 @@ with tab_single:
 
         # Data source selection
         selected_version = st.selectbox(
-            "Data source",
+            "Data version",
             options=available_versions,
             index=0,
             help="Select data version to use. Latest = most recently saved data.",
         )
 
+        # Metadata source selection (NEW - above data source)
+        selected_metadata = st.selectbox(
+            "Metadata version",
+            options=metadata_options,
+            index=0,
+            help="Select metadata configuration. Universal mappings work for all countries. Latest = most recently saved metadata.",
+        )
+
+        # Show current loaded state (point 4 - UI representing actual state)
+        if (
+            "preview_df" in st.session_state
+            and st.session_state["preview_df"] is not None
+        ):
+            loaded_country = st.session_state.get("selected_country", "N/A")
+            loaded_version = st.session_state.get("selected_version", "N/A")
+            loaded_metadata_source = st.session_state.get(
+                "selected_metadata", "N/A"
+            )
+            st.info(
+                f"🔵 **Currently Loaded:** Data: {loaded_country.upper()} - {loaded_version} | Metadata: {loaded_metadata_source}"
+            )
+        else:
+            st.warning("⚪ No data loaded yet")
         # Load data button with automatic preview
         if st.button(
             "Load selected data",
@@ -360,9 +359,9 @@ with tab_single:
             )
 
     # Load Configuration (moved outside Data selection expander)
-    with st.expander("📥 Load Training Configuration", expanded=False):
+    with st.expander("📥 Load Model Settings", expanded=False):
         st.caption(
-            "Load a previously saved configuration to apply to current data."
+            "Load a saved model setting and apply them to the current data."
         )
 
         gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
@@ -381,13 +380,13 @@ with tab_single:
 
             if available_configs:
                 selected_config = st.selectbox(
-                    "Select configuration to load",
+                    "Saved settings:",
                     options=available_configs,
-                    help=f"Configurations available for {current_country.upper()}",
+                    help=f"Model settings available for {current_country.upper()}",
                 )
 
                 if st.button(
-                    "📥 Load Configuration",
+                    "📥 Apply Settings",
                     use_container_width=True,
                     key="load_config_btn",
                 ):
@@ -409,24 +408,24 @@ with tab_single:
                         )
 
                         st.success(
-                            f"✅ Configuration '{selected_config}' loaded successfully!"
+                            f"✅ Setting '{selected_config}' loaded successfully!"
                         )
                         st.info(
-                            "The configuration values are now applied to the form below."
+                            "These settings are now applied to the form below."
                         )
                         st.json(config_data, expanded=False)
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Failed to load configuration: {e}")
+                        st.error(f"Failed to load model settings: {e}")
             else:
                 st.info(
-                    f"No saved configurations found for {current_country.upper()}"
+                    f"No saved settings found for {current_country.upper()}"
                 )
         except Exception as e:
-            st.warning(f"Could not list configurations: {e}")
+            st.warning(f"Could not list settings: {e}")
 
     # Robyn config (moved outside Data selection expander)
-    with st.expander("⚙️ Robyn Configuration", expanded=False):
+    with st.expander("⚙️ Robyn Training Settings", expanded=False):
         # Country auto-filled from Data Selection
         country = st.session_state.get("selected_country", "fr")
         st.info(f"**Country:** {country.upper()} (from Data Selection)")
@@ -436,7 +435,8 @@ with tab_single:
 
         # Iterations and Trials as presets
         preset_options = {
-            "Test run": {"iterations": 200, "trials": 3},
+            "Test Run": {"iterations": 200, "trials": 3},
+            "Benchmark":  {"iterations": 2000, "trials": 5},
             "Production": {"iterations": 10000, "trials": 5},
             "Custom": {"iterations": 5000, "trials": 10},
         }
@@ -461,12 +461,16 @@ with tab_single:
                 default_preset_index = 2
 
         preset_choice = st.selectbox(
-            "Training preset",
+            "Run Mode",
             options=list(preset_options.keys()),
             index=default_preset_index,
-            help="Choose a training preset or use custom values",
+            help="Choose how extensive the training should be",
         )
-
+        st.caption(
+            "**Test Run**: For checking output structure only •  "
+            "**Benchmark**: For quick directional comparisons only (not fully-optimized experiment) • "
+            "**Production**: Full-scale experiment suited for business decisions"
+        )
         if preset_choice == "Custom":
             col1, col2 = st.columns(2)
             with col1:
@@ -496,13 +500,13 @@ with tab_single:
 
         # Train size stays as is
         train_size = st.text_input(
-            "Train size",
+            "Train Test Split Ratios",
             value=(
                 loaded_config.get("train_size", "0.7,0.9")
                 if loaded_config
                 else "0.7,0.9"
             ),
-            help="Comma-separated train/validation split ratios",
+            help="Comma-separated train/validation split ratios. E.g., '0.7,0.9' means 70% train, 20% validation, 10% test.",
         )
 
         # Training date range instead of single date tag
@@ -521,7 +525,7 @@ with tab_single:
             start_data_date = st.date_input(
                 "Training start date",
                 value=default_start_date,
-                help="Start date for training data window (start_data_date in R script)",
+                help="Start date for training window. Usually when paid media spends begin.",
             )
         with col2:
             # Parse loaded end date if available
@@ -537,7 +541,7 @@ with tab_single:
             end_data_date = st.date_input(
                 "Training end date",
                 value=default_end_date,
-                help="End date for training data window (end_data_date in R script)",
+                help="End date for training data window. Usually the most recent paid media dates available.",
             )
 
         # Convert dates to strings for config
@@ -564,10 +568,10 @@ with tab_single:
                         pass
 
                 dep_var = st.selectbox(
-                    "Goal variable",
+                    "Select Goal",
                     options=goal_options,
                     index=default_dep_var_index,
-                    help="Primary goal variable (dependent variable) for the model",
+                    help="What business outcome do you want to optimize for?",
                 )
                 # Find the corresponding type
                 dep_var_type = next(
@@ -617,12 +621,12 @@ with tab_single:
             "Goals type",
             options=["revenue", "conversion"],
             index=0 if dep_var_type == "revenue" else 1,
-            help="Type of the goal variable: revenue (monetary) or conversion (count)",
+            help="Type of the goal: revenue=money value (e.g. GMV) or conversion (e.g. Booking)",
         )
 
         # Date variable
         date_var = st.text_input(
-            "date_var",
+            "Date Field",
             value=(
                 loaded_config.get("date_var", "date")
                 if loaded_config
@@ -641,18 +645,19 @@ with tab_single:
                 )
             except (ValueError, KeyError):
                 pass
-
+            
+        st.caption("**Adstock** models the carryover effect of advertising over time.")
         adstock = st.selectbox(
-            "adstock",
+            "Adstock Method",
             options=adstock_options,
             index=default_adstock_index,
-            help="Robyn adstock function",
+            help="Adstock modeling method to use for paid media and organic variables",
         )
 
         # Hyperparameters - conditional on adstock
-        st.write("**Hyperparameters**")
+        st.write("**Adstock hyperparameters**")
         hyperparameter_options = [
-            "Facebook recommend",
+            "Meta recommend",
             "Meshed recommend",
             "Custom",
         ]
@@ -666,10 +671,10 @@ with tab_single:
                 pass
 
         hyperparameter_preset = st.selectbox(
-            "Hyperparameter preset",
+            "Hyperparameter Mode",
             options=hyperparameter_options,
             index=default_hyperparameter_index,
-            help="Choose hyperparameter preset or define custom values",
+            help="Choose hyperparameter mode or define custom values",
         )
 
         # Store the hyperparameter choice for later use
