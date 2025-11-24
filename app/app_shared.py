@@ -378,6 +378,55 @@ def _safe_tick_once(
             logger.info(f"[QUEUE] Successfully launched job {entry.get('id')}")
             logger.info(f"[QUEUE] Execution: {entry['execution_name']}")
             logger.info(f"[QUEUE] GCS prefix: {entry['gcs_prefix']}")
+
+            # Add job to job_history when it starts
+            try:
+                params = entry.get("params", {})
+                append_row_to_job_history(
+                    {
+                        "job_id": entry.get("gcs_prefix"),
+                        "state": "RUNNING",
+                        "country": params.get("country"),
+                        "revision": params.get("revision"),
+                        "date_input": params.get("date_input"),
+                        "iterations": params.get("iterations"),
+                        "trials": params.get("trials"),
+                        "train_size": params.get("train_size"),
+                        "paid_media_spends": params.get("paid_media_spends"),
+                        "paid_media_vars": params.get("paid_media_vars"),
+                        "context_vars": params.get("context_vars"),
+                        "factor_vars": params.get("factor_vars"),
+                        "organic_vars": params.get("organic_vars"),
+                        "gcs_bucket": params.get("gcs_bucket", bucket_name),
+                        "table": params.get("table", ""),
+                        "query": params.get("query", ""),
+                        "dep_var": params.get("dep_var"),
+                        "date_var": params.get("date_var"),
+                        "adstock": params.get("adstock"),
+                        "start_time": datetime.utcnow().isoformat(
+                            timespec="seconds"
+                        )
+                        + "Z",
+                        "end_time": None,
+                        "duration_minutes": None,
+                        "gcs_prefix": entry.get("gcs_prefix"),
+                        "bucket": params.get("gcs_bucket", bucket_name),
+                        "exec_name": (
+                            entry["execution_name"].split("/")[-1]
+                            if entry.get("execution_name")
+                            else ""
+                        ),
+                        "execution_name": entry.get("execution_name"),
+                        "message": "Job launched from queue",
+                    },
+                    bucket_name,
+                )
+                logger.info(
+                    f"[QUEUE] Added job {entry.get('gcs_prefix')} to job_history"
+                )
+            except Exception as e:
+                logger.warning(f"[QUEUE] Failed to add job to job_history: {e}")
+
         except Exception as e:
             entry["status"] = "ERROR"
             entry["message"] = f"launch failed: {e}"
