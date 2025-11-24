@@ -460,7 +460,7 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                         status_info.get("error", "") or final_state
                     )
 
-                    # Try to get end_time and duration from timings.csv on GCS
+                    # Try to get training time from timings.csv on GCS
                     gcs_prefix = row.get("gcs_prefix")
                     if gcs_prefix and not pd.isna(gcs_prefix):
                         try:
@@ -476,54 +476,91 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                                     io.BytesIO(timings_csv)
                                 )
 
-                                # Get the last row which should have the total duration
-                                if not df_timings.empty:
-                                    last_row = df_timings.iloc[-1]
-                                    if "end_time" in df_timings.columns:
-                                        df_history.loc[idx, "end_time"] = (
-                                            last_row["end_time"]
+                                # Find the row with "R training (robyn_run)" and extract training_time
+                                if (
+                                    not df_timings.empty
+                                    and len(df_timings.columns) >= 2
+                                ):
+                                    # Look for the R training row
+                                    robyn_mask = (
+                                        df_timings.iloc[:, 0]
+                                        .astype(str)
+                                        .str.contains(
+                                            "R training.*robyn_run",
+                                            case=False,
+                                            na=False,
+                                            regex=True,
                                         )
-                                    if "duration_sec" in df_timings.columns:
-                                        duration_sec = last_row["duration_sec"]
+                                    )
+                                    if robyn_mask.any():
+                                        robyn_row = df_timings[robyn_mask].iloc[
+                                            0
+                                        ]
+                                        # Second column should be the training time
+                                        training_time_sec = float(
+                                            robyn_row.iloc[1]
+                                        )
+
+                                        # Calculate duration in minutes
+                                        duration_minutes = round(
+                                            training_time_sec / 60.0, 2
+                                        )
                                         df_history.loc[
                                             idx, "duration_minutes"
-                                        ] = round(float(duration_sec) / 60.0, 2)
-                                    logger.info(
-                                        f"[JOB_HISTORY] Got end_time and duration from timings.csv for {gcs_prefix}"
+                                        ] = duration_minutes
+
+                                        # Calculate end_time from start_time + training_time
+                                        start_time_str = row.get("start_time")
+                                        if start_time_str and not pd.isna(
+                                            start_time_str
+                                        ):
+                                            try:
+                                                from datetime import (
+                                                    datetime as dt,
+                                                    timedelta,
+                                                )
+
+                                                start_time = dt.fromisoformat(
+                                                    str(start_time_str).replace(
+                                                        "Z", "+00:00"
+                                                    )
+                                                )
+                                                end_time = start_time + timedelta(
+                                                    seconds=training_time_sec
+                                                )
+                                                df_history.loc[
+                                                    idx, "end_time"
+                                                ] = end_time.isoformat(
+                                                    timespec="seconds"
+                                                ).replace(
+                                                    "+00:00", "Z"
+                                                )
+                                                logger.info(
+                                                    f"[JOB_HISTORY] Got training_time={training_time_sec}s ({duration_minutes}m) from timings.csv for {gcs_prefix}"
+                                                )
+                                            except Exception as e:
+                                                logger.warning(
+                                                    f"[JOB_HISTORY] Could not calculate end_time for {gcs_prefix}: {e}"
+                                                )
+                                        else:
+                                            logger.warning(
+                                                f"[JOB_HISTORY] No start_time available for {gcs_prefix}"
+                                            )
+                                    else:
+                                        logger.warning(
+                                            f"[JOB_HISTORY] Could not find 'R training (robyn_run)' row in timings.csv for {gcs_prefix}"
+                                        )
+                                else:
+                                    logger.warning(
+                                        f"[JOB_HISTORY] timings.csv is empty or has insufficient columns for {gcs_prefix}"
                                     )
                         except Exception as e:
                             logger.warning(
                                 f"[JOB_HISTORY] Could not read timings.csv for {gcs_prefix}: {e}"
                             )
-                            # Fallback: calculate based on current time
-                            df_history.loc[idx, "end_time"] = (
-                                datetime.utcnow().isoformat(timespec="seconds")
-                                + "Z"
-                            )
-                            start_time_str = row.get("start_time")
-                            if start_time_str and not pd.isna(start_time_str):
-                                try:
-                                    from datetime import datetime as dt
-
-                                    start_time = dt.fromisoformat(
-                                        str(start_time_str).replace(
-                                            "Z", "+00:00"
-                                        )
-                                    )
-                                    end_time = dt.utcnow()
-                                    duration = (
-                                        end_time - start_time
-                                    ).total_seconds() / 60.0
-                                    df_history.loc[idx, "duration_minutes"] = (
-                                        round(duration, 2)
-                                    )
-                                except Exception:
-                                    pass
                     else:
-                        # No gcs_prefix, fallback to calculation
-                        df_history.loc[idx, "end_time"] = (
-                            datetime.utcnow().isoformat(timespec="seconds")
-                            + "Z"
+                        logger.warning(
+                            f"[JOB_HISTORY] No gcs_prefix available for job {row.get('job_id')}"
                         )
 
                     updated_count += 1
