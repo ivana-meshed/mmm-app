@@ -45,7 +45,7 @@ if st.session_state.get("switch_to_queue_tab", False):
     )
     st.session_state["switch_to_queue_tab"] = False
 
-tab_single, tab_queue, tab_status = st.tabs(["Single Experiment", "Batch Experiments", "Status"])
+tab_single, tab_queue, tab_status = st.tabs(["Single Run", "Batch Run", "Queue Status"])
 
 # Prefill fields from saved metadata if present (session_state keys should already be set by Map Your Data page).
 
@@ -464,11 +464,11 @@ with tab_single:
             "Run Mode",
             options=list(preset_options.keys()),
             index=default_preset_index,
-            help="Choose how extensive the training should be",
+            help="Choose how extensive training should be",
         )
         st.caption(
             "**Test Run**: For checking output structure only •  "
-            "**Benchmark**: For quick directional comparisons only (not fully-optimized experiment) • "
+            "**Benchmark**: directional comparisons only (not fully optimized) • "
             "**Production**: Full-scale experiment suited for business decisions"
         )
         if preset_choice == "Custom":
@@ -500,7 +500,7 @@ with tab_single:
 
         # Train size stays as is
         train_size = st.text_input(
-            "Train Test Split Ratios",
+            "Train-Test Split Ratios",
             value=(
                 loaded_config.get("train_size", "0.7,0.9")
                 if loaded_config
@@ -618,21 +618,21 @@ with tab_single:
 
         # Goals type - display and allow override
         dep_var_type = st.selectbox(
-            "Goals type",
+            "Goal type",
             options=["revenue", "conversion"],
             index=0 if dep_var_type == "revenue" else 1,
-            help="Type of the goal: revenue=money value (e.g. GMV) or conversion (e.g. Booking)",
+            help="Revenue for monetary values (e.g. GMV), conversion for units (e.g. bookings).",
         )
 
         # Date variable
         date_var = st.text_input(
-            "Date Field",
+            "Date Column",
             value=(
                 loaded_config.get("date_var", "date")
                 if loaded_config
                 else "date"
             ),
-            help="Date column in your data (e.g., date)",
+            help="Name of date column in your data",
         )
 
         # Adstock selection
@@ -646,7 +646,7 @@ with tab_single:
             except (ValueError, KeyError):
                 pass
             
-        st.caption("**Adstock** models the carryover effect of advertising over time.")
+        st.caption("**Adstock:** models how advertising decays over time.")
         adstock = st.selectbox(
             "Adstock Method",
             options=adstock_options,
@@ -671,10 +671,10 @@ with tab_single:
                 pass
 
         hyperparameter_preset = st.selectbox(
-            "Hyperparameter Mode",
+            "Hyperparameter Settings",
             options=hyperparameter_options,
             index=default_hyperparameter_index,
-            help="Choose hyperparameter mode or define custom values",
+            help="Choose hyperparameter settings or define custom ranges",
         )
 
         # Store the hyperparameter choice for later use
@@ -684,7 +684,7 @@ with tab_single:
         # Show info message when Custom is selected
         if hyperparameter_preset == "Custom":
             st.info(
-                "📌 **Custom Hyperparameters Selected**: Scroll down to the **Variable Mapping** section below to configure per-variable hyperparameter ranges for each paid media and organic variable."
+                "📌 **Custom hyperparameters selected**: Define ranges for each paid/organic variable in the ***Variable Mapping*** below."
             )
 
         # Custom hyperparameters will be collected later after variables are selected
@@ -693,10 +693,10 @@ with tab_single:
 
         # NEW: optional resampling
         resample_freq_label = st.selectbox(
-            "Resample input data (optional)",
+            "Aggregate input data (optional)",
             ["None", "Weekly (W)", "Monthly (M)"],
             index=0,
-            help="Aggregates the input before training. Column aggregations from metadata will be used.",
+            help="Aggregates the raw data before training. Column level aggregation rules from metadata apply.",
         )
 
         # Determine default resample freq from loaded config
@@ -758,7 +758,7 @@ with tab_single:
             )
 
     # Variables (moved outside Data selection expander)
-    with st.expander("🗺️ Variable Mapping", expanded=False):
+    with st.expander("🗺️ Choose Model Inputs", expanded=False):
         # Get available columns from loaded data
         preview_df = st.session_state.get("preview_df")
         if preview_df is not None and not preview_df.empty:
@@ -980,19 +980,19 @@ with tab_single:
         ]
 
         # Display paid_media_spends first (all selected by default)
-        st.markdown("**Paid Media Configuration**")
+        st.markdown("**Paid Media Settings**")
         st.caption(
-            "Select paid media spend channels. For each spend, you can choose the corresponding variable metric."
+            "Select which paid media spends to optimize. For each, choose a metric to model it's effect"
         )
 
         # Use timestamp-based key to force widget refresh when config is loaded
         config_timestamp = st.session_state.get("loaded_config_timestamp", 0)
 
         paid_media_spends_list = st.multiselect(
-            "paid_media_spends (Select channels to include)",
+            "Paid Media Spends",
             options=available_spends,
             default=default_paid_media_spends,
-            help="Select media spend columns to include in the model",
+            help="Select media spend columns to include in the optimization",
             key=f"paid_media_spends_{config_timestamp}",
         )
 
@@ -1001,10 +1001,10 @@ with tab_single:
         spend_var_mapping = {}
 
         if paid_media_spends_list:
-            st.markdown("**Variable Selection for Each Spend**")
+            st.markdown("**Select a metric for each paid channel**")
             st.caption(
-                "For each spend channel, select the corresponding metric variable. "
-                "If none selected, the spend column itself will be used."
+                "For each spend column, pick a performance metric to model its effect (e.g. impressions, clicks). "
+                "If left empty (not recommended), the spend column itself will be used."
             )
 
             for spend in paid_media_spends_list:
@@ -1068,10 +1068,9 @@ with tab_single:
                 # Use container with custom width to ensure full variable names are visible
                 with st.container():
                     selected_var = st.selectbox(
-                        f"**{spend}** → Variable:",
+                        f"**{spend}** → Performance Metric:",
                         options=var_options,
                         index=default_idx,
-                        help=f"Select the metric variable for {spend}",
                         key=f"var_for_{spend}_{config_timestamp}",
                     )
 
@@ -1087,6 +1086,7 @@ with tab_single:
 
         # Context vars - multiselect
         st.markdown("**Context Variables**")
+        st.caption("Non-media drivers like seasonality, promotions, pricing, events, etc.")
         # Determine default from loaded config
         default_context_vars = default_values["context_vars"]
         if loaded_config and "context_vars" in loaded_config:
@@ -1105,7 +1105,7 @@ with tab_single:
         ]
 
         context_vars_list = st.multiselect(
-            "context_vars",
+            "Context Variables",
             options=all_columns,
             default=default_context_vars,
             help="Select contextual variables (e.g., seasonality, events)",
@@ -1132,10 +1132,10 @@ with tab_single:
         ]
 
         factor_vars_list = st.multiselect(
-            "factor_vars",
+            "Binary Variables",
             options=all_columns,
             default=default_factor_vars,
-            help="Select factor/categorical variables",
+            help="Binary variables (e.g. is_weekend, is_holiday)",
             key=f"factor_vars_{config_timestamp}",
         )
 
@@ -1144,7 +1144,7 @@ with tab_single:
             context_vars_list = list(set(context_vars_list + factor_vars_list))
 
         # Organic vars - multiselect
-        st.markdown("**Organic/Baseline Variables**")
+        st.markdown("**Organic Variables**")
         # Determine default from loaded config
         default_organic_vars = default_values["organic_vars"]
         if loaded_config and "organic_vars" in loaded_config:
@@ -1163,10 +1163,10 @@ with tab_single:
         ]
 
         organic_vars_list = st.multiselect(
-            "organic_vars",
+            "Organic Variables",
             options=all_columns,
             default=default_organic_vars,
-            help="Select organic/baseline variables",
+            help="Non-paid channels that drive business outcomes (e.g., SEO, direct, brand search)",
             key=f"organic_vars_{config_timestamp}",
         )
 
@@ -1207,9 +1207,9 @@ with tab_single:
         # Custom hyperparameters per variable (when Custom preset is selected)
         if hyperparameter_preset == "Custom":
             st.markdown("---")
-            st.markdown("### 🎛️ Custom Hyperparameters per Variable")
+            st.markdown("### 🎛️ Custom Hyperparameters per variable")
             st.info(
-                "📝 **Per-Variable Hyperparameters**: Define custom ranges for each paid media and organic variable. Values are prefilled with Meshed recommend defaults."
+                "📝 **Define adstock ranges for each paid media and organic variable. Defaults are prefilled; adjust only if you know what you’re doing."
             )
 
             # Helper function to get variable-specific defaults based on preset
@@ -1468,10 +1468,10 @@ with tab_single:
         organic_vars = ", ".join(organic_vars_list)
 
     # Revision Configuration (new section above Save Training Configuration)
-    with st.expander("🏷️ Revision Configuration", expanded=False):
+    with st.expander("🏷️ Experiment Versioning & Tagging", expanded=False):
         st.caption(
-            "Configure the revision tag and number for organizing training outputs. "
-            "Outputs will be saved to robyn/{TAG}_{NUMBER}/{COUNTRY}/{TIMESTAMP}/ in GCS."
+            "Define a version tag and number to organize and track your experiments."
+            "Files will be stored to robyn/{TAG}_{NUMBER}/{COUNTRY}/{TIMESTAMP}/ in GCS."
         )
 
         gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
@@ -1518,23 +1518,23 @@ with tab_single:
 
         with col1:
             selected_tag_option = st.selectbox(
-                "Revision Tag",
+                "Version Tag",
                 options=tag_options,
                 index=default_tag_index,
-                help="Select an existing revision tag or create a new one",
+                help="Select an existing version tag or create a new one to group related experiment runs.",
             )
 
             # If "Create New Tag" is selected, show text input
             if selected_tag_option == "-- Create New Tag --":
                 revision_tag = st.text_input(
-                    "Enter new revision tag",
+                    "New version tag",
                     value=(
                         loaded_revision_tag
                         if loaded_revision_tag not in existing_tags
                         else ""
                     ),
-                    placeholder="e.g., your_name or department_name",
-                    help="Insert your name or the department name into the tag field",
+                    placeholder="e.g., brand_search, crm_tests, q1_budget",
+                    help="Use a clear identifier such as team name, purpose, or feature name.",
                 )
             else:
                 revision_tag = selected_tag_option
@@ -1553,7 +1553,7 @@ with tab_single:
                 )
 
                 revision_number = st.number_input(
-                    "Revision Number",
+                    "Version Number",
                     value=default_number,
                     min_value=1,
                     step=1,
@@ -1562,37 +1562,37 @@ with tab_single:
 
                 if revision_number < next_number:
                     st.warning(
-                        f"⚠️ Number {revision_number} may already exist for tag '{revision_tag}'. Next available: {next_number}"
+                        f"⚠️ Version Number {revision_number} already exists for tag '{revision_tag}'. Use {next_number} or above to avoid overwriting previous runs."
                     )
             else:
                 revision_number = st.number_input(
-                    "Revision Number",
+                    "Version Number",
                     value=1,
                     min_value=1,
                     step=1,
-                    help="Enter the revision number (must be numeric)",
+                    help="Enter the version number (must be numeric)",
                     disabled=True,
                 )
                 if not revision_tag or revision_tag == "-- Create New Tag --":
-                    st.info("👆 Please enter a revision tag first")
+                    st.info("👆 Please enter a version tag first")
 
         # Show the combined revision identifier
         if revision_tag and revision_tag != "-- Create New Tag --":
             combined_revision = f"{revision_tag}_{revision_number}"
             st.success(
-                f"✅ Training outputs will be saved under: **robyn/{combined_revision}/{{COUNTRY}}/{{TIMESTAMP}}/**"
+                f"✅ Your experiment version will be saved under: **robyn/{combined_revision}/{{COUNTRY}}/{{TIMESTAMP}}/**"
             )
         else:
             combined_revision = ""
-            st.warning("⚠️ Please select or create a revision tag")
+            st.warning("⚠️ Please select or create a version tag")
 
         # For backward compatibility, create a combined "revision" field
         revision = combined_revision
 
     # Save Configuration (moved outside Data selection expander, after Variable Mapping)
-    with st.expander("💾 Save Training Configuration", expanded=False):
+    with st.expander("💾 Save Experiment Settings", expanded=False):
         st.caption(
-            "Save the current training configuration to apply it later to other data sources or countries."
+            "Save the current model settings so you can reuse them for other data versions or countries."
         )
 
         gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
@@ -1600,7 +1600,7 @@ with tab_single:
         col1, col2 = st.columns([3, 1])
         with col1:
             config_name = st.text_input(
-                "Configuration name",
+                "Settings name",
                 placeholder="e.g., baseline_config_v1",
                 help="Name for this training configuration",
             )
@@ -1611,7 +1611,7 @@ with tab_single:
             )
             default_multi = len(loaded_countries) > 1
             save_for_multi = st.checkbox(
-                "Multi-country",
+                "Apply to multiple countries",
                 value=default_multi,
                 help="Save for multiple countries",
             )
@@ -1627,11 +1627,9 @@ with tab_single:
                 else [st.session_state.get("selected_country", "de")]
             )
             config_countries = st.multiselect(
-                "Select countries",
+                "Countries",
                 options=["fr", "de", "it", "es", "nl", "uk"],
-                default=default_countries,
-                help="Countries this configuration applies to",
-            )
+                default=default_countries,            )
         else:
             config_countries = [st.session_state.get("selected_country", "de")]
 
@@ -1639,15 +1637,15 @@ with tab_single:
         col_btn1, col_btn2, col_btn3 = st.columns(3)
 
         save_config_clicked = col_btn1.button(
-            "💾 Save Configuration",
+            "💾 Save Settings",
             use_container_width=True,
             key="save_config_btn",
         )
         add_to_queue_clicked = col_btn2.button(
-            "➕ Add to Queue", use_container_width=True, key="add_to_queue_btn"
+            "➕ Save & Add to Queue", use_container_width=True, key="add_to_queue_btn"
         )
         add_and_start_clicked = col_btn3.button(
-            "▶️ Add to Queue & Start",
+            "▶️ Save, Add to Queue & Start",
             use_container_width=True,
             key="add_and_start_btn",
         )
@@ -1722,16 +1720,16 @@ with tab_single:
             file_name=f"robyn_config_{country}_{revision}_{time.strftime('%Y%m%d')}.csv",
             mime="text/csv",
             use_container_width=True,
-            help="Download current configuration as CSV for batch processing",
+            help="Download current settings as CSV and use for batch processing",
         )
 
         st.markdown("---")
 
         if save_config_clicked:
             if not revision or not revision.strip():
-                st.error("⚠️ Revision tag is required to save configuration.")
+                st.error("⚠️ Version tag is required to save configuration.")
             elif not config_name or not config_name.strip():
-                st.error("⚠️ Configuration name is required.")
+                st.error("⚠️ Setting name is required.")
             else:
                 try:
                     # Build configuration payload
@@ -1743,9 +1741,9 @@ with tab_single:
                             "iterations": int(iterations),
                             "trials": int(trials),
                             "train_size": train_size,
-                            "revision": revision,
-                            "revision_tag": revision_tag,
-                            "revision_number": revision_number,
+                            "version": revision,
+                            "version_tag": revision_tag,
+                            "version_number": revision_number,
                             "start_date": start_date_str,
                             "end_date": end_date_str,
                             "paid_media_spends": paid_media_spends,
@@ -1784,15 +1782,15 @@ with tab_single:
                         [c.upper() for c in config_countries]
                     )
                     st.success(
-                        f"✅ Configuration '{config_name}' saved for: {countries_str}"
+                        f"✅ Settings '{config_name}' saved for: {countries_str}"
                     )
                 except Exception as e:
-                    st.error(f"Failed to save configuration: {e}")
+                    st.error(f"Failed to save settings: {e}")
 
         # Handle "Add to Queue" button (Issue #5 fix)
         if add_to_queue_clicked or add_and_start_clicked:
             if not revision or not revision.strip():
-                st.error("⚠️ Revision tag is required.")
+                st.error("⚠️ Version tag is required.")
             else:
                 try:
                     # Import helper from app_split_helpers
@@ -1833,7 +1831,7 @@ with tab_single:
                         # Build params dict
                         params = {
                             "country": ctry,
-                            "revision": revision,
+                            "version": revision,
                             "date_input": time.strftime(
                                 "%Y-%m-%d"
                             ),  # Current date when job is added to queue
@@ -1988,7 +1986,7 @@ with tab_single:
             "iterations": int(iterations),
             "trials": int(trials),
             "train_size": parse_train_size(train_size),
-            "revision": revision,
+            "version": revision,
             "start_date": start_date_str,
             "end_date": end_date_str,
             "paid_media_spends": paid_media_spends,
@@ -2019,7 +2017,7 @@ with tab_single:
         # Validate revision is filled
         if not revision or not revision.strip():
             st.error(
-                "⚠️ Revision tag is required. Please enter a revision identifier before starting training."
+                "⚠️ Version tag is required. Please enter a version identifier before starting training."
             )
             st.stop()
 
