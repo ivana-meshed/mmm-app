@@ -22,6 +22,8 @@ from app_shared import (
     GCS_BUCKET,
     build_meta_views,
     build_plat_map_df,
+    data_blob,
+    data_latest_blob,
     download_json_from_gcs_cached,
     download_parquet_from_gcs_cached,
     filter_range,
@@ -82,7 +84,11 @@ with st.expander("Step 1) Select Data", expanded=False):
         st.session_state["country"] = country
 
     refresh_clicked = c4.button("↻ Refresh Lists", key="refresh_step1")
-    refresh_key = str(pd.Timestamp.utcnow().value) if refresh_clicked else ""
+    refresh_key = (
+        str(int(datetime.now(timezone.utc).timestamp() * 1e9))
+        if refresh_clicked
+        else ""
+    )
 
     data_versions = (
         list_data_versions(GCS_BUCKET, country, refresh_key)
@@ -107,8 +113,6 @@ with st.expander("Step 1) Select Data", expanded=False):
     if load_clicked:
         try:
             # Resolve DATA path
-            from app_shared import data_blob, data_latest_blob
-            
             db = (
                 data_latest_blob(country)
                 if data_ts == "Latest"
