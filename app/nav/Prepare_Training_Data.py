@@ -361,11 +361,17 @@ def _active_spend_platforms(
     vm = vm[vm["col"].isin(df_window.columns)]
     if vm.empty:
         return set()
+    
+    # Create column->platform mapping
+    col_to_plat = dict(zip(vm["col"], vm["platform"]))
+    
+    # Melt and add platform column
+    melted = df_window[vm["col"].tolist()].melt(value_name="spend")
+    melted["platform"] = melted["variable"].map(col_to_plat)
+    
     sums = (
-        df_window[vm["col"].tolist()]
-        .melt(value_name="spend")
-        .dropna(subset=["spend"])
-        .groupby(vm.reset_index(drop=True)["platform"])["spend"]
+        melted.dropna(subset=["spend"])
+        .groupby("platform")["spend"]
         .sum(min_count=1)
     )
     return set(sums[sums.fillna(0) > 0].index.astype(str))
@@ -538,11 +544,20 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
             dropping_all = all(v in to_drop for v in vars_for_p)
             if dropping_all:
                 by_p = by_col.loc[[v for v in vars_for_p if v in by_col.index]]
-                keep_one = by_p["std"].astype(float).idxmax()
-                to_drop.discard(keep_one)
-                warnings_list.append(
-                    f"{p}: kept '{keep_one}' to retain at least one var for active spend."
-                )
+                std_values = by_p["std"].astype(float).dropna()
+                if not std_values.empty:
+                    keep_one = std_values.idxmax()
+                    to_drop.discard(keep_one)
+                    warnings_list.append(
+                        f"{p}: kept '{keep_one}' to retain at least one var for active spend."
+                    )
+                # If all stds are NaN, just keep the first one
+                elif not by_p.empty:
+                    keep_one = by_p.index[0]
+                    to_drop.discard(keep_one)
+                    warnings_list.append(
+                        f"{p}: kept '{keep_one}' (first available) to retain at least one var for active spend."
+                    )
 
         st.session_state["dq_dropped_cols"] |= set(to_drop)
         st.session_state["dq_last_dropped"] = sorted(to_drop)
@@ -683,6 +698,7 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     st.markdown("### Export Selected Columns")
     
     if st.button("Export Selected Columns", type="primary", key="export_selected_cols"):
+        tmp_path = None
         try:
             # Create CSV of selected columns
             selected_data = prof_df[selected_cols].copy()
@@ -698,21 +714,20 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
                 tmp_path = tmp.name
                 selected_data.to_csv(tmp_path, index=False)
             
-            try:
-                # Upload to GCS
-                gcs_path = TRAINING_DATA_PATH_TEMPLATE.format(
-                    country=country, timestamp=timestamp
-                )
-                upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
-                
-                st.success(f"✅ Exported selected columns to gs://{GCS_BUCKET}/{gcs_path}")
-                st.session_state["last_exported_columns_path"] = gcs_path
-            finally:
-                # Clean up temp file
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
+            # Upload to GCS
+            gcs_path = TRAINING_DATA_PATH_TEMPLATE.format(
+                country=country, timestamp=timestamp
+            )
+            upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
+            
+            st.success(f"✅ Exported selected columns to gs://{GCS_BUCKET}/{gcs_path}")
+            st.session_state["last_exported_columns_path"] = gcs_path
         except Exception as e:
             st.error(f"Failed to export selected columns: {e}")
+        finally:
+            # Clean up temp file
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
 
 # =============================
@@ -772,8 +787,13 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                     
                     # Calculate NMAE (Normalized Mean Absolute Error)
                     mae = mean_absolute_error(y, y_pred)
-                    y_range = y.max() - y.min() if y.max() != y.min() else 1.0
-                    nmae = mae / y_range
+                    y_min, y_max = float(y.min()), float(y.max())
+                    if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
+                        y_range = y_max - y_min
+                        nmae = mae / y_range
+                    else:
+                        # If range is zero, NaN, or invalid, set NMAE to NaN
+                        nmae = np.nan
                     
                     # Calculate Spearman's rho
                     spearman_rho, _ = stats.spearmanr(
@@ -868,8 +888,13 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                         
                         # Calculate NMAE
                         mae = mean_absolute_error(y, y_pred)
-                        y_range = y.max() - y.min() if y.max() != y.min() else 1.0
-                        nmae = mae / y_range
+                        y_min, y_max = float(y.min()), float(y.max())
+                        if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
+                            y_range = y_max - y_min
+                            nmae = mae / y_range
+                        else:
+                            # If range is zero, NaN, or invalid, set NMAE to NaN
+                            nmae = np.nan
                         
                         # Calculate Spearman's rho
                         spearman_rho, _ = stats.spearmanr(
