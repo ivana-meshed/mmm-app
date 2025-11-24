@@ -700,14 +700,21 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".csv", delete=False
             ) as tmp:
-                selected_data.to_csv(tmp.name, index=False)
-                
+                tmp_path = tmp.name
+                selected_data.to_csv(tmp_path, index=False)
+            
+            try:
                 # Upload to GCS
                 gcs_path = f"training_data/{country}/{timestamp}/selected_columns.csv"
-                upload_to_gcs(GCS_BUCKET, tmp.name, gcs_path)
+                upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
                 
                 st.success(f"✅ Exported selected columns to gs://{GCS_BUCKET}/{gcs_path}")
                 st.session_state["last_exported_columns_path"] = gcs_path
+            finally:
+                # Clean up temp file
+                import os
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
         except Exception as e:
             st.error(f"Failed to export selected columns: {e}")
 
