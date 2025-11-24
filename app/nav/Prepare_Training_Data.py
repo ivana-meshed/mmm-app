@@ -50,6 +50,9 @@ require_login_and_domain()
 
 st.title("Prepare Training Data")
 
+# Constants
+TRAINING_DATA_PATH_TEMPLATE = "training_data/{country}/{timestamp}/selected_columns.csv"
+
 # Session state defaults
 st.session_state.setdefault("country", "de")
 st.session_state.setdefault("picked_data_ts", "Latest")
@@ -695,7 +698,7 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
             
             # Save to GCS
             country = st.session_state.get("country", "de")
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             
             # Create temporary file
             with tempfile.NamedTemporaryFile(
@@ -706,14 +709,15 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
             
             try:
                 # Upload to GCS
-                gcs_path = f"training_data/{country}/{timestamp}/selected_columns.csv"
+                gcs_path = TRAINING_DATA_PATH_TEMPLATE.format(
+                    country=country, timestamp=timestamp
+                )
                 upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
                 
                 st.success(f"✅ Exported selected columns to gs://{GCS_BUCKET}/{gcs_path}")
                 st.session_state["last_exported_columns_path"] = gcs_path
             finally:
                 # Clean up temp file
-                import os
                 if os.path.exists(tmp_path):
                     os.unlink(tmp_path)
         except Exception as e:
