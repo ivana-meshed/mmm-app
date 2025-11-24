@@ -26,6 +26,12 @@ connect_page = st.Page(
 )
 map_page = st.Page("nav/Map_Data.py", title="Map your Data", icon="🗺️")
 
+prepare_training_data_page = st.Page(
+    "nav/Prepare_Training_Data.py",
+    title="Prepare Training Data",
+    icon="🔧",
+)
+
 review_page = st.Page(
     "nav/Review_Data.py",
     title="Review Business- & Marketing Data",
@@ -73,6 +79,7 @@ pg = st.navigation(
     [
         connect_page,
         map_page,
+        prepare_training_data_page,
         review_page,
         prepare_training_page,
         prepare_training_page_old,
