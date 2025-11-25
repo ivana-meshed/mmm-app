@@ -911,43 +911,49 @@ with st.expander(
         metrics_data = []
         for spend_col in available_paid_spends:
             if spend_col in df_r.columns and selected_goal in df_r.columns:
-                # Prepare data for correlation
-                temp_df = df_r[[spend_col, selected_goal]].dropna()
+                # Prepare data for correlation - ensure numeric types
+                temp_df = df_r[[spend_col, selected_goal]].copy()
+                temp_df[spend_col] = pd.to_numeric(temp_df[spend_col], errors="coerce")
+                temp_df[selected_goal] = pd.to_numeric(temp_df[selected_goal], errors="coerce")
+                temp_df = temp_df.dropna()
+
+                r2 = np.nan
+                nmae = np.nan
+                spearman_rho = np.nan
 
                 if len(temp_df) > 1:
-                    X = temp_df[[spend_col]].values
-                    y = temp_df[selected_goal].values
+                    try:
+                        X = np.asarray(temp_df[[spend_col]].values, dtype=np.float64)
+                        y = np.asarray(temp_df[selected_goal].values, dtype=np.float64)
 
-                    # Calculate R2
-                    model = LinearRegression()
-                    model.fit(X, y)
-                    y_pred = model.predict(X)
-                    r2 = r2_score(y, y_pred)
+                        # Calculate R2
+                        model = LinearRegression()
+                        model.fit(X, y)
+                        y_pred = model.predict(X)
+                        r2 = r2_score(y, y_pred)
 
-                    # Calculate NMAE (Normalized Mean Absolute Error)
-                    mae = mean_absolute_error(y, y_pred)
-                    y_min, y_max = float(y.min()), float(y.max())
-                    if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
-                        y_range = y_max - y_min
-                        nmae = mae / y_range
-                    else:
-                        # If range is zero, NaN, or invalid, set NMAE to NaN
-                        nmae = np.nan
+                        # Calculate NMAE (Normalized Mean Absolute Error)
+                        mae = mean_absolute_error(y, y_pred)
+                        y_min, y_max = float(y.min()), float(y.max())
+                        if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
+                            y_range = y_max - y_min
+                            nmae = mae / y_range
+                        else:
+                            # If range is zero, NaN, or invalid, set NMAE to NaN
+                            nmae = np.nan
+                    except Exception:
+                        pass
 
                     # Calculate Spearman's rho (suppress warning for constant input)
                     try:
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore")
                             rho, _ = stats.spearmanr(
-                                temp_df[spend_col], temp_df[selected_goal]
+                                temp_df[spend_col].values, temp_df[selected_goal].values
                             )
                         spearman_rho = _safe_float(rho)
-                    except (ValueError, TypeError):
+                    except Exception:
                         spearman_rho = np.nan
-                else:
-                    r2 = np.nan
-                    nmae = np.nan
-                    spearman_rho = np.nan
 
                 # Pre-select based on prefill from Map Data
                 # If prefill list is empty, select all by default
@@ -1037,46 +1043,52 @@ with st.expander(
             var_metrics_data = []
             for var_col in unique_options:
                 if var_col in df_r.columns and spend_col in df_r.columns:
-                    temp_df = df_r[[spend_col, var_col]].dropna()
+                    temp_df = df_r[[spend_col, var_col]].copy()
+                    temp_df[spend_col] = pd.to_numeric(temp_df[spend_col], errors="coerce")
+                    temp_df[var_col] = pd.to_numeric(temp_df[var_col], errors="coerce")
+                    temp_df = temp_df.dropna()
+
+                    r2 = np.nan
+                    nmae = np.nan
+                    spearman_rho = np.nan
 
                     if len(temp_df) > 1:
-                        X = temp_df[[spend_col]].values
-                        y = temp_df[var_col].values
+                        try:
+                            X = np.asarray(temp_df[[spend_col]].values, dtype=np.float64)
+                            y = np.asarray(temp_df[var_col].values, dtype=np.float64)
 
-                        # Calculate R2
-                        model = LinearRegression()
-                        model.fit(X, y)
-                        y_pred = model.predict(X)
-                        r2 = r2_score(y, y_pred)
+                            # Calculate R2
+                            model = LinearRegression()
+                            model.fit(X, y)
+                            y_pred = model.predict(X)
+                            r2 = r2_score(y, y_pred)
 
-                        # Calculate NMAE
-                        mae = mean_absolute_error(y, y_pred)
-                        y_min, y_max = float(y.min()), float(y.max())
-                        if (
-                            pd.notna(y_min)
-                            and pd.notna(y_max)
-                            and y_max > y_min
-                        ):
-                            y_range = y_max - y_min
-                            nmae = mae / y_range
-                        else:
-                            # If range is zero, NaN, or invalid, set NMAE to NaN
-                            nmae = np.nan
+                            # Calculate NMAE
+                            mae = mean_absolute_error(y, y_pred)
+                            y_min, y_max = float(y.min()), float(y.max())
+                            if (
+                                pd.notna(y_min)
+                                and pd.notna(y_max)
+                                and y_max > y_min
+                            ):
+                                y_range = y_max - y_min
+                                nmae = mae / y_range
+                            else:
+                                # If range is zero, NaN, or invalid, set NMAE to NaN
+                                nmae = np.nan
+                        except Exception:
+                            pass
 
                         # Calculate Spearman's rho (suppress warning for constant input)
                         try:
                             with warnings.catch_warnings():
                                 warnings.simplefilter("ignore")
                                 rho, _ = stats.spearmanr(
-                                    temp_df[spend_col], temp_df[var_col]
+                                    temp_df[spend_col].values, temp_df[var_col].values
                                 )
                             spearman_rho = _safe_float(rho)
-                        except (ValueError, TypeError):
+                        except Exception:
                             spearman_rho = np.nan
-                    else:
-                        r2 = np.nan
-                        nmae = np.nan
-                        spearman_rho = np.nan
 
                     # Mark if this is the original spend column
                     label = (
@@ -1218,40 +1230,49 @@ with st.expander(
             if var_col not in df_r.columns or goal_col not in df_r.columns:
                 continue
 
-            temp_df = df_r[[var_col, goal_col]].dropna()
+            temp_df = df_r[[var_col, goal_col]].copy()
+            # Convert to numeric to ensure proper dtype
+            temp_df[var_col] = pd.to_numeric(temp_df[var_col], errors="coerce")
+            temp_df[goal_col] = pd.to_numeric(temp_df[goal_col], errors="coerce")
+            temp_df = temp_df.dropna()
 
             r2 = np.nan
             nmae = np.nan
             spearman_rho = np.nan
 
             if len(temp_df) > 1:
-                X = temp_df[[var_col]].values
-                y = temp_df[goal_col].values
+                try:
+                    X = np.asarray(temp_df[[var_col]].values, dtype=np.float64)
+                    y = np.asarray(temp_df[goal_col].values, dtype=np.float64)
+                except (ValueError, TypeError):
+                    X = None
+                    y = None
 
                 # Calculate R2 and predictions
-                try:
-                    model = LinearRegression()
-                    model.fit(X, y)
-                    y_pred = model.predict(X)
-                    r2 = r2_score(y, y_pred)
+                if X is not None and y is not None:
+                    try:
+                        model = LinearRegression()
+                        model.fit(X, y)
+                        y_pred = model.predict(X)
+                        r2 = r2_score(y, y_pred)
 
-                    # Calculate NMAE (only if predictions are available)
-                    mae = mean_absolute_error(y, y_pred)
-                    y_min, y_max = float(y.min()), float(y.max())
-                    if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
-                        nmae = mae / (y_max - y_min)
-                except (ValueError, np.linalg.LinAlgError):
-                    pass
+                        # Calculate NMAE (only if predictions are available)
+                        mae = mean_absolute_error(y, y_pred)
+                        y_min, y_max = float(y.min()), float(y.max())
+                        if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
+                            nmae = mae / (y_max - y_min)
+                    except Exception:
+                        pass
 
                 # Calculate Spearman's rho (suppress warning for constant input)
                 try:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
                         rho, _ = stats.spearmanr(
-                            temp_df[var_col], temp_df[goal_col]
+                            temp_df[var_col].values, temp_df[goal_col].values
                         )
                     spearman_rho = _safe_float(rho)
-                except (ValueError, TypeError):
+                except Exception:
                     pass
 
             # Get VIF value
