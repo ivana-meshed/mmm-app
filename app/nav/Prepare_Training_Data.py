@@ -1115,13 +1115,28 @@ with st.expander(
     st.markdown("---")
     st.markdown("### 3.4 Variable Analysis with VIF")
     st.caption(
-        "Analyze selected variables for multicollinearity using Variance Inflation Factor (VIF). "
+        "Analyze selected variables from sections 3.2 and 3.3 for multicollinearity using Variance Inflation Factor (VIF). "
         "VIF > 10 indicates high multicollinearity (🔴), VIF 5-10 is moderate (🟡), VIF < 5 is good (🟢)."
     )
 
     # Get selected goal for correlation calculations
     selected_goal = st.session_state.get("selected_goal")
-    column_categories = st.session_state.get("column_categories", {})
+    
+    # Get selected paid media spends from section 3.2
+    selected_paid_spends_3_2 = st.session_state.get("selected_paid_spends", [])
+    
+    # Get selected media response variables from section 3.3 dropdowns
+    SPEND_SUFFIX = " (spend)"
+    selected_media_vars_3_3 = []
+    for spend_col in selected_paid_spends_3_2:
+        media_var = st.session_state.get(f"media_var_select_{spend_col}")
+        if media_var:
+            # Remove "(spend)" suffix if it's the spend column itself
+            if media_var.endswith(SPEND_SUFFIX):
+                media_var = media_var[: -len(SPEND_SUFFIX)]
+            # Only add non-empty variable names
+            if media_var:
+                selected_media_vars_3_3.append(media_var)
 
     def _calculate_vif_band(vif_value: float) -> str:
         """Return VIF band indicator based on VIF value."""
@@ -1231,7 +1246,7 @@ with st.expander(
         df_metrics = _calculate_variable_metrics(var_list, title, selected_goal)
 
         if df_metrics.empty:
-            st.info(f"No {title.lower()} variables available in the data.")
+            st.info(f"No {title.lower()} available in the data.")
             return
 
         st.markdown(f"#### {title} ({len(df_metrics)})")
@@ -1258,20 +1273,20 @@ with st.expander(
 
     if not selected_goal:
         st.info("Please select a goal in section 3.1 to calculate variable metrics.")
-    elif not column_categories:
-        st.info("Please complete Step 2 to select columns for training.")
+    elif not selected_paid_spends_3_2:
+        st.info("Please select paid media spends in section 3.2.")
+    elif not selected_media_vars_3_3:
+        st.info("Please select media response variables in section 3.3.")
     else:
-        # Get selected columns from each category
-        selected_paid_vars = column_categories.get("paid_media_vars", [])
-        selected_organic = column_categories.get("organic_vars", [])
-        selected_context = column_categories.get("context_vars", [])
-        selected_factor = column_categories.get("factor_vars", [])
-
-        # Render tables for each category
-        _render_variable_table("Paid Media Variables", selected_paid_vars, "paid_vars")
-        _render_variable_table("Organic Variables", selected_organic, "organic")
-        _render_variable_table("Context Variables", selected_context, "context")
-        _render_variable_table("Factor Variables", selected_factor, "factor")
+        # Render table for selected paid media spends (from 3.2)
+        _render_variable_table(
+            "Selected Paid Media Spends", selected_paid_spends_3_2, "paid_spends"
+        )
+        
+        # Render table for selected media response variables (from 3.3)
+        _render_variable_table(
+            "Selected Media Response Variables", selected_media_vars_3_3, "media_vars"
+        )
 
     # Export Selected Columns button (after section 3.4)
     st.markdown("---")
