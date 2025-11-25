@@ -894,9 +894,7 @@ with st.expander(
     ]
 
     # Get prefilled paid media spends from Map Data (if any)
-    prefill_paid_spends = st.session_state.get(
-        "prefill_paid_media_spends", []
-    )
+    prefill_paid_spends = st.session_state.get("prefill_paid_media_spends", [])
 
     if not available_paid_spends:
         st.info(
@@ -911,10 +909,17 @@ with st.expander(
         metrics_data = []
         for spend_col in available_paid_spends:
             if spend_col in df_r.columns and selected_goal in df_r.columns:
-                # Prepare data for correlation - ensure numeric types
+                # Skip if spend_col == selected_goal (can't regress against itself)
+                if spend_col == selected_goal:
+                    continue
+
                 temp_df = df_r[[spend_col, selected_goal]].copy()
-                temp_df[spend_col] = pd.to_numeric(temp_df[spend_col], errors="coerce")
-                temp_df[selected_goal] = pd.to_numeric(temp_df[selected_goal], errors="coerce")
+                temp_df[spend_col] = pd.to_numeric(
+                    temp_df[spend_col], errors="coerce"
+                )
+                temp_df[selected_goal] = pd.to_numeric(
+                    temp_df[selected_goal], errors="coerce"
+                )
                 temp_df = temp_df.dropna()
 
                 r2 = np.nan
@@ -923,8 +928,12 @@ with st.expander(
 
                 if len(temp_df) > 1:
                     try:
-                        X = np.asarray(temp_df[[spend_col]].values, dtype=np.float64)
-                        y = np.asarray(temp_df[selected_goal].values, dtype=np.float64)
+                        X = np.asarray(
+                            temp_df[[spend_col]].values, dtype=np.float64
+                        )
+                        y = np.asarray(
+                            temp_df[selected_goal].values, dtype=np.float64
+                        )
 
                         # Calculate R2
                         model = LinearRegression()
@@ -935,7 +944,11 @@ with st.expander(
                         # Calculate NMAE (Normalized Mean Absolute Error)
                         mae = mean_absolute_error(y, y_pred)
                         y_min, y_max = float(y.min()), float(y.max())
-                        if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
+                        if (
+                            pd.notna(y_min)
+                            and pd.notna(y_max)
+                            and y_max > y_min
+                        ):
                             y_range = y_max - y_min
                             nmae = mae / y_range
                         else:
@@ -949,7 +962,8 @@ with st.expander(
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore")
                             rho, _ = stats.spearmanr(
-                                temp_df[spend_col].values, temp_df[selected_goal].values
+                                temp_df[spend_col].values,
+                                temp_df[selected_goal].values,
                             )
                         spearman_rho = _safe_float(rho)
                     except Exception:
@@ -1036,16 +1050,29 @@ with st.expander(
             unique_options = list(dict.fromkeys(options_list))
 
             if len(unique_options) <= 1 and spend_col not in df_r.columns:
-                st.info(f"No media response variables available for {spend_col}")
+                st.info(
+                    f"No media response variables available for {spend_col}"
+                )
                 continue
 
             # Calculate metrics for each option
             var_metrics_data = []
             for var_col in unique_options:
                 if var_col in df_r.columns and spend_col in df_r.columns:
-                    temp_df = df_r[[spend_col, var_col]].copy()
-                    temp_df[spend_col] = pd.to_numeric(temp_df[spend_col], errors="coerce")
-                    temp_df[var_col] = pd.to_numeric(temp_df[var_col], errors="coerce")
+                    # Handle case where spend_col == var_col to avoid duplicate columns
+                    if spend_col == var_col:
+                        temp_df = df_r[[spend_col]].copy()
+                        temp_df[spend_col] = pd.to_numeric(
+                            temp_df[spend_col], errors="coerce"
+                        )
+                    else:
+                        temp_df = df_r[[spend_col, var_col]].copy()
+                        temp_df[spend_col] = pd.to_numeric(
+                            temp_df[spend_col], errors="coerce"
+                        )
+                        temp_df[var_col] = pd.to_numeric(
+                            temp_df[var_col], errors="coerce"
+                        )
                     temp_df = temp_df.dropna()
 
                     r2 = np.nan
@@ -1054,8 +1081,12 @@ with st.expander(
 
                     if len(temp_df) > 1:
                         try:
-                            X = np.asarray(temp_df[[spend_col]].values, dtype=np.float64)
-                            y = np.asarray(temp_df[var_col].values, dtype=np.float64)
+                            X = np.asarray(
+                                temp_df[[spend_col]].values, dtype=np.float64
+                            )
+                            y = np.asarray(
+                                temp_df[var_col].values, dtype=np.float64
+                            )
 
                             # Calculate R2
                             model = LinearRegression()
@@ -1084,7 +1115,8 @@ with st.expander(
                             with warnings.catch_warnings():
                                 warnings.simplefilter("ignore")
                                 rho, _ = stats.spearmanr(
-                                    temp_df[spend_col].values, temp_df[var_col].values
+                                    temp_df[spend_col].values,
+                                    temp_df[var_col].values,
                                 )
                             spearman_rho = _safe_float(rho)
                         except Exception:
@@ -1146,10 +1178,10 @@ with st.expander(
 
     # Get selected goal for correlation calculations
     selected_goal = st.session_state.get("selected_goal")
-    
+
     # Get selected paid media spends from section 3.2
     selected_paid_spends_3_2 = st.session_state.get("selected_paid_spends", [])
-    
+
     # Get selected media response variables from section 3.3 dropdowns
     SPEND_SUFFIX = " (spend)"
     selected_media_vars_3_3 = []
@@ -1186,8 +1218,13 @@ with st.expander(
         if not var_cols or not goal_col:
             return pd.DataFrame()
 
-        # Filter to columns that exist in df_r
-        valid_cols = [c for c in var_cols if c in df_r.columns]
+        # Filter to columns that exist in df_r and are numeric
+        # (exclude datetime columns which can't be used in regression)
+        valid_cols = [
+            c
+            for c in var_cols
+            if c in df_r.columns and pd.api.types.is_numeric_dtype(df_r[c])
+        ]
         if not valid_cols:
             return pd.DataFrame()
 
@@ -1203,7 +1240,7 @@ with st.expander(
                 for col in vif_df.columns:
                     vif_df[col] = pd.to_numeric(vif_df[col], errors="coerce")
                 vif_df = vif_df.dropna()
-                
+
                 # Only proceed if we have enough rows and all columns are numeric
                 if len(vif_df) > len(valid_cols) + 1:
                     # Convert to float64 array for statsmodels (explicit dtype)
@@ -1211,7 +1248,7 @@ with st.expander(
                         vif_array = np.asarray(vif_df.values, dtype=np.float64)
                     except (ValueError, TypeError):
                         vif_array = None
-                    
+
                     if vif_array is not None and vif_array.size > 0:
                         for i, col in enumerate(valid_cols):
                             try:
@@ -1230,10 +1267,16 @@ with st.expander(
             if var_col not in df_r.columns or goal_col not in df_r.columns:
                 continue
 
+            # Handle case where var_col == goal_col (edge case - skip it)
+            if var_col == goal_col:
+                continue
+
             temp_df = df_r[[var_col, goal_col]].copy()
             # Convert to numeric to ensure proper dtype
             temp_df[var_col] = pd.to_numeric(temp_df[var_col], errors="coerce")
-            temp_df[goal_col] = pd.to_numeric(temp_df[goal_col], errors="coerce")
+            temp_df[goal_col] = pd.to_numeric(
+                temp_df[goal_col], errors="coerce"
+            )
             temp_df = temp_df.dropna()
 
             r2 = np.nan
@@ -1259,7 +1302,11 @@ with st.expander(
                         # Calculate NMAE (only if predictions are available)
                         mae = mean_absolute_error(y, y_pred)
                         y_min, y_max = float(y.min()), float(y.max())
-                        if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
+                        if (
+                            pd.notna(y_min)
+                            and pd.notna(y_max)
+                            and y_max > y_min
+                        ):
                             nmae = mae / (y_max - y_min)
                     except Exception:
                         pass
@@ -1335,15 +1382,19 @@ with st.expander(
     selected_other = column_categories.get("other", [])
 
     if not selected_goal:
-        st.info("Please select a goal in section 3.1 to calculate variable metrics.")
+        st.info(
+            "Please select a goal in section 3.1 to calculate variable metrics."
+        )
     elif not selected_media_vars_3_3:
         st.info("Please select media response variables in section 3.3.")
     else:
         # Render table for selected media response variables (from 3.3)
         _render_variable_table(
-            "Selected Media Response Variables", selected_media_vars_3_3, "media_vars"
+            "Selected Media Response Variables",
+            selected_media_vars_3_3,
+            "media_vars",
         )
-        
+
         # Render tables for Step 2 category selections (only if category has variables)
         if selected_organic:
             _render_variable_table(
