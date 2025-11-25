@@ -12,7 +12,7 @@ import json
 import os
 import tempfile
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Union
 
 import numpy as np
 import pandas as pd
@@ -44,6 +44,27 @@ from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+
+def _safe_float(value: Union[float, np.ndarray, None]) -> float:
+    """Safely convert a value to float, handling numpy arrays and NaN values."""
+    if value is None:
+        return np.nan
+    # Handle numpy arrays - take scalar value if single element, else NaN
+    if isinstance(value, np.ndarray):
+        if value.size == 1:
+            value = value.item()
+        else:
+            return np.nan
+    # Now check if it's a valid number
+    try:
+        f = float(value)
+        if np.isnan(f) or np.isinf(f):
+            return np.nan
+        return f
+    except (TypeError, ValueError):
+        return np.nan
+
 
 # Authentication
 require_login_and_domain()
@@ -914,7 +935,7 @@ with st.expander(
                     rho, _ = stats.spearmanr(
                         temp_df[spend_col], temp_df[selected_goal]
                     )
-                    spearman_rho = float(rho) if pd.notna(rho) else np.nan
+                    spearman_rho = _safe_float(rho)
                 else:
                     r2 = np.nan
                     nmae = np.nan
@@ -932,9 +953,9 @@ with st.expander(
                     {
                         "Select": is_selected,
                         "Paid Media Spend": spend_col,
-                        "R²": float(r2) if pd.notna(r2) else np.nan,
-                        "NMAE": float(nmae) if pd.notna(nmae) else np.nan,
-                        "Spearman's ρ": float(spearman_rho) if pd.notna(spearman_rho) else np.nan,
+                        "R²": _safe_float(r2),
+                        "NMAE": _safe_float(nmae),
+                        "Spearman's ρ": _safe_float(spearman_rho),
                     }
                 )
 
@@ -1038,7 +1059,7 @@ with st.expander(
                         rho, _ = stats.spearmanr(
                             temp_df[spend_col], temp_df[var_col]
                         )
-                        spearman_rho = float(rho) if pd.notna(rho) else np.nan
+                        spearman_rho = _safe_float(rho)
                     else:
                         r2 = np.nan
                         nmae = np.nan
@@ -1053,9 +1074,9 @@ with st.expander(
                     var_metrics_data.append(
                         {
                             "Media Response Variable": label,
-                            "R²": float(r2) if pd.notna(r2) else np.nan,
-                            "NMAE": float(nmae) if pd.notna(nmae) else np.nan,
-                            "Spearman's ρ": float(spearman_rho) if pd.notna(spearman_rho) else np.nan,
+                            "R²": _safe_float(r2),
+                            "NMAE": _safe_float(nmae),
+                            "Spearman's ρ": _safe_float(spearman_rho),
                         }
                     )
 
@@ -1179,7 +1200,7 @@ with st.expander(
                     rho, _ = stats.spearmanr(
                         temp_df[var_col], temp_df[goal_col]
                     )
-                    spearman_rho = float(rho) if pd.notna(rho) else np.nan
+                    spearman_rho = _safe_float(rho)
                 except (ValueError, TypeError):
                     pass
 
@@ -1190,10 +1211,10 @@ with st.expander(
             metrics_data.append(
                 {
                     "Variable": var_col,
-                    "R²": float(r2) if pd.notna(r2) else np.nan,
-                    "NMAE": float(nmae) if pd.notna(nmae) else np.nan,
-                    "Spearman's ρ": float(spearman_rho) if pd.notna(spearman_rho) else np.nan,
-                    "VIF": float(vif) if pd.notna(vif) else np.nan,
+                    "R²": _safe_float(r2),
+                    "NMAE": _safe_float(nmae),
+                    "Spearman's ρ": _safe_float(spearman_rho),
+                    "VIF": _safe_float(vif),
                     "VIF Band": vif_band,
                 }
             )
