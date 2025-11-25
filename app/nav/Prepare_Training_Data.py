@@ -1192,17 +1192,25 @@ with st.expander(
                     vif_df[col] = pd.to_numeric(vif_df[col], errors="coerce")
                 vif_df = vif_df.dropna()
                 
+                # Only proceed if we have enough rows and all columns are numeric
                 if len(vif_df) > len(valid_cols) + 1:
-                    # Convert to float array for statsmodels
-                    vif_array = vif_df.values.astype(float)
-                    for i, col in enumerate(valid_cols):
-                        try:
-                            vif_values[col] = variance_inflation_factor(
-                                vif_array, i
-                            )
-                        except (ValueError, TypeError, np.linalg.LinAlgError):
-                            vif_values[col] = np.nan
-            except (ValueError, TypeError, KeyError):
+                    # Convert to float64 array for statsmodels (explicit dtype)
+                    try:
+                        vif_array = np.asarray(vif_df.values, dtype=np.float64)
+                    except (ValueError, TypeError):
+                        vif_array = None
+                    
+                    if vif_array is not None and vif_array.size > 0:
+                        for i, col in enumerate(valid_cols):
+                            try:
+                                vif_values[col] = variance_inflation_factor(
+                                    vif_array, i
+                                )
+                            except Exception:
+                                # Catch all exceptions from VIF calculation
+                                vif_values[col] = np.nan
+            except Exception:
+                # Catch any other exceptions during data preparation
                 pass
 
         # Calculate metrics for each variable against the goal
