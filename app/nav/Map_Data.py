@@ -2050,6 +2050,7 @@ with st.expander("💾 Save Dataset & Mapping Configuration", expanded=False):
             )
             st.session_state["last_saved_meta_path"] = f"gs://{BUCKET}/{vblob}"
             _list_country_versions_cached.clear()  # ⬅️ refresh loader pickers
+            _list_metadata_versions_cached.clear()  # ⬅️ refresh metadata list
             location_msg = (
                 f"for {save_country.upper()}"
                 if save_country_specific
@@ -2101,12 +2102,41 @@ if can_go_next:
     with coln1:
         try:
             # Streamlit >= 1.27
-            if st.button("Next → Experiment", use_container_width=True):
+            if st.button(
+                "Next → Prepare Training Data", use_container_width=True
+            ):
+                # Store values from Map Data for prefilling Prepare Training Data
+                # 3.1: Store the main goal
+                if not goals_df.empty:
+                    main_goals = goals_df[goals_df.get("main", False).astype(bool)]
+                    if not main_goals.empty:
+                        st.session_state["prefill_goal"] = str(
+                            main_goals.iloc[0]["var"]
+                        )
+                    elif not goals_df.empty:
+                        # Fallback to first primary goal if no main is selected
+                        primary_goals = goals_df[
+                            goals_df["group"] == "primary"
+                        ]
+                        if not primary_goals.empty:
+                            st.session_state["prefill_goal"] = str(
+                                primary_goals.iloc[0]["var"]
+                            )
+
+                # 3.2: Store paid media spends from mapping
+                paid_spends_list = by_cat.get("paid_media_spends", [])
+                st.session_state["prefill_paid_media_spends"] = paid_spends_list
+
+                # 3.3: Store paid_media_mapping for media response variables
+                st.session_state["prefill_paid_media_mapping"] = paid_media_mapping
+
                 import streamlit as stlib
 
-                stlib.switch_page("nav/Run_Experiment.py")
+                stlib.switch_page("nav/Prepare_Training_Data.py")
         except Exception:
             # Fallback: link
             st.page_link(
-                "nav/Run_Experiment.py", label="Next → Experiment", icon="➡️"
+                "nav/Prepare_Training_Data.py",
+                label="Next → Prepare Training Data",
+                icon="➡️",
             )

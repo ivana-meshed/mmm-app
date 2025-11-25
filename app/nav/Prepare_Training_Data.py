@@ -832,10 +832,24 @@ with st.expander(
         )
     else:
         goal_vars = [g.get("var") for g in goals_list if g.get("var")]
+
+        # Determine default index based on prefill from Map Data or main goal
+        prefill_goal = st.session_state.get("prefill_goal")
+        default_idx = 0
+        if prefill_goal and prefill_goal in goal_vars:
+            default_idx = goal_vars.index(prefill_goal)
+        else:
+            # Fallback: use main goal from metadata
+            for i, g in enumerate(goals_list):
+                if g.get("main", False):
+                    if g.get("var") in goal_vars:
+                        default_idx = goal_vars.index(g.get("var"))
+                        break
+
         selected_goal = st.selectbox(
             "Select goal to predict",
             options=goal_vars,
-            index=0 if goal_vars else None,
+            index=default_idx if goal_vars else None,
             key="selected_goal_dropdown",
         )
         st.session_state["selected_goal"] = selected_goal
@@ -852,6 +866,11 @@ with st.expander(
     available_paid_spends = [
         c for c in paid_spend_cols if c in selected_cols_step2
     ]
+
+    # Get prefilled paid media spends from Map Data (if any)
+    prefill_paid_spends = st.session_state.get(
+        "prefill_paid_media_spends", []
+    )
 
     if not available_paid_spends:
         st.info(
@@ -898,9 +917,17 @@ with st.expander(
                     nmae = np.nan
                     spearman_rho = np.nan
 
+                # Pre-select based on prefill from Map Data
+                # If prefill list is empty, select all by default
+                is_selected = (
+                    spend_col in prefill_paid_spends
+                    if prefill_paid_spends
+                    else True
+                )
+
                 metrics_data.append(
                     {
-                        "Select": True,
+                        "Select": is_selected,
                         "Paid Media Spend": spend_col,
                         "R²": r2,
                         "NMAE": nmae,
