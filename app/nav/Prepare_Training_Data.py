@@ -49,7 +49,9 @@ require_login_and_domain()
 st.title("Prepare Training Data")
 
 # Constants
-TRAINING_DATA_PATH_TEMPLATE = "training_data/{country}/{timestamp}/selected_columns.csv"
+TRAINING_DATA_PATH_TEMPLATE = (
+    "training_data/{country}/{timestamp}/selected_columns.csv"
+)
 
 # Session state defaults
 st.session_state.setdefault("country", "de")
@@ -64,11 +66,13 @@ st.session_state.setdefault("selected_goal", None)
 # =============================
 with st.expander("Step 1) Select Data", expanded=False):
     st.markdown("### Select country and data versions to analyze")
-    
+
     # Check if we have preselected values from Map Your Data
     if "country" in st.session_state and st.session_state.get("country"):
-        st.info(f"Using country from Map Your Data: **{st.session_state['country'].upper()}**")
-    
+        st.info(
+            f"Using country from Map Your Data: **{st.session_state['country'].upper()}**"
+        )
+
     c1, c2, c3, c4 = st.columns([1.2, 1, 1, 0.6])
 
     country = (
@@ -274,8 +278,8 @@ def _num_stats(s: pd.Series) -> dict:
             max=np.nan,
             std=np.nan,
         )
-    z = int((s.fillna(0) == 0).sum())
     s2 = s.dropna()
+    z = int((s2 == 0).sum())
     return dict(
         non_null=nn,
         nulls=na,
@@ -361,14 +365,14 @@ def _active_spend_platforms(
     vm = vm[vm["col"].isin(df_window.columns)]
     if vm.empty:
         return set()
-    
+
     # Create column->platform mapping
     col_to_plat = dict(zip(vm["col"], vm["platform"]))
-    
+
     # Melt and add platform column
     melted = df_window[vm["col"].tolist()].melt(value_name="spend")
     melted["platform"] = melted["variable"].map(col_to_plat)
-    
+
     sums = (
         melted.dropna(subset=["spend"])
         .groupby("platform")["spend"]
@@ -429,11 +433,12 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     # Get all columns mapped in metadata
     data_types_map = meta.get("data_types", {}) or {}
     channels_map = meta.get("channels", {}) or {}
-    
+
     # Other columns are those in data_types but NOT in channels
     # Filter to only those present in the dataframe for display
     other_cols = [
-        c for c in data_types_map.keys()
+        c
+        for c in data_types_map.keys()
         if c not in channels_map and c in prof_df.columns
     ]
 
@@ -466,7 +471,9 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         dist_vals = _distribution_values(s)
 
         rows.append(
-            dict(Use=True, Column=col, Type=col_type, Dist=dist_vals, **col_stats)
+            dict(
+                Use=True, Column=col, Type=col_type, Dist=dist_vals, **col_stats
+            )
         )
     prof_all = pd.DataFrame(rows)
 
@@ -477,9 +484,7 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         drop_all_zero = st.checkbox(
             "Drop all-zero (numeric) columns", value=True
         )
-        drop_constant = st.checkbox(
-            "Drop constant (distinct == 1)", value=True
-        )
+        drop_constant = st.checkbox("Drop constant (distinct == 1)", value=True)
         drop_low_var = st.checkbox(
             "Drop low variance (CV < threshold)", value=False
         )
@@ -596,7 +601,7 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     def _render_cat_table(title: str, cols: list[str], key_suffix: str):
         subset = prof_all[prof_all["Column"].isin(cols)].copy()
         st.markdown(f"### {title} ({len(subset)})")
-        
+
         if subset.empty:
             st.info("No columns in this category.")
             return
@@ -702,31 +707,36 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     # Export Selected Columns button
     st.markdown("---")
     st.markdown("### Export Selected Columns")
-    
-    if st.button("Export Selected Columns", type="primary", key="export_selected_cols"):
+
+    if st.button(
+        "Export Selected Columns", type="primary", key="export_selected_cols"
+    ):
         tmp_path = None
         try:
-            # Create CSV of selected columns
-            selected_data = prof_df[selected_cols].copy()
-            
+            # Create CSV with column list only (one column per row)
+            column_list_df = pd.DataFrame({"column_name": selected_cols})
+
             # Save to GCS
             country = st.session_state.get("country", "de")
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            
+
             # Create temporary file
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".csv", delete=False
             ) as tmp:
                 tmp_path = tmp.name
-                selected_data.to_csv(tmp_path, index=False)
-            
+                column_list_df.to_csv(tmp_path, index=False)
+
             # Upload to GCS
             gcs_path = TRAINING_DATA_PATH_TEMPLATE.format(
                 country=country, timestamp=timestamp
             )
             upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
-            
-            st.success(f"✅ Exported selected columns to gs://{GCS_BUCKET}/{gcs_path}")
+
+            st.success(
+                f"✅ Exported {len(selected_cols)} column names "
+                f"to gs://{GCS_BUCKET}/{gcs_path}"
+            )
             st.session_state["last_exported_columns_path"] = gcs_path
         except Exception as e:
             st.error(f"Failed to export selected columns: {e}")
@@ -739,58 +749,66 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
 # =============================
 # Step 3: Prepare paid media spends & media response
 # =============================
-with st.expander("Step 3) Prepare paid media spends & media response", expanded=False):
+with st.expander(
+    "Step 3) Prepare paid media spends & media response", expanded=False
+):
     st.markdown("### 3.1 What output do you want to predict?")
-    
+
     # Get goals from metadata
     goals_list = meta.get("goals", []) or []
     if not goals_list:
-        st.warning("No goals defined in metadata. Please configure goals in Map Your Data.")
+        st.warning(
+            "No goals defined in metadata. Please configure goals in Map Your Data."
+        )
     else:
         goal_vars = [g.get("var") for g in goals_list if g.get("var")]
         selected_goal = st.selectbox(
             "Select goal to predict",
             options=goal_vars,
             index=0 if goal_vars else None,
-            key="selected_goal_dropdown"
+            key="selected_goal_dropdown",
         )
         st.session_state["selected_goal"] = selected_goal
-    
+
     # 3.2 Select Paid Media Spends to optimize
     st.markdown("---")
     st.markdown("### 3.2 Select Paid Media Spends to optimize:")
-    
-    selected_cols_step2 = st.session_state.get("selected_columns_for_training", [])
-    
+
+    selected_cols_step2 = st.session_state.get(
+        "selected_columns_for_training", []
+    )
+
     # Filter paid media spends from selected columns
     available_paid_spends = [
         c for c in paid_spend_cols if c in selected_cols_step2
     ]
-    
+
     if not available_paid_spends:
-        st.info("No paid media spend columns available. Please select columns in Step 2.")
+        st.info(
+            "No paid media spend columns available. Please select columns in Step 2."
+        )
     elif not st.session_state.get("selected_goal"):
         st.info("Please select a goal in section 3.1 above.")
     else:
         selected_goal = st.session_state["selected_goal"]
-        
+
         # Calculate metrics for each paid spend column
         metrics_data = []
         for spend_col in available_paid_spends:
             if spend_col in df_r.columns and selected_goal in df_r.columns:
                 # Prepare data for correlation
                 temp_df = df_r[[spend_col, selected_goal]].dropna()
-                
+
                 if len(temp_df) > 1:
                     X = temp_df[[spend_col]].values
                     y = temp_df[selected_goal].values
-                    
+
                     # Calculate R2
                     model = LinearRegression()
                     model.fit(X, y)
                     y_pred = model.predict(X)
                     r2 = r2_score(y, y_pred)
-                    
+
                     # Calculate NMAE (Normalized Mean Absolute Error)
                     mae = mean_absolute_error(y, y_pred)
                     y_min, y_max = float(y.min()), float(y.max())
@@ -800,7 +818,7 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                     else:
                         # If range is zero, NaN, or invalid, set NMAE to NaN
                         nmae = np.nan
-                    
+
                     # Calculate Spearman's rho
                     spearman_rho, _ = stats.spearmanr(
                         temp_df[spend_col], temp_df[selected_goal]
@@ -809,18 +827,20 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                     r2 = np.nan
                     nmae = np.nan
                     spearman_rho = np.nan
-                
-                metrics_data.append({
-                    "Select": False,
-                    "Paid Media Spend": spend_col,
-                    "R²": r2,
-                    "NMAE": nmae,
-                    "Spearman's ρ": spearman_rho,
-                })
-        
+
+                metrics_data.append(
+                    {
+                        "Select": True,
+                        "Paid Media Spend": spend_col,
+                        "R²": r2,
+                        "NMAE": nmae,
+                        "Spearman's ρ": spearman_rho,
+                    }
+                )
+
         if metrics_data:
             metrics_df = pd.DataFrame(metrics_data)
-            
+
             # Display editable table
             edited_metrics = st.data_editor(
                 metrics_df,
@@ -833,75 +853,83 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                         "Paid Media Spend", disabled=True
                     ),
                     "R²": st.column_config.NumberColumn("R²", format="%.4f"),
-                    "NMAE": st.column_config.NumberColumn("NMAE", format="%.4f"),
+                    "NMAE": st.column_config.NumberColumn(
+                        "NMAE", format="%.4f"
+                    ),
                     "Spearman's ρ": st.column_config.NumberColumn(
                         "Spearman's ρ", format="%.4f"
                     ),
                 },
-                key="paid_spends_metrics_table"
+                key="paid_spends_metrics_table",
             )
-            
+
             # Store selected paid spends
-            selected_paid_spends = edited_metrics[edited_metrics["Select"]]["Paid Media Spend"].tolist()
+            selected_paid_spends = edited_metrics[edited_metrics["Select"]][
+                "Paid Media Spend"
+            ].tolist()
             st.session_state["selected_paid_spends"] = selected_paid_spends
-    
+
     # 3.3 Select Media Response Variables
     st.markdown("---")
     st.markdown("### 3.3 Select Media Response Variables")
-    
+
     selected_paid_spends = st.session_state.get("selected_paid_spends", [])
-    
+
     if not selected_paid_spends:
         st.info("Please select paid media spends in section 3.2 above.")
     else:
         # Get paid_media_mapping from metadata
         paid_media_mapping = meta.get("paid_media_mapping", {}) or {}
-        
+
         for spend_col in selected_paid_spends:
             st.markdown(f"#### {spend_col}")
-            
+
             # Get corresponding paid media vars
             corresponding_vars = paid_media_mapping.get(spend_col, [])
-            
+
             if not corresponding_vars:
                 st.info(f"No media response variables mapped for {spend_col}")
                 continue
-            
+
             # Filter vars that are available in the data
             available_vars = [
                 v for v in corresponding_vars if v in df_r.columns
             ]
-            
+
             if not available_vars:
                 st.info(f"Mapped variables not found in data for {spend_col}")
                 continue
-            
+
             # Calculate metrics for each media var
             var_metrics_data = []
             for var_col in available_vars:
                 if var_col in df_r.columns and spend_col in df_r.columns:
                     temp_df = df_r[[spend_col, var_col]].dropna()
-                    
+
                     if len(temp_df) > 1:
                         X = temp_df[[spend_col]].values
                         y = temp_df[var_col].values
-                        
+
                         # Calculate R2
                         model = LinearRegression()
                         model.fit(X, y)
                         y_pred = model.predict(X)
                         r2 = r2_score(y, y_pred)
-                        
+
                         # Calculate NMAE
                         mae = mean_absolute_error(y, y_pred)
                         y_min, y_max = float(y.min()), float(y.max())
-                        if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
+                        if (
+                            pd.notna(y_min)
+                            and pd.notna(y_max)
+                            and y_max > y_min
+                        ):
                             y_range = y_max - y_min
                             nmae = mae / y_range
                         else:
                             # If range is zero, NaN, or invalid, set NMAE to NaN
                             nmae = np.nan
-                        
+
                         # Calculate Spearman's rho
                         spearman_rho, _ = stats.spearmanr(
                             temp_df[spend_col], temp_df[var_col]
@@ -910,24 +938,26 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                         r2 = np.nan
                         nmae = np.nan
                         spearman_rho = np.nan
-                    
-                    var_metrics_data.append({
-                        "Media Response Variable": var_col,
-                        "R²": r2,
-                        "NMAE": nmae,
-                        "Spearman's ρ": spearman_rho,
-                    })
-            
+
+                    var_metrics_data.append(
+                        {
+                            "Media Response Variable": var_col,
+                            "R²": r2,
+                            "NMAE": nmae,
+                            "Spearman's ρ": spearman_rho,
+                        }
+                    )
+
             if var_metrics_data:
                 var_metrics_df = pd.DataFrame(var_metrics_data)
-                
+
                 # Dropdown to select the media response variable
                 st.selectbox(
                     f"Select media response variable for {spend_col}",
                     options=var_metrics_df["Media Response Variable"].tolist(),
-                    key=f"media_var_select_{spend_col}"
+                    key=f"media_var_select_{spend_col}",
                 )
-                
+
                 # Display metrics table
                 st.dataframe(
                     var_metrics_df,
@@ -937,8 +967,12 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                         "Media Response Variable": st.column_config.TextColumn(
                             "Media Response Variable"
                         ),
-                        "R²": st.column_config.NumberColumn("R²", format="%.4f"),
-                        "NMAE": st.column_config.NumberColumn("NMAE", format="%.4f"),
+                        "R²": st.column_config.NumberColumn(
+                            "R²", format="%.4f"
+                        ),
+                        "NMAE": st.column_config.NumberColumn(
+                            "NMAE", format="%.4f"
+                        ),
                         "Spearman's ρ": st.column_config.NumberColumn(
                             "Spearman's ρ", format="%.4f"
                         ),
@@ -949,6 +983,10 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
 # =============================
 # Step 4: Select strongest drivers and reduce noise
 # =============================
-with st.expander("Step 4) Select strongest drivers and reduce noise", expanded=False):
+with st.expander(
+    "Step 4) Select strongest drivers and reduce noise", expanded=False
+):
     st.markdown("### Coming soon")
-    st.info("This step will help you identify and select the strongest drivers while reducing noise in your model.")
+    st.info(
+        "This step will help you identify and select the strongest drivers while reducing noise in your model."
+    )
