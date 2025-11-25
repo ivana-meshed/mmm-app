@@ -1271,22 +1271,40 @@ with st.expander(
             key=f"vif_table_{key_suffix}",
         )
 
+    # Get column categories from Step 2
+    column_categories = st.session_state.get("column_categories", {})
+    selected_organic = column_categories.get("organic_vars", [])
+    selected_context = column_categories.get("context_vars", [])
+    selected_factor = column_categories.get("factor_vars", [])
+    selected_other = column_categories.get("other", [])
+
     if not selected_goal:
         st.info("Please select a goal in section 3.1 to calculate variable metrics.")
-    elif not selected_paid_spends_3_2:
-        st.info("Please select paid media spends in section 3.2.")
     elif not selected_media_vars_3_3:
         st.info("Please select media response variables in section 3.3.")
     else:
-        # Render table for selected paid media spends (from 3.2)
-        _render_variable_table(
-            "Selected Paid Media Spends", selected_paid_spends_3_2, "paid_spends"
-        )
-        
         # Render table for selected media response variables (from 3.3)
         _render_variable_table(
             "Selected Media Response Variables", selected_media_vars_3_3, "media_vars"
         )
+        
+        # Render tables for Step 2 category selections (only if category has variables)
+        if selected_organic:
+            _render_variable_table(
+                "Selected Organic Variables", selected_organic, "organic"
+            )
+        if selected_context:
+            _render_variable_table(
+                "Selected Context Variables", selected_context, "context"
+            )
+        if selected_factor:
+            _render_variable_table(
+                "Selected Factor Variables", selected_factor, "factor"
+            )
+        if selected_other:
+            _render_variable_table(
+                "Selected Other Variables", selected_other, "other"
+            )
 
     # Export Selected Columns button (after section 3.4)
     st.markdown("---")
