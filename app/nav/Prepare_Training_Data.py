@@ -8,6 +8,7 @@ This page guides users through preparing training data in 4 steps:
 4. Select strongest drivers and reduce noise
 """
 
+import json
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -31,7 +32,6 @@ from app_shared import (
     period_label,
     pretty,
     previous_window,
-    render_sidebar,
     require_login_and_domain,
     resample_numeric,
     resolve_meta_blob_from_selection,
@@ -49,7 +49,9 @@ require_login_and_domain()
 st.title("Prepare Training Data")
 
 # Constants
-TRAINING_DATA_PATH_TEMPLATE = "training_data/{country}/{timestamp}/selected_columns.csv"
+TRAINING_DATA_PATH_TEMPLATE = (
+    "training_data/{country}/{timestamp}/selected_columns.json"
+)
 
 # Session state defaults
 st.session_state.setdefault("country", "de")
@@ -64,11 +66,13 @@ st.session_state.setdefault("selected_goal", None)
 # =============================
 with st.expander("Step 1) Select Data", expanded=False):
     st.markdown("### Select country and data versions to analyze")
-    
+
     # Check if we have preselected values from Map Your Data
     if "country" in st.session_state and st.session_state.get("country"):
-        st.info(f"Using country from Map Your Data: **{st.session_state['country'].upper()}**")
-    
+        st.info(
+            f"Using country from Map Your Data: **{st.session_state['country'].upper()}**"
+        )
+
     c1, c2, c3, c4 = st.columns([1.2, 1, 1, 0.6])
 
     country = (
@@ -201,21 +205,49 @@ def nice_title(col: str) -> str:
         return pretty(raw)
 
 
-# Sidebar for timeframe selection
-GOAL, sel_countries, TIMEFRAME_LABEL, RANGE, agg_label, FREQ = render_sidebar(
-    meta, df, nice_title, goal_cols
+# Sidebar for timeframe and aggregation selection (no Goal selector for this page)
+# Countries
+if "COUNTRY" in df.columns:
+    country_list = sorted(df["COUNTRY"].dropna().astype(str).unique().tolist())
+    default_countries = country_list or []
+    sel_countries = st.sidebar.multiselect(
+        "Country", country_list, default=default_countries
+    )
+else:
+    sel_countries = []
+    st.sidebar.caption("Dataset has no COUNTRY column — showing all rows.")
+
+# Timeframe - default to ALL for this page
+tf_label_map = {
+    "ALL": "all",
+    "LAST 6 MONTHS": "6m",
+    "LAST 12 MONTHS": "12m",
+    "CURRENT YEAR": "cy",
+    "LAST YEAR": "ly",
+    "LAST 2 YEARS": "2y",
+}
+TIMEFRAME_LABEL = st.sidebar.selectbox(
+    "Timeframe", list(tf_label_map.keys()), index=0
 )
+RANGE = tf_label_map[TIMEFRAME_LABEL]
+
+# Aggregation
+agg_map = {
+    "Daily": "D",
+    "Weekly": "W",
+    "Monthly": "M",
+    "Quarterly": "Q",
+    "Yearly": "YE",
+}
+agg_label = st.sidebar.selectbox("Aggregation", list(agg_map.keys()), index=0)
+FREQ = agg_map[agg_label]
 
 # Country filter
 if sel_countries and "COUNTRY" in df.columns:
     df = df[df["COUNTRY"].astype(str).isin(sel_countries)].copy()
 
 # Target, spend, platforms
-target = (
-    GOAL
-    if (GOAL and GOAL in df.columns)
-    else (goal_cols[0] if goal_cols else None)
-)
+target = goal_cols[0] if goal_cols else None
 
 paid_spend_cols = [
     c for c in (mapping.get("paid_media_spends", []) or []) if c in df.columns
@@ -245,9 +277,82 @@ plat_map_df, platforms, PLATFORM_COLORS = build_plat_map_df(
     CHANNELS_MAP=CHANNELS_MAP,
 )
 
-# Timeframe & resample
+# Timeframe filter
 df_r = filter_range(df.copy(), DATE_COL, RANGE)
 df_prev = previous_window(df, df_r, DATE_COL, RANGE)
+
+
+# Apply aggregation/resampling if not daily
+def _resample_df(data: pd.DataFrame, date_col: str, rule: str) -> pd.DataFrame:
+    """Resample dataframe by the given frequency rule."""
+    if data.empty or rule == "D":
+        return data
+
+    # Convert date column to datetime
+    data = data.copy()
+    data[date_col] = pd.to_datetime(data[date_col], errors="coerce")
+    data = data.dropna(subset=[date_col])
+    if data.empty:
+        return data
+
+    # Separate numeric and non-numeric columns
+    num_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+    non_num_cols = [
+        c for c in data.columns if c not in num_cols and c != date_col
+    ]
+
+    # Handle edge case where there are no columns to resample
+    if not num_cols and not non_num_cols:
+        return data
+
+    # First, get the count of rows per period to know which periods have data
+    # Use any available column to count rows per period
+    count_col = num_cols[0] if num_cols else non_num_cols[0]
+    period_counts = (
+        data.set_index(date_col)[[count_col]]
+        .resample(rule)
+        .count()
+        .reset_index()
+    )
+    period_counts.columns = [date_col, "_row_count"]
+    periods_with_data = period_counts[period_counts["_row_count"] > 0][
+        date_col
+    ].tolist()
+
+    # Resample numeric columns using sum (appropriate for costs/counts)
+    # Note: sum() returns 0 for empty periods, but we filter those out below
+    if num_cols:
+        res = (
+            data.set_index(date_col)[num_cols]
+            .resample(rule)
+            .sum()
+            .reset_index()
+        )
+    else:
+        res = (
+            data[[date_col]]
+            .set_index(date_col)
+            .resample(rule)
+            .size()
+            .reset_index(name="_count")
+        )
+        res = res.drop(columns=["_count"])
+
+    # For non-numeric columns, take the first value in each period
+    for col in non_num_cols:
+        first_vals = (
+            data.set_index(date_col)[[col]].resample(rule).first().reset_index()
+        )
+        res = res.merge(first_vals, on=date_col, how="left")
+
+    # Only keep periods that actually had data in the original dataset
+    res = res[res[date_col].isin(periods_with_data)].reset_index(drop=True)
+
+    return res
+
+
+# Apply resampling based on selected aggregation
+df_r = _resample_df(df_r, DATE_COL, RULE)
 
 
 # =============================
@@ -274,14 +379,14 @@ def _num_stats(s: pd.Series) -> dict:
             max=np.nan,
             std=np.nan,
         )
-    z = int((s.fillna(0) == 0).sum())
     s2 = s.dropna()
+    z = int((s2 == 0).sum())
     return dict(
         non_null=nn,
         nulls=na,
         nulls_pct=(na / n * 100) if n else np.nan,
         zeros=z,
-        zeros_pct=(z / n * 100) if n else np.nan,
+        zeros_pct=(z / nn * 100) if nn else np.nan,
         distinct=int(s2.nunique(dropna=True)),
         min=float(s2.min()) if not s2.empty else np.nan,
         p10=float(np.percentile(s2, 10)) if not s2.empty else np.nan,
@@ -361,14 +466,14 @@ def _active_spend_platforms(
     vm = vm[vm["col"].isin(df_window.columns)]
     if vm.empty:
         return set()
-    
+
     # Create column->platform mapping
     col_to_plat = dict(zip(vm["col"], vm["platform"]))
-    
+
     # Melt and add platform column
     melted = df_window[vm["col"].tolist()].melt(value_name="spend")
     melted["platform"] = melted["variable"].map(col_to_plat)
-    
+
     sums = (
         melted.dropna(subset=["spend"])
         .groupby("platform")["spend"]
@@ -429,11 +534,12 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     # Get all columns mapped in metadata
     data_types_map = meta.get("data_types", {}) or {}
     channels_map = meta.get("channels", {}) or {}
-    
+
     # Other columns are those in data_types but NOT in channels
     # Filter to only those present in the dataframe for display
     other_cols = [
-        c for c in data_types_map.keys()
+        c
+        for c in data_types_map.keys()
         if c not in channels_map and c in prof_df.columns
     ]
 
@@ -466,7 +572,9 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         dist_vals = _distribution_values(s)
 
         rows.append(
-            dict(Use=True, Column=col, Type=col_type, Dist=dist_vals, **col_stats)
+            dict(
+                Use=True, Column=col, Type=col_type, Dist=dist_vals, **col_stats
+            )
         )
     prof_all = pd.DataFrame(rows)
 
@@ -477,9 +585,7 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         drop_all_zero = st.checkbox(
             "Drop all-zero (numeric) columns", value=True
         )
-        drop_constant = st.checkbox(
-            "Drop constant (distinct == 1)", value=True
-        )
+        drop_constant = st.checkbox("Drop constant (distinct == 1)", value=True)
         drop_low_var = st.checkbox(
             "Drop low variance (CV < threshold)", value=False
         )
@@ -596,7 +702,7 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     def _render_cat_table(title: str, cols: list[str], key_suffix: str):
         subset = prof_all[prof_all["Column"].isin(cols)].copy()
         st.markdown(f"### {title} ({len(subset)})")
-        
+
         if subset.empty:
             st.info("No columns in this category.")
             return
@@ -656,28 +762,28 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
                     y_max=1.0,
                 ),
                 "non_null": st.column_config.NumberColumn(
-                    "Non-Null", format="%,.0f"
+                    "Non-Null", format="%d"
                 ),
-                "nulls": st.column_config.NumberColumn("Nulls", format="%,.0f"),
+                "nulls": st.column_config.NumberColumn("Nulls", format="%d"),
                 "nulls_pct": st.column_config.NumberColumn(
                     "Nulls %", format="%.1f%%"
                 ),
-                "zeros": st.column_config.NumberColumn("Zeros", format="%,.0f"),
+                "zeros": st.column_config.NumberColumn("Zeros", format="%d"),
                 "zeros_pct": st.column_config.NumberColumn(
                     "Zeros %", format="%.1f%%"
                 ),
                 "distinct": st.column_config.NumberColumn(
-                    "Distinct", format="%,.0f"
+                    "Distinct", format="%d"
                 ),
                 "MinDisp": st.column_config.TextColumn("Min"),
-                "p10": st.column_config.NumberColumn("P10", format="%,.2f"),
+                "p10": st.column_config.NumberColumn("P10", format="%.2f"),
                 "median": st.column_config.NumberColumn(
-                    "Median", format="%,.2f"
+                    "Median", format="%.2f"
                 ),
-                "mean": st.column_config.NumberColumn("Mean", format="%,.2f"),
-                "p90": st.column_config.NumberColumn("P90", format="%,.2f"),
+                "mean": st.column_config.NumberColumn("Mean", format="%.2f"),
+                "p90": st.column_config.NumberColumn("P90", format="%.2f"),
                 "MaxDisp": st.column_config.TextColumn("Max"),
-                "std": st.column_config.NumberColumn("Std", format="%,.2f"),
+                "std": st.column_config.NumberColumn("Std", format="%.2f"),
             },
             key=f"dq_editor_{key_suffix}",
         )
@@ -699,98 +805,80 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     selected_cols = [c for c, u in final_use.items() if u]
     st.session_state["selected_columns_for_training"] = selected_cols
 
-    # Export Selected Columns button
-    st.markdown("---")
-    st.markdown("### Export Selected Columns")
-    
-    if st.button("Export Selected Columns", type="primary", key="export_selected_cols"):
-        tmp_path = None
-        try:
-            # Create CSV of selected columns
-            selected_data = prof_df[selected_cols].copy()
-            
-            # Save to GCS
-            country = st.session_state.get("country", "de")
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            
-            # Create temporary file
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".csv", delete=False
-            ) as tmp:
-                tmp_path = tmp.name
-                selected_data.to_csv(tmp_path, index=False)
-            
-            # Upload to GCS
-            gcs_path = TRAINING_DATA_PATH_TEMPLATE.format(
-                country=country, timestamp=timestamp
-            )
-            upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
-            
-            st.success(f"✅ Exported selected columns to gs://{GCS_BUCKET}/{gcs_path}")
-            st.session_state["last_exported_columns_path"] = gcs_path
-        except Exception as e:
-            st.error(f"Failed to export selected columns: {e}")
-        finally:
-            # Clean up temp file
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+    # Store categories for later export
+    st.session_state["column_categories"] = {
+        "paid_media_spends": [c for c in paid_spend if c in selected_cols],
+        "paid_media_vars": [c for c in paid_vars if c in selected_cols],
+        "organic_vars": [c for c in organic_vars if c in selected_cols],
+        "context_vars": [c for c in context_vars if c in selected_cols],
+        "factor_vars": [c for c in factor_vars if c in selected_cols],
+        "other": [c for c in other_cols if c in selected_cols],
+    }
 
 
 # =============================
 # Step 3: Prepare paid media spends & media response
 # =============================
-with st.expander("Step 3) Prepare paid media spends & media response", expanded=False):
+with st.expander(
+    "Step 3) Prepare paid media spends & media response", expanded=False
+):
     st.markdown("### 3.1 What output do you want to predict?")
-    
+
     # Get goals from metadata
     goals_list = meta.get("goals", []) or []
     if not goals_list:
-        st.warning("No goals defined in metadata. Please configure goals in Map Your Data.")
+        st.warning(
+            "No goals defined in metadata. Please configure goals in Map Your Data."
+        )
     else:
         goal_vars = [g.get("var") for g in goals_list if g.get("var")]
         selected_goal = st.selectbox(
             "Select goal to predict",
             options=goal_vars,
             index=0 if goal_vars else None,
-            key="selected_goal_dropdown"
+            key="selected_goal_dropdown",
         )
         st.session_state["selected_goal"] = selected_goal
-    
+
     # 3.2 Select Paid Media Spends to optimize
     st.markdown("---")
     st.markdown("### 3.2 Select Paid Media Spends to optimize:")
-    
-    selected_cols_step2 = st.session_state.get("selected_columns_for_training", [])
-    
+
+    selected_cols_step2 = st.session_state.get(
+        "selected_columns_for_training", []
+    )
+
     # Filter paid media spends from selected columns
     available_paid_spends = [
         c for c in paid_spend_cols if c in selected_cols_step2
     ]
-    
+
     if not available_paid_spends:
-        st.info("No paid media spend columns available. Please select columns in Step 2.")
+        st.info(
+            "No paid media spend columns available. Please select columns in Step 2."
+        )
     elif not st.session_state.get("selected_goal"):
         st.info("Please select a goal in section 3.1 above.")
     else:
         selected_goal = st.session_state["selected_goal"]
-        
+
         # Calculate metrics for each paid spend column
         metrics_data = []
         for spend_col in available_paid_spends:
             if spend_col in df_r.columns and selected_goal in df_r.columns:
                 # Prepare data for correlation
                 temp_df = df_r[[spend_col, selected_goal]].dropna()
-                
+
                 if len(temp_df) > 1:
                     X = temp_df[[spend_col]].values
                     y = temp_df[selected_goal].values
-                    
+
                     # Calculate R2
                     model = LinearRegression()
                     model.fit(X, y)
                     y_pred = model.predict(X)
                     r2 = r2_score(y, y_pred)
-                    
+
                     # Calculate NMAE (Normalized Mean Absolute Error)
                     mae = mean_absolute_error(y, y_pred)
                     y_min, y_max = float(y.min()), float(y.max())
@@ -800,7 +888,7 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                     else:
                         # If range is zero, NaN, or invalid, set NMAE to NaN
                         nmae = np.nan
-                    
+
                     # Calculate Spearman's rho
                     spearman_rho, _ = stats.spearmanr(
                         temp_df[spend_col], temp_df[selected_goal]
@@ -809,18 +897,20 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                     r2 = np.nan
                     nmae = np.nan
                     spearman_rho = np.nan
-                
-                metrics_data.append({
-                    "Select": False,
-                    "Paid Media Spend": spend_col,
-                    "R²": r2,
-                    "NMAE": nmae,
-                    "Spearman's ρ": spearman_rho,
-                })
-        
+
+                metrics_data.append(
+                    {
+                        "Select": True,
+                        "Paid Media Spend": spend_col,
+                        "R²": r2,
+                        "NMAE": nmae,
+                        "Spearman's ρ": spearman_rho,
+                    }
+                )
+
         if metrics_data:
             metrics_df = pd.DataFrame(metrics_data)
-            
+
             # Display editable table
             edited_metrics = st.data_editor(
                 metrics_df,
@@ -833,75 +923,83 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                         "Paid Media Spend", disabled=True
                     ),
                     "R²": st.column_config.NumberColumn("R²", format="%.4f"),
-                    "NMAE": st.column_config.NumberColumn("NMAE", format="%.4f"),
+                    "NMAE": st.column_config.NumberColumn(
+                        "NMAE", format="%.4f"
+                    ),
                     "Spearman's ρ": st.column_config.NumberColumn(
                         "Spearman's ρ", format="%.4f"
                     ),
                 },
-                key="paid_spends_metrics_table"
+                key="paid_spends_metrics_table",
             )
-            
+
             # Store selected paid spends
-            selected_paid_spends = edited_metrics[edited_metrics["Select"]]["Paid Media Spend"].tolist()
+            selected_paid_spends = edited_metrics[edited_metrics["Select"]][
+                "Paid Media Spend"
+            ].tolist()
             st.session_state["selected_paid_spends"] = selected_paid_spends
-    
+
     # 3.3 Select Media Response Variables
     st.markdown("---")
     st.markdown("### 3.3 Select Media Response Variables")
-    
+
     selected_paid_spends = st.session_state.get("selected_paid_spends", [])
-    
+
     if not selected_paid_spends:
         st.info("Please select paid media spends in section 3.2 above.")
     else:
         # Get paid_media_mapping from metadata
         paid_media_mapping = meta.get("paid_media_mapping", {}) or {}
-        
+
         for spend_col in selected_paid_spends:
             st.markdown(f"#### {spend_col}")
-            
+
             # Get corresponding paid media vars
             corresponding_vars = paid_media_mapping.get(spend_col, [])
-            
+
             if not corresponding_vars:
                 st.info(f"No media response variables mapped for {spend_col}")
                 continue
-            
+
             # Filter vars that are available in the data
             available_vars = [
                 v for v in corresponding_vars if v in df_r.columns
             ]
-            
+
             if not available_vars:
                 st.info(f"Mapped variables not found in data for {spend_col}")
                 continue
-            
+
             # Calculate metrics for each media var
             var_metrics_data = []
             for var_col in available_vars:
                 if var_col in df_r.columns and spend_col in df_r.columns:
                     temp_df = df_r[[spend_col, var_col]].dropna()
-                    
+
                     if len(temp_df) > 1:
                         X = temp_df[[spend_col]].values
                         y = temp_df[var_col].values
-                        
+
                         # Calculate R2
                         model = LinearRegression()
                         model.fit(X, y)
                         y_pred = model.predict(X)
                         r2 = r2_score(y, y_pred)
-                        
+
                         # Calculate NMAE
                         mae = mean_absolute_error(y, y_pred)
                         y_min, y_max = float(y.min()), float(y.max())
-                        if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
+                        if (
+                            pd.notna(y_min)
+                            and pd.notna(y_max)
+                            and y_max > y_min
+                        ):
                             y_range = y_max - y_min
                             nmae = mae / y_range
                         else:
                             # If range is zero, NaN, or invalid, set NMAE to NaN
                             nmae = np.nan
-                        
+
                         # Calculate Spearman's rho
                         spearman_rho, _ = stats.spearmanr(
                             temp_df[spend_col], temp_df[var_col]
@@ -910,24 +1008,26 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                         r2 = np.nan
                         nmae = np.nan
                         spearman_rho = np.nan
-                    
-                    var_metrics_data.append({
-                        "Media Response Variable": var_col,
-                        "R²": r2,
-                        "NMAE": nmae,
-                        "Spearman's ρ": spearman_rho,
-                    })
-            
+
+                    var_metrics_data.append(
+                        {
+                            "Media Response Variable": var_col,
+                            "R²": r2,
+                            "NMAE": nmae,
+                            "Spearman's ρ": spearman_rho,
+                        }
+                    )
+
             if var_metrics_data:
                 var_metrics_df = pd.DataFrame(var_metrics_data)
-                
+
                 # Dropdown to select the media response variable
                 st.selectbox(
                     f"Select media response variable for {spend_col}",
                     options=var_metrics_df["Media Response Variable"].tolist(),
-                    key=f"media_var_select_{spend_col}"
+                    key=f"media_var_select_{spend_col}",
                 )
-                
+
                 # Display metrics table
                 st.dataframe(
                     var_metrics_df,
@@ -937,18 +1037,98 @@ with st.expander("Step 3) Prepare paid media spends & media response", expanded=
                         "Media Response Variable": st.column_config.TextColumn(
                             "Media Response Variable"
                         ),
-                        "R²": st.column_config.NumberColumn("R²", format="%.4f"),
-                        "NMAE": st.column_config.NumberColumn("NMAE", format="%.4f"),
+                        "R²": st.column_config.NumberColumn(
+                            "R²", format="%.4f"
+                        ),
+                        "NMAE": st.column_config.NumberColumn(
+                            "NMAE", format="%.4f"
+                        ),
                         "Spearman's ρ": st.column_config.NumberColumn(
                             "Spearman's ρ", format="%.4f"
                         ),
                     },
                 )
 
+    # Export Selected Columns button (after section 3.3)
+    st.markdown("---")
+    st.markdown("### Export Selected Columns")
+
+    if st.button(
+        "Export Selected Columns", type="primary", key="export_selected_cols"
+    ):
+        tmp_path = None
+        try:
+            # Get column categories from session state
+            column_categories = st.session_state.get("column_categories", {})
+            selected_cols = st.session_state.get(
+                "selected_columns_for_training", []
+            )
+
+            # Build JSON with columns per category
+            export_data = {
+                "paid_media_spends": column_categories.get(
+                    "paid_media_spends", []
+                ),
+                "paid_media_vars": column_categories.get("paid_media_vars", []),
+                "organic_vars": column_categories.get("organic_vars", []),
+                "context_vars": column_categories.get("context_vars", []),
+                "factor_vars": column_categories.get("factor_vars", []),
+                "other": column_categories.get("other", []),
+                "selected_goal": st.session_state.get("selected_goal"),
+                "selected_paid_spends": st.session_state.get(
+                    "selected_paid_spends", []
+                ),
+            }
+
+            # Save to GCS
+            country = st.session_state.get("country", "de")
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+            # Create temporary file
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            ) as tmp:
+                tmp_path = tmp.name
+                json.dump(export_data, tmp, indent=2)
+
+            # Upload to GCS
+            gcs_path = TRAINING_DATA_PATH_TEMPLATE.format(
+                country=country, timestamp=timestamp
+            )
+            upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
+
+            # Count only the column category fields, not metadata fields
+            column_category_keys = [
+                "paid_media_spends",
+                "paid_media_vars",
+                "organic_vars",
+                "context_vars",
+                "factor_vars",
+                "other",
+            ]
+            total_cols = sum(
+                len(export_data.get(k, [])) for k in column_category_keys
+            )
+            st.success(
+                f"✅ Exported {total_cols} columns by category "
+                f"to gs://{GCS_BUCKET}/{gcs_path}"
+            )
+            st.session_state["last_exported_columns_path"] = gcs_path
+        except Exception as e:
+            st.error(f"Failed to export selected columns: {e}")
+        finally:
+            # Clean up temp file
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
 
 # =============================
 # Step 4: Select strongest drivers and reduce noise
 # =============================
-with st.expander("Step 4) Select strongest drivers and reduce noise", expanded=False):
+with st.expander(
+    "Step 4) Select strongest drivers and reduce noise", expanded=False
+):
     st.markdown("### Coming soon")
-    st.info("This step will help you identify and select the strongest drivers while reducing noise in your model.")
+    st.info(
+        "This step will help you identify and select the strongest drivers while reducing noise in your model."
+    )
