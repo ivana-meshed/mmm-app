@@ -31,7 +31,6 @@ from app_shared import (
     period_label,
     pretty,
     previous_window,
-    render_sidebar,
     require_login_and_domain,
     resample_numeric,
     resolve_meta_blob_from_selection,
@@ -205,21 +204,49 @@ def nice_title(col: str) -> str:
         return pretty(raw)
 
 
-# Sidebar for timeframe selection
-GOAL, sel_countries, TIMEFRAME_LABEL, RANGE, agg_label, FREQ = render_sidebar(
-    meta, df, nice_title, goal_cols
+# Sidebar for timeframe and aggregation selection (no Goal selector for this page)
+# Countries
+if "COUNTRY" in df.columns:
+    country_list = sorted(df["COUNTRY"].dropna().astype(str).unique().tolist())
+    default_countries = country_list or []
+    sel_countries = st.sidebar.multiselect(
+        "Country", country_list, default=default_countries
+    )
+else:
+    sel_countries = []
+    st.sidebar.caption("Dataset has no COUNTRY column — showing all rows.")
+
+# Timeframe - default to ALL for this page
+tf_label_map = {
+    "ALL": "all",
+    "LAST 6 MONTHS": "6m",
+    "LAST 12 MONTHS": "12m",
+    "CURRENT YEAR": "cy",
+    "LAST YEAR": "ly",
+    "LAST 2 YEARS": "2y",
+}
+TIMEFRAME_LABEL = st.sidebar.selectbox(
+    "Timeframe", list(tf_label_map.keys()), index=0
 )
+RANGE = tf_label_map[TIMEFRAME_LABEL]
+
+# Aggregation
+agg_map = {
+    "Daily": "D",
+    "Weekly": "W",
+    "Monthly": "M",
+    "Quarterly": "Q",
+    "Yearly": "YE",
+}
+agg_label = st.sidebar.selectbox("Aggregation", list(agg_map.keys()), index=0)
+FREQ = agg_map[agg_label]
 
 # Country filter
 if sel_countries and "COUNTRY" in df.columns:
     df = df[df["COUNTRY"].astype(str).isin(sel_countries)].copy()
 
 # Target, spend, platforms
-target = (
-    GOAL
-    if (GOAL and GOAL in df.columns)
-    else (goal_cols[0] if goal_cols else None)
-)
+target = goal_cols[0] if goal_cols else None
 
 paid_spend_cols = [
     c for c in (mapping.get("paid_media_spends", []) or []) if c in df.columns
@@ -249,9 +276,60 @@ plat_map_df, platforms, PLATFORM_COLORS = build_plat_map_df(
     CHANNELS_MAP=CHANNELS_MAP,
 )
 
-# Timeframe & resample
+# Timeframe filter
 df_r = filter_range(df.copy(), DATE_COL, RANGE)
 df_prev = previous_window(df, df_r, DATE_COL, RANGE)
+
+
+# Apply aggregation/resampling if not daily
+def _resample_df(data: pd.DataFrame, date_col: str, rule: str) -> pd.DataFrame:
+    """Resample dataframe by the given frequency rule."""
+    if data.empty or rule == "D":
+        return data
+
+    # Convert date column to datetime
+    data = data.copy()
+    data[date_col] = pd.to_datetime(data[date_col], errors="coerce")
+    data = data.dropna(subset=[date_col])
+    if data.empty:
+        return data
+
+    # Separate numeric and non-numeric columns
+    num_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+    non_num_cols = [
+        c for c in data.columns if c not in num_cols and c != date_col
+    ]
+
+    # Resample numeric columns (sum for counts/costs)
+    if num_cols:
+        res = (
+            data.set_index(date_col)[num_cols]
+            .resample(rule)
+            .sum(min_count=1)
+            .reset_index()
+        )
+    else:
+        res = (
+            data[[date_col]]
+            .set_index(date_col)
+            .resample(rule)
+            .size()
+            .reset_index(name="_count")
+        )
+        res = res.drop(columns=["_count"])
+
+    # For non-numeric columns, take the first value in each period
+    for col in non_num_cols:
+        first_vals = (
+            data.set_index(date_col)[[col]].resample(rule).first().reset_index()
+        )
+        res = res.merge(first_vals, on=date_col, how="left")
+
+    return res
+
+
+# Apply resampling based on selected aggregation
+df_r = _resample_df(df_r, DATE_COL, RULE)
 
 
 # =============================
@@ -285,7 +363,7 @@ def _num_stats(s: pd.Series) -> dict:
         nulls=na,
         nulls_pct=(na / n * 100) if n else np.nan,
         zeros=z,
-        zeros_pct=(z / n * 100) if n else np.nan,
+        zeros_pct=(z / nn * 100) if nn else np.nan,
         distinct=int(s2.nunique(dropna=True)),
         min=float(s2.min()) if not s2.empty else np.nan,
         p10=float(np.percentile(s2, 10)) if not s2.empty else np.nan,
@@ -398,10 +476,9 @@ def _protect_columns_set(date_col: str, goal_cols: list[str]) -> set[str]:
 with st.expander("Step 2) Ensure good data quality", expanded=False):
     st.subheader(f"Data Quality")
 
-    # Use full dataset (df) for profiling, not timeframe-filtered (df_r)
-    prof_df = df.copy()
+    prof_df = df_r.copy()
     if prof_df.empty:
-        st.info("No data loaded to profile.")
+        st.info("No data in the selected timeframe to profile.")
         st.stop()
 
     # Build metadata categories

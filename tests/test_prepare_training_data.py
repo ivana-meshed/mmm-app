@@ -48,7 +48,7 @@ def _num_stats(s: pd.Series) -> dict:
         nulls=na,
         nulls_pct=(na / n * 100) if n else np.nan,
         zeros=z,
-        zeros_pct=(z / n * 100) if n else np.nan,
+        zeros_pct=(z / nn * 100) if nn else np.nan,
         distinct=int(s2.nunique(dropna=True)),
         min=float(s2.min()) if not s2.empty else np.nan,
         p10=float(np.percentile(s2, 10)) if not s2.empty else np.nan,
@@ -77,8 +77,8 @@ class TestNumStats(unittest.TestCase):
         self.assertEqual(stats["nulls"], 1)
         # Nulls percentage: 1/5 = 20%
         self.assertAlmostEqual(stats["nulls_pct"], 20.0)
-        # Zeros percentage: 2/5 = 40% (of total, not just non-null)
-        self.assertAlmostEqual(stats["zeros_pct"], 40.0)
+        # Zeros percentage: 2/4 = 50% (of non-null values)
+        self.assertAlmostEqual(stats["zeros_pct"], 50.0)
 
     def test_all_nulls(self):
         """Test handling of all-null series."""
