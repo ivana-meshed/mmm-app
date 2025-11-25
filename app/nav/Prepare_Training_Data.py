@@ -626,11 +626,14 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     st.session_state.setdefault("dq_dropped_cols", set())
     st.session_state.setdefault("dq_clean_note", "")
     st.session_state.setdefault("dq_last_dropped", [])
+    # Session state for user column selections (persists manual checkbox changes)
+    st.session_state.setdefault("dq_user_selections", {})
 
     if reset_clean:
         st.session_state["dq_dropped_cols"] = set()
         st.session_state["dq_clean_note"] = ""
         st.session_state["dq_last_dropped"] = []
+        st.session_state["dq_user_selections"] = {}
         st.rerun()
 
     # Apply cleaning when requested
@@ -709,7 +712,16 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
 
     # Apply dropped flags to 'Use' default
     dropped = st.session_state["dq_dropped_cols"]
+    user_selections = st.session_state["dq_user_selections"]
+
+    # Initialize Use column: start with True for non-dropped, then apply user selections
     prof_all["Use"] = ~prof_all["Column"].isin(dropped)
+    # Apply any saved user selections (vectorized)
+    if user_selections:
+        mask = prof_all["Column"].isin(user_selections.keys())
+        prof_all.loc[mask, "Use"] = prof_all.loc[mask, "Column"].map(
+            user_selections
+        )
 
     # Render tables
     use_overrides: dict[str, bool] = {}
@@ -814,7 +826,11 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
             key=f"dq_editor_{key_suffix}",
         )
         for _, r in edited.iterrows():
-            use_overrides[str(r["Column"])] = bool(r["Use"])
+            col_name = str(r["Column"])
+            use_value = bool(r["Use"])
+            use_overrides[col_name] = use_value
+            # Persist user selection to session state
+            st.session_state["dq_user_selections"][col_name] = use_value
 
     # Render all categories
     for title, cols in categories:
@@ -1229,6 +1245,9 @@ with st.expander(
             # Convert all columns to numeric, coercing errors to NaN
             for col in vif_df.columns:
                 vif_df[col] = pd.to_numeric(vif_df[col], errors="coerce")
+            # Fill NaN with column means (vectorized) to avoid dropping too many rows
+            vif_df = vif_df.fillna(vif_df.mean())
+            # Drop any remaining rows with NaN (shouldn't be many after mean fill)
             vif_df = vif_df.dropna()
 
             # Only proceed if we have enough rows
