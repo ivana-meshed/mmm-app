@@ -301,9 +301,15 @@ def _resample_df(data: pd.DataFrame, date_col: str, rule: str) -> pd.DataFrame:
         c for c in data.columns if c not in num_cols and c != date_col
     ]
 
+    # Handle edge case where there are no columns to resample
+    if not num_cols and not non_num_cols:
+        return data
+
     # First, get the count of rows per period to know which periods have data
+    # Use any available column to count rows per period
+    count_col = num_cols[0] if num_cols else non_num_cols[0]
     period_counts = (
-        data.set_index(date_col)[[num_cols[0] if num_cols else non_num_cols[0]]]
+        data.set_index(date_col)[[count_col]]
         .resample(rule)
         .count()
         .reset_index()
@@ -313,7 +319,8 @@ def _resample_df(data: pd.DataFrame, date_col: str, rule: str) -> pd.DataFrame:
         date_col
     ].tolist()
 
-    # Resample numeric columns (sum for counts/costs)
+    # Resample numeric columns using sum (appropriate for costs/counts)
+    # Note: sum() returns 0 for empty periods, but we filter those out below
     if num_cols:
         res = (
             data.set_index(date_col)[num_cols]
@@ -1090,8 +1097,17 @@ with st.expander(
             )
             upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
 
+            # Count only the column category fields, not metadata fields
+            column_category_keys = [
+                "paid_media_spends",
+                "paid_media_vars",
+                "organic_vars",
+                "context_vars",
+                "factor_vars",
+                "other",
+            ]
             total_cols = sum(
-                len(v) for k, v in export_data.items() if isinstance(v, list)
+                len(export_data.get(k, [])) for k in column_category_keys
             )
             st.success(
                 f"✅ Exported {total_cols} columns by category "
