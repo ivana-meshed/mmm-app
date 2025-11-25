@@ -8,6 +8,7 @@ This page guides users through preparing training data in 4 steps:
 4. Select strongest drivers and reduce noise
 """
 
+import json
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -49,7 +50,7 @@ st.title("Prepare Training Data")
 
 # Constants
 TRAINING_DATA_PATH_TEMPLATE = (
-    "training_data/{country}/{timestamp}/selected_columns.csv"
+    "training_data/{country}/{timestamp}/selected_columns.json"
 )
 
 # Session state defaults
@@ -300,12 +301,24 @@ def _resample_df(data: pd.DataFrame, date_col: str, rule: str) -> pd.DataFrame:
         c for c in data.columns if c not in num_cols and c != date_col
     ]
 
+    # First, get the count of rows per period to know which periods have data
+    period_counts = (
+        data.set_index(date_col)[[num_cols[0] if num_cols else non_num_cols[0]]]
+        .resample(rule)
+        .count()
+        .reset_index()
+    )
+    period_counts.columns = [date_col, "_row_count"]
+    periods_with_data = period_counts[period_counts["_row_count"] > 0][
+        date_col
+    ].tolist()
+
     # Resample numeric columns (sum for counts/costs)
     if num_cols:
         res = (
             data.set_index(date_col)[num_cols]
             .resample(rule)
-            .sum(min_count=1)
+            .sum()
             .reset_index()
         )
     else:
@@ -324,6 +337,9 @@ def _resample_df(data: pd.DataFrame, date_col: str, rule: str) -> pd.DataFrame:
             data.set_index(date_col)[[col]].resample(rule).first().reset_index()
         )
         res = res.merge(first_vals, on=date_col, how="left")
+
+    # Only keep periods that actually had data in the original dataset
+    res = res[res[date_col].isin(periods_with_data)].reset_index(drop=True)
 
     return res
 
@@ -782,46 +798,15 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     selected_cols = [c for c, u in final_use.items() if u]
     st.session_state["selected_columns_for_training"] = selected_cols
 
-    # Export Selected Columns button
-    st.markdown("---")
-    st.markdown("### Export Selected Columns")
-
-    if st.button(
-        "Export Selected Columns", type="primary", key="export_selected_cols"
-    ):
-        tmp_path = None
-        try:
-            # Create CSV with column list only (one column per row)
-            column_list_df = pd.DataFrame({"column_name": selected_cols})
-
-            # Save to GCS
-            country = st.session_state.get("country", "de")
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-
-            # Create temporary file
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".csv", delete=False
-            ) as tmp:
-                tmp_path = tmp.name
-                column_list_df.to_csv(tmp_path, index=False)
-
-            # Upload to GCS
-            gcs_path = TRAINING_DATA_PATH_TEMPLATE.format(
-                country=country, timestamp=timestamp
-            )
-            upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
-
-            st.success(
-                f"✅ Exported {len(selected_cols)} column names "
-                f"to gs://{GCS_BUCKET}/{gcs_path}"
-            )
-            st.session_state["last_exported_columns_path"] = gcs_path
-        except Exception as e:
-            st.error(f"Failed to export selected columns: {e}")
-        finally:
-            # Clean up temp file
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+    # Store categories for later export
+    st.session_state["column_categories"] = {
+        "paid_media_spends": [c for c in paid_spend if c in selected_cols],
+        "paid_media_vars": [c for c in paid_vars if c in selected_cols],
+        "organic_vars": [c for c in organic_vars if c in selected_cols],
+        "context_vars": [c for c in context_vars if c in selected_cols],
+        "factor_vars": [c for c in factor_vars if c in selected_cols],
+        "other": [c for c in other_cols if c in selected_cols],
+    }
 
 
 # =============================
@@ -1056,6 +1041,69 @@ with st.expander(
                         ),
                     },
                 )
+
+    # Export Selected Columns button (after section 3.3)
+    st.markdown("---")
+    st.markdown("### Export Selected Columns")
+
+    if st.button(
+        "Export Selected Columns", type="primary", key="export_selected_cols"
+    ):
+        tmp_path = None
+        try:
+            # Get column categories from session state
+            column_categories = st.session_state.get("column_categories", {})
+            selected_cols = st.session_state.get(
+                "selected_columns_for_training", []
+            )
+
+            # Build JSON with columns per category
+            export_data = {
+                "paid_media_spends": column_categories.get(
+                    "paid_media_spends", []
+                ),
+                "paid_media_vars": column_categories.get("paid_media_vars", []),
+                "organic_vars": column_categories.get("organic_vars", []),
+                "context_vars": column_categories.get("context_vars", []),
+                "factor_vars": column_categories.get("factor_vars", []),
+                "other": column_categories.get("other", []),
+                "selected_goal": st.session_state.get("selected_goal"),
+                "selected_paid_spends": st.session_state.get(
+                    "selected_paid_spends", []
+                ),
+            }
+
+            # Save to GCS
+            country = st.session_state.get("country", "de")
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+            # Create temporary file
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            ) as tmp:
+                tmp_path = tmp.name
+                json.dump(export_data, tmp, indent=2)
+
+            # Upload to GCS
+            gcs_path = TRAINING_DATA_PATH_TEMPLATE.format(
+                country=country, timestamp=timestamp
+            )
+            upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
+
+            total_cols = sum(
+                len(v) for k, v in export_data.items() if isinstance(v, list)
+            )
+            st.success(
+                f"✅ Exported {total_cols} columns by category "
+                f"to gs://{GCS_BUCKET}/{gcs_path}"
+            )
+            st.session_state["last_exported_columns_path"] = gcs_path
+        except Exception as e:
+            st.error(f"Failed to export selected columns: {e}")
+        finally:
+            # Clean up temp file
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
 
 # =============================
