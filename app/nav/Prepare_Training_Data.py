@@ -9,6 +9,7 @@ This page guides users through preparing training data in 4 steps:
 """
 
 import json
+import math
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -59,7 +60,8 @@ def _safe_float(value: Union[float, np.ndarray, None]) -> float:
     # Now check if it's a valid number
     try:
         f = float(value)
-        if np.isnan(f) or np.isinf(f):
+        # Use math.isnan and math.isinf for Python floats (avoids numpy type issues)
+        if math.isnan(f) or math.isinf(f):
             return np.nan
         return f
     except (TypeError, ValueError):
@@ -1140,14 +1142,19 @@ with st.expander(
 
     def _calculate_vif_band(vif_value: float) -> str:
         """Return VIF band indicator based on VIF value."""
-        if pd.isna(vif_value) or np.isinf(vif_value):
+        try:
+            # Try to convert to float first to handle any type
+            v = float(vif_value)
+            if math.isnan(v) or math.isinf(v):
+                return "⚪"  # Unknown/invalid
+            elif v >= 10:
+                return "🔴"  # High multicollinearity
+            elif v >= 5:
+                return "🟡"  # Moderate multicollinearity
+            else:
+                return "🟢"  # Good (low multicollinearity)
+        except (TypeError, ValueError):
             return "⚪"  # Unknown/invalid
-        elif vif_value >= 10:
-            return "🔴"  # High multicollinearity
-        elif vif_value >= 5:
-            return "🟡"  # Moderate multicollinearity
-        else:
-            return "🟢"  # Good (low multicollinearity)
 
     def _calculate_variable_metrics(
         var_cols: List[str], category_name: str, goal_col: str
