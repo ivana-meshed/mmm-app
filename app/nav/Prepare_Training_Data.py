@@ -1211,8 +1211,54 @@ with st.expander(
         except (TypeError, ValueError):
             return "⚪"  # Unknown/invalid
 
+    def _calculate_vif_for_all_vars(all_vars: List[str]) -> dict:
+        """Calculate VIF for all selected variables together."""
+        vif_values = {}
+        # Filter to numeric columns that exist in df_r
+        valid_cols = [
+            c
+            for c in all_vars
+            if c in df_r.columns and pd.api.types.is_numeric_dtype(df_r[c])
+        ]
+        if len(valid_cols) < 2:
+            return vif_values
+
+        try:
+            # Prepare data for VIF calculation - ensure numeric types only
+            vif_df = df_r[valid_cols].copy()
+            # Convert all columns to numeric, coercing errors to NaN
+            for col in vif_df.columns:
+                vif_df[col] = pd.to_numeric(vif_df[col], errors="coerce")
+            vif_df = vif_df.dropna()
+
+            # Only proceed if we have enough rows
+            if len(vif_df) > len(valid_cols) + 1:
+                # Convert to float64 array for statsmodels (explicit dtype)
+                try:
+                    vif_array = np.asarray(vif_df.values, dtype=np.float64)
+                except (ValueError, TypeError):
+                    vif_array = None
+
+                if vif_array is not None and vif_array.size > 0:
+                    for i, col in enumerate(valid_cols):
+                        try:
+                            vif_values[col] = variance_inflation_factor(
+                                vif_array, i
+                            )
+                        except Exception:
+                            # Catch all exceptions from VIF calculation
+                            vif_values[col] = np.nan
+        except Exception:
+            # Catch any other exceptions during data preparation
+            pass
+
+        return vif_values
+
     def _calculate_variable_metrics(
-        var_cols: List[str], category_name: str, goal_col: str
+        var_cols: List[str],
+        category_name: str,
+        goal_col: str,
+        global_vif_values: dict,
     ) -> pd.DataFrame:
         """Calculate R², NMAE, Spearman's ρ, VIF for a list of variables."""
         if not var_cols or not goal_col:
@@ -1229,38 +1275,6 @@ with st.expander(
             return pd.DataFrame()
 
         metrics_data = []
-
-        # Calculate VIF for all valid columns together
-        vif_values = {}
-        if len(valid_cols) >= 2:
-            try:
-                # Prepare data for VIF calculation - ensure numeric types only
-                vif_df = df_r[valid_cols].copy()
-                # Convert all columns to numeric, coercing errors to NaN
-                for col in vif_df.columns:
-                    vif_df[col] = pd.to_numeric(vif_df[col], errors="coerce")
-                vif_df = vif_df.dropna()
-
-                # Only proceed if we have enough rows and all columns are numeric
-                if len(vif_df) > len(valid_cols) + 1:
-                    # Convert to float64 array for statsmodels (explicit dtype)
-                    try:
-                        vif_array = np.asarray(vif_df.values, dtype=np.float64)
-                    except (ValueError, TypeError):
-                        vif_array = None
-
-                    if vif_array is not None and vif_array.size > 0:
-                        for i, col in enumerate(valid_cols):
-                            try:
-                                vif_values[col] = variance_inflation_factor(
-                                    vif_array, i
-                                )
-                            except Exception:
-                                # Catch all exceptions from VIF calculation
-                                vif_values[col] = np.nan
-            except Exception:
-                # Catch any other exceptions during data preparation
-                pass
 
         # Calculate metrics for each variable against the goal
         for var_col in valid_cols:
@@ -1322,8 +1336,8 @@ with st.expander(
                 except Exception:
                     pass
 
-            # Get VIF value
-            vif = vif_values.get(var_col, np.nan)
+            # Get VIF value from global calculation
+            vif = global_vif_values.get(var_col, np.nan)
             vif_band = _calculate_vif_band(vif)
 
             metrics_data.append(
@@ -1340,13 +1354,18 @@ with st.expander(
         return pd.DataFrame(metrics_data)
 
     def _render_variable_table(
-        title: str, var_list: List[str], key_suffix: str
+        title: str,
+        var_list: List[str],
+        key_suffix: str,
+        global_vif_values: dict,
     ) -> None:
         """Render a variable metrics table for a category."""
         if not var_list or not selected_goal:
             return
 
-        df_metrics = _calculate_variable_metrics(var_list, title, selected_goal)
+        df_metrics = _calculate_variable_metrics(
+            var_list, title, selected_goal, global_vif_values
+        )
 
         if df_metrics.empty:
             st.info(f"No {title.lower()} available in the data.")
@@ -1388,29 +1407,53 @@ with st.expander(
     elif not selected_media_vars_3_3:
         st.info("Please select media response variables in section 3.3.")
     else:
+        # Combine all selected variables for global VIF calculation
+        all_selected_vars = (
+            selected_media_vars_3_3
+            + selected_organic
+            + selected_context
+            + selected_factor
+            + selected_other
+        )
+        # Calculate VIF for all variables together
+        global_vif_values = _calculate_vif_for_all_vars(all_selected_vars)
+
         # Render table for selected media response variables (from 3.3)
         _render_variable_table(
             "Selected Media Response Variables",
             selected_media_vars_3_3,
             "media_vars",
+            global_vif_values,
         )
 
         # Render tables for Step 2 category selections (only if category has variables)
         if selected_organic:
             _render_variable_table(
-                "Selected Organic Variables", selected_organic, "organic"
+                "Selected Organic Variables",
+                selected_organic,
+                "organic",
+                global_vif_values,
             )
         if selected_context:
             _render_variable_table(
-                "Selected Context Variables", selected_context, "context"
+                "Selected Context Variables",
+                selected_context,
+                "context",
+                global_vif_values,
             )
         if selected_factor:
             _render_variable_table(
-                "Selected Factor Variables", selected_factor, "factor"
+                "Selected Factor Variables",
+                selected_factor,
+                "factor",
+                global_vif_values,
             )
         if selected_other:
             _render_variable_table(
-                "Selected Other Variables", selected_other, "other"
+                "Selected Other Variables",
+                selected_other,
+                "other",
+                global_vif_values,
             )
 
     # Export Selected Columns button (after section 3.4)
