@@ -45,7 +45,7 @@ if st.session_state.get("switch_to_queue_tab", False):
     )
     st.session_state["switch_to_queue_tab"] = False
 
-tab_single, tab_queue, tab_status = st.tabs(["Single Run", "Batch Run", "Queue Status"])
+tab_single, tab_queue, tab_status = st.tabs(["Single Run", "Batch Run", "Queue Monitor"])
 
 # Prefill fields from saved metadata if present (session_state keys should already be set by Map Your Data page).
 
@@ -2220,7 +2220,310 @@ with tab_queue:
     if "current_queue_expanded" not in st.session_state:
         st.session_state.current_queue_expanded = False
 
-    st.subheader("Run multiple experiments in batch")
+    # ========== Run Batch Experiments ==========
+    st.markdown("#### 📥 Run multiple experiments via batch run. Upload CSV to continue.")
+    st.caption("Upload a CSV where each row defines one experiment. You can edit rows after upload.")
+
+    up = st.file_uploader("**Select CSV:**", type=["csv"], key="batch_csv")
+
+    # Session scaffolding
+    if "uploaded_df" not in st.session_state:
+        st.session_state.uploaded_df = pd.DataFrame()
+    if "uploaded_fingerprint" not in st.session_state:
+        st.session_state.uploaded_fingerprint = None
+
+    # Load only when the *file changes*
+    if up is not None:
+        fingerprint = f"{getattr(up, 'name', '')}:{getattr(up, 'size', '')}"
+        if st.session_state.uploaded_fingerprint != fingerprint:
+            try:
+                logging.info(
+                    f"[QUEUE] Uploading CSV file: {getattr(up, 'name', 'unknown')}, size: {getattr(up, 'size', 0)} bytes"
+                )
+                st.session_state.uploaded_df = pd.read_csv(
+                    up, keep_default_na=True
+                )
+                st.session_state.uploaded_fingerprint = fingerprint
+                logging.info(
+                    f"[QUEUE] Successfully loaded CSV with {len(st.session_state.uploaded_df)} rows and {len(st.session_state.uploaded_df.columns)} columns"
+                )
+                st.success(
+                    f"Loaded {len(st.session_state.uploaded_df)} rows from CSV"
+                )
+            except Exception as e:
+                logging.error(
+                    f"[QUEUE] Failed to parse CSV: {e}", exc_info=True
+                )
+                st.error(f"Failed to parse CSV: {e}")
+    else:
+        # If user clears the file input, allow re-uploading the same file later
+        st.session_state.uploaded_fingerprint = None
+
+    # Helper to load current GCS queue into a DataFrame (for reset button)
+    def _as_csv(v):
+        if isinstance(v, (list, tuple)):
+            return ", ".join(str(x) for x in v if str(x).strip())
+        return "" if v is None else str(v)
+
+    def _entry_to_row(e: dict) -> dict:
+        p = e.get("params", {}) or {}
+        return {
+            "country": p.get("country", ""),
+            "revision": p.get("revision", ""),
+            "start_date": p.get("start_date", ""),
+            "end_date": p.get("end_date", ""),
+            "iterations": p.get("iterations", ""),
+            "trials": p.get("trials", ""),
+            "train_size": _as_csv(p.get("train_size", "")),
+            "paid_media_spends": _as_csv(p.get("paid_media_spends", "")),
+            "paid_media_vars": _as_csv(p.get("paid_media_vars", "")),
+            "context_vars": _as_csv(p.get("context_vars", "")),
+            "factor_vars": _as_csv(p.get("factor_vars", "")),
+            "organic_vars": _as_csv(p.get("organic_vars", "")),
+            "gcs_bucket": p.get(
+                "gcs_bucket", st.session_state["gcs_bucket"]
+            ),
+            "data_gcs_path": p.get("data_gcs_path", ""),
+            "table": p.get("table", ""),
+            "query": p.get("query", ""),
+            "dep_var": p.get("dep_var", ""),
+            "dep_var_type": p.get("dep_var_type", "revenue"),
+            "date_var": p.get("date_var", ""),
+            "adstock": p.get("adstock", ""),
+            "hyperparameter_preset": p.get(
+                "hyperparameter_preset", "Meshed recommend"
+            ),
+            "resample_freq": p.get("resample_freq", "none"),
+            "annotations_gcs_path": p.get("annotations_gcs_path", ""),
+        }
+
+    def _load_queue_as_df() -> pd.DataFrame:
+        payload = load_queue_payload(st.session_state.queue_name)
+        existing_entries = payload.get("entries", [])
+        seed_df = pd.DataFrame([_entry_to_row(e) for e in existing_entries])
+        if seed_df.empty:
+            seed_df = seed_df.reindex(
+                columns=[
+                    "country",
+                    "revision",
+                    "start_date",
+                    "end_date",
+                    "iterations",
+                    "trials",
+                    "train_size",
+                    "paid_media_spends",
+                    "paid_media_vars",
+                    "context_vars",
+                    "factor_vars",
+                    "organic_vars",
+                    "gcs_bucket",
+                    "data_gcs_path",
+                    "table",
+                    "query",
+                    "dep_var",
+                    "dep_var_type",
+                    "date_var",
+                    "adstock",
+                    "hyperparameter_preset",
+                    "resample_freq",
+                    "annotations_gcs_path",
+                ]
+            )
+        return seed_df
+
+    if st.session_state.uploaded_df.empty:
+        st.caption("No CSV uploaded yet (or it has 0 rows).")
+    else:
+        # Work on a copy with a Delete column & sorting controls
+        uploaded_view = st.session_state.uploaded_df.copy()
+        if "Delete" not in uploaded_view.columns:
+            uploaded_view.insert(0, "Delete", False)
+
+        uploaded_view, up_nonce = _sorted_with_controls(
+            uploaded_view, prefix="uploaded"
+        )
+
+        with st.form("uploaded_csv_form"):
+            uploaded_edited = st.data_editor(  # type: ignore[arg-type]
+                uploaded_view,
+                key=f"uploaded_editor_{up_nonce}",
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Delete": st.column_config.CheckboxColumn(
+                        "Delete", help="Mark to remove from table"
+                    )
+                },
+            )
+
+            # Action buttons (builder actions, now for uploaded_df)
+            b1, b2, b3 = st.columns(3)
+            save_uploaded_clicked = b1.form_submit_button(
+                "💾 Save edits"
+            )
+            clear_uploaded_clicked = b2.form_submit_button(
+                "🧹 Clear table"
+            )
+            enqueue_clicked = b3.form_submit_button("➕ Add all to queue")
+
+
+
+        # ----- Handle actions -----
+
+        # Always have a "clean" version of what the user sees (drop Delete)
+        cleaned_uploaded = uploaded_edited.drop(
+            columns="Delete", errors="ignore"
+        ).reset_index(drop=True)
+
+        if save_uploaded_clicked:
+            st.session_state.uploaded_df = cleaned_uploaded
+            st.success("Saved table edits.")
+            st.rerun()
+
+        if clear_uploaded_clicked:
+            st.session_state.uploaded_df = pd.DataFrame()
+            st.session_state.uploaded_fingerprint = None
+            st.success("Cleared table.")
+            st.rerun()
+
+        # Enqueue logic (adapted from Queue Builder, now operating on uploaded_df)
+        if enqueue_clicked:
+            logging.info(
+                f"[QUEUE] Processing 'Enqueue' from uploaded table - {len(cleaned_uploaded)} rows"
+            )
+
+            if cleaned_uploaded.dropna(how="all").empty:
+                st.warning(
+                    "No rows to enqueue. Add at least one non-empty row."
+                )
+            else:
+                def _sig_from_params_dict(d: dict) -> str:
+                    return json.dumps(d, sort_keys=True)
+
+                need_cols = list(cleaned_uploaded.columns)
+
+                # Existing queue signatures
+                queue_sigs_existing = set()
+                for e in st.session_state.job_queue:
+                    try:
+                        norm_existing = _normalize_row(
+                            pd.Series(e.get("params", {}))
+                        )
+                        queue_sigs_existing.add(
+                            json.dumps(norm_existing, sort_keys=True)
+                        )
+                    except Exception:
+                        pass
+
+                # Job history signatures
+                try:
+                    df_led = read_job_history_from_gcs(
+                        st.session_state.get("gcs_bucket", GCS_BUCKET)
+                    )
+                except Exception:
+                    df_led = pd.DataFrame()
+
+                job_history_sigs_existing = set()
+                if not df_led.empty and "state" in df_led.columns:
+                    df_led = df_led[
+                        df_led["state"].isin(["SUCCEEDED", "FAILED"])
+                    ].copy()
+                    for _, r in df_led.iterrows():
+                        params_like = {c: r.get(c, "") for c in need_cols}
+                        params_like = _normalize_row(pd.Series(params_like))
+                        job_history_sigs_existing.add(
+                            json.dumps(params_like, sort_keys=True)
+                        )
+
+                next_id = (
+                    max(
+                        [e["id"] for e in st.session_state.job_queue],
+                        default=0,
+                    )
+                    + 1
+                )
+
+                new_entries, enqueued_sigs = [], set()
+                dup = {
+                    "in_queue": [],
+                    "in_job_history": [],
+                    "missing_data_source": [],
+                }
+
+                for i, row in cleaned_uploaded.iterrows():
+                    params = _normalize_row(row)
+                    # Check for data source: query, table, or data_gcs_path
+                    if not (
+                        params.get("query")
+                        or params.get("table")
+                        or params.get("data_gcs_path")
+                    ):
+                        dup["missing_data_source"].append(i + 1)
+                        continue
+                    sig = json.dumps(params, sort_keys=True)
+                    if sig in queue_sigs_existing:
+                        dup["in_queue"].append(i + 1)
+                        continue
+                    if sig in job_history_sigs_existing:
+                        dup["in_job_history"].append(i + 1)
+                        continue
+
+                    new_entries.append(
+                        {
+                            "id": next_id + len(new_entries),
+                            "params": params,
+                            "status": "PENDING",
+                            "timestamp": None,
+                            "execution_name": None,
+                            "gcs_prefix": None,
+                            "message": "",
+                        }
+                    )
+                    enqueued_sigs.add(sig)
+
+                _toast_dupe_summary(
+                    "Enqueue", dup, added_count=len(new_entries)
+                )
+
+                if not new_entries:
+                    logging.info(
+                        "[QUEUE] No new entries to enqueue (all duplicates or invalid)"
+                    )
+                else:
+                    logging.info(
+                        f"[QUEUE] Enqueuing {len(new_entries)} new jobs from uploaded table (IDs: {[e['id'] for e in new_entries]})"
+                    )
+                    st.session_state.job_queue.extend(new_entries)
+                    logging.info(
+                        f"[QUEUE] Total queue size after enqueue: {len(st.session_state.job_queue)}"
+                    )
+                    st.session_state.queue_saved_at = save_queue_to_gcs(
+                        st.session_state.queue_name,
+                        st.session_state.job_queue,
+                        queue_running=st.session_state.queue_running,
+                    )
+
+                    # Remove only enqueued rows from uploaded_df
+                    def _row_sig(r: pd.Series) -> str:
+                        return json.dumps(_normalize_row(r), sort_keys=True)
+
+                    keep_mask = ~cleaned_uploaded.apply(
+                        _row_sig, axis=1
+                    ).isin(enqueued_sigs)
+                    st.session_state.uploaded_df = (
+                        cleaned_uploaded.loc[keep_mask]
+                        .reset_index(drop=True)
+                    )
+
+                    st.success(
+                        f"Enqueued {len(new_entries)} new job(s), saved to GCS, and removed them from the table."
+                    )
+                    # Auto-open Current Queue in status tab
+                    st.session_state.current_queue_expanded = True
+                    st.rerun()
+
+    st.markdown('---')
 
     # ==== Define example CSVs (unchanged) ==================================
     example = pd.DataFrame(
@@ -2426,7 +2729,7 @@ with tab_queue:
     left_col, right_col = st.columns([2, 3])
 
     with left_col:
-        st.write("**Recommended workflow**")
+        st.write("**ℹ️ Recommended workflow**")
         st.write("1. Use **Single Run** to build and verify one experiment.")
         st.write("2. Download the configuration as a CSV.")
         st.write("3. Add more rows to your CSV (e.g., more countries or variables).")
@@ -2486,358 +2789,25 @@ with tab_queue:
     _render_flash("batch_dupes")
     maybe_refresh_queue_from_gcs()
 
-    st.markdown('---')
-
-    # ========== Run Batch Experiments ==========
-    st.markdown("#### 📥 Upload CSV to continue")
-    st.caption("Upload a CSV where each row defines one experiment. You can edit rows after upload.")
-
-    up = st.file_uploader("**Select CSV:**", type=["csv"], key="batch_csv")
-
-    # Session scaffolding
-    if "uploaded_df" not in st.session_state:
-        st.session_state.uploaded_df = pd.DataFrame()
-    if "uploaded_fingerprint" not in st.session_state:
-        st.session_state.uploaded_fingerprint = None
-
-    # Load only when the *file changes*
-    if up is not None:
-        fingerprint = f"{getattr(up, 'name', '')}:{getattr(up, 'size', '')}"
-        if st.session_state.uploaded_fingerprint != fingerprint:
-            try:
-                logging.info(
-                    f"[QUEUE] Uploading CSV file: {getattr(up, 'name', 'unknown')}, size: {getattr(up, 'size', 0)} bytes"
-                )
-                st.session_state.uploaded_df = pd.read_csv(
-                    up, keep_default_na=True
-                )
-                st.session_state.uploaded_fingerprint = fingerprint
-                logging.info(
-                    f"[QUEUE] Successfully loaded CSV with {len(st.session_state.uploaded_df)} rows and {len(st.session_state.uploaded_df.columns)} columns"
-                )
-                st.success(
-                    f"Loaded {len(st.session_state.uploaded_df)} rows from CSV"
-                )
-            except Exception as e:
-                logging.error(
-                    f"[QUEUE] Failed to parse CSV: {e}", exc_info=True
-                )
-                st.error(f"Failed to parse CSV: {e}")
-    else:
-        # If user clears the file input, allow re-uploading the same file later
-        st.session_state.uploaded_fingerprint = None
-
-    # Helper to load current GCS queue into a DataFrame (for reset button)
-    def _as_csv(v):
-        if isinstance(v, (list, tuple)):
-            return ", ".join(str(x) for x in v if str(x).strip())
-        return "" if v is None else str(v)
-
-    def _entry_to_row(e: dict) -> dict:
-        p = e.get("params", {}) or {}
-        return {
-            "country": p.get("country", ""),
-            "revision": p.get("revision", ""),
-            "start_date": p.get("start_date", ""),
-            "end_date": p.get("end_date", ""),
-            "iterations": p.get("iterations", ""),
-            "trials": p.get("trials", ""),
-            "train_size": _as_csv(p.get("train_size", "")),
-            "paid_media_spends": _as_csv(p.get("paid_media_spends", "")),
-            "paid_media_vars": _as_csv(p.get("paid_media_vars", "")),
-            "context_vars": _as_csv(p.get("context_vars", "")),
-            "factor_vars": _as_csv(p.get("factor_vars", "")),
-            "organic_vars": _as_csv(p.get("organic_vars", "")),
-            "gcs_bucket": p.get(
-                "gcs_bucket", st.session_state["gcs_bucket"]
-            ),
-            "data_gcs_path": p.get("data_gcs_path", ""),
-            "table": p.get("table", ""),
-            "query": p.get("query", ""),
-            "dep_var": p.get("dep_var", ""),
-            "dep_var_type": p.get("dep_var_type", "revenue"),
-            "date_var": p.get("date_var", ""),
-            "adstock": p.get("adstock", ""),
-            "hyperparameter_preset": p.get(
-                "hyperparameter_preset", "Meshed recommend"
-            ),
-            "resample_freq": p.get("resample_freq", "none"),
-            "annotations_gcs_path": p.get("annotations_gcs_path", ""),
-        }
-
-    def _load_queue_as_df() -> pd.DataFrame:
-        payload = load_queue_payload(st.session_state.queue_name)
-        existing_entries = payload.get("entries", [])
-        seed_df = pd.DataFrame([_entry_to_row(e) for e in existing_entries])
-        if seed_df.empty:
-            seed_df = seed_df.reindex(
-                columns=[
-                    "country",
-                    "revision",
-                    "start_date",
-                    "end_date",
-                    "iterations",
-                    "trials",
-                    "train_size",
-                    "paid_media_spends",
-                    "paid_media_vars",
-                    "context_vars",
-                    "factor_vars",
-                    "organic_vars",
-                    "gcs_bucket",
-                    "data_gcs_path",
-                    "table",
-                    "query",
-                    "dep_var",
-                    "dep_var_type",
-                    "date_var",
-                    "adstock",
-                    "hyperparameter_preset",
-                    "resample_freq",
-                    "annotations_gcs_path",
-                ]
-            )
-        return seed_df
-
-    if st.session_state.uploaded_df.empty:
-        st.caption("No CSV uploaded yet (or it has 0 rows).")
-    else:
-        # Work on a copy with a Delete column & sorting controls
-        uploaded_view = st.session_state.uploaded_df.copy()
-        if "Delete" not in uploaded_view.columns:
-            uploaded_view.insert(0, "Delete", False)
-
-        uploaded_view, up_nonce = _sorted_with_controls(
-            uploaded_view, prefix="uploaded"
-        )
-
-        with st.form("uploaded_csv_form"):
-            uploaded_edited = st.data_editor(  # type: ignore[arg-type]
-                uploaded_view,
-                key=f"uploaded_editor_{up_nonce}",
-                num_rows="dynamic",
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Delete": st.column_config.CheckboxColumn(
-                        "Delete", help="Mark to remove from table"
-                    )
-                },
-            )
-
-            # Action buttons (builder actions, now for uploaded_df)
-            b1, b2, b3 = st.columns(3)
-            save_uploaded_clicked = b1.form_submit_button(
-                "💾 Save edits"
-            )
-            reset_uploaded_clicked = b2.form_submit_button(
-                "🔄 Reset to current GCS queue"
-            )
-            clear_uploaded_clicked = b3.form_submit_button(
-                "🧹 Clear table"
-            )
-
-            c1, c2,c3 = st.columns(3)
-            enqueue_clicked = c1.form_submit_button("➕ Add all to queue")
-            clear_queue_clicked = c2.form_submit_button(
-                "🧹 Clear queue"
-            )
-
-        # ----- Handle actions -----
-
-        # Always have a "clean" version of what the user sees (drop Delete)
-        cleaned_uploaded = uploaded_edited.drop(
-            columns="Delete", errors="ignore"
-        ).reset_index(drop=True)
-
-        if save_uploaded_clicked:
-            st.session_state.uploaded_df = cleaned_uploaded
-            st.success("Saved table edits.")
-            st.rerun()
-
-        if reset_uploaded_clicked:
-            st.session_state.uploaded_df = _load_queue_as_df()
-            st.session_state.uploaded_fingerprint = None
-            st.info("Table reset to current GCS queue.")
-            st.rerun()
-
-        if clear_uploaded_clicked:
-            st.session_state.uploaded_df = pd.DataFrame()
-            st.session_state.uploaded_fingerprint = None
-            st.success("Cleared table.")
-            st.rerun()
-
-        if clear_queue_clicked:
-            st.session_state["job_queue"] = []
-            st.session_state["queue_running"] = False
-            save_queue_to_gcs(st.session_state.queue_name, [])
-            st.success("Queue cleared & saved to GCS.")
-            st.rerun()
-
-        # Enqueue logic (adapted from Queue Builder, now operating on uploaded_df)
-        if enqueue_clicked:
-            logging.info(
-                f"[QUEUE] Processing 'Enqueue' from uploaded table - {len(cleaned_uploaded)} rows"
-            )
-
-            if cleaned_uploaded.dropna(how="all").empty:
-                st.warning(
-                    "No rows to enqueue. Add at least one non-empty row."
-                )
-            else:
-                def _sig_from_params_dict(d: dict) -> str:
-                    return json.dumps(d, sort_keys=True)
-
-                need_cols = list(cleaned_uploaded.columns)
-
-                # Existing queue signatures
-                queue_sigs_existing = set()
-                for e in st.session_state.job_queue:
-                    try:
-                        norm_existing = _normalize_row(
-                            pd.Series(e.get("params", {}))
-                        )
-                        queue_sigs_existing.add(
-                            json.dumps(norm_existing, sort_keys=True)
-                        )
-                    except Exception:
-                        pass
-
-                # Job history signatures
-                try:
-                    df_led = read_job_history_from_gcs(
-                        st.session_state.get("gcs_bucket", GCS_BUCKET)
-                    )
-                except Exception:
-                    df_led = pd.DataFrame()
-
-                job_history_sigs_existing = set()
-                if not df_led.empty and "state" in df_led.columns:
-                    df_led = df_led[
-                        df_led["state"].isin(["SUCCEEDED", "FAILED"])
-                    ].copy()
-                    for _, r in df_led.iterrows():
-                        params_like = {c: r.get(c, "") for c in need_cols}
-                        params_like = _normalize_row(pd.Series(params_like))
-                        job_history_sigs_existing.add(
-                            json.dumps(params_like, sort_keys=True)
-                        )
-
-                next_id = (
-                    max(
-                        [e["id"] for e in st.session_state.job_queue],
-                        default=0,
-                    )
-                    + 1
-                )
-
-                new_entries, enqueued_sigs = [], set()
-                dup = {
-                    "in_queue": [],
-                    "in_job_history": [],
-                    "missing_data_source": [],
-                }
-
-                for i, row in cleaned_uploaded.iterrows():
-                    params = _normalize_row(row)
-                    # Check for data source: query, table, or data_gcs_path
-                    if not (
-                        params.get("query")
-                        or params.get("table")
-                        or params.get("data_gcs_path")
-                    ):
-                        dup["missing_data_source"].append(i + 1)
-                        continue
-                    sig = json.dumps(params, sort_keys=True)
-                    if sig in queue_sigs_existing:
-                        dup["in_queue"].append(i + 1)
-                        continue
-                    if sig in job_history_sigs_existing:
-                        dup["in_job_history"].append(i + 1)
-                        continue
-
-                    new_entries.append(
-                        {
-                            "id": next_id + len(new_entries),
-                            "params": params,
-                            "status": "PENDING",
-                            "timestamp": None,
-                            "execution_name": None,
-                            "gcs_prefix": None,
-                            "message": "",
-                        }
-                    )
-                    enqueued_sigs.add(sig)
-
-                _toast_dupe_summary(
-                    "Enqueue", dup, added_count=len(new_entries)
-                )
-
-                if not new_entries:
-                    logging.info(
-                        "[QUEUE] No new entries to enqueue (all duplicates or invalid)"
-                    )
-                else:
-                    logging.info(
-                        f"[QUEUE] Enqueuing {len(new_entries)} new jobs from uploaded table (IDs: {[e['id'] for e in new_entries]})"
-                    )
-                    st.session_state.job_queue.extend(new_entries)
-                    logging.info(
-                        f"[QUEUE] Total queue size after enqueue: {len(st.session_state.job_queue)}"
-                    )
-                    st.session_state.queue_saved_at = save_queue_to_gcs(
-                        st.session_state.queue_name,
-                        st.session_state.job_queue,
-                        queue_running=st.session_state.queue_running,
-                    )
-
-                    # Remove only enqueued rows from uploaded_df
-                    def _row_sig(r: pd.Series) -> str:
-                        return json.dumps(_normalize_row(r), sort_keys=True)
-
-                    keep_mask = ~cleaned_uploaded.apply(
-                        _row_sig, axis=1
-                    ).isin(enqueued_sigs)
-                    st.session_state.uploaded_df = (
-                        cleaned_uploaded.loc[keep_mask]
-                        .reset_index(drop=True)
-                    )
-
-                    st.success(
-                        f"Enqueued {len(new_entries)} new job(s), saved to GCS, and removed them from the table."
-                    )
-                    # Auto-open Current Queue in status tab
-                    st.session_state.current_queue_expanded = True
-                    st.rerun()
-
 # ===================== STATUS TAB =====================
 with tab_status:
-    st.subheader("Job Status & History")
-    st.write(
-        "Track all your training jobs - both from Single run and Queue tabs."
-    )
-
+ 
     # Job Status Monitor
     render_job_status_monitor(key_prefix="status")
 
-    st.divider()
 
-    # Job History
-    render_jobs_job_history(key_prefix="status")
-
-   # ========== EXPANDER 3: Current Queue ==========
     with st.expander(
         "📋 Current Queue",
-        expanded=st.session_state.current_queue_expanded,
+        expanded=False
     ):
         # Queue controls
         st.caption(
-            f"Queue status: {'▶️ RUNNING' if st.session_state.queue_running else '⏸️ STOPPED'} · "
+            "Queue status: "
             f"{sum(e['status'] in ('RUNNING','LAUNCHING') for e in st.session_state.job_queue)} running"
         )
 
         if st.button(
-            "🔁 Refresh from GCS",
+            "🔁 Refresh queue",
             use_container_width=True,
             key="refresh_queue_from_gcs",
         ):
@@ -2845,7 +2815,7 @@ with tab_status:
             st.success("Refreshed from GCS.")
             st.rerun()
 
-        qc1, qc2, qc3, qc4 = st.columns(4)
+        qc1, qc2, qc3 = st.columns(3)
         if qc1.button(
             "▶️ Start Queue",
             disabled=(len(st.session_state.job_queue) == 0),
@@ -2869,20 +2839,13 @@ with tab_status:
             st.session_state.queue_running = False
             st.info("Queue paused.")
             st.rerun()
-        if qc3.button("⏭️ Process Next Step", key="process_next_step_btn"):
+        if qc3.button("⏭️ Start Next Job", key="process_next_step_btn"):
             logging.info(
                 f"[QUEUE] Manual queue tick triggered for '{st.session_state.queue_name}'"
             )
             _queue_tick()
             st.toast("Ticked queue")
             st.rerun()
-
-        if qc4.button("💾 Save now", key="save_queue_now_btn"):
-            save_queue_to_gcs(
-                st.session_state.queue_name, st.session_state.job_queue
-            )
-            st.success("Queue saved to GCS.")
-            # No rerun needed for save operation
 
         _auto_refresh_and_tick(interval_ms=2000)
 
@@ -2985,3 +2948,6 @@ with tab_status:
                     )
                 st.success("Queue updated.")
                 st.rerun()
+
+   # Job History
+    render_jobs_job_history(key_prefix="status")

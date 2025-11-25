@@ -590,10 +590,10 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
 
 @st.fragment
 def render_jobs_job_history(key_prefix: str = "single") -> None:
-    with st.expander("📚 Job History (from GCS)", expanded=False):
+    with st.expander("📚 Run History", expanded=False):
         # Refresh control first
         if st.button(
-            "🔁 Refresh job_history", key=f"refresh_job_history_{key_prefix}"
+            "🔁 Refresh History", key=f"refresh_job_history_{key_prefix}"
         ):
             # Update any RUNNING jobs that have actually completed
             with st.spinner("Checking status of running jobs..."):
@@ -619,10 +619,6 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
             return
 
         df_job_history = df_job_history.reindex(columns=JOB_HISTORY_COLUMNS)
-
-        st.caption(
-            "JOB_HISTORY entries are automatically updated when you click 'Refresh job_history'."
-        )
         st.dataframe(
             df_job_history,
             use_container_width=True,
@@ -630,28 +626,15 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
             key=f"job_history_view_{key_prefix}_{st.session_state.get('job_history_nonce', 0)}",
         )
 
-
 def render_job_status_monitor(key_prefix: str = "single") -> None:
-    """Status UI showing all currently running jobs as a table."""
-    st.subheader("📊 Job Status Monitor")
-
-    # Refresh button - force a reload of queue and check job statuses
-    if st.button("🔄 Refresh Status", key=f"refresh_status_table_{key_prefix}"):
-        # Refresh queue from GCS to get latest status
-        maybe_refresh_queue_from_gcs(force=True)
-        # Clear cached timestamp to force re-check of single run jobs
-        st.session_state["status_refresh_timestamp"] = (
-            datetime.utcnow().timestamp()
-        )
-        st.rerun()
-
+    """Status UI showing all currently running jobs as a table (no manual checker)."""
     # Collect all running jobs from two sources:
     # 1. Queue jobs (RUNNING/LAUNCHING status)
     # 2. Single run jobs from session state (check actual status)
     all_running_jobs = []
     job_manager = get_job_manager()
 
-    # Add queue jobs
+    # --- Queue jobs ---
     queue = st.session_state.get("job_queue", [])
     for job in queue:
         if job.get("status") in ("RUNNING", "LAUNCHING"):
@@ -671,204 +654,143 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                 }
             )
 
-    # Add single run jobs from session state - check their actual status
+    # --- Single run jobs (poll actual status) ---
     jobs_to_remove = []
     for idx, exec_info in enumerate(st.session_state.get("job_executions", [])):
         exec_name = exec_info.get("execution_name", "")
-        if exec_name:
-            # Check actual execution status
-            try:
-                status_info = job_manager.get_execution_status(exec_name)
-                actual_status = (
-                    status_info.get("overall_status") or "RUNNING"
-                ).upper()
+        if not exec_name:
+            continue
 
-                # If job is complete, mark it for removal from session state
-                if actual_status in (
-                    "SUCCEEDED",
-                    "FAILED",
-                    "CANCELLED",
-                    "COMPLETED",
-                    "ERROR",
-                ):
-                    jobs_to_remove.append(idx)
-                    # Don't add to running jobs list
-                    continue
+        try:
+            status_info = job_manager.get_execution_status(exec_name)
+            actual_status = (status_info.get("overall_status") or "RUNNING").upper()
+        except Exception:
+            # If we can't check status, assume it's still running
+            actual_status = "RUNNING"
 
-                # Job is still running, add to list
-                all_running_jobs.append(
-                    {
-                        "Source": "Single",
-                        "Job ID": f"single-{exec_info.get('timestamp', '?')}",
-                        "Status": actual_status,
-                        "Country": exec_info.get("country", "N/A"),
-                        "Revision": exec_info.get("revision", "N/A"),
-                        "Iterations": str(exec_info.get("iterations", "N/A")),
-                        "Trials": str(exec_info.get("trials", "N/A")),
-                        "GCS Prefix": exec_info.get("gcs_prefix", ""),
-                        "Execution Details": exec_name,
-                    }
-                )
-            except Exception as e:
-                # If we can't check status, assume it's still running
-                all_running_jobs.append(
-                    {
-                        "Source": "Single",
-                        "Job ID": f"single-{exec_info.get('timestamp', '?')}",
-                        "Status": "RUNNING",
-                        "Country": exec_info.get("country", "N/A"),
-                        "Revision": exec_info.get("revision", "N/A"),
-                        "Iterations": str(exec_info.get("iterations", "N/A")),
-                        "Trials": str(exec_info.get("trials", "N/A")),
-                        "GCS Prefix": exec_info.get("gcs_prefix", ""),
-                        "Execution Details": exec_name,
-                    }
-                )
+        if actual_status in (
+            "SUCCEEDED",
+            "FAILED",
+            "CANCELLED",
+            "COMPLETED",
+            "ERROR",
+        ):
+            # Completed – remove from "currently running"
+            jobs_to_remove.append(idx)
+            continue
 
-    # Remove completed jobs from session state
+        all_running_jobs.append(
+            {
+                "Source": "Single",
+                "Job ID": f"single-{exec_info.get('timestamp', '?')}",
+                "Status": actual_status,
+                "Country": exec_info.get("country", "N/A"),
+                "Revision": exec_info.get("revision", "N/A"),
+                "Iterations": str(exec_info.get("iterations", "N/A")),
+                "Trials": str(exec_info.get("trials", "N/A")),
+                "GCS Prefix": exec_info.get("gcs_prefix", ""),
+                "Execution Details": exec_name,
+            }
+        )
+
+    # Remove completed single-run jobs from session state
     if jobs_to_remove:
         current_jobs = st.session_state.get("job_executions", [])
         st.session_state["job_executions"] = [
             job for i, job in enumerate(current_jobs) if i not in jobs_to_remove
         ]
 
+    # ===== UI =====
+    st.subheader("📊 Model Run Status:")
+
+    top_left, top_right = st.columns([4, 1])
+
+    with top_left:
+        total_running = len(all_running_jobs)
+        if total_running == 0:
+            st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
+            st.info("ℹ️ No jobs currently running.")
+            st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
+        else:
+            n_queue = sum(1 for j in all_running_jobs if j["Source"] == "Queue")
+            n_single = total_running - n_queue
+            st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
+            st.write(
+                f"**{total_running} job(s) running** "
+                f"(Queue: {n_queue}, Single run: {n_single})."
+            )
+            st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
+    with top_right:
+        if st.button("🔄 Refresh", key=f"refresh_status_table_{key_prefix}", use_container_width=True):
+            # Refresh queue from GCS to get latest status
+            maybe_refresh_queue_from_gcs(force=True)
+            # Clear cached timestamp to force re-check of single run jobs
+            st.session_state["status_refresh_timestamp"] = datetime.utcnow().timestamp()
+            st.rerun()
+
+    # If nothing running, we're done
     if not all_running_jobs:
-        st.info("ℹ️ No jobs currently running")
-    else:
-        # Create DataFrame for display
-        df = pd.DataFrame(all_running_jobs)
+        return
 
-        # Display table with clickable links
-        st.write(f"**{len(all_running_jobs)} job(s) currently running:**")
+    # Create DataFrame for display
+    df = pd.DataFrame(all_running_jobs)
 
-        # Create display dataframe with proper URLs
-        display_df = df.copy()
+    # Build display dataframe with proper URLs
+    display_df = df.copy()
 
-        # Convert GCS Prefix to clickable URLs
-        gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
-        display_df["GCS Prefix"] = display_df["GCS Prefix"].apply(
+    gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
+
+    # Convert GCS Prefix to clickable URLs
+    display_df["GCS Prefix"] = display_df["GCS Prefix"].apply(
+        lambda x: (
+            f"https://console.cloud.google.com/storage/browser/{gcs_bucket}/{x}"
+            if x
+            else ""
+        )
+    )
+
+    # For execution details, create links to Cloud Run console
+    if PROJECT_ID and REGION:
+        display_df["Execution Details"] = display_df["Execution Details"].apply(
             lambda x: (
-                f"https://console.cloud.google.com/storage/browser/{gcs_bucket}/{x}"
-                if x
-                else ""
+                f"https://console.cloud.google.com/run/jobs/executions/details/"
+                f"{REGION}/{x.split('/')[-1]}?project={PROJECT_ID}"
+                if x and "/" in x
+                else x
             )
         )
 
-        # For execution details, create links to Cloud Run console
-        if PROJECT_ID and REGION:
-            display_df["Execution Details"] = display_df[
-                "Execution Details"
-            ].apply(
-                lambda x: (
-                    f"https://console.cloud.google.com/run/jobs/executions/details/{REGION}/{x.split('/')[-1]}?project={PROJECT_ID}"
-                    if x and "/" in x
-                    else x
-                )
-            )
+    # Color coding for Status
+    def color_status(val: str) -> str:
+        if val == "RUNNING":
+            return "background-color: #90EE90"  # Light green
+        if val == "LAUNCHING":
+            return "background-color: #FFD700"  # Gold
+        if val == "SUCCEEDED":
+            return "background-color: #32CD32"  # Lime green
+        if val in ("FAILED", "ERROR"):
+            return "background-color: #FF6B6B"  # Light red
+        return ""
 
-        # Apply color coding to Status column using styled dataframe
-        def color_status(val):
-            if val == "RUNNING":
-                return "background-color: #90EE90"  # Light green
-            elif val == "LAUNCHING":
-                return "background-color: #FFD700"  # Gold
-            elif val == "SUCCEEDED":
-                return "background-color: #32CD32"  # Lime green
-            elif val in ["FAILED", "ERROR"]:
-                return "background-color: #FF6B6B"  # Light red
-            else:
-                return ""
+    column_config = {
+        "GCS Prefix": st.column_config.LinkColumn(
+            "GCS Prefix",
+            help="Open GCS folder in new tab",
+            display_text="Open GCS ↗",
+        ),
+        "Execution Details": st.column_config.LinkColumn(
+            "Execution Details",
+            help="Open Cloud Run execution details in new tab",
+            display_text="Open Execution ↗",
+        ),
+    }
 
-        # Use st.dataframe with column configuration for clickable links
-        column_config = {
-            "GCS Prefix": st.column_config.LinkColumn(
-                "GCS Prefix",
-                help="Click to open GCS folder in new tab",
-                display_text="Open GCS ↗",
-            ),
-            "Execution Details": st.column_config.LinkColumn(
-                "Execution Details",
-                help="Click to open Cloud Run execution details in new tab",
-                display_text="Open Execution ↗",
-            ),
-        }
-
-        st.dataframe(
-            display_df.style.applymap(color_status, subset=["Status"]),
-            column_config=column_config,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    # Manual job status checker (for any execution)
-    with st.expander("🔍 Manual Status Check", expanded=False):
-        st.write("Check status of any job by entering the execution ID:")
-
-        # Build the prefix from environment variables
-        exec_prefix = ""
-        if PROJECT_ID and REGION and TRAINING_JOB_NAME:
-            exec_prefix = f"projects/{PROJECT_ID}/locations/{REGION}/jobs/{TRAINING_JOB_NAME}/executions/"
-
-        # Get default execution ID (last part only)
-        default_exec_id = ""
-        if st.session_state.get("job_executions"):
-            last_exec = st.session_state.job_executions[-1]["execution_name"]
-            if "/executions/" in last_exec:
-                default_exec_id = last_exec.split("/executions/")[-1]
-
-        exec_id = st.text_input(
-            "Execution ID (short form)",
-            value=default_exec_id,
-            key=f"exec_id_manual_{key_prefix}",
-            help="Enter just the execution ID (e.g., 'mmm-app-dev-training-abc123'). The full path will be constructed automatically.",
-        )
-
-        if exec_prefix:
-            st.caption(
-                f"Full path: `{exec_prefix}{exec_id or '<execution-id>'}`"
-            )
-
-        if st.button(
-            "🔍 Check Status", key=f"check_status_manual_{key_prefix}"
-        ):
-            if not exec_id:
-                st.warning("Please enter an execution ID.")
-            elif not exec_prefix:
-                st.error(
-                    "⚠️ Configuration Error: Missing required environment variables."
-                )
-                st.info(
-                    "**Required environment variables:**\n"
-                    "- `PROJECT_ID`\n"
-                    "- `REGION`\n"
-                    "- `TRAINING_JOB_NAME`\n\n"
-                    "Please ensure these are set in the web service environment."
-                )
-            else:
-                exec_name = exec_prefix + exec_id
-                try:
-                    with st.spinner("Fetching status..."):
-                        status_info = job_manager.get_execution_status(
-                            exec_name
-                        )
-                        st.json(status_info)
-                except Exception as e:
-                    error_msg = str(e)
-                    if "403" in error_msg or "Permission denied" in error_msg:
-                        st.error(
-                            "⚠️ Permission Error: The service account doesn't have "
-                            "permission to view job execution status."
-                        )
-                        st.info(
-                            "**To fix this issue:**\n"
-                            "1. The web service account needs Cloud Run permissions\n"
-                            "2. Ensure it has 'roles/run.developer' or 'roles/run.admin'\n"
-                            "3. Check the terraform configuration in infra/terraform/main.tf"
-                        )
-                        with st.expander("Technical Details"):
-                            st.code(error_msg)
-                    else:
-                        st.error(f"Status check failed: {e}")
+    st.dataframe(
+        display_df.style.applymap(color_status, subset=["Status"]),
+        column_config=column_config,
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 def set_queue_running(
