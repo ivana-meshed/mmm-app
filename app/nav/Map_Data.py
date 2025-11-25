@@ -2118,7 +2118,7 @@ if can_go_next:
                         st.session_state["prefill_goal"] = str(
                             main_goals.iloc[0]["var"]
                         )
-                    elif not goals_df.empty:
+                    else:
                         # Fallback to first primary goal if no main is selected
                         primary_goals = goals_df[
                             goals_df["group"] == "primary"
