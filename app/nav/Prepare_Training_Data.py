@@ -626,11 +626,14 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     st.session_state.setdefault("dq_dropped_cols", set())
     st.session_state.setdefault("dq_clean_note", "")
     st.session_state.setdefault("dq_last_dropped", [])
+    # Session state for user column selections (persists manual checkbox changes)
+    st.session_state.setdefault("dq_user_selections", {})
 
     if reset_clean:
         st.session_state["dq_dropped_cols"] = set()
         st.session_state["dq_clean_note"] = ""
         st.session_state["dq_last_dropped"] = []
+        st.session_state["dq_user_selections"] = {}
         st.rerun()
 
     # Apply cleaning when requested
@@ -709,7 +712,16 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
 
     # Apply dropped flags to 'Use' default
     dropped = st.session_state["dq_dropped_cols"]
+    user_selections = st.session_state["dq_user_selections"]
+
+    # Initialize Use column: start with True for non-dropped
     prof_all["Use"] = ~prof_all["Column"].isin(dropped)
+    
+    # Apply any saved user selections (persisted from previous interactions)
+    if user_selections:
+        # Use vectorized map for O(n) performance
+        mask = prof_all["Column"].isin(user_selections.keys())
+        prof_all.loc[mask, "Use"] = prof_all.loc[mask, "Column"].map(user_selections)
 
     # Render tables
     use_overrides: dict[str, bool] = {}
@@ -827,6 +839,9 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         row["Column"]: bool(row["Use"]) for _, row in prof_all.iterrows()
     }
     final_use.update(use_overrides)
+    
+    # Persist user selections to session state for next rerun
+    st.session_state["dq_user_selections"].update(use_overrides)
 
     selected_cols = [c for c, u in final_use.items() if u]
     st.session_state["selected_columns_for_training"] = selected_cols
