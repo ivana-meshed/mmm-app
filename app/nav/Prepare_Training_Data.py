@@ -398,9 +398,10 @@ def _protect_columns_set(date_col: str, goal_cols: list[str]) -> set[str]:
 with st.expander("Step 2) Ensure good data quality", expanded=False):
     st.subheader(f"Data Quality")
 
-    prof_df = df_r.copy()
+    # Use full dataset (df) for profiling, not timeframe-filtered (df_r)
+    prof_df = df.copy()
     if prof_df.empty:
-        st.info("No data in the selected timeframe to profile.")
+        st.info("No data loaded to profile.")
         st.stop()
 
     # Build metadata categories
@@ -661,28 +662,28 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
                     y_max=1.0,
                 ),
                 "non_null": st.column_config.NumberColumn(
-                    "Non-Null", format="%,.0f"
+                    "Non-Null", format="%d"
                 ),
-                "nulls": st.column_config.NumberColumn("Nulls", format="%,.0f"),
+                "nulls": st.column_config.NumberColumn("Nulls", format="%d"),
                 "nulls_pct": st.column_config.NumberColumn(
                     "Nulls %", format="%.1f%%"
                 ),
-                "zeros": st.column_config.NumberColumn("Zeros", format="%,.0f"),
+                "zeros": st.column_config.NumberColumn("Zeros", format="%d"),
                 "zeros_pct": st.column_config.NumberColumn(
                     "Zeros %", format="%.1f%%"
                 ),
                 "distinct": st.column_config.NumberColumn(
-                    "Distinct", format="%,.0f"
+                    "Distinct", format="%d"
                 ),
                 "MinDisp": st.column_config.TextColumn("Min"),
-                "p10": st.column_config.NumberColumn("P10", format="%,.2f"),
+                "p10": st.column_config.NumberColumn("P10", format="%.2f"),
                 "median": st.column_config.NumberColumn(
-                    "Median", format="%,.2f"
+                    "Median", format="%.2f"
                 ),
-                "mean": st.column_config.NumberColumn("Mean", format="%,.2f"),
-                "p90": st.column_config.NumberColumn("P90", format="%,.2f"),
+                "mean": st.column_config.NumberColumn("Mean", format="%.2f"),
+                "p90": st.column_config.NumberColumn("P90", format="%.2f"),
                 "MaxDisp": st.column_config.TextColumn("Max"),
-                "std": st.column_config.NumberColumn("Std", format="%,.2f"),
+                "std": st.column_config.NumberColumn("Std", format="%.2f"),
             },
             key=f"dq_editor_{key_suffix}",
         )
