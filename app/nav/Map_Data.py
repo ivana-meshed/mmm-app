@@ -17,6 +17,8 @@ from app_shared import (
     _require_sf_session,
     effective_sql,
     get_data_processor,
+    list_data_versions,
+    list_meta_versions,
     require_login_and_domain,
     run_sql,
     upload_to_gcs,
@@ -1141,7 +1143,8 @@ with st.expander("📊 Data Selection", expanded=False):
             st.session_state["picked_ts"] = res["timestamp"]
             st.session_state["data_origin"] = "gcs_latest"
             st.session_state["last_saved_raw_path"] = res["data_gcs_path"]
-            _list_country_versions_cached.clear()  # ⬅️ invalidate immediately
+            _list_country_versions_cached.clear()  # ⬅️ invalidate local cache
+            list_data_versions.clear()  # ⬅️ invalidate app_shared cache
             st.success(f"Saved raw snapshot → {res['data_gcs_path']}")
         except Exception as e:
             st.error(f"Saving to GCS failed: {e}")
@@ -2049,8 +2052,10 @@ with st.expander("💾 Save Dataset & Mapping Configuration", expanded=False):
                 payload, BUCKET, _meta_latest_blob(save_country)
             )
             st.session_state["last_saved_meta_path"] = f"gs://{BUCKET}/{vblob}"
-            _list_country_versions_cached.clear()  # ⬅️ refresh loader pickers
-            _list_metadata_versions_cached.clear()  # ⬅️ refresh metadata list
+            _list_country_versions_cached.clear()  # ⬅️ refresh local loader pickers
+            _list_metadata_versions_cached.clear()  # ⬅️ refresh local metadata list
+            list_data_versions.clear()  # ⬅️ refresh app_shared data cache
+            list_meta_versions.clear()  # ⬅️ refresh app_shared metadata cache
             location_msg = (
                 f"for {save_country.upper()}"
                 if save_country_specific
