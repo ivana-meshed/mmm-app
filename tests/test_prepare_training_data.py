@@ -1,5 +1,10 @@
 """
 Tests for Prepare Training Data statistics functions.
+
+Note: The _num_stats function is duplicated here because it's defined inside
+a Streamlit page file (Prepare_Training_Data.py) which has dependencies on
+Streamlit session state and imports that make it difficult to import directly.
+This is a common pattern for testing embedded functions in UI code.
 """
 
 import unittest
