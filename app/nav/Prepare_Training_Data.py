@@ -175,7 +175,7 @@ with st.expander("Step 1) Select Data", expanded=False):
                 st.warning("Declared vs observed type mismatches:")
                 st.dataframe(
                     report["type_mismatches"],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
             else:
@@ -774,7 +774,7 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         edited = st.data_editor(
             subset[show_cols],
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             num_rows="fixed",
             column_config={
                 "Use": st.column_config.CheckboxColumn(required=True),
@@ -966,7 +966,7 @@ with st.expander(
             edited_metrics = st.data_editor(
                 metrics_df,
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
                 num_rows="fixed",
                 column_config={
                     "Select": st.column_config.CheckboxColumn(required=True),
@@ -1094,7 +1094,7 @@ with st.expander(
                 st.dataframe(
                     var_metrics_df,
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                     column_config={
                         "Media Response Variable": st.column_config.TextColumn(
                             "Media Response Variable"
@@ -1254,7 +1254,7 @@ with st.expander(
         st.dataframe(
             df_metrics,
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Variable": st.column_config.TextColumn("Variable"),
                 "R²": st.column_config.NumberColumn("R²", format="%.4f"),
