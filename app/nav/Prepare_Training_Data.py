@@ -12,6 +12,7 @@ import json
 import os
 import tempfile
 from datetime import datetime, timezone
+from typing import List
 
 import numpy as np
 import pandas as pd
@@ -42,6 +43,7 @@ from app_shared import (
 from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 # Authentication
 require_login_and_domain()
@@ -984,22 +986,26 @@ with st.expander(
             # Get corresponding paid media vars
             corresponding_vars = paid_media_mapping.get(spend_col, [])
 
-            if not corresponding_vars:
-                st.info(f"No media response variables mapped for {spend_col}")
-                continue
+            # Build options list: include the spend column itself plus mapped vars
+            # Always include the spend column as an option
+            options_list = [spend_col]  # Start with the spend column itself
 
-            # Filter vars that are available in the data
+            # Add mapped vars that are available in the data
             available_vars = [
                 v for v in corresponding_vars if v in df_r.columns
             ]
+            options_list.extend(available_vars)
 
-            if not available_vars:
-                st.info(f"Mapped variables not found in data for {spend_col}")
+            # Remove duplicates while preserving order using dict.fromkeys()
+            unique_options = list(dict.fromkeys(options_list))
+
+            if len(unique_options) <= 1 and spend_col not in df_r.columns:
+                st.info(f"No media response variables available for {spend_col}")
                 continue
 
-            # Calculate metrics for each media var
+            # Calculate metrics for each option
             var_metrics_data = []
-            for var_col in available_vars:
+            for var_col in unique_options:
                 if var_col in df_r.columns and spend_col in df_r.columns:
                     temp_df = df_r[[spend_col, var_col]].dropna()
 
@@ -1036,9 +1042,15 @@ with st.expander(
                         nmae = np.nan
                         spearman_rho = np.nan
 
+                    # Mark if this is the original spend column
+                    label = (
+                        f"{var_col} (spend)"
+                        if var_col == spend_col
+                        else var_col
+                    )
                     var_metrics_data.append(
                         {
-                            "Media Response Variable": var_col,
+                            "Media Response Variable": label,
                             "R²": r2,
                             "NMAE": nmae,
                             "Spearman's ρ": spearman_rho,
@@ -1076,7 +1088,168 @@ with st.expander(
                     },
                 )
 
-    # Export Selected Columns button (after section 3.3)
+    # 3.4 Variable Analysis with VIF
+    st.markdown("---")
+    st.markdown("### 3.4 Variable Analysis with VIF")
+    st.caption(
+        "Analyze selected variables for multicollinearity using Variance Inflation Factor (VIF). "
+        "VIF > 10 indicates high multicollinearity (🔴), VIF 5-10 is moderate (🟡), VIF < 5 is good (🟢)."
+    )
+
+    # Get selected goal for correlation calculations
+    selected_goal = st.session_state.get("selected_goal")
+    column_categories = st.session_state.get("column_categories", {})
+
+    def _calculate_vif_band(vif_value: float) -> str:
+        """Return VIF band indicator based on VIF value."""
+        if pd.isna(vif_value) or np.isinf(vif_value):
+            return "⚪"  # Unknown/invalid
+        elif vif_value >= 10:
+            return "🔴"  # High multicollinearity
+        elif vif_value >= 5:
+            return "🟡"  # Moderate multicollinearity
+        else:
+            return "🟢"  # Good (low multicollinearity)
+
+    def _calculate_variable_metrics(
+        var_cols: List[str], category_name: str, goal_col: str
+    ) -> pd.DataFrame:
+        """Calculate R², NMAE, Spearman's ρ, VIF for a list of variables."""
+        if not var_cols or not goal_col:
+            return pd.DataFrame()
+
+        # Filter to columns that exist in df_r
+        valid_cols = [c for c in var_cols if c in df_r.columns]
+        if not valid_cols:
+            return pd.DataFrame()
+
+        metrics_data = []
+
+        # Calculate VIF for all valid columns together
+        vif_values = {}
+        if len(valid_cols) >= 2:
+            try:
+                # Prepare data for VIF calculation
+                vif_df = df_r[valid_cols].dropna()
+                if len(vif_df) > len(valid_cols) + 1:
+                    for i, col in enumerate(valid_cols):
+                        try:
+                            vif_values[col] = variance_inflation_factor(
+                                vif_df.values, i
+                            )
+                        except (ValueError, np.linalg.LinAlgError):
+                            vif_values[col] = np.nan
+            except (ValueError, KeyError):
+                pass
+
+        # Calculate metrics for each variable against the goal
+        for var_col in valid_cols:
+            if var_col not in df_r.columns or goal_col not in df_r.columns:
+                continue
+
+            temp_df = df_r[[var_col, goal_col]].dropna()
+
+            r2 = np.nan
+            nmae = np.nan
+            spearman_rho = np.nan
+
+            if len(temp_df) > 1:
+                X = temp_df[[var_col]].values
+                y = temp_df[goal_col].values
+
+                # Calculate R2 and predictions
+                try:
+                    model = LinearRegression()
+                    model.fit(X, y)
+                    y_pred = model.predict(X)
+                    r2 = r2_score(y, y_pred)
+
+                    # Calculate NMAE (only if predictions are available)
+                    mae = mean_absolute_error(y, y_pred)
+                    y_min, y_max = float(y.min()), float(y.max())
+                    if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
+                        nmae = mae / (y_max - y_min)
+                except (ValueError, np.linalg.LinAlgError):
+                    pass
+
+                # Calculate Spearman's rho
+                try:
+                    spearman_rho, _ = stats.spearmanr(
+                        temp_df[var_col], temp_df[goal_col]
+                    )
+                except (ValueError, TypeError):
+                    pass
+
+            # Get VIF value
+            vif = vif_values.get(var_col, np.nan)
+            vif_band = _calculate_vif_band(vif)
+
+            metrics_data.append(
+                {
+                    "Variable": var_col,
+                    "R²": r2,
+                    "NMAE": nmae,
+                    "Spearman's ρ": spearman_rho,
+                    "VIF": vif,
+                    "VIF Band": vif_band,
+                }
+            )
+
+        return pd.DataFrame(metrics_data)
+
+    def _render_variable_table(
+        title: str, var_list: List[str], key_suffix: str
+    ) -> None:
+        """Render a variable metrics table for a category."""
+        if not var_list or not selected_goal:
+            return
+
+        df_metrics = _calculate_variable_metrics(var_list, title, selected_goal)
+
+        if df_metrics.empty:
+            st.info(f"No {title.lower()} variables available in the data.")
+            return
+
+        st.markdown(f"#### {title} ({len(df_metrics)})")
+
+        st.dataframe(
+            df_metrics,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Variable": st.column_config.TextColumn("Variable"),
+                "R²": st.column_config.NumberColumn("R²", format="%.4f"),
+                "NMAE": st.column_config.NumberColumn("NMAE", format="%.4f"),
+                "Spearman's ρ": st.column_config.NumberColumn(
+                    "Spearman's ρ", format="%.4f"
+                ),
+                "VIF": st.column_config.NumberColumn("VIF", format="%.2f"),
+                "VIF Band": st.column_config.TextColumn(
+                    "VIF Band",
+                    help="🟢 = Good (VIF < 5), 🟡 = Moderate (5-10), 🔴 = High (> 10)",
+                ),
+            },
+            key=f"vif_table_{key_suffix}",
+        )
+
+    if not selected_goal:
+        st.info("Please select a goal in section 3.1 to calculate variable metrics.")
+    elif not column_categories:
+        st.info("Please complete Step 2 to select columns for training.")
+    else:
+        # Get selected columns from each category
+        selected_paid_vars = column_categories.get("paid_media_vars", [])
+        selected_organic = column_categories.get("organic_vars", [])
+        selected_context = column_categories.get("context_vars", [])
+        selected_factor = column_categories.get("factor_vars", [])
+
+        # Render tables for each category
+        _render_variable_table("Paid Media Variables", selected_paid_vars, "paid_vars")
+        _render_variable_table("Organic Variables", selected_organic, "organic")
+        _render_variable_table("Context Variables", selected_context, "context")
+        _render_variable_table("Factor Variables", selected_factor, "factor")
+
+    # Export Selected Columns button (after section 3.4)
     st.markdown("---")
     st.markdown("### Export Selected Columns")
 
