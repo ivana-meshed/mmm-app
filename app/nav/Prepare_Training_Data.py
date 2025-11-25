@@ -911,9 +911,10 @@ with st.expander(
                         nmae = np.nan
 
                     # Calculate Spearman's rho
-                    spearman_rho, _ = stats.spearmanr(
+                    rho, _ = stats.spearmanr(
                         temp_df[spend_col], temp_df[selected_goal]
                     )
+                    spearman_rho = float(rho) if pd.notna(rho) else np.nan
                 else:
                     r2 = np.nan
                     nmae = np.nan
@@ -931,9 +932,9 @@ with st.expander(
                     {
                         "Select": is_selected,
                         "Paid Media Spend": spend_col,
-                        "R²": r2,
-                        "NMAE": nmae,
-                        "Spearman's ρ": spearman_rho,
+                        "R²": float(r2) if pd.notna(r2) else np.nan,
+                        "NMAE": float(nmae) if pd.notna(nmae) else np.nan,
+                        "Spearman's ρ": float(spearman_rho) if pd.notna(spearman_rho) else np.nan,
                     }
                 )
 
@@ -1034,9 +1035,10 @@ with st.expander(
                             nmae = np.nan
 
                         # Calculate Spearman's rho
-                        spearman_rho, _ = stats.spearmanr(
+                        rho, _ = stats.spearmanr(
                             temp_df[spend_col], temp_df[var_col]
                         )
+                        spearman_rho = float(rho) if pd.notna(rho) else np.nan
                     else:
                         r2 = np.nan
                         nmae = np.nan
@@ -1051,9 +1053,9 @@ with st.expander(
                     var_metrics_data.append(
                         {
                             "Media Response Variable": label,
-                            "R²": r2,
-                            "NMAE": nmae,
-                            "Spearman's ρ": spearman_rho,
+                            "R²": float(r2) if pd.notna(r2) else np.nan,
+                            "NMAE": float(nmae) if pd.notna(nmae) else np.nan,
+                            "Spearman's ρ": float(spearman_rho) if pd.notna(spearman_rho) else np.nan,
                         }
                     )
 
@@ -1174,9 +1176,10 @@ with st.expander(
 
                 # Calculate Spearman's rho
                 try:
-                    spearman_rho, _ = stats.spearmanr(
+                    rho, _ = stats.spearmanr(
                         temp_df[var_col], temp_df[goal_col]
                     )
+                    spearman_rho = float(rho) if pd.notna(rho) else np.nan
                 except (ValueError, TypeError):
                     pass
 
@@ -1187,10 +1190,10 @@ with st.expander(
             metrics_data.append(
                 {
                     "Variable": var_col,
-                    "R²": r2,
-                    "NMAE": nmae,
-                    "Spearman's ρ": spearman_rho,
-                    "VIF": vif,
+                    "R²": float(r2) if pd.notna(r2) else np.nan,
+                    "NMAE": float(nmae) if pd.notna(nmae) else np.nan,
+                    "Spearman's ρ": float(spearman_rho) if pd.notna(spearman_rho) else np.nan,
+                    "VIF": float(vif) if pd.notna(vif) else np.nan,
                     "VIF Band": vif_band,
                 }
             )
