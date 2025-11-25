@@ -12,6 +12,7 @@ import json
 import math
 import os
 import tempfile
+import warnings
 from datetime import datetime, timezone
 from typing import List, Union
 
@@ -933,11 +934,16 @@ with st.expander(
                         # If range is zero, NaN, or invalid, set NMAE to NaN
                         nmae = np.nan
 
-                    # Calculate Spearman's rho
-                    rho, _ = stats.spearmanr(
-                        temp_df[spend_col], temp_df[selected_goal]
-                    )
-                    spearman_rho = _safe_float(rho)
+                    # Calculate Spearman's rho (suppress warning for constant input)
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            rho, _ = stats.spearmanr(
+                                temp_df[spend_col], temp_df[selected_goal]
+                            )
+                        spearman_rho = _safe_float(rho)
+                    except (ValueError, TypeError):
+                        spearman_rho = np.nan
                 else:
                     r2 = np.nan
                     nmae = np.nan
@@ -1057,11 +1063,16 @@ with st.expander(
                             # If range is zero, NaN, or invalid, set NMAE to NaN
                             nmae = np.nan
 
-                        # Calculate Spearman's rho
-                        rho, _ = stats.spearmanr(
-                            temp_df[spend_col], temp_df[var_col]
-                        )
-                        spearman_rho = _safe_float(rho)
+                        # Calculate Spearman's rho (suppress warning for constant input)
+                        try:
+                            with warnings.catch_warnings():
+                                warnings.simplefilter("ignore")
+                                rho, _ = stats.spearmanr(
+                                    temp_df[spend_col], temp_df[var_col]
+                                )
+                            spearman_rho = _safe_float(rho)
+                        except (ValueError, TypeError):
+                            spearman_rho = np.nan
                     else:
                         r2 = np.nan
                         nmae = np.nan
@@ -1174,17 +1185,24 @@ with st.expander(
         vif_values = {}
         if len(valid_cols) >= 2:
             try:
-                # Prepare data for VIF calculation
-                vif_df = df_r[valid_cols].dropna()
+                # Prepare data for VIF calculation - ensure numeric types only
+                vif_df = df_r[valid_cols].copy()
+                # Convert all columns to numeric, coercing errors to NaN
+                for col in vif_df.columns:
+                    vif_df[col] = pd.to_numeric(vif_df[col], errors="coerce")
+                vif_df = vif_df.dropna()
+                
                 if len(vif_df) > len(valid_cols) + 1:
+                    # Convert to float array for statsmodels
+                    vif_array = vif_df.values.astype(float)
                     for i, col in enumerate(valid_cols):
                         try:
                             vif_values[col] = variance_inflation_factor(
-                                vif_df.values, i
+                                vif_array, i
                             )
-                        except (ValueError, np.linalg.LinAlgError):
+                        except (ValueError, TypeError, np.linalg.LinAlgError):
                             vif_values[col] = np.nan
-            except (ValueError, KeyError):
+            except (ValueError, TypeError, KeyError):
                 pass
 
         # Calculate metrics for each variable against the goal
@@ -1217,11 +1235,13 @@ with st.expander(
                 except (ValueError, np.linalg.LinAlgError):
                     pass
 
-                # Calculate Spearman's rho
+                # Calculate Spearman's rho (suppress warning for constant input)
                 try:
-                    rho, _ = stats.spearmanr(
-                        temp_df[var_col], temp_df[goal_col]
-                    )
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        rho, _ = stats.spearmanr(
+                            temp_df[var_col], temp_df[goal_col]
+                        )
                     spearman_rho = _safe_float(rho)
                 except (ValueError, TypeError):
                     pass
