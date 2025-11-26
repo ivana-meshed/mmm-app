@@ -373,6 +373,27 @@ with tab_single:
                                     )
                                 )
 
+                            # Check for custom columns in metadata mapping that couldn't be created
+                            agg_sources = metadata.get(
+                                "aggregation_sources", {}
+                            )
+                            if agg_sources:
+                                not_created = [
+                                    col
+                                    for col in agg_sources.keys()
+                                    if col not in df_prev.columns
+                                ]
+                                if not_created:
+                                    st.warning(
+                                        f"⚠️ Could not auto-create {len(not_created)} custom column(s) "
+                                        f"(source columns missing in data): {', '.join(not_created[:3])}"
+                                        + (
+                                            f"... and {len(not_created) - 3} more"
+                                            if len(not_created) > 3
+                                            else ""
+                                        )
+                                    )
+
                         st.session_state["preview_df"] = df_prev
                         st.session_state["selected_country"] = selected_country
                         st.session_state["selected_version"] = selected_version
@@ -1263,13 +1284,31 @@ with tab_single:
                 + factor_vars_list
                 + organic_vars_list
             )
-            missing_custom_vars = [
-                v
-                for v in all_selected_vars
-                if "_CUSTOM" in v and v not in preview_columns
-            ]
+            # Deduplicate missing custom vars
+            missing_custom_vars = list(
+                set(
+                    v
+                    for v in all_selected_vars
+                    if "_CUSTOM" in v and v not in preview_columns
+                )
+            )
 
             if missing_custom_vars:
+                # Check if these are in aggregation_sources
+                loaded_meta = st.session_state.get("loaded_metadata", {})
+                agg_sources = (
+                    loaded_meta.get("aggregation_sources", {})
+                    if loaded_meta
+                    else {}
+                )
+
+                in_agg_sources = [
+                    v for v in missing_custom_vars if v in agg_sources
+                ]
+                not_in_agg_sources = [
+                    v for v in missing_custom_vars if v not in agg_sources
+                ]
+
                 st.warning(
                     f"⚠️ **Warning:** {len(missing_custom_vars)} custom variable(s) selected but not found in loaded data: "
                     f"{', '.join(missing_custom_vars[:5])}"
@@ -1279,11 +1318,19 @@ with tab_single:
                         else ""
                     )
                 )
-                st.info(
-                    "💡 **To fix this:** Go to the 'Map Data' page, load your data, "
-                    "apply mapping changes to create custom variables, "
-                    "then click 'Save dataset & metadata to GCS' (this now saves both automatically)."
-                )
+
+                if not_in_agg_sources:
+                    st.info(
+                        "💡 **To fix this:** Go to the 'Map Data' page, load your data, "
+                        "apply mapping changes to create custom variables, "
+                        "then click 'Save dataset & metadata to GCS' (this now saves both automatically)."
+                    )
+                elif in_agg_sources:
+                    st.info(
+                        "💡 **Note:** These custom columns are defined in metadata but couldn't be auto-created "
+                        "(source columns may be missing in this dataset). Try re-loading the data or "
+                        "go to 'Map Data' to recreate them."
+                    )
 
         # Custom hyperparameters per variable (when Custom preset is selected)
         if hyperparameter_preset == "Custom":
