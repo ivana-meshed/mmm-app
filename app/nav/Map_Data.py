@@ -928,10 +928,10 @@ def _iso2_countries_gcs_first(bucket: str) -> list[str]:
 # ──────────────────────────────────────────────────────────────
 # Page header & helper image
 # ──────────────────────────────────────────────────────────────
-st.title("Customize your analytics — map your data in 3 steps.")
+st.title("Map Data & Define Goals")
 
 # sensible defaults so we can read these anywhere
-st.session_state.setdefault("sf_table", "MMM_RAW")
+st.session_state.setdefault("sf_table", "DB.SCHEMA.TABLE")
 st.session_state.setdefault("sf_sql", "")
 st.session_state.setdefault("sf_country_field", "COUNTRY")
 st.session_state.setdefault("source_mode", "Latest (GCS)")
@@ -939,9 +939,9 @@ st.session_state.setdefault("source_mode", "Latest (GCS)")
 # ──────────────────────────────────────────────────────────────
 # Step 1) Choose your dataset
 # ──────────────────────────────────────────────────────────────
-st.header("Step 1) Choose your dataset")
+st.header("1. Select Dataset")
 
-with st.expander("📊 Data Selection", expanded=False):
+with st.expander("📊 Choose the data you want to analyze.", expanded=False):
     # Country picker (ISO2, GCS-first). Keep this OUTSIDE the form.
     c1, c2 = st.columns([1.2, 2])
     with c1:
@@ -952,7 +952,7 @@ with st.expander("📊 Data Selection", expanded=False):
             else 0
         )
         st.selectbox(
-            "Country (ISO2)",
+            "Country",
             options=countries,
             index=initial_idx,
             key="country",  # don't also set st.session_state["country"] manually
@@ -984,7 +984,7 @@ with st.expander("📊 Data Selection", expanded=False):
 
         # Use a FORM so edits don’t commit on every keystroke
         with st.form("load_data_form", clear_on_submit=False):
-            st.write("**Source**")
+            st.write("**Select previously loaded data:**")
             src_idx = (
                 source_options.index(
                     st.session_state.get("source_choice", "Latest")
@@ -1002,10 +1002,10 @@ with st.expander("📊 Data Selection", expanded=False):
             )
 
             # Snowflake inputs (only relevant if Snowflake is chosen)
-            st.write("**Snowflake options**")
-            st.text_input("Table (DB.SCHEMA.TABLE)", key="sf_table")
-            st.text_area("Custom SQL (optional)", key="sf_sql")
-            st.text_input("Country field", key="sf_country_field")
+            st.write("Alternatively: connect and load new dataset")
+            st.text_input("Select table", key="sf_table",)
+            st.text_area("Or: Write a custom SQL", key="sf_sql")
+            st.text_input("Select country field:", key="sf_country_field")
 
             # Buttons row: Load + Refresh GCS list (side-by-side, wide)
             b1, b2 = st.columns([1, 1.2])
@@ -1097,11 +1097,11 @@ with st.expander("📊 Data Selection", expanded=False):
                                 )
                             else:
                                 st.warning(
-                                    "Provide a table or SQL to load from Snowflake."
+                                    "Provide a table name (DATABASE.SCHEMA.TABLE) or write a SQL to load data from Snowflake."
                                 )
                     else:
                         st.info(
-                            "No saved data found in GCS; falling back to Snowflake."
+                            "No saved data found in GCS; falling back to Snowflake connection."
                         )
                         _require_sf_session()
                         sql = (
@@ -1124,7 +1124,7 @@ with st.expander("📊 Data Selection", expanded=False):
                             )
                         else:
                             st.warning(
-                                "Provide a table or SQL to load from Snowflake."
+                                "Provide a table name (DATABASE.SCHEMA.TABLE) or write a SQL to load data from Snowflake."
                             )
 
             elif choice in versions:
@@ -1160,7 +1160,7 @@ with st.expander("📊 Data Selection", expanded=False):
                         }
                     )
                 else:
-                    st.warning("Provide a table or SQL to load from Snowflake.")
+                    st.warning("Provide a table name (DATABASE.SCHEMA.TABLE) or write a SQL to load data from Snowflake.")
 
             if df is not None and not df.empty:
                 st.success(f"Loaded {len(df):,} rows.")
@@ -1209,11 +1209,11 @@ with st.expander("📊 Data Selection", expanded=False):
 # ──────────────────────────────────────────────────────────────
 # Step 2) Map your data
 # ──────────────────────────────────────────────────────────────
-st.header("Step 2) Map your data")
+st.header("2. Map Variables")
 
 df_raw = st.session_state.get("df_raw", pd.DataFrame())
 
-with st.expander("🗺️ Data Mapping Configuration", expanded=False):
+with st.expander("🗺️ Tell the tool what each data point represents.", expanded=False):
     # Show current data state (point 4 - UI representing actual state)
     data_origin = st.session_state.get("data_origin", "N/A")
     picked_ts = st.session_state.get("picked_ts", "N/A")
@@ -1238,7 +1238,7 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
 
     # ---- Load saved metadata (moved to beginning of Step 2) ----
     with st.expander(
-        "📥 Load saved metadata & apply to current dataset", expanded=False
+        "📥 Start from previous mapping", expanded=False
     ):
         # Get available metadata versions (including universal) - same logic as Experiment page
         try:
@@ -1275,10 +1275,10 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
 
         # Metadata source selection
         selected_metadata = st.selectbox(
-            "Metadata source",
+            "Select mapping:",
             options=metadata_options,
             index=0,
-            help="Select metadata configuration. Universal mappings work for all countries. Latest = most recently saved metadata.",
+            help="'Universal' mappings work for all countries. Latest = most recently saved metadata.",
             key="load_metadata_source_selector",
         )
 
@@ -1286,7 +1286,7 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
         col_load, col_clear, col_refresh = st.columns([1, 1, 1])
         with col_load:
             load_metadata_clicked = st.button(
-                "Load & apply metadata",
+                "Apply mapping",
                 use_container_width=True,
                 key="load_metadata_btn",
             )
@@ -1421,7 +1421,7 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                 st.error(f"Failed to load metadata: {e}")
 
     # ---- Goals (form) ----
-    with st.expander("🎯 Goals", expanded=False):
+    with st.expander("🎯 Define Business Goals", expanded=False):
         # Date field selection (moved into Goals expander)
         date_candidates = sorted(
             {
@@ -1434,9 +1434,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
         )
         date_field_options = date_candidates or all_cols or ["date"]
         date_field = st.selectbox(
-            "Date field",
-            options=date_field_options,
-            index=0 if date_field_options else None,
+            "Select Date field", 
+            options=date_field_options, 
+            index=0 if date_field_options else None
         )
 
         st.divider()
@@ -1444,10 +1444,11 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
         with st.form("goals_form", clear_on_submit=False):
             # Stack primary and secondary goals vertically
             primary_goals = st.multiselect(
-                "Primary goal variables", options=all_cols, default=[]
+                "Define primary business goal (e.g. GMV, Bookings)", options=all_cols, default=[]
             )
             secondary_goals = st.multiselect(
-                "Secondary goal variables", options=all_cols, default=[]
+                "Define secondary business goals (e.g. Signups, App Installs) ", options=all_cols, default=[],
+                help="Secondary goals support full driver analysis. Select only a few to maintain oversight."
             )
 
             def _mk(selected, group):
@@ -1499,17 +1500,17 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                 num_rows="dynamic",
                 column_config={
                     "var": st.column_config.SelectboxColumn(
-                        "Variable", options=all_cols
+                        "Goal", options=all_cols
                     ),
                     "group": st.column_config.SelectboxColumn(
-                        "Group", options=["primary", "secondary"]
+                        "Goal Priority", options=["primary", "secondary"]
                     ),
                     "type": st.column_config.SelectboxColumn(
-                        "Type", options=["revenue", "conversion"], required=True
+                        "Goal Type", options=["revenue", "conversion"], required=True
                     ),
                     "main": st.column_config.CheckboxColumn(
-                        "Main",
-                        help="Select the main dependent variable for the model",
+                        "Select main goal",
+                        help="Select the main business goal for the model",
                         default=False,
                     ),
                 },
@@ -1554,7 +1555,7 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                 st.success("Goals updated.")
 
     # ---- Custom channels UI ----
-    with st.expander("📺 Custom Marketing Channels", expanded=False):
+    with st.expander("📺 Define marketing channels", expanded=False):
         # Show recognized channels from mapping and inferred from column names
         mapping_channels = []
         if (
@@ -1591,17 +1592,15 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
 
         # Single input field with prefilled recognized channels
         channels_input = st.text_area(
-            "Marketing Channels (comma-separated)",
+            "List your channel names (comma-separated)",
             value=", ".join(all_existing_channels),
-            help="Edit this list to set your marketing channels. These will be used to extract channel names from column names (e.g., 'facebook_spend' → 'facebook'). Add, remove, or modify channels as needed.",
+            help="Used to auto-detect your media channels from column names (e.g., 'facebook_', 'tv_').",
             height=100,
             key="channels_input",
         )
 
         if st.button(
-            "➕ Apply Channels",
-            key="add_channels_btn",
-            use_container_width=True,
+            "➕ Apply Channel Detection", key="add_channels_btn", use_container_width=True
         ):
             # Parse the input
             entered_channels = [
@@ -1634,7 +1633,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
         st.divider()
 
     # ---- Auto-tag rules ----
-    with st.expander("🏷️ Auto-tag Rules", expanded=False):
+
+    with st.expander("🏷️ Automatically tag your variables", expanded=False):
+        st.write("**Use suffixes to tag columns.**")
         rcol1, rcol2, rcol3 = st.columns(3)
 
         def _parse_sfx(s: str) -> list[str]:
@@ -1643,44 +1644,43 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
         new_rules = {
             "paid_media_spends": _parse_sfx(
                 rcol1.text_input(
-                    "paid_media_spends suffixes",
+                    "Paid media spends:",
                     value=", ".join(
                         st.session_state["auto_rules"]["paid_media_spends"]
                     ),
+                    help="Suffixes that identify spend columns, e.g. '_spend', '_cost'",
                 )
             ),
             "paid_media_vars": _parse_sfx(
                 rcol1.text_input(
-                    "paid_media_vars suffixes",
+                    "Paid media variables",
                     value=", ".join(
                         st.session_state["auto_rules"]["paid_media_vars"]
                     ),
                     key="paid_vars",
+                    help="Suffixes for media activity metrics, e.g. '_clicks', '_impressions', '_views'",
                 )
             ),
             "context_vars": _parse_sfx(
                 rcol2.text_input(
-                    "context_vars suffixes",
-                    value=", ".join(
-                        st.session_state["auto_rules"]["context_vars"]
-                    ),
+                    "Context Variables",
+                    value=", ".join(st.session_state["auto_rules"]["context_vars"]),
+                    help="Suffixes for non-media drivers, e.g. '_promo', '_weather'",
                 )
             ),
             "organic_vars": _parse_sfx(
                 rcol2.text_input(
-                    "organic_vars suffixes",
-                    value=", ".join(
-                        st.session_state["auto_rules"]["organic_vars"]
-                    ),
+                    "Organic Variables",
+                    value=", ".join(st.session_state["auto_rules"]["organic_vars"]),
                     key="org_vars",
+                    help="Suffixes for organic traffic channels, e.g. '_organic', '_direct'. Similar to Paid Spends, they also receive response-curves.",
                 )
             ),
             "factor_vars": _parse_sfx(
                 rcol3.text_input(
-                    "factor_vars suffixes",
-                    value=", ".join(
-                        st.session_state["auto_rules"]["factor_vars"]
-                    ),
+                    "Factor Variables (True/False)",
+                    value=", ".join(st.session_state["auto_rules"]["factor_vars"]),
+                    help="Suffixes for binary flags, e.g. 'is_big_promotion','is_holiday'"
                 )
             ),
         }
@@ -1697,7 +1697,7 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
 
         # Prefix configuration for aggregated variables
         st.divider()
-        st.write("**Prefixes for aggregated variables**")
+        st.write("**Use prefixes to automate tagging instead:**")
         st.caption(
             "Define prefixes to use when creating aggregated columns for these categories"
         )
@@ -1705,21 +1705,21 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
         pcol1, pcol2, pcol3 = st.columns(3)
 
         organic_prefix = pcol1.text_input(
-            "organic_vars prefix",
+            "Organic Variables",
             value=st.session_state.get("organic_vars_prefix", "organic_"),
             help="Prefix for aggregated organic variables (e.g., 'organic_')",
             key="organic_vars_prefix_input",
         )
 
         context_prefix = pcol2.text_input(
-            "context_vars prefix",
+            "Context Variables",
             value=st.session_state.get("context_vars_prefix", "context_"),
             help="Prefix for aggregated context variables (e.g., 'context_')",
             key="context_vars_prefix_input",
         )
 
         factor_prefix = pcol3.text_input(
-            "factor_vars prefix",
+            "Factor Variables (True/False)",
             value=st.session_state.get("factor_vars_prefix", "factor_"),
             help="Prefix for aggregated factor variables (e.g., 'factor_')",
             key="factor_vars_prefix_input",
@@ -1739,19 +1739,21 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
         )
 
     # ---- Variable Mapping Editor ----
-    with st.expander("🗺️ Variable Mapping", expanded=False):
+    with st.expander("🗺️ Review and Finalize Mapping", expanded=False):
+        st.write("Review auto-tagged variables, adjust where needed and confirm before saving.")
+        st.caption("Hint: Hover over the **header names** in the mapping table to see extra info.")
+        
         # Add sorting controls (user-controlled, not automatic)
-        st.write("**Sort mapping table:**")
         sort_col1, sort_col2, sort_col3 = st.columns([2, 1, 1])
         with sort_col1:
             sort_by = st.selectbox(
                 "Sort by",
                 options=[
                     "Original order",
-                    "var",
+                    "var",              # FE: column name rename
                     "category",
                     "channel",
-                    "channel_subchannel",
+                    "channel_subchannel", # FE: column gibts nicht? wäre gut zu displayen?
                     "data_type",
                 ],
                 index=0,
@@ -1849,7 +1851,8 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                 column_config={
                     "var": st.column_config.TextColumn("Column", disabled=True),
                     "category": st.column_config.SelectboxColumn(
-                        "Category", options=ALLOWED_CATEGORIES
+                        "Category", options=ALLOWED_CATEGORIES,
+                        help="Marketing Mix Model variable category"
                     ),
                     "channel": st.column_config.SelectboxColumn(
                         "Channel",
@@ -1864,17 +1867,18 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                     "agg_strategy": st.column_config.SelectboxColumn(
                         "Aggregation",
                         options=["sum", "mean", "max", "min", "mode"],
-                        help="Strategy for aggregating when resampling. Numeric: sum/mean/max/min. Categorical: mode",
+                        help="How this column is rolled up when changing granularity (e.g., day → week → month). Numeric fields: sum/mean/max/min. Categorical: mode.",
                     ),
                     "custom_tags": st.column_config.TextColumn(
-                        "Custom Tags (optional)"
+                        "Custom Channels",
+                        help="Tag sub-channels to group them into a custom channel (e.g., tag multiple GA sub-channels as 'small' → creates GA_CUSTOM_SMALL for MMM).",
                     ),
                 },
                 key="mapping_editor",
             )
 
             # Submit button inside the form to capture edits
-            mapping_submit = st.form_submit_button("✅ Apply mapping changes")
+            mapping_submit = st.form_submit_button("✅ Apply new mapping")
 
         # Handle form submission - capture edits and apply aggregations
         if mapping_submit:
@@ -1932,13 +1936,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
 # ──────────────────────────────────────────────────────────────
 # Step 3) Save your mapping
 # ──────────────────────────────────────────────────────────────
-st.header("Step 3) Save your data & mapping")
+st.header("3. Save & Reuse")
 
-with st.expander("💾 Save Dataset & Mapping Configuration", expanded=False):
-    st.caption(
-        "Save both your dataset (including custom aggregated variables) and mapping metadata to GCS. "
-        "Both will be automatically saved together to ensure they stay in sync."
-    )
+with st.expander("💾 Store mapping for future use.", expanded=False):
     goals_df = st.session_state["goals_df"]
     mapping_df = st.session_state["mapping_df"]
     auto_rules = st.session_state["auto_rules"]
@@ -1990,7 +1990,7 @@ with st.expander("💾 Save Dataset & Mapping Configuration", expanded=False):
     save_country_specific = st.checkbox(
         f"Save only for {st.session_state['country'].upper()}",
         value=False,
-        help="By default, mappings are saved universally for all countries. Check this to save only for the current country.",
+        help="By default, mappings are saved universally for all countries. Alternatively, check this box to save only for the current country.",
     )
 
     meta_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
