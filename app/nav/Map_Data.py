@@ -207,6 +207,8 @@ def _init_state():
     st.session_state.setdefault("context_vars_prefix", "context_")
     st.session_state.setdefault("factor_vars_prefix", "factor_")
     st.session_state.setdefault("aggregation_sources", {})
+    # Track loaded metadata source for UI feedback
+    st.session_state.setdefault("loaded_metadata_source", "")
 
 
 _init_state()
@@ -1216,11 +1218,17 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
     data_origin = st.session_state.get("data_origin", "N/A")
     picked_ts = st.session_state.get("picked_ts", "N/A")
     country = st.session_state.get("country", "N/A")
+    loaded_metadata_source = st.session_state.get("loaded_metadata_source", "")
 
     if df_raw is not None and not df_raw.empty:
         st.info(
-            f"🔵 **Currently Loaded:** {data_origin.upper()} | Country: {country.upper()} | Timestamp: {picked_ts} | Rows: {len(df_raw):,} | Columns: {len(df_raw.columns)}"
+            f"🔵 **Data:** {data_origin.upper()} | Country: {country.upper()} | Timestamp: {picked_ts} | Rows: {len(df_raw):,} | Columns: {len(df_raw.columns)}"
         )
+        # Show metadata status
+        if loaded_metadata_source:
+            st.info(f"📋 **Metadata:** Loaded from {loaded_metadata_source}")
+        else:
+            st.caption("📋 **Metadata:** Using default auto-tagging rules")
     else:
         st.warning(
             "⚪ No data loaded yet - load data in Step 1 to configure mapping"
@@ -1337,6 +1345,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
             st.session_state["context_vars_prefix"] = "context_"
             st.session_state["factor_vars_prefix"] = "factor_"
             st.session_state["last_saved_meta_path"] = ""
+            st.session_state["aggregation_sources"] = {}
+            # Clear the loaded metadata source indicator
+            st.session_state["loaded_metadata_source"] = ""
 
             # Rebuild mapping_df from current data with default rules
             if not df_raw.empty:
@@ -1368,6 +1379,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
 
                 meta = _download_json_from_gcs(BUCKET, meta_blob)
                 _apply_metadata_to_current_df(meta, all_cols, df_raw)
+
+                # Track the loaded metadata source for UI feedback
+                st.session_state["loaded_metadata_source"] = selected_metadata
 
                 # Show what was loaded
                 st.success(f"✅ Loaded metadata from: **{selected_metadata}**")
