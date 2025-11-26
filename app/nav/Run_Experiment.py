@@ -168,6 +168,58 @@ def _get_next_revision_number(bucket: str, tag: str) -> int:
         return 1
 
 
+def _apply_aggregations_from_metadata(
+    df: pd.DataFrame, metadata: Dict
+) -> tuple[pd.DataFrame, List[str]]:
+    """
+    Apply custom aggregations from metadata to create missing _CUSTOM columns.
+
+    If aggregation_sources is in metadata and the _CUSTOM column is missing
+    but source columns exist, create the aggregated column.
+
+    Returns: (updated_df, list of created columns)
+    """
+    aggregation_sources = metadata.get("aggregation_sources", {})
+    if not aggregation_sources:
+        return df, []
+
+    created_columns = []
+    df = df.copy()
+
+    for custom_col, source_info in aggregation_sources.items():
+        # Skip if column already exists
+        if custom_col in df.columns:
+            continue
+
+        source_columns = source_info.get("source_columns", [])
+        agg_method = source_info.get("agg_method", "sum")
+
+        # Check if all source columns exist
+        available_sources = [c for c in source_columns if c in df.columns]
+        if not available_sources:
+            continue  # Skip if no source columns available
+
+        # Apply aggregation
+        try:
+            if agg_method == "sum":
+                df[custom_col] = df[available_sources].sum(axis=1)
+            elif agg_method == "mean":
+                df[custom_col] = df[available_sources].mean(axis=1)
+            elif agg_method == "max":
+                df[custom_col] = df[available_sources].max(axis=1)
+            elif agg_method == "min":
+                df[custom_col] = df[available_sources].min(axis=1)
+            else:
+                # Default to sum
+                df[custom_col] = df[available_sources].sum(axis=1)
+
+            created_columns.append(custom_col)
+        except Exception:
+            pass  # Skip column if aggregation fails
+
+    return df, created_columns
+
+
 # Extracted from streamlit_app.py tab_single (Single run):
 with tab_single:
     st.subheader("Robyn configuration & training")
@@ -271,9 +323,6 @@ with tab_single:
                         tmp_path = tmp.name
                         _download_from_gcs(gcs_bucket, blob_path, tmp_path)
                         df_prev = pd.read_parquet(tmp_path)
-                        st.session_state["preview_df"] = df_prev
-                        st.session_state["selected_country"] = selected_country
-                        st.session_state["selected_version"] = selected_version
 
                         # Parse metadata selection to get country and version
                         meta_parts = selected_metadata.split(" - ")
@@ -290,6 +339,29 @@ with tab_single:
                         metadata = _load_metadata_from_gcs(
                             gcs_bucket, meta_country, meta_version  # type: ignore
                         )
+
+                        # Apply custom aggregations from metadata
+                        # This creates missing _CUSTOM columns if source columns exist
+                        if metadata:
+                            df_prev, created_cols = (
+                                _apply_aggregations_from_metadata(
+                                    df_prev, metadata
+                                )
+                            )
+                            if created_cols:
+                                st.info(
+                                    f"🔧 Auto-created {len(created_cols)} custom column(s) from metadata: "
+                                    f"{', '.join(created_cols[:5])}"
+                                    + (
+                                        f"... and {len(created_cols) - 5} more"
+                                        if len(created_cols) > 5
+                                        else ""
+                                    )
+                                )
+
+                        st.session_state["preview_df"] = df_prev
+                        st.session_state["selected_country"] = selected_country
+                        st.session_state["selected_version"] = selected_version
                         st.session_state["loaded_metadata"] = metadata
                         st.session_state["selected_metadata"] = (
                             selected_metadata
