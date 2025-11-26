@@ -1158,8 +1158,16 @@ with st.expander(
             var_metrics_data = []
             for var_col in unique_options:
                 if var_col in df_r.columns and spend_col in df_r.columns:
-                    # Skip if spend_col == var_col (comparing to itself)
+                    # For spend column itself, add it with N/A metrics
                     if spend_col == var_col:
+                        var_metrics_data.append(
+                            {
+                                "Media Response Variable": f"{var_col} (spend)",
+                                "R²": np.nan,
+                                "NMAE": np.nan,
+                                "Spearman's ρ": np.nan,
+                            }
+                        )
                         continue
                     temp_df = df_r[[spend_col, var_col]].copy()
                     temp_df[spend_col] = pd.to_numeric(
@@ -1673,11 +1681,8 @@ with st.expander(
 
         st.markdown(f"#### {title} ({len(df_metrics)})")
 
-        # Create a unique key based on content hash to force refresh
-        content_hash = hash(
-            tuple(df_metrics["Use"].tolist())
-            + tuple(df_metrics["Variable"].tolist())
-        )
+        # Use a stable key without content hash - let Streamlit handle state
+        editor_key = f"vif_editor_step4_{key_suffix}"
 
         # Use data_editor with checkbox column
         edited = st.data_editor(
@@ -1713,17 +1718,26 @@ with st.expander(
                     disabled=True,
                 ),
             },
-            key=f"vif_editor_step4_{key_suffix}_{content_hash}",
+            key=editor_key,
         )
 
-        # Update session state with user selections immediately
+        # Check if any selections changed and update session state
         selected_vars = []
+        needs_rerun = False
         for _, row in edited.iterrows():
             var_name = str(row["Variable"])
             use_val = bool(row["Use"])
+            # Check if this value differs from session state
+            old_val = st.session_state["vif_selections"].get(var_name, True)
+            if old_val != use_val:
+                needs_rerun = True
             st.session_state["vif_selections"][var_name] = use_val
             if use_val:
                 selected_vars.append(var_name)
+
+        # If selections changed, trigger a rerun to recalculate VIF
+        if needs_rerun:
+            st.rerun()
 
         return selected_vars
 
@@ -1833,12 +1847,7 @@ with st.expander(
 
                 global_vif_df = pd.DataFrame(global_vif_data)
 
-                # Create content hash for unique key
-                global_content_hash = hash(
-                    tuple(global_vif_df["Use"].tolist())
-                    + tuple(global_vif_df["Variable"].tolist())
-                )
-
+                # Use stable key for global VIF table
                 edited_global = st.data_editor(
                     global_vif_df,
                     hide_index=True,
@@ -1864,16 +1873,26 @@ with st.expander(
                             disabled=True,
                         ),
                     },
-                    key=f"global_vif_table_step4_{global_content_hash}",
+                    key="global_vif_table_step4",
                 )
 
-                # Update session state with global VIF selections
+                # Check if selections changed and update session state
+                needs_rerun_global = False
                 for _, row in edited_global.iterrows():
                     var_name = str(row["Variable"])
                     use_val = bool(row["Use"])
+                    old_val = st.session_state["global_vif_selections"].get(
+                        var_name, True
+                    )
+                    if old_val != use_val:
+                        needs_rerun_global = True
                     st.session_state["global_vif_selections"][
                         var_name
                     ] = use_val
+
+                # If selections changed, trigger a rerun to recalculate VIF
+                if needs_rerun_global:
+                    st.rerun()
 
                 # Count final selected variables for indicators
                 final_selected_vars = [
