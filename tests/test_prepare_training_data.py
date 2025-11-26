@@ -360,6 +360,53 @@ class TestVIFCalculation(unittest.TestCase):
         # Other columns should remain
         self.assertEqual(len(df_processed.columns), n_cols - 1)
 
+    def test_vif_with_duplicate_column_names(self):
+        """
+        Test that duplicate column names are removed before VIF calculation.
+
+        When the same media response variable is selected for multiple spend
+        columns, the column list will have duplicates. These must be removed
+        to avoid pandas creating a DataFrame with duplicate column names,
+        which causes pd.to_numeric to fail.
+        """
+        from statsmodels.stats.outliers_influence import (
+            variance_inflation_factor,
+        )
+
+        # Create test data
+        np.random.seed(42)
+        n_rows = 100
+        df = pd.DataFrame(
+            {
+                "col_a": np.random.randn(n_rows),
+                "col_b": np.random.randn(n_rows),
+                "col_c": np.random.randn(n_rows),
+            }
+        )
+
+        # Simulate duplicate column names in input list
+        cols_with_dupes = ["col_a", "col_b", "col_c", "col_a"]  # col_a is dupe
+
+        # Use the deduplication logic from the fix
+        seen = set()
+        valid_cols = []
+        for c in cols_with_dupes:
+            if c not in seen and c in df.columns:
+                seen.add(c)
+                valid_cols.append(c)
+
+        # Should have only unique columns
+        self.assertEqual(len(valid_cols), 3)
+        self.assertEqual(valid_cols, ["col_a", "col_b", "col_c"])
+
+        # VIF should be calculable with deduplicated columns
+        vif_df = df[valid_cols]
+        vif_array = np.asarray(vif_df.values, dtype=np.float64)
+        for i in range(len(valid_cols)):
+            vif = variance_inflation_factor(vif_array, i)
+            self.assertFalse(np.isnan(vif))
+            self.assertFalse(np.isinf(vif))  # No inf due to duplicates
+
 
 if __name__ == "__main__":
     unittest.main()

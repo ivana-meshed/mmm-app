@@ -1268,12 +1268,20 @@ with st.expander(
             return vif_values
 
         try:
-            # Filter to valid numeric columns
-            valid_cols = [
-                c
-                for c in cols
-                if c in df_r.columns and pd.api.types.is_numeric_dtype(df_r[c])
-            ]
+            # Filter to valid numeric columns and remove duplicates
+            # Duplicates cause issues: df[duplicate_col] returns DataFrame
+            # instead of Series, breaking pd.to_numeric
+            seen = set()
+            valid_cols = []
+            for c in cols:
+                if (
+                    c not in seen
+                    and c in df_r.columns
+                    and pd.api.types.is_numeric_dtype(df_r[c])
+                ):
+                    seen.add(c)
+                    valid_cols.append(c)
+
             if len(valid_cols) < 2:
                 return vif_values
 
