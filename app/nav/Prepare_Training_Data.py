@@ -1258,25 +1258,50 @@ with st.expander(
             return "⚪"  # Unknown/invalid
 
     def _calculate_vif_for_columns(cols: List[str]) -> dict:
-        """Calculate VIF values for a list of columns."""
+        """Calculate VIF values for a list of columns.
+
+        Handles missing values by filling NaN with column means to avoid
+        losing too many rows when data is sparse across multiple columns.
+        """
         vif_values = {}
         if len(cols) < 2:
             return vif_values
 
         try:
-            # Filter to valid numeric columns
-            valid_cols = [
-                c
-                for c in cols
-                if c in df_r.columns and pd.api.types.is_numeric_dtype(df_r[c])
-            ]
+            # Filter to valid numeric columns and remove duplicates
+            # Duplicates cause issues: df[duplicate_col] returns DataFrame
+            # instead of Series, breaking pd.to_numeric
+            seen = set()
+            valid_cols = []
+            for c in cols:
+                if (
+                    c not in seen
+                    and c in df_r.columns
+                    and pd.api.types.is_numeric_dtype(df_r[c])
+                ):
+                    seen.add(c)
+                    valid_cols.append(c)
+
             if len(valid_cols) < 2:
                 return vif_values
 
             vif_df = df_r[valid_cols].copy()
             for col in vif_df.columns:
                 vif_df[col] = pd.to_numeric(vif_df[col], errors="coerce")
-            vif_df = vif_df.dropna()
+
+            # Drop columns that are entirely NaN
+            vif_df = vif_df.dropna(axis=1, how="all")
+            if vif_df.shape[1] < 2:
+                return vif_values
+
+            # Fill remaining NaN values with column means to preserve rows.
+            # Use fillna(0) as fallback for any columns where mean is NaN.
+            # This is more robust than dropping all rows with any NaN.
+            col_means = vif_df.mean().fillna(0)
+            vif_df = vif_df.fillna(col_means)
+
+            # Update valid_cols to match remaining columns after processing
+            valid_cols = vif_df.columns.tolist()
 
             if len(vif_df) > len(valid_cols) + 1:
                 try:

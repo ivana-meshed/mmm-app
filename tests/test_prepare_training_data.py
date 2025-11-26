@@ -290,5 +290,123 @@ class TestOtherColumnFiltering(unittest.TestCase):
         self.assertEqual(set(other_cols), {"date_col", "unknown_col"})
 
 
+class TestVIFCalculation(unittest.TestCase):
+    """Tests for VIF calculation with sparse data."""
+
+    def test_vif_with_sparse_data(self):
+        """
+        Test that VIF calculation handles sparse data by filling NaN with means.
+
+        With 30% NaN per column across 13 columns, dropna() would leave only
+        1 complete row, which is insufficient for VIF calculation. The fix
+        fills NaN with column means to preserve more rows.
+        """
+        from statsmodels.stats.outliers_influence import (
+            variance_inflation_factor,
+        )
+
+        # Create sparse data: 50 rows, 13 columns, 30% NaN per column
+        np.random.seed(42)
+        n_rows = 50
+        n_cols = 13
+
+        data = {}
+        for i in range(n_cols):
+            col_data = np.random.randn(n_rows).tolist()
+            # Set 30% of values to NaN
+            nan_indices = np.random.choice(
+                n_rows, size=int(n_rows * 0.3), replace=False
+            )
+            for idx in nan_indices:
+                col_data[idx] = np.nan
+            data[f"col_{i}"] = col_data
+
+        df = pd.DataFrame(data)
+
+        # Using old approach (dropna): only 1 row remains
+        complete_cases = len(df.dropna())
+        self.assertEqual(complete_cases, 1)
+
+        # Using new approach (fillna with mean): all 50 rows preserved
+        df_filled = df.fillna(df.mean())
+        self.assertEqual(len(df_filled), 50)
+
+        # VIF should be calculable with filled data
+        vif_array = np.asarray(df_filled.values, dtype=np.float64)
+        for i in range(n_cols):
+            vif = variance_inflation_factor(vif_array, i)
+            self.assertFalse(np.isnan(vif))
+            self.assertTrue(vif >= 1.0)  # VIF is always >= 1
+
+    def test_vif_with_all_nan_column(self):
+        """
+        Test that columns that are entirely NaN are dropped before VIF calc.
+        """
+        # Create data with one column entirely NaN
+        np.random.seed(42)
+        n_rows = 50
+        n_cols = 5
+
+        data = {f"col_{i}": np.random.randn(n_rows) for i in range(n_cols)}
+        data["col_2"] = [np.nan] * n_rows  # Entirely NaN
+        df = pd.DataFrame(data)
+
+        # Drop columns that are all NaN, fill remaining NaN with mean
+        df_processed = df.dropna(axis=1, how="all").fillna(df.mean())
+
+        # col_2 should be dropped
+        self.assertNotIn("col_2", df_processed.columns)
+
+        # Other columns should remain
+        self.assertEqual(len(df_processed.columns), n_cols - 1)
+
+    def test_vif_with_duplicate_column_names(self):
+        """
+        Test that duplicate column names are removed before VIF calculation.
+
+        When the same media response variable is selected for multiple spend
+        columns, the column list will have duplicates. These must be removed
+        to avoid pandas creating a DataFrame with duplicate column names,
+        which causes pd.to_numeric to fail.
+        """
+        from statsmodels.stats.outliers_influence import (
+            variance_inflation_factor,
+        )
+
+        # Create test data
+        np.random.seed(42)
+        n_rows = 100
+        df = pd.DataFrame(
+            {
+                "col_a": np.random.randn(n_rows),
+                "col_b": np.random.randn(n_rows),
+                "col_c": np.random.randn(n_rows),
+            }
+        )
+
+        # Simulate duplicate column names in input list
+        cols_with_dupes = ["col_a", "col_b", "col_c", "col_a"]  # col_a is dupe
+
+        # Use the deduplication logic from the fix
+        seen = set()
+        valid_cols = []
+        for c in cols_with_dupes:
+            if c not in seen and c in df.columns:
+                seen.add(c)
+                valid_cols.append(c)
+
+        # Should have only unique columns
+        self.assertEqual(len(valid_cols), 3)
+        self.assertEqual(valid_cols, ["col_a", "col_b", "col_c"])
+
+        # VIF should be calculable with deduplicated columns
+        vif_df = df[valid_cols]
+        vif_array = np.asarray(vif_df.values, dtype=np.float64)
+        for i in range(len(valid_cols)):
+            vif = variance_inflation_factor(vif_array, i)
+            self.assertFalse(np.isnan(vif))
+            self.assertFalse(np.isinf(vif))  # No inf due to duplicates
+
+
 if __name__ == "__main__":
     unittest.main()
