@@ -161,6 +161,59 @@ class TestMappingMetadata(unittest.TestCase):
             self.assertIsInstance(vars_list, list, "Vars must be list")
             self.assertTrue(all(isinstance(v, str) for v in vars_list))
 
+    def test_aggregation_sources_structure(self):
+        """Test aggregation_sources structure for _CUSTOM columns."""
+        aggregation_sources = {
+            "GA_SMALL_COST_CUSTOM": {
+                "source_columns": [
+                    "GA_OTHER_COST",
+                    "GA_COMPETITOR_COST",
+                    "GA_BRAND_COST",
+                    "GA_APP_COST",
+                ],
+                "agg_method": "sum",
+                "category": "paid_media_spends",
+                "channel": "ga",
+                "custom_tag": "SMALL",
+            },
+            "GA_TOTAL_COST_CUSTOM": {
+                "source_columns": [
+                    "GA_SUPPLY_COST",
+                    "GA_DEMAND_COST",
+                    "GA_OTHER_COST",
+                ],
+                "agg_method": "sum",
+                "category": "paid_media_spends",
+                "channel": "ga",
+                "custom_tag": "TOTAL",
+            },
+        }
+
+        # Verify structure
+        self.assertIsInstance(aggregation_sources, dict)
+        for custom_col, source_info in aggregation_sources.items():
+            # Verify custom column name has _CUSTOM suffix
+            self.assertTrue(
+                custom_col.endswith("_CUSTOM"),
+                f"Custom column {custom_col} must end with _CUSTOM",
+            )
+            # Verify source_info is a dict with required keys
+            self.assertIsInstance(source_info, dict)
+            self.assertIn("source_columns", source_info)
+            self.assertIn("agg_method", source_info)
+            # Verify source_columns is a list
+            self.assertIsInstance(source_info["source_columns"], list)
+            self.assertTrue(
+                len(source_info["source_columns"]) > 0,
+                "source_columns must not be empty",
+            )
+            # Verify agg_method is valid
+            self.assertIn(
+                source_info["agg_method"],
+                ["sum", "mean", "max", "min"],
+                f"Invalid agg_method: {source_info['agg_method']}",
+            )
+
     def test_date_field_data_type(self):
         """Test that date field has data_type 'date'."""
         data_types = {

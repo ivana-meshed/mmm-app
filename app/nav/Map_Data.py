@@ -206,6 +206,9 @@ def _init_state():
     st.session_state.setdefault("organic_vars_prefix", "organic_")
     st.session_state.setdefault("context_vars_prefix", "context_")
     st.session_state.setdefault("factor_vars_prefix", "factor_")
+    st.session_state.setdefault("aggregation_sources", {})
+    # Track loaded metadata source for UI feedback
+    st.session_state.setdefault("loaded_metadata_source", "")
 
 
 _init_state()
@@ -442,10 +445,13 @@ def _parse_variable_name(var_name: str) -> dict:
 
 def _apply_automatic_aggregations(
     mapping_df: pd.DataFrame, df_raw: pd.DataFrame, prefixes: dict = None
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
     Apply automatic aggregations based on custom tags and categories.
-    Returns: (updated_mapping_df, updated_df_raw)
+    Returns: (updated_mapping_df, updated_df_raw, aggregation_sources)
+
+    aggregation_sources is a dict mapping each _CUSTOM column name to its
+    source info: {"source_columns": [...], "agg_method": "sum"/"mean"/...}
 
     This function:
     1. Copies aggregations from paid_media_spends to paid_media_vars
@@ -463,6 +469,7 @@ def _apply_automatic_aggregations(
 
     new_mapping_rows = []
     new_columns = {}
+    aggregation_sources = {}  # Track source columns for each custom aggregate
 
     # Group variables by category
     paid_spends = mapping_df[
@@ -559,6 +566,15 @@ def _apply_automatic_aggregations(
                             }
                         )
 
+                        # Track aggregation sources
+                        aggregation_sources[custom_var_name] = {
+                            "source_columns": vars_list,
+                            "agg_method": "sum",
+                            "category": category,
+                            "channel": channel,
+                            "custom_tag": tag,
+                        }
+
                         # Calculate the sum in df_raw
                         if all(v in df_raw.columns for v in vars_list):
                             new_columns[custom_var_name] = df_raw[
@@ -617,6 +633,15 @@ def _apply_automatic_aggregations(
                             "custom_tags": "",
                         }
                     )
+
+                    # Track aggregation sources
+                    aggregation_sources[total_var_name] = {
+                        "source_columns": vars_list,
+                        "agg_method": "sum",
+                        "category": category,
+                        "channel": channel,
+                        "custom_tag": "TOTAL",
+                    }
 
                     # Calculate the sum in df_raw
                     if all(v in df_raw.columns for v in vars_list):
@@ -679,6 +704,15 @@ def _apply_automatic_aggregations(
                         }
                     )
 
+                    # Track aggregation sources
+                    aggregation_sources[custom_var_name] = {
+                        "source_columns": vars_list,
+                        "agg_method": "sum",
+                        "category": "organic_vars",
+                        "channel": "organic",
+                        "custom_tag": tag,
+                    }
+
                     # Calculate sum
                     if all(v in df_raw.columns for v in vars_list):
                         new_columns[custom_var_name] = df_raw[vars_list].sum(
@@ -709,6 +743,16 @@ def _apply_automatic_aggregations(
                     "custom_tags": "",
                 }
             )
+
+            # Track aggregation sources
+            aggregation_sources[total_var_name] = {
+                "source_columns": organic_vars,
+                "agg_method": "sum",
+                "category": "organic_vars",
+                "channel": "organic",
+                "custom_tag": "TOTAL",
+            }
+
             new_columns[total_var_name] = df_raw[organic_vars].sum(axis=1)
 
     # Add new mapping rows
@@ -721,7 +765,7 @@ def _apply_automatic_aggregations(
         if col_name not in df_raw.columns:
             df_raw[col_name] = col_data
 
-    return mapping_df, df_raw
+    return mapping_df, df_raw, aggregation_sources
 
 
 def _apply_metadata_to_current_df(
@@ -1174,11 +1218,17 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
     data_origin = st.session_state.get("data_origin", "N/A")
     picked_ts = st.session_state.get("picked_ts", "N/A")
     country = st.session_state.get("country", "N/A")
+    loaded_metadata_source = st.session_state.get("loaded_metadata_source", "")
 
     if df_raw is not None and not df_raw.empty:
         st.info(
-            f"🔵 **Currently Loaded:** {data_origin.upper()} | Country: {country.upper()} | Timestamp: {picked_ts} | Rows: {len(df_raw):,} | Columns: {len(df_raw.columns)}"
+            f"🔵 **Data:** {data_origin.upper()} | Country: {country.upper()} | Timestamp: {picked_ts} | Rows: {len(df_raw):,} | Columns: {len(df_raw.columns)}"
         )
+        # Show metadata status
+        if loaded_metadata_source:
+            st.info(f"📋 **Metadata:** Loaded from {loaded_metadata_source}")
+        else:
+            st.caption("📋 **Metadata:** Using default auto-tagging rules")
     else:
         st.warning(
             "⚪ No data loaded yet - load data in Step 1 to configure mapping"
@@ -1232,13 +1282,20 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
             key="load_metadata_source_selector",
         )
 
-        # Add buttons for Load and Refresh
-        col_load, col_refresh = st.columns([1, 1])
+        # Add buttons for Load, Clear, and Refresh
+        col_load, col_clear, col_refresh = st.columns([1, 1, 1])
         with col_load:
             load_metadata_clicked = st.button(
                 "Load & apply metadata",
                 use_container_width=True,
                 key="load_metadata_btn",
+            )
+        with col_clear:
+            clear_metadata_clicked = st.button(
+                "🗑️ Clear metadata",
+                use_container_width=True,
+                key="clear_metadata_btn",
+                help="Clear all loaded metadata and reset mapping to defaults",
             )
         with col_refresh:
             refresh_metadata_clicked = st.button(
@@ -1251,6 +1308,54 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
         if refresh_metadata_clicked:
             _list_metadata_versions_cached.clear()
             st.success("Refreshed metadata list.")
+            st.rerun()
+
+        # Handle clear metadata button
+        if clear_metadata_clicked:
+            # Reset all metadata-related session state to defaults
+            st.session_state["goals_df"] = pd.DataFrame(
+                columns=["var", "group", "type", "main"]
+            ).astype("object")
+            st.session_state["mapping_df"] = pd.DataFrame(
+                columns=[
+                    "var",
+                    "category",
+                    "channel",
+                    "data_type",
+                    "agg_strategy",
+                    "custom_tags",
+                ]
+            ).astype("object")
+            st.session_state["auto_rules"] = {
+                "paid_media_spends": [
+                    "_cost",
+                    "_spend",
+                    "_costs",
+                    "_spends",
+                    "_budget",
+                    "_amount",
+                ],
+                "paid_media_vars": ["_impressions", "_clicks", "_sessions"],
+                "context_vars": ["_index", "_temp", "_price", "_holiday"],
+                "organic_vars": ["_organic", "_direct"],
+                "factor_vars": ["_flag", "_is", "_on"],
+            }
+            st.session_state["custom_channels"] = []
+            st.session_state["organic_vars_prefix"] = "organic_"
+            st.session_state["context_vars_prefix"] = "context_"
+            st.session_state["factor_vars_prefix"] = "factor_"
+            st.session_state["last_saved_meta_path"] = ""
+            st.session_state["aggregation_sources"] = {}
+            # Clear the loaded metadata source indicator
+            st.session_state["loaded_metadata_source"] = ""
+
+            # Rebuild mapping_df from current data with default rules
+            if not df_raw.empty:
+                st.session_state["mapping_df"] = _build_mapping_df(
+                    all_cols, df_raw, st.session_state["auto_rules"]
+                )
+
+            st.success("✅ Metadata cleared. All mappings reset to defaults.")
             st.rerun()
 
         if load_metadata_clicked:
@@ -1274,6 +1379,9 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
 
                 meta = _download_json_from_gcs(BUCKET, meta_blob)
                 _apply_metadata_to_current_df(meta, all_cols, df_raw)
+
+                # Track the loaded metadata source for UI feedback
+                st.session_state["loaded_metadata_source"] = selected_metadata
 
                 # Show what was loaded
                 st.success(f"✅ Loaded metadata from: **{selected_metadata}**")
@@ -1788,13 +1896,18 @@ with st.expander("🗺️ Data Mapping Configuration", expanded=False):
                     ),
                 }
                 # Use mapping_edit which has the user's edits from the data_editor
-                updated_mapping, updated_df = _apply_automatic_aggregations(
+                (
+                    updated_mapping,
+                    updated_df,
+                    aggregation_sources,
+                ) = _apply_automatic_aggregations(
                     mapping_edit.copy(),
                     st.session_state["df_raw"].copy(),
                     prefixes,
                 )
                 st.session_state["mapping_df"] = updated_mapping
                 st.session_state["df_raw"] = updated_df
+                st.session_state["aggregation_sources"] = aggregation_sources
                 num_new = len(updated_mapping) - original_length
                 st.success(
                     f"✅ Mapping updated! Total: {len(updated_mapping)} variables."
@@ -2003,6 +2116,7 @@ with st.expander("💾 Save Dataset & Mapping Configuration", expanded=False):
         "data_types": data_types_map,
         "agg_strategies": agg_strategies_map,
         "paid_media_mapping": paid_media_mapping,
+        "aggregation_sources": st.session_state.get("aggregation_sources", {}),
         "dep_var": dep_var or "",
         "variable_prefixes": {
             "organic_vars": st.session_state.get(
@@ -2113,16 +2227,16 @@ if can_go_next:
                 # Store values from Map Data for prefilling Prepare Training Data
                 # 3.1: Store the main goal
                 if not goals_df.empty:
-                    main_goals = goals_df[goals_df.get("main", False).astype(bool)]
+                    main_goals = goals_df[
+                        goals_df.get("main", False).astype(bool)
+                    ]
                     if not main_goals.empty:
                         st.session_state["prefill_goal"] = str(
                             main_goals.iloc[0]["var"]
                         )
                     else:
                         # Fallback to first primary goal if no main is selected
-                        primary_goals = goals_df[
-                            goals_df["group"] == "primary"
-                        ]
+                        primary_goals = goals_df[goals_df["group"] == "primary"]
                         if not primary_goals.empty:
                             st.session_state["prefill_goal"] = str(
                                 primary_goals.iloc[0]["var"]
@@ -2133,7 +2247,9 @@ if can_go_next:
                 st.session_state["prefill_paid_media_spends"] = paid_spends_list
 
                 # 3.3: Store paid_media_mapping for media response variables
-                st.session_state["prefill_paid_media_mapping"] = paid_media_mapping
+                st.session_state["prefill_paid_media_mapping"] = (
+                    paid_media_mapping
+                )
 
                 import streamlit as stlib
 

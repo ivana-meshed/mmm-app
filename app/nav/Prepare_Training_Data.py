@@ -86,6 +86,10 @@ st.session_state.setdefault("picked_meta_ts", "Latest")
 st.session_state.setdefault("selected_columns_for_training", [])
 st.session_state.setdefault("selected_paid_spends", [])
 st.session_state.setdefault("selected_goal", None)
+# Track paid spend selections in session state to persist across reruns
+st.session_state.setdefault("paid_spend_selections", {})
+# Track paid vars selections to sync with paid spends
+st.session_state.setdefault("paid_var_selections", {})
 
 # =============================
 # Step 1: Select Data
@@ -522,6 +526,36 @@ def _protect_columns_set(date_col: str, goal_cols: list[str]) -> set[str]:
     return set(p.upper() for p in prot)
 
 
+def _sync_paid_vars_with_spends(
+    use_overrides: dict[str, bool],
+    paid_spend: list[str],
+    paid_vars: list[str],
+    paid_media_mapping: dict[str, list[str]],
+    user_selections: dict[str, bool],
+) -> None:
+    """
+    Sync Paid Vars selections based on Paid Spend selections.
+
+    When a Paid Spend column is selected/deselected, update the corresponding
+    Paid Vars columns to match.
+
+    Args:
+        use_overrides: Dict of column -> selection state (modified in place)
+        paid_spend: List of paid spend column names
+        paid_vars: List of paid vars column names
+        paid_media_mapping: Dict mapping spend columns to their var columns
+        user_selections: Session state dict for user selections (modified)
+    """
+    for spend_col, is_selected in list(use_overrides.items()):
+        if spend_col in paid_spend:
+            # This is a Paid Spend column - sync corresponding Paid Vars
+            corresponding_vars = paid_media_mapping.get(spend_col, [])
+            for var_col in corresponding_vars:
+                if var_col in paid_vars:
+                    use_overrides[var_col] = is_selected
+                    user_selections[var_col] = is_selected
+
+
 with st.expander("Step 2) Ensure good data quality", expanded=False):
     st.subheader(f"Data Quality")
 
@@ -864,6 +898,16 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
             title, cols, key_suffix=title.replace(" ", "_").lower()
         )
 
+    # Sync Paid Spend selections with Paid Vars (Requirement 4b)
+    paid_media_mapping = meta.get("paid_media_mapping", {}) or {}
+    _sync_paid_vars_with_spends(
+        use_overrides,
+        paid_spend,
+        paid_vars,
+        paid_media_mapping,
+        st.session_state["dq_user_selections"],
+    )
+
     # Aggregate final selection across all tables
     final_use = {
         row["Column"]: bool(row["Use"]) for _, row in prof_all.iterrows()
@@ -1014,13 +1058,15 @@ with st.expander(
                     except Exception:
                         spearman_rho = np.nan
 
-                # Pre-select based on prefill from Map Data
-                # If prefill list is empty, select all by default
-                is_selected = (
-                    spend_col in prefill_paid_spends
-                    if prefill_paid_spends
-                    else True
-                )
+                # Use session state selection if available, else use prefill
+                if spend_col in st.session_state["paid_spend_selections"]:
+                    is_selected = st.session_state["paid_spend_selections"][
+                        spend_col
+                    ]
+                elif prefill_paid_spends:
+                    is_selected = spend_col in prefill_paid_spends
+                else:
+                    is_selected = True  # Default to selected
 
                 metrics_data.append(
                     {
@@ -1056,6 +1102,14 @@ with st.expander(
                 },
                 key="paid_spends_metrics_table",
             )
+
+            # Update session state with current selections
+            for _, row in edited_metrics.iterrows():
+                spend_col = row["Paid Media Spend"]
+                is_selected = bool(row["Select"])
+                st.session_state["paid_spend_selections"][
+                    spend_col
+                ] = is_selected
 
             # Store selected paid spends
             selected_paid_spends = edited_metrics[edited_metrics["Select"]][

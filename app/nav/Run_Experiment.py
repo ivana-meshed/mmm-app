@@ -168,6 +168,72 @@ def _get_next_revision_number(bucket: str, tag: str) -> int:
         return 1
 
 
+def _apply_aggregations_from_metadata(
+    df: pd.DataFrame, metadata: Dict
+) -> tuple[pd.DataFrame, List[str]]:
+    """
+    Apply custom aggregations from metadata to create missing _CUSTOM columns.
+
+    If aggregation_sources is in metadata and the _CUSTOM column is missing
+    but source columns exist, create the aggregated column.
+
+    Returns: (updated_df, list of created columns)
+    """
+    aggregation_sources = metadata.get("aggregation_sources", {})
+    if not aggregation_sources:
+        return df, []
+
+    created_columns = []
+    skipped_columns = []
+    df = df.copy()
+
+    for custom_col, source_info in aggregation_sources.items():
+        # Skip if column already exists
+        if custom_col in df.columns:
+            continue
+
+        source_columns = source_info.get("source_columns", [])
+        agg_method = source_info.get("agg_method", "sum")
+
+        # Check if all source columns exist
+        available_sources = [c for c in source_columns if c in df.columns]
+        if not available_sources:
+            # Track skipped columns for potential debugging
+            skipped_columns.append(
+                f"{custom_col} (missing sources: {source_columns})"
+            )
+            continue
+
+        # Apply aggregation
+        try:
+            if agg_method == "sum":
+                df[custom_col] = df[available_sources].sum(axis=1)
+            elif agg_method == "mean":
+                df[custom_col] = df[available_sources].mean(axis=1)
+            elif agg_method == "max":
+                df[custom_col] = df[available_sources].max(axis=1)
+            elif agg_method == "min":
+                df[custom_col] = df[available_sources].min(axis=1)
+            else:
+                # Default to sum
+                df[custom_col] = df[available_sources].sum(axis=1)
+
+            created_columns.append(custom_col)
+        except (ValueError, TypeError) as e:
+            # Log specific errors that might occur during aggregation
+            logging.warning(
+                f"Failed to create {custom_col} from {available_sources}: {e}"
+            )
+
+    # Log skipped columns for debugging if any
+    if skipped_columns:
+        logging.info(
+            f"Skipped {len(skipped_columns)} custom column(s) due to missing source columns"
+        )
+
+    return df, created_columns
+
+
 # Extracted from streamlit_app.py tab_single (Single run):
 with tab_single:
     st.subheader("Robyn configuration & training")
@@ -271,9 +337,6 @@ with tab_single:
                         tmp_path = tmp.name
                         _download_from_gcs(gcs_bucket, blob_path, tmp_path)
                         df_prev = pd.read_parquet(tmp_path)
-                        st.session_state["preview_df"] = df_prev
-                        st.session_state["selected_country"] = selected_country
-                        st.session_state["selected_version"] = selected_version
 
                         # Parse metadata selection to get country and version
                         meta_parts = selected_metadata.split(" - ")
@@ -290,6 +353,50 @@ with tab_single:
                         metadata = _load_metadata_from_gcs(
                             gcs_bucket, meta_country, meta_version  # type: ignore
                         )
+
+                        # Apply custom aggregations from metadata
+                        # This creates missing _CUSTOM columns if source columns exist
+                        if metadata:
+                            df_prev, created_cols = (
+                                _apply_aggregations_from_metadata(
+                                    df_prev, metadata
+                                )
+                            )
+                            if created_cols:
+                                st.info(
+                                    f"🔧 Auto-created {len(created_cols)} custom column(s) from metadata: "
+                                    f"{', '.join(created_cols[:5])}"
+                                    + (
+                                        f"... and {len(created_cols) - 5} more"
+                                        if len(created_cols) > 5
+                                        else ""
+                                    )
+                                )
+
+                            # Check for custom columns in metadata mapping that couldn't be created
+                            agg_sources = metadata.get(
+                                "aggregation_sources", {}
+                            )
+                            if agg_sources:
+                                not_created = [
+                                    col
+                                    for col in agg_sources.keys()
+                                    if col not in df_prev.columns
+                                ]
+                                if not_created:
+                                    st.warning(
+                                        f"⚠️ Could not auto-create {len(not_created)} custom column(s) "
+                                        f"(source columns missing in data): {', '.join(not_created[:3])}"
+                                        + (
+                                            f"... and {len(not_created) - 3} more"
+                                            if len(not_created) > 3
+                                            else ""
+                                        )
+                                    )
+
+                        st.session_state["preview_df"] = df_prev
+                        st.session_state["selected_country"] = selected_country
+                        st.session_state["selected_version"] = selected_version
                         st.session_state["loaded_metadata"] = metadata
                         st.session_state["selected_metadata"] = (
                             selected_metadata
@@ -1177,13 +1284,31 @@ with tab_single:
                 + factor_vars_list
                 + organic_vars_list
             )
-            missing_custom_vars = [
-                v
-                for v in all_selected_vars
-                if "_CUSTOM" in v and v not in preview_columns
-            ]
+            # Deduplicate missing custom vars
+            missing_custom_vars = list(
+                set(
+                    v
+                    for v in all_selected_vars
+                    if "_CUSTOM" in v and v not in preview_columns
+                )
+            )
 
             if missing_custom_vars:
+                # Check if these are in aggregation_sources
+                loaded_meta = st.session_state.get("loaded_metadata", {})
+                agg_sources = (
+                    loaded_meta.get("aggregation_sources", {})
+                    if loaded_meta
+                    else {}
+                )
+
+                in_agg_sources = [
+                    v for v in missing_custom_vars if v in agg_sources
+                ]
+                not_in_agg_sources = [
+                    v for v in missing_custom_vars if v not in agg_sources
+                ]
+
                 st.warning(
                     f"⚠️ **Warning:** {len(missing_custom_vars)} custom variable(s) selected but not found in loaded data: "
                     f"{', '.join(missing_custom_vars[:5])}"
@@ -1193,11 +1318,19 @@ with tab_single:
                         else ""
                     )
                 )
-                st.info(
-                    "💡 **To fix this:** Go to the 'Map Data' page, load your data, "
-                    "apply mapping changes to create custom variables, "
-                    "then click 'Save dataset & metadata to GCS' (this now saves both automatically)."
-                )
+
+                if not_in_agg_sources:
+                    st.info(
+                        "💡 **To fix this:** Go to the 'Map Data' page, load your data, "
+                        "apply mapping changes to create custom variables, "
+                        "then click 'Save dataset & metadata to GCS' (this now saves both automatically)."
+                    )
+                elif in_agg_sources:
+                    st.info(
+                        "💡 **Note:** These custom columns are defined in metadata but couldn't be auto-created "
+                        "(source columns may be missing in this dataset). Try re-loading the data or "
+                        "go to 'Map Data' to recreate them."
+                    )
 
         # Custom hyperparameters per variable (when Custom preset is selected)
         if hyperparameter_preset == "Custom":
