@@ -220,5 +220,75 @@ class TestDuplicateColumnHandling(unittest.TestCase):
         self.assertIsInstance(numeric_result, pd.Series)
 
 
+class TestOtherColumnFiltering(unittest.TestCase):
+    """Tests for filtering organic variables from the 'Other' category."""
+
+    def test_other_cols_excludes_already_categorized_columns(self):
+        """
+        Test that columns already in other categories are excluded from Other.
+
+        This tests the logic that filters out organic_vars (and other category
+        vars) from the 'other_cols' list to prevent duplicates.
+        """
+        # Simulate the data_types and channels maps from metadata
+        data_types_map = {
+            "date_col": "datetime",
+            "spend_col": "numeric",
+            "organic_col": "numeric",  # This is in organic_vars
+            "context_col": "numeric",  # This is in context_vars
+            "unknown_col": "numeric",  # This should be in Other
+        }
+        channels_map = {
+            "spend_col": {"platform": "google"},
+        }
+
+        # Simulate the category lists from mapping
+        paid_spend = ["spend_col"]
+        paid_vars = []
+        organic_vars = ["organic_col"]
+        context_vars = ["context_col"]
+        factor_vars = []
+
+        # Simulate the columns present in the dataframe
+        prof_df_columns = [
+            "date_col",
+            "spend_col",
+            "organic_col",
+            "context_col",
+            "unknown_col",
+        ]
+
+        # Replicate the logic from the actual code
+        all_categorized_cols = set(
+            paid_spend + paid_vars + organic_vars + context_vars + factor_vars
+        )
+
+        other_cols = [
+            c
+            for c in data_types_map.keys()
+            if c not in channels_map
+            and c in prof_df_columns
+            and c not in all_categorized_cols
+        ]
+
+        # 'unknown_col' should be in Other (not in channels, not categorized)
+        self.assertIn("unknown_col", other_cols)
+
+        # 'organic_col' should NOT be in Other (already in organic_vars)
+        self.assertNotIn("organic_col", other_cols)
+
+        # 'context_col' should NOT be in Other (already in context_vars)
+        self.assertNotIn("context_col", other_cols)
+
+        # 'spend_col' should NOT be in Other (it's in channels_map)
+        self.assertNotIn("spend_col", other_cols)
+
+        # 'date_col' should be in Other (not in channels, not categorized)
+        self.assertIn("date_col", other_cols)
+
+        # Only date_col and unknown_col should be in Other
+        self.assertEqual(set(other_cols), {"date_col", "unknown_col"})
+
+
 if __name__ == "__main__":
     unittest.main()

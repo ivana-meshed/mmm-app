@@ -561,12 +561,20 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     data_types_map = meta.get("data_types", {}) or {}
     channels_map = meta.get("channels", {}) or {}
 
+    # Collect all columns already in other categories to exclude from "Other"
+    all_categorized_cols = set(
+        paid_spend + paid_vars + organic_vars + context_vars + factor_vars
+    )
+
     # Other columns are those in data_types but NOT in channels
+    # AND not already in any of the category lists
     # Filter to only those present in the dataframe for display
     other_cols = [
         c
         for c in data_types_map.keys()
-        if c not in channels_map and c in prof_df.columns
+        if c not in channels_map
+        and c in prof_df.columns
+        and c not in all_categorized_cols
     ]
 
     categories = [
@@ -704,6 +712,20 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
             note += " Guards applied — " + "; ".join(warnings_list)
         st.session_state["dq_clean_note"] = note
 
+        # Clear user selections for dropped columns so they reflect the drop
+        user_sel = st.session_state.get("dq_user_selections", {})
+        for col in to_drop:
+            user_sel[col] = False
+        st.session_state["dq_user_selections"] = user_sel
+
+        # Clear data editor widget states so they refresh with correct values
+        # This is needed because Streamlit caches widget state by key
+        for key in list(st.session_state.keys()):
+            if key.startswith("dq_editor_"):
+                del st.session_state[key]
+
+        st.rerun()
+
     if st.session_state["dq_clean_note"]:
         st.info(st.session_state["dq_clean_note"])
         if st.session_state["dq_last_dropped"]:
@@ -716,12 +738,21 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
 
     # Initialize Use column: start with True for non-dropped
     prof_all["Use"] = ~prof_all["Column"].isin(dropped)
-    
+
     # Apply any saved user selections (persisted from previous interactions)
+    # but only for columns that are not in the dropped set
     if user_selections:
-        # Use vectorized map for O(n) performance
-        mask = prof_all["Column"].isin(user_selections.keys())
-        prof_all.loc[mask, "Use"] = prof_all.loc[mask, "Column"].map(user_selections)
+        # Filter out dropped columns from user selections to apply
+        valid_selections = {
+            col: val
+            for col, val in user_selections.items()
+            if col not in dropped
+        }
+        if valid_selections:
+            mask = prof_all["Column"].isin(valid_selections.keys())
+            prof_all.loc[mask, "Use"] = prof_all.loc[mask, "Column"].map(
+                valid_selections
+            )
 
     # Render tables
     use_overrides: dict[str, bool] = {}
@@ -839,7 +870,7 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         row["Column"]: bool(row["Use"]) for _, row in prof_all.iterrows()
     }
     final_use.update(use_overrides)
-    
+
     # Persist user selections to session state for next rerun
     st.session_state["dq_user_selections"].update(use_overrides)
 
@@ -909,9 +940,7 @@ with st.expander(
     ]
 
     # Get prefilled paid media spends from Map Data (if any)
-    prefill_paid_spends = st.session_state.get(
-        "prefill_paid_media_spends", []
-    )
+    prefill_paid_spends = st.session_state.get("prefill_paid_media_spends", [])
 
     if not available_paid_spends:
         st.info(
@@ -931,8 +960,12 @@ with st.expander(
                     continue
                 # Prepare data for correlation - ensure numeric types
                 temp_df = df_r[[spend_col, selected_goal]].copy()
-                temp_df[spend_col] = pd.to_numeric(temp_df[spend_col], errors="coerce")
-                temp_df[selected_goal] = pd.to_numeric(temp_df[selected_goal], errors="coerce")
+                temp_df[spend_col] = pd.to_numeric(
+                    temp_df[spend_col], errors="coerce"
+                )
+                temp_df[selected_goal] = pd.to_numeric(
+                    temp_df[selected_goal], errors="coerce"
+                )
                 temp_df = temp_df.dropna()
 
                 r2 = np.nan
@@ -941,8 +974,12 @@ with st.expander(
 
                 if len(temp_df) > 1:
                     try:
-                        X = np.asarray(temp_df[[spend_col]].values, dtype=np.float64)
-                        y = np.asarray(temp_df[selected_goal].values, dtype=np.float64)
+                        X = np.asarray(
+                            temp_df[[spend_col]].values, dtype=np.float64
+                        )
+                        y = np.asarray(
+                            temp_df[selected_goal].values, dtype=np.float64
+                        )
 
                         # Calculate R2
                         model = LinearRegression()
@@ -953,7 +990,11 @@ with st.expander(
                         # Calculate NMAE (Normalized Mean Absolute Error)
                         mae = mean_absolute_error(y, y_pred)
                         y_min, y_max = float(y.min()), float(y.max())
-                        if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
+                        if (
+                            pd.notna(y_min)
+                            and pd.notna(y_max)
+                            and y_max > y_min
+                        ):
                             y_range = y_max - y_min
                             nmae = mae / y_range
                         else:
@@ -967,7 +1008,8 @@ with st.expander(
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore")
                             rho, _ = stats.spearmanr(
-                                temp_df[spend_col].values, temp_df[selected_goal].values
+                                temp_df[spend_col].values,
+                                temp_df[selected_goal].values,
                             )
                         spearman_rho = _safe_float(rho)
                     except Exception:
@@ -1054,7 +1096,9 @@ with st.expander(
             unique_options = list(dict.fromkeys(options_list))
 
             if len(unique_options) <= 1 and spend_col not in df_r.columns:
-                st.info(f"No media response variables available for {spend_col}")
+                st.info(
+                    f"No media response variables available for {spend_col}"
+                )
                 continue
 
             # Calculate metrics for each option
@@ -1065,8 +1109,12 @@ with st.expander(
                     if spend_col == var_col:
                         continue
                     temp_df = df_r[[spend_col, var_col]].copy()
-                    temp_df[spend_col] = pd.to_numeric(temp_df[spend_col], errors="coerce")
-                    temp_df[var_col] = pd.to_numeric(temp_df[var_col], errors="coerce")
+                    temp_df[spend_col] = pd.to_numeric(
+                        temp_df[spend_col], errors="coerce"
+                    )
+                    temp_df[var_col] = pd.to_numeric(
+                        temp_df[var_col], errors="coerce"
+                    )
                     temp_df = temp_df.dropna()
 
                     r2 = np.nan
@@ -1075,8 +1123,12 @@ with st.expander(
 
                     if len(temp_df) > 1:
                         try:
-                            X = np.asarray(temp_df[[spend_col]].values, dtype=np.float64)
-                            y = np.asarray(temp_df[var_col].values, dtype=np.float64)
+                            X = np.asarray(
+                                temp_df[[spend_col]].values, dtype=np.float64
+                            )
+                            y = np.asarray(
+                                temp_df[var_col].values, dtype=np.float64
+                            )
 
                             # Calculate R2
                             model = LinearRegression()
@@ -1105,7 +1157,8 @@ with st.expander(
                             with warnings.catch_warnings():
                                 warnings.simplefilter("ignore")
                                 rho, _ = stats.spearmanr(
-                                    temp_df[spend_col].values, temp_df[var_col].values
+                                    temp_df[spend_col].values,
+                                    temp_df[var_col].values,
                                 )
                             spearman_rho = _safe_float(rho)
                         except Exception:
@@ -1161,16 +1214,19 @@ with st.expander(
     st.markdown("---")
     st.markdown("### 3.4 Variable Analysis with VIF")
     st.caption(
-        "Analyze selected variables from sections 3.2 and 3.3 for multicollinearity using Variance Inflation Factor (VIF). "
-        "VIF > 10 indicates high multicollinearity (🔴), VIF 5-10 is moderate (🟡), VIF < 5 is good (🟢)."
+        "Analyze selected variables for multicollinearity using Variance Inflation "
+        "Factor (VIF). Use checkboxes to include/exclude variables. VIF is "
+        "recalculated based on selected variables within each table and globally. "
+        "VIF > 10 indicates high multicollinearity (🔴), VIF 5-10 is moderate "
+        "(🟡), VIF < 5 is good (🟢)."
     )
 
     # Get selected goal for correlation calculations
     selected_goal = st.session_state.get("selected_goal")
-    
+
     # Get selected paid media spends from section 3.2
     selected_paid_spends_3_2 = st.session_state.get("selected_paid_spends", [])
-    
+
     # Get selected media response variables from section 3.3 dropdowns
     SPEND_SUFFIX = " (spend)"
     selected_media_vars_3_3 = []
@@ -1184,10 +1240,12 @@ with st.expander(
             if media_var:
                 selected_media_vars_3_3.append(media_var)
 
+    # Initialize session state for VIF selections (all preselected by default)
+    st.session_state.setdefault("vif_selections", {})
+
     def _calculate_vif_band(vif_value: float) -> str:
         """Return VIF band indicator based on VIF value."""
         try:
-            # Try to convert to float first to handle any type
             v = float(vif_value)
             if math.isnan(v) or math.isinf(v):
                 return "⚪"  # Unknown/invalid
@@ -1200,17 +1258,64 @@ with st.expander(
         except (TypeError, ValueError):
             return "⚪"  # Unknown/invalid
 
+    def _calculate_vif_for_columns(cols: List[str]) -> dict:
+        """Calculate VIF values for a list of columns."""
+        vif_values = {}
+        if len(cols) < 2:
+            return vif_values
+
+        try:
+            # Filter to valid numeric columns
+            valid_cols = [
+                c
+                for c in cols
+                if c in df_r.columns and pd.api.types.is_numeric_dtype(df_r[c])
+            ]
+            if len(valid_cols) < 2:
+                return vif_values
+
+            vif_df = df_r[valid_cols].copy()
+            for col in vif_df.columns:
+                vif_df[col] = pd.to_numeric(vif_df[col], errors="coerce")
+            vif_df = vif_df.dropna()
+
+            if len(vif_df) > len(valid_cols) + 1:
+                try:
+                    vif_array = np.asarray(vif_df.values, dtype=np.float64)
+                except (ValueError, TypeError):
+                    return vif_values
+
+                if vif_array is not None and vif_array.size > 0:
+                    for i, col in enumerate(valid_cols):
+                        try:
+                            vif_values[col] = variance_inflation_factor(
+                                vif_array, i
+                            )
+                        except Exception:
+                            vif_values[col] = np.nan
+        except Exception:
+            pass
+        return vif_values
+
     def _calculate_variable_metrics(
-        var_cols: List[str], category_name: str, goal_col: str
+        var_cols: List[str],
+        goal_col: str,
+        selected_only_cols: List[str],
     ) -> pd.DataFrame:
-        """Calculate R², NMAE, Spearman's ρ, VIF for a list of variables."""
+        """Calculate R², NMAE, Spearman's ρ, VIF for a list of variables.
+
+        Args:
+            var_cols: All columns to display in the table
+            goal_col: The goal column for correlation calculations
+            selected_only_cols: Columns currently selected (Use=True) for VIF
+        """
         if not var_cols or not goal_col:
             return pd.DataFrame()
 
         # Filter to columns that exist in df_r and are numeric
-        # (exclude datetime columns which can't be used in regression)
         valid_cols = [
-            c for c in var_cols
+            c
+            for c in var_cols
             if c in df_r.columns and pd.api.types.is_numeric_dtype(df_r[c])
         ]
         if not valid_cols:
@@ -1218,37 +1323,8 @@ with st.expander(
 
         metrics_data = []
 
-        # Calculate VIF for all valid columns together
-        vif_values = {}
-        if len(valid_cols) >= 2:
-            try:
-                # Prepare data for VIF calculation - ensure numeric types only
-                vif_df = df_r[valid_cols].copy()
-                # Convert all columns to numeric, coercing errors to NaN
-                for col in vif_df.columns:
-                    vif_df[col] = pd.to_numeric(vif_df[col], errors="coerce")
-                vif_df = vif_df.dropna()
-                
-                # Only proceed if we have enough rows and all columns are numeric
-                if len(vif_df) > len(valid_cols) + 1:
-                    # Convert to float64 array for statsmodels (explicit dtype)
-                    try:
-                        vif_array = np.asarray(vif_df.values, dtype=np.float64)
-                    except (ValueError, TypeError):
-                        vif_array = None
-                    
-                    if vif_array is not None and vif_array.size > 0:
-                        for i, col in enumerate(valid_cols):
-                            try:
-                                vif_values[col] = variance_inflation_factor(
-                                    vif_array, i
-                                )
-                            except Exception:
-                                # Catch all exceptions from VIF calculation
-                                vif_values[col] = np.nan
-            except Exception:
-                # Catch any other exceptions during data preparation
-                pass
+        # Calculate VIF only for selected columns within this table
+        vif_values = _calculate_vif_for_columns(selected_only_cols)
 
         # Calculate metrics for each variable against the goal
         for var_col in valid_cols:
@@ -1260,9 +1336,10 @@ with st.expander(
                 continue
 
             temp_df = df_r[[var_col, goal_col]].copy()
-            # Convert to numeric to ensure proper dtype
             temp_df[var_col] = pd.to_numeric(temp_df[var_col], errors="coerce")
-            temp_df[goal_col] = pd.to_numeric(temp_df[goal_col], errors="coerce")
+            temp_df[goal_col] = pd.to_numeric(
+                temp_df[goal_col], errors="coerce"
+            )
             temp_df = temp_df.dropna()
 
             r2 = np.nan
@@ -1277,7 +1354,6 @@ with st.expander(
                     X = None
                     y = None
 
-                # Calculate R2 and predictions
                 if X is not None and y is not None:
                     try:
                         model = LinearRegression()
@@ -1285,15 +1361,17 @@ with st.expander(
                         y_pred = model.predict(X)
                         r2 = r2_score(y, y_pred)
 
-                        # Calculate NMAE (only if predictions are available)
                         mae = mean_absolute_error(y, y_pred)
                         y_min, y_max = float(y.min()), float(y.max())
-                        if pd.notna(y_min) and pd.notna(y_max) and y_max > y_min:
+                        if (
+                            pd.notna(y_min)
+                            and pd.notna(y_max)
+                            and y_max > y_min
+                        ):
                             nmae = mae / (y_max - y_min)
                     except Exception:
                         pass
 
-                # Calculate Spearman's rho (suppress warning for constant input)
                 try:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
@@ -1304,12 +1382,16 @@ with st.expander(
                 except Exception:
                     pass
 
-            # Get VIF value
+            # Get VIF value (only if column is selected)
             vif = vif_values.get(var_col, np.nan)
             vif_band = _calculate_vif_band(vif)
 
+            # Determine default Use value from session state or default True
+            use_val = st.session_state["vif_selections"].get(var_col, True)
+
             metrics_data.append(
                 {
+                    "Use": use_val,
                     "Variable": var_col,
                     "R²": _safe_float(r2),
                     "NMAE": _safe_float(nmae),
@@ -1323,38 +1405,79 @@ with st.expander(
 
     def _render_variable_table(
         title: str, var_list: List[str], key_suffix: str
-    ) -> None:
-        """Render a variable metrics table for a category."""
-        if not var_list or not selected_goal:
-            return
+    ) -> List[str]:
+        """Render a variable metrics table with Use checkboxes.
 
-        df_metrics = _calculate_variable_metrics(var_list, title, selected_goal)
+        Returns list of selected (Use=True) variable names.
+        """
+        if not var_list or not selected_goal:
+            return []
+
+        # Get currently selected columns for this table from session state
+        selected_cols_for_vif = [
+            c
+            for c in var_list
+            if st.session_state["vif_selections"].get(c, True)
+            and c in df_r.columns
+            and pd.api.types.is_numeric_dtype(df_r[c])
+        ]
+
+        df_metrics = _calculate_variable_metrics(
+            var_list, selected_goal, selected_cols_for_vif
+        )
 
         if df_metrics.empty:
             st.info(f"No {title.lower()} available in the data.")
-            return
+            return []
 
         st.markdown(f"#### {title} ({len(df_metrics)})")
 
-        st.dataframe(
+        # Use data_editor with checkbox column
+        edited = st.data_editor(
             df_metrics,
             hide_index=True,
             width="stretch",
+            num_rows="fixed",
             column_config={
-                "Variable": st.column_config.TextColumn("Variable"),
-                "R²": st.column_config.NumberColumn("R²", format="%.4f"),
-                "NMAE": st.column_config.NumberColumn("NMAE", format="%.4f"),
-                "Spearman's ρ": st.column_config.NumberColumn(
-                    "Spearman's ρ", format="%.4f"
+                "Use": st.column_config.CheckboxColumn(
+                    "Use",
+                    help="Include variable in VIF calculation",
+                    required=True,
                 ),
-                "VIF": st.column_config.NumberColumn("VIF", format="%.2f"),
+                "Variable": st.column_config.TextColumn(
+                    "Variable", disabled=True
+                ),
+                "R²": st.column_config.NumberColumn(
+                    "R²", format="%.4f", disabled=True
+                ),
+                "NMAE": st.column_config.NumberColumn(
+                    "NMAE", format="%.4f", disabled=True
+                ),
+                "Spearman's ρ": st.column_config.NumberColumn(
+                    "Spearman's ρ", format="%.4f", disabled=True
+                ),
+                "VIF": st.column_config.NumberColumn(
+                    "VIF", format="%.2f", disabled=True
+                ),
                 "VIF Band": st.column_config.TextColumn(
                     "VIF Band",
-                    help="🟢 = Good (VIF < 5), 🟡 = Moderate (5-10), 🔴 = High (> 10)",
+                    help="🟢 = Good (< 5), 🟡 = Moderate (5-10), 🔴 = High (> 10)",
+                    disabled=True,
                 ),
             },
-            key=f"vif_table_{key_suffix}",
+            key=f"vif_editor_{key_suffix}",
         )
+
+        # Update session state with user selections
+        selected_vars = []
+        for _, row in edited.iterrows():
+            var_name = str(row["Variable"])
+            use_val = bool(row["Use"])
+            st.session_state["vif_selections"][var_name] = use_val
+            if use_val:
+                selected_vars.append(var_name)
+
+        return selected_vars
 
     # Get column categories from Step 2
     column_categories = st.session_state.get("column_categories", {})
@@ -1363,33 +1486,101 @@ with st.expander(
     selected_factor = column_categories.get("factor_vars", [])
     selected_other = column_categories.get("other", [])
 
+    # Track all selected variables across tables for global VIF
+    all_selected_vars: List[str] = []
+
     if not selected_goal:
-        st.info("Please select a goal in section 3.1 to calculate variable metrics.")
+        st.info(
+            "Please select a goal in section 3.1 to calculate variable metrics."
+        )
     elif not selected_media_vars_3_3:
         st.info("Please select media response variables in section 3.3.")
     else:
         # Render table for selected media response variables (from 3.3)
-        _render_variable_table(
-            "Selected Media Response Variables", selected_media_vars_3_3, "media_vars"
+        selected_media = _render_variable_table(
+            "Selected Media Response Variables",
+            selected_media_vars_3_3,
+            "media_vars",
         )
-        
-        # Render tables for Step 2 category selections (only if category has variables)
+        all_selected_vars.extend(selected_media)
+
+        # Render tables for Step 2 category selections
         if selected_organic:
-            _render_variable_table(
+            selected_org = _render_variable_table(
                 "Selected Organic Variables", selected_organic, "organic"
             )
+            all_selected_vars.extend(selected_org)
+
         if selected_context:
-            _render_variable_table(
+            selected_ctx = _render_variable_table(
                 "Selected Context Variables", selected_context, "context"
             )
+            all_selected_vars.extend(selected_ctx)
+
         if selected_factor:
-            _render_variable_table(
+            selected_fac = _render_variable_table(
                 "Selected Factor Variables", selected_factor, "factor"
             )
+            all_selected_vars.extend(selected_fac)
+
         if selected_other:
-            _render_variable_table(
+            selected_oth = _render_variable_table(
                 "Selected Other Variables", selected_other, "other"
             )
+            all_selected_vars.extend(selected_oth)
+
+        # Display global VIF across ALL selected variables from all tables
+        st.markdown("---")
+        st.markdown("#### Global VIF (All Selected Variables)")
+        st.caption(
+            "VIF calculated across all selected variables from all tables above."
+        )
+
+        # Remove duplicates while preserving order
+        all_selected_unique = list(dict.fromkeys(all_selected_vars))
+
+        if len(all_selected_unique) < 2:
+            st.info(
+                "Select at least 2 variables across all tables to calculate "
+                "global VIF."
+            )
+        else:
+            global_vif = _calculate_vif_for_columns(all_selected_unique)
+
+            if global_vif:
+                global_vif_data = []
+                for var_col in all_selected_unique:
+                    vif = global_vif.get(var_col, np.nan)
+                    global_vif_data.append(
+                        {
+                            "Variable": var_col,
+                            "Global VIF": _safe_float(vif),
+                            "VIF Band": _calculate_vif_band(vif),
+                        }
+                    )
+
+                global_vif_df = pd.DataFrame(global_vif_data)
+                st.dataframe(
+                    global_vif_df,
+                    hide_index=True,
+                    width="stretch",
+                    column_config={
+                        "Variable": st.column_config.TextColumn("Variable"),
+                        "Global VIF": st.column_config.NumberColumn(
+                            "Global VIF", format="%.2f"
+                        ),
+                        "VIF Band": st.column_config.TextColumn(
+                            "VIF Band",
+                            help="🟢 = Good (< 5), 🟡 = Moderate (5-10), "
+                            "🔴 = High (> 10)",
+                        ),
+                    },
+                    key="global_vif_table",
+                )
+            else:
+                st.info(
+                    "Unable to calculate global VIF for selected variables."
+                )
 
     # Export Selected Columns button (after section 3.4)
     st.markdown("---")
