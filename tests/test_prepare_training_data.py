@@ -129,5 +129,96 @@ class TestNumStats(unittest.TestCase):
         self.assertAlmostEqual(stats["p90"], 9.1)
 
 
+class TestDatetimeColumnFiltering(unittest.TestCase):
+    """Tests for datetime column filtering in metrics calculation."""
+
+    def test_is_numeric_dtype_excludes_datetime(self):
+        """Test that datetime columns are correctly identified as non-numeric."""
+        # Create test series
+        datetime_series = pd.Series(pd.date_range("2024-01-01", periods=5))
+        float_series = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0])
+        int_series = pd.Series([1, 2, 3, 4, 5])
+
+        # datetime64 should NOT be numeric (for our regression purposes)
+        self.assertFalse(pd.api.types.is_numeric_dtype(datetime_series))
+        # float64 should be numeric
+        self.assertTrue(pd.api.types.is_numeric_dtype(float_series))
+        # int64 should be numeric
+        self.assertTrue(pd.api.types.is_numeric_dtype(int_series))
+
+    def test_datetime_column_in_mixed_dataframe(self):
+        """Test that datetime columns are excluded from numeric column list."""
+        df = pd.DataFrame(
+            {
+                "date_col": pd.date_range("2024-01-01", periods=5),
+                "float_col": [1.0, 2.0, 3.0, 4.0, 5.0],
+                "int_col": [1, 2, 3, 4, 5],
+            }
+        )
+
+        # Filter numeric columns like the production code does
+        var_cols = ["date_col", "float_col", "int_col"]
+        valid_cols = [
+            c
+            for c in var_cols
+            if c in df.columns and pd.api.types.is_numeric_dtype(df[c])
+        ]
+
+        # datetime column should be excluded
+        self.assertNotIn("date_col", valid_cols)
+        # numeric columns should be included
+        self.assertIn("float_col", valid_cols)
+        self.assertIn("int_col", valid_cols)
+        self.assertEqual(len(valid_cols), 2)
+
+
+class TestDuplicateColumnHandling(unittest.TestCase):
+    """Tests for handling duplicate column names in DataFrame selection."""
+
+    def test_duplicate_column_selection_returns_dataframe(self):
+        """
+        Test that selecting the same column twice creates duplicate columns.
+
+        This documents the pandas behavior that causes the TypeError when
+        pd.to_numeric is called on a DataFrame instead of a Series.
+        """
+        df = pd.DataFrame({"col_a": [1.0, 2.0, 3.0], "col_b": [4.0, 5.0, 6.0]})
+
+        # Selecting the same column twice creates duplicate column names
+        col_name = "col_a"
+        temp_df = df[[col_name, col_name]].copy()
+
+        # This creates a DataFrame with duplicate column names
+        self.assertEqual(list(temp_df.columns), ["col_a", "col_a"])
+
+        # Accessing by column name returns a DataFrame (not Series!)
+        result = temp_df[col_name]
+        self.assertIsInstance(result, pd.DataFrame)
+
+        # This is why pd.to_numeric fails - it expects a Series
+        with self.assertRaises(TypeError):
+            pd.to_numeric(result, errors="coerce")
+
+    def test_single_column_selection_returns_series(self):
+        """
+        Test that selecting a single column returns a Series.
+
+        This is the correct behavior when spend_col == var_col.
+        """
+        df = pd.DataFrame({"col_a": [1.0, 2.0, 3.0], "col_b": [4.0, 5.0, 6.0]})
+
+        # Selecting a single column works correctly
+        col_name = "col_a"
+        temp_df = df[[col_name]].copy()
+
+        # Accessing by column name returns a Series
+        result = temp_df[col_name]
+        self.assertIsInstance(result, pd.Series)
+
+        # pd.to_numeric works on a Series
+        numeric_result = pd.to_numeric(result, errors="coerce")
+        self.assertIsInstance(numeric_result, pd.Series)
+
+
 if __name__ == "__main__":
     unittest.main()
