@@ -184,6 +184,7 @@ def _apply_aggregations_from_metadata(
         return df, []
 
     created_columns = []
+    skipped_columns = []
     df = df.copy()
 
     for custom_col, source_info in aggregation_sources.items():
@@ -197,7 +198,11 @@ def _apply_aggregations_from_metadata(
         # Check if all source columns exist
         available_sources = [c for c in source_columns if c in df.columns]
         if not available_sources:
-            continue  # Skip if no source columns available
+            # Track skipped columns for potential debugging
+            skipped_columns.append(
+                f"{custom_col} (missing sources: {source_columns})"
+            )
+            continue
 
         # Apply aggregation
         try:
@@ -214,8 +219,17 @@ def _apply_aggregations_from_metadata(
                 df[custom_col] = df[available_sources].sum(axis=1)
 
             created_columns.append(custom_col)
-        except Exception:
-            pass  # Skip column if aggregation fails
+        except (ValueError, TypeError) as e:
+            # Log specific errors that might occur during aggregation
+            logging.warning(
+                f"Failed to create {custom_col} from {available_sources}: {e}"
+            )
+
+    # Log skipped columns for debugging if any
+    if skipped_columns:
+        logging.info(
+            f"Skipped {len(skipped_columns)} custom column(s) due to missing source columns"
+        )
 
     return df, created_columns
 
