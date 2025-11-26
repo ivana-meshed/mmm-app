@@ -1258,7 +1258,11 @@ with st.expander(
             return "⚪"  # Unknown/invalid
 
     def _calculate_vif_for_columns(cols: List[str]) -> dict:
-        """Calculate VIF values for a list of columns."""
+        """Calculate VIF values for a list of columns.
+
+        Handles missing values by filling NaN with column means to avoid
+        losing too many rows when data is sparse across multiple columns.
+        """
         vif_values = {}
         if len(cols) < 2:
             return vif_values
@@ -1276,7 +1280,21 @@ with st.expander(
             vif_df = df_r[valid_cols].copy()
             for col in vif_df.columns:
                 vif_df[col] = pd.to_numeric(vif_df[col], errors="coerce")
+
+            # Drop columns that are entirely NaN
+            vif_df = vif_df.dropna(axis=1, how="all")
+            if vif_df.shape[1] < 2:
+                return vif_values
+
+            # Fill remaining NaN values with column means to preserve rows
+            # This is more robust than dropping all rows with any NaN
+            vif_df = vif_df.fillna(vif_df.mean())
+
+            # Drop any rows that still have NaN (e.g., if entire column was NaN)
             vif_df = vif_df.dropna()
+
+            # Update valid_cols to match remaining columns after processing
+            valid_cols = vif_df.columns.tolist()
 
             if len(vif_df) > len(valid_cols) + 1:
                 try:

@@ -290,5 +290,76 @@ class TestOtherColumnFiltering(unittest.TestCase):
         self.assertEqual(set(other_cols), {"date_col", "unknown_col"})
 
 
+class TestVIFCalculation(unittest.TestCase):
+    """Tests for VIF calculation with sparse data."""
+
+    def test_vif_with_sparse_data(self):
+        """
+        Test that VIF calculation handles sparse data by filling NaN with means.
+
+        With 30% NaN per column across 13 columns, dropna() would leave only
+        1 complete row, which is insufficient for VIF calculation. The fix
+        fills NaN with column means to preserve more rows.
+        """
+        from statsmodels.stats.outliers_influence import (
+            variance_inflation_factor,
+        )
+
+        # Create sparse data: 50 rows, 13 columns, 30% NaN per column
+        np.random.seed(42)
+        n_rows = 50
+        n_cols = 13
+
+        data = {}
+        for i in range(n_cols):
+            col_data = np.random.randn(n_rows).tolist()
+            # Set 30% of values to NaN
+            nan_indices = np.random.choice(
+                n_rows, size=int(n_rows * 0.3), replace=False
+            )
+            for idx in nan_indices:
+                col_data[idx] = np.nan
+            data[f"col_{i}"] = col_data
+
+        df = pd.DataFrame(data)
+
+        # Using old approach (dropna): only 1 row remains
+        complete_cases = len(df.dropna())
+        self.assertEqual(complete_cases, 1)
+
+        # Using new approach (fillna with mean): all 50 rows preserved
+        df_filled = df.fillna(df.mean())
+        self.assertEqual(len(df_filled), 50)
+
+        # VIF should be calculable with filled data
+        vif_array = np.asarray(df_filled.values, dtype=np.float64)
+        for i in range(n_cols):
+            vif = variance_inflation_factor(vif_array, i)
+            self.assertFalse(np.isnan(vif))
+            self.assertTrue(vif >= 1.0)  # VIF is always >= 1
+
+    def test_vif_with_all_nan_column(self):
+        """
+        Test that columns that are entirely NaN are dropped before VIF calc.
+        """
+        # Create data with one column entirely NaN
+        np.random.seed(42)
+        n_rows = 50
+        n_cols = 5
+
+        data = {f"col_{i}": np.random.randn(n_rows) for i in range(n_cols)}
+        data["col_2"] = [np.nan] * n_rows  # Entirely NaN
+        df = pd.DataFrame(data)
+
+        # Drop columns that are all NaN, fill remaining NaN with mean
+        df_processed = df.dropna(axis=1, how="all").fillna(df.mean())
+
+        # col_2 should be dropped
+        self.assertNotIn("col_2", df_processed.columns)
+
+        # Other columns should remain
+        self.assertEqual(len(df_processed.columns), n_cols - 1)
+
+
 if __name__ == "__main__":
     unittest.main()
