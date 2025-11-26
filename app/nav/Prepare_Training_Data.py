@@ -626,11 +626,14 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
     st.session_state.setdefault("dq_dropped_cols", set())
     st.session_state.setdefault("dq_clean_note", "")
     st.session_state.setdefault("dq_last_dropped", [])
+    # Session state for user column selections (persists manual checkbox changes)
+    st.session_state.setdefault("dq_user_selections", {})
 
     if reset_clean:
         st.session_state["dq_dropped_cols"] = set()
         st.session_state["dq_clean_note"] = ""
         st.session_state["dq_last_dropped"] = []
+        st.session_state["dq_user_selections"] = {}
         st.rerun()
 
     # Apply cleaning when requested
@@ -709,7 +712,16 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
 
     # Apply dropped flags to 'Use' default
     dropped = st.session_state["dq_dropped_cols"]
+    user_selections = st.session_state["dq_user_selections"]
+
+    # Initialize Use column: start with True for non-dropped
     prof_all["Use"] = ~prof_all["Column"].isin(dropped)
+    
+    # Apply any saved user selections (persisted from previous interactions)
+    if user_selections:
+        # Use vectorized map for O(n) performance
+        mask = prof_all["Column"].isin(user_selections.keys())
+        prof_all.loc[mask, "Use"] = prof_all.loc[mask, "Column"].map(user_selections)
 
     # Render tables
     use_overrides: dict[str, bool] = {}
@@ -827,6 +839,9 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         row["Column"]: bool(row["Use"]) for _, row in prof_all.iterrows()
     }
     final_use.update(use_overrides)
+    
+    # Persist user selections to session state for next rerun
+    st.session_state["dq_user_selections"].update(use_overrides)
 
     selected_cols = [c for c, u in final_use.items() if u]
     st.session_state["selected_columns_for_training"] = selected_cols
@@ -911,6 +926,9 @@ with st.expander(
         metrics_data = []
         for spend_col in available_paid_spends:
             if spend_col in df_r.columns and selected_goal in df_r.columns:
+                # Skip if spend_col == selected_goal (comparing to itself)
+                if spend_col == selected_goal:
+                    continue
                 # Prepare data for correlation - ensure numeric types
                 temp_df = df_r[[spend_col, selected_goal]].copy()
                 temp_df[spend_col] = pd.to_numeric(temp_df[spend_col], errors="coerce")
@@ -1043,6 +1061,9 @@ with st.expander(
             var_metrics_data = []
             for var_col in unique_options:
                 if var_col in df_r.columns and spend_col in df_r.columns:
+                    # Skip if spend_col == var_col (comparing to itself)
+                    if spend_col == var_col:
+                        continue
                     temp_df = df_r[[spend_col, var_col]].copy()
                     temp_df[spend_col] = pd.to_numeric(temp_df[spend_col], errors="coerce")
                     temp_df[var_col] = pd.to_numeric(temp_df[var_col], errors="coerce")
@@ -1186,8 +1207,12 @@ with st.expander(
         if not var_cols or not goal_col:
             return pd.DataFrame()
 
-        # Filter to columns that exist in df_r
-        valid_cols = [c for c in var_cols if c in df_r.columns]
+        # Filter to columns that exist in df_r and are numeric
+        # (exclude datetime columns which can't be used in regression)
+        valid_cols = [
+            c for c in var_cols
+            if c in df_r.columns and pd.api.types.is_numeric_dtype(df_r[c])
+        ]
         if not valid_cols:
             return pd.DataFrame()
 
@@ -1228,6 +1253,10 @@ with st.expander(
         # Calculate metrics for each variable against the goal
         for var_col in valid_cols:
             if var_col not in df_r.columns or goal_col not in df_r.columns:
+                continue
+
+            # Skip if var_col == goal_col (comparing to itself)
+            if var_col == goal_col:
                 continue
 
             temp_df = df_r[[var_col, goal_col]].copy()
