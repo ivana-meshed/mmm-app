@@ -1129,11 +1129,6 @@ with st.expander(
         # Get paid_media_mapping from metadata
         paid_media_mapping = meta.get("paid_media_mapping", {}) or {}
 
-        # Also get all available paid media spends for dropdown options
-        all_paid_spends_available = [
-            c for c in paid_spend_cols if c in df_r.columns
-        ]
-
         for spend_col in selected_paid_spends:
             st.markdown(f"#### {spend_col}")
 
@@ -1141,7 +1136,7 @@ with st.expander(
             corresponding_vars = paid_media_mapping.get(spend_col, [])
 
             # Build options list: include the spend column itself plus mapped vars
-            # Always include the spend column as an option
+            # Always include the spend column as an option (Requirement 5)
             options_list = [spend_col]  # Start with the spend column itself
 
             # Add mapped vars that are available in the data
@@ -1149,11 +1144,6 @@ with st.expander(
                 v for v in corresponding_vars if v in df_r.columns
             ]
             options_list.extend(available_vars)
-
-            # Add all other paid media spends as options (Requirement 5)
-            for other_spend in all_paid_spends_available:
-                if other_spend not in options_list:
-                    options_list.append(other_spend)
 
             # Remove duplicates while preserving order using dict.fromkeys()
             unique_options = list(dict.fromkeys(options_list))
