@@ -56,8 +56,10 @@ prepare_training_page_oldv2 = st.Page(
     icon="⚙️",
 )
 
+# experiment_page = st.Page("nav/Run_Models.py", title="5. Run Models", icon="🧪")
+
 experiment_page = st.Page(
-    "nav/Run_Models.py", title="5. Run Models", icon="🧪"
+    "nav/Run_Experiment.py", title="5. Run Models", icon="🧪"
 )
 results_page = st.Page(
     "nav/View_Results.py", title="Results: Robyn MMM", icon="📈"
@@ -81,9 +83,9 @@ pg = st.navigation(
         map_page,
         prepare_training_data_page,
         review_page,
-        prepare_training_page,
-        prepare_training_page_old,
-        prepare_training_page_oldv2,
+        # prepare_training_page,
+        # prepare_training_page_old,
+        # prepare_training_page_oldv2,
         experiment_page,
         results_page,
         best_results_page,
