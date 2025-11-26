@@ -712,10 +712,9 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
             note += " Guards applied — " + "; ".join(warnings_list)
         st.session_state["dq_clean_note"] = note
 
-        # Clear user selections for dropped columns so they reflect the drop
+        # Mark dropped columns as Use=False in user selections
         user_sel = st.session_state.get("dq_user_selections", {})
-        for col in to_drop:
-            user_sel[col] = False
+        user_sel.update({col: False for col in to_drop})
         st.session_state["dq_user_selections"] = user_sel
 
         # Clear data editor widget states so they refresh with correct values
@@ -1536,7 +1535,9 @@ with st.expander(
             "VIF calculated across all selected variables from all tables above."
         )
 
-        # Remove duplicates while preserving order
+        # Remove duplicates while preserving order - order matters because
+        # columns from different tables may overlap and we want consistent
+        # display order based on when they were first added
         all_selected_unique = list(dict.fromkeys(all_selected_vars))
 
         if len(all_selected_unique) < 2:
