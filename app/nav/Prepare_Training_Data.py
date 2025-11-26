@@ -1299,12 +1299,14 @@ with st.expander(
     def _calculate_variable_metrics(
         var_cols: List[str],
         goal_col: str,
+        selected_only_cols: List[str],
     ) -> pd.DataFrame:
         """Calculate R², NMAE, Spearman's ρ, VIF for a list of variables.
 
         Args:
             var_cols: All columns to display in the table
             goal_col: The goal column for correlation calculations
+            selected_only_cols: Columns currently selected (Use=True) for VIF
         """
         if not var_cols or not goal_col:
             return pd.DataFrame()
@@ -1320,9 +1322,8 @@ with st.expander(
 
         metrics_data = []
 
-        # Calculate VIF for all valid columns in this table
-        # (VIF shows multicollinearity among all displayed variables)
-        vif_values = _calculate_vif_for_columns(valid_cols)
+        # Calculate VIF only for selected columns within this table
+        vif_values = _calculate_vif_for_columns(selected_only_cols)
 
         # Calculate metrics for each variable against the goal
         for var_col in valid_cols:
@@ -1411,7 +1412,18 @@ with st.expander(
         if not var_list or not selected_goal:
             return []
 
-        df_metrics = _calculate_variable_metrics(var_list, selected_goal)
+        # Get currently selected columns for this table from session state
+        selected_cols_for_vif = [
+            c
+            for c in var_list
+            if st.session_state["vif_selections"].get(c, True)
+            and c in df_r.columns
+            and pd.api.types.is_numeric_dtype(df_r[c])
+        ]
+
+        df_metrics = _calculate_variable_metrics(
+            var_list, selected_goal, selected_cols_for_vif
+        )
 
         if df_metrics.empty:
             st.info(f"No {title.lower()} available in the data.")
