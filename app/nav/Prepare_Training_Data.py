@@ -1693,7 +1693,7 @@ with st.expander(
         edited = st.data_editor(
             df_metrics,
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             num_rows="fixed",
             column_config={
                 "Use": st.column_config.CheckboxColumn(
@@ -1852,7 +1852,7 @@ with st.expander(
                 edited_global = st.data_editor(
                     global_vif_df,
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                     num_rows="fixed",
                     column_config={
                         "Use": st.column_config.CheckboxColumn(
