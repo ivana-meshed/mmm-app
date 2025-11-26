@@ -1286,12 +1286,11 @@ with st.expander(
             if vif_df.shape[1] < 2:
                 return vif_values
 
-            # Fill remaining NaN values with column means to preserve rows
-            # This is more robust than dropping all rows with any NaN
-            vif_df = vif_df.fillna(vif_df.mean())
-
-            # Drop any rows that still have NaN (e.g., if entire column was NaN)
-            vif_df = vif_df.dropna()
+            # Fill remaining NaN values with column means to preserve rows.
+            # Use fillna(0) as fallback for any columns where mean is NaN.
+            # This is more robust than dropping all rows with any NaN.
+            col_means = vif_df.mean().fillna(0)
+            vif_df = vif_df.fillna(col_means)
 
             # Update valid_cols to match remaining columns after processing
             valid_cols = vif_df.columns.tolist()
