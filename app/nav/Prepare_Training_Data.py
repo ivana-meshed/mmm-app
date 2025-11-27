@@ -2227,14 +2227,26 @@ with st.expander(
                 paid_media_mapping = meta.get("paid_media_mapping", {}) or {}
 
                 # Build reverse mapping: var -> spend
+                # First, use the actual Step 3.3 selections to map each media var
+                # back to its corresponding spend from Step 3.2
                 var_to_spend_mapping = {}
+                SPEND_SUFFIX = " (spend)"
+                for spend_col in selected_paid_spends_3_2:
+                    media_var = st.session_state.get(
+                        f"media_var_select_{spend_col}"
+                    )
+                    if media_var:
+                        # Remove "(spend)" suffix if present
+                        if media_var.endswith(SPEND_SUFFIX):
+                            media_var = media_var[: -len(SPEND_SUFFIX)]
+                        if media_var:
+                            var_to_spend_mapping[media_var] = spend_col
+
+                # Also add mappings from metadata for any vars not yet mapped
                 for spend_col, var_list in paid_media_mapping.items():
                     for var_col in var_list:
-                        var_to_spend_mapping[var_col] = spend_col
-                # Also map spend columns to themselves (when spend is used as var)
-                for spend_col in paid_media_mapping.keys():
-                    if spend_col not in var_to_spend_mapping:
-                        var_to_spend_mapping[spend_col] = spend_col
+                        if var_col not in var_to_spend_mapping:
+                            var_to_spend_mapping[var_col] = spend_col
 
                 # Find corresponding spends for the VIF-selected media vars
                 selected_spends_from_vif = []
