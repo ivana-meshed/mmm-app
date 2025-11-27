@@ -238,6 +238,16 @@ def _apply_aggregations_from_metadata(
 with tab_single:
     st.subheader("Robyn configuration & training")
 
+    # Check for prefill from Prepare Training Data page for country/data/metadata
+    training_prefill = st.session_state.get("training_prefill")
+    prefill_country = None
+    prefill_data_version = None
+    prefill_meta_version = None
+    if training_prefill and st.session_state.get("training_prefill_ready"):
+        prefill_country = training_prefill.get("country")
+        prefill_data_version = training_prefill.get("data_version")
+        prefill_meta_version = training_prefill.get("meta_version")
+
     # Data selection
     with st.expander("📊 Data Selection", expanded=False):
         # Show current loaded state (point 4 - UI representing actual state)
@@ -258,10 +268,16 @@ with tab_single:
 
         # Country selection
         available_countries = ["fr", "de", "it", "es", "nl", "uk"]
+        # Determine default index from prefill or default to 0
+        default_country_index = 0
+        if prefill_country and prefill_country.lower() in available_countries:
+            default_country_index = available_countries.index(
+                prefill_country.lower()
+            )
         selected_country = st.selectbox(
             "Country",
             options=available_countries,
-            index=0,
+            index=default_country_index,
             help="Select the country for which to load data",
         )
 
@@ -296,10 +312,18 @@ with tab_single:
             metadata_options = ["Universal - Latest"]
 
         # Metadata source selection (NEW - above data source)
+        # Determine default index from prefill
+        default_meta_index = 0
+        if prefill_meta_version:
+            # Try to find matching metadata option
+            for i, opt in enumerate(metadata_options):
+                if prefill_meta_version in opt:
+                    default_meta_index = i
+                    break
         selected_metadata = st.selectbox(
             "Metadata source",
             options=metadata_options,
-            index=0,
+            index=default_meta_index,
             help="Select metadata configuration. Universal mappings work for all countries. Latest = most recently saved metadata.",
         )
 
@@ -313,10 +337,18 @@ with tab_single:
             available_versions = ["Latest"]
 
         # Data source selection
+        # Determine default index from prefill
+        default_data_index = 0
+        if prefill_data_version:
+            # Try to find matching data version
+            for i, opt in enumerate(available_versions):
+                if prefill_data_version.lower() == opt.lower():
+                    default_data_index = i
+                    break
         selected_version = st.selectbox(
             "Data source",
             options=available_versions,
-            index=0,
+            index=default_data_index,
             help="Select data version to use. Latest = most recently saved data.",
         )
 
@@ -999,6 +1031,35 @@ with tab_single:
 
         # Get loaded configuration to apply defaults
         loaded_config = st.session_state.get("loaded_training_config", {})
+
+        # Check for prefill from Prepare Training Data page (takes priority)
+        training_prefill = st.session_state.get("training_prefill")
+        if training_prefill and st.session_state.get("training_prefill_ready"):
+            st.info(
+                "📋 **Prefill from Prepare Training Data page detected!** "
+                "Variable selections have been pre-populated."
+            )
+            # Use prefill data as loaded_config equivalent
+            loaded_config = {
+                "paid_media_spends": training_prefill.get(
+                    "paid_media_spends", []
+                ),
+                "paid_media_vars": training_prefill.get("paid_media_vars", []),
+                "organic_vars": training_prefill.get("organic_vars", []),
+                "context_vars": training_prefill.get("context_vars", []),
+                "factor_vars": training_prefill.get("factor_vars", []),
+            }
+            # Apply var_to_spend_mapping to spend_var_mapping
+            var_to_spend = training_prefill.get("var_to_spend_mapping", {})
+            # Reverse it to spend -> var for the UI
+            for var, spend in var_to_spend.items():
+                st.session_state["spend_var_mapping"][spend] = var
+            # Clear the prefill flag so it doesn't re-trigger on each page load
+            st.session_state["training_prefill_ready"] = False
+            # Force widget refresh by updating timestamp
+            st.session_state["loaded_config_timestamp"] = (
+                datetime.utcnow().timestamp()
+            )
 
         # Get all paid_media_spends from metadata (including CUSTOM columns)
         # Don't filter by all_columns since CUSTOM columns may not be in preview yet

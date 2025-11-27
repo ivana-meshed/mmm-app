@@ -1354,8 +1354,8 @@ with st.expander(
     st.caption(
         "Analyze selected variables for multicollinearity using Variance "
         "Inflation Factor (VIF). Use checkboxes to include/exclude variables. "
-        "VIF is recalculated based on selected variables within each table and "
-        "globally. VIF > 10 indicates high multicollinearity (🔴), VIF 5-10 is "
+        "VIF is calculated within each category table separately. "
+        "VIF > 10 indicates high multicollinearity (🔴), VIF 5-10 is "
         "moderate (🟡), VIF < 5 is good (🟢)."
     )
 
@@ -1751,8 +1751,55 @@ with st.expander(
     selected_factor_step4 = column_categories_step4.get("factor_vars", [])
     selected_other_step4 = column_categories_step4.get("other", [])
 
-    # Track all selected variables across tables for global VIF
+    # Track all selected variables across tables for VIF
     all_selected_vars_step4: List[str] = []
+
+    # Helper function to get all currently selected vars across all categories
+    def _get_all_selected_vars_step4() -> List[str]:
+        """Get all selected variables from VIF tables."""
+        all_vars = []
+        # Media vars
+        for v in selected_media_vars_3_3:
+            if (
+                st.session_state["vif_selections"].get(v, True)
+                and v in df_r.columns
+                and pd.api.types.is_numeric_dtype(df_r[v])
+            ):
+                all_vars.append(v)
+        # Organic vars
+        for v in selected_organic_step4:
+            if (
+                st.session_state["vif_selections"].get(v, True)
+                and v in df_r.columns
+                and pd.api.types.is_numeric_dtype(df_r[v])
+            ):
+                all_vars.append(v)
+        # Context vars
+        for v in selected_context_step4:
+            if (
+                st.session_state["vif_selections"].get(v, True)
+                and v in df_r.columns
+                and pd.api.types.is_numeric_dtype(df_r[v])
+            ):
+                all_vars.append(v)
+        # Factor vars
+        for v in selected_factor_step4:
+            if (
+                st.session_state["vif_selections"].get(v, True)
+                and v in df_r.columns
+                and pd.api.types.is_numeric_dtype(df_r[v])
+            ):
+                all_vars.append(v)
+        # Other vars
+        for v in selected_other_step4:
+            if (
+                st.session_state["vif_selections"].get(v, True)
+                and v in df_r.columns
+                and pd.api.types.is_numeric_dtype(df_r[v])
+            ):
+                all_vars.append(v)
+        # Remove duplicates while preserving order
+        return list(dict.fromkeys(all_vars))
 
     if not selected_goal_step4:
         st.info(
@@ -1762,13 +1809,118 @@ with st.expander(
     elif not selected_media_vars_3_3:
         st.info("Please select media response variables in Step 3 section 3.3.")
     else:
+        # =====================================================
+        # Model Quality Indicators Section (MOVED ABOVE VIF tables)
+        # This section updates when VIF selections change (full page rerun)
+        # =====================================================
+        def _render_model_quality_indicators():
+            """Render Model Quality Indicators - updates on VIF changes."""
+            # Get all currently selected variables
+            final_selected_vars = _get_all_selected_vars_step4()
+
+            st.markdown("#### Model Quality Indicators")
+            st.caption(
+                "Traffic light indicators based on Robyn MMM best practices. "
+                "Updates when you change driver selections below."
+            )
+
+            col_ratio, col_collin = st.columns(2)
+
+            # Indicator 1: Ratio of drivers to timeframe
+            with col_ratio:
+                n_drivers = len(final_selected_vars)
+                n_observations = len(df_r) if not df_r.empty else 0
+
+                ratio_light, ratio_label, ratio_value = (
+                    _calculate_driver_ratio_band(n_drivers, n_observations)
+                )
+
+                st.markdown("##### Driver Ratio")
+                st.caption(
+                    "Robyn recommends ≥10 observations per driver (1:10)."
+                )
+
+                ratio_col1, ratio_col2 = st.columns([1, 2])
+                with ratio_col1:
+                    st.metric(
+                        label="Status",
+                        value=f"{ratio_light} {ratio_label}",
+                    )
+                with ratio_col2:
+                    if pd.notna(ratio_value):
+                        st.metric(
+                            label="Ratio",
+                            value=f"{ratio_value:.1f}:1",
+                            help=f"{n_observations} obs / {n_drivers} drivers",
+                        )
+                    else:
+                        st.metric(label="Ratio", value="N/A")
+
+                st.caption(f"📊 {n_drivers} drivers, {n_observations} obs")
+
+            # Indicator 2: Collinearity (Condition Number)
+            with col_collin:
+                # Calculate condition number for selected variables
+                if len(final_selected_vars) >= 2:
+                    condition_number = _calculate_condition_number(
+                        final_selected_vars
+                    )
+                else:
+                    condition_number = np.nan
+
+                collin_light, collin_label = _calculate_collinearity_band(
+                    condition_number
+                )
+
+                st.markdown("##### Collinearity")
+                st.caption(
+                    "Condition Number: <10 good, 10-30 moderate, >30 high"
+                )
+
+                collin_col1, collin_col2 = st.columns([1, 2])
+                with collin_col1:
+                    st.metric(
+                        label="Status",
+                        value=f"{collin_light} {collin_label}",
+                    )
+                with collin_col2:
+                    if pd.notna(condition_number):
+                        st.metric(
+                            label="CN",
+                            value=f"{condition_number:.2f}",
+                            help="Calculated from correlation matrix",
+                        )
+                    else:
+                        st.metric(label="CN", value="N/A")
+
+                if pd.notna(condition_number) and condition_number > 30:
+                    st.warning(
+                        "High collinearity. Consider removing variables."
+                    )
+
+        # Render Model Quality Indicators at the top
+        _render_model_quality_indicators()
+
+        # Add Refresh button to update indicators after VIF selection changes
+        if st.button(
+            "🔄 Refresh Quality Indicators",
+            help="Click to recalculate indicators after changing driver selections in the VIF tables below",
+            key="refresh_quality_indicators",
+        ):
+            st.rerun()
+
+        st.markdown("---")
+
+        # =====================================================
+        # VIF Tables Section
+        # =====================================================
         # Render tables with fragment for partial rerun on checkbox change
         _render_vif_table_fragment(
             "Selected Media Response Variables",
             selected_media_vars_3_3,
             "media_vars",
         )
-        # Collect selected vars for global VIF from session state
+        # Collect selected vars from session state
         all_selected_vars_step4.extend(
             _get_selected_vars_from_session(selected_media_vars_3_3)
         )
@@ -1806,210 +1958,210 @@ with st.expander(
                 _get_selected_vars_from_session(selected_other_step4)
             )
 
-        # Display global VIF across ALL selected variables from all tables
+        # =====================================================
+        # Global VIF Section - COMMENTED OUT per requirement
+        # =====================================================
+        # # Display global VIF across ALL selected variables from all tables
+        # st.markdown("---")
+        # st.markdown("#### Global VIF (All Selected Variables)")
+        # st.caption(
+        #     "VIF calculated across all selected variables from all tables "
+        #     "above. Use checkboxes to include/exclude variables from the "
+        #     "global VIF calculation."
+        # )
+        #
+        # # Remove duplicates while preserving order
+        # all_selected_unique_step4 = list(dict.fromkeys(all_selected_vars_step4))
+        #
+        # if len(all_selected_unique_step4) < 2:
+        #     st.info(
+        #         "Select at least 2 variables across all tables to calculate "
+        #         "global VIF."
+        #     )
+        # else:
+        #     # Get global VIF selections from session state
+        #     # Initialize with all selected if not set
+        #     for var in all_selected_unique_step4:
+        #         if var not in st.session_state["global_vif_selections"]:
+        #             st.session_state["global_vif_selections"][var] = True
+        #
+        #     @st.fragment
+        #     def _render_global_vif_fragment():
+        #         """Fragment for Global VIF table to enable partial reruns."""
+        #         # Filter to only globally selected variables
+        #         globally_selected_vars = [
+        #             v
+        #             for v in all_selected_unique_step4
+        #             if st.session_state["global_vif_selections"].get(v, True)
+        #         ]
+        #
+        #         global_vif = _calculate_vif_for_columns_step4(
+        #             globally_selected_vars
+        #         )
+        #
+        #         if global_vif or all_selected_unique_step4:
+        #             global_vif_data = []
+        #             for var_col in all_selected_unique_step4:
+        #                 use_val = st.session_state[
+        #                     "global_vif_selections"
+        #                 ].get(var_col, True)
+        #                 vif = (
+        #                     global_vif.get(var_col, np.nan)
+        #                     if use_val
+        #                     else np.nan
+        #                 )
+        #                 global_vif_data.append(
+        #                     {
+        #                         "Use": use_val,
+        #                         "Variable": var_col,
+        #                         "Global VIF": _safe_float(vif),
+        #                         "VIF Band": (
+        #                             _calculate_vif_band(vif)
+        #                             if use_val
+        #                             else "⚪"
+        #                         ),
+        #                     }
+        #                 )
+        #
+        #             global_vif_df = pd.DataFrame(global_vif_data)
+        #
+        #             edited_global = st.data_editor(
+        #                 global_vif_df,
+        #                 hide_index=True,
+        #                 width="stretch",
+        #                 num_rows="fixed",
+        #                 column_config={
+        #                     "Use": st.column_config.CheckboxColumn(
+        #                         "Use",
+        #                         help="Include in global VIF calculation",
+        #                         required=True,
+        #                         default=True,
+        #                     ),
+        #                     "Variable": st.column_config.TextColumn(
+        #                         "Variable", disabled=True
+        #                     ),
+        #                     "Global VIF": st.column_config.NumberColumn(
+        #                         "Global VIF", format="%.2f", disabled=True
+        #                     ),
+        #                     "VIF Band": st.column_config.TextColumn(
+        #                         "VIF Band",
+        #                         help="🟢 = Good, 🟡 = Moderate, 🔴 = High",
+        #                         disabled=True,
+        #                     ),
+        #                 },
+        #                 key="global_vif_table_step4",
+        #             )
+        #
+        #             # Check if selections changed and update session state
+        #             needs_rerun = False
+        #             for _, row in edited_global.iterrows():
+        #                 var_name = str(row["Variable"])
+        #                 use_val = bool(row["Use"])
+        #                 old_val = st.session_state[
+        #                     "global_vif_selections"
+        #                 ].get(var_name, True)
+        #                 if old_val != use_val:
+        #                     needs_rerun = True
+        #                 st.session_state["global_vif_selections"][
+        #                     var_name
+        #                 ] = use_val
+        #
+        #             # Fragment rerun only
+        #             if needs_rerun:
+        #                 st.rerun(scope="fragment")
+        #         else:
+        #             st.info(
+        #                 "Unable to calculate global VIF for selected variables."
+        #             )
+        #
+        #     # Call the fragment
+        #     _render_global_vif_fragment()
+
+        # =====================================================
+        # Export to Training Page Button
+        # =====================================================
         st.markdown("---")
-        st.markdown("#### Global VIF (All Selected Variables)")
+        st.markdown("### Export to Training Page")
         st.caption(
-            "VIF calculated across all selected variables from all tables "
-            "above. Use checkboxes to include/exclude variables from the "
-            "global VIF calculation."
+            "Export your current selections to prefill the Training page "
+            "with data, metadata, and selected drivers."
         )
 
-        # Remove duplicates while preserving order
-        all_selected_unique_step4 = list(dict.fromkeys(all_selected_vars_step4))
+        if st.button(
+            "🚀 Export to Training Page",
+            type="primary",
+            key="export_to_training_page",
+        ):
+            # Get final selected variables from VIF selections
+            final_vars = _get_all_selected_vars_step4()
 
-        if len(all_selected_unique_step4) < 2:
-            st.info(
-                "Select at least 2 variables across all tables to calculate "
-                "global VIF."
-            )
-        else:
-            # Get global VIF selections from session state
-            # Initialize with all selected if not set
-            for var in all_selected_unique_step4:
-                if var not in st.session_state["global_vif_selections"]:
-                    st.session_state["global_vif_selections"][var] = True
-
-            @st.fragment
-            def _render_global_vif_fragment():
-                """Fragment for Global VIF table to enable partial reruns."""
-                # Filter to only globally selected variables
-                globally_selected_vars = [
-                    v
-                    for v in all_selected_unique_step4
-                    if st.session_state["global_vif_selections"].get(v, True)
-                ]
-
-                global_vif = _calculate_vif_for_columns_step4(
-                    globally_selected_vars
-                )
-
-                if global_vif or all_selected_unique_step4:
-                    global_vif_data = []
-                    for var_col in all_selected_unique_step4:
-                        use_val = st.session_state["global_vif_selections"].get(
-                            var_col, True
-                        )
-                        vif = (
-                            global_vif.get(var_col, np.nan)
-                            if use_val
-                            else np.nan
-                        )
-                        global_vif_data.append(
-                            {
-                                "Use": use_val,
-                                "Variable": var_col,
-                                "Global VIF": _safe_float(vif),
-                                "VIF Band": (
-                                    _calculate_vif_band(vif)
-                                    if use_val
-                                    else "⚪"
-                                ),
-                            }
-                        )
-
-                    global_vif_df = pd.DataFrame(global_vif_data)
-
-                    edited_global = st.data_editor(
-                        global_vif_df,
-                        hide_index=True,
-                        width="stretch",
-                        num_rows="fixed",
-                        column_config={
-                            "Use": st.column_config.CheckboxColumn(
-                                "Use",
-                                help="Include variable in global VIF calculation",
-                                required=True,
-                                default=True,
-                            ),
-                            "Variable": st.column_config.TextColumn(
-                                "Variable", disabled=True
-                            ),
-                            "Global VIF": st.column_config.NumberColumn(
-                                "Global VIF", format="%.2f", disabled=True
-                            ),
-                            "VIF Band": st.column_config.TextColumn(
-                                "VIF Band",
-                                help="🟢 = Good (< 5), 🟡 = Moderate (5-10), "
-                                "🔴 = High (> 10)",
-                                disabled=True,
-                            ),
-                        },
-                        key="global_vif_table_step4",
-                    )
-
-                    # Check if selections changed and update session state
-                    needs_rerun = False
-                    for _, row in edited_global.iterrows():
-                        var_name = str(row["Variable"])
-                        use_val = bool(row["Use"])
-                        old_val = st.session_state["global_vif_selections"].get(
-                            var_name, True
-                        )
-                        if old_val != use_val:
-                            needs_rerun = True
-                        st.session_state["global_vif_selections"][
-                            var_name
-                        ] = use_val
-
-                    # Fragment rerun only
-                    if needs_rerun:
-                        st.rerun(scope="fragment")
-                else:
-                    st.info(
-                        "Unable to calculate global VIF for selected variables."
-                    )
-
-            # Call the fragment
-            _render_global_vif_fragment()
-
-            # Count final selected variables for indicators (outside fragment)
-            final_selected_vars = [
+            # Get VIF-selected media response variables
+            # These are the media vars selected in Step 3.3 AND kept via VIF
+            selected_media_response_vars = [
                 v
-                for v in all_selected_unique_step4
-                if st.session_state["global_vif_selections"].get(v, True)
+                for v in selected_media_vars_3_3
+                if st.session_state["vif_selections"].get(v, True)
+                and v in df_r.columns
+                and pd.api.types.is_numeric_dtype(df_r[v])
             ]
 
-            # Traffic Light Indicators Section
-            st.markdown("---")
-            st.markdown("#### Model Quality Indicators")
-            st.caption(
-                "Traffic light indicators based on Robyn MMM best practices."
+            # Get paid_media_mapping from metadata to find corresponding spends
+            paid_media_mapping = meta.get("paid_media_mapping", {}) or {}
+
+            # Build reverse mapping: var -> spend
+            var_to_spend_mapping = {}
+            for spend_col, var_list in paid_media_mapping.items():
+                for var_col in var_list:
+                    var_to_spend_mapping[var_col] = spend_col
+            # Also map spend columns to themselves (when spend is used as var)
+            for spend_col in paid_media_mapping.keys():
+                if spend_col not in var_to_spend_mapping:
+                    var_to_spend_mapping[spend_col] = spend_col
+
+            # Find corresponding spends for the VIF-selected media response vars
+            selected_spends_from_vif = []
+            var_to_spend_export = {}
+            for media_var in selected_media_response_vars:
+                spend_col = var_to_spend_mapping.get(media_var)
+                if spend_col:
+                    if spend_col not in selected_spends_from_vif:
+                        selected_spends_from_vif.append(spend_col)
+                    var_to_spend_export[media_var] = spend_col
+
+            # Store selections in session state for Training page
+            st.session_state["training_prefill"] = {
+                "country": st.session_state.get("country", "de"),
+                "selected_goal": st.session_state.get("selected_goal"),
+                "paid_media_spends": selected_spends_from_vif,
+                "paid_media_vars": selected_media_response_vars,
+                "var_to_spend_mapping": var_to_spend_export,
+                "organic_vars": [
+                    v for v in selected_organic_step4 if v in final_vars
+                ],
+                "context_vars": [
+                    v for v in selected_context_step4 if v in final_vars
+                ],
+                "factor_vars": [
+                    v for v in selected_factor_step4 if v in final_vars
+                ],
+                "all_selected_drivers": final_vars,
+                "data_version": st.session_state.get(
+                    "picked_data_ts", "Latest"
+                ),
+                "meta_version": st.session_state.get(
+                    "picked_meta_ts", "Latest"
+                ),
+            }
+
+            # Store flag to indicate prefill is ready
+            st.session_state["training_prefill_ready"] = True
+
+            st.success(
+                f"✅ Exported {len(final_vars)} selected drivers to Training page!\n\n"
+                f"**Paid Media Response Vars (VIF selected):** {len(selected_media_response_vars)}\n"
+                f"**Corresponding Paid Media Spends:** {len(selected_spends_from_vif)}\n"
+                f"**Organic Vars:** {len([v for v in selected_organic_step4 if v in final_vars])}\n"
+                f"**Context Vars:** {len([v for v in selected_context_step4 if v in final_vars])}\n"
+                f"**Factor Vars:** {len([v for v in selected_factor_step4 if v in final_vars])}\n\n"
+                "👉 Navigate to **Experiment** page to see prefilled values."
             )
-
-            col_ratio, col_collin = st.columns(2)
-
-            # Indicator 1: Ratio of drivers to timeframe
-            with col_ratio:
-                n_drivers = len(final_selected_vars)
-                n_observations = len(df_r) if not df_r.empty else 0
-
-                ratio_light, ratio_label, ratio_value = (
-                    _calculate_driver_ratio_band(n_drivers, n_observations)
-                )
-
-                st.markdown("##### Ratio of Drivers to Timeframe")
-                st.caption(
-                    "Robyn recommends at least 10 observations per driver "
-                    "(1:10 ratio). Based on your data granularity and "
-                    "selected variables."
-                )
-
-                ratio_col1, ratio_col2 = st.columns([1, 2])
-                with ratio_col1:
-                    st.metric(
-                        label="Status",
-                        value=f"{ratio_light} {ratio_label}",
-                    )
-                with ratio_col2:
-                    if pd.notna(ratio_value):
-                        st.metric(
-                            label="Ratio",
-                            value=f"{ratio_value:.1f}:1",
-                            help=f"{n_observations} observations / "
-                            f"{n_drivers} drivers",
-                        )
-                    else:
-                        st.metric(label="Ratio", value="N/A")
-
-                st.caption(
-                    f"📊 {n_drivers} drivers, {n_observations} observations"
-                )
-
-            # Indicator 2: Collinearity (Condition Number)
-            with col_collin:
-                condition_number = _calculate_condition_number(
-                    final_selected_vars
-                )
-                collin_light, collin_label = _calculate_collinearity_band(
-                    condition_number
-                )
-
-                st.markdown("##### Collinearity (Condition Number)")
-                st.caption(
-                    "Overall multicollinearity measure. Condition Number "
-                    "< 10 is good, 10-30 is moderate, > 30 is high."
-                )
-
-                collin_col1, collin_col2 = st.columns([1, 2])
-                with collin_col1:
-                    st.metric(
-                        label="Status",
-                        value=f"{collin_light} {collin_label}",
-                    )
-                with collin_col2:
-                    if pd.notna(condition_number):
-                        st.metric(
-                            label="Condition Number",
-                            value=f"{condition_number:.2f}",
-                            help="Calculated from correlation matrix "
-                            "eigenvalues",
-                        )
-                    else:
-                        st.metric(label="Condition Number", value="N/A")
-
-                if condition_number > 30:
-                    st.warning(
-                        "High collinearity detected. Consider removing "
-                        "some correlated variables."
-                    )

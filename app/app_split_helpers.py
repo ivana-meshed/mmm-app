@@ -517,6 +517,8 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                                             try:
                                                 from datetime import (
                                                     datetime as dt,
+                                                )
+                                                from datetime import (
                                                     timedelta,
                                                 )
 
@@ -626,6 +628,7 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
             key=f"job_history_view_{key_prefix}_{st.session_state.get('job_history_nonce', 0)}",
         )
 
+
 def render_job_status_monitor(key_prefix: str = "single") -> None:
     """Status UI showing all currently running jobs as a table (no manual checker)."""
     # Collect all running jobs from two sources:
@@ -663,7 +666,9 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
 
         try:
             status_info = job_manager.get_execution_status(exec_name)
-            actual_status = (status_info.get("overall_status") or "RUNNING").upper()
+            actual_status = (
+                status_info.get("overall_status") or "RUNNING"
+            ).upper()
         except Exception:
             # If we can't check status, assume it's still running
             actual_status = "RUNNING"
@@ -708,24 +713,42 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     with top_left:
         total_running = len(all_running_jobs)
         if total_running == 0:
-            st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div style='margin-bottom:20px;'></div>",
+                unsafe_allow_html=True,
+            )
             st.info("ℹ️ No jobs currently running.")
-            st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div style='margin-bottom:20px;'></div>",
+                unsafe_allow_html=True,
+            )
         else:
             n_queue = sum(1 for j in all_running_jobs if j["Source"] == "Queue")
             n_single = total_running - n_queue
-            st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div style='margin-bottom:20px;'></div>",
+                unsafe_allow_html=True,
+            )
             st.write(
                 f"**{total_running} job(s) running** "
                 f"(Queue: {n_queue}, Single run: {n_single})."
             )
-            st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div style='margin-bottom:20px;'></div>",
+                unsafe_allow_html=True,
+            )
     with top_right:
-        if st.button("🔄 Refresh", key=f"refresh_status_table_{key_prefix}", use_container_width=True):
+        if st.button(
+            "🔄 Refresh",
+            key=f"refresh_status_table_{key_prefix}",
+            use_container_width=True,
+        ):
             # Refresh queue from GCS to get latest status
             maybe_refresh_queue_from_gcs(force=True)
             # Clear cached timestamp to force re-check of single run jobs
-            st.session_state["status_refresh_timestamp"] = datetime.utcnow().timestamp()
+            st.session_state["status_refresh_timestamp"] = (
+                datetime.utcnow().timestamp()
+            )
             st.rerun()
 
     # If nothing running, we're done

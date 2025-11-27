@@ -21,7 +21,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from gcp_secrets import access_secret, upsert_secret
 
-#require_login_and_domain()
+# require_login_and_domain()
 ensure_session_defaults()
 
 # Secret ID for persistent private key storage
@@ -103,9 +103,7 @@ with st.form("sf_connect_form", clear_on_submit=False):
             or os.getenv("SF_WAREHOUSE"),
         )
 
-        st.markdown(
-            "**Upload Private key (PEM)**"
-        )
+        st.markdown("**Upload Private key (PEM)**")
         sf_pk_pem = st.text_area(
             "Private Key (PEM format)",
             value="",
@@ -221,7 +219,9 @@ if submitted:
         if (preview_table or "").strip():
             try:
                 df_prev = run_sql(f"SELECT * FROM {preview_table} LIMIT 20")
-                st.caption(f"Preview: Showing first 20 rows of `{preview_table}`")
+                st.caption(
+                    f"Preview: Showing first 20 rows of `{preview_table}`"
+                )
                 st.dataframe(df_prev, use_container_width=True, hide_index=True)
             except Exception as e:
                 st.warning(f"Could not preview table `{preview_table}`: {e}")
@@ -280,7 +280,9 @@ if st.session_state.sf_connected:
                 st.error(f"Failed to clear saved key: {e}")
 
 else:
-    st.info("You're not connected yet. Enter your Snowflake details above and click **Connect**.")
+    st.info(
+        "You're not connected yet. Enter your Snowflake details above and click **Connect**."
+    )
 
 # ============= Outputs Configuration =============
 st.divider()

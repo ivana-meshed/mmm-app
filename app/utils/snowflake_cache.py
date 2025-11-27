@@ -18,7 +18,7 @@ from typing import Optional
 import pandas as pd
 from google.cloud import storage
 
-from .cache import _get_cache_key, _cache
+from .cache import _cache, _get_cache_key
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +39,10 @@ def init_cache(bucket_name: str):
 def _get_query_hash(query: str) -> str:
     """
     Generate a stable hash for a SQL query.
-    
+
     Args:
         query: SQL query string
-        
+
     Returns:
         MD5 hash of the normalized query
     """
@@ -59,31 +59,31 @@ def _get_gcs_cache_path(query_hash: str) -> str:
 def _read_from_gcs_cache(query_hash: str) -> Optional[pd.DataFrame]:
     """
     Read cached query result from GCS.
-    
+
     Args:
         query_hash: Hash of the query
-        
+
     Returns:
         DataFrame if cache hit and not expired, None otherwise
     """
     if not CACHE_BUCKET:
         return None
-        
+
     try:
         client = storage.Client()
         bucket = client.bucket(CACHE_BUCKET)
         blob_path = _get_gcs_cache_path(query_hash)
         blob = bucket.blob(blob_path)
-        
+
         if not blob.exists():
             logger.debug(f"GCS cache miss for query hash {query_hash[:8]}")
             return None
-            
+
         # Check if cache is expired
         metadata = blob.metadata or {}
         cached_time = float(metadata.get("cached_timestamp", 0))
         age = time.time() - cached_time
-        
+
         if age > GCS_TTL:
             logger.debug(
                 f"GCS cache expired for query hash {query_hash[:8]} (age: {age:.1f}s)"
@@ -94,15 +94,16 @@ def _read_from_gcs_cache(query_hash: str) -> Optional[pd.DataFrame]:
             except Exception:
                 pass
             return None
-            
+
         # Read parquet data
         logger.info(
             f"GCS cache hit for query hash {query_hash[:8]} (age: {age:.1f}s)"
         )
         import io
+
         data = blob.download_as_bytes()
         return pd.read_parquet(io.BytesIO(data))
-        
+
     except Exception as e:
         logger.warning(f"Failed to read from GCS cache: {e}")
         return None
@@ -111,26 +112,27 @@ def _read_from_gcs_cache(query_hash: str) -> Optional[pd.DataFrame]:
 def _write_to_gcs_cache(query_hash: str, df: pd.DataFrame):
     """
     Write query result to GCS cache.
-    
+
     Args:
         query_hash: Hash of the query
         df: DataFrame to cache
     """
     if not CACHE_BUCKET:
         return
-        
+
     try:
         client = storage.Client()
         bucket = client.bucket(CACHE_BUCKET)
         blob_path = _get_gcs_cache_path(query_hash)
         blob = bucket.blob(blob_path)
-        
+
         # Convert DataFrame to parquet bytes
         import io
+
         buffer = io.BytesIO()
-        df.to_parquet(buffer, index=False, compression='snappy')
+        df.to_parquet(buffer, index=False, compression="snappy")
         buffer.seek(0)
-        
+
         # Upload with metadata
         blob.metadata = {
             "cached_timestamp": str(time.time()),
@@ -138,12 +140,12 @@ def _write_to_gcs_cache(query_hash: str, df: pd.DataFrame):
             "column_count": str(len(df.columns)),
         }
         blob.upload_from_file(buffer, content_type="application/octet-stream")
-        
+
         logger.info(
             f"Cached query result to GCS: {query_hash[:8]} "
             f"({len(df)} rows, {len(df.columns)} cols)"
         )
-        
+
     except Exception as e:
         logger.warning(f"Failed to write to GCS cache: {e}")
 
@@ -155,23 +157,23 @@ def get_cached_query_result(
 ) -> pd.DataFrame:
     """
     Get query result from cache or execute if not cached.
-    
+
     This implements a two-tier caching strategy:
     1. Check in-memory cache (fast, TTL: 1 hour)
     2. Check GCS cache (slower, TTL: 24 hours)
     3. Execute query and cache result if not found
-    
+
     Args:
         query: SQL query to execute
         execute_func: Function to call if cache miss (takes query as argument)
         use_gcs_cache: Whether to use GCS persistent cache
-        
+
     Returns:
         DataFrame with query results
     """
     query_hash = _get_query_hash(query)
     cache_key = f"snowflake_query_{query_hash}"
-    
+
     # Tier 1: Check in-memory cache
     if cache_key in _cache:
         entry = _cache[cache_key]
@@ -185,7 +187,7 @@ def get_cached_query_result(
             logger.debug(
                 f"In-memory cache expired for query hash {query_hash[:8]} (age: {age:.1f}s)"
             )
-            
+
     # Tier 2: Check GCS cache
     if use_gcs_cache:
         gcs_result = _read_from_gcs_cache(query_hash)
@@ -196,31 +198,31 @@ def get_cached_query_result(
                 "value": gcs_result,
             }
             return gcs_result
-            
+
     # Cache miss - execute query
     logger.info(f"Cache miss for query hash {query_hash[:8]}, executing query")
     result = execute_func(query)
-    
+
     # Cache result in memory
     _cache[cache_key] = {
         "timestamp": time.time(),
         "value": result,
     }
-    
+
     # Cache result in GCS (async, don't block on failures)
     if use_gcs_cache:
         try:
             _write_to_gcs_cache(query_hash, result)
         except Exception as e:
             logger.warning(f"Failed to cache result in GCS: {e}")
-            
+
     return result
 
 
 def clear_snowflake_cache(query_hash: Optional[str] = None):
     """
     Clear Snowflake query cache.
-    
+
     Args:
         query_hash: If provided, clear only this specific query.
                    If None, clear all cached queries.
@@ -230,28 +232,36 @@ def clear_snowflake_cache(query_hash: Optional[str] = None):
         cache_key = f"snowflake_query_{query_hash}"
         if cache_key in _cache:
             del _cache[cache_key]
-            logger.info(f"Cleared in-memory cache for query hash {query_hash[:8]}")
+            logger.info(
+                f"Cleared in-memory cache for query hash {query_hash[:8]}"
+            )
     else:
-        keys_to_remove = [k for k in _cache.keys() if k.startswith("snowflake_query_")]
+        keys_to_remove = [
+            k for k in _cache.keys() if k.startswith("snowflake_query_")
+        ]
         for key in keys_to_remove:
             del _cache[key]
-        logger.info(f"Cleared {len(keys_to_remove)} in-memory Snowflake cache entries")
-        
+        logger.info(
+            f"Cleared {len(keys_to_remove)} in-memory Snowflake cache entries"
+        )
+
     # Clear GCS cache
     if not CACHE_BUCKET:
         return
-        
+
     try:
         client = storage.Client()
         bucket = client.bucket(CACHE_BUCKET)
-        
+
         if query_hash:
             # Delete specific cache file
             blob_path = _get_gcs_cache_path(query_hash)
             blob = bucket.blob(blob_path)
             if blob.exists():
                 blob.delete()
-                logger.info(f"Deleted GCS cache for query hash {query_hash[:8]}")
+                logger.info(
+                    f"Deleted GCS cache for query hash {query_hash[:8]}"
+                )
         else:
             # Delete all cache files
             blobs = bucket.list_blobs(prefix=CACHE_PREFIX)
@@ -260,7 +270,7 @@ def clear_snowflake_cache(query_hash: Optional[str] = None):
                 blob.delete()
                 count += 1
             logger.info(f"Deleted {count} GCS cache files")
-            
+
     except Exception as e:
         logger.warning(f"Failed to clear GCS cache: {e}")
 
@@ -268,18 +278,18 @@ def clear_snowflake_cache(query_hash: Optional[str] = None):
 def get_cache_stats() -> dict:
     """
     Get statistics about the Snowflake query cache.
-    
+
     Returns:
         Dictionary with cache statistics
     """
     # In-memory stats
     memory_keys = [k for k in _cache.keys() if k.startswith("snowflake_query_")]
     memory_count = len(memory_keys)
-    
+
     # GCS stats
     gcs_count = 0
     gcs_total_size = 0
-    
+
     if CACHE_BUCKET:
         try:
             client = storage.Client()
@@ -289,7 +299,7 @@ def get_cache_stats() -> dict:
             gcs_total_size = sum(blob.size for blob in blobs)
         except Exception as e:
             logger.warning(f"Failed to get GCS cache stats: {e}")
-            
+
     return {
         "in_memory_count": memory_count,
         "gcs_count": gcs_count,
