@@ -28,7 +28,7 @@ map_page = st.Page("nav/Map_Data.py", title="2. Map Data", icon="🗺️")
 
 prepare_training_data_page = st.Page(
     "nav/Prepare_Training_Data.py",
-    title="Prepare Training Data",
+    title="4. Prepare Training Data",
     icon="🔧",
 )
 
@@ -81,8 +81,8 @@ pg = st.navigation(
     [
         connect_page,
         map_page,
-        prepare_training_data_page,
         review_page,
+        prepare_training_data_page,
         # prepare_training_page,
         # prepare_training_page_old,
         # prepare_training_page_oldv2,
