@@ -1674,6 +1674,39 @@ with st.expander(
         except (TypeError, ValueError):
             return "N/A"
 
+    def _find_identical_columns(cols: List[str]) -> List[tuple]:
+        """Find pairs of identical columns among the given columns.
+
+        Returns a list of tuples, each containing two column names that are
+        identical (correlation = 1.0).
+        """
+        identical_pairs = []
+        if len(cols) < 2:
+            return identical_pairs
+
+        # Filter to valid numeric columns
+        valid_cols = [
+            c
+            for c in cols
+            if c in df_r.columns and pd.api.types.is_numeric_dtype(df_r[c])
+        ]
+
+        if len(valid_cols) < 2:
+            return identical_pairs
+
+        # Check each pair of columns for perfect correlation
+        for i, col1 in enumerate(valid_cols):
+            for col2 in valid_cols[i + 1 :]:
+                try:
+                    corr = df_r[col1].corr(df_r[col2])
+                    if pd.notna(corr) and abs(corr) >= 0.9999:
+                        identical_pairs.append((col1, col2))
+                except Exception:
+                    pass
+
+        return identical_pairs
+
+    @st.fragment
     def _render_vif_table(
         title: str,
         var_list: List[str],
@@ -1751,11 +1784,9 @@ with st.expander(
                 needs_rerun = True
             st.session_state["vif_selections"][var_name] = use_val
 
-        # If selections changed, trigger a full page rerun to recalculate
-        # global VIF across all tables. This ensures VIF values update
-        # correctly when any checkbox changes.
+        # If selections changed, trigger a fragment rerun
         if needs_rerun:
-            st.rerun()
+            st.rerun(scope="fragment")
 
     def _get_selected_vars_from_session(var_list: List[str]) -> List[str]:
         """Get selected variables from session state for a given var list."""
@@ -1973,6 +2004,18 @@ with st.expander(
         global_vif_values = _calculate_vif_for_columns_step4(
             all_selected_for_global_vif
         )
+
+        # Check for identical columns and display warning
+        identical_pairs = _find_identical_columns(all_selected_for_global_vif)
+        if identical_pairs:
+            pairs_text = ", ".join(
+                [f"**{p[0]}** ↔ **{p[1]}**" for p in identical_pairs]
+            )
+            st.warning(
+                f"⚠️ **Identical columns detected** (VIF = ∞): {pairs_text}\n\n"
+                "These column pairs have perfect correlation (≈1.0). "
+                "Consider removing one from each pair to avoid multicollinearity."
+            )
 
         # Render tables with fragment for partial rerun on checkbox change
         _render_vif_table(
