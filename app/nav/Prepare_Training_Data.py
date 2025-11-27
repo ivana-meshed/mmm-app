@@ -1730,9 +1730,9 @@ with st.expander(
                 needs_rerun = True
             st.session_state["vif_selections"][var_name] = use_val
 
-        # If selections changed, trigger a full page rerun to update indicators
+        # If selections changed, trigger a fragment rerun only
         if needs_rerun:
-            st.rerun()
+            st.rerun(scope="fragment")
 
     def _get_selected_vars_from_session(var_list: List[str]) -> List[str]:
         """Get selected variables from session state for a given var list."""
@@ -1900,6 +1900,15 @@ with st.expander(
 
         # Render Model Quality Indicators at the top
         _render_model_quality_indicators()
+
+        # Add Refresh button to update indicators after VIF selection changes
+        if st.button(
+            "🔄 Refresh Quality Indicators",
+            help="Click to recalculate indicators after changing driver selections in the VIF tables below",
+            key="refresh_quality_indicators",
+        ):
+            st.rerun()
+
         st.markdown("---")
 
         # =====================================================
