@@ -2087,30 +2087,46 @@ with st.expander(
             # Get final selected variables from VIF selections
             final_vars = _get_all_selected_vars_step4()
 
-            # Get selected paid media spends and their corresponding vars
-            selected_spends = st.session_state.get("selected_paid_spends", [])
+            # Get VIF-selected media response variables
+            # These are the media vars selected in Step 3.3 AND kept via VIF
+            selected_media_response_vars = [
+                v
+                for v in selected_media_vars_3_3
+                if st.session_state["vif_selections"].get(v, True)
+                and v in df_r.columns
+                and pd.api.types.is_numeric_dtype(df_r[v])
+            ]
 
-            # Build mapping of spend -> selected media var
-            spend_to_var_mapping = {}
-            for spend_col in selected_spends:
-                media_var = st.session_state.get(
-                    f"media_var_select_{spend_col}"
-                )
-                if media_var:
-                    # Remove "(spend)" suffix if present
-                    if media_var.endswith(SPEND_SUFFIX):
-                        clean_var = media_var[: -len(SPEND_SUFFIX)]
-                    else:
-                        clean_var = media_var
-                    spend_to_var_mapping[spend_col] = clean_var
+            # Get paid_media_mapping from metadata to find corresponding spends
+            paid_media_mapping = meta.get("paid_media_mapping", {}) or {}
+
+            # Build reverse mapping: var -> spend
+            var_to_spend_mapping = {}
+            for spend_col, var_list in paid_media_mapping.items():
+                for var_col in var_list:
+                    var_to_spend_mapping[var_col] = spend_col
+            # Also map spend columns to themselves (when spend is used as var)
+            for spend_col in paid_media_mapping.keys():
+                if spend_col not in var_to_spend_mapping:
+                    var_to_spend_mapping[spend_col] = spend_col
+
+            # Find corresponding spends for the VIF-selected media response vars
+            selected_spends_from_vif = []
+            var_to_spend_export = {}
+            for media_var in selected_media_response_vars:
+                spend_col = var_to_spend_mapping.get(media_var)
+                if spend_col:
+                    if spend_col not in selected_spends_from_vif:
+                        selected_spends_from_vif.append(spend_col)
+                    var_to_spend_export[media_var] = spend_col
 
             # Store selections in session state for Training page
             st.session_state["training_prefill"] = {
                 "country": st.session_state.get("country", "de"),
                 "selected_goal": st.session_state.get("selected_goal"),
-                "paid_media_spends": selected_spends,
-                "paid_media_vars": list(spend_to_var_mapping.values()),
-                "spend_var_mapping": spend_to_var_mapping,
+                "paid_media_spends": selected_spends_from_vif,
+                "paid_media_vars": selected_media_response_vars,
+                "var_to_spend_mapping": var_to_spend_export,
                 "organic_vars": [
                     v for v in selected_organic_step4 if v in final_vars
                 ],
@@ -2134,8 +2150,8 @@ with st.expander(
 
             st.success(
                 f"✅ Exported {len(final_vars)} selected drivers to Training page!\n\n"
-                f"**Paid Media Spends:** {len(selected_spends)}\n"
-                f"**Paid Media Vars:** {len(spend_to_var_mapping)}\n"
+                f"**Paid Media Response Vars (VIF selected):** {len(selected_media_response_vars)}\n"
+                f"**Corresponding Paid Media Spends:** {len(selected_spends_from_vif)}\n"
                 f"**Organic Vars:** {len([v for v in selected_organic_step4 if v in final_vars])}\n"
                 f"**Context Vars:** {len([v for v in selected_context_step4 if v in final_vars])}\n"
                 f"**Factor Vars:** {len([v for v in selected_factor_step4 if v in final_vars])}\n\n"
