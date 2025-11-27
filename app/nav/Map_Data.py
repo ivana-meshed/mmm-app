@@ -1003,7 +1003,10 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
 
             # Snowflake inputs (only relevant if Snowflake is chosen)
             st.write("Alternatively: connect and load new dataset")
-            st.text_input("Select table", key="sf_table",)
+            st.text_input(
+                "Select table",
+                key="sf_table",
+            )
             st.text_area("Or: Write a custom SQL", key="sf_sql")
             st.text_input("Select country field:", key="sf_country_field")
 
@@ -1160,7 +1163,9 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                         }
                     )
                 else:
-                    st.warning("Provide a table name (DATABASE.SCHEMA.TABLE) or write a SQL to load data from Snowflake.")
+                    st.warning(
+                        "Provide a table name (DATABASE.SCHEMA.TABLE) or write a SQL to load data from Snowflake."
+                    )
 
             if df is not None and not df.empty:
                 st.success(f"Loaded {len(df):,} rows.")
@@ -1213,7 +1218,9 @@ st.header("2. Map Variables")
 
 df_raw = st.session_state.get("df_raw", pd.DataFrame())
 
-with st.expander("🗺️ Tell the tool what each data point represents.", expanded=False):
+with st.expander(
+    "🗺️ Tell the tool what each data point represents.", expanded=False
+):
     # Show current data state (point 4 - UI representing actual state)
     data_origin = st.session_state.get("data_origin", "N/A")
     picked_ts = st.session_state.get("picked_ts", "N/A")
@@ -1237,9 +1244,7 @@ with st.expander("🗺️ Tell the tool what each data point represents.", expan
     all_cols = df_raw.columns.astype(str).tolist() if not df_raw.empty else []
 
     # ---- Load saved metadata (moved to beginning of Step 2) ----
-    with st.expander(
-        "📥 Start from previous mapping", expanded=False
-    ):
+    with st.expander("📥 Start from previous mapping", expanded=False):
         # Get available metadata versions (including universal) - same logic as Experiment page
         try:
             # Get country-specific metadata versions
@@ -1434,9 +1439,9 @@ with st.expander("🗺️ Tell the tool what each data point represents.", expan
         )
         date_field_options = date_candidates or all_cols or ["date"]
         date_field = st.selectbox(
-            "Select Date field", 
-            options=date_field_options, 
-            index=0 if date_field_options else None
+            "Select Date field",
+            options=date_field_options,
+            index=0 if date_field_options else None,
         )
 
         st.divider()
@@ -1444,11 +1449,15 @@ with st.expander("🗺️ Tell the tool what each data point represents.", expan
         with st.form("goals_form", clear_on_submit=False):
             # Stack primary and secondary goals vertically
             primary_goals = st.multiselect(
-                "Define primary business goal (e.g. GMV, Bookings)", options=all_cols, default=[]
+                "Define primary business goal (e.g. GMV, Bookings)",
+                options=all_cols,
+                default=[],
             )
             secondary_goals = st.multiselect(
-                "Define secondary business goals (e.g. Signups, App Installs) ", options=all_cols, default=[],
-                help="Secondary goals support full driver analysis. Select only a few to maintain oversight."
+                "Define secondary business goals (e.g. Signups, App Installs) ",
+                options=all_cols,
+                default=[],
+                help="Secondary goals support full driver analysis. Select only a few to maintain oversight.",
             )
 
             def _mk(selected, group):
@@ -1506,7 +1515,9 @@ with st.expander("🗺️ Tell the tool what each data point represents.", expan
                         "Goal Priority", options=["primary", "secondary"]
                     ),
                     "type": st.column_config.SelectboxColumn(
-                        "Goal Type", options=["revenue", "conversion"], required=True
+                        "Goal Type",
+                        options=["revenue", "conversion"],
+                        required=True,
                     ),
                     "main": st.column_config.CheckboxColumn(
                         "Select main goal",
@@ -1600,7 +1611,9 @@ with st.expander("🗺️ Tell the tool what each data point represents.", expan
         )
 
         if st.button(
-            "➕ Apply Channel Detection", key="add_channels_btn", use_container_width=True
+            "➕ Apply Channel Detection",
+            key="add_channels_btn",
+            use_container_width=True,
         ):
             # Parse the input
             entered_channels = [
@@ -1664,14 +1677,18 @@ with st.expander("🗺️ Tell the tool what each data point represents.", expan
             "context_vars": _parse_sfx(
                 rcol2.text_input(
                     "Context Variables",
-                    value=", ".join(st.session_state["auto_rules"]["context_vars"]),
+                    value=", ".join(
+                        st.session_state["auto_rules"]["context_vars"]
+                    ),
                     help="Suffixes for non-media drivers, e.g. '_promo', '_weather'",
                 )
             ),
             "organic_vars": _parse_sfx(
                 rcol2.text_input(
                     "Organic Variables",
-                    value=", ".join(st.session_state["auto_rules"]["organic_vars"]),
+                    value=", ".join(
+                        st.session_state["auto_rules"]["organic_vars"]
+                    ),
                     key="org_vars",
                     help="Suffixes for organic traffic channels, e.g. '_organic', '_direct'. Similar to Paid Spends, they also receive response-curves.",
                 )
@@ -1679,8 +1696,10 @@ with st.expander("🗺️ Tell the tool what each data point represents.", expan
             "factor_vars": _parse_sfx(
                 rcol3.text_input(
                     "Factor Variables (True/False)",
-                    value=", ".join(st.session_state["auto_rules"]["factor_vars"]),
-                    help="Suffixes for binary flags, e.g. 'is_big_promotion','is_holiday'"
+                    value=", ".join(
+                        st.session_state["auto_rules"]["factor_vars"]
+                    ),
+                    help="Suffixes for binary flags, e.g. 'is_big_promotion','is_holiday'",
                 )
             ),
         }
@@ -1740,9 +1759,13 @@ with st.expander("🗺️ Tell the tool what each data point represents.", expan
 
     # ---- Variable Mapping Editor ----
     with st.expander("🗺️ Review and Finalize Mapping", expanded=False):
-        st.write("Review auto-tagged variables, adjust where needed and confirm before saving.")
-        st.caption("Hint: Hover over the **header names** in the mapping table to see extra info.")
-        
+        st.write(
+            "Review auto-tagged variables, adjust where needed and confirm before saving."
+        )
+        st.caption(
+            "Hint: Hover over the **header names** in the mapping table to see extra info."
+        )
+
         # Add sorting controls (user-controlled, not automatic)
         sort_col1, sort_col2, sort_col3 = st.columns([2, 1, 1])
         with sort_col1:
@@ -1750,10 +1773,10 @@ with st.expander("🗺️ Tell the tool what each data point represents.", expan
                 "Sort by",
                 options=[
                     "Original order",
-                    "var",              # FE: column name rename
+                    "var",  # FE: column name rename
                     "category",
                     "channel",
-                    "channel_subchannel", # FE: column gibts nicht? wäre gut zu displayen?
+                    "channel_subchannel",  # FE: column gibts nicht? wäre gut zu displayen?
                     "data_type",
                 ],
                 index=0,
@@ -1851,8 +1874,9 @@ with st.expander("🗺️ Tell the tool what each data point represents.", expan
                 column_config={
                     "var": st.column_config.TextColumn("Column", disabled=True),
                     "category": st.column_config.SelectboxColumn(
-                        "Category", options=ALLOWED_CATEGORIES,
-                        help="Marketing Mix Model variable category"
+                        "Category",
+                        options=ALLOWED_CATEGORIES,
+                        help="Marketing Mix Model variable category",
                     ),
                     "channel": st.column_config.SelectboxColumn(
                         "Channel",

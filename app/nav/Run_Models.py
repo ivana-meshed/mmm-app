@@ -32,7 +32,7 @@ data_processor = get_data_processor()
 job_manager = get_job_manager()
 from app_split_helpers import *  # bring in all helper functions/constants
 
-#require_login_and_domain()
+# require_login_and_domain()
 ensure_session_defaults()
 
 st.title("Run Marketing Mix Models")
@@ -45,7 +45,9 @@ if st.session_state.get("switch_to_queue_tab", False):
     )
     st.session_state["switch_to_queue_tab"] = False
 
-tab_single, tab_queue, tab_status = st.tabs(["Single Run", "Batch Run", "Queue Monitor"])
+tab_single, tab_queue, tab_status = st.tabs(
+    ["Single Run", "Batch Run", "Queue Monitor"]
+)
 
 # Prefill fields from saved metadata if present (session_state keys should already be set by Map Your Data page).
 
@@ -174,7 +176,7 @@ with tab_single:
 
     # Data selection
     with st.expander("📊 Select Data", expanded=False):
-        
+
         # Country selection
         available_countries = ["fr", "de", "it", "es", "us"]
         selected_country = st.selectbox(
@@ -436,7 +438,7 @@ with tab_single:
         # Iterations and Trials as presets
         preset_options = {
             "Test Run": {"iterations": 200, "trials": 3},
-            "Benchmark":  {"iterations": 2000, "trials": 5},
+            "Benchmark": {"iterations": 2000, "trials": 5},
             "Production": {"iterations": 10000, "trials": 5},
             "Custom": {"iterations": 5000, "trials": 10},
         }
@@ -645,7 +647,7 @@ with tab_single:
                 )
             except (ValueError, KeyError):
                 pass
-            
+
         adstock = st.selectbox(
             "Adstock Method",
             options=adstock_options,
@@ -1067,7 +1069,9 @@ with tab_single:
 
         # Context vars - multiselect
         st.markdown("**Context Variables**")
-        st.caption("Non-media drivers like seasonality, promotions, pricing, events, etc.")
+        st.caption(
+            "Non-media drivers like seasonality, promotions, pricing, events, etc."
+        )
         # Determine default from loaded config
         default_context_vars = default_values["context_vars"]
         if loaded_config and "context_vars" in loaded_config:
@@ -1608,7 +1612,8 @@ with tab_single:
             config_countries = st.multiselect(
                 "Select countries",
                 options=["fr", "de", "it", "es", "us"],
-                default=default_countries,            )
+                default=default_countries,
+            )
         else:
             config_countries = [st.session_state.get("selected_country", "de")]
 
@@ -1621,7 +1626,9 @@ with tab_single:
             key="save_config_btn",
         )
         add_to_queue_clicked = col_btn2.button(
-            "➕ Save Settings & Add Run to Queue", use_container_width=True, key="add_to_queue_btn"
+            "➕ Save Settings & Add Run to Queue",
+            use_container_width=True,
+            key="add_to_queue_btn",
         )
         add_and_start_clicked = col_btn3.button(
             "▶️ Save, Add Run to Queue & Start Queue",
@@ -2221,8 +2228,12 @@ with tab_queue:
         st.session_state.current_queue_expanded = False
 
     # ========== Run Batch Experiments ==========
-    st.markdown("#### 📥 Run multiple experiments via batch run. Upload CSV to continue.")
-    st.caption("Upload a CSV where each row defines one experiment. You can edit rows after upload.")
+    st.markdown(
+        "#### 📥 Run multiple experiments via batch run. Upload CSV to continue."
+    )
+    st.caption(
+        "Upload a CSV where each row defines one experiment. You can edit rows after upload."
+    )
 
     up = st.file_uploader("**Select CSV:**", type=["csv"], key="batch_csv")
 
@@ -2280,9 +2291,7 @@ with tab_queue:
             "context_vars": _as_csv(p.get("context_vars", "")),
             "factor_vars": _as_csv(p.get("factor_vars", "")),
             "organic_vars": _as_csv(p.get("organic_vars", "")),
-            "gcs_bucket": p.get(
-                "gcs_bucket", st.session_state["gcs_bucket"]
-            ),
+            "gcs_bucket": p.get("gcs_bucket", st.session_state["gcs_bucket"]),
             "data_gcs_path": p.get("data_gcs_path", ""),
             "table": p.get("table", ""),
             "query": p.get("query", ""),
@@ -2359,15 +2368,9 @@ with tab_queue:
 
             # Action buttons (builder actions, now for uploaded_df)
             b1, b2, b3 = st.columns(3)
-            save_uploaded_clicked = b1.form_submit_button(
-                "💾 Save edits"
-            )
-            clear_uploaded_clicked = b2.form_submit_button(
-                "🧹 Clear table"
-            )
+            save_uploaded_clicked = b1.form_submit_button("💾 Save edits")
+            clear_uploaded_clicked = b2.form_submit_button("🧹 Clear table")
             enqueue_clicked = b3.form_submit_button("➕ Add all to queue")
-
-
 
         # ----- Handle actions -----
 
@@ -2398,6 +2401,7 @@ with tab_queue:
                     "No rows to enqueue. Add at least one non-empty row."
                 )
             else:
+
                 def _sig_from_params_dict(d: dict) -> str:
                     return json.dumps(d, sort_keys=True)
 
@@ -2508,13 +2512,12 @@ with tab_queue:
                     def _row_sig(r: pd.Series) -> str:
                         return json.dumps(_normalize_row(r), sort_keys=True)
 
-                    keep_mask = ~cleaned_uploaded.apply(
-                        _row_sig, axis=1
-                    ).isin(enqueued_sigs)
-                    st.session_state.uploaded_df = (
-                        cleaned_uploaded.loc[keep_mask]
-                        .reset_index(drop=True)
+                    keep_mask = ~cleaned_uploaded.apply(_row_sig, axis=1).isin(
+                        enqueued_sigs
                     )
+                    st.session_state.uploaded_df = cleaned_uploaded.loc[
+                        keep_mask
+                    ].reset_index(drop=True)
 
                     st.success(
                         f"Enqueued {len(new_entries)} new job(s), saved to GCS, and removed them from the table."
@@ -2523,7 +2526,7 @@ with tab_queue:
                     st.session_state.current_queue_expanded = True
                     st.rerun()
 
-    st.markdown('---')
+    st.markdown("---")
 
     # ==== Define example CSVs (unchanged) ==================================
     example = pd.DataFrame(
@@ -2732,11 +2735,15 @@ with tab_queue:
         st.write("**ℹ️ Recommended workflow**")
         st.write("1. Use **Single Run** to build and verify one experiment.")
         st.write("2. Download the configuration as a CSV.")
-        st.write("3. Add more rows to your CSV (e.g., more countries or variables).")
+        st.write(
+            "3. Add more rows to your CSV (e.g., more countries or variables)."
+        )
         st.write("4. Upload the CSV here to create a batch queue.")
 
     with right_col:
-        with st.expander("Queue Settings", expanded=False):# --- Queue settings (top of right column) ---
+        with st.expander(
+            "Queue Settings", expanded=False
+        ):  # --- Queue settings (top of right column) ---
             cqn1, cqn2, cqn3 = st.columns([2, 1, 1])
             new_qname = cqn1.text_input(
                 "Queue name",
@@ -2751,9 +2758,13 @@ with tab_queue:
             if cqn2.button("⬇️ Load from GCS", key="batch_load_queue_from_gcs"):
                 payload = load_queue_payload(st.session_state.queue_name)
                 st.session_state.job_queue = payload["entries"]
-                st.session_state.queue_running = payload.get("queue_running", False)
+                st.session_state.queue_running = payload.get(
+                    "queue_running", False
+                )
                 st.session_state.queue_saved_at = payload.get("saved_at")
-                st.success(f"Loaded queue '{st.session_state.queue_name}' from GCS")
+                st.success(
+                    f"Loaded queue '{st.session_state.queue_name}' from GCS"
+                )
 
             if cqn3.button("⬆️ Save to GCS", key="batch_save_queue_to_gcs"):
                 st.session_state.queue_saved_at = save_queue_to_gcs(
@@ -2761,7 +2772,9 @@ with tab_queue:
                     st.session_state.job_queue,
                     queue_running=st.session_state.queue_running,
                 )
-                st.success(f"Saved queue '{st.session_state.queue_name}' to GCS")
+                st.success(
+                    f"Saved queue '{st.session_state.queue_name}' to GCS"
+                )
 
         # --- CSV templates (collapsed, less prominent) ---
         with st.expander("CSV examples", expanded=False):
@@ -2791,15 +2804,11 @@ with tab_queue:
 
 # ===================== STATUS TAB =====================
 with tab_status:
- 
+
     # Job Status Monitor
     render_job_status_monitor(key_prefix="status")
 
-
-    with st.expander(
-        "📋 Current Queue",
-        expanded=False
-    ):
+    with st.expander("📋 Current Queue", expanded=False):
         # Queue controls
         st.caption(
             "Queue status: "
@@ -2949,5 +2958,5 @@ with tab_status:
                 st.success("Queue updated.")
                 st.rerun()
 
-   # Job History
+    # Job History
     render_jobs_job_history(key_prefix="status")

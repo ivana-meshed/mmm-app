@@ -56,7 +56,9 @@ require_login_and_domain()
 ensure_session_defaults()
 
 st.title("Validate Mapping")
-st.caption("Make sure your data, channels, and goals are recognized as intended.")
+st.caption(
+    "Make sure your data, channels, and goals are recognized as intended."
+)
 
 
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
@@ -296,7 +298,9 @@ res["PERIOD_LABEL"] = period_label(res["DATE_PERIOD"], RULE)
 with tab_biz:
     # Small helper to guarantee a nice label even if metadata is incomplete
     st.markdown("## Goals Overview")
-    st.caption("Review total outcomes and efficiency for all goals over the selected timeframe.")
+    st.caption(
+        "Review total outcomes and efficiency for all goals over the selected timeframe."
+    )
     st.markdown(f"Selected timeframe: {TIMEFRAME_LABEL}")
 
     has_prev = not df_prev.empty
@@ -382,8 +386,10 @@ with tab_biz:
     # Goal vs Spend (bar + line)
     # -----------------------------
     st.markdown("## Goal & Efficiency Over Time")
-    st.caption("Select Goal, Timeframe and Aggregation in the sidebar to update the charts.")
-    
+    st.caption(
+        "Select Goal, Timeframe and Aggregation in the sidebar to update the charts."
+    )
+
     cA, cB = st.columns(2)
 
     with cA:
@@ -441,7 +447,7 @@ with tab_biz:
         fig2e.add_trace(
             go.Scatter(
                 x=eff_t["PERIOD_LABEL"],
-                y=eff_t["EFF"], 
+                y=eff_t["EFF"],
                 name=label_eff,
                 yaxis="y2",
                 mode="lines+markers",
@@ -462,15 +468,15 @@ with tab_biz:
         )
         st.plotly_chart(fig2e, use_container_width=True)
 
-  
-
 
 # =============================
 # TAB 2 — MARKETING OVERVIEW
 # =============================
 with tab_mkt:
     st.subheader("Marketing Overview")
-    st.caption(f"Selected timeframe: {TIMEFRAME_LABEL}, Aggregation: {agg_label}")
+    st.caption(
+        f"Selected timeframe: {TIMEFRAME_LABEL}, Aggregation: {agg_label}"
+    )
     # ----- KPI — Outcomes (TOTALS only) -----
     st.markdown("#### Reach & Traffic")
     cur_imps, d_imps = total_with_prev_local(IMPR_COLS)
@@ -587,10 +593,12 @@ with tab_mkt:
 
     # ===== View selector =====
     st.subheader("Channel Breakdown")
-    st.caption(f"Selected timeframe: {TIMEFRAME_LABEL}, Aggregation: {agg_label}")
+    st.caption(
+        f"Selected timeframe: {TIMEFRAME_LABEL}, Aggregation: {agg_label}"
+    )
 
     channel_options = ["All channels"] + platforms
-    
+
     col_select, col_spacer = st.columns([1, 4])
     with col_select:
         view_sel = st.selectbox(
@@ -657,8 +665,8 @@ with tab_mkt:
     long_prev_view = (
         spend_long_filtered(df_prev) if not df_prev.empty else pd.DataFrame()
     )
- 
-     # ===== Spend over time & waterfall side-by-side =====
+
+    # ===== Spend over time & waterfall side-by-side =====
     col_left, col_right = st.columns(2)
 
     # ----- Channel Mix (stacked) — platform (all) OR sub-channel (single) -----
@@ -674,9 +682,7 @@ with tab_mkt:
                     .rename(columns={DATE_COL: "DATE_PERIOD"})
                 )
                 freq_df["series"] = freq_df["platform"]
-                chart_title = (
-                    f"{spend_label} by Platform"
-                )
+                chart_title = f"{spend_label} by Platform"
             else:
                 sel_platform = view_sel
                 sub_df = long_cur_view.copy()
@@ -694,9 +700,7 @@ with tab_mkt:
                     .rename(columns={DATE_COL: "DATE_PERIOD"})
                 )
                 freq_df["series"] = freq_df["sub"]
-                chart_title = (
-                    f"{spend_label} by Sub-Channel ({sel_platform})"
-                )
+                chart_title = f"{spend_label} by Sub-Channel ({sel_platform})"
 
             freq_df["PERIOD_LABEL"] = period_label(freq_df["DATE_PERIOD"], RULE)
             order = (
@@ -806,7 +810,6 @@ with tab_mkt:
 
     st.markdown("---")
 
-
     # ----- Funnels (INDEPENDENT from selector; always per platform) -----
     st.markdown("#### Channel Funnels")
     if not plat_map_df.empty:
@@ -864,7 +867,10 @@ with tab_mkt:
                 else:
                     st.info("No funnel metrics found.")
             with col_div:
-                st.markdown("<div style='border-left: 1px solid #DDD; height: 100%;'></div>", unsafe_allow_html=True)
+                st.markdown(
+                    "<div style='border-left: 1px solid #DDD; height: 100%;'></div>",
+                    unsafe_allow_html=True,
+                )
             with col_right:
                 tbl = pd.DataFrame(
                     {
@@ -898,11 +904,13 @@ with tab_mkt:
         st.info("Platform mapping not available.")
 
 with tab_driver:
-      # -----------------------------
+    # -----------------------------
     # Explore Any Metric Over Time
     # -----------------------------
     st.markdown("## Metrics Explorer")
-    st.caption(f"Selected timeframe: {TIMEFRAME_LABEL}, Aggregation level: {agg_label}")
+    st.caption(
+        f"Selected timeframe: {TIMEFRAME_LABEL}, Aggregation level: {agg_label}"
+    )
     numeric_candidates = df_r.select_dtypes(
         include=[np.number]
     ).columns.tolist()
@@ -934,7 +942,9 @@ with tab_driver:
 
         c_sel, c_spend = st.columns([2, 1])
         picked_label = c_sel.selectbox(
-            "Select a metric to explore:", labels_sorted, index=labels_sorted.index(default_label)
+            "Select a metric to explore:",
+            labels_sorted,
+            index=labels_sorted.index(default_label),
         )
         picked_col = label_to_col[picked_label]
 

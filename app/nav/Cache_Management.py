@@ -7,18 +7,20 @@ Helps users understand cache performance and manually clear cache when needed.
 
 import streamlit as st
 from app_shared import require_login_and_domain
-from utils.snowflake_cache import get_cache_stats, clear_snowflake_cache
+from utils.snowflake_cache import clear_snowflake_cache, get_cache_stats
 
 require_login_and_domain()
 
 st.title("⚡ Cache Management")
 
-st.markdown("""
+st.markdown(
+    """
 This page helps you manage the Snowflake query cache, which reduces costs by avoiding 
 repeated execution of identical queries.
 
 **Expected Savings:** ~70% reduction in Snowflake compute costs with typical usage patterns.
-""")
+"""
+)
 
 # Get cache statistics
 stats = get_cache_stats()
@@ -32,28 +34,29 @@ with col1:
     st.metric(
         "In-Memory Cache",
         f"{stats['in_memory_count']} queries",
-        help=f"TTL: {stats['in_memory_ttl_seconds'] // 60} minutes"
+        help=f"TTL: {stats['in_memory_ttl_seconds'] // 60} minutes",
     )
 
 with col2:
     st.metric(
         "GCS Cache",
         f"{stats['gcs_count']} queries",
-        help=f"TTL: {stats['gcs_ttl_seconds'] // 3600} hours"
+        help=f"TTL: {stats['gcs_ttl_seconds'] // 3600} hours",
     )
 
 with col3:
     st.metric(
         "GCS Storage",
         f"{stats['gcs_total_size_mb']} MB",
-        help="Total size of cached query results in GCS"
+        help="Total size of cached query results in GCS",
     )
 
 st.divider()
 
 # Cache explanation
 with st.expander("ℹ️ How Query Caching Works"):
-    st.markdown("""
+    st.markdown(
+        """
     ### Two-Tier Caching Strategy
     
     1. **In-Memory Cache (Fast)**
@@ -92,7 +95,8 @@ with st.expander("ℹ️ How Query Caching Works"):
     - Whitespace differences are ignored
     - Case differences are ignored
     - `SELECT * FROM table` and `select * from table` use the same cache
-    """)
+    """
+    )
 
 st.divider()
 
@@ -117,9 +121,11 @@ st.divider()
 # Cost savings calculator
 st.subheader("💰 Cost Savings Calculator")
 
-st.markdown("""
+st.markdown(
+    """
 Estimate your monthly savings based on cache hit rate and query volume.
-""")
+"""
+)
 
 col1, col2 = st.columns(2)
 
@@ -130,16 +136,16 @@ with col1:
         max_value=100000,
         value=500,
         step=100,
-        help="Total number of queries executed per month"
+        help="Total number of queries executed per month",
     )
-    
+
 with col2:
     cache_hit_rate = st.slider(
         "Cache hit rate (%)",
         min_value=0,
         max_value=100,
         value=70,
-        help="Percentage of queries served from cache (typical: 70%)"
+        help="Percentage of queries served from cache (typical: 70%)",
     )
 
 # Calculate costs
@@ -164,7 +170,7 @@ with col1:
     st.metric(
         "Without Cache",
         f"${cost_without_cache:.2f}",
-        help=f"{credits_without_cache:.1f} Snowflake credits"
+        help=f"{credits_without_cache:.1f} Snowflake credits",
     )
 
 with col2:
@@ -173,7 +179,7 @@ with col2:
         f"${cost_with_cache:.2f}",
         delta=f"-${savings:.2f}",
         delta_color="inverse",
-        help=f"{credits_needed:.1f} Snowflake credits"
+        help=f"{credits_needed:.1f} Snowflake credits",
     )
 
 with col3:
@@ -181,7 +187,7 @@ with col3:
         "Monthly Savings",
         f"${savings:.2f}",
         delta=f"{cache_hit_rate}% reduction",
-        help="Estimated monthly cost savings from caching"
+        help="Estimated monthly cost savings from caching",
     )
 
 st.info(

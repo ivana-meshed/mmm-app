@@ -27,8 +27,8 @@ from google.api_core.exceptions import PreconditionFailed
 from google.cloud import run_v2, secretmanager, storage
 from utils.snowflake_cache import (
     get_cached_query_result,
-    init_cache as init_snowflake_cache,
 )
+from utils.snowflake_cache import init_cache as init_snowflake_cache
 
 # Environment constants
 PROJECT_ID = os.getenv("PROJECT_ID")
