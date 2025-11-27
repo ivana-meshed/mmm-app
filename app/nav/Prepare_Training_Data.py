@@ -1730,9 +1730,9 @@ with st.expander(
                 needs_rerun = True
             st.session_state["vif_selections"][var_name] = use_val
 
-        # If selections changed, trigger a fragment rerun only
+        # If selections changed, trigger a full page rerun to update indicators
         if needs_rerun:
-            st.rerun(scope="fragment")
+            st.rerun()
 
     def _get_selected_vars_from_session(var_list: List[str]) -> List[str]:
         """Get selected variables from session state for a given var list."""
@@ -1811,18 +1811,17 @@ with st.expander(
     else:
         # =====================================================
         # Model Quality Indicators Section (MOVED ABOVE VIF tables)
-        # This section updates instantly when VIF selections change
+        # This section updates when VIF selections change (full page rerun)
         # =====================================================
-        @st.fragment
         def _render_model_quality_indicators():
-            """Fragment for Model Quality Indicators - updates on VIF changes."""
+            """Render Model Quality Indicators - updates on VIF changes."""
             # Get all currently selected variables
             final_selected_vars = _get_all_selected_vars_step4()
 
             st.markdown("#### Model Quality Indicators")
             st.caption(
                 "Traffic light indicators based on Robyn MMM best practices. "
-                "Updates instantly when you change driver selections below."
+                "Updates when you change driver selections below."
             )
 
             col_ratio, col_collin = st.columns(2)

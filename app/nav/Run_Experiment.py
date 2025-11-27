@@ -1000,6 +1000,35 @@ with tab_single:
         # Get loaded configuration to apply defaults
         loaded_config = st.session_state.get("loaded_training_config", {})
 
+        # Check for prefill from Prepare Training Data page (takes priority)
+        training_prefill = st.session_state.get("training_prefill")
+        if training_prefill and st.session_state.get("training_prefill_ready"):
+            st.info(
+                "📋 **Prefill from Prepare Training Data page detected!** "
+                "Variable selections have been pre-populated."
+            )
+            # Use prefill data as loaded_config equivalent
+            loaded_config = {
+                "paid_media_spends": training_prefill.get(
+                    "paid_media_spends", []
+                ),
+                "paid_media_vars": training_prefill.get("paid_media_vars", []),
+                "organic_vars": training_prefill.get("organic_vars", []),
+                "context_vars": training_prefill.get("context_vars", []),
+                "factor_vars": training_prefill.get("factor_vars", []),
+            }
+            # Apply var_to_spend_mapping to spend_var_mapping
+            var_to_spend = training_prefill.get("var_to_spend_mapping", {})
+            # Reverse it to spend -> var for the UI
+            for var, spend in var_to_spend.items():
+                st.session_state["spend_var_mapping"][spend] = var
+            # Clear the prefill flag so it doesn't re-trigger on each page load
+            st.session_state["training_prefill_ready"] = False
+            # Force widget refresh by updating timestamp
+            st.session_state["loaded_config_timestamp"] = (
+                datetime.utcnow().timestamp()
+            )
+
         # Get all paid_media_spends from metadata (including CUSTOM columns)
         # Don't filter by all_columns since CUSTOM columns may not be in preview yet
         available_spends = default_values["paid_media_spends"]
