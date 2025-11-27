@@ -1638,16 +1638,13 @@ with st.expander(
 
         return pd.DataFrame(metrics_data)
 
-    @st.fragment
-    def _render_vif_table_fragment(
+    def _render_vif_table(
         title: str,
         var_list: List[str],
         key_suffix: str,
         global_vif_values: dict,
     ):
-        """Fragment wrapper for VIF table that enables partial reruns.
-
-        Updates session state with selections which persists outside fragment.
+        """Render a VIF table for a category of variables.
 
         Args:
             title: Title to display for this table
@@ -1716,9 +1713,11 @@ with st.expander(
                 needs_rerun = True
             st.session_state["vif_selections"][var_name] = use_val
 
-        # If selections changed, trigger a fragment rerun only
+        # If selections changed, trigger a full page rerun to recalculate
+        # global VIF across all tables. This ensures VIF values update
+        # correctly when any checkbox changes.
         if needs_rerun:
-            st.rerun(scope="fragment")
+            st.rerun()
 
     def _get_selected_vars_from_session(var_list: List[str]) -> List[str]:
         """Get selected variables from session state for a given var list."""
@@ -1938,7 +1937,7 @@ with st.expander(
         )
 
         # Render tables with fragment for partial rerun on checkbox change
-        _render_vif_table_fragment(
+        _render_vif_table(
             "Selected Media Response Variables",
             selected_media_vars_3_3,
             "media_vars",
@@ -1951,7 +1950,7 @@ with st.expander(
 
         # Render tables for Step 2 category selections
         if selected_organic_step4:
-            _render_vif_table_fragment(
+            _render_vif_table(
                 "Selected Organic Variables",
                 selected_organic_step4,
                 "organic",
@@ -1962,7 +1961,7 @@ with st.expander(
             )
 
         if selected_context_step4:
-            _render_vif_table_fragment(
+            _render_vif_table(
                 "Selected Context Variables",
                 selected_context_step4,
                 "context",
@@ -1973,7 +1972,7 @@ with st.expander(
             )
 
         if selected_factor_step4:
-            _render_vif_table_fragment(
+            _render_vif_table(
                 "Selected Factor Variables",
                 selected_factor_step4,
                 "factor",
@@ -1984,7 +1983,7 @@ with st.expander(
             )
 
         if selected_other_step4:
-            _render_vif_table_fragment(
+            _render_vif_table(
                 "Selected Other Variables",
                 selected_other_step4,
                 "other",
