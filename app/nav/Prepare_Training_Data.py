@@ -124,11 +124,13 @@ def _filter_leading_zeros_from_media_vars(
     any_nonzero = data[valid_cols].apply(lambda row: (row != 0).any(), axis=1)
 
     # Find the first index where any media var is non-zero
-    first_nonzero_idx = any_nonzero.idxmax() if any_nonzero.any() else None
-
-    if first_nonzero_idx is None:
-        # All rows are zero, return empty or original depending on use case
+    # Note: any() guard ensures idxmax() is only called when there's at least
+    # one True value. Without this guard, idxmax() would return 0 for all-False.
+    if not any_nonzero.any():
+        # All rows are zero, return original data
         return data
+
+    first_nonzero_idx = any_nonzero.idxmax()
 
     # Return all rows from the first non-zero row onwards
     return data.loc[first_nonzero_idx:].reset_index(drop=True)
@@ -1850,6 +1852,8 @@ with st.expander(
 
                 ratio_col1, ratio_col2 = st.columns([1, 2])
                 with ratio_col1:
+                    # Use empty label to prevent text truncation (e.g. "Mod..." for
+                    # "Moderate"). The status is shown in the value with traffic light.
                     st.metric(
                         label=" ",
                         value=f"{ratio_light} {ratio_label}",
@@ -1889,6 +1893,8 @@ with st.expander(
 
                 collin_col1, collin_col2 = st.columns([1, 2])
                 with collin_col1:
+                    # Use empty label to prevent text truncation (e.g. "Mod..." for
+                    # "Moderate"). The status is shown in the value with traffic light.
                     st.metric(
                         label=" ",
                         value=f"{collin_light} {collin_label}",
