@@ -1172,10 +1172,17 @@ with st.expander(
     st.markdown("### 3.3 Select Media Response Variables")
 
     selected_paid_spends = st.session_state.get("selected_paid_spends", [])
+    selected_goal_3_3 = st.session_state.get("selected_goal")
 
     if not selected_paid_spends:
         st.info("Please select paid media spends in section 3.2 above.")
+    elif not selected_goal_3_3:
+        st.info("Please select a goal in section 3.1 above.")
     else:
+        st.caption(
+            f"Metrics are calculated against the goal: **{selected_goal_3_3}**"
+        )
+
         # Get paid_media_mapping from metadata
         paid_media_mapping = meta.get("paid_media_mapping", {}) or {}
 
@@ -1204,24 +1211,32 @@ with st.expander(
                 )
                 continue
 
-            # Calculate metrics for each option
+            # Calculate metrics for each option compared to the goal
             var_metrics_data = []
             for var_col in unique_options:
-                if var_col in df_r.columns and spend_col in df_r.columns:
-                    # For spend column itself, add it with N/A metrics
-                    if spend_col == var_col:
+                if (
+                    var_col in df_r.columns
+                    and selected_goal_3_3 in df_r.columns
+                ):
+                    # Skip if var_col == goal (comparing to itself)
+                    if var_col == selected_goal_3_3:
                         var_metrics_data.append(
                             {
-                                "Media Response Variable": f"{var_col} (spend)",
+                                "Media Response Variable": (
+                                    f"{var_col} (spend)"
+                                    if var_col == spend_col
+                                    else var_col
+                                ),
                                 "R²": np.nan,
                                 "NMAE": np.nan,
                                 "Spearman's ρ": np.nan,
                             }
                         )
                         continue
-                    temp_df = df_r[[spend_col, var_col]].copy()
-                    temp_df[spend_col] = pd.to_numeric(
-                        temp_df[spend_col], errors="coerce"
+
+                    temp_df = df_r[[selected_goal_3_3, var_col]].copy()
+                    temp_df[selected_goal_3_3] = pd.to_numeric(
+                        temp_df[selected_goal_3_3], errors="coerce"
                     )
                     temp_df[var_col] = pd.to_numeric(
                         temp_df[var_col], errors="coerce"
@@ -1235,10 +1250,11 @@ with st.expander(
                     if len(temp_df) > 1:
                         try:
                             X = np.asarray(
-                                temp_df[[spend_col]].values, dtype=np.float64
+                                temp_df[[var_col]].values, dtype=np.float64
                             )
                             y = np.asarray(
-                                temp_df[var_col].values, dtype=np.float64
+                                temp_df[selected_goal_3_3].values,
+                                dtype=np.float64,
                             )
 
                             # Calculate R2
@@ -1268,8 +1284,8 @@ with st.expander(
                             with warnings.catch_warnings():
                                 warnings.simplefilter("ignore")
                                 rho, _ = stats.spearmanr(
-                                    temp_df[spend_col].values,
                                     temp_df[var_col].values,
+                                    temp_df[selected_goal_3_3].values,
                                 )
                             spearman_rho = _safe_float(rho)
                         except Exception:
