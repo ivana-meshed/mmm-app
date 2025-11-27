@@ -90,6 +90,49 @@ st.session_state.setdefault("selected_goal", None)
 st.session_state.setdefault("paid_spend_selections", {})
 # Track paid vars selections to sync with paid spends
 st.session_state.setdefault("paid_var_selections", {})
+# Toggle for filtering leading zero rows in quality indicators
+st.session_state.setdefault("filter_leading_zeros", False)
+
+
+def _filter_leading_zeros_from_media_vars(
+    data: pd.DataFrame,
+    media_var_cols: List[str],
+) -> pd.DataFrame:
+    """
+    Filter out leading zero rows from media response variables.
+
+    Removes rows where ALL media response variables are zero at the beginning
+    of the time series. Once any media response variable becomes non-zero,
+    all subsequent rows are kept (to preserve the timeline).
+
+    Args:
+        data: DataFrame with the data
+        media_var_cols: List of media response variable column names
+
+    Returns:
+        DataFrame with leading zero rows removed
+    """
+    if data.empty or not media_var_cols:
+        return data
+
+    # Get valid media var columns that exist in the dataframe
+    valid_cols = [c for c in media_var_cols if c in data.columns]
+    if not valid_cols:
+        return data
+
+    # Create a boolean series: True if ANY media var is non-zero for that row
+    any_nonzero = data[valid_cols].apply(lambda row: (row != 0).any(), axis=1)
+
+    # Find the first index where any media var is non-zero
+    first_nonzero_idx = any_nonzero.idxmax() if any_nonzero.any() else None
+
+    if first_nonzero_idx is None:
+        # All rows are zero, return empty or original depending on use case
+        return data
+
+    # Return all rows from the first non-zero row onwards
+    return data.loc[first_nonzero_idx:].reset_index(drop=True)
+
 
 # =============================
 # Step 1: Select Data
@@ -1271,78 +1314,6 @@ with st.expander(
                     },
                 )
 
-    # Export Selected Columns button (after section 3.4)
-    st.markdown("---")
-    st.markdown("### Export Selected Columns")
-
-    if st.button(
-        "Export Selected Columns", type="primary", key="export_selected_cols"
-    ):
-        tmp_path = None
-        try:
-            # Get column categories from session state
-            column_categories = st.session_state.get("column_categories", {})
-            selected_cols = st.session_state.get(
-                "selected_columns_for_training", []
-            )
-
-            # Build JSON with columns per category
-            export_data = {
-                "paid_media_spends": column_categories.get(
-                    "paid_media_spends", []
-                ),
-                "paid_media_vars": column_categories.get("paid_media_vars", []),
-                "organic_vars": column_categories.get("organic_vars", []),
-                "context_vars": column_categories.get("context_vars", []),
-                "factor_vars": column_categories.get("factor_vars", []),
-                "other": column_categories.get("other", []),
-                "selected_goal": st.session_state.get("selected_goal"),
-                "selected_paid_spends": st.session_state.get(
-                    "selected_paid_spends", []
-                ),
-            }
-
-            # Save to GCS
-            country = st.session_state.get("country", "de")
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-
-            # Create temporary file
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".json", delete=False
-            ) as tmp:
-                tmp_path = tmp.name
-                json.dump(export_data, tmp, indent=2)
-
-            # Upload to GCS
-            gcs_path = TRAINING_DATA_PATH_TEMPLATE.format(
-                country=country, timestamp=timestamp
-            )
-            upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
-
-            # Count only the column category fields, not metadata fields
-            column_category_keys = [
-                "paid_media_spends",
-                "paid_media_vars",
-                "organic_vars",
-                "context_vars",
-                "factor_vars",
-                "other",
-            ]
-            total_cols = sum(
-                len(export_data.get(k, [])) for k in column_category_keys
-            )
-            st.success(
-                f"✅ Exported {total_cols} columns by category "
-                f"to gs://{GCS_BUCKET}/{gcs_path}"
-            )
-            st.session_state["last_exported_columns_path"] = gcs_path
-        except Exception as e:
-            st.error(f"Failed to export selected columns: {e}")
-        finally:
-            # Clean up temp file
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-
 
 # =============================
 # Step 4: Select strongest drivers and reduce noise
@@ -1354,7 +1325,7 @@ with st.expander(
     st.caption(
         "Analyze selected variables for multicollinearity using Variance "
         "Inflation Factor (VIF). Use checkboxes to include/exclude variables. "
-        "VIF is calculated within each category table separately. "
+        "VIF is calculated across ALL selected variables from all tables. "
         "VIF > 10 indicates high multicollinearity (🔴), VIF 5-10 is "
         "moderate (🟡), VIF < 5 is good (🟢)."
     )
@@ -1398,16 +1369,26 @@ with st.expander(
         except (TypeError, ValueError):
             return "⚪"  # Unknown/invalid
 
-    def _calculate_condition_number(cols: List[str]) -> float:
+    def _calculate_condition_number(
+        cols: List[str],
+        data: pd.DataFrame = None,
+    ) -> float:
         """Calculate the condition number for multicollinearity assessment.
 
         Condition Number is an overall measure of multicollinearity:
         - < 10: No/low multicollinearity
         - 10-30: Moderate multicollinearity
         - > 30: High multicollinearity
+
+        Args:
+            cols: List of column names to include
+            data: DataFrame to use for calculation. Defaults to df_r.
         """
         if len(cols) < 2:
             return np.nan
+
+        # Use provided data or fall back to df_r
+        source_df = data if data is not None else df_r
 
         try:
             # Filter to valid numeric columns and remove duplicates
@@ -1416,8 +1397,8 @@ with st.expander(
             for c in cols:
                 if (
                     c not in seen
-                    and c in df_r.columns
-                    and pd.api.types.is_numeric_dtype(df_r[c])
+                    and c in source_df.columns
+                    and pd.api.types.is_numeric_dtype(source_df[c])
                 ):
                     seen.add(c)
                     valid_cols.append(c)
@@ -1425,7 +1406,7 @@ with st.expander(
             if len(valid_cols) < 2:
                 return np.nan
 
-            cond_df = df_r[valid_cols].copy()
+            cond_df = source_df[valid_cols].copy()
             for col in cond_df.columns:
                 cond_df[col] = pd.to_numeric(cond_df[col], errors="coerce")
 
@@ -1555,9 +1536,15 @@ with st.expander(
     def _calculate_variable_metrics_step4(
         var_cols: List[str],
         goal_col: str,
-        selected_only_cols: List[str],
+        global_vif_values: dict,
     ) -> pd.DataFrame:
-        """Calculate R², NMAE, Spearman's ρ, VIF for a list of variables."""
+        """Calculate R², NMAE, Spearman's ρ, VIF for a list of variables.
+
+        Args:
+            var_cols: List of variable column names to display in this table
+            goal_col: Goal column for calculating R², NMAE, Spearman's ρ
+            global_vif_values: Pre-calculated VIF values across all tables
+        """
         if not var_cols or not goal_col:
             return pd.DataFrame()
 
@@ -1571,9 +1558,6 @@ with st.expander(
             return pd.DataFrame()
 
         metrics_data = []
-
-        # Calculate VIF only for selected columns within this table
-        vif_values = _calculate_vif_for_columns_step4(selected_only_cols)
 
         # Calculate metrics for each variable against the goal
         for var_col in valid_cols:
@@ -1631,8 +1615,8 @@ with st.expander(
                 except Exception:
                     pass
 
-            # Get VIF value (only if column is selected)
-            vif = vif_values.get(var_col, np.nan)
+            # Get VIF value from global VIF calculation (across all tables)
+            vif = global_vif_values.get(var_col, np.nan)
             vif_band = _calculate_vif_band(vif)
 
             # Determine default Use value from session state or default True
@@ -1654,26 +1638,26 @@ with st.expander(
 
     @st.fragment
     def _render_vif_table_fragment(
-        title: str, var_list: List[str], key_suffix: str
+        title: str,
+        var_list: List[str],
+        key_suffix: str,
+        global_vif_values: dict,
     ):
         """Fragment wrapper for VIF table that enables partial reruns.
 
         Updates session state with selections which persists outside fragment.
+
+        Args:
+            title: Title to display for this table
+            var_list: List of variables to show in this table
+            key_suffix: Unique key suffix for the data editor
+            global_vif_values: Pre-calculated VIF values across all tables
         """
         if not var_list or not selected_goal_step4:
             return
 
-        # Get currently selected columns for this table from session state
-        selected_cols_for_vif = [
-            c
-            for c in var_list
-            if st.session_state["vif_selections"].get(c, True)
-            and c in df_r.columns
-            and pd.api.types.is_numeric_dtype(df_r[c])
-        ]
-
         df_metrics = _calculate_variable_metrics_step4(
-            var_list, selected_goal_step4, selected_cols_for_vif
+            var_list, selected_goal_step4, global_vif_values
         )
 
         if df_metrics.empty:
@@ -1824,12 +1808,36 @@ with st.expander(
                 "Updates when you change driver selections below."
             )
 
+            # Add toggle for filtering leading zeros from media response vars
+            filter_zeros = st.toggle(
+                "Exclude leading zero rows",
+                value=st.session_state.get("filter_leading_zeros", False),
+                help=(
+                    "When enabled, excludes rows where all Media Response "
+                    "Variables are zero at the beginning of the time series. "
+                    "Once any variable becomes non-zero, all subsequent rows "
+                    "are kept to preserve the timeline."
+                ),
+                key="filter_leading_zeros_toggle",
+            )
+            st.session_state["filter_leading_zeros"] = filter_zeros
+
+            # Get data for calculations (filtered or unfiltered)
+            if filter_zeros and selected_media_vars_3_3:
+                df_for_calc = _filter_leading_zeros_from_media_vars(
+                    df_r, selected_media_vars_3_3
+                )
+            else:
+                df_for_calc = df_r
+
             col_ratio, col_collin = st.columns(2)
 
             # Indicator 1: Ratio of drivers to timeframe
             with col_ratio:
                 n_drivers = len(final_selected_vars)
-                n_observations = len(df_r) if not df_r.empty else 0
+                n_observations = (
+                    len(df_for_calc) if not df_for_calc.empty else 0
+                )
 
                 ratio_light, ratio_label, ratio_value = (
                     _calculate_driver_ratio_band(n_drivers, n_observations)
@@ -1843,7 +1851,7 @@ with st.expander(
                 ratio_col1, ratio_col2 = st.columns([1, 2])
                 with ratio_col1:
                     st.metric(
-                        label="Status",
+                        label=" ",
                         value=f"{ratio_light} {ratio_label}",
                     )
                 with ratio_col2:
@@ -1861,9 +1869,11 @@ with st.expander(
             # Indicator 2: Collinearity (Condition Number)
             with col_collin:
                 # Calculate condition number for selected variables
+                # Use filtered data if toggle is on
                 if len(final_selected_vars) >= 2:
                     condition_number = _calculate_condition_number(
-                        final_selected_vars
+                        final_selected_vars,
+                        df_for_calc,
                     )
                 else:
                     condition_number = np.nan
@@ -1880,7 +1890,7 @@ with st.expander(
                 collin_col1, collin_col2 = st.columns([1, 2])
                 with collin_col1:
                     st.metric(
-                        label="Status",
+                        label=" ",
                         value=f"{collin_light} {collin_label}",
                     )
                 with collin_col2:
@@ -1914,11 +1924,19 @@ with st.expander(
         # =====================================================
         # VIF Tables Section
         # =====================================================
+        # Calculate VIF ONCE across ALL selected variables from ALL tables
+        # This ensures VIF values are calculated globally, not per-table
+        all_selected_for_global_vif = _get_all_selected_vars_step4()
+        global_vif_values = _calculate_vif_for_columns_step4(
+            all_selected_for_global_vif
+        )
+
         # Render tables with fragment for partial rerun on checkbox change
         _render_vif_table_fragment(
             "Selected Media Response Variables",
             selected_media_vars_3_3,
             "media_vars",
+            global_vif_values,
         )
         # Collect selected vars from session state
         all_selected_vars_step4.extend(
@@ -1928,7 +1946,10 @@ with st.expander(
         # Render tables for Step 2 category selections
         if selected_organic_step4:
             _render_vif_table_fragment(
-                "Selected Organic Variables", selected_organic_step4, "organic"
+                "Selected Organic Variables",
+                selected_organic_step4,
+                "organic",
+                global_vif_values,
             )
             all_selected_vars_step4.extend(
                 _get_selected_vars_from_session(selected_organic_step4)
@@ -1936,7 +1957,10 @@ with st.expander(
 
         if selected_context_step4:
             _render_vif_table_fragment(
-                "Selected Context Variables", selected_context_step4, "context"
+                "Selected Context Variables",
+                selected_context_step4,
+                "context",
+                global_vif_values,
             )
             all_selected_vars_step4.extend(
                 _get_selected_vars_from_session(selected_context_step4)
@@ -1944,7 +1968,10 @@ with st.expander(
 
         if selected_factor_step4:
             _render_vif_table_fragment(
-                "Selected Factor Variables", selected_factor_step4, "factor"
+                "Selected Factor Variables",
+                selected_factor_step4,
+                "factor",
+                global_vif_values,
             )
             all_selected_vars_step4.extend(
                 _get_selected_vars_from_session(selected_factor_step4)
@@ -1952,7 +1979,10 @@ with st.expander(
 
         if selected_other_step4:
             _render_vif_table_fragment(
-                "Selected Other Variables", selected_other_step4, "other"
+                "Selected Other Variables",
+                selected_other_step4,
+                "other",
+                global_vif_values,
             )
             all_selected_vars_step4.extend(
                 _get_selected_vars_from_session(selected_other_step4)
@@ -2092,76 +2122,106 @@ with st.expander(
             type="primary",
             key="export_to_training_page",
         ):
-            # Get final selected variables from VIF selections
-            final_vars = _get_all_selected_vars_step4()
+            tmp_path = None
+            try:
+                # Get final selected variables from VIF selections
+                final_vars = _get_all_selected_vars_step4()
 
-            # Get VIF-selected media response variables
-            # These are the media vars selected in Step 3.3 AND kept via VIF
-            selected_media_response_vars = [
-                v
-                for v in selected_media_vars_3_3
-                if st.session_state["vif_selections"].get(v, True)
-                and v in df_r.columns
-                and pd.api.types.is_numeric_dtype(df_r[v])
-            ]
+                # Get VIF-selected media response variables
+                # These are the media vars selected in Step 3.3 AND kept via VIF
+                selected_media_response_vars = [
+                    v
+                    for v in selected_media_vars_3_3
+                    if st.session_state["vif_selections"].get(v, True)
+                    and v in df_r.columns
+                    and pd.api.types.is_numeric_dtype(df_r[v])
+                ]
 
-            # Get paid_media_mapping from metadata to find corresponding spends
-            paid_media_mapping = meta.get("paid_media_mapping", {}) or {}
+                # Get paid_media_mapping from metadata
+                paid_media_mapping = meta.get("paid_media_mapping", {}) or {}
 
-            # Build reverse mapping: var -> spend
-            var_to_spend_mapping = {}
-            for spend_col, var_list in paid_media_mapping.items():
-                for var_col in var_list:
-                    var_to_spend_mapping[var_col] = spend_col
-            # Also map spend columns to themselves (when spend is used as var)
-            for spend_col in paid_media_mapping.keys():
-                if spend_col not in var_to_spend_mapping:
-                    var_to_spend_mapping[spend_col] = spend_col
+                # Build reverse mapping: var -> spend
+                var_to_spend_mapping = {}
+                for spend_col, var_list in paid_media_mapping.items():
+                    for var_col in var_list:
+                        var_to_spend_mapping[var_col] = spend_col
+                # Also map spend columns to themselves (when spend is used as var)
+                for spend_col in paid_media_mapping.keys():
+                    if spend_col not in var_to_spend_mapping:
+                        var_to_spend_mapping[spend_col] = spend_col
 
-            # Find corresponding spends for the VIF-selected media response vars
-            selected_spends_from_vif = []
-            var_to_spend_export = {}
-            for media_var in selected_media_response_vars:
-                spend_col = var_to_spend_mapping.get(media_var)
-                if spend_col:
-                    if spend_col not in selected_spends_from_vif:
-                        selected_spends_from_vif.append(spend_col)
-                    var_to_spend_export[media_var] = spend_col
+                # Find corresponding spends for the VIF-selected media vars
+                selected_spends_from_vif = []
+                var_to_spend_export = {}
+                for media_var in selected_media_response_vars:
+                    spend_col = var_to_spend_mapping.get(media_var)
+                    if spend_col:
+                        if spend_col not in selected_spends_from_vif:
+                            selected_spends_from_vif.append(spend_col)
+                        var_to_spend_export[media_var] = spend_col
 
-            # Store selections in session state for Training page
-            st.session_state["training_prefill"] = {
-                "country": st.session_state.get("country", "de"),
-                "selected_goal": st.session_state.get("selected_goal"),
-                "paid_media_spends": selected_spends_from_vif,
-                "paid_media_vars": selected_media_response_vars,
-                "var_to_spend_mapping": var_to_spend_export,
-                "organic_vars": [
-                    v for v in selected_organic_step4 if v in final_vars
-                ],
-                "context_vars": [
-                    v for v in selected_context_step4 if v in final_vars
-                ],
-                "factor_vars": [
-                    v for v in selected_factor_step4 if v in final_vars
-                ],
-                "all_selected_drivers": final_vars,
-                "data_version": st.session_state.get(
-                    "picked_data_ts", "Latest"
-                ),
-                "meta_version": st.session_state.get(
-                    "picked_meta_ts", "Latest"
-                ),
-            }
+                # Build export data with all Training page settings
+                export_data = {
+                    "country": st.session_state.get("country", "de"),
+                    "selected_goal": st.session_state.get("selected_goal"),
+                    "paid_media_spends": selected_spends_from_vif,
+                    "paid_media_vars": selected_media_response_vars,
+                    "var_to_spend_mapping": var_to_spend_export,
+                    "organic_vars": [
+                        v for v in selected_organic_step4 if v in final_vars
+                    ],
+                    "context_vars": [
+                        v for v in selected_context_step4 if v in final_vars
+                    ],
+                    "factor_vars": [
+                        v for v in selected_factor_step4 if v in final_vars
+                    ],
+                    "all_selected_drivers": final_vars,
+                    "data_version": st.session_state.get(
+                        "picked_data_ts", "Latest"
+                    ),
+                    "meta_version": st.session_state.get(
+                        "picked_meta_ts", "Latest"
+                    ),
+                }
 
-            # Store flag to indicate prefill is ready
-            st.session_state["training_prefill_ready"] = True
+                # Store selections in session state for Training page
+                st.session_state["training_prefill"] = export_data
 
-            st.success(
-                f"✅ Exported {len(final_vars)} selected drivers to Training page!\n\n"
-                f"**Paid Media Response Vars (VIF selected):** {len(selected_media_response_vars)}\n"
-                f"**Corresponding Paid Media Spends:** {len(selected_spends_from_vif)}\n"
-                f"**Organic Vars:** {len([v for v in selected_organic_step4 if v in final_vars])}\n"
-                f"**Context Vars:** {len([v for v in selected_context_step4 if v in final_vars])}\n"
-                f"**Factor Vars:** {len([v for v in selected_factor_step4 if v in final_vars])}\n\n"
-                "👉 Navigate to **Experiment** page to see prefilled values."
-            )
+                # Store flag to indicate prefill is ready
+                st.session_state["training_prefill_ready"] = True
+
+                # Save to GCS
+                country = st.session_state.get("country", "de")
+                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+                # Create temporary file
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".json", delete=False
+                ) as tmp:
+                    tmp_path = tmp.name
+                    json.dump(export_data, tmp, indent=2)
+
+                # Upload to GCS
+                gcs_path = TRAINING_DATA_PATH_TEMPLATE.format(
+                    country=country, timestamp=timestamp
+                )
+                upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
+                st.session_state["last_exported_columns_path"] = gcs_path
+
+                st.success(
+                    f"✅ Exported {len(final_vars)} selected drivers!\n\n"
+                    f"**Saved to:** `gs://{GCS_BUCKET}/{gcs_path}`\n\n"
+                    f"**Paid Media Response Vars:** {len(selected_media_response_vars)}\n"
+                    f"**Corresponding Paid Media Spends:** {len(selected_spends_from_vif)}\n"
+                    f"**Organic Vars:** {len([v for v in selected_organic_step4 if v in final_vars])}\n"
+                    f"**Context Vars:** {len([v for v in selected_context_step4 if v in final_vars])}\n"
+                    f"**Factor Vars:** {len([v for v in selected_factor_step4 if v in final_vars])}\n\n"
+                    "👉 Navigate to **Experiment** page to see prefilled values."
+                )
+            except Exception as e:
+                st.error(f"Failed to export training settings: {e}")
+            finally:
+                # Clean up temp file
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
