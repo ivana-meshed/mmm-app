@@ -49,7 +49,12 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 
 def _safe_float(value: Union[float, np.ndarray, None]) -> float:
-    """Safely convert a value to float, handling numpy arrays and NaN values."""
+    """Safely convert a value to float, handling numpy arrays and NaN values.
+
+    Note: Infinity values are preserved (not converted to NaN) because they
+    have meaning in VIF calculations - they indicate perfect multicollinearity
+    between variables (e.g., identical columns).
+    """
     if value is None:
         return np.nan
     # Handle numpy arrays - take scalar value if single element, else NaN
@@ -61,8 +66,8 @@ def _safe_float(value: Union[float, np.ndarray, None]) -> float:
     # Now check if it's a valid number
     try:
         f = float(value)
-        # Use math.isnan and math.isinf for Python floats (avoids numpy type issues)
-        if math.isnan(f) or math.isinf(f):
+        # Only convert NaN to np.nan, preserve infinity values
+        if math.isnan(f):
             return np.nan
         return f
     except (TypeError, ValueError):
@@ -1357,11 +1362,21 @@ with st.expander(
     st.session_state.setdefault("global_vif_selections", {})
 
     def _calculate_vif_band(vif_value: float) -> str:
-        """Return VIF band indicator based on VIF value."""
+        """Return VIF band indicator based on VIF value.
+
+        VIF thresholds:
+        - inf (∞): Perfect multicollinearity (e.g., identical columns) - 🔴
+        - >= 10: High multicollinearity - 🔴
+        - 5-10: Moderate multicollinearity - 🟡
+        - < 5: Good (low multicollinearity) - 🟢
+        - NaN/invalid: Unknown - ⚪
+        """
         try:
             v = float(vif_value)
-            if math.isnan(v) or math.isinf(v):
+            if math.isnan(v):
                 return "⚪"  # Unknown/invalid
+            elif math.isinf(v):
+                return "🔴"  # Perfect multicollinearity (identical columns)
             elif v >= 10:
                 return "🔴"  # High multicollinearity
             elif v >= 5:
@@ -1631,12 +1646,33 @@ with st.expander(
                     "R²": _safe_float(r2),
                     "NMAE": _safe_float(nmae),
                     "Spearman's ρ": _safe_float(spearman_rho),
-                    "VIF": _safe_float(vif),
+                    "VIF": _format_vif_value(_safe_float(vif)),
                     "VIF Band": vif_band,
                 }
             )
 
         return pd.DataFrame(metrics_data)
+
+    def _format_vif_value(vif: float) -> str:
+        """Format VIF value for display.
+
+        Returns:
+            - "∞" for infinite VIF (perfect multicollinearity)
+            - "N/A" for NaN values
+            - Formatted number string for valid values
+        """
+        if vif is None:
+            return "N/A"
+        try:
+            v = float(vif)
+            if math.isnan(v):
+                return "N/A"
+            elif math.isinf(v):
+                return "∞"
+            else:
+                return f"{v:.2f}"
+        except (TypeError, ValueError):
+            return "N/A"
 
     def _render_vif_table(
         title: str,
@@ -1691,12 +1727,14 @@ with st.expander(
                 "Spearman's ρ": st.column_config.NumberColumn(
                     "Spearman's ρ", format="%.4f", disabled=True
                 ),
-                "VIF": st.column_config.NumberColumn(
-                    "VIF", format="%.2f", disabled=True
+                "VIF": st.column_config.TextColumn(
+                    "VIF",
+                    help="∞ indicates perfect multicollinearity (e.g., identical columns)",
+                    disabled=True,
                 ),
                 "VIF Band": st.column_config.TextColumn(
                     "VIF Band",
-                    help="🟢 = Good (< 5), 🟡 = Moderate (5-10), 🔴 = High (> 10)",
+                    help="🟢 = Good (< 5), 🟡 = Moderate (5-10), 🔴 = High (> 10 or ∞)",
                     disabled=True,
                 ),
             },
