@@ -61,12 +61,13 @@ prepare_training_page_oldv2 = st.Page(
 experiment_page = st.Page(
     "nav/Run_Experiment.py", title="5. Run Models", icon="🧪"
 )
+
 results_page = st.Page(
-    "nav/View_Results.py", title="Results: Robyn MMM", icon="📈"
+    "nav/View_Results.py", title="6. View Model Results", icon="📈"
 )
 best_results_page = st.Page(
     "nav/View_Best_Results.py",
-    title="Best models per country: Robyn MMM",
+    title="7. View Best Models",
     icon="🏆",
 )
 
