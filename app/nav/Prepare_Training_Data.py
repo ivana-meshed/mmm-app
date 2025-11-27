@@ -1354,7 +1354,7 @@ with st.expander(
     st.caption(
         "Analyze selected variables for multicollinearity using Variance "
         "Inflation Factor (VIF). Use checkboxes to include/exclude variables. "
-        "VIF is recalculated based on selected variables within each table. "
+        "VIF is calculated within each category table separately. "
         "VIF > 10 indicates high multicollinearity (🔴), VIF 5-10 is "
         "moderate (🟡), VIF < 5 is good (🟢)."
     )
