@@ -408,5 +408,120 @@ class TestVIFCalculation(unittest.TestCase):
             self.assertFalse(np.isinf(vif))  # No inf due to duplicates
 
 
+class TestFilterLeadingZeros(unittest.TestCase):
+    """Tests for filtering leading zero rows from media response variables."""
+
+    def test_filter_leading_zeros_basic(self):
+        """Test basic filtering of leading zero rows."""
+        # Create test data with leading zeros in media columns
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2024-01-01", periods=6),
+                "media_a": [0, 0, 10, 20, 30, 40],
+                "media_b": [0, 0, 5, 15, 25, 35],
+                "other_col": [1, 2, 3, 4, 5, 6],
+            }
+        )
+
+        # Replicate the filter logic from the page
+        media_var_cols = ["media_a", "media_b"]
+        valid_cols = [c for c in media_var_cols if c in df.columns]
+
+        any_nonzero = df[valid_cols].apply(lambda row: (row != 0).any(), axis=1)
+
+        first_nonzero_idx = any_nonzero.idxmax() if any_nonzero.any() else None
+
+        if first_nonzero_idx is not None:
+            result = df.loc[first_nonzero_idx:].reset_index(drop=True)
+        else:
+            result = df
+
+        # Should have 4 rows (from index 2 onwards)
+        self.assertEqual(len(result), 4)
+        # First row should have media_a = 10
+        self.assertEqual(result.iloc[0]["media_a"], 10)
+        # other_col should also be filtered (to preserve timeline)
+        self.assertEqual(result.iloc[0]["other_col"], 3)
+
+    def test_filter_leading_zeros_no_leading_zeros(self):
+        """Test filtering when there are no leading zeros."""
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2024-01-01", periods=4),
+                "media_a": [10, 20, 30, 40],
+                "media_b": [5, 15, 25, 35],
+            }
+        )
+
+        media_var_cols = ["media_a", "media_b"]
+        valid_cols = [c for c in media_var_cols if c in df.columns]
+
+        any_nonzero = df[valid_cols].apply(lambda row: (row != 0).any(), axis=1)
+
+        first_nonzero_idx = any_nonzero.idxmax() if any_nonzero.any() else None
+
+        if first_nonzero_idx is not None:
+            result = df.loc[first_nonzero_idx:].reset_index(drop=True)
+        else:
+            result = df
+
+        # Should have all 4 rows (no leading zeros)
+        self.assertEqual(len(result), 4)
+        self.assertEqual(result.iloc[0]["media_a"], 10)
+
+    def test_filter_leading_zeros_all_zeros(self):
+        """Test filtering when all rows are zeros."""
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2024-01-01", periods=4),
+                "media_a": [0, 0, 0, 0],
+                "media_b": [0, 0, 0, 0],
+            }
+        )
+
+        media_var_cols = ["media_a", "media_b"]
+        valid_cols = [c for c in media_var_cols if c in df.columns]
+
+        any_nonzero = df[valid_cols].apply(lambda row: (row != 0).any(), axis=1)
+
+        # When all zeros, any_nonzero.any() is False
+        if not any_nonzero.any():
+            result = df
+        else:
+            first_nonzero_idx = any_nonzero.idxmax()
+            result = df.loc[first_nonzero_idx:].reset_index(drop=True)
+
+        # Should keep original data when all zeros
+        self.assertEqual(len(result), 4)
+
+    def test_filter_leading_zeros_mixed_columns(self):
+        """Test filtering when one column has zeros but another has values."""
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2024-01-01", periods=5),
+                "media_a": [0, 0, 10, 20, 30],
+                "media_b": [0, 5, 10, 15, 20],  # First non-zero at index 1
+            }
+        )
+
+        media_var_cols = ["media_a", "media_b"]
+        valid_cols = [c for c in media_var_cols if c in df.columns]
+
+        any_nonzero = df[valid_cols].apply(lambda row: (row != 0).any(), axis=1)
+
+        first_nonzero_idx = any_nonzero.idxmax() if any_nonzero.any() else None
+
+        if first_nonzero_idx is not None:
+            result = df.loc[first_nonzero_idx:].reset_index(drop=True)
+        else:
+            result = df
+
+        # Should have 4 rows (from index 1 onwards)
+        self.assertEqual(len(result), 4)
+        # First row should be at original index 1
+        self.assertEqual(result.iloc[0]["media_a"], 0)
+        self.assertEqual(result.iloc[0]["media_b"], 5)
+
+
 if __name__ == "__main__":
     unittest.main()
