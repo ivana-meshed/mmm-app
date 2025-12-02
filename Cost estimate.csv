@@ -1,79 +1,94 @@
-Service,Component,Metric,Idle Cost ($/month),100 calls/month ($),500 calls/month ($),1000 calls/month ($),5000 calls/month ($),Notes
-Cloud Run,Web Service - CPU,Allocated CPU-seconds,0.00,24.00,120.00,240.00,1200.00,"Per-request: avg 30s @ 2 vCPU * $0.00002400"
-Cloud Run,Web Service - Memory,Allocated Memory GB-seconds,0.00,4.80,24.00,48.00,240.00,"Per-request: avg 30s @ 4GB * $0.00000250"
-Cloud Run,Web Service - Requests,Request count,0.00,0.40,2.00,4.00,20.00,"$0.40 per million requests"
-Cloud Run,Web Service - Idle Instances,Always-on minimum instances,0.00,0.00,0.00,0.00,0.00,"OPTIMIZED: min_instances set to 0 (was $42.34/month with 2 instances). Trade-off: cold starts"
-Cloud Run,Training Job - CPU,Allocated CPU-seconds,0.00,16.00,80.00,160.00,800.00,"OPTIMIZED: 4 vCPU * 3600s avg * $0.00002400. Was $32/job with 8 vCPU. Assumes 1 job per 10 requests"
-Cloud Run,Training Job - Memory,Allocated Memory GB-seconds,0.00,14.40,72.00,144.00,720.00,"OPTIMIZED: 16GB * 3600s avg * $0.00000250. Was $28.80/job with 32GB. Assumes 1 job per 10 requests"
-Cloud Run,Training Job - Executions,Execution count,0.00,0.10,0.50,1.00,5.00,"$0.10 per execution (1 job per ~10 web requests)"
-Cloud Storage,GCS Bucket,Storage (GB-months),0.82,1.02,2.02,3.52,11.02,"OPTIMIZED: Lifecycle policies applied. Nearline (30d): $0.010/GB, Coldline (90d): $0.004/GB. Was $1.60-12.80"
-Cloud Storage,GCS Bucket,Class A Operations,0.01,0.06,0.26,0.51,2.51,"$0.05 per 10K ops. Idle: 2K ops. Active: ~100 ops per request (writes/metadata)"
-Cloud Storage,GCS Bucket,Class B Operations,0.00,0.02,0.08,0.16,0.80,"$0.004 per 10K ops. Idle: 5K ops. Active: ~200 ops per request (reads)"
-Cloud Storage,GCS Bucket,Network Egress,0.00,1.20,6.00,12.00,60.00,"$0.12 per GB egress. Assumes 1GB data transfer per 10 requests (downloading results)"
-Artifact Registry,Docker Repository,Storage,0.10,0.10,0.10,0.10,0.10,"$0.10 per GB/month for images. ~1GB for web+training images"
-Secret Manager,Secrets Storage,Active secret versions,0.18,0.18,0.18,0.18,0.18,"6 secrets * $0.06 per secret/month (sf-private-key, sf-private-key-persistent, auth-client-id, auth-client-secret, auth-cookie-secret, metadata)"
-Secret Manager,Secret Access,Access operations,0.00,0.30,1.50,3.00,15.00,"$0.03 per 10K accesses. ~10 secret reads per request"
-Cloud Scheduler,Job Scheduler,Jobs,0.30,0.30,0.30,0.30,0.30,"$0.10 per job/month. 3 jobs (queue tick prod, queue tick dev, health check)"
-Cloud Scheduler,Job Invocations,Invocations,0.00,0.00,0.00,0.00,0.00,"First 3 jobs free, then $0.10/job. Scheduler invokes queue tick every minute = ~43.8K/month but within free tier"
-Snowflake,Warehouse Usage,Compute credits,0.00,3.00,15.00,30.00,150.00,"OPTIMIZED: 70% cache hit rate. Small warehouse: $2/credit. Only 30% of requests hit Snowflake. Was $10-500"
-Cloud Logging,Log Ingestion,Log volume (GB),0.50,1.00,2.50,4.50,17.50,"First 50GB/month free. $0.50/GB above. Idle: 10GB. Active: +0.5GB per 100 requests"
-Cloud Logging,Log Storage,Log retention (GB),0.00,0.00,0.00,0.00,0.00,"First 30 days included in ingestion. Long-term storage minimal"
-IAM & Admin,Service Accounts,Service accounts,0.00,0.00,0.00,0.00,0.00,"Free - 3 service accounts (web-service-sa, training-job-sa, scheduler)"
-Cloud Build,Container Builds,Build minutes,0.00,0.00,0.00,0.00,0.00,"First 120 build-minutes/day free. CI/CD builds only on deploys, not per request"
-Networking,Load Balancing,Ingress traffic,0.00,0.60,3.00,6.00,30.00,"Cloud Run ingress free. But includes Cloud Armor/Load Balancer forwarding rules if used: ~$0.006/GB ingress"
-,,,,,,,,
-TOTAL,All Services,Monthly Cost (OPTIMIZED),2.69,68.26,282.56,629.39,3272.33,"With min_instances=0, 70% Snowflake cache, and 4 vCPU/16GB training jobs"
-TOTAL,All Services,Monthly Cost (ORIGINAL),45.03,148.00,519.56,1073.39,5142.33,"Before optimizations (8 vCPU/32GB training, 2 min_instances, no caching)"
-TOTAL,All Services,Monthly Savings,42.34,79.74,237.00,444.00,1870.00,"Savings from all implemented optimizations"
-TOTAL,All Services,Percentage Saved,94%,54%,46%,41%,36%,"Cost reduction percentage"
-,,,,,,,,
-ASSUMPTIONS,,,,,,,
-,"Average Web Request Duration: 30 seconds (CPU + memory time)",,,,,,
-,"Average Training Job Duration: 1 hour (3600 seconds)",,,,,,
-,"Training Job Frequency: 1 job per 10 web requests",,,,,,
-,"Data Transfer: 1GB per 10 requests for downloading results",,,,,,
-,"Base Storage: 80GB for historical data and artifacts",,,,,,
-,"Storage Growth: +1GB per 100 requests for new results",,,,,,
-,"Secret Access: ~10 reads per request (Snowflake, OAuth)",,,,,,
-,"GCS Operations: ~100 Class A (writes), ~200 Class B (reads) per request",,,,,,
-,"Snowflake Cache Hit Rate: 70% (cached data reused, only 30% hit Snowflake)",,,,,,
-,"Snowflake: 1 compute credit per 10 requests when cache misses (varies by query complexity)",,,,,,
-,"Log Volume: 10GB/month idle, +0.5GB per 100 requests",,,,,,
-,"Region: europe-west1 (Belgium) pricing",,,,,,
-,"Currency: USD as of November 2025",,,,,,
-,"Optimizations Applied: min_instances=0, GCS lifecycle policies, 70% Snowflake caching",,,,,,
-,,,,,,,,
-OPTIMIZATION NOTES,,,,,,,
-,"✅ IMPLEMENTED: min_instances reduced from 2 to 0 - saves $42.34/month (eliminates idle cost, adds cold starts)",,,,,,
-,"✅ IMPLEMENTED: GCS lifecycle policies configured - saves ~50-80% on storage for data >30 days old",,,,,,
-,"✅ IMPLEMENTED: Snowflake caching (70% hit rate) - saves $7-350/month depending on usage",,,,,,
-,"✅ IMPLEMENTED: Training job downsized to 4 vCPU/16GB - saves $15.22/job (50% per job, $1520/month at 5K calls)",,,,,,
-,"5. Further reduce training job to 2 vCPU/8GB for 75% savings per job (but 2-4x longer runtime)",,,,,,
-,"6. Compress training results before uploading to GCS to reduce storage and egress costs by ~50%",,,,,,
-,"7. Use Cloud Run jobs with spot/preemptible instances when available (up to 50% savings) - not yet available",,,,,,
-,"8. Configure log retention policies (minimal impact, first 50GB free)",,,,,,
-,,,,,,,,
-COST BREAKDOWN BY USAGE,,,,,,,
-,Idle (no usage),Fixed infrastructure costs only,2.69,100%,,"Optimized from $45.03 (94% reduction)",
-,100 calls/month,Low usage - training jobs dominate,68.26,4% idle | 96% variable,,"Optimized from $148.00 (54% reduction)",
-,500 calls/month,Medium usage,282.56,1% idle | 99% variable,,"Optimized from $519.56 (46% reduction)",
-,1000 calls/month,High usage,629.39,0% idle | 100% variable,,"Optimized from $1073.39 (41% reduction)",
-,5000 calls/month,Very high usage,3272.33,0% idle | 100% variable,,"Optimized from $5142.33 (36% reduction)",
-,,,,,,,,
-TRAINING JOB SIZING,,,,,,,
-,"Training jobs are the biggest cost component at scale",,,,,,
-,"Current configuration: 4 vCPU / 16 GB = $30.50 per job",,,,,,
-,"Original configuration: 8 vCPU / 32 GB = $60.90 per job (50% more expensive)",,,,,,
-,"Alternative: 2 vCPU / 8 GB = $15.22 per job (50% savings, but 2-4x slower)",,,,,,
-,"At 5000 calls/month (500 jobs): 4 vCPU saves $15,225/month vs 8 vCPU",,,,,,
-,"Recommendation: Monitor job completion time and adjust as needed",,,,,,
-,"Trade-off: Smaller machines = lower cost but longer training time",,,,,,
-,,,,,,,,
-WHY SNOWFLAKE COSTS ARE HIGH,,,,,,,
-,"Snowflake charges per compute credit for warehouse usage",,,,,,
-,"Small warehouse costs $2/credit",,,,,,
-,"Complex queries (aggregations, joins) consume more credits",,,,,,
-,"Original estimate: 1 credit per 10 requests = $10-500/month",,,,,,
-,"With 70% caching: Only 30% hit Snowflake = $3-150/month",,,,,,
-,"Further optimization: Use result caching, query optimization, smaller warehouse for simple queries",,,,,,
-,"Alternative: Pre-aggregate data or use materialized views in Snowflake",,,,,,
+Service,Category,Component,Metric,Idle Cost ($/month),100 calls/month ($),500 calls/month ($),1000 calls/month ($),5000 calls/month ($),Notes
+,,,,,,,,,,
+WEB SERVICE CALLS,,,,,,,,,,
+Cloud Run,Web Service,CPU,Allocated CPU-seconds,0.00,1.44,7.20,14.40,72.00,"Per-request: avg 30s @ 2 vCPU * $0.00002400/vCPU-second"
+Cloud Run,Web Service,Memory,Allocated Memory GB-seconds,0.00,0.30,1.50,3.00,15.00,"Per-request: avg 30s @ 4GB * $0.0000025/GB-second"
+Cloud Run,Web Service,Requests,Request count,0.00,0.00,0.00,0.00,0.00,"$0.40 per million requests (negligible at this scale)"
+Cloud Run,Web Service,Idle Instances,Always-on minimum instances,0.00,0.00,0.00,0.00,0.00,"min_instances=0 (cold starts trade-off)"
+Snowflake,Web Service,Warehouse Usage,Compute credits (with caching),0.00,0.60,3.00,6.00,30.00,"30% of requests hit Snowflake (70% cache). ~0.1 credit per 5 queries * $2/credit"
+Secret Manager,Web Service,Secret Access,Access operations,0.00,0.03,0.15,0.30,1.50,"$0.03 per 10K accesses. ~10 secret reads per request"
+Cloud Logging,Web Service,Log Ingestion,Log volume (GB),0.00,0.25,1.25,2.50,12.50,"$0.50/GB above 50GB free tier. +0.25GB per 100 requests"
+Networking,Web Service,Ingress,Traffic,0.00,0.06,0.30,0.60,3.00,"~$0.006/GB ingress. Small request payloads: ~10KB per request"
+SUBTOTAL,Web Service,All Components,,0.00,2.68,13.40,26.80,134.00,"Web service only (no training)"
+,,,,,,,,,,
+TRAINING JOB CALLS (1 job per 10 web requests),,,,,,,,,,
+Cloud Run,Training Job,CPU,Allocated CPU-seconds,0.00,34.56,172.80,345.60,1728.00,"4 vCPU * 3600s * $0.00002400/vCPU-second * (calls/10 jobs)"
+Cloud Run,Training Job,Memory,Allocated Memory GB-seconds,0.00,14.40,72.00,144.00,720.00,"16GB * 3600s * $0.0000025/GB-second * (calls/10 jobs)"
+Cloud Run,Training Job,Executions,Execution count,0.00,0.01,0.05,0.10,0.50,"$0.10 per execution (1 job per ~10 web requests)"
+Cloud Storage,Training Job,Storage,Result storage (GB-months),0.00,0.20,1.00,2.00,10.00,"~2GB per training result. Lifecycle policies: Nearline $0.010/GB, Coldline $0.004/GB"
+Cloud Storage,Training Job,Class A Operations,Write operations,0.00,0.05,0.25,0.50,2.50,"$0.05 per 10K ops. ~100 writes per training job"
+Cloud Storage,Training Job,Class B Operations,Read operations,0.00,0.02,0.08,0.16,0.80,"$0.004 per 10K ops. ~200 reads per job"
+Cloud Storage,Training Job,Network Egress,Downloading results,0.00,1.20,6.00,12.00,60.00,"$0.12 per GB egress. ~1GB download per training result"
+Cloud Logging,Training Job,Log Ingestion,Training logs,0.00,0.25,1.25,2.50,12.50,"$0.50/GB. Training jobs produce ~0.25GB logs per 10 jobs"
+SUBTOTAL,Training Job,All Components,,0.00,50.69,253.43,506.86,2534.30,"Training jobs only (10% of web requests)"
+,,,,,,,,,,
+FIXED INFRASTRUCTURE (IDLE) COSTS,,,,,,,,,,
+Cloud Storage,Infrastructure,Base Storage,Historical data and artifacts,0.82,0.82,0.82,0.82,0.82,"80GB base storage * blended rate with lifecycle policies"
+Cloud Storage,Infrastructure,Class A Ops,Background operations,0.01,0.01,0.01,0.01,0.01,"Idle operations: ~2K/month"
+Cloud Storage,Infrastructure,Class B Ops,Background reads,0.00,0.00,0.00,0.00,0.00,"Idle reads: ~5K/month (negligible)"
+Artifact Registry,Infrastructure,Docker Repository,Image storage,0.10,0.10,0.10,0.10,0.10,"$0.10/GB/month. ~1GB for web+training images"
+Secret Manager,Infrastructure,Secrets Storage,Active secret versions,0.36,0.36,0.36,0.36,0.36,"6 secrets * $0.06/secret/month"
+Cloud Scheduler,Infrastructure,Job Scheduler,Scheduled jobs,0.30,0.30,0.30,0.30,0.30,"$0.10/job/month. 3 jobs (queue tick prod/dev, health check)"
+Cloud Logging,Infrastructure,Base Logging,System logs,0.50,0.50,0.50,0.50,0.50,"Base system logging ~10GB/month when idle"
+IAM & Admin,Infrastructure,Service Accounts,Service accounts,0.00,0.00,0.00,0.00,0.00,"Free - 3 service accounts"
+Cloud Build,Infrastructure,Container Builds,CI/CD builds,0.00,0.00,0.00,0.00,0.00,"First 120 build-minutes/day free"
+SUBTOTAL,Infrastructure,Fixed Costs,,2.09,2.09,2.09,2.09,2.09,"Fixed monthly infrastructure costs"
+,,,,,,,,,,
+SUMMARY BY SCENARIO,,,,,,,,,,
+TOTAL,All Services,Monthly Cost (Current),,2.09,55.46,268.92,535.75,2670.39,"Current optimized infrastructure"
+Breakdown,Web Service Only,Cost,,0.00,2.68,13.40,26.80,134.00,"Web service requests only"
+Breakdown,Training Jobs Only,Cost,,0.00,50.69,253.43,506.86,2534.30,"Training job executions only"
+Breakdown,Infrastructure,Fixed Cost,,2.09,2.09,2.09,2.09,2.09,"Fixed infrastructure costs"
+,,,,,,,,,,
+WEB-ONLY SCENARIO (No Training Jobs),,,,,,,,,,
+TOTAL,Web Only,Monthly Cost,,2.09,4.77,15.49,28.89,136.09,"If users only browse/query without triggering training"
+,,,,,,,,,,
+COMPARISON WITH ORIGINAL (Pre-Optimization),,,,,,,,,,
+TOTAL,Original Config,Monthly Cost,,45.03,148.00,519.56,1073.39,5142.33,"8 vCPU/32GB training, 2 min_instances, no caching"
+TOTAL,Current Config,Savings,,42.94,92.54,250.64,537.64,2471.94,"Savings from all optimizations"
+TOTAL,Percentage,Saved,,95%,63%,48%,50%,48%,"Cost reduction percentage"
+,,,,,,,,,,
+ASSUMPTIONS,,,,,,,,,,
+,General,Average Web Request Duration: 30 seconds (CPU + memory time),,,,,,,,
+,General,Average Training Job Duration: 1 hour (3600 seconds),,,,,,,,
+,General,Training Job Frequency: 1 training job per 10 web requests,,,,,,,,
+,General,Data Transfer: 1GB download per training result,,,,,,,,
+,General,Base Storage: 80GB for historical data and artifacts,,,,,,,,
+,General,Storage Growth: ~2GB per training job result,,,,,,,,
+,Web Service,Secret Access: ~10 reads per web request (Snowflake + OAuth),,,,,,,,
+,Web Service,Snowflake Cache Hit Rate: 70% (only 30% hit Snowflake),,,,,,,,
+,Web Service,Snowflake: ~0.1 credit per 5 uncached queries ($2/credit),,,,,,,,
+,Training Job,GCS Operations: ~100 Class A (writes), ~200 Class B (reads) per job,,,,,,,,
+,Training Job,Log Volume: ~0.25GB per 10 training jobs,,,,,,,,
+,Infrastructure,Region: europe-west1 (Belgium) pricing,,,,,,,,
+,Infrastructure,Currency: USD as of December 2025,,,,,,,,
+,,,,,,,,,,
+PRICING REFERENCE (GCP Cloud Run - europe-west1),,,,,,,,,,
+,Cloud Run,CPU: $0.00002400 per vCPU-second,,,,,,,,
+,Cloud Run,Memory: $0.0000025 per GB-second,,,,,,,,
+,Cloud Run,Requests: $0.40 per million requests,,,,,,,,
+,Cloud Storage,Standard: $0.020/GB/month | Nearline: $0.010/GB | Coldline: $0.004/GB,,,,,,,,
+,Cloud Storage,Class A ops: $0.05 per 10K | Class B ops: $0.004 per 10K,,,,,,,,
+,Cloud Storage,Egress: $0.12/GB (intra-region free),,,,,,,,
+,Snowflake,Small warehouse: $2 per compute credit,,,,,,,,
+,Secret Manager,Storage: $0.06/secret/month | Access: $0.03 per 10K accesses,,,,,,,,
+,Cloud Scheduler,Jobs: $0.10/job/month (first 3 free),,,,,,,,
+,Cloud Logging,Ingestion: First 50GB free, then $0.50/GB,,,,,,,,
+,,,,,,,,,,
+CURRENT CONFIGURATION,,,,,,,,,,
+,Web Service,vCPU: 2.0 | Memory: 4GB | min_instances: 0 | max_instances: 10,,,,,,,,
+,Training Job,vCPU: 4.0 | Memory: 16GB | timeout: 6 hours | max_retries: 1,,,,,,,,
+,Snowflake,Warehouse: SMALL_WH | Cache: Two-tier (in-memory + GCS),,,,,,,,
+,Cloud Storage,Bucket: mmm-app-output | Lifecycle: Nearline 30d / Coldline 90d,,,,,,,,
+,,,,,,,,,,
+IMPLEMENTED OPTIMIZATIONS,,,,,,,,,,
+,1,✅ min_instances=0: Saves $42.94/month idle (trade-off: cold starts),,,,,,,,
+,2,✅ GCS lifecycle policies: Saves 50-80% on data >30 days old,,,,,,,,
+,3,✅ Snowflake caching (70% hit rate): Saves 70% on Snowflake costs,,,,,,,,
+,4,✅ Training job right-sizing (4 vCPU/16GB vs 8/32): Saves 50% per job,,,,,,,,
+,,,,,,,,,,
+FURTHER OPTIMIZATION OPTIONS,,,,,,,,,,
+,1,"Reduce training to 2 vCPU/8GB: Additional 50% per job (but 2-4x slower)",,,,,,,,
+,2,"Compress training results: ~50% storage and egress savings",,,,,,,,
+,3,"Preemptible/spot instances: Up to 50% savings (when available)",,,,,,,,
+,4,"Log retention policies: Minimal impact (first 50GB free)",,,,,,,,
