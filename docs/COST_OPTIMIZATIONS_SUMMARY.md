@@ -4,6 +4,18 @@
 
 This document summarizes the cost optimization implementations for the MMM Trainer application.
 
+## Current Cost Estimates (December 2025)
+
+| Scenario | Web Service | Training Jobs | Fixed Costs | **Total** |
+|----------|-------------|---------------|-------------|-----------|
+| **Idle** | $0.00 | $0.00 | $2.09 | **$2.09** |
+| 100 calls/month | $2.68 | $50.69 | $2.09 | **$55.46** |
+| 500 calls/month | $13.40 | $253.43 | $2.09 | **$268.92** |
+| 1,000 calls/month | $26.80 | $506.86 | $2.09 | **$535.75** |
+| 5,000 calls/month | $134.00 | $2,534.30 | $2.09 | **$2,670.39** |
+
+**Key finding:** Training jobs account for ~95% of variable costs at scale.
+
 ## Implemented Optimizations
 
 ### 1. ✅ Reduced Minimum Instances to 0
@@ -17,7 +29,7 @@ variable "min_instances" {
 }
 ```
 
-**Savings:** $42.34/month (94% of idle cost)
+**Savings:** $42.94/month (95% of idle cost)
 
 **Trade-off:** Adds 1-3 second cold start latency on first request after idle period
 
@@ -29,7 +41,25 @@ terraform apply -var-file="envs/prod.tfvars"
 
 ---
 
-### 2. ✅ GCS Lifecycle Policies
+### 2. ✅ Training Job Right-Sizing
+
+**Files:** `infra/terraform/variables.tf`, `infra/terraform/envs/prod.tfvars`
+
+**Change:**
+```hcl
+# Reduced from 8 vCPU/32GB to 4 vCPU/16GB
+training_cpu       = "4.0"
+training_memory    = "16Gi"
+training_max_cores = "4"
+```
+
+**Savings:** ~50% per training job (~$51 vs ~$100 per job including GCS costs)
+
+**Trade-off:** Jobs may take 1.5-2x longer to complete
+
+---
+
+### 3. ✅ GCS Lifecycle Policies
 
 **File:** `infra/terraform/storage.tf` (documentation)
 
@@ -49,7 +79,7 @@ See `infra/terraform/storage.tf` for the lifecycle.json content.
 
 ---
 
-### 3. ✅ Snowflake Query Caching
+### 4. ✅ Snowflake Query Caching
 
 **Files:**
 - `app/utils/snowflake_cache.py` - Core caching logic
@@ -86,23 +116,20 @@ df = run_sql("INSERT INTO ...", use_cache=False)
 
 | Scenario | Original | Optimized | Savings | % Saved |
 |----------|----------|-----------|---------|---------|
-| **Idle** | $45.03 | $2.69 | $42.34 | **94%** |
-| 100 calls/month | $148.00 | $98.66 | $49.34 | **33%** |
-| 500 calls/month | $519.56 | $434.56 | $85.00 | **16%** |
-| 1,000 calls/month | $1,073.39 | $933.39 | $140.00 | **13%** |
-| 5,000 calls/month | $5,142.33 | $4,792.33 | $350.00 | **7%** |
+| **Idle** | $45.03 | $2.09 | $42.94 | **95%** |
+| 100 calls/month | $148.00 | $55.46 | $92.54 | **63%** |
+| 500 calls/month | $519.56 | $268.92 | $250.64 | **48%** |
+| 1,000 calls/month | $1,073.39 | $535.75 | $537.64 | **50%** |
+| 5,000 calls/month | $5,142.33 | $2,670.39 | $2,471.94 | **48%** |
 
-## Cost Breakdown by Service (Optimized, 5K calls/month)
+## Cost Breakdown by Category (Optimized, 5K calls/month)
 
-| Service | Monthly Cost | % of Total | Optimization Applied |
-|---------|--------------|------------|---------------------|
-| Snowflake | $150.00 | 3.1% | ✅ 70% cache hit rate |
-| Cloud Run (Training) | $3,361.00 | 70.1% | 🔮 Future: preemptible instances |
-| Cloud Run (Web) | $1,264.40 | 26.4% | ✅ min_instances=0 |
-| Cloud Storage | $70.82 | 1.5% | ✅ Lifecycle policies |
-| Networking | $30.00 | 0.6% | 📝 Compression recommended |
-| Other | $16.11 | 0.3% | - |
-| **Total** | **$4,792.33** | **100%** | |
+| Category | Monthly Cost | % of Total | Description |
+|----------|--------------|------------|-------------|
+| Training Jobs | $2,534.30 | 95.0% | Cloud Run jobs, GCS storage/egress |
+| Web Service | $134.00 | 5.0% | Cloud Run web, Snowflake, networking |
+| Fixed Infrastructure | $2.09 | 0.1% | Storage, secrets, scheduler |
+| **Total** | **$2,670.39** | **100%** | |
 
 ## Next Steps (Optional)
 
@@ -206,6 +233,11 @@ gcloud storage buckets update gs://mmm-app-output --clear-lifecycle
 
 ## Change Log
 
+- **2025-12-02:** Updated cost estimates
+  - Restructured cost estimate CSV to separate web service vs training job costs
+  - Updated all documentation with revised cost figures
+  - Added web-only scenario for users who browse without triggering training
+  
 - **2025-11-19:** Initial implementation
   - Set min_instances to 0
   - Documented GCS lifecycle policies
