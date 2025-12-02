@@ -41,6 +41,7 @@ from app_shared import (
     total_with_prev,
     upload_to_gcs,
     validate_against_metadata,
+    _require_sf_session
 )
 from scipy import stats
 from sklearn.linear_model import LinearRegression
