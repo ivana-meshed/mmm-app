@@ -47,6 +47,10 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
+# Authentication
+require_login_and_domain()
+ensure_session_defaults()
+
 
 def _safe_float(value: Union[float, np.ndarray, None]) -> float:
     """Safely convert a value to float, handling numpy arrays and NaN values.
@@ -73,9 +77,6 @@ def _safe_float(value: Union[float, np.ndarray, None]) -> float:
     except (TypeError, ValueError):
         return np.nan
 
-
-# Authentication
-require_login_and_domain()
 
 st.title("Prepare Training Data")
 

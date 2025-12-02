@@ -41,7 +41,7 @@ except ImportError:
     )
 
 # ---------- Page ----------
-st.title("Results browser (GCS)")
+st.title("View Model Results")
 
 # ---------- Settings ----------
 DEFAULT_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
@@ -675,7 +675,7 @@ def render_model_config_section(blobs, country, stamp, bucket_name):
 
 def render_model_metrics_table(blobs, country, stamp):
     """Render model metrics in a formatted table with color coding"""
-    st.subheader("Model Performance Metrics")
+    st.subheader("Model Performance Overview")
 
     # Create a cache key from blob names
     blob_names = tuple(sorted([b.name for b in blobs]))
@@ -737,17 +737,17 @@ def render_model_metrics_table(blobs, country, stamp):
     # Build the metrics table
     table_data = {
         "Split": ["Train", "Validation", "Test"],
-        "Predictive Power (R²)": [
+        "Prediction Quality": [
             metrics.get("r2_train"),
             metrics.get("r2_val"),
             metrics.get("r2_test"),
         ],
-        "Prediction Accuracy (NRMSE)": [
+        "Prediction Error": [
             metrics.get("nrmse_train"),
             metrics.get("nrmse_val"),
             metrics.get("nrmse_test"),
         ],
-        "Business Error (DECOMP.RSSD)": [
+        "ROAS Error": [
             metrics.get("decomp_rssd_train"),
             metrics.get("decomp_rssd_val"),
             metrics.get("decomp_rssd_test"),
@@ -763,12 +763,12 @@ def render_model_metrics_table(blobs, country, stamp):
             return styles
 
         idx = row.name
-        styles[1] = get_color(table_data["Predictive Power (R²)"][idx], "r2")
+        styles[1] = get_color(table_data["Prediction Quality"][idx], "r2")
         styles[2] = get_color(
-            table_data["Prediction Accuracy (NRMSE)"][idx], "nrmse"
+            table_data["Prediction Error"][idx], "nrmse"
         )
         styles[3] = get_color(
-            table_data["Business Error (DECOMP.RSSD)"][idx], "decomp_rssd"
+            table_data["ROAS Error"][idx], "decomp_rssd"
         )
         return styles
 
@@ -788,9 +788,9 @@ def render_model_metrics_table(blobs, country, stamp):
     for i, row in df.iterrows():
         html += "<tr>"
         html += f"<td style='padding: 12px; border: 1px solid #dee2e6; font-weight: bold;'>{row['Split']}</td>"
-        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Predictive Power (R²)'], 'r2')}'>{format_value(row['Predictive Power (R²)'])}</td>"
-        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Prediction Accuracy (NRMSE)'], 'nrmse')}'>{format_value(row['Prediction Accuracy (NRMSE)'])}</td>"
-        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Business Error (DECOMP.RSSD)'], 'decomp_rssd')}'>{format_value(row['Business Error (DECOMP.RSSD)'])}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Prediction Quality'], 'r2')}'>{format_value(row['Prediction Quality'])}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['Prediction Error'], 'nrmse')}'>{format_value(row['Prediction Error'])}</td>"
+        html += f"<td style='padding: 12px; border: 1px solid #dee2e6; {get_color(row['ROAS Error'], 'decomp_rssd')}'>{format_value(row['ROAS Error'])}</td>"
         html += "</tr>"
 
     html += "</tbody></table>"
@@ -806,17 +806,17 @@ def render_model_metrics_table(blobs, country, stamp):
     with st.expander("View metric thresholds", expanded=False):
         st.markdown(
             f"""
-        **R² (Predictive Power)** - Higher is better:
+        **Prediction Quality (R²):** How much the model captures the outcome  - Higher is better:
         - Good: ≥ {r2_thresholds['good']}
         - Acceptable: ≥ {r2_thresholds['acceptable']}
         - Poor: < {r2_thresholds['acceptable']}
 
-        **NRMSE (Prediction Accuracy)** - Lower is better:
+        **Prediction Error (NRMSE)** - How much the model is off in its predictions - Lower is better:
         - Good: ≤ {nrmse_thresholds['good']}
         - Acceptable: ≤ {nrmse_thresholds['acceptable']}
         - Poor: > {nrmse_thresholds['acceptable']}
 
-        **DECOMP.RSSD (Business Error)** - Lower is better:
+        **ROAS Error (DECOMP.RSSD):** How stable the model understands channel impact - Lower Error is better
         - Good: ≤ {decomp_thresholds['good']}
         - Acceptable: ≤ {decomp_thresholds['acceptable']}
         - Poor: > {decomp_thresholds['acceptable']}
@@ -824,6 +824,11 @@ def render_model_metrics_table(blobs, country, stamp):
         )
 
 
+    st.write("")
+    st.write("")
+    st.subheader("Model Outputs")
+
+    
 def render_metrics_section(blobs, country, stamp):
     st.subheader("Allocator Metrics")
     metrics_csv = find_blob(blobs, "/allocator_metrics.csv")
@@ -1073,23 +1078,23 @@ def render_allocator_section(blobs, country, stamp):
 
 
 def render_onepager_section(blobs, best_id, country, stamp):
-    # Executive Summary section - no subheader needed, will be in tab
+    # Model Performance section - no subheader needed, will be in tab
     if not best_id:
         st.warning(
-            "best_model_id.txt not found; cannot locate executive summary."
+            "best_model_id.txt not found; cannot locate model performance summary."
         )
         return
 
     op_blob = find_onepager_blob(blobs, best_id)
     if not op_blob:
         st.warning(
-            f"No executive summary found for best model id '{best_id}' using standard patterns."
+            f"No model performance summary found for best model id '{best_id}' using standard patterns."
         )
         return
 
     name = os.path.basename(op_blob.name)
     lower = name.lower()
-    st.success(f"Found executive summary: **{name}** ({op_blob.size:,} bytes)")
+    st.success(f"Found model performancd summary: **{name}** ({op_blob.size:,} bytes)")
 
     if lower.endswith(".png"):
         try:
@@ -1099,7 +1104,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
                 return
             b64 = base64.b64encode(image_data).decode()
             st.markdown(
-                f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="Executive Summary">',
+                f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="Model Performace">',
                 unsafe_allow_html=True,
             )
             download_link_for_blob(
@@ -1111,7 +1116,7 @@ def render_onepager_section(blobs, best_id, country, stamp):
         except Exception as e:
             st.error(f"Couldn't preview `{name}`: {e}")
     elif lower.endswith(".pdf"):
-        st.info("Executive summary available as PDF (preview not supported).")
+        st.info("Model Performance available as PDF (preview not supported).")
         download_link_for_blob(
             op_blob,
             label=f"Download {name}",
@@ -1246,7 +1251,7 @@ else:
     )
 
 rev = st.selectbox(
-    "Revision",
+    "Experiment Name (tag & number, e.g. gmv001)",
     all_revs,
     index=default_rev_index,
 )
@@ -1290,7 +1295,7 @@ else:
     default_countries = [default_country_in_rev]
 
 countries_sel = st.multiselect(
-    "Countries",
+    "Country",
     rev_countries,
     default=default_countries,
 )
@@ -1327,9 +1332,10 @@ else:
     default_stamp_index = 0
 
 stamp_sel = st.selectbox(
-    "Timestamp (optional - select one or leave blank to show latest per country)",
+    "Timestamp (optional)",
     stamp_options,
     index=default_stamp_index,
+    help=("Leave empty to use the latest run per tag number. Useful when you have multiple runs."),
 )
 
 # Store selection in persistent session state key (not widget key)
@@ -1373,8 +1379,8 @@ def render_run_for_country(
     # Render model metrics first
     render_model_metrics_table(blobs, country, stamp)
 
-    # Create tabs for Executive Summary and Budget Allocator
-    tab1, tab2 = st.tabs(["Executive Summary", "Budget Allocator"])
+    # Create tabs for Model Performance and Budget Allocator
+    tab1, tab2 = st.tabs(["Model Performance", "Budget Allocator"])
 
     with tab1:
         render_onepager_section(blobs, best_id, country, stamp)
