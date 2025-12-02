@@ -2,29 +2,31 @@
 
 ## Problem
 
-**Your training jobs are the #1 cost driver**, consuming 50-70% of total infrastructure costs at scale.
+**Your training jobs are the #1 cost driver**, consuming ~95% of variable costs at scale.
 
-### Current Costs (Before Optimization)
+### Cost Breakdown (Current Configuration)
 
-| Configuration | Cost per Job | 500 Jobs/Month | Annual Cost |
-|--------------|--------------|----------------|-------------|
-| 8 vCPU / 32 GB | $60.90 | $30,450 | $365,400 |
+| Scenario | Web Service | Training Jobs | Fixed | **Total** |
+|----------|-------------|---------------|-------|-----------|
+| 100 calls | $2.68 | $50.69 | $2.09 | **$55.46** |
+| 500 calls | $13.40 | $253.43 | $2.09 | **$268.92** |
+| 1,000 calls | $26.80 | $506.86 | $2.09 | **$535.75** |
+| 5,000 calls | $134.00 | $2,534.30 | $2.09 | **$2,670.39** |
 
-**At 5,000 calls/month (500 jobs), training jobs cost $30,450/month!**
+**Training jobs account for 90-95% of all variable costs!**
 
 ## Solution: Right-Size Your Training Jobs
 
-### Implemented: 4 vCPU / 16 GB (50% savings)
+### Current Implementation: 4 vCPU / 16 GB (50% savings vs original)
 
-**New configuration:**
+**Current configuration:**
 - CPU: 4 vCPU (was 8)
 - Memory: 16 GB (was 32 GB)
-- Cost per job: $30.50 (was $60.90)
+- Cost per job: ~$50.70 (CPU: $34.56 + Memory: $14.40 + GCS storage/egress: ~$1.50 + execution: $0.01)
 
-**Savings:**
-- Per job: $30.40 (50% reduction)
-- 500 jobs/month: **$15,225/month** saved
-- Annual: **$182,700** saved
+**Savings vs original (8 vCPU/32 GB):**
+- Per job: ~50% reduction
+- At scale: Training is still the dominant cost driver (~95% of variable costs)
 
 **Trade-off:**
 - Jobs may take 1.5-2x longer
@@ -38,16 +40,12 @@ For maximum savings (if jobs are quick):
 **Configuration:**
 - CPU: 2 vCPU
 - Memory: 8 GB
-- Cost per job: $15.22
-
-**Savings:**
-- Per job: $45.68 (75% reduction)
-- 500 jobs/month: **$22,840/month** saved
-- Annual: **$274,080** saved
+- Cost per job: ~$25 (CPU: $17.28 + Memory: $7.20 + GCS: ~$1.50 + execution: $0.01)
 
 **Trade-off:**
 - Jobs will take 2-4x longer
 - Only suitable if current jobs complete in < 30 minutes
+- Used in dev environment for testing
 
 ## How It Works
 
@@ -139,15 +137,17 @@ gcloud beta billing budgets list --billing-account=<ACCOUNT_ID>
 
 Look for:
 - Cloud Run job execution costs dropping by ~50%
-- Total monthly costs reducing by $15,225+
+- Training job costs as primary cost driver
 
 ## Cost Comparison Table
 
-| Config | vCPU | Memory | Cost/Job | 100 Jobs | 500 Jobs | 5000 Jobs (annually) |
-|--------|------|--------|----------|----------|----------|---------------------|
-| Original | 8 | 32 GB | $60.90 | $6,090 | $30,450 | $365,400 |
-| Recommended | 4 | 16 GB | $30.50 | $3,050 | $15,225 | $182,700 |
-| Aggressive | 2 | 8 GB | $15.22 | $1,522 | $7,610 | $91,320 |
+| Config | vCPU | Memory | Cost/Job | 10 Jobs | 50 Jobs | 500 Jobs |
+|--------|------|--------|----------|---------|---------|----------|
+| Original | 8 | 32 GB | ~$100 | $1,000 | $5,000 | $50,000 |
+| **Current** | 4 | 16 GB | ~$51 | $510 | $2,550 | $25,500 |
+| Aggressive | 2 | 8 GB | ~$25 | $250 | $1,250 | $12,500 |
+
+*Note: 1 training job per 10 web requests. Costs include CPU, memory, GCS storage/egress, and execution fees.*
 
 ## When to Adjust
 
@@ -246,10 +246,11 @@ training_memory = "24Gi" # Increase memory to 24GB
 3. Monitor first 10-20 jobs
 4. Adjust if needed
 
-**Expected Savings:**
-- **$15,225/month** at 500 jobs/month
-- **$182,700/year** annually
-- **50% reduction** in training job costs
+**Current Cost Structure (at 5,000 calls/month):**
+- Training Jobs: $2,534.30 (95% of variable costs)
+- Web Service: $134.00 (5% of variable costs)
+- Fixed Infrastructure: $2.09
+- **Total: $2,670.39/month**
 
 **Risk:**
 - Low - can easily revert if needed
@@ -261,3 +262,4 @@ training_memory = "24Gi" # Increase memory to 24GB
 - Cost estimates: `Cost estimate.csv`
 - Terraform config: `infra/terraform/main.tf`
 - Production values: `infra/terraform/envs/prod.tfvars`
+- Cost optimization guide: `COST_OPTIMIZATION.md`

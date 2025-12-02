@@ -2,16 +2,28 @@
 
 This document describes the cost reduction strategies implemented for the MMM Trainer application, as referenced in `Cost estimate.csv`.
 
+## Cost Summary
+
+| Scenario | Web Service | Training Jobs | Fixed Costs | Total |
+|----------|-------------|---------------|-------------|-------|
+| **Idle** | $0.00 | $0.00 | $2.09 | **$2.09** |
+| 100 calls/month | $2.68 | $50.69 | $2.09 | **$55.46** |
+| 500 calls/month | $13.40 | $253.43 | $2.09 | **$268.92** |
+| 1,000 calls/month | $26.80 | $506.86 | $2.09 | **$535.75** |
+| 5,000 calls/month | $134.00 | $2,534.30 | $2.09 | **$2,670.39** |
+
+**Key insight:** Training jobs account for ~95% of variable costs at scale (1 training job per 10 web requests).
+
 ## Implemented Optimizations
 
 ### 1. ✅ Reduced min_instances to 0 (IMPLEMENTED)
-**Savings: $42.34/month (94% of idle cost)**
+**Savings: $42.94/month (95% of idle cost)**
 
 Changed `min_instances` from 2 to 0 in `infra/terraform/variables.tf`.
 
 **Impact:**
 - Eliminates always-on Cloud Run instances
-- Reduces idle cost from $45.03/month to $2.69/month
+- Reduces idle cost from $45.03/month to $2.09/month
 - Trade-off: Adds 1-3 second cold start latency on first request
 
 **To apply:**
@@ -176,25 +188,27 @@ Currently using regional GCS (europe-west1) which is already the most cost-effec
 
 ## Updated Cost Estimates with Optimizations
 
-### With min_instances=0 and 70% Snowflake cache hit rate:
+### With all optimizations applied (Current):
 
 | Scenario | Original Cost | Optimized Cost | Savings | % Reduction |
 |----------|---------------|----------------|---------|-------------|
-| Idle | $45.03 | $2.69 | $42.34 | 94% |
-| 100 calls | $148.00 | $98.66 | $49.34 | 33% |
-| 500 calls | $519.56 | $434.56 | $85.00 | 16% |
-| 1000 calls | $1,073.39 | $933.39 | $140.00 | 13% |
-| 5000 calls | $5,142.33 | $4,792.33 | $350.00 | 7% |
+| Idle | $45.03 | $2.09 | $42.94 | 95% |
+| 100 calls | $148.00 | $55.46 | $92.54 | 63% |
+| 500 calls | $519.56 | $268.92 | $250.64 | 48% |
+| 1,000 calls | $1,073.39 | $535.75 | $537.64 | 50% |
+| 5,000 calls | $5,142.33 | $2,670.39 | $2,471.94 | 48% |
 
-### Additional savings with compression (estimated):
+### Web-Only Scenario (No Training Jobs):
 
-| Scenario | Optimized Cost | With Compression | Total Savings | % Reduction |
-|----------|----------------|------------------|---------------|-------------|
-| Idle | $2.69 | $2.30 | $42.73 | 95% |
-| 100 calls | $98.66 | $97.66 | $50.34 | 34% |
-| 500 calls | $434.56 | $430.06 | $89.50 | 17% |
-| 1000 calls | $933.39 | $924.39 | $149.00 | 14% |
-| 5000 calls | $4,792.33 | $4,747.33 | $395.00 | 8% |
+If users only browse/query without triggering training:
+
+| Scenario | Monthly Cost |
+|----------|-------------|
+| Idle | $2.09 |
+| 100 calls | $4.77 |
+| 500 calls | $15.49 |
+| 1,000 calls | $28.89 |
+| 5,000 calls | $136.09 |
 
 ## Implementation Priority
 
@@ -203,6 +217,7 @@ Currently using regional GCS (europe-west1) which is already the most cost-effec
    - ✅ Document GCS lifecycle policies
    - ✅ Implement Snowflake query caching (two-tier: in-memory + GCS)
    - ✅ Create cache management UI
+   - ✅ Training job right-sizing (4 vCPU/16GB vs 8/32)
 
 2. **Medium Priority (Recommended Next)**
    - Apply GCS lifecycle policies to production bucket
@@ -212,7 +227,7 @@ Currently using regional GCS (europe-west1) which is already the most cost-effec
 3. **Low Priority (Future)**
    - Optimize Docker images
    - Configure log retention
-   - Monitor for preemptible instances
+   - Monitor for preemptible/spot instances
 
 ## Rollout Plan
 
