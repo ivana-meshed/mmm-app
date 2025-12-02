@@ -62,6 +62,19 @@ docs/                       # Additional documentation
 
 For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Deploying to a New Company/Project
+
+For step-by-step instructions on deploying this application to a new Google Cloud project, see the **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)**. This comprehensive guide covers:
+
+- GCP project setup and API enablement
+- Workload Identity Federation configuration for GitHub Actions
+- Service accounts and IAM permissions
+- Artifact Registry and GCS bucket creation
+- Google OAuth and Snowflake configuration
+- GitHub repository secrets setup
+- Terraform configuration and deployment
+- Post-deployment verification and troubleshooting
+
 ## Prerequisites
 
 - Google Cloud project with billing enabled
@@ -266,6 +279,21 @@ All API responses follow a standardized format:
 - **nevergrad not found**: verify `pip3 show nevergrad` inside container; ensure `RETICULATE_PYTHON` points to the same python.
 - **GCS auth error**: confirm Cloud Run service account has `storage.objectAdmin` and *the revision* uses that SA.
 - **Duplicate dates**: the R script collapses duplicates per day; ensure your SQL produces one row/day or let the script aggregate.
+
+For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting](docs/DEPLOYMENT_GUIDE.md#troubleshooting).
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [README.md](README.md) | Project overview and quick start |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture and components |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | Local development setup and testing |
+| [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | **Complete deployment guide for new projects** |
+| [docs/MODEL_SUMMARY.md](docs/MODEL_SUMMARY.md) | Model summary file structure |
+| [docs/google_auth_domain_configuration.md](docs/google_auth_domain_configuration.md) | OAuth domain configuration |
+| [docs/persistent_private_key.md](docs/persistent_private_key.md) | Snowflake key storage |
+| [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Cost optimization strategies |
 
 ## License
 
