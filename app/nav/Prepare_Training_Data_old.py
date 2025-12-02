@@ -27,6 +27,10 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
 
+# Authentication
+require_login_and_domain()
+ensure_session_defaults()
+
 # ---- Pull state from the loader page ----
 df = st.session_state.get("df", pd.DataFrame())
 meta = st.session_state.get("meta", {}) or {}

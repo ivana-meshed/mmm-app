@@ -14,6 +14,10 @@ from app_shared import (
 from scipy import stats
 from sklearn.linear_model import LinearRegression
 
+# Authentication
+require_login_and_domain()
+ensure_session_defaults()
+
 # Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
 
 st.title("Prepare Training Data (v2) — Guided Wizard")
