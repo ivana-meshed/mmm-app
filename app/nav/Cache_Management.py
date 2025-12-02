@@ -9,7 +9,9 @@ import streamlit as st
 from app_shared import require_login_and_domain
 from utils.snowflake_cache import clear_snowflake_cache, get_cache_stats
 
+# Authentication
 require_login_and_domain()
+ensure_session_defaults()
 
 st.title("⚡ Cache Management")
 

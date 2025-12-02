@@ -71,6 +71,7 @@ def _safe_float(value: Union[float, np.ndarray, None]) -> float:
 
 # Authentication
 require_login_and_domain()
+ensure_session_defaults()
 
 st.title("Prepare Training Data")
 

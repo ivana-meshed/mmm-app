@@ -48,7 +48,10 @@ from sklearn.preprocessing import PolynomialFeatures
 
 # Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
 
+# Authentication
 require_login_and_domain()
+ensure_session_defaults()
+
 
 st.title("Prepare Training Data for Experimentation")
 

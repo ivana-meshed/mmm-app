@@ -25,18 +25,8 @@ except Exception:
     ensure_sf_conn = None
     keepalive_ping = None
 
-#require_login_and_domain()
-
-# Initialize session state defaults
-try:
-    from app_split_helpers import ensure_session_defaults
-
-    ensure_session_defaults()
-except ImportError:
-    # Fallback if app_split_helpers is not available
-    st.session_state.setdefault(
-        "gcs_bucket", os.getenv("GCS_BUCKET", "mmm-app-output")
-    )
+require_login_and_domain()
+ensure_session_defaults()
 
 # ---------- Page ----------
 st.title("View Best Models")

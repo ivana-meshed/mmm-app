@@ -32,7 +32,7 @@ data_processor = get_data_processor()
 job_manager = get_job_manager()
 from app_split_helpers import *  # bring in all helper functions/constants
 
-#require_login_and_domain()
+require_login_and_domain()
 ensure_session_defaults()
 
 st.title("Run Marketing Mix Models")
