@@ -1269,16 +1269,18 @@ def build_job_config_from_params(
     timestamp: str,
     annotations_gcs_path: Optional[str],
 ) -> dict:
+    # Support both 'revision' and 'version' keys for backward compatibility
+    revision = params.get("revision") or params.get("version") or ""
     config = {
-        "country": params["country"],
-        "iterations": int(params["iterations"]),
-        "trials": int(params["trials"]),
+        "country": params.get("country", ""),
+        "iterations": int(params.get("iterations", 100)),
+        "trials": int(params.get("trials", 5)),
         "train_size": (
             parse_train_size(str(params["train_size"]))
-            if isinstance(params["train_size"], str)
-            else params["train_size"]
+            if isinstance(params.get("train_size"), str)
+            else params.get("train_size", 0.8)
         ),
-        "revision": params["revision"],
+        "revision": revision,
         "date_input": params.get("date_input") or time.strftime("%Y-%m-%d"),
         "start_date": params.get("start_date", "2024-01-01"),  # NEW
         "end_date": params.get("end_date", time.strftime("%Y-%m-%d")),  # NEW
@@ -1288,12 +1290,12 @@ def build_job_config_from_params(
         "annotations_gcs_path": _normalize_gs_uri(annotations_gcs_path),  # type: ignore
         "paid_media_spends": [
             s.strip()
-            for s in str(params["paid_media_spends"]).split(",")
+            for s in str(params.get("paid_media_spends", "")).split(",")
             if s.strip()
         ],
         "paid_media_vars": [
             s.strip()
-            for s in str(params["paid_media_vars"]).split(",")
+            for s in str(params.get("paid_media_vars", "")).split(",")
             if s.strip()
         ],
         "context_vars": [
