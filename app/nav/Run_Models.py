@@ -310,20 +310,23 @@ with tab_single:
             metadata_options = ["Universal - Latest"]
 
         # Get available data versions for selected country
+        # Use the same function as Prepare Training Data page for consistency
         try:
-            available_versions = _list_country_versions(gcs_bucket, selected_country)  # type: ignore
+            available_versions = list_mapped_data_versions(
+                gcs_bucket, selected_country, refresh_key=""
+            )
             if not available_versions:
                 available_versions = ["Latest"]
         except Exception as e:
-            st.warning(f"Could not list data versions: {e}")
+            st.warning(f"Could not list mapped data versions: {e}")
             available_versions = ["Latest"]
 
-        # Mapped Data version selection (renamed from "Data version")
+        # Mapped Data version selection - uses same list as Prepare Training Data page
         selected_version = st.selectbox(
             "Mapped Data version",
             options=available_versions,
             index=0,
-            help="Select mapped data version to use. Latest = most recently saved data from Map Data page.",
+            help="Select mapped data version. Uses the same list as Prepare Training Data page.",
         )
 
         # Metadata source selection
