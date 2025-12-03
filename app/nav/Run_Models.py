@@ -177,8 +177,25 @@ with tab_single:
     # Data selection
     with st.expander("📊 Select Data", expanded=False):
 
-        # Country selection
-        available_countries = ["fr", "de", "it", "es", "us"]
+        # Get countries from Map Data if available
+        map_data_countries = st.session_state.get("selected_countries", [])
+        prefill_countries = st.session_state.get("prefill_countries", [])
+
+        # Combine all available countries
+        if map_data_countries:
+            available_countries = map_data_countries
+            st.info(
+                f"Using countries from Map Data: **{', '.join([c.upper() for c in available_countries])}**"
+            )
+        elif prefill_countries:
+            available_countries = prefill_countries
+            st.info(
+                f"Using countries from Map Data: **{', '.join([c.upper() for c in available_countries])}**"
+            )
+        else:
+            available_countries = ["fr", "de", "it", "es", "us"]
+
+        # Allow selection of primary country
         selected_country = st.selectbox(
             "Primary Country",
             options=available_countries,
@@ -2023,7 +2040,20 @@ with tab_single:
             )
             st.stop()
 
-        timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+        # Use shared timestamp from Map Data if available, otherwise generate new one
+        shared_ts = st.session_state.get("shared_save_timestamp", "")
+        if shared_ts:
+            # Convert from YYYYMMDD_HHMMSS to MMDD_HHMMSS format for consistency
+            try:
+                if len(shared_ts) >= 15:  # YYYYMMDD_HHMMSS format
+                    timestamp = shared_ts[4:]  # Remove first 4 chars (year)
+                else:
+                    timestamp = shared_ts
+            except Exception:
+                timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+        else:
+            timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+
         gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
         timings: List[Dict[str, float]] = []
 

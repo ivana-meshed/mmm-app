@@ -117,9 +117,9 @@ def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
 
 
 def _save_raw_to_gcs(
-    df: pd.DataFrame, bucket: str, country: str
+    df: pd.DataFrame, bucket: str, country: str, timestamp: str = None
 ) -> Dict[str, str]:
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = timestamp or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         df.to_parquet(tmp.name, index=False)
         data_gcs_path = upload_to_gcs(bucket, tmp.name, _data_blob(country, ts))
@@ -163,9 +163,15 @@ def _load_from_snowflake_cached(sql: str) -> pd.DataFrame:
 # --- Session bootstrap (call once, early) ---
 def _init_state():
     st.session_state.setdefault("country", "de")
+    # Multi-country support: list of selected countries
+    st.session_state.setdefault("selected_countries", [])
     st.session_state.setdefault("df_raw", pd.DataFrame())
+    # Per-country dataframes for multi-country support
+    st.session_state.setdefault("df_raw_by_country", {})
     st.session_state.setdefault("data_origin", "")
     st.session_state.setdefault("picked_ts", "")
+    # Shared timestamp for saving metadata and datasets
+    st.session_state.setdefault("shared_save_timestamp", "")
     st.session_state.setdefault(
         "goals_df",
         pd.DataFrame(columns=["var", "group", "type", "main"]).astype("object"),
@@ -942,27 +948,60 @@ st.session_state.setdefault("source_mode", "Latest (GCS)")
 st.header("1. Select Dataset")
 
 with st.expander("📊 Choose the data you want to analyze.", expanded=False):
-    # Country picker (ISO2, GCS-first). Keep this OUTSIDE the form.
-    c1, c2 = st.columns([1.2, 2])
+    # Country picker (ISO2, GCS-first) as multiselect
+    c1, c2, c3 = st.columns([3, 0.8, 0.8])
     with c1:
         countries = _iso2_countries_gcs_first(BUCKET)
-        initial_idx = (
-            countries.index(st.session_state.get("country", "de"))
-            if st.session_state.get("country", "de") in countries
-            else 0
-        )
-        st.selectbox(
-            "Country",
+        # Get previously selected countries or default to all countries with data
+        default_countries = st.session_state.get("selected_countries", [])
+        if not default_countries:
+            # Default to all countries that have data in GCS
+            default_countries = [
+                c for c in countries if _list_country_versions_cached(BUCKET, c)
+            ][
+                :10
+            ]  # Limit to first 10 to avoid overwhelming
+            if not default_countries and countries:
+                default_countries = [countries[0]]
+
+        selected_countries = st.multiselect(
+            "Countries",
             options=countries,
-            index=initial_idx,
-            key="country",  # don't also set st.session_state["country"] manually
+            default=default_countries,
+            key="selected_countries_widget",
+            help="Select one or more countries to analyze. All selected countries will use the same mapping.",
         )
+        # Update session state
+        st.session_state["selected_countries"] = selected_countries
+        # Keep backward compatibility with single country field
+        if selected_countries:
+            st.session_state["country"] = selected_countries[0]
     with c2:
-        st.caption(f"GCS Bucket: **{BUCKET}**")
+        # Select All button
+        if st.button(
+            "All", key="select_all_countries", use_container_width=True
+        ):
+            st.session_state["selected_countries"] = countries
+            st.rerun()
+    with c3:
+        # Clear button
+        if st.button(
+            "Clear", key="deselect_all_countries", use_container_width=True
+        ):
+            st.session_state["selected_countries"] = []
+            st.rerun()
+
+    st.caption(f"GCS Bucket: **{BUCKET}**")
 
     @_fragment()
     def step1_loader():
-        country = st.session_state.get("country", "de")
+        selected_countries = st.session_state.get("selected_countries", [])
+        if not selected_countries:
+            st.warning("Please select at least one country.")
+            return
+
+        # Use the first selected country for version checking
+        country = selected_countries[0]
 
         # Get available GCS versions for the chosen country
         versions_raw = _list_country_versions_cached(
@@ -1422,6 +1461,11 @@ with st.expander(
                             f"  - Row count: {data_info.get('row_count', 'N/A')}"
                         )
 
+            except FileNotFoundError:
+                st.warning(
+                    "⚠️ No saved metadata found on GCS. "
+                    "Create new mappings below and save them to get started."
+                )
             except Exception as e:
                 st.error(f"Failed to load metadata: {e}")
 
@@ -1446,63 +1490,103 @@ with st.expander(
 
         st.divider()
 
+        # Initialize goals nonce for forcing table refresh
+        st.session_state.setdefault("goals_nonce", 0)
+
+        # Primary and secondary goal selection
+        primary_goals = st.multiselect(
+            "Define primary business goal (e.g. GMV, Bookings)",
+            options=all_cols,
+            default=[],
+            key="primary_goals_select",
+        )
+        secondary_goals = st.multiselect(
+            "Define secondary business goals (e.g. Signups, App Installs)",
+            options=all_cols,
+            default=[],
+            help="Secondary goals support full driver analysis. Select only a few to maintain oversight.",
+            key="secondary_goals_select",
+        )
+
+        def _mk(selected, group):
+            return pd.DataFrame(
+                {
+                    "var": pd.Series(selected, dtype="object"),
+                    "group": pd.Series([group] * len(selected), dtype="object"),
+                    "type": pd.Series(
+                        [_guess_goal_type(v) for v in selected],
+                        dtype="object",
+                    ),
+                    "main": pd.Series([False] * len(selected), dtype="object"),
+                }
+            )
+
+        # "Add Business Goals" button - adds goals to table without applying
+        add_goals_col1, add_goals_col2 = st.columns([1, 3])
+        with add_goals_col1:
+            if st.button(
+                "➕ Add Business Goals",
+                key="add_goals_btn",
+                use_container_width=True,
+                help="Add selected goals to the table below without applying mappings yet",
+            ):
+                new_primary = _mk(primary_goals, "primary")
+                new_secondary = _mk(secondary_goals, "secondary")
+                new_goals = pd.concat(
+                    [new_primary, new_secondary], ignore_index=True
+                )
+
+                if not new_goals.empty:
+                    # Merge with existing goals, avoiding duplicates
+                    existing = st.session_state.get("goals_df", pd.DataFrame())
+                    if existing.empty:
+                        merged = new_goals
+                    else:
+                        combined = pd.concat(
+                            [existing, new_goals], ignore_index=True
+                        )
+                        merged = combined.drop_duplicates(
+                            subset=["var"], keep="last"
+                        )
+
+                    st.session_state["goals_df"] = merged.fillna("").astype(
+                        {"var": "object", "group": "object", "type": "object"}
+                    )
+                    if "main" not in st.session_state["goals_df"].columns:
+                        st.session_state["goals_df"]["main"] = False
+                    st.session_state["goals_df"]["main"] = st.session_state[
+                        "goals_df"
+                    ]["main"].astype(bool)
+
+                    # Increment nonce to force table refresh
+                    st.session_state["goals_nonce"] = (
+                        st.session_state.get("goals_nonce", 0) + 1
+                    )
+                    st.success(f"Added {len(new_goals)} goal(s) to the table.")
+                    st.rerun()
+                else:
+                    st.warning("Please select at least one goal to add.")
+
+        st.divider()
+
+        # Build goals source
+        if st.session_state["goals_df"].empty:
+            # Only suggest goals on first load, don't merge with heuristics later
+            heur = _initial_goals_from_columns(all_cols)
+            goals_src = heur
+        else:
+            # Keep only what's in session - don't add heuristics if user has edited
+            goals_src = st.session_state["goals_df"]
+
+        goals_src = goals_src.fillna("").astype(
+            {"var": "object", "group": "object", "type": "object"}
+        )
+        # Add main column if it doesn't exist
+        if "main" not in goals_src.columns:
+            goals_src["main"] = False
+        goals_src["main"] = goals_src["main"].astype(bool)
+
         with st.form("goals_form", clear_on_submit=False):
-            # Stack primary and secondary goals vertically
-            primary_goals = st.multiselect(
-                "Define primary business goal (e.g. GMV, Bookings)",
-                options=all_cols,
-                default=[],
-            )
-            secondary_goals = st.multiselect(
-                "Define secondary business goals (e.g. Signups, App Installs) ",
-                options=all_cols,
-                default=[],
-                help="Secondary goals support full driver analysis. Select only a few to maintain oversight.",
-            )
-
-            def _mk(selected, group):
-                return pd.DataFrame(
-                    {
-                        "var": pd.Series(selected, dtype="object"),
-                        "group": pd.Series(
-                            [group] * len(selected), dtype="object"
-                        ),
-                        "type": pd.Series(
-                            [_guess_goal_type(v) for v in selected],
-                            dtype="object",
-                        ),
-                        "main": pd.Series(
-                            [False] * len(selected), dtype="object"
-                        ),
-                    }
-                )
-
-            if st.session_state["goals_df"].empty:
-                # Only suggest goals on first load, don't merge with heuristics later
-                heur = _initial_goals_from_columns(all_cols)
-                manual = pd.concat(
-                    [
-                        _mk(primary_goals, "primary"),
-                        _mk(secondary_goals, "secondary"),
-                    ],
-                    ignore_index=True,
-                )
-                goals_src = pd.concat([manual, heur], ignore_index=True)
-                goals_src = goals_src.drop_duplicates(
-                    subset=["var"], keep="first"
-                )
-            else:
-                # Keep only what's in session - don't add heuristics if user has edited
-                goals_src = st.session_state["goals_df"]
-
-            goals_src = goals_src.fillna("").astype(
-                {"var": "object", "group": "object", "type": "object"}
-            )
-            # Add main column if it doesn't exist
-            if "main" not in goals_src.columns:
-                goals_src["main"] = False
-            goals_src["main"] = goals_src["main"].astype(bool)
-
             goals_edit = st.data_editor(
                 goals_src,
                 use_container_width=True,
@@ -1525,7 +1609,7 @@ with st.expander(
                         default=False,
                     ),
                 },
-                key="goals_editor",
+                key=f"goals_editor_{st.session_state.get('goals_nonce', 0)}",
             )
             goals_submit = st.form_submit_button("✅ Apply goal changes")
 
@@ -1563,10 +1647,41 @@ with st.expander(
                 merged["main"] = merged["main"].astype(bool)
 
                 st.session_state["goals_df"] = merged
+                # Increment nonce to force table refresh
+                st.session_state["goals_nonce"] = (
+                    st.session_state.get("goals_nonce", 0) + 1
+                )
                 st.success("Goals updated.")
+                st.rerun()
 
     # ---- Custom channels UI ----
     with st.expander("📺 Define marketing channels", expanded=False):
+        # Common marketing channel prefixes for prefill
+        COMMON_MARKETING_CHANNELS = [
+            "meta",
+            "facebook",
+            "google",
+            "ga",
+            "bing",
+            "twitter",
+            "tiktok",
+            "linkedin",
+            "snapchat",
+            "pinterest",
+            "youtube",
+            "tv",
+            "radio",
+            "display",
+            "programmatic",
+            "affiliate",
+            "email",
+            "sms",
+            "push",
+            "influencer",
+            "partnership",
+            "organic",
+        ]
+
         # Show recognized channels from mapping and inferred from column names
         mapping_channels = []
         if (
@@ -1597,15 +1712,20 @@ with st.expander(
 
         # Combine recognized channels with existing custom channels for prefill
         existing_custom = st.session_state.get("custom_channels", [])
-        all_existing_channels = sorted(
-            set(recognized_channels + existing_custom)
-        )
+
+        # If no channels exist yet, prefill with common marketing channels
+        if not recognized_channels and not existing_custom:
+            all_existing_channels = COMMON_MARKETING_CHANNELS
+        else:
+            all_existing_channels = sorted(
+                set(recognized_channels + existing_custom)
+            )
 
         # Single input field with prefilled recognized channels
         channels_input = st.text_area(
             "List your channel names (comma-separated)",
             value=", ".join(all_existing_channels),
-            help="Used to auto-detect your media channels from column names (e.g., 'facebook_', 'tv_').",
+            help="Used to auto-detect your media channels from column names (e.g., 'facebook_', 'tv_'). Common channels are prefilled for your convenience.",
             height=100,
             key="channels_input",
         )
@@ -2010,11 +2130,17 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
             if not primary_goals.empty:
                 dep_var = str(primary_goals.iloc[0]["var"])
 
+    # Show selected countries for saving
+    selected_countries = st.session_state.get("selected_countries", [])
+    if selected_countries:
+        countries_display = ", ".join([c.upper() for c in selected_countries])
+        st.info(f"📍 Selected countries: **{countries_display}**")
+
     # Checkbox for universal vs country-specific mapping
     save_country_specific = st.checkbox(
-        f"Save only for {st.session_state['country'].upper()}",
+        f"Save metadata only for {st.session_state['country'].upper()}",
         value=False,
-        help="By default, mappings are saved universally for all countries. Alternatively, check this box to save only for the current country.",
+        help="By default, mappings are saved universally for all countries. Check this box to save metadata only for the current country.",
     )
 
     meta_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -2157,23 +2283,47 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
 
     def _save_metadata():
         try:
-            # First, save the dataset if it's loaded
+            # Generate a shared timestamp for all saves
+            shared_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            st.session_state["shared_save_timestamp"] = shared_ts
+
+            # Get selected countries (use session state)
+            selected_countries = st.session_state.get("selected_countries", [])
+            if not selected_countries:
+                # Fallback to single country
+                selected_countries = [st.session_state.get("country", "de")]
+
+            # First, save the dataset for each country if data is loaded
             df = st.session_state.get("df_raw", pd.DataFrame())
+            saved_paths = []
+
             if not df.empty:
-                try:
-                    # Save dataset for the current country (not universal)
-                    res = _save_raw_to_gcs(
-                        df, BUCKET, st.session_state["country"]
+                for country in selected_countries:
+                    try:
+                        # Save dataset for each country with shared timestamp
+                        res = _save_raw_to_gcs(
+                            df, BUCKET, country, timestamp=shared_ts
+                        )
+                        saved_paths.append(res["data_gcs_path"])
+                    except Exception as e:
+                        st.error(f"Failed to save dataset for {country}: {e}")
+                        return  # Don't save metadata if dataset save failed
+
+                st.session_state["picked_ts"] = shared_ts
+                st.session_state["data_origin"] = "gcs_latest"
+                st.session_state["last_saved_raw_path"] = (
+                    saved_paths[0] if saved_paths else ""
+                )
+
+                if len(saved_paths) == 1:
+                    st.success(f"✅ Saved dataset → {saved_paths[0]}")
+                else:
+                    st.success(
+                        f"✅ Saved datasets for {len(saved_paths)} countries"
                     )
-                    st.session_state["picked_ts"] = res["timestamp"]
-                    st.session_state["data_origin"] = "gcs_latest"
-                    st.session_state["last_saved_raw_path"] = res[
-                        "data_gcs_path"
-                    ]
-                    st.success(f"✅ Saved dataset → {res['data_gcs_path']}")
-                except Exception as e:
-                    st.error(f"Failed to save dataset: {e}")
-                    return  # Don't save metadata if dataset save failed
+                    with st.expander("Saved paths"):
+                        for path in saved_paths:
+                            st.write(f"- {path}")
             else:
                 st.warning("⚠️ No dataset loaded - saving metadata only")
 
@@ -2184,7 +2334,8 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
                 else "universal"
             )
 
-            vblob = _meta_blob(save_country, meta_ts)
+            # Use shared timestamp for metadata too
+            vblob = _meta_blob(save_country, shared_ts)
             _safe_json_dump_to_gcs(payload, BUCKET, vblob)
             _safe_json_dump_to_gcs(
                 payload, BUCKET, _meta_latest_blob(save_country)
@@ -2241,7 +2392,8 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
 can_go_next = not st.session_state["mapping_df"].empty
 if can_go_next:
     st.divider()
-    coln1, coln2 = st.columns([1, 5])
+    # Make the button wider by using a larger column ratio
+    coln1, coln2 = st.columns([2, 4])
     with coln1:
         try:
             # Streamlit >= 1.27
@@ -2273,6 +2425,12 @@ if can_go_next:
                 # 3.3: Store paid_media_mapping for media response variables
                 st.session_state["prefill_paid_media_mapping"] = (
                     paid_media_mapping
+                )
+
+                # Store selected countries for Prepare Training Data page
+                st.session_state["prefill_countries"] = st.session_state.get(
+                    "selected_countries",
+                    [st.session_state.get("country", "de")],
                 )
 
                 import streamlit as stlib
