@@ -57,6 +57,62 @@ tab_single, tab_queue, tab_status = st.tabs(
 
 
 # Helper functions for GCS data loading
+def _list_available_countries(bucket: str) -> List[str]:
+    """List all countries that have mapped-datasets in GCS."""
+    try:
+        client = storage.Client()
+        prefix = "mapped-datasets/"
+        blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+        countries = set()
+        for blob in blobs:
+            parts = blob.name.split("/")
+            # mapped-datasets/<country>/<version>/raw.parquet
+            if len(parts) >= 2 and parts[1]:
+                countries.add(parts[1].lower())
+        return sorted(list(countries)) if countries else []
+    except Exception:
+        return []
+
+
+def _list_training_data_versions(bucket: str, country: str) -> List[str]:
+    """List available selected_columns.json versions from Prepare Training Data.
+
+    Returns list of timestamps for which selected_columns.json exists.
+    Path pattern: training_data/{country}/{timestamp}/selected_columns.json
+    """
+    try:
+        client = storage.Client()
+        prefix = f"training_data/{country.lower().strip()}/"
+        blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+        versions = []
+        for blob in blobs:
+            if blob.name.endswith("selected_columns.json"):
+                parts = blob.name.split("/")
+                # training_data/<country>/<timestamp>/selected_columns.json
+                if len(parts) >= 4:
+                    versions.append(parts[2])
+        # Sort newest first
+        return sorted(versions, reverse=True) if versions else []
+    except Exception:
+        return []
+
+
+def _load_training_data_json(
+    bucket: str, country: str, version: str
+) -> Optional[Dict]:
+    """Load selected_columns.json from Prepare Training Data page."""
+    try:
+        client = storage.Client()
+        blob_path = f"training_data/{country.lower().strip()}/{version}/selected_columns.json"
+        blob = client.bucket(bucket).blob(blob_path)
+        if not blob.exists():
+            return None
+        return json.loads(blob.download_as_bytes())
+    except Exception as e:
+        st.warning(f"Could not load training data config: {e}")
+        return None
+
+
 def _list_country_versions(bucket: str, country: str) -> List[str]:
     """Return timestamp folder names available in mapped-datasets/<country>/."""
     client = storage.Client()
@@ -182,11 +238,14 @@ with tab_single:
     # Data selection
     with st.expander("📊 Select Data", expanded=False):
 
-        # Get countries from Map Data if available
+        gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
+
+        # Get countries from Map Data session state if available,
+        # otherwise load from GCS mapped-datasets
         map_data_countries = st.session_state.get("selected_countries", [])
         prefill_countries = st.session_state.get("prefill_countries", [])
 
-        # Combine all available countries
+        # Combine all available countries - priority: Map Data > prefill > GCS
         if map_data_countries:
             available_countries = map_data_countries
             st.info(
@@ -198,7 +257,16 @@ with tab_single:
                 f"Using countries from previous session: **{', '.join([c.upper() for c in available_countries])}**"
             )
         else:
-            available_countries = ["fr", "de", "it", "es", "us"]
+            # Load available countries from GCS mapped-datasets
+            available_countries = _list_available_countries(gcs_bucket)
+            if not available_countries:
+                st.warning(
+                    "No mapped datasets found in GCS. Please map and save data first using the Map Data page."
+                )
+                available_countries = ["de"]  # Default fallback
+
+        # Store available countries in session state for use in Save Model Settings
+        st.session_state["run_models_available_countries"] = available_countries
 
         # Allow selection of primary country
         selected_country = st.selectbox(
@@ -207,8 +275,8 @@ with tab_single:
             index=0,
             help="Choose the country this model run will focus on",
         )
+
         # Get available metadata versions (including universal)
-        gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
         try:
             # Get country-specific metadata versions
             country_meta_versions = _list_metadata_versions(gcs_bucket, selected_country)  # type: ignore
@@ -246,21 +314,63 @@ with tab_single:
             st.warning(f"Could not list data versions: {e}")
             available_versions = ["Latest"]
 
-        # Data source selection
+        # Mapped Data version selection (renamed from "Data version")
         selected_version = st.selectbox(
-            "Data version",
+            "Mapped Data version",
             options=available_versions,
             index=0,
-            help="Select data version to use. Latest = most recently saved data.",
+            help="Select mapped data version to use. Latest = most recently saved data from Map Data page.",
         )
 
-        # Metadata source selection (NEW - above data source)
+        # Metadata source selection
         selected_metadata = st.selectbox(
             "Metadata version",
             options=metadata_options,
             index=0,
             help="Select metadata configuration. Universal mappings work for all countries. Latest = most recently saved metadata.",
         )
+
+        # Training Data Config from Prepare Training Data page
+        st.markdown("---")
+        st.markdown("**Training Data Configuration (from Prepare Training Data)**")
+        st.caption(
+            "Optionally load a saved selected_columns.json to prefill model inputs."
+        )
+
+        try:
+            training_data_versions = _list_training_data_versions(
+                gcs_bucket, selected_country
+            )
+            if training_data_versions:
+                training_data_options = ["None"] + training_data_versions
+            else:
+                training_data_options = ["None"]
+        except Exception:
+            training_data_options = ["None"]
+
+        selected_training_data = st.selectbox(
+            "Select Training Data Config",
+            options=training_data_options,
+            index=0,
+            help="Load selected_columns.json from Prepare Training Data to prefill model inputs.",
+        )
+
+        # Load and store training data config if selected
+        if selected_training_data != "None":
+            training_data_config = _load_training_data_json(
+                gcs_bucket, selected_country, selected_training_data
+            )
+            if training_data_config:
+                st.session_state["training_data_config"] = training_data_config
+                st.success(
+                    f"✅ Loaded training data config: {selected_training_data}"
+                )
+                with st.expander("Preview Training Data Config", expanded=False):
+                    st.json(training_data_config)
+            else:
+                st.session_state["training_data_config"] = None
+        else:
+            st.session_state["training_data_config"] = None
 
         # Show current loaded state (point 4 - UI representing actual state)
         if (
@@ -786,8 +896,43 @@ with tab_single:
             "organic_vars": ["ORGANIC_TRAFFIC"],
         }
 
-        # Extract values from metadata if available
-        if metadata and "mapping" in metadata:
+        # Check for training data config from Prepare Training Data page
+        # This takes priority over metadata defaults
+        training_data_config = st.session_state.get("training_data_config")
+        if training_data_config:
+            st.info(
+                "📋 **Using training data config from Prepare Training Data page**"
+            )
+            # Prefill from training data config
+            if training_data_config.get("paid_media_spends"):
+                default_values["paid_media_spends"] = training_data_config[
+                    "paid_media_spends"
+                ]
+            if training_data_config.get("paid_media_vars"):
+                default_values["paid_media_vars"] = training_data_config[
+                    "paid_media_vars"
+                ]
+            if training_data_config.get("organic_vars"):
+                default_values["organic_vars"] = training_data_config[
+                    "organic_vars"
+                ]
+            if training_data_config.get("context_vars"):
+                default_values["context_vars"] = training_data_config[
+                    "context_vars"
+                ]
+            if training_data_config.get("factor_vars"):
+                default_values["factor_vars"] = training_data_config[
+                    "factor_vars"
+                ]
+            # Also update the spend_var_mapping if available
+            if training_data_config.get("var_to_spend_mapping"):
+                # Invert the mapping: var -> spend to spend -> var
+                var_to_spend = training_data_config["var_to_spend_mapping"]
+                spend_to_var = {v: k for k, v in var_to_spend.items()}
+                st.session_state["spend_var_mapping"] = spend_to_var
+
+        # Extract values from metadata if available (only if no training data config)
+        elif metadata and "mapping" in metadata:
             mapping_raw = metadata["mapping"]
 
             # Normalize mapping into a list of dicts with keys 'var' and 'category'
@@ -1631,9 +1776,13 @@ with tab_single:
                 if loaded_countries
                 else [st.session_state.get("selected_country", "de")]
             )
+            # Use available countries from Select Data section instead of hardcoded list
+            available_countries_for_multi = st.session_state.get(
+                "run_models_available_countries", ["de"]
+            )
             config_countries = st.multiselect(
                 "Select countries",
-                options=["fr", "de", "it", "es", "us"],
+                options=available_countries_for_multi,
                 default=default_countries,
             )
         else:
@@ -2016,12 +2165,156 @@ with tab_single:
             "data_gcs_path": "",  # Will be filled later
         }
 
-    if st.button(
-        "🚀 Start Training Job",
-        type="primary",
-        use_container_width=True,
-        key="start_training_job_btn",
-    ):
+    # Get the config_countries list from Save Model Settings section
+    # This is used for multi-country training
+    multi_country_list = st.session_state.get(
+        "run_models_available_countries", []
+    )
+
+    # Multi-country training button
+    col_multi, col_single = st.columns(2)
+
+    with col_multi:
+        start_multi_training = st.button(
+            "🌍 Start Training for All Countries",
+            type="secondary",
+            use_container_width=True,
+            key="start_multi_training_job_btn",
+            help=f"Start training jobs in parallel for all {len(multi_country_list)} countries",
+        )
+
+    with col_single:
+        start_single_training = st.button(
+            "🚀 Start Training Job",
+            type="primary",
+            use_container_width=True,
+            key="start_training_job_btn",
+        )
+
+    # Handle multi-country training
+    if start_multi_training:
+        if not multi_country_list or len(multi_country_list) == 0:
+            st.error(
+                "⚠️ No countries available. Please load data first."
+            )
+            st.stop()
+
+        if not revision or not revision.strip():
+            st.error(
+                "⚠️ Version tag is required. Please enter a version identifier before starting training."
+            )
+            st.stop()
+
+        if not all([PROJECT_ID, REGION, TRAINING_JOB_NAME]):
+            st.error(
+                "Missing configuration. Check environment variables on the web service."
+            )
+            st.stop()
+
+        # Add jobs to queue for all countries
+        try:
+            from app_split_helpers import (
+                save_queue_to_gcs,
+                set_queue_running,
+            )
+
+            # Get next queue ID
+            next_id = (
+                max(
+                    [e["id"] for e in st.session_state.job_queue],
+                    default=0,
+                )
+                + 1
+            )
+
+            new_entries = []
+            logging.info(
+                f"[QUEUE] Starting multi-country training for: {multi_country_list}"
+            )
+
+            for i, ctry in enumerate(multi_country_list):
+                # Get data source information for each country
+                data_version = st.session_state.get(
+                    "selected_version", "Latest"
+                )
+                data_blob_path = _get_data_blob(ctry, data_version.lower())
+
+                params = {
+                    "country": ctry,
+                    "version": revision,
+                    "date_input": time.strftime("%Y-%m-%d"),
+                    "iterations": int(iterations),
+                    "trials": int(trials),
+                    "train_size": train_size,
+                    "paid_media_spends": paid_media_spends,
+                    "paid_media_vars": paid_media_vars,
+                    "context_vars": context_vars,
+                    "factor_vars": factor_vars,
+                    "organic_vars": organic_vars,
+                    "gcs_bucket": gcs_bucket,
+                    "table": "",
+                    "query": "",
+                    "dep_var": dep_var,
+                    "dep_var_type": dep_var_type,
+                    "date_var": date_var,
+                    "adstock": adstock,
+                    "hyperparameter_preset": hyperparameter_preset,
+                    "custom_hyperparameters": (
+                        custom_hyperparameters
+                        if hyperparameter_preset == "Custom"
+                        else {}
+                    ),
+                    "resample_freq": resample_freq,
+                    "column_agg_strategies": column_agg_strategies,
+                    "annotations_gcs_path": "",
+                    "start_date": start_date_str,
+                    "end_date": end_date_str,
+                    "data_gcs_path": f"gs://{gcs_bucket}/{data_blob_path}",
+                }
+
+                new_entries.append(
+                    {
+                        "id": next_id + i,
+                        "params": params,
+                        "status": "PENDING",
+                        "timestamp": None,
+                        "execution_name": None,
+                        "gcs_prefix": None,
+                        "message": "",
+                    }
+                )
+
+            # Add to queue
+            st.session_state.job_queue.extend(new_entries)
+            logging.info(
+                f"[QUEUE] Added {len(new_entries)} jobs for multi-country training"
+            )
+
+            # Save queue to GCS
+            st.session_state.queue_saved_at = save_queue_to_gcs(
+                st.session_state.queue_name,
+                st.session_state.job_queue,
+                queue_running=st.session_state.queue_running,
+            )
+
+            # Start the queue
+            set_queue_running(st.session_state.queue_name, True)
+            st.session_state.queue_running = True
+
+            countries_str = ", ".join([c.upper() for c in multi_country_list])
+            st.success(
+                f"✅ Started training jobs for {len(new_entries)} countries: {countries_str}"
+            )
+            st.info("👉 Go to the **Queue Monitor** tab to track progress.")
+
+            # Set flag to switch to Queue tab
+            st.session_state["switch_to_queue_tab"] = True
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"Failed to start multi-country training: {e}")
+
+    if start_single_training:
         # Validate revision is filled
         if not revision or not revision.strip():
             st.error(

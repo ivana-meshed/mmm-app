@@ -916,6 +916,7 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         except Exception:
             return "–"
 
+    @st.fragment
     def _render_cat_table(title: str, cols: list[str], key_suffix: str):
         subset = prof_all[prof_all["Column"].isin(cols)].copy()
         st.markdown(f"### {title} ({len(subset)})")
@@ -1004,8 +1005,26 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
             },
             key=f"dq_editor_{key_suffix}",
         )
+
+        # Check if any selections changed and update session state
+        needs_rerun = False
         for _, r in edited.iterrows():
-            use_overrides[str(r["Column"])] = bool(r["Use"])
+            col_name = str(r["Column"])
+            use_val = bool(r["Use"])
+            old_val = st.session_state["dq_user_selections"].get(col_name)
+            # If old_val is None, check against the default (not dropped)
+            if old_val is None:
+                old_val = col_name not in st.session_state.get(
+                    "dq_dropped_cols", set()
+                )
+            if old_val != use_val:
+                needs_rerun = True
+            st.session_state["dq_user_selections"][col_name] = use_val
+            use_overrides[col_name] = use_val
+
+        # If selections changed, trigger a fragment rerun
+        if needs_rerun:
+            st.rerun(scope="fragment")
 
     # Render all categories
     for title, cols in categories:
