@@ -2160,6 +2160,7 @@ with st.expander(
                     ),
                 }
                 # Use mapping_edit which has the user's edits from the data_editor
+                # Apply aggregations to the first country's data to get updated mapping
                 (
                     updated_mapping,
                     updated_df,
@@ -2169,12 +2170,47 @@ with st.expander(
                     st.session_state["df_raw"].copy(),
                     prefixes,
                 )
+
+                # Now apply the same aggregations to ALL countries in df_raw_by_country
+                df_by_country = st.session_state.get("df_raw_by_country", {})
+                if df_by_country:
+                    updated_df_by_country = {}
+                    for country, country_df in df_by_country.items():
+                        try:
+                            # Apply aggregations to each country's data
+                            _, country_updated_df, _ = (
+                                _apply_automatic_aggregations(
+                                    mapping_edit.copy(),
+                                    country_df.copy(),
+                                    prefixes,
+                                )
+                            )
+                            updated_df_by_country[country] = country_updated_df
+                        except Exception as country_err:
+                            st.warning(
+                                f"Failed to apply aggregations to {country.upper()}: {country_err}"
+                            )
+                            updated_df_by_country[country] = (
+                                country_df  # Keep original
+                            )
+                    st.session_state["df_raw_by_country"] = (
+                        updated_df_by_country
+                    )
+                    # Also update df_raw to be consistent with the first country
+                    first_country = list(updated_df_by_country.keys())[0]
+                    st.session_state["df_raw"] = updated_df_by_country[
+                        first_country
+                    ]
+                else:
+                    # Single country mode - just update df_raw
+                    st.session_state["df_raw"] = updated_df
+
                 st.session_state["mapping_df"] = updated_mapping
-                st.session_state["df_raw"] = updated_df
                 st.session_state["aggregation_sources"] = aggregation_sources
                 num_new = len(updated_mapping) - original_length
+                countries_count = len(df_by_country) if df_by_country else 1
                 st.success(
-                    f"✅ Mapping updated! Total: {len(updated_mapping)} variables."
+                    f"✅ Mapping updated for {countries_count} countries! Total: {len(updated_mapping)} variables."
                 )
                 if num_new > 0:
                     st.info(
