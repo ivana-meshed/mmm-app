@@ -1140,6 +1140,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
             df_by_country = {}
             loaded_count = 0
             failed_countries = []
+            load_details = []  # Track what happened for each country
 
             # Load data for each selected country
             with st.spinner(
@@ -1148,63 +1149,95 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 for country in selected_countries:
                     try:
                         df = None
-                        country_versions = _list_country_versions_cached(
-                            BUCKET, country
-                        )
+                        load_method = ""
 
-                        if choice == "Latest":
-                            # Try latest symlink first
-                            try:
-                                df = _download_parquet_from_gcs_cached(
-                                    BUCKET, _latest_symlink_blob(country)
-                                )
-                            except Exception:
-                                # Fallback to most recent timestamp
-                                if country_versions:
-                                    fallback_ts = (
-                                        country_versions[0]
-                                        if country_versions[0].lower()
-                                        != "latest"
-                                        else (
-                                            country_versions[1]
-                                            if len(country_versions) > 1
-                                            else None
-                                        )
-                                    )
-                                    if fallback_ts:
-                                        df = _download_parquet_from_gcs_cached(
-                                            BUCKET,
-                                            _data_blob(country, fallback_ts),
-                                        )
-
-                        elif choice in versions:
-                            # User picked a specific GCS timestamp
-                            df = _download_parquet_from_gcs_cached(
-                                BUCKET, _data_blob(country, choice)
-                            )
-
-                        else:  # "Snowflake"
+                        if choice == "Snowflake":
+                            # Load from Snowflake with country-specific WHERE clause
                             _require_sf_session()
-                            sql = (
-                                effective_sql(
-                                    st.session_state["sf_table"],
-                                    st.session_state["sf_sql"],
-                                )
-                                or ""
+                            base_sql = effective_sql(
+                                st.session_state["sf_table"],
+                                st.session_state["sf_sql"],
                             )
-                            if sql and not st.session_state["sf_sql"].strip():
-                                sql = f"{sql} WHERE {st.session_state['sf_country_field']} = '{country.upper()}'"
-                            if sql:
+                            if base_sql:
+                                # Add country filter if not using custom SQL
+                                if not st.session_state["sf_sql"].strip():
+                                    country_field = st.session_state.get(
+                                        "sf_country_field", "COUNTRY"
+                                    )
+                                    sql = f"{base_sql} WHERE {country_field} = '{country.upper()}'"
+                                else:
+                                    # Custom SQL - user must include country filter themselves
+                                    # Replace placeholder if present
+                                    sql = st.session_state["sf_sql"].replace(
+                                        "{country}", country.upper()
+                                    )
                                 df = _load_from_snowflake_cached(sql)
+                                load_method = f"Snowflake ({len(df) if df is not None else 0} rows)"
+
+                        else:
+                            # Load from GCS
+                            country_versions = _list_country_versions_cached(
+                                BUCKET, country
+                            )
+
+                            if choice == "Latest":
+                                # Try latest symlink first
+                                try:
+                                    blob_path = _latest_symlink_blob(country)
+                                    df = _download_parquet_from_gcs_cached(
+                                        BUCKET, blob_path
+                                    )
+                                    load_method = f"GCS latest ({len(df)} rows)"
+                                except Exception as gcs_err:
+                                    # Fallback to most recent timestamp
+                                    if country_versions:
+                                        fallback_ts = (
+                                            country_versions[0]
+                                            if country_versions[0].lower()
+                                            != "latest"
+                                            else (
+                                                country_versions[1]
+                                                if len(country_versions) > 1
+                                                else None
+                                            )
+                                        )
+                                        if fallback_ts:
+                                            blob_path = _data_blob(
+                                                country, fallback_ts
+                                            )
+                                            df = _download_parquet_from_gcs_cached(
+                                                BUCKET, blob_path
+                                            )
+                                            load_method = f"GCS {fallback_ts} ({len(df)} rows)"
+                                        else:
+                                            load_method = f"No data in GCS"
+                                    else:
+                                        load_method = f"No versions in GCS"
+                            else:
+                                # User picked a specific GCS timestamp
+                                blob_path = _data_blob(country, choice)
+                                df = _download_parquet_from_gcs_cached(
+                                    BUCKET, blob_path
+                                )
+                                load_method = f"GCS {choice} ({len(df)} rows)"
 
                         if df is not None and not df.empty:
                             df_by_country[country] = df
                             loaded_count += 1
+                            load_details.append(
+                                f"✅ {country.upper()}: {load_method}"
+                            )
                         else:
                             failed_countries.append(country)
+                            load_details.append(
+                                f"❌ {country.upper()}: {load_method or 'No data'}"
+                            )
 
                     except Exception as e:
-                        failed_countries.append(f"{country} ({str(e)[:50]})")
+                        failed_countries.append(country)
+                        load_details.append(
+                            f"❌ {country.upper()}: Error - {str(e)[:50]}"
+                        )
 
             # Update session state
             st.session_state["df_raw_by_country"] = df_by_country
@@ -1234,6 +1267,13 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
             # Show results
             if loaded_count > 0:
                 st.success(f"✅ Loaded data for {loaded_count} countries.")
+
+                # Show load details
+                with st.expander("📋 Load details", expanded=False):
+                    for detail in load_details:
+                        st.write(detail)
+
+                # Show data preview for each country
                 for country, df in df_by_country.items():
                     with st.expander(f"{country.upper()} - {len(df):,} rows"):
                         st.dataframe(
@@ -1244,8 +1284,12 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
 
             if failed_countries:
                 st.warning(
-                    f"⚠️ Failed to load data for: {', '.join(failed_countries)}"
+                    f"⚠️ Failed to load data for {len(failed_countries)} countries"
                 )
+                with st.expander("Failed countries details"):
+                    for detail in load_details:
+                        if "❌" in detail:
+                            st.write(detail)
 
             if loaded_count > 0:
                 st.rerun()
