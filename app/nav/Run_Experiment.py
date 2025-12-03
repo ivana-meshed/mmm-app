@@ -114,9 +114,10 @@ def _load_training_data_json(
 
 
 def _list_country_versions(bucket: str, country: str) -> List[str]:
-    """Return timestamp folder names available in datasets/<country>/."""
+    """Return timestamp folder names available in mapped-datasets/<country>/."""
     client = storage.Client()
-    prefix = f"datasets/{country.lower().strip()}/"
+    # Use mapped-datasets for Run Models (data processed through Map Data Step 3)
+    prefix = f"mapped-datasets/{country.lower().strip()}/"
     blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
     ts = set()
     for blob in blobs:
@@ -148,10 +149,10 @@ def _list_metadata_versions(bucket: str, country: str) -> List[str]:
 
 
 def _get_data_blob(country: str, version: str) -> str:
-    """Get GCS blob path for data."""
+    """Get GCS blob path for mapped data (from Map Data Step 3)."""
     if version.lower() == "latest":
-        return f"datasets/{country.lower().strip()}/latest/raw.parquet"
-    return f"datasets/{country.lower().strip()}/{version}/raw.parquet"
+        return f"mapped-datasets/{country.lower().strip()}/latest/raw.parquet"
+    return f"mapped-datasets/{country.lower().strip()}/{version}/raw.parquet"
 
 
 def _get_meta_blob(country: str, version: str) -> str:
@@ -207,7 +208,7 @@ def _get_revision_tags(bucket: str) -> List[str]:
 
 
 def _get_next_revision_number(bucket: str, tag: str) -> int:
-    """Get the next experiment number for a given tag."""
+    """Get the next revision number for a given tag."""
     try:
         client = storage.Client()
         prefix = f"robyn/"
@@ -435,7 +436,9 @@ with tab_single:
 
         # Training Data Config from Prepare Training Data page
         st.markdown("---")
-        st.markdown("**Training Data Configuration (from Prepare Training Data)**")
+        st.markdown(
+            "**Training Data Configuration (from Prepare Training Data)**"
+        )
         st.caption(
             "Optionally load a saved selected_columns.json to prefill model inputs."
         )
@@ -468,7 +471,9 @@ with tab_single:
                 st.success(
                     f"✅ Loaded training data config: {selected_training_data}"
                 )
-                with st.expander("Preview Training Data Config", expanded=False):
+                with st.expander(
+                    "Preview Training Data Config", expanded=False
+                ):
                     st.json(training_data_config)
             else:
                 st.session_state["training_data_config"] = None
@@ -574,7 +579,9 @@ with tab_single:
                         st.session_state["selected_country"] = selected_country
                         st.session_state["selected_version"] = selected_version
                         st.session_state["loaded_metadata"] = metadata
-                        st.session_state["selected_metadata"] = selected_metadata
+                        st.session_state["selected_metadata"] = (
+                            selected_metadata
+                        )
 
                         st.success(
                             f"✅ Loaded {len(df_prev)} rows, {len(df_prev.columns)} columns "
@@ -583,11 +590,15 @@ with tab_single:
                         st.info(f"📋 Using metadata: **{selected_metadata}**")
 
                         # Loaded data summary (incl. goals)
-                        with st.expander("📊 Loaded Data Summary", expanded=False):
+                        with st.expander(
+                            "📊 Loaded Data Summary", expanded=False
+                        ):
                             st.write(
                                 f"**Data Source:** {selected_country.upper()} - {selected_version}"
                             )
-                            st.write(f"**Metadata Source:** {selected_metadata}")
+                            st.write(
+                                f"**Metadata Source:** {selected_metadata}"
+                            )
                             st.write(f"**Rows:** {len(df_prev):,}")
                             st.write(f"**Columns:** {len(df_prev.columns)}")
 
@@ -641,7 +652,9 @@ with tab_single:
 
     # Load Model settings
     with st.expander("📥 Load Model Settings", expanded=False):
-        st.caption("Load a saved model setting and apply them to the current data.")
+        st.caption(
+            "Load a saved model setting and apply them to the current data."
+        )
 
         gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
 
@@ -684,20 +697,26 @@ with tab_single:
                             datetime.utcnow().timestamp()
                         )
 
-                        st.success(f"✅ Setting '{selected_config}' loaded successfully!")
-                        st.info("These settings are now applied to the form below.")
+                        st.success(
+                            f"✅ Setting '{selected_config}' loaded successfully!"
+                        )
+                        st.info(
+                            "These settings are now applied to the form below."
+                        )
                         st.json(config_data, expanded=False)
                         st.rerun()
 
                     except Exception as e:
                         st.error(f"Failed to load model settings: {e}")
             else:
-                st.info(f"No saved settings found for {current_country.upper()}")
+                st.info(
+                    f"No saved settings found for {current_country.upper()}"
+                )
 
         except Exception as e:
             st.warning(f"Could not list settings: {e}")
- 
-      # Robyn config (moved outside Data selection expander)
+
+    # Robyn config (moved outside Data selection expander)
     with st.expander("⚙️ Robyn Training Settings", expanded=False):
         # Country auto-filled from Data Selection
         country = st.session_state.get("selected_country", "fr")
@@ -1058,7 +1077,7 @@ with tab_single:
             "organic_vars": ["ORGANIC_TRAFFIC"],
         }
 
-        # Check for training data config from Select Data section
+        # Check for training data config from Prepare Training Data page
         # This takes priority over metadata defaults
         training_data_config = st.session_state.get("training_data_config")
         if training_data_config:
@@ -1348,9 +1367,7 @@ with tab_single:
         spend_var_mapping = {}
 
         if paid_media_spends_list:
-            st.markdown(
-                "**Select a performance metric for each paid channel**"
-            )
+            st.markdown("**Select a performance metric for each paid channel**")
             st.caption(
                 "For each spend, pick a performance metric to model its effect (e.g. impressions, clicks). "
                 "If left empty the spend itself will be used as a fallback."
@@ -1853,7 +1870,7 @@ with tab_single:
     revision = ""
     revision_tag = ""
     revision_number = 1
-   
+
     # Revision Configuration (new section above Save Training Configuration)
     with st.expander("🏷️ Tag Experiment Run", expanded=False):
         st.caption(
@@ -2079,7 +2096,7 @@ with tab_single:
             "factor_vars": factor_vars,
             "organic_vars": organic_vars,
             "gcs_bucket": gcs_bucket,
-            "data_gcs_path": f"gs://{gcs_bucket}/datasets/{country}/latest/raw.parquet",
+            "data_gcs_path": f"gs://{gcs_bucket}/mapped-datasets/{country}/latest/raw.parquet",
             "table": "",
             "query": "",
             "dep_var": dep_var,
@@ -2429,9 +2446,7 @@ with tab_single:
     # Handle multi-country training
     if start_multi_training:
         if not multi_country_list or len(multi_country_list) == 0:
-            st.error(
-                "⚠️ No countries available. Please load data first."
-            )
+            st.error("⚠️ No countries available. Please load data first.")
             st.stop()
 
         if not revision or not revision.strip():
@@ -2690,7 +2705,7 @@ with tab_single:
 
                             from app_shared import append_row_to_job_history
 
-                            append_row_to_job_history(
+                            result = append_row_to_job_history(
                                 {
                                     "job_id": gcs_prefix,
                                     "state": "RUNNING",  # Initial state
@@ -2727,6 +2742,14 @@ with tab_single:
                                 },
                                 gcs_bucket,
                             )
+                            if result:
+                                st.success(
+                                    f"✅ Job added to history: {gcs_prefix}"
+                                )
+                            else:
+                                st.error(
+                                    f"❌ Failed to add job to history (returned False)"
+                                )
                         except Exception as e:
                             st.warning(f"Could not add job to history: {e}")
 
@@ -3402,9 +3425,12 @@ with tab_status:
             st.session_state.queue_running = False
             st.info("Queue paused.")
             st.rerun()
-        
-        if qc4.button("🔁 Refresh queue",use_container_width=True,  key="refresh_queue_from_gcs",
-            ):
+
+        if qc4.button(
+            "🔁 Refresh queue",
+            use_container_width=True,
+            key="refresh_queue_from_gcs",
+        ):
             maybe_refresh_queue_from_gcs(force=True)
             st.success("Refreshed from GCS.")
             st.rerun()
@@ -3426,7 +3452,9 @@ with tab_status:
                         "ID": e["id"],
                         "Status": e["status"],
                         "Country": e["params"].get("country", ""),
-                        "Revision": e["params"].get("revision", e["params"].get("version", "")),
+                        "Revision": e["params"].get(
+                            "revision", e["params"].get("version", "")
+                        ),
                         "Timestamp": e.get("timestamp", ""),
                         "Exec": (e.get("execution_name", "") or "").split("/")[
                             -1
