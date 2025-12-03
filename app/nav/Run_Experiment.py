@@ -3425,8 +3425,8 @@ with tab_status:
                     {
                         "ID": e["id"],
                         "Status": e["status"],
-                        "Country": e["params"]["country"],
-                        "Revision": e["params"]["revision"],
+                        "Country": e["params"].get("country", ""),
+                        "Revision": e["params"].get("revision", e["params"].get("version", "")),
                         "Timestamp": e.get("timestamp", ""),
                         "Exec": (e.get("execution_name", "") or "").split("/")[
                             -1
