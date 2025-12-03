@@ -1464,7 +1464,7 @@ with st.expander(
             except FileNotFoundError:
                 st.warning(
                     "⚠️ No saved metadata found on GCS. "
-                    "Create new mappings below and save them to get started."
+                    "Use the sections below to create new mappings and save them to get started."
                 )
             except Exception as e:
                 st.error(f"Failed to load metadata: {e}")
@@ -1714,12 +1714,11 @@ with st.expander(
         existing_custom = st.session_state.get("custom_channels", [])
 
         # If no channels exist yet, prefill with common marketing channels
-        if not recognized_channels and not existing_custom:
-            all_existing_channels = COMMON_MARKETING_CHANNELS
-        else:
-            all_existing_channels = sorted(
-                set(recognized_channels + existing_custom)
-            )
+        all_existing_channels = (
+            COMMON_MARKETING_CHANNELS
+            if not (recognized_channels or existing_custom)
+            else sorted(set(recognized_channels + existing_custom))
+        )
 
         # Single input field with prefilled recognized channels
         channels_input = st.text_area(
@@ -2136,11 +2135,21 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
         countries_display = ", ".join([c.upper() for c in selected_countries])
         st.info(f"📍 Selected countries: **{countries_display}**")
 
+    # Determine checkbox label based on number of selected countries
+    current_country = st.session_state.get("country", "de")
+    if len(selected_countries) > 1:
+        checkbox_label = (
+            f"Save metadata only for {current_country.upper()} "
+            f"(first of {len(selected_countries)} selected)"
+        )
+    else:
+        checkbox_label = f"Save metadata only for {current_country.upper()}"
+
     # Checkbox for universal vs country-specific mapping
     save_country_specific = st.checkbox(
-        f"Save metadata only for {st.session_state['country'].upper()}",
+        checkbox_label,
         value=False,
-        help="By default, mappings are saved universally for all countries. Check this box to save metadata only for the current country.",
+        help="By default, mappings are saved universally for all countries. Check this box to save metadata only for the primary country.",
     )
 
     meta_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")

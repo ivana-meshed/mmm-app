@@ -190,7 +190,7 @@ with tab_single:
         elif prefill_countries:
             available_countries = prefill_countries
             st.info(
-                f"Using countries from Map Data: **{', '.join([c.upper() for c in available_countries])}**"
+                f"Using countries from previous session: **{', '.join([c.upper() for c in available_countries])}**"
             )
         else:
             available_countries = ["fr", "de", "it", "es", "us"]
@@ -2043,10 +2043,14 @@ with tab_single:
         # Use shared timestamp from Map Data if available, otherwise generate new one
         shared_ts = st.session_state.get("shared_save_timestamp", "")
         if shared_ts:
+            # Timestamp format constants
+            FULL_TIMESTAMP_LENGTH = 15  # YYYYMMDD_HHMMSS format length
+            YEAR_PREFIX_LENGTH = 4  # Length of year prefix to remove
+
             # Convert from YYYYMMDD_HHMMSS to MMDD_HHMMSS format for consistency
             try:
-                if len(shared_ts) >= 15:  # YYYYMMDD_HHMMSS format
-                    timestamp = shared_ts[4:]  # Remove first 4 chars (year)
+                if len(shared_ts) >= FULL_TIMESTAMP_LENGTH:
+                    timestamp = shared_ts[YEAR_PREFIX_LENGTH:]  # Remove year
                 else:
                     timestamp = shared_ts
             except Exception:
