@@ -1821,6 +1821,19 @@ def data_latest_blob(country: str) -> str:
     return f"{data_root(country)}/latest/raw.parquet"
 
 
+# Mapped data paths (for data after variable mapping in Map Data Step 3)
+def mapped_data_root(country: str) -> str:
+    return f"mapped-datasets/{country.lower().strip()}"
+
+
+def mapped_data_blob(country: str, ts: str) -> str:
+    return f"{mapped_data_root(country)}/{ts}/raw.parquet"
+
+
+def mapped_data_latest_blob(country: str) -> str:
+    return f"{mapped_data_root(country)}/latest/raw.parquet"
+
+
 # --- metadata paths (country + universal)
 def meta_blob(country: str, ts: str) -> str:
     """Country-scoped metadata path."""
@@ -1877,6 +1890,23 @@ def list_data_versions(
 ) -> List[str]:
     client = storage.Client()
     prefix = f"{data_root(country)}/"
+    blobs = client.list_blobs(bucket, prefix=prefix)
+    ts = set()
+    for b in blobs:
+        parts = b.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "raw.parquet":
+            ts.add(parts[-2])
+    out = sorted_versions_newest_first(list(ts))
+    return ["Latest"] + out
+
+
+@st.cache_data(show_spinner=False)
+def list_mapped_data_versions(
+    bucket: str, country: str, refresh_key: str = ""
+) -> List[str]:
+    """List available versions of mapped data (from Map Data Step 3)."""
+    client = storage.Client()
+    prefix = f"{mapped_data_root(country)}/"
     blobs = client.list_blobs(bucket, prefix=prefix)
     ts = set()
     for b in blobs:

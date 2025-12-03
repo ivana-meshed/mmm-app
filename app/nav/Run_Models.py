@@ -54,9 +54,10 @@ tab_single, tab_queue, tab_status = st.tabs(
 
 # Helper functions for GCS data loading
 def _list_country_versions(bucket: str, country: str) -> List[str]:
-    """Return timestamp folder names available in datasets/<country>/."""
+    """Return timestamp folder names available in mapped-datasets/<country>/."""
     client = storage.Client()
-    prefix = f"datasets/{country.lower().strip()}/"
+    # Use mapped-datasets for Run Models (data processed through Map Data Step 3)
+    prefix = f"mapped-datasets/{country.lower().strip()}/"
     blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
     ts = set()
     for blob in blobs:
@@ -88,10 +89,10 @@ def _list_metadata_versions(bucket: str, country: str) -> List[str]:
 
 
 def _get_data_blob(country: str, version: str) -> str:
-    """Get GCS blob path for data."""
+    """Get GCS blob path for mapped data (from Map Data Step 3)."""
     if version.lower() == "latest":
-        return f"datasets/{country.lower().strip()}/latest/raw.parquet"
-    return f"datasets/{country.lower().strip()}/{version}/raw.parquet"
+        return f"mapped-datasets/{country.lower().strip()}/latest/raw.parquet"
+    return f"mapped-datasets/{country.lower().strip()}/{version}/raw.parquet"
 
 
 def _get_meta_blob(country: str, version: str) -> str:
@@ -1690,7 +1691,7 @@ with tab_single:
             "factor_vars": factor_vars,
             "organic_vars": organic_vars,
             "gcs_bucket": gcs_bucket,
-            "data_gcs_path": f"gs://{gcs_bucket}/datasets/{country}/latest/raw.parquet",
+            "data_gcs_path": f"gs://{gcs_bucket}/mapped-datasets/{country}/latest/raw.parquet",
             "table": "",
             "query": "",
             "dep_var": dep_var,
@@ -2580,7 +2581,7 @@ with tab_queue:
                 "factor_vars": "IS_WEEKEND,TV_IS_ON",
                 "organic_vars": "ORGANIC_TRAFFIC",
                 "gcs_bucket": st.session_state["gcs_bucket"],
-                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
+                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/mapped-datasets/fr/latest/raw.parquet",
                 "table": "",
                 "query": "",
                 "dep_var": "UPLOAD_VALUE",
@@ -2621,7 +2622,7 @@ with tab_queue:
                 "factor_vars": "",
                 "organic_vars": "ORGANIC_TRAFFIC",
                 "gcs_bucket": st.session_state["gcs_bucket"],
-                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
+                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/mapped-datasets/de/latest/raw.parquet",
                 "table": "",
                 "query": "",
                 "dep_var": "UPLOAD_VALUE",
@@ -2662,7 +2663,7 @@ with tab_queue:
                 "factor_vars": "IS_WEEKEND",
                 "organic_vars": "ORGANIC_TRAFFIC",
                 "gcs_bucket": st.session_state["gcs_bucket"],
-                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/it/latest/raw.parquet",
+                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/mapped-datasets/it/latest/raw.parquet",
                 "table": "",
                 "query": "",
                 "dep_var": "UPLOAD_VALUE",
@@ -2708,7 +2709,7 @@ with tab_queue:
                 "factor_vars": "IS_WEEKEND,TV_IS_ON",
                 "organic_vars": "ORGANIC_TRAFFIC",
                 "gcs_bucket": st.session_state["gcs_bucket"],
-                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
+                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/mapped-datasets/fr/latest/raw.parquet",
                 "dep_var": "UPLOAD_VALUE",
                 "dep_var_type": "revenue",
                 "date_var": "date",
@@ -2729,7 +2730,7 @@ with tab_queue:
                 "paid_media_vars": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST",
                 "context_vars": "",
                 "gcs_bucket": st.session_state["gcs_bucket"],
-                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
+                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/mapped-datasets/de/latest/raw.parquet",
                 "dep_var": "UPLOAD_VALUE",
                 "date_var": "date",
                 "adstock": "weibull_cdf",
@@ -2747,7 +2748,7 @@ with tab_queue:
                 "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST",
                 "organic_vars": "ORGANIC_TRAFFIC",
                 "gcs_bucket": st.session_state["gcs_bucket"],
-                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/it/latest/raw.parquet",
+                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/mapped-datasets/it/latest/raw.parquet",
                 "dep_var": "UPLOAD_VALUE",
                 "date_var": "date",
                 "adstock": "geometric",

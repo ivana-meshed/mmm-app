@@ -61,6 +61,19 @@ def _latest_symlink_blob(country: str) -> str:
     return f"{_data_root(country)}/latest/raw.parquet"
 
 
+# Mapped data paths (for Step 3 - Save & Reuse, after variable mapping)
+def _mapped_data_root(country: str) -> str:
+    return f"mapped-datasets/{country.lower().strip()}"
+
+
+def _mapped_data_blob(country: str, ts: str) -> str:
+    return f"{_mapped_data_root(country)}/{ts}/raw.parquet"
+
+
+def _mapped_latest_symlink_blob(country: str) -> str:
+    return f"{_mapped_data_root(country)}/latest/raw.parquet"
+
+
 def _meta_blob(country: str, ts: str) -> str:
     return f"metadata/{country.lower().strip()}/{ts}/mapping.json"
 
@@ -125,6 +138,21 @@ def _save_raw_to_gcs(
         data_gcs_path = upload_to_gcs(bucket, tmp.name, _data_blob(country, ts))
         # maintain "latest" copy
         upload_to_gcs(bucket, tmp.name, _latest_symlink_blob(country))
+    return {"timestamp": ts, "data_gcs_path": data_gcs_path}
+
+
+def _save_mapped_to_gcs(
+    df: pd.DataFrame, bucket: str, country: str, timestamp: str = None
+) -> Dict[str, str]:
+    """Save mapped dataset to mapped-datasets/ path (separate from raw datasets)."""
+    ts = timestamp or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
+        df.to_parquet(tmp.name, index=False)
+        data_gcs_path = upload_to_gcs(
+            bucket, tmp.name, _mapped_data_blob(country, ts)
+        )
+        # maintain "latest" copy
+        upload_to_gcs(bucket, tmp.name, _mapped_latest_symlink_blob(country))
     return {"timestamp": ts, "data_gcs_path": data_gcs_path}
 
 
@@ -2343,15 +2371,16 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
                 # Fallback to single country
                 selected_countries = [st.session_state.get("country", "de")]
 
-            # First, save the dataset for each country if data is loaded
+            # Save the MAPPED dataset for each country (to mapped-datasets/ path)
+            # This is separate from raw datasets saved in Step 1
             df = st.session_state.get("df_raw", pd.DataFrame())
             saved_paths = []
 
             if not df.empty:
                 for country in selected_countries:
                     try:
-                        # Save dataset for each country with shared timestamp
-                        res = _save_raw_to_gcs(
+                        # Save mapped dataset for each country with shared timestamp
+                        res = _save_mapped_to_gcs(
                             df, BUCKET, country, timestamp=shared_ts
                         )
                         saved_paths.append(res["data_gcs_path"])
@@ -2360,16 +2389,16 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
                         return  # Don't save metadata if dataset save failed
 
                 st.session_state["picked_ts"] = shared_ts
-                st.session_state["data_origin"] = "gcs_latest"
-                st.session_state["last_saved_raw_path"] = (
+                st.session_state["data_origin"] = "gcs_mapped"
+                st.session_state["last_saved_mapped_path"] = (
                     saved_paths[0] if saved_paths else ""
                 )
 
                 if len(saved_paths) == 1:
-                    st.success(f"✅ Saved dataset → {saved_paths[0]}")
+                    st.success(f"✅ Saved mapped dataset → {saved_paths[0]}")
                 else:
                     st.success(
-                        f"✅ Saved datasets for {len(saved_paths)} countries"
+                        f"✅ Saved mapped datasets for {len(saved_paths)} countries"
                     )
                     with st.expander("Saved paths"):
                         for path in saved_paths:
