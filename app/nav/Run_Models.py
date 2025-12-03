@@ -70,7 +70,8 @@ def _list_available_countries(bucket: str) -> List[str]:
             if len(parts) >= 2 and parts[1]:
                 countries.add(parts[1].lower())
         return sorted(list(countries)) if countries else []
-    except Exception:
+    except Exception as e:
+        logging.warning(f"Could not list available countries from GCS: {e}")
         return []
 
 
@@ -93,7 +94,10 @@ def _list_training_data_versions(bucket: str, country: str) -> List[str]:
                     versions.append(parts[2])
         # Sort newest first
         return sorted(versions, reverse=True) if versions else []
-    except Exception:
+    except Exception as e:
+        logging.warning(
+            f"Could not list training data versions for {country}: {e}"
+        )
         return []
 
 
@@ -927,8 +931,14 @@ with tab_single:
             # Also update the spend_var_mapping if available
             if training_data_config.get("var_to_spend_mapping"):
                 # Invert the mapping: var -> spend to spend -> var
+                # The var_to_spend_mapping maps media_var -> spend_col
+                # We need spend_col -> media_var for the UI
                 var_to_spend = training_data_config["var_to_spend_mapping"]
-                spend_to_var = {v: k for k, v in var_to_spend.items()}
+                spend_to_var = {}
+                for var_name, spend_name in var_to_spend.items():
+                    # Only add if not already present (first occurrence wins)
+                    if spend_name not in spend_to_var:
+                        spend_to_var[spend_name] = var_name
                 st.session_state["spend_var_mapping"] = spend_to_var
 
         # Extract values from metadata if available (only if no training data config)
