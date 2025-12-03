@@ -1037,19 +1037,20 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
             st.warning("Please select at least one country.")
             return
 
-        # Use the first selected country for loading data
-        country = selected_countries[0]
-
         # Show info about multi-country behavior
         if len(selected_countries) > 1:
             st.info(
-                f"📍 Loading data from **{country.upper()}** (first selected). "
-                f"When saved, the same data will be applied to all {len(selected_countries)} selected countries."
+                f"📍 Loading data for **{len(selected_countries)} countries**: "
+                f"{', '.join([c.upper() for c in selected_countries])}. "
+                f"Each country's data will be loaded and saved separately."
             )
 
-        # Get available GCS versions for the chosen country
+        # Use the first selected country for version checking (UI display)
+        first_country = selected_countries[0]
+
+        # Get available GCS versions for the first country (for UI display)
         versions_raw = _list_country_versions_cached(
-            BUCKET, country
+            BUCKET, first_country
         )  # e.g. ["20250107_101500", "20241231_235959", "latest"]
         # Normalize versions: canonicalize any 'latest' -> 'Latest' and de-duplicate, preserving order
         seen = set()
@@ -1111,57 +1112,78 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
             st.rerun()
 
         if not load_clicked:
-            df = st.session_state.get("df_raw", pd.DataFrame())
-            if not df.empty:
+            # Show preview of loaded data by country
+            df_by_country = st.session_state.get("df_raw_by_country", {})
+            if df_by_country:
+                st.caption(
+                    f"Preview (from session) - {len(df_by_country)} countries loaded:"
+                )
+                for country, df in df_by_country.items():
+                    with st.expander(f"{country.upper()} - {len(df):,} rows"):
+                        st.dataframe(
+                            df.head(10),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+            elif not st.session_state.get("df_raw", pd.DataFrame()).empty:
+                # Backward compatibility: show single df_raw
                 st.caption("Preview (from session):")
                 st.dataframe(
-                    df.head(20), use_container_width=True, hide_index=True
+                    st.session_state["df_raw"].head(20),
+                    use_container_width=True,
+                    hide_index=True,
                 )
             return
 
         try:
-            df = None
             choice = st.session_state.get("source_choice", "Latest")
+            df_by_country = {}
+            loaded_count = 0
+            failed_countries = []
 
-            if choice == "Latest":
-                # Try latest symlink; fallback to most recent timestamp if available; else Snowflake
-                try:
-                    df = _download_parquet_from_gcs_cached(
-                        BUCKET, _latest_symlink_blob(country)
-                    )
-                    st.session_state.update(
-                        {
-                            "df_raw": df,
-                            "data_origin": "gcs_latest",
-                            "picked_ts": "latest",
-                        }
-                    )
-                except Exception:
-                    if versions:
-                        fallback_ts = (
-                            versions[0]
-                            if versions[0] != "Latest"
-                            else (versions[1] if len(versions) > 1 else None)
+            # Load data for each selected country
+            with st.spinner(
+                f"Loading data for {len(selected_countries)} countries..."
+            ):
+                for country in selected_countries:
+                    try:
+                        df = None
+                        country_versions = _list_country_versions_cached(
+                            BUCKET, country
                         )
-                        if fallback_ts:
-                            st.info(
-                                f"‘latest’ not found — loading most recent saved version: {fallback_ts}."
-                            )
+
+                        if choice == "Latest":
+                            # Try latest symlink first
+                            try:
+                                df = _download_parquet_from_gcs_cached(
+                                    BUCKET, _latest_symlink_blob(country)
+                                )
+                            except Exception:
+                                # Fallback to most recent timestamp
+                                if country_versions:
+                                    fallback_ts = (
+                                        country_versions[0]
+                                        if country_versions[0].lower()
+                                        != "latest"
+                                        else (
+                                            country_versions[1]
+                                            if len(country_versions) > 1
+                                            else None
+                                        )
+                                    )
+                                    if fallback_ts:
+                                        df = _download_parquet_from_gcs_cached(
+                                            BUCKET,
+                                            _data_blob(country, fallback_ts),
+                                        )
+
+                        elif choice in versions:
+                            # User picked a specific GCS timestamp
                             df = _download_parquet_from_gcs_cached(
-                                BUCKET, _data_blob(country, fallback_ts)
+                                BUCKET, _data_blob(country, choice)
                             )
 
-                            st.session_state.update(
-                                {
-                                    "df_raw": df,
-                                    "data_origin": "gcs_timestamp",
-                                    "picked_ts": fallback_ts,
-                                }
-                            )
-                        else:
-                            st.info(
-                                "No saved timestamp versions found in GCS; falling back to Snowflake."
-                            )
+                        else:  # "Snowflake"
                             _require_sf_session()
                             sql = (
                                 effective_sql(
@@ -1174,90 +1196,61 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                 sql = f"{sql} WHERE {st.session_state['sf_country_field']} = '{country.upper()}'"
                             if sql:
                                 df = _load_from_snowflake_cached(sql)
-                                st.session_state.update(
-                                    {
-                                        "df_raw": df,
-                                        "data_origin": "snowflake",
-                                        "picked_ts": "",
-                                    }
-                                )
-                            else:
-                                st.warning(
-                                    "Provide a table name (DATABASE.SCHEMA.TABLE) or write a SQL to load data from Snowflake."
-                                )
-                    else:
-                        st.info(
-                            "No saved data found in GCS; falling back to Snowflake connection."
-                        )
-                        _require_sf_session()
-                        sql = (
-                            effective_sql(
-                                st.session_state["sf_table"],
-                                st.session_state["sf_sql"],
-                            )
-                            or ""
-                        )
-                        if sql and not st.session_state["sf_sql"].strip():
-                            sql = f"{sql} WHERE {st.session_state['sf_country_field']} = '{country.upper()}'"
-                        if sql:
-                            df = _load_from_snowflake_cached(sql)
-                            st.session_state.update(
-                                {
-                                    "df_raw": df,
-                                    "data_origin": "snowflake",
-                                    "picked_ts": "",
-                                }
-                            )
-                        else:
-                            st.warning(
-                                "Provide a table name (DATABASE.SCHEMA.TABLE) or write a SQL to load data from Snowflake."
-                            )
 
-            elif choice in versions:
-                # User picked a specific GCS timestamp directly from the Source list
-                df = _download_parquet_from_gcs_cached(
-                    BUCKET, _data_blob(country, choice)
-                )
+                        if df is not None and not df.empty:
+                            df_by_country[country] = df
+                            loaded_count += 1
+                        else:
+                            failed_countries.append(country)
+
+                    except Exception as e:
+                        failed_countries.append(f"{country} ({str(e)[:50]})")
+
+            # Update session state
+            st.session_state["df_raw_by_country"] = df_by_country
+            # For backward compatibility, set df_raw to the first country's data
+            if df_by_country:
+                first_country_df = list(df_by_country.values())[0]
                 st.session_state.update(
                     {
-                        "df_raw": df,
-                        "data_origin": "gcs_timestamp",
-                        "picked_ts": choice,
+                        "df_raw": first_country_df,
+                        "data_origin": (
+                            "gcs_latest"
+                            if choice == "Latest"
+                            else (
+                                "gcs_timestamp"
+                                if choice in versions
+                                else "snowflake"
+                            )
+                        ),
+                        "picked_ts": (
+                            choice
+                            if choice in versions
+                            else ("latest" if choice == "Latest" else "")
+                        ),
                     }
                 )
 
-            else:  # "Snowflake"
-                _require_sf_session()
-                sql = (
-                    effective_sql(
-                        st.session_state["sf_table"], st.session_state["sf_sql"]
-                    )
-                    or ""
-                )
-                if sql and not st.session_state["sf_sql"].strip():
-                    sql = f"{sql} WHERE {sql and st.session_state['sf_country_field']} = '{country.upper()}'"
-                if sql:
-                    df = _load_from_snowflake_cached(sql)
-                    st.session_state.update(
-                        {
-                            "df_raw": df,
-                            "data_origin": "snowflake",
-                            "picked_ts": "",
-                        }
-                    )
-                else:
-                    st.warning(
-                        "Provide a table name (DATABASE.SCHEMA.TABLE) or write a SQL to load data from Snowflake."
-                    )
+            # Show results
+            if loaded_count > 0:
+                st.success(f"✅ Loaded data for {loaded_count} countries.")
+                for country, df in df_by_country.items():
+                    with st.expander(f"{country.upper()} - {len(df):,} rows"):
+                        st.dataframe(
+                            df.head(10),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
 
-            if df is not None and not df.empty:
-                st.success(f"Loaded {len(df):,} rows.")
-                st.dataframe(
-                    df.head(20), use_container_width=True, hide_index=True
+            if failed_countries:
+                st.warning(
+                    f"⚠️ Failed to load data for: {', '.join(failed_countries)}"
                 )
+
+            if loaded_count > 0:
                 st.rerun()
             else:
-                st.warning("Data load finished, but no rows were returned.")
+                st.error("No data was loaded for any country.")
 
         except Exception as e:
             st.error(f"Load failed: {e}")
@@ -1266,24 +1259,35 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
 
     # Save snapshot (button callback uses session data; no manual st.rerun())
     def _save_current_raw():
-        df = st.session_state.get("df_raw", pd.DataFrame())
-        if df.empty:
+        # Get data by country
+        df_by_country = st.session_state.get("df_raw_by_country", {})
+
+        # Fallback to single df_raw for backward compatibility
+        if not df_by_country:
+            df = st.session_state.get("df_raw", pd.DataFrame())
+            if df.empty:
+                st.warning("No dataset loaded.")
+                return
+            # Use single country
+            country = st.session_state.get("country", "de")
+            df_by_country = {country: df}
+
+        if not df_by_country:
             st.warning("No dataset loaded.")
             return
-
-        # Get all selected countries
-        selected_countries = st.session_state.get("selected_countries", [])
-        if not selected_countries:
-            selected_countries = [st.session_state.get("country", "de")]
 
         try:
             # Generate shared timestamp for all countries
             shared_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             saved_paths = []
 
-            for country in selected_countries:
-                res = _save_raw_to_gcs(df, BUCKET, country, timestamp=shared_ts)
-                saved_paths.append(res["data_gcs_path"])
+            # Save each country's data to its own path
+            for country, df in df_by_country.items():
+                if df is not None and not df.empty:
+                    res = _save_raw_to_gcs(
+                        df, BUCKET, country, timestamp=shared_ts
+                    )
+                    saved_paths.append(res["data_gcs_path"])
 
             st.session_state["picked_ts"] = shared_ts
             st.session_state["shared_save_timestamp"] = shared_ts
@@ -1298,7 +1302,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 st.success(f"Saved raw snapshot → {saved_paths[0]}")
             else:
                 st.success(
-                    f"Saved raw snapshot for {len(saved_paths)} countries"
+                    f"✅ Saved raw snapshots for {len(saved_paths)} countries"
                 )
                 with st.expander("Saved paths"):
                     for path in saved_paths:
@@ -2365,28 +2369,34 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
             shared_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             st.session_state["shared_save_timestamp"] = shared_ts
 
-            # Get selected countries (use session state)
-            selected_countries = st.session_state.get("selected_countries", [])
-            if not selected_countries:
-                # Fallback to single country
-                selected_countries = [st.session_state.get("country", "de")]
+            # Get data by country
+            df_by_country = st.session_state.get("df_raw_by_country", {})
+
+            # Fallback to single df_raw for backward compatibility
+            if not df_by_country:
+                df = st.session_state.get("df_raw", pd.DataFrame())
+                if not df.empty:
+                    country = st.session_state.get("country", "de")
+                    df_by_country = {country: df}
 
             # Save the MAPPED dataset for each country (to mapped-datasets/ path)
             # This is separate from raw datasets saved in Step 1
-            df = st.session_state.get("df_raw", pd.DataFrame())
             saved_paths = []
 
-            if not df.empty:
-                for country in selected_countries:
-                    try:
-                        # Save mapped dataset for each country with shared timestamp
-                        res = _save_mapped_to_gcs(
-                            df, BUCKET, country, timestamp=shared_ts
-                        )
-                        saved_paths.append(res["data_gcs_path"])
-                    except Exception as e:
-                        st.error(f"Failed to save dataset for {country}: {e}")
-                        return  # Don't save metadata if dataset save failed
+            if df_by_country:
+                for country, df in df_by_country.items():
+                    if df is not None and not df.empty:
+                        try:
+                            # Save mapped dataset for each country with shared timestamp
+                            res = _save_mapped_to_gcs(
+                                df, BUCKET, country, timestamp=shared_ts
+                            )
+                            saved_paths.append(res["data_gcs_path"])
+                        except Exception as e:
+                            st.error(
+                                f"Failed to save dataset for {country}: {e}"
+                            )
+                            return  # Don't save metadata if dataset save failed
 
                 st.session_state["picked_ts"] = shared_ts
                 st.session_state["data_origin"] = "gcs_mapped"
