@@ -1848,6 +1848,11 @@ with tab_single:
         context_vars = ", ".join(context_vars_list)
         factor_vars = ", ".join(factor_vars_list)
         organic_vars = ", ".join(organic_vars_list)
+
+    # Initialize revision variables with defaults (will be updated in expander)
+    revision = ""
+    revision_tag = ""
+    revision_number = 1
    
     # Revision Configuration (new section above Save Training Configuration)
     with st.expander("🏷️ Tag Experiment Run", expanded=False):
