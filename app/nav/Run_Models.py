@@ -20,6 +20,7 @@ from app_shared import (
     _require_sf_session,
     get_data_processor,
     get_job_manager,
+    list_mapped_data_versions,
     parse_train_size,
     require_login_and_domain,
     run_sql,
@@ -34,6 +35,9 @@ from app_split_helpers import *  # bring in all helper functions/constants
 
 require_login_and_domain()
 ensure_session_defaults()
+
+# Clear mapped data cache to ensure we get fresh data
+list_mapped_data_versions.clear()
 
 st.title("Run Marketing Mix Models")
 
@@ -54,9 +58,10 @@ tab_single, tab_queue, tab_status = st.tabs(
 
 # Helper functions for GCS data loading
 def _list_country_versions(bucket: str, country: str) -> List[str]:
-    """Return timestamp folder names available in datasets/<country>/."""
+    """Return timestamp folder names available in mapped-datasets/<country>/."""
     client = storage.Client()
-    prefix = f"datasets/{country.lower().strip()}/"
+    # Use mapped-datasets for Run Models (data processed through Map Data Step 3)
+    prefix = f"mapped-datasets/{country.lower().strip()}/"
     blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
     ts = set()
     for blob in blobs:
@@ -88,10 +93,10 @@ def _list_metadata_versions(bucket: str, country: str) -> List[str]:
 
 
 def _get_data_blob(country: str, version: str) -> str:
-    """Get GCS blob path for data."""
+    """Get GCS blob path for mapped data (from Map Data Step 3)."""
     if version.lower() == "latest":
-        return f"datasets/{country.lower().strip()}/latest/raw.parquet"
-    return f"datasets/{country.lower().strip()}/{version}/raw.parquet"
+        return f"mapped-datasets/{country.lower().strip()}/latest/raw.parquet"
+    return f"mapped-datasets/{country.lower().strip()}/{version}/raw.parquet"
 
 
 def _get_meta_blob(country: str, version: str) -> str:
@@ -177,8 +182,25 @@ with tab_single:
     # Data selection
     with st.expander("📊 Select Data", expanded=False):
 
-        # Country selection
-        available_countries = ["fr", "de", "it", "es", "us"]
+        # Get countries from Map Data if available
+        map_data_countries = st.session_state.get("selected_countries", [])
+        prefill_countries = st.session_state.get("prefill_countries", [])
+
+        # Combine all available countries
+        if map_data_countries:
+            available_countries = map_data_countries
+            st.info(
+                f"Using countries from Map Data: **{', '.join([c.upper() for c in available_countries])}**"
+            )
+        elif prefill_countries:
+            available_countries = prefill_countries
+            st.info(
+                f"Using countries from previous session: **{', '.join([c.upper() for c in available_countries])}**"
+            )
+        else:
+            available_countries = ["fr", "de", "it", "es", "us"]
+
+        # Allow selection of primary country
         selected_country = st.selectbox(
             "Primary Country",
             options=available_countries,
@@ -1673,7 +1695,7 @@ with tab_single:
             "factor_vars": factor_vars,
             "organic_vars": organic_vars,
             "gcs_bucket": gcs_bucket,
-            "data_gcs_path": f"gs://{gcs_bucket}/datasets/{country}/latest/raw.parquet",
+            "data_gcs_path": f"gs://{gcs_bucket}/mapped-datasets/{country}/latest/raw.parquet",
             "table": "",
             "query": "",
             "dep_var": dep_var,
@@ -2023,7 +2045,24 @@ with tab_single:
             )
             st.stop()
 
-        timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+        # Use shared timestamp from Map Data if available, otherwise generate new one
+        shared_ts = st.session_state.get("shared_save_timestamp", "")
+        if shared_ts:
+            # Timestamp format constants
+            FULL_TIMESTAMP_LENGTH = 15  # YYYYMMDD_HHMMSS format length
+            YEAR_PREFIX_LENGTH = 4  # Length of year prefix to remove
+
+            # Convert from YYYYMMDD_HHMMSS to MMDD_HHMMSS format for consistency
+            try:
+                if len(shared_ts) >= FULL_TIMESTAMP_LENGTH:
+                    timestamp = shared_ts[YEAR_PREFIX_LENGTH:]  # Remove year
+                else:
+                    timestamp = shared_ts
+            except Exception:
+                timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+        else:
+            timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+
         gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
         timings: List[Dict[str, float]] = []
 
@@ -2546,7 +2585,7 @@ with tab_queue:
                 "factor_vars": "IS_WEEKEND,TV_IS_ON",
                 "organic_vars": "ORGANIC_TRAFFIC",
                 "gcs_bucket": st.session_state["gcs_bucket"],
-                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
+                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/mapped-datasets/fr/latest/raw.parquet",
                 "table": "",
                 "query": "",
                 "dep_var": "UPLOAD_VALUE",
@@ -2587,7 +2626,7 @@ with tab_queue:
                 "factor_vars": "",
                 "organic_vars": "ORGANIC_TRAFFIC",
                 "gcs_bucket": st.session_state["gcs_bucket"],
-                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
+                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/mapped-datasets/de/latest/raw.parquet",
                 "table": "",
                 "query": "",
                 "dep_var": "UPLOAD_VALUE",
@@ -2628,7 +2667,7 @@ with tab_queue:
                 "factor_vars": "IS_WEEKEND",
                 "organic_vars": "ORGANIC_TRAFFIC",
                 "gcs_bucket": st.session_state["gcs_bucket"],
-                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/it/latest/raw.parquet",
+                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/mapped-datasets/it/latest/raw.parquet",
                 "table": "",
                 "query": "",
                 "dep_var": "UPLOAD_VALUE",
@@ -2674,7 +2713,7 @@ with tab_queue:
                 "factor_vars": "IS_WEEKEND,TV_IS_ON",
                 "organic_vars": "ORGANIC_TRAFFIC",
                 "gcs_bucket": st.session_state["gcs_bucket"],
-                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/fr/latest/raw.parquet",
+                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/mapped-datasets/fr/latest/raw.parquet",
                 "dep_var": "UPLOAD_VALUE",
                 "dep_var_type": "revenue",
                 "date_var": "date",
@@ -2695,7 +2734,7 @@ with tab_queue:
                 "paid_media_vars": "BING_DEMAND_COST, META_DEMAND_COST, TV_COST",
                 "context_vars": "",
                 "gcs_bucket": st.session_state["gcs_bucket"],
-                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/de/latest/raw.parquet",
+                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/mapped-datasets/de/latest/raw.parquet",
                 "dep_var": "UPLOAD_VALUE",
                 "date_var": "date",
                 "adstock": "weibull_cdf",
@@ -2713,7 +2752,7 @@ with tab_queue:
                 "paid_media_vars": "GA_SUPPLY_COST, GA_DEMAND_COST, BING_DEMAND_COST, META_DEMAND_COST",
                 "organic_vars": "ORGANIC_TRAFFIC",
                 "gcs_bucket": st.session_state["gcs_bucket"],
-                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/datasets/it/latest/raw.parquet",
+                "data_gcs_path": f"gs://{st.session_state['gcs_bucket']}/mapped-datasets/it/latest/raw.parquet",
                 "dep_var": "UPLOAD_VALUE",
                 "date_var": "date",
                 "adstock": "geometric",
