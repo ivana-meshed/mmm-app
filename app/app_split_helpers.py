@@ -186,7 +186,10 @@ def prepare_and_launch_job(params: dict) -> dict:
     """
     gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
     timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
-    gcs_prefix = f"robyn/{params['revision']}/{params['country']}/{timestamp}"
+    # Support both 'revision' and 'version' keys for backward compatibility
+    revision = params.get("revision") or params.get("version") or ""
+    country = params.get("country", "")
+    gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
 
     # Check if data already exists in GCS (Issue #4 GCS-based workflow)
     data_gcs_path_provided = params.get("data_gcs_path")
@@ -324,8 +327,8 @@ def prepare_and_launch_job(params: dict) -> dict:
         "status": "LAUNCHED",
         "config_path": config_gcs_path,
         "data_path": data_gcs_path,
-        "revision": params["revision"],
-        "country": params["country"],
+        "revision": revision,
+        "country": country,
         "gcs_prefix": gcs_prefix,
         "gcs_bucket": gcs_bucket,
     }
