@@ -950,11 +950,34 @@ st.header("1. Select Dataset")
 with st.expander("📊 Choose the data you want to analyze.", expanded=False):
     # Country picker (ISO2, GCS-first) as multiselect
     c1, c2, c3 = st.columns([3, 0.8, 0.8])
+
+    countries = _iso2_countries_gcs_first(BUCKET)
+
+    # Handle All/Clear button clicks before rendering multiselect
+    with c2:
+        # Select All button
+        if st.button(
+            "All", key="select_all_countries", use_container_width=True
+        ):
+            st.session_state["selected_countries_widget"] = countries
+            st.rerun()
+    with c3:
+        # Clear button
+        if st.button(
+            "Clear", key="deselect_all_countries", use_container_width=True
+        ):
+            st.session_state["selected_countries_widget"] = []
+            st.rerun()
+
     with c1:
-        countries = _iso2_countries_gcs_first(BUCKET)
         # Get previously selected countries or default to all countries with data
-        default_countries = st.session_state.get("selected_countries", [])
-        if not default_countries:
+        default_countries = st.session_state.get(
+            "selected_countries_widget", []
+        )
+        if (
+            not default_countries
+            and "selected_countries_widget" not in st.session_state
+        ):
             # Default to all countries that have data in GCS
             default_countries = [
                 c for c in countries if _list_country_versions_cached(BUCKET, c)
@@ -976,20 +999,6 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
         # Keep backward compatibility with single country field
         if selected_countries:
             st.session_state["country"] = selected_countries[0]
-    with c2:
-        # Select All button
-        if st.button(
-            "All", key="select_all_countries", use_container_width=True
-        ):
-            st.session_state["selected_countries"] = countries
-            st.rerun()
-    with c3:
-        # Clear button
-        if st.button(
-            "Clear", key="deselect_all_countries", use_container_width=True
-        ):
-            st.session_state["selected_countries"] = []
-            st.rerun()
 
     st.caption(f"GCS Bucket: **{BUCKET}**")
 
@@ -1000,8 +1009,15 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
             st.warning("Please select at least one country.")
             return
 
-        # Use the first selected country for version checking
+        # Use the first selected country for loading data
         country = selected_countries[0]
+
+        # Show info about multi-country behavior
+        if len(selected_countries) > 1:
+            st.info(
+                f"📍 Loading data from **{country.upper()}** (first selected). "
+                f"When saved, the same data will be applied to all {len(selected_countries)} selected countries."
+            )
 
         # Get available GCS versions for the chosen country
         versions_raw = _list_country_versions_cached(
@@ -1226,14 +1242,39 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
         if df.empty:
             st.warning("No dataset loaded.")
             return
+
+        # Get all selected countries
+        selected_countries = st.session_state.get("selected_countries", [])
+        if not selected_countries:
+            selected_countries = [st.session_state.get("country", "de")]
+
         try:
-            res = _save_raw_to_gcs(df, BUCKET, st.session_state["country"])
-            st.session_state["picked_ts"] = res["timestamp"]
+            # Generate shared timestamp for all countries
+            shared_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            saved_paths = []
+
+            for country in selected_countries:
+                res = _save_raw_to_gcs(df, BUCKET, country, timestamp=shared_ts)
+                saved_paths.append(res["data_gcs_path"])
+
+            st.session_state["picked_ts"] = shared_ts
+            st.session_state["shared_save_timestamp"] = shared_ts
             st.session_state["data_origin"] = "gcs_latest"
-            st.session_state["last_saved_raw_path"] = res["data_gcs_path"]
+            st.session_state["last_saved_raw_path"] = (
+                saved_paths[0] if saved_paths else ""
+            )
             _list_country_versions_cached.clear()  # ⬅️ invalidate local cache
             list_data_versions.clear()  # ⬅️ invalidate app_shared cache
-            st.success(f"Saved raw snapshot → {res['data_gcs_path']}")
+
+            if len(saved_paths) == 1:
+                st.success(f"Saved raw snapshot → {saved_paths[0]}")
+            else:
+                st.success(
+                    f"Saved raw snapshot for {len(saved_paths)} countries"
+                )
+                with st.expander("Saved paths"):
+                    for path in saved_paths:
+                        st.write(f"- {path}")
         except Exception as e:
             st.error(f"Saving to GCS failed: {e}")
 
