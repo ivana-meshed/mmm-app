@@ -1276,7 +1276,7 @@ def build_job_config_from_params(
         "iterations": int(params.get("iterations", 100)),
         "trials": int(params.get("trials", 5)),
         "train_size": (
-            parse_train_size(str(params["train_size"]))
+            parse_train_size(str(params.get("train_size", 0.8)))
             if isinstance(params.get("train_size"), str)
             else params.get("train_size", 0.8)
         ),

@@ -327,8 +327,8 @@ def prepare_and_launch_job(params: dict) -> dict:
         "status": "LAUNCHED",
         "config_path": config_gcs_path,
         "data_path": data_gcs_path,
-        "revision": params["revision"],
-        "country": params["country"],
+        "revision": revision,
+        "country": country,
         "gcs_prefix": gcs_prefix,
         "gcs_bucket": gcs_bucket,
     }
