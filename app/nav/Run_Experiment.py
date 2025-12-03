@@ -2491,7 +2491,7 @@ with tab_single:
 
                 params = {
                     "country": ctry,
-                    "version": revision,
+                    "revision": revision,
                     "date_input": time.strftime("%Y-%m-%d"),
                     "iterations": int(iterations),
                     "trials": int(trials),

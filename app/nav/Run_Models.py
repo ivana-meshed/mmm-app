@@ -1911,7 +1911,7 @@ with tab_single:
                             "iterations": int(iterations),
                             "trials": int(trials),
                             "train_size": train_size,
-                            "version": revision,
+                            "revision": revision,
                             "version_tag": revision_tag,
                             "version_number": revision_number,
                             "start_date": start_date_str,
@@ -2001,7 +2001,7 @@ with tab_single:
                         # Build params dict
                         params = {
                             "country": ctry,
-                            "version": revision,
+                            "revision": revision,
                             "date_input": time.strftime(
                                 "%Y-%m-%d"
                             ),  # Current date when job is added to queue
@@ -2156,7 +2156,7 @@ with tab_single:
             "iterations": int(iterations),
             "trials": int(trials),
             "train_size": parse_train_size(train_size),
-            "version": revision,
+            "revision": revision,
             "start_date": start_date_str,
             "end_date": end_date_str,
             "paid_media_spends": paid_media_spends,
@@ -2254,7 +2254,7 @@ with tab_single:
 
                 params = {
                     "country": ctry,
-                    "version": revision,
+                    "revision": revision,
                     "date_input": time.strftime("%Y-%m-%d"),
                     "iterations": int(iterations),
                     "trials": int(trials),
