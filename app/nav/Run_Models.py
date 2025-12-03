@@ -20,6 +20,7 @@ from app_shared import (
     _require_sf_session,
     get_data_processor,
     get_job_manager,
+    list_mapped_data_versions,
     parse_train_size,
     require_login_and_domain,
     run_sql,
@@ -34,6 +35,9 @@ from app_split_helpers import *  # bring in all helper functions/constants
 
 require_login_and_domain()
 ensure_session_defaults()
+
+# Clear mapped data cache to ensure we get fresh data
+list_mapped_data_versions.clear()
 
 st.title("Run Marketing Mix Models")
 
