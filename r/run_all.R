@@ -742,6 +742,21 @@ if (skip_country) {
     ), skip_file)
     gcs_put_safe(skip_file, file.path(gcs_prefix, "SKIPPED.txt"))
     
+    # Update status.json to SKIPPED state
+    writeLines(
+        jsonlite::toJSON(
+            list(
+                state = "SKIPPED",
+                start_time = as.character(job_started),
+                end_time = as.character(Sys.time()),
+                skip_reason = paste(skip_reason, collapse = "; ")
+            ),
+            auto_unbox = TRUE, pretty = TRUE
+        ),
+        status_json
+    )
+    gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+    
     flush_and_ship_log("country skipped - no usable data")
     message("✅ Country skipped successfully. Exiting without error.")
     quit(save = "no", status = 0)
