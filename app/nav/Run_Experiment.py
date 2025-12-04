@@ -2683,6 +2683,8 @@ with tab_single:
                             "country": country,
                             "gcs_prefix": gcs_prefix,
                             "gcs_bucket": gcs_bucket,
+                            "iterations": int(iterations),
+                            "trials": int(trials),
                         }
                         st.session_state.job_executions.append(exec_info)
                         st.success("🎉 Training job launched!")
