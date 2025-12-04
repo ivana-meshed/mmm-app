@@ -683,6 +683,69 @@ df <- df %>% filter(date >= start_data_date, date <= end_data_date)
 df$DOW <- wday(df$date, label = TRUE)
 df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
+# CHECK: Skip country if critical columns have no data in the training window
+# A country should be skipped if:
+# 1. The dependent variable has zero variance (all zeros or all same value)
+# 2. ALL paid media spend columns have zero variance (no media spend data)
+skip_country <- FALSE
+skip_reason <- character(0)
+
+# Check dep_var
+if (dep_var_from_cfg %in% names(df)) {
+    dep_var_data <- df[[dep_var_from_cfg]]
+    if (is.numeric(dep_var_data) && dplyr::n_distinct(dep_var_data, na.rm = TRUE) <= 1) {
+        skip_country <- TRUE
+        dep_val <- unique(na.omit(dep_var_data))[1]
+        skip_reason <- c(skip_reason, paste0("dep_var '", dep_var_from_cfg, "' has zero variance (all values = ", dep_val, ")"))
+    }
+} else {
+    skip_country <- TRUE
+    skip_reason <- c(skip_reason, paste0("dep_var '", dep_var_from_cfg, "' not found in data"))
+}
+
+# Check paid_media_spends - skip if ALL have zero variance
+if (length(paid_media_spends_cfg) > 0) {
+    media_cols_in_data <- intersect(paid_media_spends_cfg, names(df))
+    if (length(media_cols_in_data) == 0) {
+        skip_country <- TRUE
+        skip_reason <- c(skip_reason, "no paid_media_spends columns found in data")
+    } else {
+        # Check variance of each media column
+        media_zero_var <- sapply(media_cols_in_data, function(col) {
+            x <- df[[col]]
+            is.numeric(x) && dplyr::n_distinct(x, na.rm = TRUE) <= 1
+        })
+        if (all(media_zero_var)) {
+            skip_country <- TRUE
+            skip_reason <- c(skip_reason, paste0("all ", length(media_cols_in_data), " paid_media_spends columns have zero variance"))
+        }
+    }
+}
+
+if (skip_country) {
+    message("⏭️ SKIPPING COUNTRY: ", country)
+    message("   Reason(s): ", paste(skip_reason, collapse = "; "))
+    message("   Training window: ", start_data_date, " to ", end_data_date)
+    message("   Rows in window: ", nrow(df))
+    
+    # Write skip notification to GCS
+    skip_file <- file.path(dir_path, "SKIPPED.txt")
+    writeLines(c(
+        paste0("Country: ", country),
+        paste0("Revision: ", revision),
+        paste0("Training window: ", start_data_date, " to ", end_data_date),
+        paste0("Rows in window: ", nrow(df)),
+        "",
+        "Skip reason(s):",
+        paste0("  - ", skip_reason)
+    ), skip_file)
+    gcs_put_safe(skip_file, file.path(gcs_prefix, "SKIPPED.txt"))
+    
+    flush_and_ship_log("country skipped - no usable data")
+    message("✅ Country skipped successfully. Exiting without error.")
+    quit(save = "no", status = 0)
+}
+
 # Drop zero-variance columns AFTER date filtering to ensure we only consider
 # variance within the actual training window, not the full dataset
 # IMPORTANT: Never drop critical columns even if they have zero variance:
