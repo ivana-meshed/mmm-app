@@ -695,7 +695,8 @@ if (dep_var_from_cfg %in% names(df)) {
     dep_var_data <- df[[dep_var_from_cfg]]
     if (is.numeric(dep_var_data) && dplyr::n_distinct(dep_var_data, na.rm = TRUE) <= 1) {
         skip_country <- TRUE
-        dep_val <- unique(na.omit(dep_var_data))[1]
+        non_na_vals <- unique(na.omit(dep_var_data))
+        dep_val <- if (length(non_na_vals) > 0) non_na_vals[1] else "all NA"
         skip_reason <- c(skip_reason, paste0("dep_var '", dep_var_from_cfg, "' has zero variance (all values = ", dep_val, ")"))
     }
 } else {
