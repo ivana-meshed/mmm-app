@@ -666,17 +666,6 @@ df <- fill_day(df)
 cost_cols <- union(grep("_COST$", names(df), value = TRUE), grep("_COSTS$", names(df), value = TRUE))
 df <- safe_parse_numbers(df, cost_cols)
 
-num_cols <- setdiff(names(df), "date")
-zero_var <- num_cols[sapply(df[num_cols], function(x) is.numeric(x) && dplyr::n_distinct(x, na.rm = TRUE) <= 1)]
-if (length(zero_var)) {
-    df <- df[, !(names(df) %in% zero_var), drop = FALSE]
-    cat("ℹ️ Dropped zero-variance:", paste(zero_var, collapse = ", "), "\n")
-}
-# Note: TV_IS_ON may be added here but will be filtered out later if it has
-# zero variance (e.g., all 0s). The zero_var_check() function will remove it
-# from context_vars and factor_vars before calling robyn_inputs().
-if (!"TV_IS_ON" %in% names(df)) df$TV_IS_ON <- 0
-
 ## ---------- FEATURE ENGINEERING ----------
 # NOTE: Custom tag aggregates (e.g., GA_SMALL_COST_CUSTOM, GA_CAMPAIGN_COST_CUSTOM)
 # and TOTAL columns (e.g., GA_TOTAL_COST, GA_TOTAL_SESSIONS) are now created
@@ -693,6 +682,19 @@ if (!"TV_IS_ON" %in% names(df)) df$TV_IS_ON <- 0
 df <- df %>% filter(date >= start_data_date, date <= end_data_date)
 df$DOW <- wday(df$date, label = TRUE)
 df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
+
+# Drop zero-variance columns AFTER date filtering to ensure we only consider
+# variance within the actual training window, not the full dataset
+num_cols <- setdiff(names(df), "date")
+zero_var <- num_cols[sapply(df[num_cols], function(x) is.numeric(x) && dplyr::n_distinct(x, na.rm = TRUE) <= 1)]
+if (length(zero_var)) {
+    df <- df[, !(names(df) %in% zero_var), drop = FALSE]
+    cat("ℹ️ Dropped zero-variance:", paste(zero_var, collapse = ", "), "\n")
+}
+# Note: TV_IS_ON may be added here but will be filtered out later if it has
+# zero variance (e.g., all 0s). The zero_var_check() function will remove it
+# from context_vars and factor_vars before calling robyn_inputs().
+if (!"TV_IS_ON" %in% names(df)) df$TV_IS_ON <- 0
 
 ## ---------- RESAMPLING ----------
 # Apply resampling if configured (Weekly or Monthly aggregation)
