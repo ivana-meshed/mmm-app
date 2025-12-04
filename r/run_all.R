@@ -685,7 +685,8 @@ df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
 # Drop zero-variance columns AFTER date filtering to ensure we only consider
 # variance within the actual training window, not the full dataset
-num_cols <- setdiff(names(df), "date")
+# IMPORTANT: Never drop the dependent variable (dep_var), even if it has zero variance
+num_cols <- setdiff(names(df), c("date", dep_var_from_cfg))
 zero_var <- num_cols[sapply(df[num_cols], function(x) is.numeric(x) && dplyr::n_distinct(x, na.rm = TRUE) <= 1)]
 if (length(zero_var)) {
     df <- df[, !(names(df) %in% zero_var), drop = FALSE]
