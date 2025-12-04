@@ -685,8 +685,12 @@ df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
 # Drop zero-variance columns AFTER date filtering to ensure we only consider
 # variance within the actual training window, not the full dataset
-# IMPORTANT: Never drop the dependent variable (dep_var), even if it has zero variance
-num_cols <- setdiff(names(df), c("date", dep_var_from_cfg))
+# IMPORTANT: Never drop critical columns even if they have zero variance:
+# - dep_var: the dependent variable
+# - paid_media_spends: columns needed for media mix modeling
+# - paid_media_vars: media variable columns
+protected_cols <- unique(c("date", dep_var_from_cfg, paid_media_spends_cfg, paid_media_vars_cfg))
+num_cols <- setdiff(names(df), protected_cols)
 zero_var <- num_cols[sapply(df[num_cols], function(x) is.numeric(x) && dplyr::n_distinct(x, na.rm = TRUE) <= 1)]
 if (length(zero_var)) {
     df <- df[, !(names(df) %in% zero_var), drop = FALSE]
