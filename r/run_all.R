@@ -672,6 +672,9 @@ if (length(zero_var)) {
     df <- df[, !(names(df) %in% zero_var), drop = FALSE]
     cat("ℹ️ Dropped zero-variance:", paste(zero_var, collapse = ", "), "\n")
 }
+# Note: TV_IS_ON may be added here but will be filtered out later if it has
+# zero variance (e.g., all 0s). The zero_var_check() function will remove it
+# from context_vars and factor_vars before calling robyn_inputs().
 if (!"TV_IS_ON" %in% names(df)) df$TV_IS_ON <- 0
 
 ## ---------- FEATURE ENGINEERING ----------
@@ -856,6 +859,27 @@ if (length(factor_vars) > 0) {
 
 org_base <- intersect(organic_vars_cfg %||% "ORGANIC_TRAFFIC", names(df))
 organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES" %in% names(df)) unique(c(org_base, "N_SEARCHES")) else org_base
+
+# Filter out zero-variance columns from context_vars and factor_vars
+# This prevents robyn_inputs() from failing with "no-variance" error
+# after data filtering/resampling may have reduced variance
+zero_var_check <- function(var_list, data) {
+    if (length(var_list) == 0) return(character(0))
+    has_variance <- vapply(var_list, function(v) {
+        if (!v %in% names(data)) return(FALSE)
+        x <- data[[v]]
+        is.numeric(x) && dplyr::n_distinct(x, na.rm = TRUE) > 1
+    }, logical(1))
+    removed <- var_list[!has_variance]
+    if (length(removed) > 0) {
+        message("ℹ️ Removed zero-variance variables: ", paste(removed, collapse = ", "))
+    }
+    var_list[has_variance]
+}
+
+context_vars <- zero_var_check(context_vars, df)
+factor_vars <- zero_var_check(factor_vars, df)
+organic_vars <- zero_var_check(organic_vars, df)
 
 adstock <- cfg$adstock %||% "geometric"
 
