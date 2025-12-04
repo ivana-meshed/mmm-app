@@ -868,7 +868,8 @@ zero_var_check <- function(var_list, data) {
     has_variance <- vapply(var_list, function(v) {
         if (!v %in% names(data)) return(FALSE)
         x <- data[[v]]
-        is.numeric(x) && dplyr::n_distinct(x, na.rm = TRUE) > 1
+        # Check variance for both numeric and factor/character columns
+        dplyr::n_distinct(x, na.rm = TRUE) > 1
     }, logical(1))
     removed <- var_list[!has_variance]
     if (length(removed) > 0) {
