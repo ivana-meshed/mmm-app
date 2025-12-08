@@ -4,6 +4,11 @@
 # Extract compressed data from OutputModels.RDS to parquet files
 # Extracts: xDecompAgg, resultHypParam, mediaVecCollect, xDecompVecCollect
 
+# Ensure arrow library is available when sourced
+if (!requireNamespace("arrow", quietly = TRUE)) {
+    stop("Package 'arrow' is required but not installed.")
+}
+
 #' Extract data from OutputModels.RDS to parquet files
 #'
 #' @param oc_path Path to OutputModels.RDS file
@@ -84,13 +89,17 @@ extract_output_models_data <- function(oc_path, out_dir) {
 }
 
 # If run as a script (not sourced), parse command line arguments
-if (!interactive() && length(commandArgs(trailingOnly = FALSE)) > 0) {
+if (!interactive()) {
     # Check if this is being run via Rscript
     args <- commandArgs(trailingOnly = FALSE)
     file_arg <- grep("^--file=", args, value = TRUE)
     
     if (length(file_arg) > 0) {
-        # Script is being run directly
+        # Script is being run directly - load required libraries
+        if (!requireNamespace("optparse", quietly = TRUE)) {
+            stop("Package 'optparse' is required but not installed.")
+        }
+        
         suppressPackageStartupMessages({
             library(arrow)
             library(optparse)

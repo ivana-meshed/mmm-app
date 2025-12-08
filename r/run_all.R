@@ -1631,14 +1631,11 @@ message("→ Extracting compressed data from OutputModels.RDS to parquet files..
 output_models_data_dir <- file.path(dir_path, "output_models_data")
 tryCatch(
     {
-        # Source the extraction helper
+        # Source the extraction helper - try multiple locations
         extract_script <- NULL
-        
-        # Try multiple locations for the script
         candidates <- c(
-            file.path(dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE)), "extract_output_models_data.R"),
-            "/app/extract_output_models_data.R",
-            "r/extract_output_models_data.R"
+            "/app/extract_output_models_data.R",  # Docker container location
+            "r/extract_output_models_data.R"      # Local development location
         )
         
         for (candidate in candidates) {
@@ -1659,7 +1656,8 @@ tryCatch(
             
             # Upload parquet files to GCS
             for (pq_file in created_files) {
-                rel_path <- sub(paste0("^", normalizePath(dir_path), "/?"), "", normalizePath(pq_file))
+                # Get relative path from dir_path
+                rel_path <- gsub(paste0("^", dir_path, "/?"), "", pq_file)
                 gcs_put_safe(pq_file, file.path(gcs_prefix, rel_path))
             }
             
