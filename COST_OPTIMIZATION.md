@@ -14,6 +14,41 @@ This document describes the cost reduction strategies implemented for the MMM Tr
 
 **Key insight:** Training jobs account for ~95% of variable costs at scale (1 training job per 10 web requests).
 
+## Infrastructure: Queue Execution
+
+### Cloud Scheduler for Background Queue Processing
+**Cost: $0.10/month (included in free tier)**
+
+The application uses Google Cloud Scheduler to process the training job queue in the background:
+
+**Configuration:**
+- **Schedule**: Every minute (`*/1 * * * *`)
+- **Endpoint**: `${WEB_SERVICE_URL}?queue_tick=1&name={queue_name}`
+  - Production: `?queue_tick=1&name=default`
+  - Dev: `?queue_tick=1&name=default-dev`
+- **Authentication**: OIDC token with dedicated service account (`robyn-queue-scheduler`)
+- **Timeout**: 320 seconds per tick
+- **Resource**: `google_cloud_scheduler_job.robyn_queue_tick` in `infra/terraform/main.tf`
+- **Environment Variable**: `DEFAULT_QUEUE_NAME` set via `var.queue_name` in terraform
+
+**How it works:**
+1. Cloud Scheduler triggers the web service every minute with `?queue_tick=1` parameter
+2. Web service reads `DEFAULT_QUEUE_NAME` from environment (set to `var.queue_name` in terraform)
+3. Web service processes one queue tick: launches pending jobs or updates running job status
+4. Queue state is persisted in GCS at `gs://{bucket}/robyn-queues/{queue_name}/queue.json`
+5. Jobs execute independently as Cloud Run Jobs
+
+**Benefits:**
+- Queue processes automatically without requiring user to be on the page
+- Reliable execution even if browser is closed
+- Separate queues for dev and prod environments prevent interference
+- Minimal cost (~$0.10/month, covered by Cloud Scheduler free tier of 3 jobs)
+
+**Cost Impact:**
+- Cloud Scheduler: $0.10/month (first 3 jobs free, then $0.10/job/month)
+- Already deployed and included in infrastructure
+- No additional costs for queue processing itself
+
 ## Implemented Optimizations
 
 ### 1. ✅ Reduced min_instances to 0 (IMPLEMENTED)

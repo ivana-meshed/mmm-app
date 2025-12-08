@@ -1512,12 +1512,17 @@ def handle_queue_tick_from_query_params(
     if qp.get("queue_tick") != "1":
         return None
 
+    # Log that queue tick endpoint was called (helpful for debugging Cloud Scheduler)
     qname = qp.get("name") or DEFAULT_QUEUE_NAME
     bkt = bucket_name or GCS_BUCKET
+    logger.info(f"[QUEUE_TICK] Endpoint called for queue '{qname}' in bucket '{bkt}'")
+    
     try:
-        return queue_tick_once_headless(qname, bkt, launcher=launcher)
+        result = queue_tick_once_headless(qname, bkt, launcher=launcher)
+        logger.info(f"[QUEUE_TICK] Completed successfully: {result}")
+        return result
     except Exception as e:
-        logger.exception("queue_tick handler failed: %s", e)
+        logger.exception("[QUEUE_TICK] Handler failed: %s", e)
         return {"ok": False, "error": str(e)}
 
 
@@ -1571,10 +1576,11 @@ def require_login_and_domain(allowed_domain: Optional[str] = None) -> None:
                        If None, uses the ALLOWED_DOMAINS from settings.
                        If provided, checks against this single domain only.
     """
-    # Allow lightweight health checks to pass through if you use them on pages too
+    # Allow lightweight health checks and queue tick endpoints to pass through
+    # These endpoints are called by Cloud Scheduler with service account credentials
     q = getattr(st, "query_params", {})
-    if q.get("health") == "true":
-        return  # let the page handle its health endpoint and st.stop() later if needed
+    if q.get("health") == "true" or q.get("queue_tick") == "1":
+        return  # let the page handle its endpoint and st.stop() later if needed
 
     # Determine which domains to allow
     if allowed_domain is not None:
