@@ -560,12 +560,8 @@ def render_model_metrics_table(blobs, country, stamp):
 
         idx = row.name
         styles[1] = get_color(table_data["Prediction Quality"][idx], "r2")
-        styles[2] = get_color(
-            table_data["Prediction Error"][idx], "nrmse"
-        )
-        styles[3] = get_color(
-            table_data["ROAS Error"][idx], "decomp_rssd"
-        )
+        styles[2] = get_color(table_data["Prediction Error"][idx], "nrmse")
+        styles[3] = get_color(table_data["ROAS Error"][idx], "decomp_rssd")
         return styles
 
     # Format the values
@@ -756,7 +752,9 @@ def render_onepager_section(blobs, best_id, country, stamp):
 
     name = os.path.basename(op_blob.name)
     lower = name.lower()
-    st.success(f"Found model performance summary: **{name}** ({op_blob.size:,} bytes)")
+    st.success(
+        f"Found model performance summary: **{name}** ({op_blob.size:,} bytes)"
+    )
 
     if lower.endswith(".png"):
         try:

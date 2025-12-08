@@ -764,12 +764,8 @@ def render_model_metrics_table(blobs, country, stamp):
 
         idx = row.name
         styles[1] = get_color(table_data["Prediction Quality"][idx], "r2")
-        styles[2] = get_color(
-            table_data["Prediction Error"][idx], "nrmse"
-        )
-        styles[3] = get_color(
-            table_data["ROAS Error"][idx], "decomp_rssd"
-        )
+        styles[2] = get_color(table_data["Prediction Error"][idx], "nrmse")
+        styles[3] = get_color(table_data["ROAS Error"][idx], "decomp_rssd")
         return styles
 
     # Format the values
@@ -823,12 +819,11 @@ def render_model_metrics_table(blobs, country, stamp):
         """
         )
 
-
     st.write("")
     st.write("")
     st.subheader("Model Outputs")
 
-    
+
 def render_metrics_section(blobs, country, stamp):
     st.subheader("Allocator Metrics")
     metrics_csv = find_blob(blobs, "/allocator_metrics.csv")
@@ -1094,7 +1089,9 @@ def render_onepager_section(blobs, best_id, country, stamp):
 
     name = os.path.basename(op_blob.name)
     lower = name.lower()
-    st.success(f"Found model performancd summary: **{name}** ({op_blob.size:,} bytes)")
+    st.success(
+        f"Found model performancd summary: **{name}** ({op_blob.size:,} bytes)"
+    )
 
     if lower.endswith(".png"):
         try:
@@ -1335,7 +1332,9 @@ stamp_sel = st.selectbox(
     "Timestamp (optional)",
     stamp_options,
     index=default_stamp_index,
-    help=("Leave empty to use the latest run per tag number. Useful when you have multiple runs."),
+    help=(
+        "Leave empty to use the latest run per tag number. Useful when you have multiple runs."
+    ),
 )
 
 # Store selection in persistent session state key (not widget key)

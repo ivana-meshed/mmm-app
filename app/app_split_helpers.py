@@ -458,21 +458,30 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                         if actual_status in ("SUCCEEDED", "COMPLETED")
                         else actual_status
                     )
-                    
+
                     # Check for SKIPPED status in status.json on GCS
                     # A job that succeeded but was skipped should show as SKIPPED
                     gcs_prefix = row.get("gcs_prefix")
-                    if gcs_prefix and not pd.isna(gcs_prefix) and final_state == "SUCCEEDED":
+                    if (
+                        gcs_prefix
+                        and not pd.isna(gcs_prefix)
+                        and final_state == "SUCCEEDED"
+                    ):
                         try:
                             client = storage.Client()
                             status_blob = client.bucket(bucket_name).blob(
                                 f"{gcs_prefix}/status.json"
                             )
                             if status_blob.exists():
-                                status_data = json.loads(status_blob.download_as_text())
+                                status_data = json.loads(
+                                    status_blob.download_as_text()
+                                )
                                 if status_data.get("state") == "SKIPPED":
                                     final_state = "SKIPPED"
-                                    skip_reason = status_data.get("skip_reason", "No usable data in training window")
+                                    skip_reason = status_data.get(
+                                        "skip_reason",
+                                        "No usable data in training window",
+                                    )
                                     df_history.loc[idx, "message"] = skip_reason
                                     logger.info(
                                         f"[JOB_HISTORY] Job {row.get('job_id')} detected as SKIPPED: {skip_reason}"
@@ -481,7 +490,7 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                             logger.debug(
                                 f"[JOB_HISTORY] Could not check status.json for {gcs_prefix}: {e}"
                             )
-                    
+
                     df_history.loc[idx, "state"] = final_state
                     if final_state != "SKIPPED":
                         df_history.loc[idx, "message"] = (
@@ -545,9 +554,7 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                                                 from datetime import (
                                                     datetime as dt,
                                                 )
-                                                from datetime import (
-                                                    timedelta,
-                                                )
+                                                from datetime import timedelta
 
                                                 start_time = dt.fromisoformat(
                                                     str(start_time_str).replace(
