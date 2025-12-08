@@ -77,6 +77,19 @@ cache_management_page = st.Page(
     icon="⚡",
 )
 
+driver_stability_page = st.Page(
+    "nav/Driver_stability.py",
+    title="Driver Stability",
+    icon="🛡️",
+)
+
+driver_stability2_page = st.Page(
+    "nav/Driver_2.py",
+    title="Driver Stability2",
+    icon="🛡️",
+)
+
+
 # Create navigation - this replaces the default sidebar navigation
 pg = st.navigation(
     [
@@ -90,6 +103,8 @@ pg = st.navigation(
         experiment_page,
         results_page,
         best_results_page,
+        driver_stability_page,
+        driver_stability2_page
         # cache_management_page,
     ],
     position="sidebar",
