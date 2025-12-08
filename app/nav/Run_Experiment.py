@@ -2463,10 +2463,7 @@ with tab_single:
 
         # Add jobs to queue for all countries
         try:
-            from app_split_helpers import (
-                save_queue_to_gcs,
-                set_queue_running,
-            )
+            from app_split_helpers import save_queue_to_gcs, set_queue_running
 
             # Get next queue ID
             next_id = (

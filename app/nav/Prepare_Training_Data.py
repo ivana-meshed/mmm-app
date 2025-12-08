@@ -46,11 +46,11 @@ from app_shared import (
     upload_to_gcs,
     validate_against_metadata,
 )
+from app_split_helpers import ensure_session_defaults
 from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from statsmodels.stats.outliers_influence import variance_inflation_factor
-from app_split_helpers import ensure_session_defaults
 
 # Authentication
 require_login_and_domain()
