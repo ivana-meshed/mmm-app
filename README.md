@@ -291,6 +291,7 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Local development setup and testing |
 | [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | **Complete deployment guide for new projects** |
 | [docs/MODEL_SUMMARY.md](docs/MODEL_SUMMARY.md) | Model summary file structure |
+| [docs/OUTPUT_MODELS_PARQUET.md](docs/OUTPUT_MODELS_PARQUET.md) | OutputModels parquet data extraction |
 | [docs/google_auth_domain_configuration.md](docs/google_auth_domain_configuration.md) | OAuth domain configuration |
 | [docs/persistent_private_key.md](docs/persistent_private_key.md) | Snowflake key storage |
 | [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Cost optimization strategies |

@@ -1626,6 +1626,54 @@ saveRDS(InputCollect, file.path(dir_path, "InputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputModels.RDS"), file.path(gcs_prefix, "OutputModels.RDS"))
 gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "InputCollect.RDS"))
 
+## ---------- EXTRACT PARQUET DATA FROM OUTPUTMODELS ----------
+message("→ Extracting compressed data from OutputModels.RDS to parquet files...")
+output_models_data_dir <- file.path(dir_path, "output_models_data")
+tryCatch(
+    {
+        # Source the extraction helper
+        extract_script <- NULL
+        
+        # Try multiple locations for the script
+        candidates <- c(
+            file.path(dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE)), "extract_output_models_data.R"),
+            "/app/extract_output_models_data.R",
+            "r/extract_output_models_data.R"
+        )
+        
+        for (candidate in candidates) {
+            if (file.exists(candidate)) {
+                extract_script <- candidate
+                break
+            }
+        }
+        
+        if (!is.null(extract_script)) {
+            source(extract_script)
+            
+            # Extract parquet data
+            created_files <- extract_output_models_data(
+                oc_path = file.path(dir_path, "OutputModels.RDS"),
+                out_dir = output_models_data_dir
+            )
+            
+            # Upload parquet files to GCS
+            for (pq_file in created_files) {
+                rel_path <- sub(paste0("^", normalizePath(dir_path), "/?"), "", normalizePath(pq_file))
+                gcs_put_safe(pq_file, file.path(gcs_prefix, rel_path))
+            }
+            
+            message("✅ OutputModels data extraction complete, uploaded ", length(created_files), " parquet files")
+        } else {
+            message("⚠️ Could not find extract_output_models_data.R, skipping parquet extraction")
+        }
+    },
+    error = function(e) {
+        message("⚠️ Failed to extract OutputModels data to parquet: ", conditionMessage(e))
+        # Non-fatal: continue with execution
+    }
+)
+
 ## ---------- OUTPUTS & ONEPAGERS ----------
 flush_and_ship_log("before robyn_outputs")
 OutputCollect <- tryCatch(
