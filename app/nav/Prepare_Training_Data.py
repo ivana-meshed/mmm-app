@@ -243,6 +243,23 @@ with st.expander("Step 1) Select Data", expanded=False):
         else ["Latest"]
     )
 
+    # Show how many versions were found (for debugging)
+    if country and len(data_versions) > 1:
+        # Show first few versions for debugging
+        preview = data_versions[1:4]  # Skip "Latest", show up to 3
+        preview_str = ", ".join(preview)
+        if len(data_versions) > 4:
+            preview_str += ", ..."
+        st.caption(
+            f"✓ Found {len(data_versions) - 1} mapped data version(s): {preview_str}"
+        )
+    elif country and len(data_versions) == 1:
+        st.warning(
+            f"⚠️ No saved mapped data versions found in `gs://{GCS_BUCKET}/mapped-datasets/{country}/`. "
+            "Only 'Latest' is available. Please go to **Map Data** page and save data first, "
+            "or click the **↻ Refresh Lists** button to reload from storage."
+        )
+
     # Calculate correct index for data version selectbox based on session state
     current_data_ts = st.session_state.get("picked_data_ts", "Latest")
     data_ts_index = (
