@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Backfill parquet extraction for existing OutputModels.RDS files in GCS.
+Backfill parquet extraction for existing OutputCollect.RDS files in GCS.
 
-This script scans GCS for existing model runs that have OutputModels.RDS but 
+This script scans GCS for existing model runs that have OutputCollect.RDS but 
 don't have the extracted parquet files, then runs the R extraction script on them.
 """
 
@@ -93,7 +93,7 @@ def extract_parquet_for_run(bucket_name, run_prefix, rds_blob_name):
     Args:
         bucket_name: GCS bucket name
         run_prefix: GCS path prefix for the run (e.g., robyn/v1/US/123456)
-        rds_blob_name: Full blob name for OutputModels.RDS
+        rds_blob_name: Full blob name for OutputCollect.RDS
         
     Returns:
         True if successful, False otherwise
@@ -177,7 +177,7 @@ def extract_parquet_for_run(bucket_name, run_prefix, rds_blob_name):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Backfill parquet extraction for existing OutputModels.RDS files"
+        description="Backfill parquet extraction for existing OutputCollect.RDS files"
     )
     parser.add_argument(
         "--bucket",
