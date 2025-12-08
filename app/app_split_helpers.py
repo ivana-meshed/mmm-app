@@ -664,8 +664,10 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     all_running_jobs = []
     job_manager = get_job_manager()
 
-    # --- Queue jobs: Always refresh from GCS to stay in sync ---
+    # --- Queue jobs: Refresh from GCS to stay in sync ---
     # This ensures Model Run Status shows the same state as Current Queue
+    # Note: maybe_refresh_queue_from_gcs(force=False) only refreshes if remote changed
+    # (checks saved_at timestamp), so this is not expensive when called frequently
     maybe_refresh_queue_from_gcs(force=False)  # Only refresh if remote changed
     queue = st.session_state.get("job_queue", [])
     for job in queue:
