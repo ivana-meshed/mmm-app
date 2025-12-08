@@ -2,11 +2,24 @@
 
 The queue should run automatically via Cloud Scheduler every minute. If it's not working, follow these steps:
 
+## Environment-Specific Configuration
+
+This application has **two environments** with different queue names:
+
+| Environment | Queue Name | Scheduler Job Name | Service Name |
+|-------------|------------|-------------------|--------------|
+| **Production** (main branch) | `default` | `robyn-queue-tick` | `mmm-app-web` |
+| **Dev** (dev/feat/copilot branches) | `default-dev` | `robyn-queue-tick-dev` | `mmm-app-dev-web` |
+
+**Important**: Use the correct names for your environment in all commands below!
+
 ## Quick Check: Is the Cloud Scheduler Running?
 
 1. Open Google Cloud Console
 2. Navigate to **Cloud Scheduler** (search for it in the top search bar)
-3. Look for job named `robyn-queue-tick`
+3. Look for job named:
+   - `robyn-queue-tick` (production)
+   - `robyn-queue-tick-dev` (dev)
 4. Check:
    - **Status**: Should be `ENABLED`
    - **Last run**: Should be within the last minute
@@ -17,8 +30,16 @@ The queue should run automatically via Cloud Scheduler every minute. If it's not
 
 ### Step 1: Verify Cloud Scheduler exists and is enabled
 
+**For Production:**
 ```bash
 gcloud scheduler jobs describe robyn-queue-tick \
+  --project=datawarehouse-422511 \
+  --location=europe-west1
+```
+
+**For Dev:**
+```bash
+gcloud scheduler jobs describe robyn-queue-tick-dev \
   --project=datawarehouse-422511 \
   --location=europe-west1
 ```
@@ -34,14 +55,25 @@ Expected output should include:
 
 In Cloud Console:
 1. Go to **Cloud Scheduler**
-2. Click on `robyn-queue-tick` job
+2. Click on `robyn-queue-tick` (prod) or `robyn-queue-tick-dev` (dev)
 3. Click **VIEW** next to "Logs"
 4. Look for recent executions
 
 Or via command line:
+
+**For Production:**
 ```bash
 gcloud logging read "resource.type=cloud_scheduler_job 
   AND resource.labels.job_id=robyn-queue-tick" \
+  --project=datawarehouse-422511 \
+  --limit=10 \
+  --format=json
+```
+
+**For Dev:**
+```bash
+gcloud logging read "resource.type=cloud_scheduler_job 
+  AND resource.labels.job_id=robyn-queue-tick-dev" \
   --project=datawarehouse-422511 \
   --limit=10 \
   --format=json
@@ -51,6 +83,7 @@ gcloud logging read "resource.type=cloud_scheduler_job
 
 Check Cloud Run logs for queue tick requests:
 
+**For Production:**
 ```bash
 gcloud logging read "resource.type=cloud_run_revision 
   AND resource.labels.service_name=mmm-app-web
@@ -60,8 +93,19 @@ gcloud logging read "resource.type=cloud_run_revision
   --format=json
 ```
 
+**For Dev:**
+```bash
+gcloud logging read "resource.type=cloud_run_revision 
+  AND resource.labels.service_name=mmm-app-dev-web
+  AND (textPayload=~\"QUEUE_TICK\" OR textPayload=~\"queue_tick\")" \
+  --project=datawarehouse-422511 \
+  --limit=20 \
+  --format=json
+```
+
 You should see log entries like:
-- `[QUEUE_TICK] Endpoint called for queue 'default' in bucket 'mmm-app-output'`
+- Production: `[QUEUE_TICK] Endpoint called for queue 'default' in bucket 'mmm-app-output'`
+- Dev: `[QUEUE_TICK] Endpoint called for queue 'default-dev' in bucket 'mmm-app-output'`
 - `[QUEUE_TICK] Completed successfully: {...}`
 
 **If no logs appear**: The scheduler is not reaching the endpoint (check Step 4).
@@ -70,8 +114,17 @@ You should see log entries like:
 
 The scheduler needs permission to invoke the Cloud Run service:
 
+**For Production:**
 ```bash
 gcloud run services get-iam-policy mmm-app-web \
+  --project=datawarehouse-422511 \
+  --region=europe-west1 \
+  | grep robyn-queue-scheduler
+```
+
+**For Dev:**
+```bash
+gcloud run services get-iam-policy mmm-app-dev-web \
   --project=datawarehouse-422511 \
   --region=europe-west1 \
   | grep robyn-queue-scheduler
@@ -93,8 +146,15 @@ The queue must have:
 2. `queue_running` flag set to `true`
 
 Check queue file:
+
+**For Production:**
 ```bash
 gsutil cat gs://mmm-app-output/robyn-queues/default/queue.json | jq '.'
+```
+
+**For Dev:**
+```bash
+gsutil cat gs://mmm-app-output/robyn-queues/default-dev/queue.json | jq '.'
 ```
 
 Look for:
@@ -113,8 +173,16 @@ The queue is empty - add jobs via the Queue Builder or Run Models tab.
 
 Force the scheduler to run immediately:
 
+**For Production:**
 ```bash
 gcloud scheduler jobs run robyn-queue-tick \
+  --project=datawarehouse-422511 \
+  --location=europe-west1
+```
+
+**For Dev:**
+```bash
+gcloud scheduler jobs run robyn-queue-tick-dev \
   --project=datawarehouse-422511 \
   --location=europe-west1
 ```
@@ -124,6 +192,8 @@ Then immediately check Cloud Run logs (Step 3) to see if it processed.
 ### Step 7: Test the endpoint directly (Advanced)
 
 You can test the queue tick endpoint directly by visiting it with authentication:
+
+**For Production:**
 
 1. Get an OIDC token:
 ```bash
@@ -137,6 +207,20 @@ curl -H "Authorization: Bearer $TOKEN" \
   "https://mmm-app-web-wuepn6nq5a-ew.a.run.app?queue_tick=1&name=default"
 ```
 
+**For Dev:**
+
+1. Get an OIDC token:
+```bash
+TOKEN=$(gcloud auth print-identity-token \
+  --audiences=https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app)
+```
+
+2. Call the endpoint:
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app?queue_tick=1&name=default-dev"
+```
+
 This should return JSON with the tick result.
 
 ## Common Issues and Solutions
@@ -144,10 +228,19 @@ This should return JSON with the tick result.
 ### Issue 1: Cloud Scheduler not deployed
 **Symptom**: Job doesn't exist in Cloud Scheduler
 **Solution**: Deploy via Terraform:
+
+**For Production:**
 ```bash
 cd infra/terraform
 terraform init
 terraform apply -var-file="envs/prod.tfvars"
+```
+
+**For Dev:**
+```bash
+cd infra/terraform
+terraform init
+terraform apply -var-file="envs/dev.tfvars"
 ```
 
 ### Issue 2: Queue is paused
@@ -158,9 +251,11 @@ terraform apply -var-file="envs/prod.tfvars"
 
 ### Issue 3: Wrong queue name
 **Symptom**: Scheduler runs but no jobs process
-**Solution**: Scheduler is configured for queue `default`. If using different name:
-- Option A: Use queue name `default` in the app
-- Option B: Update `TF_VAR_queue_name` in `.github/workflows/ci.yml` and redeploy
+**Solution**: 
+- **Production**: Scheduler is configured for queue `default`
+- **Dev**: Scheduler is configured for queue `default-dev`
+- Verify you're using the correct queue name for your environment
+- If using different name, update `TF_VAR_queue_name` in `.github/workflows/ci.yml` (prod) or `ci-dev.yml` (dev) and redeploy
 
 ### Issue 4: Authentication failures
 **Symptom**: Scheduler logs show 401/403 errors
