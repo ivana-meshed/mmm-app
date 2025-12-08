@@ -1,27 +1,28 @@
 #!/usr/bin/env Rscript
 
 # extract_output_models_data.R
-# Extract compressed data from OutputModels.RDS to parquet files
+# Extract compressed data from OutputCollect.RDS to parquet files
 # Extracts: xDecompAgg, resultHypParam, mediaVecCollect, xDecompVecCollect
+# Note: OutputCollect is the result from robyn_outputs(), not robyn_run()
 
 # Ensure arrow library is available when sourced
 if (!requireNamespace("arrow", quietly = TRUE)) {
     stop("Package 'arrow' is required but not installed.")
 }
 
-#' Extract data from OutputModels.RDS to parquet files
+#' Extract data from OutputCollect.RDS to parquet files
 #'
-#' @param oc_path Path to OutputModels.RDS file
+#' @param oc_path Path to OutputCollect.RDS file
 #' @param out_dir Output directory for parquet files
 extract_output_models_data <- function(oc_path, out_dir) {
     if (!file.exists(oc_path)) {
-        stop("OutputModels.RDS not found at: ", oc_path)
+        stop("OutputCollect.RDS not found at: ", oc_path)
     }
     
     # Ensure directory exists
     dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
     
-    message("→ Loading OutputModels.RDS from: ", oc_path)
+    message("→ Loading OutputCollect.RDS from: ", oc_path)
     oc <- readRDS(oc_path)
     
     # Track which files were successfully created
@@ -107,7 +108,7 @@ if (!interactive()) {
         
         option_list <- list(
             make_option(c("--input"), type = "character", default = NULL,
-                        help = "Path to OutputModels.RDS file", metavar = "FILE"),
+                        help = "Path to OutputCollect.RDS file", metavar = "FILE"),
             make_option(c("--output"), type = "character", default = NULL,
                         help = "Output directory for parquet files", metavar = "DIR")
         )

@@ -2,11 +2,13 @@
 
 ## Overview
 
-The MMM application automatically extracts compressed data from `OutputModels.RDS` files into separate parquet files for easier querying and analysis. This feature extracts key data components that are commonly needed for downstream analysis without requiring users to load the full RDS file.
+The MMM application automatically extracts compressed data from `OutputCollect.RDS` files into separate parquet files for easier querying and analysis. This feature extracts key data components that are commonly needed for downstream analysis without requiring users to load the full RDS file in R.
+
+**Note:** The data is extracted from `OutputCollect.RDS` (the result of `robyn_outputs()`), not `OutputModels.RDS` (the result of `robyn_run()`). OutputCollect contains the processed model results including decomposition and performance metrics.
 
 ## What Gets Extracted
 
-From each `OutputModels.RDS` file, the following data is extracted into parquet format:
+From each `OutputCollect.RDS` file, the following data is extracted into parquet format:
 
 1. **`xDecompAgg.parquet`** - Aggregated decomposition data
 2. **`resultHypParam.parquet`** - Model hyperparameters and performance metrics
@@ -40,7 +42,7 @@ gs://mmm-app-output/robyn/v1/US/1234567890/output_models_data/
 
 Starting from this deployment, all new model training runs will automatically:
 
-1. Generate `OutputModels.RDS` as usual
+1. Generate `OutputCollect.RDS` (from `robyn_outputs()`)
 2. Extract the four parquet files immediately after
 3. Upload both the RDS and parquet files to GCS
 
@@ -48,7 +50,7 @@ This happens automatically in `run_all.R` with no manual intervention required.
 
 ### Existing Model Runs (Backfill)
 
-For existing model runs that only have `OutputModels.RDS`, you can use the backfill script to extract parquet data.
+For existing model runs that have `OutputCollect.RDS`, you can use the backfill script to extract parquet data.
 
 ## Backfilling Existing Models
 
@@ -252,14 +254,14 @@ Time series decomposition vectors for each model component.
 
 ### Parquet files not created for new runs
 
-Check the run logs for errors in the "EXTRACT PARQUET DATA FROM OUTPUTMODELS" section. Common issues:
+Check the run logs for errors in the "EXTRACT PARQUET DATA FROM OUTPUTCOLLECT" section. Common issues:
 
 1. **Missing R script**: Ensure `extract_output_models_data.R` is in the Docker container
    - Check Dockerfile includes: `COPY r/extract_output_models_data.R /app/extract_output_models_data.R`
 
 2. **Missing arrow library**: Ensure R `arrow` package is installed in the training container
 
-3. **OutputModels.RDS is NULL**: Check if model training completed successfully
+3. **OutputCollect.RDS is NULL**: Check if model training and `robyn_outputs()` completed successfully
 
 ### Backfill script fails
 

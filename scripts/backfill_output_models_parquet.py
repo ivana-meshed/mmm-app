@@ -38,23 +38,39 @@ def list_model_runs_needing_extraction(bucket_name, country=None, revision=None)
     client = storage.Client()
     bucket = client.bucket(bucket_name)
     
-    # List all blobs under robyn/
+    # Build prefix based on filters
     prefix = "robyn/"
-    if revision:
-        prefix = f"robyn/{revision}/"
     if revision and country:
-        prefix = f"robyn/{revision}/{country}/"
+        # Both specified: robyn/{revision}/{country}/
+        prefix = f"robyn/{revision}/{country.lower()}/"
+    elif revision:
+        # Only revision: robyn/{revision}/
+        prefix = f"robyn/{revision}/"
+    elif country:
+        # Only country: scan all revisions, filter by country in the loop
+        prefix = "robyn/"
     
     logger.info(f"Scanning GCS bucket '{bucket_name}' with prefix '{prefix}'...")
+    if country and not revision:
+        logger.info(f"Will filter results by country: {country}")
     
-    # Find all OutputModels.RDS files
+    # Find all OutputCollect.RDS files (not OutputModels.RDS!)
     model_runs = []
     blobs = bucket.list_blobs(prefix=prefix)
     
     for blob in blobs:
-        if blob.name.endswith("OutputModels.RDS"):
-            # Extract the run prefix (everything before OutputModels.RDS)
+        if blob.name.endswith("OutputCollect.RDS"):
+            # Extract the run prefix (everything before OutputCollect.RDS)
             run_prefix = blob.name.rsplit("/", 1)[0]
+            
+            # Apply country filter if specified and not already in prefix
+            if country and not revision:
+                # Extract country from path: robyn/{revision}/{country}/{timestamp}
+                path_parts = run_prefix.split("/")
+                if len(path_parts) >= 3:
+                    run_country = path_parts[2].lower()
+                    if run_country != country.lower():
+                        continue
             
             # Check if parquet data already exists
             parquet_dir = f"{run_prefix}/output_models_data/"
@@ -88,8 +104,8 @@ def extract_parquet_for_run(bucket_name, run_prefix, rds_blob_name):
     logger.info(f"Processing: {run_prefix}")
     
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Download OutputModels.RDS
-        local_rds = os.path.join(tmpdir, "OutputModels.RDS")
+        # Download OutputCollect.RDS
+        local_rds = os.path.join(tmpdir, "OutputCollect.RDS")
         blob = bucket.blob(rds_blob_name)
         
         try:
