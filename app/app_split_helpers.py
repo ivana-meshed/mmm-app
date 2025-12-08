@@ -659,12 +659,14 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
 def render_job_status_monitor(key_prefix: str = "single") -> None:
     """Status UI showing all currently running jobs as a table (no manual checker)."""
     # Collect all running jobs from two sources:
-    # 1. Queue jobs (RUNNING/LAUNCHING status)
+    # 1. Queue jobs (RUNNING/LAUNCHING status) - always refresh from GCS
     # 2. Single run jobs from session state (check actual status)
     all_running_jobs = []
     job_manager = get_job_manager()
 
-    # --- Queue jobs ---
+    # --- Queue jobs: Always refresh from GCS to stay in sync ---
+    # This ensures Model Run Status shows the same state as Current Queue
+    maybe_refresh_queue_from_gcs(force=False)  # Only refresh if remote changed
     queue = st.session_state.get("job_queue", [])
     for job in queue:
         if job.get("status") in ("RUNNING", "LAUNCHING"):

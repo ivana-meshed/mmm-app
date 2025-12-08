@@ -1571,10 +1571,11 @@ def require_login_and_domain(allowed_domain: Optional[str] = None) -> None:
                        If None, uses the ALLOWED_DOMAINS from settings.
                        If provided, checks against this single domain only.
     """
-    # Allow lightweight health checks to pass through if you use them on pages too
+    # Allow lightweight health checks and queue tick endpoints to pass through
+    # These endpoints are called by Cloud Scheduler with service account credentials
     q = getattr(st, "query_params", {})
-    if q.get("health") == "true":
-        return  # let the page handle its health endpoint and st.stop() later if needed
+    if q.get("health") == "true" or q.get("queue_tick") == "1":
+        return  # let the page handle its endpoint and st.stop() later if needed
 
     # Determine which domains to allow
     if allowed_domain is not None:
