@@ -243,14 +243,48 @@ with st.expander("Step 1) Select Data", expanded=False):
         else ["Latest"]
     )
 
+    # Show how many versions were found (for debugging)
+    if country and len(data_versions) > 1:
+        # Show first few versions for debugging
+        preview = data_versions[1:4]  # Skip "Latest", show up to 3
+        preview_str = ", ".join(preview)
+        if len(data_versions) > 4:
+            preview_str += ", ..."
+
+    elif country and len(data_versions) == 1:
+        st.warning(
+            f"⚠️ No saved mapped data versions found in `gs://{GCS_BUCKET}/mapped-datasets/{country}/`. "
+            "Only 'Latest' is available. Please go to **Map Data** page and save data first, "
+            "or click the **↻ Refresh Lists** button to reload from storage."
+        )
+
+    # Calculate correct index for data version selectbox based on session state
+    current_data_ts = st.session_state.get("picked_data_ts", "Latest")
+    data_ts_index = (
+        data_versions.index(current_data_ts)
+        if current_data_ts in data_versions
+        else 0
+    )
+
+    # Calculate correct index for metadata version selectbox based on session state
+    current_meta_ts = st.session_state.get("picked_meta_ts", "Latest")
+    meta_ts_index = (
+        meta_versions.index(current_meta_ts)
+        if current_meta_ts in meta_versions
+        else 0
+    )
+
     data_ts = c2.selectbox(
         "Mapped Data version",
         options=data_versions,
-        index=0,
+        index=data_ts_index,
         key="picked_data_ts",
     )
     meta_ts = c3.selectbox(
-        "Metadata version", options=meta_versions, index=0, key="picked_meta_ts"
+        "Metadata version",
+        options=meta_versions,
+        index=meta_ts_index,
+        key="picked_meta_ts",
     )
 
     load_clicked = st.button("Select & Load", type="primary", key="load_step1")
