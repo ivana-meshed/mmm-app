@@ -650,7 +650,7 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
         df_job_history = df_job_history.reindex(columns=JOB_HISTORY_COLUMNS)
         st.dataframe(
             df_job_history,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             key=f"job_history_view_{key_prefix}_{st.session_state.get('job_history_nonce', 0)}",
         )
@@ -772,7 +772,7 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
         if st.button(
             "🔄 Refresh",
             key=f"refresh_status_table_{key_prefix}",
-            use_container_width=True,
+            width='stretch',
         ):
             # Refresh queue from GCS to get latest status
             maybe_refresh_queue_from_gcs(force=True)
@@ -842,7 +842,7 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     st.dataframe(
         display_df.style.applymap(color_status, subset=["Status"]),
         column_config=column_config,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
     )
 

@@ -398,7 +398,7 @@ with tab_single:
         if st.button(
             "Load selected data",
             type="primary",
-            use_container_width=True,
+            width='stretch',
             key="load_data_btn",
         ):
             tmp_path = None
@@ -496,7 +496,7 @@ with tab_single:
         ):
             st.write("**Preview (first 5 rows):**")
             st.dataframe(
-                st.session_state["preview_df"].head(5), use_container_width=True
+                st.session_state["preview_df"].head(5), width='stretch'
             )
 
     # Load Configuration (moved outside Data selection expander)
@@ -528,7 +528,7 @@ with tab_single:
 
                 if st.button(
                     "📥 Apply Settings",
-                    use_container_width=True,
+                    width='stretch',
                     key="load_config_btn",
                 ):
                     try:
@@ -1806,17 +1806,17 @@ with tab_single:
 
         save_config_clicked = col_btn1.button(
             "💾 Save Settings",
-            use_container_width=True,
+            width='stretch',
             key="save_config_btn",
         )
         add_to_queue_clicked = col_btn2.button(
             "➕ Save Settings & Add Run to Queue",
-            use_container_width=True,
+            width='stretch',
             key="add_to_queue_btn",
         )
         add_and_start_clicked = col_btn3.button(
             "▶️ Save, Add Run to Queue & Start Queue",
-            use_container_width=True,
+            width='stretch',
             key="add_and_start_btn",
         )
 
@@ -1889,7 +1889,7 @@ with tab_single:
             data=csv_df.to_csv(index=False),
             file_name=f"robyn_config_{country}_{revision}_{time.strftime('%Y%m%d')}.csv",
             mime="text/csv",
-            use_container_width=True,
+            width='stretch',
             help="Download current settings as CSV and use for batch processing",
         )
 
@@ -2191,7 +2191,7 @@ with tab_single:
         start_multi_training = st.button(
             "🌍 Start Training for All Countries",
             type="secondary",
-            use_container_width=True,
+            width='stretch',
             key="start_multi_training_job_btn",
             help=f"Start training jobs in parallel for all {len(multi_country_list)} countries",
         )
@@ -2200,7 +2200,7 @@ with tab_single:
         start_single_training = st.button(
             "🚀 Start Training Job",
             type="primary",
-            use_container_width=True,
+            width='stretch',
             key="start_training_job_btn",
         )
 
@@ -2702,7 +2702,7 @@ with tab_queue:
                 uploaded_view,
                 key=f"uploaded_editor_{up_nonce}",
                 num_rows="dynamic",
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 column_config={
                     "Delete": st.column_config.CheckboxColumn(
@@ -3131,7 +3131,7 @@ with tab_queue:
                     data=example.to_csv(index=False),
                     file_name="robyn_batch_example_consistent.csv",
                     mime="text/csv",
-                    use_container_width=False,
+                    width='content',
                     help="All rows have the same columns – recommended starting point.",
                 )
             with col_ex2:
@@ -3140,7 +3140,7 @@ with tab_queue:
                     data=example_varied.to_csv(index=False),
                     file_name="robyn_batch_example_varied.csv",
                     mime="text/csv",
-                    use_container_width=False,
+                    width='content',
                     help="Rows can differ in columns – shows CSV flexibility.",
                 )
 
@@ -3162,7 +3162,7 @@ with tab_status:
 
         if st.button(
             "🔁 Refresh queue",
-            use_container_width=True,
+            width='stretch',
             key="refresh_queue_from_gcs",
         ):
             maybe_refresh_queue_from_gcs(force=True)

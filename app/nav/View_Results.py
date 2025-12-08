@@ -935,7 +935,7 @@ def render_forecast_allocator_section(blobs, country, stamp):
                 }
             ]
             if preview_cols:
-                st.dataframe(df_idx[preview_cols], use_container_width=True)
+                st.dataframe(df_idx[preview_cols], width='stretch')
 
             download_link_for_blob(
                 idx_blob,
