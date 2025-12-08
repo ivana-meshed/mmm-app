@@ -25,9 +25,7 @@ from cryptography.hazmat.primitives import serialization
 from data_processor import DataProcessor
 from google.api_core.exceptions import PreconditionFailed
 from google.cloud import run_v2, secretmanager, storage
-from utils.snowflake_cache import (
-    get_cached_query_result,
-)
+from utils.snowflake_cache import get_cached_query_result
 from utils.snowflake_cache import init_cache as init_snowflake_cache
 
 # Environment constants
@@ -167,6 +165,11 @@ def _safe_tick_once(
             except PreconditionFailed:
                 # Someone created it concurrently; continue to normal path
                 pass
+
+        # After creation attempt, verify blob exists before reloading
+        if not blob.exists():
+            # Blob still doesn't exist, retry
+            continue
 
         blob.reload()  # get current generation
         gen = int(blob.generation)  # type: ignore
@@ -1515,8 +1518,10 @@ def handle_queue_tick_from_query_params(
     # Log that queue tick endpoint was called (helpful for debugging Cloud Scheduler)
     qname = qp.get("name") or DEFAULT_QUEUE_NAME
     bkt = bucket_name or GCS_BUCKET
-    logger.info(f"[QUEUE_TICK] Endpoint called for queue '{qname}' in bucket '{bkt}'")
-    
+    logger.info(
+        f"[QUEUE_TICK] Endpoint called for queue '{qname}' in bucket '{bkt}'"
+    )
+
     try:
         result = queue_tick_once_headless(qname, bkt, launcher=launcher)
         logger.info(f"[QUEUE_TICK] Completed successfully: {result}")
@@ -1913,7 +1918,7 @@ def list_mapped_data_versions(
     bucket: str, country: str, refresh_key: str = ""
 ) -> List[str]:
     """List available versions of mapped data (from Map Data Step 3).
-    
+
     Expected blob structure: mapped-datasets/{country}/{timestamp}/raw.parquet
     Example: mapped-datasets/de/20231201_120000/raw.parquet
     """

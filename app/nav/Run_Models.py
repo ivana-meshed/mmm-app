@@ -339,7 +339,9 @@ with tab_single:
 
         # Training Data Config from Prepare Training Data page
         st.markdown("---")
-        st.markdown("**Training Data Configuration (from Prepare Training Data)**")
+        st.markdown(
+            "**Training Data Configuration (from Prepare Training Data)**"
+        )
         st.caption(
             "Optionally load a saved selected_columns.json to prefill model inputs."
         )
@@ -372,7 +374,9 @@ with tab_single:
                 st.success(
                     f"✅ Loaded training data config: {selected_training_data}"
                 )
-                with st.expander("Preview Training Data Config", expanded=False):
+                with st.expander(
+                    "Preview Training Data Config", expanded=False
+                ):
                     st.json(training_data_config)
             else:
                 st.session_state["training_data_config"] = None
@@ -2207,9 +2211,7 @@ with tab_single:
     # Handle multi-country training
     if start_multi_training:
         if not multi_country_list or len(multi_country_list) == 0:
-            st.error(
-                "⚠️ No countries available. Please load data first."
-            )
+            st.error("⚠️ No countries available. Please load data first.")
             st.stop()
 
         if not revision or not revision.strip():
@@ -2226,10 +2228,7 @@ with tab_single:
 
         # Add jobs to queue for all countries
         try:
-            from app_split_helpers import (
-                save_queue_to_gcs,
-                set_queue_running,
-            )
+            from app_split_helpers import save_queue_to_gcs, set_queue_running
 
             # Get next queue ID
             next_id = (
