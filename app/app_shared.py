@@ -1512,12 +1512,17 @@ def handle_queue_tick_from_query_params(
     if qp.get("queue_tick") != "1":
         return None
 
+    # Log that queue tick endpoint was called (helpful for debugging Cloud Scheduler)
     qname = qp.get("name") or DEFAULT_QUEUE_NAME
     bkt = bucket_name or GCS_BUCKET
+    logger.info(f"[QUEUE_TICK] Endpoint called for queue '{qname}' in bucket '{bkt}'")
+    
     try:
-        return queue_tick_once_headless(qname, bkt, launcher=launcher)
+        result = queue_tick_once_headless(qname, bkt, launcher=launcher)
+        logger.info(f"[QUEUE_TICK] Completed successfully: {result}")
+        return result
     except Exception as e:
-        logger.exception("queue_tick handler failed: %s", e)
+        logger.exception("[QUEUE_TICK] Handler failed: %s", e)
         return {"ok": False, "error": str(e)}
 
 
