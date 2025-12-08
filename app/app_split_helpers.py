@@ -186,7 +186,10 @@ def prepare_and_launch_job(params: dict) -> dict:
     """
     gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
     timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
-    gcs_prefix = f"robyn/{params['revision']}/{params['country']}/{timestamp}"
+    # Support both 'revision' and 'version' keys for backward compatibility
+    revision = params.get("revision") or params.get("version") or ""
+    country = params.get("country", "")
+    gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
 
     # Check if data already exists in GCS (Issue #4 GCS-based workflow)
     data_gcs_path_provided = params.get("data_gcs_path")
@@ -324,8 +327,8 @@ def prepare_and_launch_job(params: dict) -> dict:
         "status": "LAUNCHED",
         "config_path": config_gcs_path,
         "data_path": data_gcs_path,
-        "revision": params["revision"],
-        "country": params["country"],
+        "revision": revision,
+        "country": country,
         "gcs_prefix": gcs_prefix,
         "gcs_bucket": gcs_bucket,
     }
@@ -455,13 +458,37 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                         if actual_status in ("SUCCEEDED", "COMPLETED")
                         else actual_status
                     )
+                    
+                    # Check for SKIPPED status in status.json on GCS
+                    # A job that succeeded but was skipped should show as SKIPPED
+                    gcs_prefix = row.get("gcs_prefix")
+                    if gcs_prefix and not pd.isna(gcs_prefix) and final_state == "SUCCEEDED":
+                        try:
+                            client = storage.Client()
+                            status_blob = client.bucket(bucket_name).blob(
+                                f"{gcs_prefix}/status.json"
+                            )
+                            if status_blob.exists():
+                                status_data = json.loads(status_blob.download_as_text())
+                                if status_data.get("state") == "SKIPPED":
+                                    final_state = "SKIPPED"
+                                    skip_reason = status_data.get("skip_reason", "No usable data in training window")
+                                    df_history.loc[idx, "message"] = skip_reason
+                                    logger.info(
+                                        f"[JOB_HISTORY] Job {row.get('job_id')} detected as SKIPPED: {skip_reason}"
+                                    )
+                        except Exception as e:
+                            logger.debug(
+                                f"[JOB_HISTORY] Could not check status.json for {gcs_prefix}: {e}"
+                            )
+                    
                     df_history.loc[idx, "state"] = final_state
-                    df_history.loc[idx, "message"] = (
-                        status_info.get("error", "") or final_state
-                    )
+                    if final_state != "SKIPPED":
+                        df_history.loc[idx, "message"] = (
+                            status_info.get("error", "") or final_state
+                        )
 
                     # Try to get training time from timings.csv on GCS
-                    gcs_prefix = row.get("gcs_prefix")
                     if gcs_prefix and not pd.isna(gcs_prefix):
                         try:
                             client = storage.Client()

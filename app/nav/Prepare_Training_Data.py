@@ -30,7 +30,11 @@ from app_shared import (
     filter_range,
     freq_to_rule,
     list_data_versions,
+    list_mapped_data_versions,
     list_meta_versions,
+    mapped_data_blob,
+    mapped_data_latest_blob,
+    mapped_data_root,
     parse_date,
     period_label,
     pretty,
@@ -40,7 +44,7 @@ from app_shared import (
     resolve_meta_blob_from_selection,
     total_with_prev,
     upload_to_gcs,
-    validate_against_metadata
+    validate_against_metadata,
 )
 from scipy import stats
 from sklearn.linear_model import LinearRegression
@@ -149,18 +153,73 @@ def _filter_leading_zeros_from_media_vars(
 with st.expander("Step 1) Select Data", expanded=False):
     st.markdown("### Select country and data versions to analyze")
 
-    # Check if we have preselected values from Map Your Data
-    if "country" in st.session_state and st.session_state.get("country"):
+    # Get countries from Map Data or fallback to latest saved data
+    prefill_countries = st.session_state.get("prefill_countries", [])
+    selected_countries_from_map = st.session_state.get("selected_countries", [])
+
+    # Combine and determine available countries
+    if prefill_countries:
+        available_countries = prefill_countries
         st.info(
-            f"Using country from Map Your Data: **{st.session_state['country'].upper()}**"
+            f"Using countries from Map Data: **{', '.join([c.upper() for c in available_countries])}**"
         )
+    elif selected_countries_from_map:
+        available_countries = selected_countries_from_map
+        st.info(
+            f"Using countries from Map Data: **{', '.join([c.upper() for c in available_countries])}**"
+        )
+    else:
+        # Try to get countries from latest saved mapped data
+        try:
+            from google.cloud import storage
+
+            client = storage.Client()
+            # Look in mapped-datasets first, fallback to datasets
+            blobs = client.list_blobs(GCS_BUCKET, prefix="mapped-datasets/")
+            found_countries = set()
+            for blob in blobs:
+                parts = blob.name.split("/")
+                if len(parts) >= 2 and parts[1]:
+                    found_countries.add(parts[1].lower())
+
+            # Fallback to raw datasets if no mapped data found
+            if not found_countries:
+                blobs = client.list_blobs(GCS_BUCKET, prefix="datasets/")
+                for blob in blobs:
+                    parts = blob.name.split("/")
+                    if len(parts) >= 2 and parts[1]:
+                        found_countries.add(parts[1].lower())
+
+            available_countries = (
+                sorted(list(found_countries)) if found_countries else []
+            )
+        except Exception:
+            available_countries = []
+
+        if not available_countries:
+            st.warning(
+                "⚠️ No saved mapped data found. Please go to Map Data page to map and save data first."
+            )
+            available_countries = ["de"]  # Default fallback
 
     c1, c2, c3, c4 = st.columns([1.2, 1, 1, 0.6])
 
-    country = (
-        c1.text_input("Country", value=st.session_state["country"])
-        .strip()
-        .lower()
+    # Country dropdown instead of text input
+    default_country = st.session_state.get(
+        "country", available_countries[0] if available_countries else "de"
+    )
+    if default_country not in available_countries and available_countries:
+        default_country = available_countries[0]
+
+    country = c1.selectbox(
+        "Country",
+        options=available_countries,
+        index=(
+            available_countries.index(default_country)
+            if default_country in available_countries
+            else 0
+        ),
+        key="country_select_step1",
     )
     if country:
         st.session_state["country"] = country
@@ -172,8 +231,9 @@ with st.expander("Step 1) Select Data", expanded=False):
         else ""
     )
 
+    # Use mapped data versions (from Map Data Step 3)
     data_versions = (
-        list_data_versions(GCS_BUCKET, country, refresh_key)
+        list_mapped_data_versions(GCS_BUCKET, country, refresh_key)
         if country
         else ["Latest"]
     )
@@ -184,7 +244,10 @@ with st.expander("Step 1) Select Data", expanded=False):
     )
 
     data_ts = c2.selectbox(
-        "Data version", options=data_versions, index=0, key="picked_data_ts"
+        "Mapped Data version",
+        options=data_versions,
+        index=0,
+        key="picked_data_ts",
     )
     meta_ts = c3.selectbox(
         "Metadata version", options=meta_versions, index=0, key="picked_meta_ts"
@@ -194,11 +257,11 @@ with st.expander("Step 1) Select Data", expanded=False):
 
     if load_clicked:
         try:
-            # Resolve DATA path
+            # Resolve DATA path (use mapped data from Map Data Step 3)
             db = (
-                data_latest_blob(country)
+                mapped_data_latest_blob(country)
                 if data_ts == "Latest"
-                else data_blob(country, str(data_ts))
+                else mapped_data_blob(country, str(data_ts))
             )
 
             # Resolve META path
@@ -853,6 +916,7 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         except Exception:
             return "–"
 
+    @st.fragment
     def _render_cat_table(title: str, cols: list[str], key_suffix: str):
         subset = prof_all[prof_all["Column"].isin(cols)].copy()
         st.markdown(f"### {title} ({len(subset)})")
@@ -941,8 +1005,26 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
             },
             key=f"dq_editor_{key_suffix}",
         )
+
+        # Check if any selections changed and update session state
+        needs_rerun = False
         for _, r in edited.iterrows():
-            use_overrides[str(r["Column"])] = bool(r["Use"])
+            col_name = str(r["Column"])
+            use_val = bool(r["Use"])
+            old_val = st.session_state["dq_user_selections"].get(col_name)
+            # If old_val is None, check against the default (not dropped)
+            if old_val is None:
+                old_val = col_name not in st.session_state.get(
+                    "dq_dropped_cols", set()
+                )
+            if old_val != use_val:
+                needs_rerun = True
+            st.session_state["dq_user_selections"][col_name] = use_val
+            use_overrides[col_name] = use_val
+
+        # If selections changed, trigger a fragment rerun
+        if needs_rerun:
+            st.rerun(scope="fragment")
 
     # Render all categories
     for title, cols in categories:
@@ -2309,7 +2391,11 @@ with st.expander(
 
                 # Save to GCS
                 country = st.session_state.get("country", "de")
-                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                # Use shared timestamp from Map Data if available, otherwise generate new one
+                timestamp = st.session_state.get(
+                    "shared_save_timestamp",
+                    datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"),
+                )
 
                 # Create temporary file
                 with tempfile.NamedTemporaryFile(

@@ -1269,16 +1269,18 @@ def build_job_config_from_params(
     timestamp: str,
     annotations_gcs_path: Optional[str],
 ) -> dict:
+    # Support both 'revision' and 'version' keys for backward compatibility
+    revision = params.get("revision") or params.get("version") or ""
     config = {
-        "country": params["country"],
-        "iterations": int(params["iterations"]),
-        "trials": int(params["trials"]),
+        "country": params.get("country", ""),
+        "iterations": int(params.get("iterations", 100)),
+        "trials": int(params.get("trials", 5)),
         "train_size": (
-            parse_train_size(str(params["train_size"]))
-            if isinstance(params["train_size"], str)
-            else params["train_size"]
+            parse_train_size(str(params.get("train_size", 0.8)))
+            if isinstance(params.get("train_size"), str)
+            else params.get("train_size", 0.8)
         ),
-        "revision": params["revision"],
+        "revision": revision,
         "date_input": params.get("date_input") or time.strftime("%Y-%m-%d"),
         "start_date": params.get("start_date", "2024-01-01"),  # NEW
         "end_date": params.get("end_date", time.strftime("%Y-%m-%d")),  # NEW
@@ -1288,12 +1290,12 @@ def build_job_config_from_params(
         "annotations_gcs_path": _normalize_gs_uri(annotations_gcs_path),  # type: ignore
         "paid_media_spends": [
             s.strip()
-            for s in str(params["paid_media_spends"]).split(",")
+            for s in str(params.get("paid_media_spends", "")).split(",")
             if s.strip()
         ],
         "paid_media_vars": [
             s.strip()
-            for s in str(params["paid_media_vars"]).split(",")
+            for s in str(params.get("paid_media_vars", "")).split(",")
             if s.strip()
         ],
         "context_vars": [
@@ -1821,6 +1823,19 @@ def data_latest_blob(country: str) -> str:
     return f"{data_root(country)}/latest/raw.parquet"
 
 
+# Mapped data paths (for data after variable mapping in Map Data Step 3)
+def mapped_data_root(country: str) -> str:
+    return f"mapped-datasets/{country.lower().strip()}"
+
+
+def mapped_data_blob(country: str, ts: str) -> str:
+    return f"{mapped_data_root(country)}/{ts}/raw.parquet"
+
+
+def mapped_data_latest_blob(country: str) -> str:
+    return f"{mapped_data_root(country)}/latest/raw.parquet"
+
+
 # --- metadata paths (country + universal)
 def meta_blob(country: str, ts: str) -> str:
     """Country-scoped metadata path."""
@@ -1877,6 +1892,23 @@ def list_data_versions(
 ) -> List[str]:
     client = storage.Client()
     prefix = f"{data_root(country)}/"
+    blobs = client.list_blobs(bucket, prefix=prefix)
+    ts = set()
+    for b in blobs:
+        parts = b.name.split("/")
+        if len(parts) >= 4 and parts[-1] == "raw.parquet":
+            ts.add(parts[-2])
+    out = sorted_versions_newest_first(list(ts))
+    return ["Latest"] + out
+
+
+@st.cache_data(show_spinner=False)
+def list_mapped_data_versions(
+    bucket: str, country: str, refresh_key: str = ""
+) -> List[str]:
+    """List available versions of mapped data (from Map Data Step 3)."""
+    client = storage.Client()
+    prefix = f"{mapped_data_root(country)}/"
     blobs = client.list_blobs(bucket, prefix=prefix)
     ts = set()
     for b in blobs:
