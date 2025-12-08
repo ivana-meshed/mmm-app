@@ -984,16 +984,12 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
     # Handle All/Clear button clicks before rendering multiselect
     with c2:
         # Select All button
-        if st.button(
-            "All", key="select_all_countries", width='stretch'
-        ):
+        if st.button("All", key="select_all_countries", width="stretch"):
             st.session_state["selected_countries_widget"] = countries
             st.rerun()
     with c3:
         # Clear button
-        if st.button(
-            "Clear", key="deselect_all_countries", width='stretch'
-        ):
+        if st.button("Clear", key="deselect_all_countries", width="stretch"):
             st.session_state["selected_countries_widget"] = []
             st.rerun()
 
@@ -1097,12 +1093,10 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
             # Buttons row: Load + Refresh GCS list (side-by-side, wide)
             b1, b2 = st.columns([1, 1.2])
             with b1:
-                load_clicked = st.form_submit_button(
-                    "Load", width='stretch'
-                )
+                load_clicked = st.form_submit_button("Load", width="stretch")
             with b2:
                 refresh_clicked = st.form_submit_button(
-                    "↻ Refresh GCS list", width='stretch'
+                    "↻ Refresh GCS list", width="stretch"
                 )
 
         # --- right after the form block (i.e., after the `with st.form(...):` ends)
@@ -1122,7 +1116,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                     with st.expander(f"{country.upper()} - {len(df):,} rows"):
                         st.dataframe(
                             df.head(10),
-                            width='stretch',
+                            width="stretch",
                             hide_index=True,
                         )
             elif not st.session_state.get("df_raw", pd.DataFrame()).empty:
@@ -1130,7 +1124,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 st.caption("Preview (from session):")
                 st.dataframe(
                     st.session_state["df_raw"].head(20),
-                    width='stretch',
+                    width="stretch",
                     hide_index=True,
                 )
             return
@@ -1278,7 +1272,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                     with st.expander(f"{country.upper()} - {len(df):,} rows"):
                         st.dataframe(
                             df.head(10),
-                            width='stretch',
+                            width="stretch",
                             hide_index=True,
                         )
 
@@ -1358,7 +1352,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
     csave1.button(
         "💾 Save dataset to GCS",
         on_click=_save_current_raw,
-        width='stretch',
+        width="stretch",
     )
     if st.session_state["last_saved_raw_path"]:
         csave2.caption(
@@ -1448,20 +1442,20 @@ with st.expander(
         with col_load:
             load_metadata_clicked = st.button(
                 "Apply mapping",
-                width='stretch',
+                width="stretch",
                 key="load_metadata_btn",
             )
         with col_clear:
             clear_metadata_clicked = st.button(
                 "🗑️ Clear metadata",
-                width='stretch',
+                width="stretch",
                 key="clear_metadata_btn",
                 help="Clear all loaded metadata and reset mapping to defaults",
             )
         with col_refresh:
             refresh_metadata_clicked = st.button(
                 "↻ Refresh metadata list",
-                width='stretch',
+                width="stretch",
                 key="refresh_metadata_btn",
             )
 
@@ -1644,7 +1638,7 @@ with st.expander(
             if st.button(
                 "➕ Add Business Goals",
                 key="add_goals_btn",
-                width='stretch',
+                width="stretch",
                 help="Add selected goals to the table below without applying mappings yet",
             ):
                 new_primary = _mk(primary_goals, "primary")
@@ -1706,7 +1700,7 @@ with st.expander(
         with st.form("goals_form", clear_on_submit=False):
             goals_edit = st.data_editor(
                 goals_src,
-                width='stretch',
+                width="stretch",
                 num_rows="dynamic",
                 column_config={
                     "var": st.column_config.SelectboxColumn(
@@ -1849,7 +1843,7 @@ with st.expander(
         if st.button(
             "➕ Apply Channel Detection",
             key="add_channels_btn",
-            width='stretch',
+            width="stretch",
         ):
             # Parse the input
             entered_channels = [
@@ -2028,7 +2022,7 @@ with st.expander(
             )
         with sort_col3:
             if st.button(
-                "🔄 Apply Sort", key="apply_sort_btn", width='stretch'
+                "🔄 Apply Sort", key="apply_sort_btn", width="stretch"
             ):
                 if sort_by != "Original order":
                     ascending = sort_order == "Ascending"
@@ -2105,7 +2099,7 @@ with st.expander(
 
             mapping_edit = st.data_editor(
                 mapping_src,
-                width='stretch',
+                width="stretch",
                 num_rows="dynamic",
                 column_config={
                     "var": st.column_config.TextColumn("Column", disabled=True),
@@ -2529,7 +2523,7 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
     cmeta1.button(
         "💾 Save dataset & metadata to GCS",
         on_click=_save_metadata,
-        width='stretch',
+        width="stretch",
         help="Saves both the current dataset (with custom variables) and metadata configuration to GCS",
     )
     if st.session_state["last_saved_meta_path"]:
@@ -2566,9 +2560,7 @@ if can_go_next:
     with coln1:
         try:
             # Streamlit >= 1.27
-            if st.button(
-                "Next → Prepare Training Data", width='stretch'
-            ):
+            if st.button("Next → Prepare Training Data", width="stretch"):
                 # Store values from Map Data for prefilling Prepare Training Data
                 # 3.1: Store the main goal
                 if not goals_df.empty:

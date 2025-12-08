@@ -161,7 +161,7 @@ with tab_load:
                     st.warning("Declared vs observed type mismatches:")
                     st.dataframe(
                         report["type_mismatches"],
-                        width='stretch',
+                        width="stretch",
                         hide_index=True,
                     )
                 else:
@@ -420,7 +420,7 @@ with tab_biz:
             ),
             margin=dict(b=60),
         )
-        st.plotly_chart(fig1, width='stretch')
+        st.plotly_chart(fig1, width="stretch")
 
     with cB:
         eff_t = res.copy()
@@ -466,7 +466,7 @@ with tab_biz:
             ),
             margin=dict(b=60),
         )
-        st.plotly_chart(fig2e, width='stretch')
+        st.plotly_chart(fig2e, width="stretch")
 
 
 # =============================
@@ -725,7 +725,7 @@ with tab_mkt:
                 yaxis_title=spend_label,
                 legend=dict(orientation="h"),
             )
-            st.plotly_chart(fig2, width='stretch')
+            st.plotly_chart(fig2, width="stretch")
         else:
             st.info("No spend data for the selected view.")
 
@@ -804,7 +804,7 @@ with tab_mkt:
                 title=f"Spend Change ({title_suffix})",
                 showlegend=False,
             )
-            st.plotly_chart(fig_w, width='stretch')
+            st.plotly_chart(fig_w, width="stretch")
         else:
             st.info("No spend data for the selected view.")
 
@@ -863,7 +863,7 @@ with tab_mkt:
                         )
                     )
                     figf.update_layout(margin=dict(l=40, r=20, t=10, b=20))
-                    st.plotly_chart(figf, width='stretch')
+                    st.plotly_chart(figf, width="stretch")
                 else:
                     st.info("No funnel metrics found.")
             with col_div:
@@ -898,7 +898,7 @@ with tab_mkt:
                         ],
                     }
                 )
-                st.dataframe(tbl, hide_index=True, width='stretch')
+                st.dataframe(tbl, hide_index=True, width="stretch")
             st.markdown("---")
     else:
         st.info("Platform mapping not available.")
@@ -1004,7 +1004,7 @@ with tab_driver:
             ),
             margin=dict(b=60),
         )
-        st.plotly_chart(fig_custom, width='stretch')
+        st.plotly_chart(fig_custom, width="stretch")
 
         if want_overlay and not can_overlay:
             st.caption(

@@ -150,7 +150,7 @@ with tab_load:
                 st.warning("Declared vs observed type mismatches:")
                 st.dataframe(
                     report["type_mismatches"],
-                    width='stretch',
+                    width="stretch",
                     hide_index=True,
                 )
             else:
@@ -803,7 +803,7 @@ with tab_quality:
         edited = st.data_editor(
             subset[show_cols],
             hide_index=True,
-            width='stretch',
+            width="stretch",
             num_rows="fixed",
             column_config={
                 "Use": st.column_config.CheckboxColumn(required=True),

@@ -108,14 +108,14 @@ st.subheader("🔧 Cache Actions")
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("🗑️ Clear All Cache", type="primary", width='stretch'):
+    if st.button("🗑️ Clear All Cache", type="primary", width="stretch"):
         with st.spinner("Clearing cache..."):
             clear_snowflake_cache()
             st.success("✅ All cache cleared successfully!")
             st.rerun()
 
 with col2:
-    if st.button("🔄 Refresh Statistics", width='stretch'):
+    if st.button("🔄 Refresh Statistics", width="stretch"):
         st.rerun()
 
 st.divider()

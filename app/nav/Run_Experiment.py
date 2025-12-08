@@ -113,6 +113,38 @@ def _load_training_data_json(
         return None
 
 
+def _list_all_training_data_configs(bucket: str) -> List[Dict[str, str]]:
+    """List all available training data configs from all countries.
+
+    Returns list of dicts with keys: 'country', 'timestamp', 'display_name'
+    Path pattern: training_data/{country}/{timestamp}/selected_columns.json
+    """
+    try:
+        client = storage.Client()
+        prefix = "training_data/"
+        blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+        configs = []
+        for blob in blobs:
+            if blob.name.endswith("selected_columns.json"):
+                parts = blob.name.split("/")
+                # training_data/<country>/<timestamp>/selected_columns.json
+                if len(parts) >= 4:
+                    country = parts[1]
+                    timestamp = parts[2]
+                    configs.append(
+                        {
+                            "country": country,
+                            "timestamp": timestamp,
+                            "display_name": f"{country.upper()} - {timestamp}",
+                        }
+                    )
+        # Sort by timestamp descending (newest first)
+        return sorted(configs, key=lambda x: x["timestamp"], reverse=True)
+    except Exception as e:
+        logging.warning(f"Could not list all training data configs: {e}")
+        return []
+
+
 def _list_country_versions(bucket: str, country: str) -> List[str]:
     """Return timestamp folder names available in mapped-datasets/<country>/."""
     client = storage.Client()
@@ -444,15 +476,45 @@ with tab_single:
         )
 
         try:
+            # First try to get configs for selected country
             training_data_versions = _list_training_data_versions(
                 gcs_bucket, selected_country
             )
+
             if training_data_versions:
+                # Found configs for selected country - show them with simple timestamps
                 training_data_options = ["None"] + training_data_versions
+                # Store mapping from display name to country/timestamp
+                config_mapping = {
+                    version: {"country": selected_country, "timestamp": version}
+                    for version in training_data_versions
+                }
             else:
-                training_data_options = ["None"]
-        except Exception:
+                # No configs for selected country - show configs from all countries
+                all_configs = _list_all_training_data_configs(gcs_bucket)
+                if all_configs:
+                    training_data_options = ["None"] + [
+                        cfg["display_name"] for cfg in all_configs
+                    ]
+                    # Store mapping from display name to country/timestamp
+                    config_mapping = {
+                        cfg["display_name"]: {
+                            "country": cfg["country"],
+                            "timestamp": cfg["timestamp"],
+                        }
+                        for cfg in all_configs
+                    }
+                    st.info(
+                        f"ℹ️ No training data configs found for {selected_country.upper()}. "
+                        "Showing configs from all countries."
+                    )
+                else:
+                    training_data_options = ["None"]
+                    config_mapping = {}
+        except Exception as e:
+            logging.warning(f"Error listing training data configs: {e}")
             training_data_options = ["None"]
+            config_mapping = {}
 
         selected_training_data = st.selectbox(
             "Select Training Data Config",
@@ -463,18 +525,32 @@ with tab_single:
 
         # Load and store training data config if selected
         if selected_training_data != "None":
-            training_data_config = _load_training_data_json(
-                gcs_bucket, selected_country, selected_training_data
-            )
-            if training_data_config:
-                st.session_state["training_data_config"] = training_data_config
-                st.success(
-                    f"✅ Loaded training data config: {selected_training_data}"
+            # Get country and timestamp from mapping
+            config_info = config_mapping.get(selected_training_data)
+            if config_info:
+                config_country = config_info["country"]
+                config_timestamp = config_info["timestamp"]
+                training_data_config = _load_training_data_json(
+                    gcs_bucket, config_country, config_timestamp
                 )
-                with st.expander(
-                    "Preview Training Data Config", expanded=False
-                ):
-                    st.json(training_data_config)
+                if training_data_config:
+                    st.session_state["training_data_config"] = (
+                        training_data_config
+                    )
+                    if config_country != selected_country:
+                        st.success(
+                            f"✅ Loaded training data config from {config_country.upper()}: {config_timestamp}"
+                        )
+                    else:
+                        st.success(
+                            f"✅ Loaded training data config: {selected_training_data}"
+                        )
+                    with st.expander(
+                        "Preview Training Data Config", expanded=False
+                    ):
+                        st.json(training_data_config)
+                else:
+                    st.session_state["training_data_config"] = None
             else:
                 st.session_state["training_data_config"] = None
         else:
@@ -502,7 +578,7 @@ with tab_single:
         if st.button(
             "Load selected data",
             type="primary",
-            width='stretch',
+            width="stretch",
             key="load_data_btn",
         ):
             tmp_path: Optional[str] = None
@@ -647,7 +723,7 @@ with tab_single:
             st.write("**Preview (first 5 rows):**")
             st.dataframe(
                 st.session_state["preview_df"].head(5),
-                width='stretch',
+                width="stretch",
             )
 
     # Load Model settings
@@ -679,7 +755,7 @@ with tab_single:
 
                 if st.button(
                     "📥 Apply Settings",
-                    width='stretch',
+                    width="stretch",
                     key="load_config_btn",
                 ):
                     try:
@@ -2045,17 +2121,17 @@ with tab_single:
 
         save_config_clicked = col_btn1.button(
             "💾 Save Settings",
-            width='stretch',
+            width="stretch",
             key="save_config_btn",
         )
         add_to_queue_clicked = col_btn2.button(
             "➕ Save Settings & Add to Queue",
-            width='stretch',
+            width="stretch",
             key="add_to_queue_btn",
         )
         add_and_start_clicked = col_btn3.button(
             "▶️ Save Settings, Add to Queue and Run Now",
-            width='stretch',
+            width="stretch",
             key="add_and_start_btn",
         )
 
@@ -2128,7 +2204,7 @@ with tab_single:
             data=csv_df.to_csv(index=False),
             file_name=f"robyn_config_{country}_{revision}_{time.strftime('%Y%m%d')}.csv",
             mime="text/csv",
-            width='stretch',
+            width="stretch",
             help="Download current settings as CSV and use for batch processing",
         )
 
@@ -2430,7 +2506,7 @@ with tab_single:
         start_multi_training = st.button(
             "🌍 Start Training for All Countries",
             type="secondary",
-            width='stretch',
+            width="stretch",
             key="start_multi_training_job_btn",
             help=f"Start training jobs in parallel for all {len(multi_country_list)} countries",
         )
@@ -2439,7 +2515,7 @@ with tab_single:
         start_single_training = st.button(
             "🚀 Start Training Job",
             type="primary",
-            width='stretch',
+            width="stretch",
             key="start_training_job_btn",
         )
 
@@ -2933,7 +3009,7 @@ with tab_queue:
                 uploaded_view,
                 key=f"uploaded_editor_{up_nonce}",
                 num_rows="dynamic",
-                width='stretch',
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "Delete": st.column_config.CheckboxColumn(
@@ -3362,7 +3438,7 @@ with tab_queue:
                     data=example.to_csv(index=False),
                     file_name="robyn_batch_example_consistent.csv",
                     mime="text/csv",
-                    width='content',
+                    width="content",
                     help="All rows have the same columns – recommended starting point.",
                 )
             with col_ex2:
@@ -3371,7 +3447,7 @@ with tab_queue:
                     data=example_varied.to_csv(index=False),
                     file_name="robyn_batch_example_varied.csv",
                     mime="text/csv",
-                    width='content',
+                    width="content",
                     help="Rows can differ in columns – shows CSV flexibility.",
                 )
 
@@ -3427,7 +3503,7 @@ with tab_status:
 
         if qc4.button(
             "🔁 Refresh queue",
-            width='stretch',
+            width="stretch",
             key="refresh_queue_from_gcs",
         ):
             maybe_refresh_queue_from_gcs(force=True)

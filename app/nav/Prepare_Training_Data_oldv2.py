@@ -384,7 +384,7 @@ if step >= 1:
                     "spike_pct",
                 ]
             ],
-            width='stretch',
+            width="stretch",
             hide_index=True,
             key="step1_editor",
             column_config={
@@ -456,7 +456,7 @@ if step >= 2 and st.session_state.get("pool_step1"):
         )
         edit2 = st.data_editor(
             step2_df[["use", "nice", "column"]],
-            width='stretch',
+            width="stretch",
             hide_index=True,
             key="step2_editor",
             column_config={
@@ -482,7 +482,7 @@ if step >= 2 and st.session_state.get("pool_step1"):
                 d2[k] = d2[k].map(lambda v: f"{v:.2f}" if pd.notna(v) else "–")
             st.dataframe(
                 d2[["column", "r2", "nmae", "rho"]],
-                width='stretch',
+                width="stretch",
                 hide_index=True,
             )
 
@@ -628,7 +628,7 @@ if step >= 3 and st.session_state.get("pool_step2"):
             )
             edited = st.data_editor(
                 dfp[["use", "nice", "column"]],
-                width='stretch',
+                width="stretch",
                 hide_index=True,
                 key=key,
                 column_config={
@@ -846,7 +846,7 @@ if step >= 4 and st.session_state.get("bucket_picks"):
                 if not top_pairs.empty:
                     tp = top_pairs.copy()
                     tp["badge"] = tp["abs_corr"].map(_badge_corr)
-                    st.dataframe(tp, hide_index=True, width='stretch')
+                    st.dataframe(tp, hide_index=True, width="stretch")
                 else:
                     st.caption("No variable pairs available.")
 
@@ -886,7 +886,7 @@ if step >= 5 and st.session_state.get("drivers_post_rules") is not None:
             st.dataframe(
                 vdisp[["Variable", "VIF"]],
                 hide_index=True,
-                width='stretch',
+                width="stretch",
             )
 
             # Persist a keep-set across button clicks
@@ -990,7 +990,7 @@ if step >= 5 and st.session_state.get("drivers_post_rules") is not None:
                     for p in platforms
                 ]
             )
-            st.dataframe(sm, width='stretch', hide_index=True)
+            st.dataframe(sm, width="stretch", hide_index=True)
 
         # Persist payload
         payload = dict(

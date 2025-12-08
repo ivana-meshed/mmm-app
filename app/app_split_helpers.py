@@ -554,7 +554,9 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                                                 from datetime import (
                                                     datetime as dt,
                                                 )
-                                                from datetime import timedelta
+                                                from datetime import (
+                                                    timedelta,
+                                                )
 
                                                 start_time = dt.fromisoformat(
                                                     str(start_time_str).replace(
@@ -657,7 +659,7 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
         df_job_history = df_job_history.reindex(columns=JOB_HISTORY_COLUMNS)
         st.dataframe(
             df_job_history,
-            width='stretch',
+            width="stretch",
             hide_index=True,
             key=f"job_history_view_{key_prefix}_{st.session_state.get('job_history_nonce', 0)}",
         )
@@ -779,7 +781,7 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
         if st.button(
             "🔄 Refresh",
             key=f"refresh_status_table_{key_prefix}",
-            width='stretch',
+            width="stretch",
         ):
             # Refresh queue from GCS to get latest status
             maybe_refresh_queue_from_gcs(force=True)
@@ -849,7 +851,7 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     st.dataframe(
         display_df.style.applymap(color_status, subset=["Status"]),
         column_config=column_config,
-        width='stretch',
+        width="stretch",
         hide_index=True,
     )
 
