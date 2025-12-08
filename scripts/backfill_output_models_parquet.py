@@ -71,6 +71,9 @@ def list_model_runs_needing_extraction(bucket_name, country=None, revision=None)
                     run_country = path_parts[2].lower()
                     if run_country != country.lower():
                         continue
+                else:
+                    # Path doesn't match expected structure, skip filtering for this run
+                    logger.debug(f"Skipping country filter for unexpected path: {run_prefix}")
             
             # Check if parquet data already exists
             parquet_dir = f"{run_prefix}/output_models_data/"
