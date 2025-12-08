@@ -129,15 +129,17 @@ def _list_all_training_data_configs(bucket: str) -> List[Dict[str, str]]:
                 parts = blob.name.split("/")
                 # training_data/<country>/<timestamp>/selected_columns.json
                 if len(parts) >= 4:
-                    country = parts[1]
-                    timestamp = parts[2]
-                    configs.append(
-                        {
-                            "country": country,
-                            "timestamp": timestamp,
-                            "display_name": f"{country.upper()} - {timestamp}",
-                        }
-                    )
+                    country = parts[1].strip()
+                    timestamp = parts[2].strip()
+                    # Validate that country and timestamp are non-empty
+                    if country and timestamp:
+                        configs.append(
+                            {
+                                "country": country,
+                                "timestamp": timestamp,
+                                "display_name": f"{country.upper()} - {timestamp}",
+                            }
+                        )
         # Sort by timestamp descending (newest first)
         return sorted(configs, key=lambda x: x["timestamp"], reverse=True)
     except Exception as e:
