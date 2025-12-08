@@ -1912,15 +1912,24 @@ def list_data_versions(
 def list_mapped_data_versions(
     bucket: str, country: str, refresh_key: str = ""
 ) -> List[str]:
-    """List available versions of mapped data (from Map Data Step 3)."""
+    """List available versions of mapped data (from Map Data Step 3).
+    
+    Expected blob structure: mapped-datasets/{country}/{timestamp}/raw.parquet
+    Example: mapped-datasets/de/20231201_120000/raw.parquet
+    """
     client = storage.Client()
     prefix = f"{mapped_data_root(country)}/"
     blobs = client.list_blobs(bucket, prefix=prefix)
     ts = set()
     for b in blobs:
         parts = b.name.split("/")
-        if len(parts) >= 4 and parts[-1] == "raw.parquet":
-            ts.add(parts[-2])
+        # Expect exactly 4 parts: ['mapped-datasets', '{country}', '{timestamp}', 'raw.parquet']
+        # This ensures we only get files directly in {timestamp}/ directories
+        if len(parts) == 4 and parts[-1] == "raw.parquet":
+            timestamp = parts[-2]
+            # Filter out empty timestamps (from double slashes)
+            if timestamp:
+                ts.add(timestamp)
     out = sorted_versions_newest_first(list(ts))
     return ["Latest"] + out
 
