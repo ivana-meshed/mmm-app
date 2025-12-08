@@ -1279,6 +1279,20 @@ with tab_single:
                 if isinstance(cat_vars, list):
                     all_columns_set.update(cat_vars)
 
+        # Add all columns from training_data_config to available columns
+        # This ensures custom variables from Prepare Training Data are available
+        if training_data_config:
+            for key in [
+                "paid_media_spends",
+                "paid_media_vars",
+                "organic_vars",
+                "context_vars",
+                "factor_vars",
+            ]:
+                vars_from_config = training_data_config.get(key, [])
+                if vars_from_config:
+                    all_columns_set.update(vars_from_config)
+
         # Convert back to list
         all_columns = list(all_columns_set)
 
