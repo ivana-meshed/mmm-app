@@ -1,0 +1,148 @@
+FROM rocker/r-ver:4.3.1
+ARG DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ---------- APT (with cache) ----------
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-venv python3-dev \
+    libcurl4-openssl-dev libssl-dev libxml2-dev libgit2-dev \
+    libicu-dev libicu70 \
+    libfontconfig1-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev \
+    libpng-dev libtiff5-dev libjpeg-dev \
+    libcairo2 libcairo2-dev libxt6 ghostscript \
+    fonts-dejavu-core fontconfig fonts-liberation fonts-liberation2 \
+    cmake gfortran pkg-config libnlopt-dev libblas-dev liblapack-dev \
+    libopenblas-dev libomp-dev ccache \
+    build-essential g++ make unzip ca-certificates git curl wget \
+    libnode-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV OMP_NUM_THREADS=8 \
+    OPENBLAS_NUM_THREADS=8 \
+    BLAS_NUM_THREADS=8 \
+    R_MAX_CORES=8 \
+    R_COMPILE_PKGS=1 \
+    R_DISABLE_HTTPD=1 \
+    RETICULATE_PYTHON=/usr/bin/python3 \
+    RETICULATE_AUTOCONFIGURE=0 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+RUN echo 'export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}'           >> /etc/environment && \
+    echo 'export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-8}' >> /etc/environment && \
+    echo 'export MKL_NUM_THREADS=${MKL_NUM_THREADS:-8}'           >> /etc/environment && \
+    echo 'export BLAS_NUM_THREADS=${BLAS_NUM_THREADS:-8}'         >> /etc/environment
+
+# ---------- ccache ----------
+ENV CCACHE_DIR=/root/.cache/ccache PATH="/usr/lib/ccache:$PATH"
+RUN --mount=type=cache,target=/root/.cache/ccache true
+
+# ---------- Python (cached) ----------
+ENV PIP_NO_INPUT=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+COPY docker/requirements-training.txt /tmp/requirements-training.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install -r /tmp/requirements-training.txt --upgrade-strategy only-if-needed
+
+# ---------- R: Posit PPM ----------
+# --- R: Posit PPM with CRAN fallback for reliability ---
+ARG RSPM="https://packagemanager.posit.co/cran/__linux__/ubuntu/jammy/latest"
+ENV RSPM=${RSPM}
+
+# Try PPM first; if unreachable, fall back to CRAN
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(repos=repos); \
+    if (!requireNamespace('remotes', quietly=TRUE)) install.packages('remotes')"
+
+# ---------- PINNED core set (your original pins) ----------
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(Ncpus=8); \
+    pinned <- c( \
+    jsonlite='2.0.0', dplyr='1.1.4', tidyr='1.3.1', lubridate='1.9.3', \
+    readr='2.1.5', stringr='1.5.1', reticulate='1.40.0', data.table='1.15.4', \
+    globals='0.16.3', listenv='0.9.1', parallelly='1.38.0', iterators='1.0.14', \
+    gridExtra='2.3', systemfonts='1.2.0', \
+    arrow='21.0.0.1', future='1.67.0', future.apply='1.20.0', \
+    rstudioapi='0.17.1', knitr='1.50', coda='0.19-4.1', V8='8.0.1', \
+    usethis='3.2.1', pkgload='1.4.1', roxygen2='7.3.3', withr='3.0.2', \
+    ragg='1.5.0', readxl='1.4.5', reprex='2.1.1', rvest='1.0.5', dichromat='2.0-0.1', \
+    formattable='0.2.1', nycflights13='1.0.2', whoami='1.3.0', RSQLite='2.4.3', lintr='3.2.0', \
+    abind='1.4-8', tensorA='0.36.2.1', distributional='0.5.0', farver='2.1.2', \
+    LaplacesDemon='16.1.6', VGAM='1.1-13', evd='2.3-7.1', skellam='0.2.4', \
+    googleAnalyticsR='1.2.0', miniUI='0.1.2', shiny='1.11.1', bit64='4.6.0-1', glue='1.8.0' \
+    ); \
+    for (pkg in names(pinned)) remotes::install_version(pkg, version=pinned[[pkg]], upgrade='never', repos=repos)"
+
+# Quick check ICU and stringi alignment (optional)
+RUN ldconfig -p | grep -E 'libicu(i18n|uc)\.so\.70' || true
+RUN R -q -e "packageVersion('stringi'); sessionInfo()$otherPkgs$stringi"
+
+# ---------- ggplot2 pin ----------
+ARG GGPLOT2_VER=3.5.2
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(Ncpus=8); \
+    if (!requireNamespace('ggplot2', quietly=TRUE) || packageVersion('${GGPLOT2_VER}') != '${GGPLOT2_VER}') \
+    remotes::install_version('ggplot2', version='3.5.2', upgrade='never', repos=repos)"
+
+# ---------- Stan stack (compiled) ----------
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(Ncpus=8); \
+    install.packages(c('Rcpp','BH','rstan','rstantools','StanHeaders','RcppEigen','png','dygraphs','xts','extraDistr'), repos=repos)"
+
+# ---------- Tidy deps often pulled by ggplot2 (install unpinned, no deps) ----------
+# (We avoid reinstalling/overriding pinned glue/withr.)
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(Ncpus=8); \
+    install.packages(c('rlang','scales','tibble','cli','lifecycle','vctrs'), dependencies=FALSE, repos=repos)"
+
+# ---------- Add remaining “missing” packages from the second list ----------
+# Installed WITHOUT dependencies so they don't override the pinned set above.
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(Ncpus=8); \
+    install.packages(c( \
+    'googleAuthR', 'googleCloudStorageR', 'mime', 'foreach', 'doParallel', \
+    'dtplyr', 'furrr', 'RcppParallel' , 'prophet'\
+    ), dependencies=FALSE, repos=repos)"
+
+# ---------- nloptr (needs source) ----------
+RUN R -q -e "options(Ncpus=8); install.packages('nloptr', repos=Sys.getenv('RSPM'), type='source')"
+
+# ---------- CmdStan + cmdstanr ----------
+ARG CMDSTAN_VERSION=2.35.0
+ENV MAKEFLAGS="-j8" \
+    CMDSTAN=/usr/local/cmdstan
+ENV PATH="${CMDSTAN}/bin:${PATH}"
+
+RUN wget -O /tmp/cmdstan.tar.gz "https://github.com/stan-dev/cmdstan/releases/download/v${CMDSTAN_VERSION}/cmdstan-${CMDSTAN_VERSION}.tar.gz" \
+    && tar -xzf /tmp/cmdstan.tar.gz -C /usr/local \
+    && mv "/usr/local/cmdstan-${CMDSTAN_VERSION}" "${CMDSTAN}" \
+    && make -C "${CMDSTAN}" build \
+    && "${CMDSTAN}/bin/stanc" --version || true
+
+RUN R -q -e "options(Ncpus=8); \
+    if (!requireNamespace('cmdstanr', quietly=TRUE) || packageVersion('cmdstanr') != '0.8.0') \
+    remotes::install_version('cmdstanr', version='0.8.0', repos=c('https://mc-stan.org/r-packages/', Sys.getenv('RSPM')), upgrade='never'); \
+    library(cmdstanr); set_cmdstan_path(Sys.getenv('CMDSTAN')); cmdstan_version()"
+
+# ---------- Prophet (pin; avoid upgrading your pinned deps) ----------
+#RUN R -q -e "options(Ncpus=8, repos=c(CRAN=Sys.getenv('RSPM'))); \
+#    if (!requireNamespace('prophet', quietly=TRUE) || packageVersion('prophet') != '1.2.1') { \
+#    remotes::install_version('prophet', version='1.2.1', repos=c(CRAN=Sys.getenv('RSPM')), upgrade='never'); \
+#    }"
+
+# ---------- Prophet warm-up ----------
+RUN R -q -e "options(mc.cores=8); library(prophet); set.seed(1); \
+    df <- data.frame(ds=seq.Date(as.Date('2024-01-01'), by='day', length.out=10), y=rnorm(10)); prophet(df)"
+
+# ---------- patchwork (pin) ----------
+RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
+    options(Ncpus=8); \
+    if (!requireNamespace('patchwork', quietly=TRUE) || utils::packageVersion('patchwork') < '1.3.1') \
+    remotes::install_version('patchwork', version='1.3.1', repos=repos, upgrade='never')"
+
+# ---------- Robyn (pin) ----------
+RUN R -q -e "options(Ncpus=8); \
+    remotes::install_github('facebookexperimental/Robyn', subdir='R', upgrade='never', dependencies=c('Depends','Imports')); \
+    library(Robyn); cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')"
+

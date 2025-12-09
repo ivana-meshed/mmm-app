@@ -1,15 +1,16 @@
 name: CI
 
 on:
-  #pull_request:
-  #  branches: [ main ]
   push:
-    branches: [ main]
+    branches: [ main ]
+
+concurrency:
+  group: terraform-prod
+  cancel-in-progress: false
 
 permissions:
   id-token: write
   contents: read
-
 
 jobs:
   ci:
@@ -28,8 +29,16 @@ jobs:
       SA_EMAIL: github-deployer@datawarehouse-422511.iam.gserviceaccount.com
       WEB_RUNTIME_SA: mmm-web-service-sa@datawarehouse-422511.iam.gserviceaccount.com
       TRAINING_RUNTIME_SA: mmm-training-job-sa@datawarehouse-422511.iam.gserviceaccount.com
-      REPOSITORY: ivana-meshed/mmm-app
       TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
+      # TF_VAR_* for sensitive/default vars (preferred over -var flags)
+      # Sensitive data (secrets) passed via TF_VAR_* from GitHub Secrets
+      # Non-sensitive config (project_id, regions, etc.) in envs/prod.tfvars
+      TF_VAR_sf_private_key: ${{ secrets.SF_PRIVATE_KEY }}
+      TF_VAR_auth_client_id: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      TF_VAR_auth_client_secret: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      TF_VAR_auth_cookie_secret: ${{ secrets.STREAMLIT_COOKIE_SECRET }}
+      TF_VAR_scheduler_job_name: robyn-queue-tick
+      TF_VAR_queue_name: default
 
     steps:
       - uses: actions/checkout@v4
@@ -66,77 +75,287 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build & Push web service image
+        id: build_web
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./docker/Dockerfile.web
           platforms: linux/amd64
           push: true
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           tags: |
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:latest
-          cache-from: type=gha,scope=mmm-web
-          cache-to: type=gha,mode=max,scope=mmm-web
+            ${{ env.WEB_IMAGE_URL }}
+            ${{ env.WEB_IMAGE_URL_LATEST }}
+          cache-from: type=gha,scope=mmm-web-${{ github.ref_name }}
+          cache-to: type=gha,mode=max,scope=mmm-web-${{ github.ref_name }}
+      - name: Build & Push training-base
+        id: build_training_base
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile.training-base
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/mmm-training-base:latest
+          cache-from: |
+            type=registry,ref=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/mmm-training-base:buildcache
+          cache-to: |
+            type=registry,ref=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/mmm-training-base:buildcache,mode=max
 
       - name: Build & Push training job image
+        id: build_training
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./docker/Dockerfile.training
+          build-args: |
+            BASE_REF=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/mmm-training-base:latest
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:${{ github.sha }}
-            ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:latest
-          cache-from: type=gha,scope=mmm-training
-          cache-to: type=gha,mode=max,scope=mmm-training
+            ${{ env.TRAINING_IMAGE_URL }}
+            ${{ env.TRAINING_IMAGE_URL_LATEST }}
+          cache-from: |
+            type=registry,ref=${{ env.TRAINING_IMAGE_URL_LATEST }}
+            type=registry,ref=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:buildcache
+          cache-to: |
+            type=registry,ref=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:buildcache,mode=max
+
+      - name: Setup Python for tests
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install CI dependencies
+        shell: bash
+        run: |
+          pip install -r requirements-ci.txt
+
+      - name: Auto-format code
+        shell: bash
+        run: |
+          echo "Automatically formatting code..."
+          make format
+
+      - name: Commit formatted files
+        shell: bash
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -A
+          git diff --staged --quiet || git commit -m "Auto-format code with black and isort [skip ci]"
+          git push || echo "No changes to push"
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          echo "Running unit tests for single job run functionality..."
+          python3 -m unittest tests.test_single_job_config -v
+
+      - name: Compute digest-pinned image refs
+        shell: bash
+        run: |
+          # docker/build-push-action exposes the built manifest digest as outputs.digest (e.g. "sha256:abcd...")
+          echo "WEB_IMAGE_DIGEST=${{ steps.build_web.outputs.digest }}" >> "$GITHUB_ENV"
+          echo "TRAINING_IMAGE_DIGEST=${{ steps.build_training.outputs.digest }}" >> "$GITHUB_ENV"
+
+          echo "WEB_IMAGE_REF=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}@${{ steps.build_web.outputs.digest }}" >> "$GITHUB_ENV"
+          echo "TRAINING_IMAGE_REF=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}@${{ steps.build_training.outputs.digest }}" >> "$GITHUB_ENV"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.13.0
+          terraform_version: 1.9.0
           terraform_wrapper: false
 
-      - name: Configure Terraform CLI & plugin cache
+      - name: Configure Terraform plugin cache
         shell: bash
         run: |
-          mkdir -p "$HOME/.terraform.d/plugin-cache"
-          cat > "$HOME/.terraformrc" <<'EOF'
-          plugin_cache_dir = "$HOME/.terraform.d/plugin-cache"
-          disable_checkpoint = true
-          EOF
-          echo "TF_CLI_CONFIG_FILE=$HOME/.terraformrc" >> "$GITHUB_ENV"
+          set -euo pipefail
+          CACHE_DIR="$RUNNER_TOOL_CACHE/terraform-plugins"
+          mkdir -p "$CACHE_DIR"
+          echo "TF_PLUGIN_CACHE_DIR=$CACHE_DIR" >> "$GITHUB_ENV"
 
-      - name: Cache Terraform plugins
-        uses: actions/cache@v4
-        with:
-          path: ~/.terraform.d/plugin-cache
-          key: ${{ runner.os }}-tf-plugins-${{ hashFiles('infra/terraform/.terraform.lock.hcl') }}
-          restore-keys: ${{ runner.os }}-tf-plugins-
 
       - name: Terraform init / validate
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
         run: |
+          terraform init -input=false -reconfigure -backend-config="prefix=envs/prod"
           terraform -version
-          terraform init -input=false -upgrade
+          terraform workspace new prod || terraform workspace select prod  # Create/select if needed
+
+          # Verify we're in the correct workspace
+          CURRENT_WORKSPACE=$(terraform workspace show)
+          if [ "$CURRENT_WORKSPACE" != "prod" ]; then
+            echo "ERROR: Expected to be in 'prod' workspace but currently in '$CURRENT_WORKSPACE'"
+            exit 1
+          fi
+          echo "✓ Confirmed workspace: $CURRENT_WORKSPACE"
+
           terraform fmt -check
           terraform validate
 
-      - name: Import existing service accounts if needed
+      - name: Import existing resources if needed
         working-directory: infra/terraform
         shell: bash
         run: |
           set -euo pipefail
-
-          # Import web service SA if it exists
-          terraform state show google_service_account.web_service_sa >/dev/null 2>&1 || \
-          terraform import google_service_account.web_service_sa "projects/${PROJECT_ID}/serviceAccounts/${WEB_RUNTIME_SA}" || true
-
-          # Import training job SA if it exists
-          terraform state show google_service_account.training_job_sa >/dev/null 2>&1 || \
-          terraform import google_service_account.training_job_sa "projects/${PROJECT_ID}/serviceAccounts/${TRAINING_RUNTIME_SA}" || true
+          # Import sf-private-key if exists and not already managed
+          if gcloud secrets describe sf-private-key --project=$PROJECT_ID >/dev/null 2>&1; then
+            echo "Checking if sf-private-key is already managed..."
+            if ! terraform state show google_secret_manager_secret.sf_private_key >/dev/null 2>&1; then
+              echo "Importing sf-private-key secret..."
+              terraform import -lock-timeout=5m google_secret_manager_secret.sf_private_key projects/$PROJECT_ID/secrets/sf-private-key || true
+            else
+              echo "sf-private-key already managed in Terraform state—skipping import."
+            fi
+            VERSION_ID=$(gcloud secrets versions list sf-private-key --project=$PROJECT_ID --limit=1 --format="value(name.basename())")
+            if [ -n "$VERSION_ID" ]; then
+              echo "Checking if sf-private-key version is already managed..."
+              if ! terraform state show google_secret_manager_secret_version.sf_private_key_version >/dev/null 2>&1; then
+                echo "Importing sf-private-key version $VERSION_ID..."
+                terraform import -lock-timeout=5m google_secret_manager_secret_version.sf_private_key_version projects/$PROJECT_ID/secrets/sf-private-key/versions/$VERSION_ID || true
+              else
+                echo "sf-private-key version already managed in Terraform state—skipping import."
+              fi
+            fi
+          else
+            echo "sf-private-key does not exist yet—will create on apply."
+          fi
+          # Import sf-private-key-persistent if exists and not already managed
+          if gcloud secrets describe sf-private-key-persistent --project=$PROJECT_ID >/dev/null 2>&1; then
+            echo "Checking if sf-private-key-persistent is already managed..."
+            if ! terraform state show google_secret_manager_secret.sf_private_key_persistent >/dev/null 2>&1; then
+              echo "Importing sf-private-key-persistent secret..."
+              terraform import -lock-timeout=5m google_secret_manager_secret.sf_private_key_persistent projects/$PROJECT_ID/secrets/sf-private-key-persistent || true
+            else
+              echo "sf-private-key-persistent already managed in Terraform state—skipping import."
+            fi
+          else
+            echo "sf-private-key-persistent does not exist yet—will create on apply."
+          fi
+          # Import auth_client_id if exists and not already managed
+          if gcloud secrets describe streamlit-auth-client-id --project=$PROJECT_ID >/dev/null 2>&1; then
+            echo "Checking if streamlit-auth-client-id is already managed..."
+            if ! terraform state show google_secret_manager_secret.auth_client_id >/dev/null 2>&1; then
+              echo "Importing streamlit-auth-client-id secret..."
+              terraform import -lock-timeout=5m google_secret_manager_secret.auth_client_id projects/$PROJECT_ID/secrets/streamlit-auth-client-id || true
+            else
+              echo "streamlit-auth-client-id already managed in Terraform state—skipping import."
+            fi
+            VERSION_ID=$(gcloud secrets versions list streamlit-auth-client-id --project=$PROJECT_ID --limit=1 --format="value(name.basename())")
+            if [ -n "$VERSION_ID" ]; then
+              echo "Checking if streamlit-auth-client-id version is already managed..."
+              if ! terraform state show google_secret_manager_secret_version.auth_client_id_v >/dev/null 2>&1; then
+                echo "Importing streamlit-auth-client-id version $VERSION_ID..."
+                terraform import -lock-timeout=5m google_secret_manager_secret_version.auth_client_id_v projects/$PROJECT_ID/secrets/streamlit-auth-client-id/versions/$VERSION_ID || true
+              else
+                echo "streamlit-auth-client-id version already managed in Terraform state—skipping import."
+              fi
+            fi
+          else
+            echo "streamlit-auth-client-id does not exist yet—will create on apply."
+          fi
+          # Import auth_client_secret if exists and not already managed
+          if gcloud secrets describe streamlit-auth-client-secret --project=$PROJECT_ID >/dev/null 2>&1; then
+            echo "Checking if streamlit-auth-client-secret is already managed..."
+            if ! terraform state show google_secret_manager_secret.auth_client_secret >/dev/null 2>&1; then
+              echo "Importing streamlit-auth-client-secret secret..."
+              terraform import -lock-timeout=5m google_secret_manager_secret.auth_client_secret projects/$PROJECT_ID/secrets/streamlit-auth-client-secret || true
+            else
+              echo "streamlit-auth-client-secret already managed in Terraform state—skipping import."
+            fi
+            VERSION_ID=$(gcloud secrets versions list streamlit-auth-client-secret --project=$PROJECT_ID --limit=1 --format="value(name.basename())")
+            if [ -n "$VERSION_ID" ]; then
+              echo "Checking if streamlit-auth-client-secret version is already managed..."
+              if ! terraform state show google_secret_manager_secret_version.auth_client_secret_v >/dev/null 2>&1; then
+                echo "Importing streamlit-auth-client-secret version $VERSION_ID..."
+                terraform import -lock-timeout=5m google_secret_manager_secret_version.auth_client_secret_v projects/$PROJECT_ID/secrets/streamlit-auth-client-secret/versions/$VERSION_ID || true
+              else
+                echo "streamlit-auth-client-secret version already managed in Terraform state—skipping import."
+              fi
+            fi
+          else
+            echo "streamlit-auth-client-secret does not exist yet—will create on apply."
+          fi
+          # Import auth_cookie_secret if exists and not already managed
+          if gcloud secrets describe streamlit-auth-cookie-secret --project=$PROJECT_ID >/dev/null 2>&1; then
+            echo "Checking if streamlit-auth-cookie-secret is already managed..."
+            if ! terraform state show google_secret_manager_secret.auth_cookie_secret >/dev/null 2>&1; then
+              echo "Importing streamlit-auth-cookie-secret secret..."
+              terraform import -lock-timeout=5m google_secret_manager_secret.auth_cookie_secret projects/$PROJECT_ID/secrets/streamlit-auth-cookie-secret || true
+            else
+              echo "streamlit-auth-cookie-secret already managed in Terraform state—skipping import."
+            fi
+            VERSION_ID=$(gcloud secrets versions list streamlit-auth-cookie-secret --project=$PROJECT_ID --limit=1 --format="value(name.basename())")
+            if [ -n "$VERSION_ID" ]; then
+              echo "Checking if streamlit-auth-cookie-secret version is already managed..."
+              if ! terraform state show google_secret_manager_secret_version.auth_cookie_secret_v >/dev/null 2>&1; then
+                echo "Importing streamlit-auth-cookie-secret version $VERSION_ID..."
+                terraform import -lock-timeout=5m google_secret_manager_secret_version.auth_cookie_secret_v projects/$PROJECT_ID/secrets/streamlit-auth-cookie-secret/versions/$VERSION_ID || true
+              else
+                echo "streamlit-auth-cookie-secret version already managed in Terraform state—skipping import."
+              fi
+            fi
+          else
+            echo "streamlit-auth-cookie-secret does not exist yet—will create on apply."
+          fi
+          # Import SAs (existing)
+          if ! terraform state show google_service_account.web_service_sa >/dev/null 2>&1; then
+            terraform import -lock-timeout=5m google_service_account.web_service_sa "projects/$PROJECT_ID/serviceAccounts/$WEB_RUNTIME_SA" || true
+          else
+            echo "web_service_sa already managed in Terraform state—skipping import."
+          fi
+          if ! terraform state show google_service_account.scheduler >/dev/null 2>&1; then
+            terraform import -lock-timeout=5m google_service_account.scheduler \
+              "projects/$PROJECT_ID/serviceAccounts/robyn-queue-scheduler@$PROJECT_ID.iam.gserviceaccount.com" || true
+          else
+            echo "scheduler already managed in Terraform state—skipping import."
+          fi
+          if ! terraform state show google_service_account.training_job_sa >/dev/null 2>&1; then
+            terraform import -lock-timeout=5m google_service_account.training_job_sa "projects/$PROJECT_ID/serviceAccounts/$TRAINING_RUNTIME_SA" || true
+          else
+            echo "training_job_sa already managed in Terraform state—skipping import."
+          fi
+          # Import Cloud Scheduler job
+          if gcloud scheduler jobs describe robyn-queue-tick --location=$REGION --project=$PROJECT_ID >/dev/null 2>&1; then
+            echo "Checking if scheduler job is already managed..."
+            if ! terraform state show google_cloud_scheduler_job.robyn_queue_tick >/dev/null 2>&1; then
+              echo "Scheduler job exists—importing..."
+              terraform import -lock-timeout=5m google_cloud_scheduler_job.robyn_queue_tick projects/$PROJECT_ID/locations/$REGION/jobs/robyn-queue-tick || true
+            else
+              echo "Scheduler job already managed in Terraform state—skipping import."
+            fi
+          else
+            echo "Scheduler job does not exist—will create on apply."
+          fi
+          # Import training job
+          if gcloud run jobs describe ${SERVICE_NAME}-training --region=$REGION --project=$PROJECT_ID >/dev/null 2>&1; then
+            echo "Checking if training job is already managed..."
+            if ! terraform state show google_cloud_run_v2_job.training_job >/dev/null 2>&1; then
+              echo "Training job exists—importing..."
+              terraform import -lock-timeout=5m google_cloud_run_v2_job.training_job projects/$PROJECT_ID/locations/$REGION/jobs/${SERVICE_NAME}-training || true
+            else
+              echo "Training job already managed in Terraform state—skipping import."
+            fi
+          else
+            echo "Training job does not exist—will create on apply."
+          fi
+          # Import web service
+          if gcloud run services describe ${SERVICE_NAME}-web --region=$REGION --project=$PROJECT_ID >/dev/null 2>&1; then
+            echo "Checking if web service is already managed..."
+            if ! terraform state show google_cloud_run_service.web_service >/dev/null 2>&1; then
+              echo "Web service exists—importing..."
+              terraform import -lock-timeout=5m google_cloud_run_service.web_service locations/$REGION/namespaces/$PROJECT_ID/services/${SERVICE_NAME}-web || true
+            else
+              echo "Web service already managed in Terraform state—skipping import."
+            fi
+          else
+            echo "Web service does not exist—will create on apply."
+          fi
 
       - name: Clear taint & disable deletion protection
         working-directory: infra/terraform
@@ -148,63 +367,77 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Disable deletion protection on web service
+          # Disable deletion protection on web service if it exists
           echo "Disabling Cloud Run deletion protection..."
-          gcloud run services update "${SERVICE_NAME}-web" \
-            --region="$REGION" \
-            --no-deletion-protection || true
+          if gcloud run services describe "${SERVICE_NAME}-web" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud run services update "${SERVICE_NAME}-web" \
+              --region="$REGION" \
+              --clear-deletion-protection || true
+          else
+            echo "Web service does not exist—skipping deletion protection update."
+          fi
 
           # Clear taints on Terraform resources
           echo "Clearing Terraform taints..."
           if terraform -version | grep -qE '^Terraform v1\.'; then
-            terraform untaint google_cloud_run_service.web_service || true
-            terraform untaint google_cloud_run_v2_job.training_job || true
+            if terraform state show google_cloud_run_service.web_service >/dev/null 2>&1; then
+              terraform untaint google_cloud_run_service.web_service || true
+            else
+              echo "Web service not in state—skipping untaint."
+            fi
+            if terraform state show google_cloud_run_v2_job.training_job >/dev/null 2>&1; then
+              terraform untaint google_cloud_run_v2_job.training_job || true
+            else
+              echo "Training job not in state—skipping untaint."
+            fi
           fi
 
           # Re-import if still tainted
           if terraform plan -refresh-only -no-color 2>&1 | grep -q "is tainted"; then
             echo "Re-importing resources to clear taints..."
-
-            # Re-import web service
-            terraform state rm google_cloud_run_service.web_service || true
-            terraform import google_cloud_run_service.web_service \
-              "projects/${PROJECT_ID}/locations/${REGION}/services/${SERVICE_NAME}-web" || true
-
-            # Re-import training job
-            terraform state rm google_cloud_run_v2_job.training_job || true
-            terraform import google_cloud_run_v2_job.training_job \
-              "projects/${PROJECT_ID}/locations/${REGION}/jobs/mmm-app-training" || true
+            if gcloud run services describe "${SERVICE_NAME}-web" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+              terraform state rm google_cloud_run_service.web_service || true
+              terraform import -lock-timeout=5m google_cloud_run_service.web_service \
+                "locations/$REGION/namespaces/$PROJECT_ID/services/${SERVICE_NAME}-web" || true
+            fi
+            if gcloud run jobs describe "${SERVICE_NAME}-training" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+              terraform state rm google_cloud_run_v2_job.training_job || true
+              terraform import -lock-timeout=5m google_cloud_run_v2_job.training_job \
+                "locations/$REGION/namespaces/$PROJECT_ID/services/${SERVICE_NAME}-training" || true
+            fi
           fi
 
       - name: Terraform plan
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
-          WEB_IMAGE_URL: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
-          TRAINING_IMAGE_URL: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.TRAINING_IMAGE }}:${{ github.sha }}
+          TF_VAR_project_id: $PROJECT_ID
+          TF_VAR_region: $REGION
+          TF_VAR_service_name: $SERVICE_NAME
+          TF_VAR_bucket_name: $BUCKET
+          TF_VAR_deployer_sa: $SA_EMAIL
+          # 👇 use digest-pinned refs here
+          TF_VAR_web_image: ${{ env.WEB_IMAGE_REF }}
+          TF_VAR_training_image: ${{ env.TRAINING_IMAGE_REF }}
         run: |
-          echo "Deploying images:"
-          echo "  Web service: $WEB_IMAGE_URL"
-          echo "  Training job: $TRAINING_IMAGE_URL"
+          echo "Deploying images (digest pinned):"
+          echo "  Web service: $WEB_IMAGE_REF"
+          echo "  Training job: $TRAINING_IMAGE_REF"
 
-          terraform plan -input=false \
-            -var "project_id=$PROJECT_ID" \
-            -var "region=$REGION" \
-            -var "service_name=$SERVICE_NAME" \
-            -var "bucket_name=$BUCKET" \
-            -var "deployer_sa=$SA_EMAIL" \
-            -var "web_image=$WEB_IMAGE_URL" \
-            -var "training_image=$TRAINING_IMAGE_URL" \
-            -var "scheduler_job_name=robyn-queue-tick" \
-            -var "queue_name=default" \
-            -out=tfplan
+          terraform plan -input=false -var-file="envs/prod.tfvars" -out=tfplan
 
       - name: Terraform apply
         working-directory: infra/terraform
         env:
           TF_IN_AUTOMATION: "true"
+          TF_VAR_project_id: $PROJECT_ID
+          TF_VAR_region: $REGION
+          TF_VAR_service_name: $SERVICE_NAME
+          TF_VAR_bucket_name: $BUCKET
+          TF_VAR_deployer_sa: $SA_EMAIL
+          TF_VAR_web_image: ${{ env.WEB_IMAGE_REF }}
+          TF_VAR_training_image: ${{ env.TRAINING_IMAGE_REF }}
         run: terraform apply -input=false -auto-approve tfplan
-
       - name: Print deployment info
         working-directory: infra/terraform
         run: |
@@ -219,4 +452,4 @@ jobs:
           echo "Architecture:"
           echo "  - Web Interface: Cloud Run Service (2 CPUs, 4GB)"
           echo "  - Training Jobs: Cloud Run Jobs (up to 32 CPUs, 128GB)"
-          echo "  - Storage: GCS Bucket (${BUCKET})"
+          echo "  - Storage: GCS Bucket ($BUCKET)"

@@ -1,6 +1,7 @@
-streamlit==1.36.0
+streamlit[auth]>=1.43
 pandas
 snowflake-connector-python
 google-cloud-secret-manager
 google-cloud-storage
+google-cloud-run
 protobuf<5

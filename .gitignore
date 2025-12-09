@@ -8,7 +8,15 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.mypy_cache/
+.pytest_cache/
+*.egg-info/
+htmlcov/
+.coverage
+
+# Streamlit
 .streamlit/secrets.toml
+app/.streamlit/secrets.toml
 
 # R
 .Rhistory
@@ -19,7 +27,7 @@ __pycache__/
 renv/library/
 .Rcache/
 
-# Node/Cache-ish
+# Node/Cache
 .cache/
 
 # Terraform
@@ -27,6 +35,10 @@ renv/library/
 *.tfstate
 *.tfstate.*
 .terraform.lock.hcl
+*.plan
+tfplan
+infra/terraform/.terraform/*
+infra/terraform/tfplan
 
 # Local data & temp
 data/
@@ -34,6 +46,7 @@ tmp/
 temp/
 *.tmp
 
+# Documentation (generated)
 *.pdf
 docs/*.png
 
@@ -43,23 +56,23 @@ docs/*.png
 *credentials*.json
 secrets/
 
-*.json
-*.png
-*.plan
-*.txt
-./terraformd/*
-/infra/terraform/~/.terraform.d/*
-/infra/terraform/.terraform/*
-/infra/terraform/tfplan
+# Reports
 baseline_report.md
 performance_report.md
 scripts/reports/*
-.vscode/*
+infra/terraform/~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/google-beta/7.7.0/darwin_arm64/terraform-provider-google-beta_v7.7.0_x5
 .pylintrc
+baseline_metrics.json
+datawarehouse-422511-cf521161e016.json
+performance_metrics.json
 pyproject.toml
-scripts/deploy.sh
-scripts/ci_cd.sh
-scripts/setup_dev_env.sh
-scripts/run_all.sh
-scripts/collect_baseline.py
+app/deprecated/0_Connect_Your_Data.py
+app/deprecated/10_analysis.py
+infra/terraform/~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/google/5.45.2/darwin_arm64/LICENSE.txt
+infra/terraform/~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/google/5.45.2/darwin_arm64/terraform-provider-google_v5.45.2_x5
+infra/terraform/~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/google/7.7.0/darwin_arm64/LICENSE.txt
+infra/terraform/~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/google/7.7.0/darwin_arm64/terraform-provider-google_v7.7.0_x5
+infra/terraform/~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/google-beta/7.0.1/darwin_arm64/LICENSE.txt
+infra/terraform/~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/google-beta/7.0.1/darwin_arm64/terraform-provider-google-beta_v7.0.1_x5
+infra/terraform/~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/google-beta/7.7.0/darwin_arm64/LICENSE.txt
 scripts/perf_test.py
