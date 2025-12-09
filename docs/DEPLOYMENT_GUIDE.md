@@ -177,7 +177,7 @@ Update `infra/terraform/backend.tf` with your bucket name:
 ```hcl
 terraform {
   backend "gcs" {
-    bucket = "your-project-id-tf-state"  # Replace with your bucket name
+    bucket = "your-project-id-tf-state"  # Example: "mmm-tf-state"
   }
 }
 ```
@@ -547,7 +547,7 @@ Edit `infra/terraform/backend.tf`:
 ```hcl
 terraform {
   backend "gcs" {
-    bucket = "your-project-id-tf-state"  # Your TF state bucket
+    bucket = "your-project-id-tf-state"  # Example: "mmm-tf-state"
   }
 }
 ```
@@ -721,7 +721,7 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
 | `training_max_cores` | R training max cores | `4` |
 | `min_instances` | Min Cloud Run instances | `0` |
 | `max_instances` | Max Cloud Run instances | `10` |
-| `allowed_domains` | OAuth allowed domains | `mesheddata.com` |
+| `allowed_domains` | OAuth allowed domains | `mesheddata.com, buycycle.com` |
 
 ### GitHub Secrets Required
 
