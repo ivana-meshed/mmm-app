@@ -64,6 +64,19 @@ For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Deploying to a New Company/Project
 
+### Quick Start: Requirements
+
+For a concise list of basic requirements to deploy and maintain this repository, see **[REQUIREMENTS.md](docs/REQUIREMENTS.md)**. This includes:
+
+- Required tools and software (gcloud, Terraform, Docker, Git)
+- Required accounts and access (GCP, GitHub, Snowflake)
+- Required GCP APIs and resources
+- Required credentials and secrets
+- Ongoing maintenance considerations
+- Quick reference deployment checklist
+
+### Detailed Deployment Guide
+
 For step-by-step instructions on deploying this application to a new Google Cloud project, see the **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)**. This comprehensive guide covers:
 
 - GCP project setup and API enablement
@@ -83,6 +96,8 @@ For step-by-step instructions on deploying this application to a new Google Clou
 - Terraform v1.5+
 - Snowflake credentials for the data source
 - A GCS bucket (e.g. `mmm-app-output`) to store artifacts
+
+For a complete list of prerequisites, see [REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ## Local Development
 
@@ -289,6 +304,7 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 | [README.md](README.md) | Project overview and quick start |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture and components |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Local development setup and testing |
+| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | **Basic requirements for deployment and maintenance** |
 | [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | **Complete deployment guide for new projects** |
 | [docs/MODEL_SUMMARY.md](docs/MODEL_SUMMARY.md) | Model summary file structure |
 | [docs/OUTPUT_MODELS_PARQUET.md](docs/OUTPUT_MODELS_PARQUET.md) | OutputModels parquet data extraction |
