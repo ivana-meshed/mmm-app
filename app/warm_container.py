@@ -384,7 +384,7 @@ if __name__ == "__main__":
             try:
                 parsed_df = pd.read_csv(up)
                 st.success(f"Loaded {len(parsed_df)} rows")
-                st.dataframe(parsed_df.head(), width='stretch')
+                st.dataframe(parsed_df.head(), width="stretch")
             except Exception as e:
                 st.error(f"Failed to parse CSV: {e}")
 
@@ -501,4 +501,4 @@ if __name__ == "__main__":
                     for e in st.session_state.job_queue
                 ]
             )
-            st.dataframe(df_queue, width='stretch')
+            st.dataframe(df_queue, width="stretch")

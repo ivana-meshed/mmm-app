@@ -1489,7 +1489,7 @@ else:
                     display = table[
                         [c for c in cols if c in table.columns]
                     ].copy()
-                    st.dataframe(display, width='stretch')
+                    st.dataframe(display, width="stretch")
 
                 with st.spinner("Rendering best results..."):
                     render_run_from_key(runs, best_key, bucket_name)
@@ -1519,7 +1519,7 @@ else:
                     "decomp_rssd_test",
                 ]
                 display = table[[c for c in cols if c in table.columns]].copy()
-                st.dataframe(display, width='stretch')
+                st.dataframe(display, width="stretch")
 
             with st.spinner("Rendering best results..."):
                 render_run_from_key(runs, best_key, bucket_name)

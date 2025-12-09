@@ -502,7 +502,7 @@ with tab_rel:
                     else:
                         st.plotly_chart(
                             heatmap_fig_from_matrix(mat),
-                            width='stretch',
+                            width="stretch",
                         )
 
             with c2:
@@ -575,7 +575,7 @@ with tab_rel:
                             height=bar_h,
                             margin=dict(l=8, r=8, t=20, b=8),
                         )
-                        st.plotly_chart(figd, width='stretch')
+                        st.plotly_chart(figd, width="stretch")
 
             # Metrics table (adds Avg(X) & RelVar(X); n counts non-NA pairs with X>0)
             st.caption("Per-variable signal (quadratic fit)")
@@ -599,7 +599,7 @@ with tab_rel:
                             }
                         ),
                         hide_index=True,
-                        width='stretch',
+                        width="stretch",
                     )
             else:
                 st.caption("—")
@@ -917,7 +917,7 @@ with tab_diag:
                 "PCA Band",
             ]
         ],
-        width='stretch',
+        width="stretch",
     )
 
     # Bucket variable tables (overall run)
@@ -954,7 +954,7 @@ with tab_diag:
                         .sort_values(["Country", "Variable"])
                         .copy()
                     )
-                    st.dataframe(out, hide_index=True, width='stretch')
+                    st.dataframe(out, hide_index=True, width="stretch")
                 else:
                     st.info(
                         "No variables available in this bucket for the selected countries."
@@ -1126,7 +1126,7 @@ with tab_diag:
                     "PCA Band",
                 ]
             ],
-            width='stretch',
+            width="stretch",
         )
 
     # ---- Download current variable selection as CSV ----
@@ -1226,7 +1226,7 @@ with tab_diag:
                 "PCA Band",
             ]
         ],
-        width='stretch',
+        width="stretch",
     )
 
     with st.expander(
@@ -1261,7 +1261,7 @@ with tab_diag:
                         .sort_values(["Country", "Variable"])
                         .copy()
                     )
-                    st.dataframe(out, hide_index=True, width='stretch')
+                    st.dataframe(out, hide_index=True, width="stretch")
                 else:
                     st.info(
                         "No variables available in this bucket for the current selection."
@@ -1678,7 +1678,7 @@ with tab_deep:
         xaxis_title=nice(x_col),
         yaxis_title=nice(y_col),
     )
-    st.plotly_chart(figfit, width='stretch')
+    st.plotly_chart(figfit, width="stretch")
 
     mr_tbl = pd.DataFrame(
         {
@@ -1687,4 +1687,4 @@ with tab_deep:
             "Marginal return (dy/dx)": [f"{float(v):.4f}" for v in dydx],
         }
     )
-    st.dataframe(mr_tbl, hide_index=True, width='stretch')
+    st.dataframe(mr_tbl, hide_index=True, width="stretch")

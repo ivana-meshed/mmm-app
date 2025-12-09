@@ -2,7 +2,7 @@
 """
 Backfill parquet extraction for existing OutputCollect.RDS files in GCS.
 
-This script scans GCS for existing model runs that have OutputCollect.RDS but 
+This script scans GCS for existing model runs that have OutputCollect.RDS but
 don't have the extracted parquet files, then runs the R extraction script on them.
 """
 
