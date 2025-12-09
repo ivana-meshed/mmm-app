@@ -29,14 +29,12 @@ app/                          # Streamlit application and Python modules
     snowflake_connector.py    # Snowflake connection and query utilities
     __init__.py
   pages/                      # Streamlit multi-page components
-    0_Connect_Data.py         # Snowflake connection setup
-    1_Map_Data.py             # Data column mapping and metadata
-    2_Review_Data.py          # Data validation and preview
-    3_Prepare_Training_Data.py # Data preparation (deprecated)
-    3_Prepare_Training_Datav2.py # Data preparation (current)
-    4_Run_Experiment.py       # Single/batch experiment configuration
-    5_View_Results.py         # Results visualization
-    6_View_Best_Results.py    # Best model selection and comparison
+    Connect_Data.py           # Snowflake connection setup
+    Map_Data.py               # Data column mapping and metadata
+    Review_Data.py            # Data validation and preview
+    Run_Experiment.py         # Single/batch experiment configuration
+    View_Results.py           # Results visualization
+    View_Best_Results.py      # Best model selection and comparison
   app_shared.py               # Shared helper functions (job management, queue)
   app_split_helpers.py        # Split testing helpers
   data_processor.py           # Data optimization and Parquet conversion
