@@ -246,8 +246,8 @@ def render_component():
 **GCS Interactions (using utils)**:
 ```python
 from app.utils.gcs_utils import (
-    upload_to_gcs, 
-    download_from_gcs, 
+    upload_to_gcs,
+    download_from_gcs,
     read_json_from_gcs,
     write_json_to_gcs
 )
