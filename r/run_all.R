@@ -1917,6 +1917,7 @@ low_bounds <- ifelse(is_brand, 0, 0.3)
 up_bounds <- ifelse(is_brand, 0, 4)
 
 # If per-channel budgets are specified, adjust constraints to enforce them
+# Note: This block only runs if channel_budgets is NOT empty
 if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
     message("Per-channel budgets specified - adjusting constraints to match specified budgets")
     message(sprintf("  Total budget (expected_spend): %s", expected_spend_cfg))
@@ -1983,6 +1984,13 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
         message("  ⚠️  WARNING: Upper bounds sum differs from 1.0 by more than 5%!")
         message("  ⚠️  This may cause the allocator to not respect the total budget.")
     }
+} else if (!is.null(expected_spend_cfg) && length(channel_budgets_cfg) == 0) {
+    # Custom total budget WITHOUT per-channel constraints
+    message("Custom total budget specified WITHOUT per-channel budgets")
+    message(sprintf("  Total budget (expected_spend): %s", expected_spend_cfg))
+    message("  Using default channel constraints (allowing optimizer flexibility)")
+    message("  Channel bounds: low=[", paste(round(low_bounds, 2), collapse=", "), "]")
+    message("  Channel bounds: up=[", paste(round(up_bounds, 2), collapse=", "), "]")
 }
 
 AllocatorCollect <- try(
