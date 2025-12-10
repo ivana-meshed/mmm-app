@@ -2027,7 +2027,7 @@ cat("==========================================\n\n")
 # Log the actual values being passed to robyn_allocator
 cat("📊 Calling robyn_allocator with:\n")
 cat(sprintf("  scenario: %s\n", robyn_scenario))
-cat(sprintf("  expected_spend: %s\n", if (is.null(expected_spend_cfg)) "NULL" else format(expected_spend_cfg, scientific=FALSE, big.mark=",")))
+cat(sprintf("  total_budget: %s\n", if (is.null(expected_spend_cfg)) "NULL" else format(expected_spend_cfg, scientific=FALSE, big.mark=",")))
 cat(sprintf("  channel_constr_low: %s\n", if (is.null(low_bounds)) "NULL" else paste0("[", paste(sprintf("%.3f", low_bounds), collapse=", "), "]")))
 cat(sprintf("  channel_constr_up: %s\n", if (is.null(up_bounds)) "NULL" else paste0("[", paste(sprintf("%.3f", up_bounds), collapse=", "), "]")))
 cat(sprintf("  date_range: %s to %s\n\n", alloc_start, alloc_end))
@@ -2036,7 +2036,7 @@ AllocatorCollect <- try(
     robyn_allocator(
         InputCollect = InputCollect, OutputCollect = OutputCollect,
         select_model = best_id, date_range = c(alloc_start, alloc_end),
-        expected_spend = expected_spend_cfg, scenario = robyn_scenario,
+        total_budget = expected_spend_cfg, scenario = robyn_scenario,
         channel_constr_low = low_bounds, channel_constr_up = up_bounds,
         export = TRUE
     ),
@@ -2057,7 +2057,7 @@ if (inherits(AllocatorCollect, "try-error")) {
         paste0("Error: ", err_msg),
         paste0("UI budget_scenario: ", budget_scenario_cfg),
         paste0("Robyn scenario: ", robyn_scenario),
-        paste0("expected_spend: ", if (is.null(expected_spend_cfg)) "NULL" else expected_spend_cfg),
+        paste0("total_budget: ", if (is.null(expected_spend_cfg)) "NULL" else expected_spend_cfg),
         paste0("date_range: ", alloc_start, " to ", alloc_end),
         "",
         "Stack trace:",
