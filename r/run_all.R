@@ -2014,8 +2014,36 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
     # Mode 2: Custom total budget WITHOUT per-channel constraints
     cat("\n💰 MODE 2: Custom Total Budget WITHOUT Per-Channel Constraints\n")
     cat(sprintf("  Total budget (expected_spend): %s\n", format(expected_spend_cfg, scientific=FALSE, big.mark=",")))
-    cat("  Channel constraints: NULL (using Robyn defaults for maximum flexibility)\n")
-    cat("  Note: Allocator will optimize channel mix to maximize response within the total budget\n")
+    
+    # Calculate historical spend for comparison
+    alloc_data <- InputCollect$dt_input[InputCollect$dt_input$date >= alloc_start & 
+                                        InputCollect$dt_input$date <= alloc_end, ]
+    historical_spends <- sapply(InputCollect$paid_media_spends, function(ch) {
+        sum(alloc_data[[ch]], na.rm = TRUE)
+    })
+    historical_total <- sum(historical_spends)
+    
+    cat(sprintf("  Historical total spend (in date range): %.2f\n", historical_total))
+    
+    # If custom budget is significantly lower than historical spend, 
+    # we need to set permissive channel constraints to avoid conflicts
+    budget_ratio <- expected_spend_cfg / historical_total
+    
+    if (budget_ratio < 0.9) {
+        # Custom budget is lower than historical - allow channels to decrease significantly
+        # Set lower bound to 0.01 (1% of historical) to allow major reductions
+        # Set upper bound based on budget ratio to ensure total budget is feasible
+        low_bounds <- rep(0.01, length(InputCollect$paid_media_spends))
+        up_bounds <- rep(min(budget_ratio * 2, 2.0), length(InputCollect$paid_media_spends))
+        cat(sprintf("  ⚠️  Custom budget (%.0f) is %.1f%% of historical spend\n", expected_spend_cfg, budget_ratio * 100))
+        cat(sprintf("  Setting permissive channel constraints: [%.2f, %.2f] to make budget feasible\n", 
+                    low_bounds[1], up_bounds[1]))
+        cat("  Note: Channels can be reduced to 1% of historical to fit within total budget\n")
+    } else {
+        # Custom budget is close to or higher than historical - use default flexibility
+        cat("  Channel constraints: NULL (using Robyn defaults for flexibility)\n")
+        cat("  Note: Allocator will optimize channel mix to maximize response within the total budget\n")
+    }
 } else {
     # Mode 1: Historical budget (default)
     cat("\n💰 MODE 1: Historical Budget (default)\n")
@@ -2027,7 +2055,7 @@ cat("==========================================\n\n")
 # Log the actual values being passed to robyn_allocator
 cat("📊 Calling robyn_allocator with:\n")
 cat(sprintf("  scenario: %s\n", robyn_scenario))
-cat(sprintf("  expected_spend: %s\n", if (is.null(expected_spend_cfg)) "NULL" else format(expected_spend_cfg, scientific=FALSE, big.mark=",")))
+cat(sprintf("  total_budget: %s\n", if (is.null(expected_spend_cfg)) "NULL" else format(expected_spend_cfg, scientific=FALSE, big.mark=",")))
 cat(sprintf("  channel_constr_low: %s\n", if (is.null(low_bounds)) "NULL" else paste0("[", paste(sprintf("%.3f", low_bounds), collapse=", "), "]")))
 cat(sprintf("  channel_constr_up: %s\n", if (is.null(up_bounds)) "NULL" else paste0("[", paste(sprintf("%.3f", up_bounds), collapse=", "), "]")))
 cat(sprintf("  date_range: %s to %s\n\n", alloc_start, alloc_end))
@@ -2036,7 +2064,7 @@ AllocatorCollect <- try(
     robyn_allocator(
         InputCollect = InputCollect, OutputCollect = OutputCollect,
         select_model = best_id, date_range = c(alloc_start, alloc_end),
-        expected_spend = expected_spend_cfg, scenario = robyn_scenario,
+        total_budget = expected_spend_cfg, scenario = robyn_scenario,
         channel_constr_low = low_bounds, channel_constr_up = up_bounds,
         export = TRUE
     ),
@@ -2057,7 +2085,7 @@ if (inherits(AllocatorCollect, "try-error")) {
         paste0("Error: ", err_msg),
         paste0("UI budget_scenario: ", budget_scenario_cfg),
         paste0("Robyn scenario: ", robyn_scenario),
-        paste0("expected_spend: ", if (is.null(expected_spend_cfg)) "NULL" else expected_spend_cfg),
+        paste0("total_budget: ", if (is.null(expected_spend_cfg)) "NULL" else expected_spend_cfg),
         paste0("date_range: ", alloc_start, " to ", alloc_end),
         "",
         "Stack trace:",
