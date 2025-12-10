@@ -1894,6 +1894,10 @@ alloc_start <- alloc_end - 364
 # Read budget parameters from config
 budget_scenario_cfg <- cfg$budget_scenario %||% "max_historical_response"
 expected_spend_cfg <- cfg$expected_spend %||% NULL
+# Explicitly convert expected_spend to numeric to avoid scientific notation issues
+if (!is.null(expected_spend_cfg)) {
+    expected_spend_cfg <- as.numeric(expected_spend_cfg)
+}
 channel_budgets_cfg <- cfg$channel_budgets %||% list()
 
 # Map UI scenario values to Robyn allocator scenario values
@@ -1906,7 +1910,7 @@ robyn_scenario <- "max_response"
 cat("\n========== BUDGET CONFIGURATION ==========\n")
 cat(paste0("UI scenario: ", budget_scenario_cfg, "\n"))
 cat(paste0("Robyn scenario: ", robyn_scenario, "\n"))
-cat(paste0("expected_spend: ", if (is.null(expected_spend_cfg)) "NULL (use historical)" else expected_spend_cfg, "\n"))
+cat(paste0("expected_spend: ", if (is.null(expected_spend_cfg)) "NULL (use historical)" else format(expected_spend_cfg, scientific=FALSE, big.mark=","), "\n"))
 if (length(channel_budgets_cfg) > 0) {
     cat(paste0("channel_budgets: ", paste(names(channel_budgets_cfg), "=", unlist(channel_budgets_cfg), collapse=", "), "\n"))
 }
@@ -2009,7 +2013,7 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
 } else if (!is.null(expected_spend_cfg) && length(channel_budgets_cfg) == 0) {
     # Mode 2: Custom total budget WITHOUT per-channel constraints
     cat("\n💰 MODE 2: Custom Total Budget WITHOUT Per-Channel Constraints\n")
-    cat(sprintf("  Total budget (expected_spend): %s\n", expected_spend_cfg))
+    cat(sprintf("  Total budget (expected_spend): %s\n", format(expected_spend_cfg, scientific=FALSE, big.mark=",")))
     cat("  Channel constraints: NULL (using Robyn defaults for maximum flexibility)\n")
     cat("  Note: Allocator will optimize channel mix to maximize response within the total budget\n")
 } else {
@@ -2019,6 +2023,14 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
     cat("  Channel constraints: NULL (using Robyn defaults)\n")
 }
 cat("==========================================\n\n")
+
+# Log the actual values being passed to robyn_allocator
+cat("📊 Calling robyn_allocator with:\n")
+cat(sprintf("  scenario: %s\n", robyn_scenario))
+cat(sprintf("  expected_spend: %s\n", if (is.null(expected_spend_cfg)) "NULL" else format(expected_spend_cfg, scientific=FALSE, big.mark=",")))
+cat(sprintf("  channel_constr_low: %s\n", if (is.null(low_bounds)) "NULL" else paste0("[", paste(sprintf("%.3f", low_bounds), collapse=", "), "]")))
+cat(sprintf("  channel_constr_up: %s\n", if (is.null(up_bounds)) "NULL" else paste0("[", paste(sprintf("%.3f", up_bounds), collapse=", "), "]")))
+cat(sprintf("  date_range: %s to %s\n\n", alloc_start, alloc_end))
 
 AllocatorCollect <- try(
     robyn_allocator(
