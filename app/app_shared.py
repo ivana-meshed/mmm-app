@@ -1340,6 +1340,14 @@ def build_job_config_from_params(
     if "column_agg_strategies" in params and params["column_agg_strategies"]:
         config["column_agg_strategies"] = params["column_agg_strategies"]
 
+    # Add budget allocation parameters if present
+    if "budget_scenario" in params:
+        config["budget_scenario"] = params["budget_scenario"]
+    if "expected_spend" in params:
+        config["expected_spend"] = params["expected_spend"]
+    if "channel_budgets" in params:
+        config["channel_budgets"] = params["channel_budgets"]
+
     return config
 
 
