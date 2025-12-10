@@ -2321,7 +2321,13 @@ with tab_single:
                 else ""
             ),
             "annotations_gcs_path": "",
+            "budget_scenario": budget_scenario,
+            "expected_spend": expected_spend if expected_spend else "",
         }
+
+        # Add per-channel budgets to CSV row
+        for channel, budget in channel_budgets.items():
+            csv_row[f"{channel}_budget"] = budget
 
         # Add custom hyperparameters to CSV row
         if hyperparameter_preset == "Custom" and custom_hyperparameters:
@@ -2382,6 +2388,9 @@ with tab_single:
                             ),
                             "resample_freq": resample_freq,
                             "column_agg_strategies": column_agg_strategies,
+                            "budget_scenario": budget_scenario,
+                            "expected_spend": expected_spend,
+                            "channel_budgets": channel_budgets,
                         },
                     }
 
@@ -2481,6 +2490,9 @@ with tab_single:
                             "start_date": start_date_str,
                             "end_date": end_date_str,
                             "data_gcs_path": f"gs://{gcs_bucket}/{data_blob_path}",
+                            "budget_scenario": budget_scenario,
+                            "expected_spend": expected_spend,
+                            "channel_budgets": channel_budgets,
                         }
 
                         new_entries.append(
@@ -3588,7 +3600,18 @@ with tab_queue:
 
         # --- CSV templates (collapsed, less prominent) ---
         with st.expander("CSV examples", expanded=False):
-            st.caption("Download example CSVs to see the expected structure.")
+            st.caption(
+                "Download example CSVs to see the expected structure. "
+                "New in these templates: **budget_scenario** and **expected_spend** "
+                "columns allow you to specify custom budgets for allocation."
+            )
+            st.info(
+                "💡 **Budget Allocation Options:**\n"
+                "- **budget_scenario**: Set to 'max_historical_response' (default) "
+                "to use historical spend, or 'max_response_expected_spend' for custom budget\n"
+                "- **expected_spend**: When using custom budget, specify total amount (e.g., '150000')\n"
+                "- **{CHANNEL}_budget**: Optional per-channel budgets (e.g., 'GA_SUPPLY_COST_budget')"
+            )
             col_ex1, col_ex2 = st.columns(2)
             with col_ex1:
                 st.download_button(

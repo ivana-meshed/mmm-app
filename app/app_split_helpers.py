@@ -900,6 +900,7 @@ _builder_defaults = dict(
     resample_freq="none",
     resample_agg="sum",
     gcs_bucket=st.session_state.get("gcs_bucket", GCS_BUCKET),
+    budget_scenario="max_historical_response",  # Budget allocation mode
 )
 
 
