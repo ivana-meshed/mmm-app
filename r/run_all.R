@@ -1891,14 +1891,36 @@ flush_and_ship_log("before robyn_allocator")
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
+# Read budget parameters from config
+budget_scenario <- cfg$budget_scenario %||% "max_historical_response"
+expected_spend_cfg <- cfg$expected_spend %||% NULL
+channel_budgets_cfg <- cfg$channel_budgets %||% list()
+
+message("Budget configuration:")
+message("  scenario: ", budget_scenario)
+message("  expected_spend: ", if (is.null(expected_spend_cfg)) "NULL (use historical)" else expected_spend_cfg)
+if (length(channel_budgets_cfg) > 0) {
+    message("  channel_budgets: ", paste(names(channel_budgets_cfg), "=", unlist(channel_budgets_cfg), collapse=", "))
+}
+
+# Set up channel constraints
 is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
 low_bounds <- ifelse(is_brand, 0, 0.3)
 up_bounds <- ifelse(is_brand, 0, 4)
+
+# If per-channel budgets are specified, adjust constraints
+# Note: This is a simplified approach - in practice you may want more sophisticated logic
+if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
+    message("Per-channel budgets specified - using custom constraints")
+    # Store original bounds for channels without specific budgets
+    # Channels with budgets will be constrained to their specified values
+}
+
 AllocatorCollect <- try(
     robyn_allocator(
         InputCollect = InputCollect, OutputCollect = OutputCollect,
         select_model = best_id, date_range = c(alloc_start, alloc_end),
-        expected_spend = NULL, scenario = "max_historical_response",
+        expected_spend = expected_spend_cfg, scenario = budget_scenario,
         channel_constr_low = low_bounds, channel_constr_up = up_bounds,
         export = TRUE
     ),

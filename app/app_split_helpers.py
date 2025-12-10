@@ -1058,6 +1058,46 @@ def _make_normalizer(defaults: dict):
         if custom_hyperparameters:
             result["custom_hyperparameters"] = custom_hyperparameters
 
+        # Add budget parameters (new feature)
+        budget_scenario = str(
+            _g(
+                "budget_scenario",
+                defaults.get("budget_scenario", "max_historical_response"),
+            )
+        )
+        result["budget_scenario"] = budget_scenario
+
+        # Add expected_spend if using custom budget
+        if budget_scenario == "max_response_expected_spend":
+            expected_spend_str = str(_g("expected_spend", ""))
+            if expected_spend_str and expected_spend_str.strip():
+                try:
+                    result["expected_spend"] = float(expected_spend_str)
+                except (ValueError, TypeError):
+                    result["expected_spend"] = None
+            else:
+                result["expected_spend"] = None
+        else:
+            result["expected_spend"] = None
+
+        # Parse per-channel budgets from columns like {CHANNEL}_budget
+        channel_budgets = {}
+        for col in row.index:
+            if col.endswith("_budget") and pd.notna(row[col]) and str(row[col]).strip():
+                # Extract channel name (remove _budget suffix)
+                channel = col[:-7]  # Remove "_budget"
+                try:
+                    budget_val = float(row[col])
+                    if budget_val > 0:
+                        channel_budgets[channel] = budget_val
+                except (ValueError, TypeError):
+                    pass
+
+        if channel_budgets:
+            result["channel_budgets"] = channel_budgets
+        else:
+            result["channel_budgets"] = {}
+
         return result
 
     return _normalize_row

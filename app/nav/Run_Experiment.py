@@ -1958,6 +1958,122 @@ with tab_single:
         factor_vars = ", ".join(factor_vars_list)
         organic_vars = ", ".join(organic_vars_list)
 
+    # Budget Allocation Settings
+    budget_scenario = "max_historical_response"
+    expected_spend = None
+    channel_budgets = {}
+
+    with st.expander("💰 Budget Allocation Settings", expanded=False):
+        st.caption(
+            "Configure budget allocation for the optimizer. Choose between "
+            "using historical spend patterns or defining a custom budget."
+        )
+
+        # Get loaded budget settings if available
+        loaded_budget_scenario = (
+            loaded_config.get("budget_scenario", "max_historical_response")
+            if loaded_config
+            else "max_historical_response"
+        )
+        loaded_expected_spend = (
+            loaded_config.get("expected_spend") if loaded_config else None
+        )
+
+        # Budget scenario selection
+        budget_scenario_options = [
+            "max_historical_response",
+            "max_response_expected_spend",
+        ]
+        budget_scenario_labels = {
+            "max_historical_response": "Historical Budget (use actual spend from data)",
+            "max_response_expected_spend": "Custom Budget (define total spend)",
+        }
+
+        default_scenario_index = 0
+        if loaded_budget_scenario in budget_scenario_options:
+            default_scenario_index = budget_scenario_options.index(
+                loaded_budget_scenario
+            )
+
+        budget_scenario_label = st.selectbox(
+            "Budget Allocation Mode",
+            options=[
+                budget_scenario_labels[opt] for opt in budget_scenario_options
+            ],
+            index=default_scenario_index,
+            help=(
+                "Choose 'Historical Budget' to optimize based on actual spend "
+                "in your data, or 'Custom Budget' to define your own total budget."
+            ),
+        )
+
+        # Map label back to scenario value
+        budget_scenario = [
+            k for k, v in budget_scenario_labels.items() if v == budget_scenario_label
+        ][0]
+
+        # Show expected spend input if custom budget is selected
+        if budget_scenario == "max_response_expected_spend":
+            st.markdown("**Custom Total Budget**")
+
+            expected_spend = st.number_input(
+                "Total Budget Amount",
+                value=float(loaded_expected_spend or 100000),
+                min_value=0.0,
+                step=1000.0,
+                help="Enter the total budget to allocate across all paid media channels",
+            )
+
+            st.markdown("**Per-Channel Budget Allocation (Optional)**")
+            st.caption(
+                "Optionally define budget for each channel. If left at 0, "
+                "the optimizer will distribute the total budget automatically."
+            )
+
+            # Show budget input for each paid media spend
+            if paid_media_spends_list:
+                for spend in paid_media_spends_list:
+                    # Get loaded value if available
+                    loaded_channel_budget = (
+                        loaded_config.get("channel_budgets", {}).get(spend, 0.0)
+                        if loaded_config
+                        else 0.0
+                    )
+
+                    channel_budget = st.number_input(
+                        f"Budget for {spend}",
+                        value=float(loaded_channel_budget),
+                        min_value=0.0,
+                        step=100.0,
+                        key=f"budget_{spend}",
+                        help=f"Budget allocated to {spend}. Set to 0 for automatic allocation.",
+                    )
+                    if channel_budget > 0:
+                        channel_budgets[spend] = channel_budget
+
+                # Show total allocated if any budgets are set
+                if channel_budgets:
+                    total_allocated = sum(channel_budgets.values())
+                    st.info(
+                        f"💡 Total allocated to specific channels: {total_allocated:,.2f} "
+                        f"({(total_allocated/expected_spend*100):.1f}% of total budget)"
+                    )
+                    if total_allocated > expected_spend:
+                        st.warning(
+                            f"⚠️ Total channel budgets ({total_allocated:,.2f}) exceed "
+                            f"the total budget ({expected_spend:,.2f})"
+                        )
+            else:
+                st.info(
+                    "👆 Please select paid media channels first to configure per-channel budgets"
+                )
+        else:
+            st.info(
+                "📊 Budget allocation will use historical spend from your data. "
+                "The optimizer will find the best allocation based on the actual "
+                "spend patterns in the selected date range."
+            )
+
     # Initialize revision variables with defaults (will be updated in expander)
     revision = ""
     revision_tag = ""
@@ -2453,6 +2569,9 @@ with tab_single:
                 custom_hyperparameters,  # NEW
                 resample_freq,
                 column_agg_strategies,
+                budget_scenario,  # NEW
+                expected_spend,  # NEW
+                channel_budgets,  # NEW
             ),
             data_gcs_path,
             timestamp,
@@ -2481,6 +2600,9 @@ with tab_single:
         custom_hyperparameters,  # NEW
         resample_freq,
         column_agg_strategies,
+        budget_scenario,  # NEW
+        expected_spend,  # NEW
+        channel_budgets,  # NEW
     ) -> dict:
         return {
             "country": country,
@@ -2506,6 +2628,9 @@ with tab_single:
             "custom_hyperparameters": custom_hyperparameters,  # NEW
             "resample_freq": resample_freq,
             "column_agg_strategies": column_agg_strategies,
+            "budget_scenario": budget_scenario,  # NEW
+            "expected_spend": expected_spend,  # NEW
+            "channel_budgets": channel_budgets,  # NEW
             "data_gcs_path": "",  # Will be filled later
         }
 
@@ -2609,6 +2734,9 @@ with tab_single:
                     "start_date": start_date_str,
                     "end_date": end_date_str,
                     "data_gcs_path": f"gs://{gcs_bucket}/{data_blob_path}",
+                    "budget_scenario": budget_scenario,
+                    "expected_spend": expected_spend,
+                    "channel_budgets": channel_budgets,
                 }
 
                 new_entries.append(
@@ -3239,6 +3367,8 @@ with tab_queue:
                 "ORGANIC_TRAFFIC_alphas": "",
                 "ORGANIC_TRAFFIC_gammas": "",
                 "ORGANIC_TRAFFIC_thetas": "",
+                "budget_scenario": "max_historical_response",
+                "expected_spend": "",
             },
             {
                 "country": "de",
@@ -3280,6 +3410,8 @@ with tab_queue:
                 "ORGANIC_TRAFFIC_alphas": "",
                 "ORGANIC_TRAFFIC_gammas": "",
                 "ORGANIC_TRAFFIC_thetas": "",
+                "budget_scenario": "max_response_expected_spend",
+                "expected_spend": "150000",
             },
             {
                 "country": "it",
@@ -3321,6 +3453,8 @@ with tab_queue:
                 "ORGANIC_TRAFFIC_alphas": "[0.5, 2.0]",
                 "ORGANIC_TRAFFIC_gammas": "[0.3, 0.7]",
                 "ORGANIC_TRAFFIC_thetas": "[0.9, 0.99]",
+                "budget_scenario": "max_historical_response",
+                "expected_spend": "",
             },
         ]
     )
@@ -3349,6 +3483,8 @@ with tab_queue:
                 "adstock": "geometric",
                 "hyperparameter_preset": "Meshed recommend",
                 "resample_freq": "none",
+                "budget_scenario": "max_historical_response",
+                "expected_spend": "",
             },
             {
                 "country": "de",
@@ -3369,6 +3505,8 @@ with tab_queue:
                 "adstock": "weibull_cdf",
                 "hyperparameter_preset": "Facebook recommend",
                 "resample_freq": "W",
+                "budget_scenario": "max_response_expected_spend",
+                "expected_spend": "100000",
             },
             {
                 "country": "it",
@@ -3392,6 +3530,8 @@ with tab_queue:
                 "BING_DEMAND_COST_alphas": "[1.0, 3.0]",
                 "BING_DEMAND_COST_gammas": "[0.6, 0.9]",
                 "BING_DEMAND_COST_thetas": "[0.1, 0.4]",
+                "budget_scenario": "max_historical_response",
+                "expected_spend": "",
             },
         ]
     )
