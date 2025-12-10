@@ -1903,12 +1903,12 @@ channel_budgets_cfg <- cfg$channel_budgets %||% list()
 # The difference is whether expected_spend is NULL (historical) or a value (custom)
 robyn_scenario <- "max_response"
 
-message("Budget configuration:")
-message("  UI scenario: ", budget_scenario_cfg)
-message("  Robyn scenario: ", robyn_scenario)
-message("  expected_spend: ", if (is.null(expected_spend_cfg)) "NULL (use historical)" else expected_spend_cfg)
+cat("\n========== BUDGET CONFIGURATION ==========\n")
+cat(paste0("UI scenario: ", budget_scenario_cfg, "\n"))
+cat(paste0("Robyn scenario: ", robyn_scenario, "\n"))
+cat(paste0("expected_spend: ", if (is.null(expected_spend_cfg)) "NULL (use historical)" else expected_spend_cfg, "\n"))
 if (length(channel_budgets_cfg) > 0) {
-    message("  channel_budgets: ", paste(names(channel_budgets_cfg), "=", unlist(channel_budgets_cfg), collapse=", "))
+    cat(paste0("channel_budgets: ", paste(names(channel_budgets_cfg), "=", unlist(channel_budgets_cfg), collapse=", "), "\n"))
 }
 
 # Set up channel constraints
@@ -1920,32 +1920,45 @@ up_bounds <- NULL
 # Note: This block only runs if channel_budgets is NOT empty
 if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
     # Mode 3: Custom budget WITH per-channel constraints
-    message("💰 Mode 3: Custom budget WITH per-channel constraints")
-    message(sprintf("  Total budget (expected_spend): %s", expected_spend_cfg))
+    cat("\n💰 MODE 3: Custom Budget WITH Per-Channel Constraints\n")
+    cat(sprintf("  Total budget (expected_spend): %s\n", expected_spend_cfg))
     
-    # When using custom budgets, set all channels to 0 by default
-    # Only channels with specified budgets will have non-zero bounds
-    low_bounds <- rep(0, length(InputCollect$paid_media_spends))
-    up_bounds <- rep(0, length(InputCollect$paid_media_spends))
+    # Calculate historical spend for the allocator date range
+    # Filter data to the allocator window
+    alloc_data <- InputCollect$dt_input[InputCollect$dt_input$date >= alloc_start & 
+                                        InputCollect$dt_input$date <= alloc_end, ]
+    
+    # Calculate historical total spend across all paid media channels
+    historical_spends <- sapply(InputCollect$paid_media_spends, function(ch) {
+        sum(alloc_data[[ch]], na.rm = TRUE)
+    })
+    historical_total <- sum(historical_spends)
+    
+    cat(sprintf("  Historical total spend (in date range): %.2f\n", historical_total))
     
     # Calculate total of specified channel budgets
     total_channel_budgets <- sum(sapply(channel_budgets_cfg, as.numeric))
-    message(sprintf("  Sum of channel budgets: %s", total_channel_budgets))
+    cat(sprintf("  Sum of channel budgets: %s\n", total_channel_budgets))
     
     # Warn if channel budgets don't sum to expected_spend
     if (abs(total_channel_budgets - expected_spend_cfg) > 0.01 * expected_spend_cfg) {
-        message(sprintf("  WARNING: Sum of channel budgets (%.0f) differs from expected_spend (%.0f) by %.1f%%",
+        cat(sprintf("  ⚠️  WARNING: Sum of channel budgets (%.0f) differs from expected_spend (%.0f) by %.1f%%\n",
                       total_channel_budgets, expected_spend_cfg,
                       100 * abs(total_channel_budgets - expected_spend_cfg) / expected_spend_cfg))
     }
     
-    # CRITICAL FIX: Normalize channel budgets to sum to expected_spend
-    # This ensures constraint bounds sum to exactly 1.0
-    # robyn_allocator interprets these as proportions of expected_spend
+    # Normalize channel budgets to sum to expected_spend
     normalization_factor <- expected_spend_cfg / total_channel_budgets
-    message(sprintf("  Normalization factor: %.6f (to make budgets sum to expected_spend)", normalization_factor))
+    cat(sprintf("  Normalization factor: %.6f (to make budgets sum to expected_spend)\n", normalization_factor))
     
-    # For each channel with a specified budget, set tight bounds
+    # Initialize bounds as multipliers
+    # Robyn's channel_constr_low/up are MULTIPLIERS of historical spend, not proportions
+    low_bounds <- rep(0, length(InputCollect$paid_media_spends))
+    up_bounds <- rep(0, length(InputCollect$paid_media_spends))
+    
+    cat("\n  Channel-specific constraints (as multipliers of historical spend):\n")
+    
+    # For each channel with a specified budget, calculate multiplier bounds
     for (channel_name in names(channel_budgets_cfg)) {
         # Find the index of this channel in paid_media_spends
         channel_idx <- which(InputCollect$paid_media_spends == channel_name)
@@ -1956,47 +1969,56 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
             # Normalize the budget so all budgets sum to expected_spend
             normalized_budget <- channel_budget * normalization_factor
             
-            # Calculate the proportion of total budget for this channel
-            # This should sum to 1.0 across all channels
-            budget_ratio <- normalized_budget / expected_spend_cfg
+            # Get historical spend for this channel
+            channel_historical <- historical_spends[channel_idx]
             
-            # Set tight bounds around the target ratio
-            # Use very tight tolerance since user specified exact amounts
-            tolerance <- 0.01  # 1% tolerance (very tight)
-            low_bounds[channel_idx] <- max(0, budget_ratio - tolerance)
-            up_bounds[channel_idx] <- budget_ratio + tolerance
-            
-            message(sprintf("  %s: budget=%s, normalized=%s (%.1f%% of total), bounds=[%.4f, %.4f]",
-                          channel_name, channel_budget, round(normalized_budget, 2), budget_ratio * 100,
-                          low_bounds[channel_idx], up_bounds[channel_idx]))
+            # Calculate the multiplier: desired_spend / historical_spend
+            # This tells Robyn how much to scale this channel relative to history
+            if (channel_historical > 0) {
+                target_multiplier <- normalized_budget / channel_historical
+                
+                # Set tight bounds around the target multiplier
+                # Use 5% tolerance to allow some optimization flexibility
+                tolerance <- 0.05
+                low_bounds[channel_idx] <- max(0, target_multiplier * (1 - tolerance))
+                up_bounds[channel_idx] <- target_multiplier * (1 + tolerance)
+                
+                cat(sprintf("    %s: budget=%.0f, historical=%.0f, multiplier=%.3f, bounds=[%.3f, %.3f]\n",
+                              channel_name, normalized_budget, channel_historical, target_multiplier,
+                              low_bounds[channel_idx], up_bounds[channel_idx]))
+            } else {
+                cat(sprintf("    ⚠️  %s: budget=%.0f but historical spend = 0, setting bounds to [0, 0]\n",
+                              channel_name, normalized_budget))
+                low_bounds[channel_idx] <- 0
+                up_bounds[channel_idx] <- 0
+            }
         } else {
-            message(sprintf("  WARNING: Channel '%s' in channel_budgets not found in paid_media_spends", channel_name))
+            cat(sprintf("    ⚠️  WARNING: Channel '%s' in channel_budgets not found in paid_media_spends\n", channel_name))
         }
     }
     
-    # Verify bounds sum to approximately 1.0
-    bounds_sum_low <- sum(low_bounds)
-    bounds_sum_up <- sum(up_bounds)
-    message(sprintf("  Constraint bounds sum: low=%.4f, up=%.4f (should be ~1.0 for proper budget allocation)",
-                  bounds_sum_low, bounds_sum_up))
+    # Verify that applying these multipliers would give us approximately the expected total
+    projected_total <- sum(historical_spends * up_bounds)
+    cat(sprintf("\n  Validation: Projected total spend = %.2f (target: %.2f)\n", projected_total, expected_spend_cfg))
     
-    # Final check: if bounds don't sum close to 1.0, issue a strong warning
-    if (abs(bounds_sum_up - 1.0) > 0.05) {
-        message("  ⚠️  WARNING: Upper bounds sum differs from 1.0 by more than 5%!")
-        message("  ⚠️  This may cause the allocator to not respect the total budget.")
+    if (abs(projected_total - expected_spend_cfg) > 0.1 * expected_spend_cfg) {
+        cat("  ⚠️  WARNING: Projected total differs from expected_spend by more than 10%!\n")
+        cat("  ⚠️  This suggests the multiplier approach may not perfectly enforce the budget.\n")
     }
+    
 } else if (!is.null(expected_spend_cfg) && length(channel_budgets_cfg) == 0) {
     # Mode 2: Custom total budget WITHOUT per-channel constraints
-    message("💰 Mode 2: Custom total budget WITHOUT per-channel constraints")
-    message(sprintf("  Total budget (expected_spend): %s", expected_spend_cfg))
-    message("  Channel constraints: NULL (using Robyn defaults for maximum flexibility)")
-    message("  Note: Allocator will optimize channel mix to maximize response within the total budget")
+    cat("\n💰 MODE 2: Custom Total Budget WITHOUT Per-Channel Constraints\n")
+    cat(sprintf("  Total budget (expected_spend): %s\n", expected_spend_cfg))
+    cat("  Channel constraints: NULL (using Robyn defaults for maximum flexibility)\n")
+    cat("  Note: Allocator will optimize channel mix to maximize response within the total budget\n")
 } else {
     # Mode 1: Historical budget (default)
-    message("💰 Mode 1: Historical budget (default)")
-    message("  expected_spend: NULL (using historical spend patterns)")
-    message("  Channel constraints: NULL (using Robyn defaults)")
+    cat("\n💰 MODE 1: Historical Budget (default)\n")
+    cat("  expected_spend: NULL (using historical spend patterns)\n")
+    cat("  Channel constraints: NULL (using Robyn defaults)\n")
 }
+cat("==========================================\n\n")
 
 AllocatorCollect <- try(
     robyn_allocator(
@@ -2013,7 +2035,7 @@ flush_and_ship_log("after robyn_allocator")
 # Log allocator error if it failed
 if (inherits(AllocatorCollect, "try-error")) {
     err_msg <- conditionMessage(attr(AllocatorCollect, "condition"))
-    message("❌ robyn_allocator failed with error: ", err_msg)
+    cat(paste0("\n❌ robyn_allocator FAILED with error: ", err_msg, "\n\n"))
     
     # Write error to file for debugging
     alloc_err_file <- file.path(dir_path, "allocator_error.txt")
