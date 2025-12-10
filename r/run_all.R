@@ -1912,14 +1912,15 @@ if (length(channel_budgets_cfg) > 0) {
 }
 
 # Set up channel constraints
-is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
-low_bounds <- ifelse(is_brand, 0, 0.3)
-up_bounds <- ifelse(is_brand, 0, 4)
+# Default: NULL (let Robyn use its internal defaults)
+low_bounds <- NULL
+up_bounds <- NULL
 
 # If per-channel budgets are specified, adjust constraints to enforce them
 # Note: This block only runs if channel_budgets is NOT empty
 if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
-    message("Per-channel budgets specified - adjusting constraints to match specified budgets")
+    # Mode 3: Custom budget WITH per-channel constraints
+    message("💰 Mode 3: Custom budget WITH per-channel constraints")
     message(sprintf("  Total budget (expected_spend): %s", expected_spend_cfg))
     
     # When using custom budgets, set all channels to 0 by default
@@ -1985,12 +1986,16 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
         message("  ⚠️  This may cause the allocator to not respect the total budget.")
     }
 } else if (!is.null(expected_spend_cfg) && length(channel_budgets_cfg) == 0) {
-    # Custom total budget WITHOUT per-channel constraints
-    message("Custom total budget specified WITHOUT per-channel budgets")
+    # Mode 2: Custom total budget WITHOUT per-channel constraints
+    message("💰 Mode 2: Custom total budget WITHOUT per-channel constraints")
     message(sprintf("  Total budget (expected_spend): %s", expected_spend_cfg))
-    message("  Using default channel constraints (allowing optimizer flexibility)")
-    message("  Channel bounds: low=[", paste(round(low_bounds, 2), collapse=", "), "]")
-    message("  Channel bounds: up=[", paste(round(up_bounds, 2), collapse=", "), "]")
+    message("  Channel constraints: NULL (using Robyn defaults for maximum flexibility)")
+    message("  Note: Allocator will optimize channel mix to maximize response within the total budget")
+} else {
+    # Mode 1: Historical budget (default)
+    message("💰 Mode 1: Historical budget (default)")
+    message("  expected_spend: NULL (using historical spend patterns)")
+    message("  Channel constraints: NULL (using Robyn defaults)")
 }
 
 AllocatorCollect <- try(
