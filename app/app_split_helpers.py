@@ -554,9 +554,7 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                                                 from datetime import (
                                                     datetime as dt,
                                                 )
-                                                from datetime import (
-                                                    timedelta,
-                                                )
+                                                from datetime import timedelta
 
                                                 start_time = dt.fromisoformat(
                                                     str(start_time_str).replace(
@@ -1083,7 +1081,11 @@ def _make_normalizer(defaults: dict):
         # Parse per-channel budgets from columns like {CHANNEL}_budget
         channel_budgets = {}
         for col in row.index:
-            if col.endswith("_budget") and pd.notna(row[col]) and str(row[col]).strip():
+            if (
+                col.endswith("_budget")
+                and pd.notna(row[col])
+                and str(row[col]).strip()
+            ):
                 # Extract channel name (remove _budget suffix)
                 channel = col[:-7]  # Remove "_budget"
                 try:

@@ -2009,7 +2009,9 @@ with tab_single:
 
         # Map label back to scenario value
         budget_scenario = [
-            k for k, v in budget_scenario_labels.items() if v == budget_scenario_label
+            k
+            for k, v in budget_scenario_labels.items()
+            if v == budget_scenario_label
         ][0]
 
         # Show expected spend input if custom budget is selected
