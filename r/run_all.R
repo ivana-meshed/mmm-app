@@ -1892,12 +1892,20 @@ alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
 # Read budget parameters from config
-budget_scenario <- cfg$budget_scenario %||% "max_historical_response"
+budget_scenario_cfg <- cfg$budget_scenario %||% "max_historical_response"
 expected_spend_cfg <- cfg$expected_spend %||% NULL
 channel_budgets_cfg <- cfg$channel_budgets %||% list()
 
+# Map UI scenario values to Robyn allocator scenario values
+# UI uses: "max_historical_response" or "max_response_expected_spend"
+# Robyn accepts: "max_response" or "target_efficiency"
+# For both UI scenarios, we use "max_response" in Robyn
+# The difference is whether expected_spend is NULL (historical) or a value (custom)
+robyn_scenario <- "max_response"
+
 message("Budget configuration:")
-message("  scenario: ", budget_scenario)
+message("  UI scenario: ", budget_scenario_cfg)
+message("  Robyn scenario: ", robyn_scenario)
 message("  expected_spend: ", if (is.null(expected_spend_cfg)) "NULL (use historical)" else expected_spend_cfg)
 if (length(channel_budgets_cfg) > 0) {
     message("  channel_budgets: ", paste(names(channel_budgets_cfg), "=", unlist(channel_budgets_cfg), collapse=", "))
@@ -1920,7 +1928,7 @@ AllocatorCollect <- try(
     robyn_allocator(
         InputCollect = InputCollect, OutputCollect = OutputCollect,
         select_model = best_id, date_range = c(alloc_start, alloc_end),
-        expected_spend = expected_spend_cfg, scenario = budget_scenario,
+        expected_spend = expected_spend_cfg, scenario = robyn_scenario,
         channel_constr_low = low_bounds, channel_constr_up = up_bounds,
         export = TRUE
     ),
@@ -1939,7 +1947,8 @@ if (inherits(AllocatorCollect, "try-error")) {
         "ALLOCATOR ERROR",
         paste0("When: ", Sys.time()),
         paste0("Error: ", err_msg),
-        paste0("budget_scenario: ", budget_scenario),
+        paste0("UI budget_scenario: ", budget_scenario_cfg),
+        paste0("Robyn scenario: ", robyn_scenario),
         paste0("expected_spend: ", if (is.null(expected_spend_cfg)) "NULL" else expected_spend_cfg),
         paste0("date_range: ", alloc_start, " to ", alloc_end),
         "",
