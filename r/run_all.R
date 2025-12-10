@@ -2014,8 +2014,36 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
     # Mode 2: Custom total budget WITHOUT per-channel constraints
     cat("\n💰 MODE 2: Custom Total Budget WITHOUT Per-Channel Constraints\n")
     cat(sprintf("  Total budget (expected_spend): %s\n", format(expected_spend_cfg, scientific=FALSE, big.mark=",")))
-    cat("  Channel constraints: NULL (using Robyn defaults for maximum flexibility)\n")
-    cat("  Note: Allocator will optimize channel mix to maximize response within the total budget\n")
+    
+    # Calculate historical spend for comparison
+    alloc_data <- InputCollect$dt_input[InputCollect$dt_input$date >= alloc_start & 
+                                        InputCollect$dt_input$date <= alloc_end, ]
+    historical_spends <- sapply(InputCollect$paid_media_spends, function(ch) {
+        sum(alloc_data[[ch]], na.rm = TRUE)
+    })
+    historical_total <- sum(historical_spends)
+    
+    cat(sprintf("  Historical total spend (in date range): %.2f\n", historical_total))
+    
+    # If custom budget is significantly lower than historical spend, 
+    # we need to set permissive channel constraints to avoid conflicts
+    budget_ratio <- expected_spend_cfg / historical_total
+    
+    if (budget_ratio < 0.9) {
+        # Custom budget is lower than historical - allow channels to decrease significantly
+        # Set lower bound to 0.01 (1% of historical) to allow major reductions
+        # Set upper bound based on budget ratio to ensure total budget is feasible
+        low_bounds <- rep(0.01, length(InputCollect$paid_media_spends))
+        up_bounds <- rep(min(budget_ratio * 2, 2.0), length(InputCollect$paid_media_spends))
+        cat(sprintf("  ⚠️  Custom budget (%.0f) is %.1f%% of historical spend\n", expected_spend_cfg, budget_ratio * 100))
+        cat(sprintf("  Setting permissive channel constraints: [%.2f, %.2f] to make budget feasible\n", 
+                    low_bounds[1], up_bounds[1]))
+        cat("  Note: Channels can be reduced to 1% of historical to fit within total budget\n")
+    } else {
+        # Custom budget is close to or higher than historical - use default flexibility
+        cat("  Channel constraints: NULL (using Robyn defaults for flexibility)\n")
+        cat("  Note: Allocator will optimize channel mix to maximize response within the total budget\n")
+    }
 } else {
     # Mode 1: Historical budget (default)
     cat("\n💰 MODE 1: Historical Budget (default)\n")
