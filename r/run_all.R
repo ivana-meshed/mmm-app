@@ -1927,6 +1927,28 @@ AllocatorCollect <- try(
     silent = TRUE
 )
 flush_and_ship_log("after robyn_allocator")
+
+# Log allocator error if it failed
+if (inherits(AllocatorCollect, "try-error")) {
+    err_msg <- conditionMessage(attr(AllocatorCollect, "condition"))
+    message("❌ robyn_allocator failed with error: ", err_msg)
+    
+    # Write error to file for debugging
+    alloc_err_file <- file.path(dir_path, "allocator_error.txt")
+    writeLines(c(
+        "ALLOCATOR ERROR",
+        paste0("When: ", Sys.time()),
+        paste0("Error: ", err_msg),
+        paste0("budget_scenario: ", budget_scenario),
+        paste0("expected_spend: ", if (is.null(expected_spend_cfg)) "NULL" else expected_spend_cfg),
+        paste0("date_range: ", alloc_start, " to ", alloc_end),
+        "",
+        "Stack trace:",
+        paste(capture.output(traceback()), collapse = "\n")
+    ), alloc_err_file)
+    try(gcs_put_safe(alloc_err_file, file.path(gcs_prefix, "allocator_error.txt")), silent = TRUE)
+}
+
 ## ---------- METRICS + PLOT ----------
 message("→ Extracting metrics from best model: ", best_id)
 best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == best_id, ]
@@ -2024,18 +2046,25 @@ tryCatch(
 # Allocator plot (restored)
 alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
 dir.create(alloc_dir, showWarnings = FALSE)
-try(
-    {
-        png(file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")), width = 1200, height = 800)
-        plot(AllocatorCollect)
-        dev.off()
-        gcs_put_safe(
-            file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")),
-            file.path(gcs_prefix, paste0("allocator_plots_", timestamp, "/allocator_", best_id, "_365d.png"))
-        )
-    },
-    silent = TRUE
-)
+
+# Only plot if AllocatorCollect succeeded
+if (!inherits(AllocatorCollect, "try-error")) {
+    try(
+        {
+            png(file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")), width = 1200, height = 800)
+            plot(AllocatorCollect)
+            dev.off()
+            gcs_put_safe(
+                file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")),
+                file.path(gcs_prefix, paste0("allocator_plots_", timestamp, "/allocator_", best_id, "_365d.png"))
+            )
+            message("✅ Allocator plot created successfully")
+        },
+        silent = TRUE
+    )
+} else {
+    message("⚠️ Skipping allocator plot - AllocatorCollect failed: ", conditionMessage(attr(AllocatorCollect, "condition")))
+}
 
 ## ---------- UPLOAD EVERYTHING ----------
 flush_and_ship_log("before final upload")
