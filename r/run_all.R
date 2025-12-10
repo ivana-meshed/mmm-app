@@ -1919,6 +1919,23 @@ up_bounds <- ifelse(is_brand, 0, 4)
 # If per-channel budgets are specified, adjust constraints to enforce them
 if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
     message("Per-channel budgets specified - adjusting constraints to match specified budgets")
+    message(sprintf("  Total budget (expected_spend): %s", expected_spend_cfg))
+    
+    # When using custom budgets, set all channels to 0 by default
+    # Only channels with specified budgets will have non-zero bounds
+    low_bounds <- rep(0, length(InputCollect$paid_media_spends))
+    up_bounds <- rep(0, length(InputCollect$paid_media_spends))
+    
+    # Calculate total of specified channel budgets
+    total_channel_budgets <- sum(sapply(channel_budgets_cfg, as.numeric))
+    message(sprintf("  Sum of channel budgets: %s", total_channel_budgets))
+    
+    # Warn if channel budgets don't sum to expected_spend
+    if (abs(total_channel_budgets - expected_spend_cfg) > 0.01 * expected_spend_cfg) {
+        message(sprintf("  WARNING: Sum of channel budgets (%.0f) differs from expected_spend (%.0f) by %.1f%%",
+                      total_channel_budgets, expected_spend_cfg,
+                      100 * abs(total_channel_budgets - expected_spend_cfg) / expected_spend_cfg))
+    }
     
     # For each channel with a specified budget, set tight bounds
     for (channel_name in names(channel_budgets_cfg)) {
@@ -1929,11 +1946,11 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
             channel_budget <- as.numeric(channel_budgets_cfg[[channel_name]])
             
             # Calculate the proportion of total budget for this channel
-            # This will be used as both lower and upper bound to force this allocation
             budget_ratio <- channel_budget / expected_spend_cfg
             
-            # Set tight bounds around the target ratio (allow small tolerance)
-            tolerance <- 0.05  # 5% tolerance
+            # Set tight bounds around the target ratio
+            # Use very tight tolerance since user specified exact amounts
+            tolerance <- 0.02  # 2% tolerance (tighter than before)
             low_bounds[channel_idx] <- max(0, budget_ratio - tolerance)
             up_bounds[channel_idx] <- budget_ratio + tolerance
             
@@ -1944,6 +1961,12 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
             message(sprintf("  WARNING: Channel '%s' in channel_budgets not found in paid_media_spends", channel_name))
         }
     }
+    
+    # Verify bounds sum to approximately 1.0
+    bounds_sum_low <- sum(low_bounds)
+    bounds_sum_up <- sum(up_bounds)
+    message(sprintf("  Constraint bounds sum: low=%.3f, up=%.3f (should be ~1.0 for proper budget allocation)",
+                  bounds_sum_low, bounds_sum_up))
 }
 
 AllocatorCollect <- try(
