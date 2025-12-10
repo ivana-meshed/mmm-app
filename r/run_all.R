@@ -1916,12 +1916,34 @@ is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
 low_bounds <- ifelse(is_brand, 0, 0.3)
 up_bounds <- ifelse(is_brand, 0, 4)
 
-# If per-channel budgets are specified, adjust constraints
-# Note: This is a simplified approach - in practice you may want more sophisticated logic
+# If per-channel budgets are specified, adjust constraints to enforce them
 if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
-    message("Per-channel budgets specified - using custom constraints")
-    # Store original bounds for channels without specific budgets
-    # Channels with budgets will be constrained to their specified values
+    message("Per-channel budgets specified - adjusting constraints to match specified budgets")
+    
+    # For each channel with a specified budget, set tight bounds
+    for (channel_name in names(channel_budgets_cfg)) {
+        # Find the index of this channel in paid_media_spends
+        channel_idx <- which(InputCollect$paid_media_spends == channel_name)
+        
+        if (length(channel_idx) > 0) {
+            channel_budget <- as.numeric(channel_budgets_cfg[[channel_name]])
+            
+            # Calculate the proportion of total budget for this channel
+            # This will be used as both lower and upper bound to force this allocation
+            budget_ratio <- channel_budget / expected_spend_cfg
+            
+            # Set tight bounds around the target ratio (allow small tolerance)
+            tolerance <- 0.05  # 5% tolerance
+            low_bounds[channel_idx] <- max(0, budget_ratio - tolerance)
+            up_bounds[channel_idx] <- budget_ratio + tolerance
+            
+            message(sprintf("  %s: budget=%s (%.1f%% of total), bounds=[%.3f, %.3f]",
+                          channel_name, channel_budget, budget_ratio * 100,
+                          low_bounds[channel_idx], up_bounds[channel_idx]))
+        } else {
+            message(sprintf("  WARNING: Channel '%s' in channel_budgets not found in paid_media_spends", channel_name))
+        }
+    }
 }
 
 AllocatorCollect <- try(
