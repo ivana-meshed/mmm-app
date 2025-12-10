@@ -1937,6 +1937,12 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
                       100 * abs(total_channel_budgets - expected_spend_cfg) / expected_spend_cfg))
     }
     
+    # CRITICAL FIX: Normalize channel budgets to sum to expected_spend
+    # This ensures constraint bounds sum to exactly 1.0
+    # robyn_allocator interprets these as proportions of expected_spend
+    normalization_factor <- expected_spend_cfg / total_channel_budgets
+    message(sprintf("  Normalization factor: %.6f (to make budgets sum to expected_spend)", normalization_factor))
+    
     # For each channel with a specified budget, set tight bounds
     for (channel_name in names(channel_budgets_cfg)) {
         # Find the index of this channel in paid_media_spends
@@ -1945,17 +1951,21 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
         if (length(channel_idx) > 0) {
             channel_budget <- as.numeric(channel_budgets_cfg[[channel_name]])
             
+            # Normalize the budget so all budgets sum to expected_spend
+            normalized_budget <- channel_budget * normalization_factor
+            
             # Calculate the proportion of total budget for this channel
-            budget_ratio <- channel_budget / expected_spend_cfg
+            # This should sum to 1.0 across all channels
+            budget_ratio <- normalized_budget / expected_spend_cfg
             
             # Set tight bounds around the target ratio
             # Use very tight tolerance since user specified exact amounts
-            tolerance <- 0.02  # 2% tolerance (tighter than before)
+            tolerance <- 0.01  # 1% tolerance (very tight)
             low_bounds[channel_idx] <- max(0, budget_ratio - tolerance)
             up_bounds[channel_idx] <- budget_ratio + tolerance
             
-            message(sprintf("  %s: budget=%s (%.1f%% of total), bounds=[%.3f, %.3f]",
-                          channel_name, channel_budget, budget_ratio * 100,
+            message(sprintf("  %s: budget=%s, normalized=%s (%.1f%% of total), bounds=[%.4f, %.4f]",
+                          channel_name, channel_budget, round(normalized_budget, 2), budget_ratio * 100,
                           low_bounds[channel_idx], up_bounds[channel_idx]))
         } else {
             message(sprintf("  WARNING: Channel '%s' in channel_budgets not found in paid_media_spends", channel_name))
@@ -1965,8 +1975,14 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
     # Verify bounds sum to approximately 1.0
     bounds_sum_low <- sum(low_bounds)
     bounds_sum_up <- sum(up_bounds)
-    message(sprintf("  Constraint bounds sum: low=%.3f, up=%.3f (should be ~1.0 for proper budget allocation)",
+    message(sprintf("  Constraint bounds sum: low=%.4f, up=%.4f (should be ~1.0 for proper budget allocation)",
                   bounds_sum_low, bounds_sum_up))
+    
+    # Final check: if bounds don't sum close to 1.0, issue a strong warning
+    if (abs(bounds_sum_up - 1.0) > 0.05) {
+        message("  ⚠️  WARNING: Upper bounds sum differs from 1.0 by more than 5%!")
+        message("  ⚠️  This may cause the allocator to not respect the total budget.")
+    }
 }
 
 AllocatorCollect <- try(
