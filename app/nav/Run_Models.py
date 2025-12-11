@@ -26,6 +26,7 @@ from app_shared import (
     run_sql,
     timed_step,
     upload_to_gcs,
+    upload_to_gcs_with_timestamp,
 )
 from google.cloud import storage
 
@@ -2350,8 +2351,12 @@ with tab_single:
             )
             st.stop()
 
-        # Use shared timestamp from Map Data if available, otherwise generate new one
+        # Use shared timestamp from Map Data if available, otherwise we'll get it from first blob upload
         shared_ts = st.session_state.get("shared_save_timestamp", "")
+        timestamp = (
+            None  # Will be set either from shared_ts or from first blob upload
+        )
+
         if shared_ts:
             # Timestamp format constants
             FULL_TIMESTAMP_LENGTH = 15  # YYYYMMDD_HHMMSS format length
@@ -2364,11 +2369,8 @@ with tab_single:
                 else:
                     timestamp = shared_ts
             except Exception:
-                timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
-        else:
-            timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+                timestamp = None  # Will get from blob upload
 
-        gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
         timings: List[Dict[str, float]] = []
 
         try:
@@ -2383,6 +2385,34 @@ with tab_single:
 
                     # No need to query and upload - data is already in GCS
                     st.info(f"Using data from: {data_gcs_path}")
+
+                    # If timestamp still not set, get it from existing blob path or generate fallback
+                    if timestamp is None:
+                        try:
+                            # Try to get timestamp from the blob path itself
+                            # Expected format: mapped-datasets/{country}/{timestamp}/raw.parquet
+                            parts = blob_path.split("/")
+                            if len(parts) >= 3:
+                                # Extract timestamp from path (format: YYYYMMdd_HHMMSS)
+                                path_ts = parts[-2]
+                                # Strip year prefix
+                                timestamp = (
+                                    path_ts[4:]
+                                    if len(path_ts) >= 15
+                                    else path_ts
+                                )
+                            else:
+                                # Fallback: use current time
+                                timestamp = datetime.utcnow().strftime(
+                                    "%m%d_%H%M%S"
+                                )
+                        except Exception:
+                            timestamp = datetime.utcnow().strftime(
+                                "%m%d_%H%M%S"
+                            )
+
+                    # Now that we have timestamp, construct gcs_prefix
+                    gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
 
                     # Get annotation file from session state (set in Robyn Configuration section above)
                     ann_file = st.session_state.get("annotations_file")

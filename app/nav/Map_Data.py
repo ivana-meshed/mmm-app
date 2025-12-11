@@ -22,6 +22,7 @@ from app_shared import (
     require_login_and_domain,
     run_sql,
     upload_to_gcs,
+    upload_to_gcs_with_timestamp,
 )
 from app_split_helpers import *  # bring in all helper functions/constants
 from google.cloud import storage
@@ -132,27 +133,56 @@ def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
 def _save_raw_to_gcs(
     df: pd.DataFrame, bucket: str, country: str, timestamp: str = None
 ) -> Dict[str, str]:
-    ts = timestamp or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    """Save raw dataset to GCS and return GCS path and blob timestamp.
+
+    If timestamp is provided, it's used in the path. Otherwise, the file is
+    uploaded and the blob's creation timestamp (Google's internal timestamp)
+    is used.
+    """
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         df.to_parquet(tmp.name, index=False)
-        data_gcs_path = upload_to_gcs(bucket, tmp.name, _data_blob(country, ts))
-        # maintain "latest" copy
-        upload_to_gcs(bucket, tmp.name, _latest_symlink_blob(country))
+
+        # Upload to "latest" path first and get blob timestamp
+        latest_path = _latest_symlink_blob(country)
+        latest_gcs_path, blob_timestamp = upload_to_gcs_with_timestamp(
+            bucket, tmp.name, latest_path
+        )
+
+        # Use provided timestamp or blob timestamp
+        ts = timestamp or blob_timestamp
+
+        # Also upload to versioned path
+        versioned_blob = _data_blob(country, ts)
+        data_gcs_path = upload_to_gcs(bucket, tmp.name, versioned_blob)
+
     return {"timestamp": ts, "data_gcs_path": data_gcs_path}
 
 
 def _save_mapped_to_gcs(
     df: pd.DataFrame, bucket: str, country: str, timestamp: str = None
 ) -> Dict[str, str]:
-    """Save mapped dataset to mapped-datasets/ path (separate from raw datasets)."""
-    ts = timestamp or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    """Save mapped dataset to mapped-datasets/ path (separate from raw datasets).
+
+    If timestamp is provided, it's used in the path. Otherwise, the file is
+    uploaded and the blob's creation timestamp (Google's internal timestamp)
+    is used.
+    """
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         df.to_parquet(tmp.name, index=False)
-        data_gcs_path = upload_to_gcs(
-            bucket, tmp.name, _mapped_data_blob(country, ts)
+
+        # Upload to "latest" path first and get blob timestamp
+        latest_path = _mapped_latest_symlink_blob(country)
+        latest_gcs_path, blob_timestamp = upload_to_gcs_with_timestamp(
+            bucket, tmp.name, latest_path
         )
-        # maintain "latest" copy
-        upload_to_gcs(bucket, tmp.name, _mapped_latest_symlink_blob(country))
+
+        # Use provided timestamp or blob timestamp
+        ts = timestamp or blob_timestamp
+
+        # Also upload to versioned path
+        versioned_blob = _mapped_data_blob(country, ts)
+        data_gcs_path = upload_to_gcs(bucket, tmp.name, versioned_blob)
+
     return {"timestamp": ts, "data_gcs_path": data_gcs_path}
 
 
@@ -1316,17 +1346,20 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
             return
 
         try:
-            # Generate shared timestamp for all countries
-            shared_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-            saved_paths = []
-
             # Save each country's data to its own path
+            # The first upload will establish the shared timestamp from blob
+            saved_paths = []
+            shared_ts = None
+
             for country, df in df_by_country.items():
                 if df is not None and not df.empty:
                     res = _save_raw_to_gcs(
                         df, BUCKET, country, timestamp=shared_ts
                     )
                     saved_paths.append(res["data_gcs_path"])
+                    # Use the first file's timestamp for all subsequent files
+                    if shared_ts is None:
+                        shared_ts = res["timestamp"]
 
             st.session_state["picked_ts"] = shared_ts
             st.session_state["shared_save_timestamp"] = shared_ts
@@ -2440,10 +2473,6 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
 
     def _save_metadata():
         try:
-            # Generate a shared timestamp for all saves
-            shared_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-            st.session_state["shared_save_timestamp"] = shared_ts
-
             # Get data by country
             df_by_country = st.session_state.get("df_raw_by_country", {})
 
@@ -2457,6 +2486,7 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
             # Save the MAPPED dataset for each country (to mapped-datasets/ path)
             # This is separate from raw datasets saved in Step 1
             saved_paths = []
+            shared_ts = None  # Will be set from first blob's timestamp
 
             if df_by_country:
                 for country, df in df_by_country.items():
@@ -2467,12 +2497,16 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
                                 df, BUCKET, country, timestamp=shared_ts
                             )
                             saved_paths.append(res["data_gcs_path"])
+                            # Use the first file's timestamp for all subsequent files
+                            if shared_ts is None:
+                                shared_ts = res["timestamp"]
                         except Exception as e:
                             st.error(
                                 f"Failed to save dataset for {country}: {e}"
                             )
                             return  # Don't save metadata if dataset save failed
 
+                st.session_state["shared_save_timestamp"] = shared_ts
                 st.session_state["picked_ts"] = shared_ts
                 st.session_state["data_origin"] = "gcs_mapped"
                 st.session_state["last_saved_mapped_path"] = (

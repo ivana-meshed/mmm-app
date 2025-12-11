@@ -76,6 +76,47 @@ def normalize_gs_uri(uri: str) -> str:
     return f"gs://{bucket}/{obj}"
 
 
+def get_blob_timestamp(bucket_name: str, blob_path: str) -> str:
+    """
+    Get the GCS blob's creation timestamp formatted as YYYYMMdd_HHMMSS in UTC.
+
+    Args:
+        bucket_name: Name of the GCS bucket
+        blob_path: Path to the blob in GCS
+
+    Returns:
+        Formatted timestamp string (e.g., "20231201_143022")
+
+    Raises:
+        FileNotFoundError: If blob doesn't exist
+        RuntimeError: If retrieval fails
+    """
+    try:
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob_path = normalize_blob_path(blob_path)
+        blob = bucket.blob(blob_path)
+
+        if not blob.exists():
+            raise FileNotFoundError(
+                f"Blob not found: gs://{bucket_name}/{blob_path}"
+            )
+
+        blob.reload()  # Ensure we have the latest metadata
+        time_created = blob.time_created
+        # Format as YYYYMMdd_HHMMSS in UTC
+        timestamp = time_created.strftime("%Y%m%d_%H%M%S")
+        logger.debug(
+            f"Got timestamp {timestamp} for gs://{bucket_name}/{blob_path}"
+        )
+        return timestamp
+    except FileNotFoundError:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get blob timestamp: {e}")
+        raise RuntimeError(f"GCS timestamp retrieval failed: {e}")
+
+
 def upload_to_gcs(bucket_name: str, local_path: str, dest_blob: str) -> str:
     """
     Upload a file from local filesystem to GCS.
@@ -106,6 +147,55 @@ def upload_to_gcs(bucket_name: str, local_path: str, dest_blob: str) -> str:
     except Exception as e:
         logger.error(f"Failed to upload to GCS: {e}")
         raise RuntimeError(f"GCS upload failed: {e}")
+
+
+def upload_to_gcs_with_timestamp(
+    bucket_name: str, local_path: str, dest_blob: str
+) -> tuple[str, str]:
+    """
+    Upload a file to GCS and return both the GCS URI and the blob's creation timestamp.
+
+    This function uploads a file to GCS and then retrieves the blob's creation
+    timestamp (Google's internal bucket timestamp) formatted as YYYYMMdd_HHMMSS in UTC.
+
+    Args:
+        bucket_name: Name of the GCS bucket
+        local_path: Path to the local file
+        dest_blob: Destination blob path in GCS
+
+    Returns:
+        Tuple of (gcs_uri, timestamp_string):
+        - gcs_uri: Full GCS URI (gs://bucket/path)
+        - timestamp_string: Formatted timestamp (e.g., "20231201_143022")
+
+    Raises:
+        FileNotFoundError: If local file doesn't exist
+        RuntimeError: If upload or timestamp retrieval fails
+    """
+    try:
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob_path = normalize_blob_path(dest_blob)
+        blob = bucket.blob(blob_path)
+        blob.upload_from_filename(local_path)
+
+        # Reload to get the latest metadata including time_created
+        blob.reload()
+        time_created = blob.time_created
+        # Format as YYYYMMdd_HHMMSS in UTC
+        timestamp = time_created.strftime("%Y%m%d_%H%M%S")
+
+        gcs_uri = f"gs://{bucket_name}/{blob_path}"
+        logger.info(
+            f"Uploaded {local_path} to {gcs_uri} with timestamp {timestamp}"
+        )
+        return gcs_uri, timestamp
+    except FileNotFoundError:
+        logger.error(f"Local file not found: {local_path}")
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload to GCS with timestamp: {e}")
+        raise RuntimeError(f"GCS upload with timestamp failed: {e}")
 
 
 def download_from_gcs(

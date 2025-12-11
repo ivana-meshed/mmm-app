@@ -26,6 +26,7 @@ from app_shared import (
     run_sql,
     timed_step,
     upload_to_gcs,
+    upload_to_gcs_with_timestamp,
 )
 from google.cloud import storage
 
@@ -631,7 +632,9 @@ with tab_single:
                                     )
                                 )
                                 # Set flag so training job knows to use updated data
-                                st.session_state["metadata_created_columns"] = created_cols
+                                st.session_state["metadata_created_columns"] = (
+                                    created_cols
+                                )
 
                             # Check for custom columns in metadata mapping that couldn't be created
                             agg_sources = metadata.get(
@@ -2826,8 +2829,12 @@ with tab_single:
             )
             st.stop()
 
-        # Use shared timestamp from Map Data if available, otherwise generate new one
+        # Use shared timestamp from Map Data if available, otherwise we'll get it from first blob upload
         shared_ts = st.session_state.get("shared_save_timestamp", "")
+        timestamp = (
+            None  # Will be set either from shared_ts or from first blob upload
+        )
+
         if shared_ts:
             # Timestamp format constants
             FULL_TIMESTAMP_LENGTH = 15  # YYYYMMDD_HHMMSS format length
@@ -2840,11 +2847,8 @@ with tab_single:
                 else:
                     timestamp = shared_ts
             except Exception:
-                timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
-        else:
-            timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+                timestamp = None  # Will get from blob upload
 
-        gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
         timings: List[Dict[str, float]] = []
 
         try:
@@ -2857,28 +2861,53 @@ with tab_single:
                     # instead of using the original mapped data (which lacks those columns)
                     df_with_custom_cols = st.session_state.get("preview_df")
                     original_blob_path = _get_data_blob(selected_country, selected_version)  # type: ignore
-                    
+
                     # Check if we have auto-created columns by comparing with original data
                     # If preview_df has more columns than the original, we need to use it
                     use_updated_data = False
                     if df_with_custom_cols is not None:
                         try:
                             # Read original data to compare
-                            original_data_path = f"gs://{gcs_bucket}/{original_blob_path}"
+                            original_data_path = (
+                                f"gs://{gcs_bucket}/{original_blob_path}"
+                            )
                             # Quick check: if we recently created columns, use preview_df
                             # This is indicated by session state or column count difference
                             if "metadata_created_columns" in st.session_state:
                                 use_updated_data = True
                         except Exception:
                             pass
-                    
+
                     if use_updated_data and df_with_custom_cols is not None:
                         # Save the DataFrame with auto-created columns to a new GCS location
-                        with timed_step("Upload data with auto-created columns to GCS", timings):
-                            temp_data_path = os.path.join(td, "training_data.parquet")
-                            df_with_custom_cols.to_parquet(temp_data_path, index=False)
-                            
-                            # Upload to a training-specific location
+                        with timed_step(
+                            "Upload data with auto-created columns to GCS",
+                            timings,
+                        ):
+                            temp_data_path = os.path.join(
+                                td, "training_data.parquet"
+                            )
+                            df_with_custom_cols.to_parquet(
+                                temp_data_path, index=False
+                            )
+
+                            # Upload and get blob timestamp if not already set
+                            if timestamp is None:
+                                # Upload to temp location to get blob timestamp
+                                temp_blob = "training-data/_temp_latest/training_data.parquet"
+                                _, blob_ts = upload_to_gcs_with_timestamp(
+                                    gcs_bucket,  # type: ignore
+                                    temp_data_path,
+                                    temp_blob,
+                                )
+                                # Strip year prefix to match format
+                                timestamp = (
+                                    blob_ts[4:]
+                                    if len(blob_ts) >= 15
+                                    else blob_ts
+                                )
+
+                            # Upload to a training-specific location with timestamp
                             data_blob = f"training-data/{timestamp}/training_data.parquet"
                             data_gcs_path = upload_to_gcs(
                                 gcs_bucket,  # type: ignore
@@ -2891,8 +2920,38 @@ with tab_single:
                             )
                     else:
                         # Use the already loaded GCS data (original mapped data)
-                        data_gcs_path = f"gs://{gcs_bucket}/{original_blob_path}"
+                        data_gcs_path = (
+                            f"gs://{gcs_bucket}/{original_blob_path}"
+                        )
                         st.info(f"Using data from: {data_gcs_path}")
+
+                        # If timestamp still not set, get it from existing blob or generate fallback
+                        if timestamp is None:
+                            try:
+                                # Try to get timestamp from the blob path itself
+                                # Expected format: mapped-datasets/{country}/{timestamp}/raw.parquet
+                                parts = original_blob_path.split("/")
+                                if len(parts) >= 3:
+                                    # Extract timestamp from path (format: YYYYMMdd_HHMMSS)
+                                    path_ts = parts[-2]
+                                    # Strip year prefix
+                                    timestamp = (
+                                        path_ts[4:]
+                                        if len(path_ts) >= 15
+                                        else path_ts
+                                    )
+                                else:
+                                    # Fallback: use current time
+                                    timestamp = datetime.utcnow().strftime(
+                                        "%m%d_%H%M%S"
+                                    )
+                            except Exception:
+                                timestamp = datetime.utcnow().strftime(
+                                    "%m%d_%H%M%S"
+                                )
+
+                    # Now that we have timestamp, construct gcs_prefix
+                    gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
 
                     # Get annotation file from session state (set in Robyn Configuration section above)
                     ann_file = st.session_state.get("annotations_file")
