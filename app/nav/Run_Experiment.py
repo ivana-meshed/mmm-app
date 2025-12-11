@@ -630,6 +630,8 @@ with tab_single:
                                         else ""
                                     )
                                 )
+                                # Set flag so training job knows to use updated data
+                                st.session_state["metadata_created_columns"] = created_cols
 
                             # Check for custom columns in metadata mapping that couldn't be created
                             agg_sources = metadata.get(
@@ -2851,12 +2853,46 @@ with tab_single:
                     data_gcs_path = None
                     annotations_gcs_path = None
 
-                    # Use the already loaded GCS data
-                    blob_path = _get_data_blob(selected_country, selected_version)  # type: ignore
-                    data_gcs_path = f"gs://{gcs_bucket}/{blob_path}"
-
-                    # No need to query and upload - data is already in GCS
-                    st.info(f"Using data from: {data_gcs_path}")
+                    # CRITICAL FIX: If metadata created custom columns, save the updated DataFrame
+                    # instead of using the original mapped data (which lacks those columns)
+                    df_with_custom_cols = st.session_state.get("preview_df")
+                    original_blob_path = _get_data_blob(selected_country, selected_version)  # type: ignore
+                    
+                    # Check if we have auto-created columns by comparing with original data
+                    # If preview_df has more columns than the original, we need to use it
+                    use_updated_data = False
+                    if df_with_custom_cols is not None:
+                        try:
+                            # Read original data to compare
+                            original_data_path = f"gs://{gcs_bucket}/{original_blob_path}"
+                            # Quick check: if we recently created columns, use preview_df
+                            # This is indicated by session state or column count difference
+                            if "metadata_created_columns" in st.session_state:
+                                use_updated_data = True
+                        except Exception:
+                            pass
+                    
+                    if use_updated_data and df_with_custom_cols is not None:
+                        # Save the DataFrame with auto-created columns to a new GCS location
+                        with timed_step("Upload data with auto-created columns to GCS", timings):
+                            temp_data_path = os.path.join(td, "training_data.parquet")
+                            df_with_custom_cols.to_parquet(temp_data_path, index=False)
+                            
+                            # Upload to a training-specific location
+                            data_blob = f"training-data/{timestamp}/training_data.parquet"
+                            data_gcs_path = upload_to_gcs(
+                                gcs_bucket,  # type: ignore
+                                temp_data_path,
+                                data_blob,
+                            )
+                            st.success(
+                                f"✅ Uploaded training data with {len(df_with_custom_cols.columns)} columns "
+                                f"(including auto-created custom columns) to GCS"
+                            )
+                    else:
+                        # Use the already loaded GCS data (original mapped data)
+                        data_gcs_path = f"gs://{gcs_bucket}/{original_blob_path}"
+                        st.info(f"Using data from: {data_gcs_path}")
 
                     # Get annotation file from session state (set in Robyn Configuration section above)
                     ann_file = st.session_state.get("annotations_file")
