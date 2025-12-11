@@ -1816,8 +1816,9 @@ gcs_put_safe(file.path(dir_path, "best_model_id.txt"), file.path(gcs_prefix, "be
 
 flush_and_ship_log("before onepagers")
 # onepagers for top models
-# baseline_level = 5: Shows individual organic_vars as separate bars in waterfall chart
-# instead of aggregating them into baseline component
+# baseline_level = 3: Aggregates intercept + trend + Prophet vars into baseline,
+# but shows context_vars and organic_vars as individual bars in waterfall chart
+# (lower values show more individual vars; 5 would hide organic_vars in baseline)
 top_models <- OutputCollect$resultHypParam$solID[
     1:min(3, nrow(OutputCollect$resultHypParam))
 ]
@@ -1829,7 +1830,7 @@ for (m in top_models) {
             select_model = m,
             plot_folder = dir_path,
             export = TRUE,
-            baseline_level = 5
+            baseline_level = 3
         ),
         error = function(e) {
             write_trace("Allocator error", e)
@@ -1850,7 +1851,7 @@ for (m in top_models) {
             OutputCollect,
             select_model = m,
             export = TRUE,
-            baseline_level = 5
+            baseline_level = 3
         ),
         silent = TRUE
     )
