@@ -1159,9 +1159,8 @@ with tab_single:
         # This takes priority over metadata defaults
         training_data_config = st.session_state.get("training_data_config")
         if training_data_config:
-            st.info(
-                "📋 **Using training data config from Prepare Training Data page**"
-            )
+            # Remove redundant info message - will show consolidated message later
+            pass
             # Prefill from training data config
             if training_data_config.get("paid_media_spends"):
                 default_values["paid_media_spends"] = training_data_config[
@@ -1329,11 +1328,10 @@ with tab_single:
 
         # Check for prefill from Prepare Training Data page (takes priority)
         training_prefill = st.session_state.get("training_prefill")
+        config_source = None  # Track which config source is being used
+
         if training_prefill and st.session_state.get("training_prefill_ready"):
-            st.info(
-                "📋 **Prefill from Prepare Training Data page detected!** "
-                "Variable selections have been pre-populated."
-            )
+            config_source = "prefill"
             # Use prefill data as loaded_config equivalent
             loaded_config = {
                 "paid_media_spends": training_prefill.get(
@@ -1363,6 +1361,10 @@ with tab_single:
         # Determine default selections from loaded config
         default_paid_media_spends = available_spends  # All selected by default
         if loaded_config and "paid_media_spends" in loaded_config:
+            # Set config source if not already set
+            if config_source is None:
+                config_source = "saved_config"
+
             # Parse loaded config (could be comma-separated string or list)
             loaded_spends = loaded_config["paid_media_spends"]
             if isinstance(loaded_spends, str):
@@ -1374,12 +1376,6 @@ with tab_single:
             # Add loaded spends to available options (preserve order: metadata first, then loaded)
             available_spends = list(
                 dict.fromkeys(available_spends + loaded_spends)
-            )
-
-            # Debug info to help troubleshoot (wording updated)
-            st.info(
-                f"📋 Loaded settings. Identified {len(loaded_spends)} paid media channels. "
-                f"Added {len([s for s in loaded_spends if s not in default_values['paid_media_spends']])} new variables not in metadata."
             )
 
             # Initialize spend_var_mapping from loaded config (Issue #2 fix)
@@ -1419,11 +1415,6 @@ with tab_single:
                         # Otherwise fall back to the spend itself
                         elif not matched:
                             st.session_state["spend_var_mapping"][spend] = spend
-
-                    # Debug: Show mapping being applied
-                    st.caption(
-                        f"🔧 Applied variable mappings from loaded settings for {len(loaded_spends)} spends"
-                    )
                 else:
                     # Fallback: try to match by index
                     for i, spend in enumerate(loaded_spends):
@@ -1436,6 +1427,20 @@ with tab_single:
         default_paid_media_spends = [
             s for s in default_paid_media_spends if s in available_spends
         ]
+
+        # Show single consolidated info message about config source
+        if config_source == "prefill":
+            st.info(
+                "📋 **Variable selections loaded from Prepare Training Data page**"
+            )
+        elif config_source == "saved_config":
+            st.info(
+                "📋 **Variable selections loaded from saved model settings**"
+            )
+        elif training_data_config:
+            st.info(
+                "📋 **Variable selections loaded from training data configuration**"
+            )
 
         # Display paid_media_spends first (all selected by default)
         st.markdown("**Paid Media Settings**")
@@ -1672,8 +1677,8 @@ with tab_single:
                 ]
 
                 st.warning(
-                    f"⚠️ **Warning:** {len(missing_custom_vars)} custom variable(s) selected but not found in loaded data: "
-                    f"{', '.join(missing_custom_vars[:5])}"
+                    f"⚠️ **Missing Variables:** {len(missing_custom_vars)} custom variable(s) from your configuration are not found in the loaded dataset: "
+                    f"**{', '.join(missing_custom_vars[:5])}**"
                     + (
                         f" and {len(missing_custom_vars) - 5} more..."
                         if len(missing_custom_vars) > 5
