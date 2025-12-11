@@ -70,19 +70,23 @@ robyn_onepagers(
 
 ## Impact
 
-With `baseline_level = 0`, the waterfall chart will now display:
-- ✅ Individual paid media contributions
-- ✅ **Individual organic variable contributions** (FIXED)
+With `baseline_level = 0`, the waterfall chart will display:
+- ✅ **Individual intercept** component
+- ✅ **Individual trend** component
+- ✅ **Individual Prophet decomposition components** (season, holiday, weekday)
 - ✅ **Individual context variable contributions**
-- ✅ **Individual Prophet decomposition components** (trend, seasonality, holidays, weekday)
-- ✅ **Individual intercept**
+- ✅ **Individual organic variable contributions** (FIXED - was missing before)
+- ✅ **Individual paid media contributions**
 
 This provides COMPLETE visibility into ALL modeled components and drivers, with maximum interpretability.
 
+**Important Note**: These changes only take effect for NEW training runs. Existing onepager images that were generated before this fix will still show the old visualization. You need to run a new training job to see the updated waterfall chart with individual organic_vars displayed.
+
 ## Troubleshooting
 
-If organic_vars are still not showing:
-1. Verify organic_vars are correctly specified in `robyn_inputs()`
+If organic_vars are still not showing after running a new training job:
+1. Verify organic_vars are correctly specified in `robyn_inputs()` in the training config
 2. Check that organic_vars have non-zero variance in your data
 3. Ensure organic_vars are not being filtered out during preprocessing
-4. Consider using `baseline_level = 0` for maximum disaggregation (all vars shown separately)
+4. Review the R logs to confirm the variables are being included in the model
+5. Check that the onepager image you're viewing is from the NEW training run (not a cached old image)
