@@ -1679,6 +1679,28 @@ if (is.null(OutputCollect)) {
     quit(status = 1)
 }
 
+# DEBUG: Log what variables are in xDecompAgg to diagnose organic_vars issue
+if (!is.null(OutputCollect$xDecompAgg)) {
+    all_vars_in_decomp <- unique(OutputCollect$xDecompAgg$rn)
+    message("📊 Variables in xDecompAgg (", length(all_vars_in_decomp), " total):")
+    message("   ", paste(all_vars_in_decomp, collapse = ", "))
+    
+    # Check specifically for organic_vars
+    organic_in_decomp <- intersect(organic_vars, all_vars_in_decomp)
+    organic_missing <- setdiff(organic_vars, all_vars_in_decomp)
+    
+    if (length(organic_in_decomp) > 0) {
+        message("✅ Organic vars found in decomposition: ", paste(organic_in_decomp, collapse = ", "))
+    }
+    if (length(organic_missing) > 0) {
+        message("⚠️  Organic vars MISSING from decomposition: ", paste(organic_missing, collapse = ", "))
+        message("   This means these variables were either:")
+        message("   1. Filtered out due to zero variance")
+        message("   2. Not included in the model by Robyn")
+        message("   3. Had zero coefficients and were dropped")
+    }
+}
+
 saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
 
@@ -1819,10 +1841,13 @@ flush_and_ship_log("before onepagers")
 # baseline_level = 0: Shows ALL variables as individual bars in waterfall chart
 # including intercept, trend, Prophet vars (seasonality/holiday), context_vars, and organic_vars
 # (no aggregation into baseline component)
+message("🎨 Generating onepagers with baseline_level = 0")
+message("   Expected organic_vars to appear: ", paste(organic_vars, collapse = ", "))
 top_models <- OutputCollect$resultHypParam$solID[
     1:min(3, nrow(OutputCollect$resultHypParam))
 ]
 for (m in top_models) {
+    message("   Generating onepager for model: ", m)
     tryCatch(
         robyn_onepagers(
             InputCollect,
