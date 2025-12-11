@@ -587,6 +587,15 @@ def _apply_automatic_aggregations(
                 for suffix, vars_list in suffixes.items():
                     custom_var_name = f"{channel.upper()}_{tag.upper()}_{suffix.upper()}_CUSTOM"
 
+                    # Always track aggregation sources (even if column already exists)
+                    aggregation_sources[custom_var_name] = {
+                        "source_columns": vars_list,
+                        "agg_method": "sum",
+                        "category": category,
+                        "channel": channel,
+                        "custom_tag": tag,
+                    }
+
                     # Only create if it doesn't already exist
                     if custom_var_name not in mapping_df["var"].values:
                         new_mapping_rows.append(
@@ -599,15 +608,6 @@ def _apply_automatic_aggregations(
                                 "custom_tags": tag,
                             }
                         )
-
-                        # Track aggregation sources
-                        aggregation_sources[custom_var_name] = {
-                            "source_columns": vars_list,
-                            "agg_method": "sum",
-                            "category": category,
-                            "channel": channel,
-                            "custom_tag": tag,
-                        }
 
                         # Calculate the sum in df_raw
                         if all(v in df_raw.columns for v in vars_list):
@@ -655,6 +655,15 @@ def _apply_automatic_aggregations(
                     f"{channel.upper()}_TOTAL_{suffix.upper()}_CUSTOM"
                 )
 
+                # Always track aggregation sources (even if column already exists)
+                aggregation_sources[total_var_name] = {
+                    "source_columns": vars_list,
+                    "agg_method": "sum",
+                    "category": category,
+                    "channel": channel,
+                    "custom_tag": "TOTAL",
+                }
+
                 # Only create if it doesn't already exist
                 if total_var_name not in mapping_df["var"].values:
                     new_mapping_rows.append(
@@ -667,15 +676,6 @@ def _apply_automatic_aggregations(
                             "custom_tags": "",
                         }
                     )
-
-                    # Track aggregation sources
-                    aggregation_sources[total_var_name] = {
-                        "source_columns": vars_list,
-                        "agg_method": "sum",
-                        "category": category,
-                        "channel": channel,
-                        "custom_tag": "TOTAL",
-                    }
 
                     # Calculate the sum in df_raw
                     if all(v in df_raw.columns for v in vars_list):
@@ -726,6 +726,15 @@ def _apply_automatic_aggregations(
                     f"{organic_prefix}_{tag.upper()}_{suffix.upper()}_CUSTOM"
                 )
 
+                # Always track aggregation sources (even if column already exists)
+                aggregation_sources[custom_var_name] = {
+                    "source_columns": vars_list,
+                    "agg_method": "sum",
+                    "category": "organic_vars",
+                    "channel": "organic",
+                    "custom_tag": tag,
+                }
+
                 if custom_var_name not in mapping_df["var"].values:
                     new_mapping_rows.append(
                         {
@@ -737,15 +746,6 @@ def _apply_automatic_aggregations(
                             "custom_tags": tag,
                         }
                     )
-
-                    # Track aggregation sources
-                    aggregation_sources[custom_var_name] = {
-                        "source_columns": vars_list,
-                        "agg_method": "sum",
-                        "category": "organic_vars",
-                        "channel": "organic",
-                        "custom_tag": tag,
-                    }
 
                     # Calculate sum
                     if all(v in df_raw.columns for v in vars_list):
@@ -766,19 +766,8 @@ def _apply_automatic_aggregations(
         )
         total_var_name = f"{organic_prefix}_TOTAL_CUSTOM"
 
-        if organic_vars and total_var_name not in mapping_df["var"].values:
-            new_mapping_rows.append(
-                {
-                    "var": total_var_name,
-                    "category": "organic_vars",
-                    "channel": "organic",
-                    "data_type": "numeric",
-                    "agg_strategy": "sum",
-                    "custom_tags": "",
-                }
-            )
-
-            # Track aggregation sources
+        # Always track aggregation sources if we have organic vars (even if column already exists)
+        if organic_vars:
             aggregation_sources[total_var_name] = {
                 "source_columns": organic_vars,
                 "agg_method": "sum",
@@ -787,7 +776,19 @@ def _apply_automatic_aggregations(
                 "custom_tag": "TOTAL",
             }
 
-            new_columns[total_var_name] = df_raw[organic_vars].sum(axis=1)
+            if total_var_name not in mapping_df["var"].values:
+                new_mapping_rows.append(
+                    {
+                        "var": total_var_name,
+                        "category": "organic_vars",
+                        "channel": "organic",
+                        "data_type": "numeric",
+                        "agg_strategy": "sum",
+                        "custom_tags": "",
+                    }
+                )
+
+                new_columns[total_var_name] = df_raw[organic_vars].sum(axis=1)
 
     # Add new mapping rows
     if new_mapping_rows:
