@@ -185,11 +185,9 @@ def prepare_and_launch_job(params: dict) -> dict:
     Returns exec_info dict with execution_name, timestamp, gcs_prefix, etc.
     """
     gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
-    timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
     # Support both 'revision' and 'version' keys for backward compatibility
     revision = params.get("revision") or params.get("version") or ""
     country = params.get("country", "")
-    gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
 
     # Check if data already exists in GCS (Issue #4 GCS-based workflow)
     data_gcs_path_provided = params.get("data_gcs_path")
@@ -198,6 +196,8 @@ def prepare_and_launch_job(params: dict) -> dict:
         # GCS-based workflow: data already exists, no Snowflake query needed
         logger.info(f"Using existing data from GCS: {data_gcs_path_provided}")
         data_gcs_path = data_gcs_path_provided
+        # For GCS-based workflow, generate a timestamp
+        timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
     else:
         # Snowflake-based workflow: validate & query
         sql_eff = params.get("query") or effective_sql(
@@ -225,12 +225,21 @@ def prepare_and_launch_job(params: dict) -> dict:
                 parquet_path = os.path.join(td, "input_data.parquet")
                 data_processor.csv_to_parquet(df, parquet_path)
 
-            # 3) Upload data
+            # 3) Upload data and get blob timestamp
             with timed_step("Upload data to GCS", timings):
+                # Upload to a temporary/latest path first to get blob timestamp
+                temp_blob = f"training-data/_temp_latest/input_data.parquet"
+                _, timestamp = upload_to_gcs_with_timestamp(
+                    gcs_bucket, parquet_path, temp_blob
+                )
+                # Now upload to the timestamped path
                 data_blob = f"training-data/{timestamp}/input_data.parquet"
                 data_gcs_path = upload_to_gcs(
                     gcs_bucket, parquet_path, data_blob
                 )
+
+            # Now that we have the timestamp, construct gcs_prefix
+            gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
 
             # Seed timings.csv (web-side steps) if not present
             if timings:
@@ -244,6 +253,9 @@ def prepare_and_launch_job(params: dict) -> dict:
                     ) as tmp:
                         df_times.to_csv(tmp.name, index=False)
                         upload_to_gcs(gcs_bucket, tmp.name, dest_blob)
+
+    # Construct gcs_prefix for both branches
+    gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
 
     # Optional annotations (batch: pass a gs:// in params)
     annotations_gcs_path = params.get("annotations_gcs_path") or None
