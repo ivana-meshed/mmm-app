@@ -1734,13 +1734,18 @@ message("→ Generating model summary...")
 extract_summary_script <- NULL
 
 # 1. Try same directory as this script
-candidate <- file.path(
-    dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE)),
-    "extract_model_summary.R"
-)
-if (file.exists(candidate)) {
-    extract_summary_script <- candidate
-}
+tryCatch({
+    candidate <- file.path(
+        dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE)),
+        "extract_model_summary.R"
+    )
+    if (file.exists(candidate)) {
+        extract_summary_script <- candidate
+    }
+}, error = function(e) {
+    # sys.frame(1)$ofile not available in this context
+    # Will try other locations instead
+})
 
 # 2. Try /app directory (Docker container location)
 if (is.null(extract_summary_script)) {
