@@ -32,14 +32,17 @@ The parameter accepts values from 0 to 5. **IMPORTANT**: Higher values aggregate
 
 ### Our Configuration
 
-We use **`baseline_level = 3`** to ensure that:
-- **Intercept, trend, and Prophet vars** are aggregated into baseline (cleaner chart)
-- **Context variables appear as individual bars** in the waterfall chart
-- **Organic variables appear as individual bars** in the waterfall chart (CRITICAL)
-- Each organic driver's contribution is visible and measurable
-- Non-paid marketing activities can be properly analyzed
+We use **`baseline_level = 0`** to ensure that:
+- **ALL variables appear as individual bars** in the waterfall chart
+- **Intercept** shown individually
+- **Trend** shown individually
+- **Prophet variables** (seasonality, holiday, weekday) shown individually
+- **Context variables** shown individually
+- **Organic variables** shown individually (CRITICAL)
+- Each driver's contribution is fully visible and measurable
+- Maximum visibility into all model components
 
-**Note**: Using `baseline_level = 5` would HIDE organic_vars by aggregating them into baseline, which is the opposite of what we want!
+**Note**: This provides the most detailed view. If the chart becomes too cluttered, you can increase baseline_level to aggregate less important components (e.g., baseline_level = 2 to group intercept + trend).
 
 ### Implementation
 
@@ -52,7 +55,7 @@ robyn_onepagers(
     select_model = m,
     plot_folder = dir_path,
     export = TRUE,
-    baseline_level = 3  # Shows individual organic_vars and context_vars
+    baseline_level = 0  # Shows ALL variables individually
 )
 ```
 
@@ -67,13 +70,14 @@ robyn_onepagers(
 
 ## Impact
 
-With `baseline_level = 3`, the waterfall chart will now display:
+With `baseline_level = 0`, the waterfall chart will now display:
 - ✅ Individual paid media contributions
-- ✅ **Individual organic variable contributions** (FIXED - was hidden before)
+- ✅ **Individual organic variable contributions** (FIXED)
 - ✅ **Individual context variable contributions**
-- ✅ Baseline component (intercept + trend + Prophet decomposition)
+- ✅ **Individual Prophet decomposition components** (trend, seasonality, holidays, weekday)
+- ✅ **Individual intercept**
 
-This provides complete visibility into all modeled marketing drivers (paid, organic, context) and their respective contributions to the target variable.
+This provides COMPLETE visibility into ALL modeled components and drivers, with maximum interpretability.
 
 ## Troubleshooting
 
