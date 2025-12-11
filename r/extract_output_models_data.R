@@ -95,7 +95,18 @@ if (!interactive()) {
     args <- commandArgs(trailingOnly = FALSE)
     file_arg <- grep("^--file=", args, value = TRUE)
     
+    # Check if the --file argument points to THIS script
+    # (not a parent script that sourced us)
+    is_direct_script <- FALSE
     if (length(file_arg) > 0) {
+        # Extract the filename from --file=path
+        file_path <- sub("^--file=", "", file_arg[1])
+        script_name <- basename(file_path)
+        # This script should be named extract_output_models_data.R
+        is_direct_script <- grepl("extract_output_models_data\\.R$", script_name)
+    }
+    
+    if (is_direct_script) {
         # Script is being run directly - load required libraries
         if (!requireNamespace("optparse", quietly = TRUE)) {
             stop("Package 'optparse' is required but not installed.")
