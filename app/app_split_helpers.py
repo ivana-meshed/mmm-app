@@ -54,6 +54,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from google.cloud import storage
 
+from utils.gcs_utils import format_cet_timestamp, get_cet_now
+
 __all__ = [
     # public constants & classes...
     "PROJECT_ID",
@@ -185,7 +187,7 @@ def prepare_and_launch_job(params: dict) -> dict:
     Returns exec_info dict with execution_name, timestamp, gcs_prefix, etc.
     """
     gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
-    timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+    timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
     # Support both 'revision' and 'version' keys for backward compatibility
     revision = params.get("revision") or params.get("version") or ""
     country = params.get("country", "")
@@ -554,7 +556,9 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                                                 from datetime import (
                                                     datetime as dt,
                                                 )
-                                                from datetime import timedelta
+                                                from datetime import (
+                                                    timedelta,
+                                                )
 
                                                 start_time = dt.fromisoformat(
                                                     str(start_time_str).replace(
@@ -785,7 +789,7 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
             maybe_refresh_queue_from_gcs(force=True)
             # Clear cached timestamp to force re-check of single run jobs
             st.session_state["status_refresh_timestamp"] = (
-                datetime.utcnow().timestamp()
+                get_cet_now().timestamp()
             )
             st.rerun()
 
@@ -1253,9 +1257,8 @@ def _queue_tick():
                     "timestamp"
                 )  # fallback to launch timestamp if that’s all we have
             )
-            end_time = (
-                times.get("end_time")
-                or datetime.utcnow().isoformat(timespec="seconds") + "Z"
+            end_time = times.get("end_time") or get_cet_now().isoformat(
+                timespec="seconds"
             )
             duration_minutes = times.get("duration_minutes")
 

@@ -29,6 +29,8 @@ from app_shared import (
 )
 from google.cloud import storage
 
+from utils.gcs_utils import format_cet_timestamp, get_cet_now
+
 data_processor = get_data_processor()
 job_manager = get_job_manager()
 from app_split_helpers import *  # bring in all helper functions/constants
@@ -631,7 +633,9 @@ with tab_single:
                                     )
                                 )
                                 # Set flag so training job knows to use updated data
-                                st.session_state["metadata_created_columns"] = created_cols
+                                st.session_state["metadata_created_columns"] = (
+                                    created_cols
+                                )
 
                             # Check for custom columns in metadata mapping that couldn't be created
                             agg_sources = metadata.get(
@@ -774,7 +778,7 @@ with tab_single:
                             config_data.get("countries", [])
                         )
                         st.session_state["loaded_config_timestamp"] = (
-                            datetime.utcnow().timestamp()
+                            get_cet_now().timestamp()
                         )
 
                         st.success(
@@ -908,7 +912,7 @@ with tab_single:
             )
         with col2:
             # Parse loaded end date if available
-            default_end_date = datetime.now().date()
+            default_end_date = get_cet_now().date()
             if loaded_config and "end_date" in loaded_config:
                 try:
                     default_end_date = datetime.strptime(
@@ -1353,7 +1357,7 @@ with tab_single:
             st.session_state["training_prefill_ready"] = False
             # Force widget refresh by updating timestamp
             st.session_state["loaded_config_timestamp"] = (
-                datetime.utcnow().timestamp()
+                get_cet_now().timestamp()
             )
 
         # Get all paid_media_spends from metadata (including CUSTOM columns)
@@ -2367,7 +2371,7 @@ with tab_single:
                     # Build configuration payload
                     config_payload = {
                         "name": config_name,
-                        "created_at": datetime.utcnow().isoformat(),
+                        "created_at": get_cet_now().isoformat(),
                         "countries": config_countries,
                         "config": {
                             "iterations": int(iterations),
@@ -2840,9 +2844,9 @@ with tab_single:
                 else:
                     timestamp = shared_ts
             except Exception:
-                timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+                timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
         else:
-            timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+            timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
 
         gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
         timings: List[Dict[str, float]] = []
@@ -2857,27 +2861,36 @@ with tab_single:
                     # instead of using the original mapped data (which lacks those columns)
                     df_with_custom_cols = st.session_state.get("preview_df")
                     original_blob_path = _get_data_blob(selected_country, selected_version)  # type: ignore
-                    
+
                     # Check if we have auto-created columns by comparing with original data
                     # If preview_df has more columns than the original, we need to use it
                     use_updated_data = False
                     if df_with_custom_cols is not None:
                         try:
                             # Read original data to compare
-                            original_data_path = f"gs://{gcs_bucket}/{original_blob_path}"
+                            original_data_path = (
+                                f"gs://{gcs_bucket}/{original_blob_path}"
+                            )
                             # Quick check: if we recently created columns, use preview_df
                             # This is indicated by session state or column count difference
                             if "metadata_created_columns" in st.session_state:
                                 use_updated_data = True
                         except Exception:
                             pass
-                    
+
                     if use_updated_data and df_with_custom_cols is not None:
                         # Save the DataFrame with auto-created columns to a new GCS location
-                        with timed_step("Upload data with auto-created columns to GCS", timings):
-                            temp_data_path = os.path.join(td, "training_data.parquet")
-                            df_with_custom_cols.to_parquet(temp_data_path, index=False)
-                            
+                        with timed_step(
+                            "Upload data with auto-created columns to GCS",
+                            timings,
+                        ):
+                            temp_data_path = os.path.join(
+                                td, "training_data.parquet"
+                            )
+                            df_with_custom_cols.to_parquet(
+                                temp_data_path, index=False
+                            )
+
                             # Upload to a training-specific location
                             data_blob = f"training-data/{timestamp}/training_data.parquet"
                             data_gcs_path = upload_to_gcs(
@@ -2891,7 +2904,9 @@ with tab_single:
                             )
                     else:
                         # Use the already loaded GCS data (original mapped data)
-                        data_gcs_path = f"gs://{gcs_bucket}/{original_blob_path}"
+                        data_gcs_path = (
+                            f"gs://{gcs_bucket}/{original_blob_path}"
+                        )
                         st.info(f"Using data from: {data_gcs_path}")
 
                     # Get annotation file from session state (set in Robyn Configuration section above)
@@ -2985,7 +3000,7 @@ with tab_single:
                                     "state": "RUNNING",  # Initial state
                                     "country": country,
                                     "revision": revision,
-                                    "date_input": dt.utcnow().strftime(
+                                    "date_input": get_cet_now().strftime(
                                         "%Y-%m-%d"
                                     ),  # Current date when job is run
                                     "iterations": int(iterations),
@@ -3002,10 +3017,9 @@ with tab_single:
                                     "dep_var": dep_var,
                                     "date_var": date_var,
                                     "adstock": adstock,
-                                    "start_time": dt.utcnow().isoformat(
+                                    "start_time": get_cet_now().isoformat(
                                         timespec="seconds"
-                                    )
-                                    + "Z",
+                                    ),
                                     "end_time": None,
                                     "duration_minutes": None,
                                     "gcs_prefix": gcs_prefix,
