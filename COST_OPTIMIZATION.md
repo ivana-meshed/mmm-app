@@ -1,172 +1,74 @@
-# Cost Optimization Implementation Guide
+# Cost Optimization Guide
 
-This document describes the cost reduction strategies implemented for the MMM Trainer application, as referenced in `Cost estimate.csv`.
+This document provides cost estimates for the MMM Trainer application across different machine configurations and workload scenarios.
 
-## Cost Summary
+## Cost Overview
 
-| Scenario | Web Service | Training Jobs | Fixed Costs | Total |
-|----------|-------------|---------------|-------------|-------|
-| **Idle** | $0.00 | $0.00 | $2.09 | **$2.09** |
-| 100 calls/month | $0.17 | $9.97 | $2.09 | **$12.23** |
-| 500 calls/month | $0.87 | $49.85 | $2.09 | **$52.81** |
-| 1,000 calls/month | $1.74 | $99.70 | $2.09 | **$103.53** |
-| 5,000 calls/month | $8.70 | $498.52 | $2.09 | **$509.31** |
+The table below shows monthly costs for different combinations of:
+- **Machine configurations**: Dev (2 vCPU/8GB), Prod (4 vCPU/16GB), 2x Prod (8 vCPU/32GB), 4x Prod (16 vCPU/64GB)
+- **Workload types**: Test Run (2000 iter/5 trials), Benchmark (5000 iter/10 trials), Production (10000 iter/10 trials)
+- **Usage volumes**: 100, 500, 1000, 5000 calls per month (with 10, 50, 100, 500 training jobs respectively)
 
-**Key insight:** Training jobs account for ~96% of variable costs at scale (1 training job per 10 web requests).
+### Monthly Cost Estimates
 
-**Note:** This cost summary is based on **current production workload** baseline from `Cost estimate.csv`:
-- Training workload: **10,000 iterations × 5 trials** (typical production use case)
-- Training job duration: **5,508 seconds (1.53 hours)** on production config
-- Training config: 4 vCPU, 16GB memory (production default)
-- Cost per job: **$0.997** (compute + storage + egress + logging)
+| Configuration | Workload Type | 100 calls<br/>(10 jobs) | 500 calls<br/>(50 jobs) | 1000 calls<br/>(100 jobs) | 5000 calls<br/>(500 jobs) |
+|---------------|---------------|-------------------------|-------------------------|---------------------------|---------------------------|
+| **Dev (2 vCPU, 8GB)** | Test Run | $3.61 | $9.71 | $17.33 | $78.29 |
+| | Benchmark | $9.00 | $36.66 | $71.23 | $347.79 |
+| | Production | $15.74 | $70.36 | $138.63 | $684.79 |
+| **Prod (4 vCPU, 16GB)** | Test Run | $3.76 | $10.46 | $18.83 | $85.79 |
+| | Benchmark | $9.75 | $40.41 | $78.73 | $385.29 |
+| | Production | $17.24 | $77.86 | $153.63 | $759.79 |
+| **2x Prod (8 vCPU, 32GB)** | Test Run | $3.85 | $10.91 | $19.73 | $90.29 |
+| | Benchmark | $10.19 | $42.61 | $83.13 | $407.29 |
+| | Production | $18.12 | $82.26 | $162.43 | $803.79 |
+| **4x Prod (16 vCPU, 64GB)** | Test Run | $3.92 | $11.26 | $20.43 | $93.79 |
+| | Benchmark | $10.56 | $44.46 | $86.83 | $425.79 |
+| | Production | $18.86 | $85.96 | $169.83 | $840.79 |
+
+**Notes:**
+- Costs include web service ($0.0017 per call), training jobs, and fixed costs ($2.09/month for GCS, Secret Manager, etc.)
+- Training job ratio: 1 job per 10 web requests
+- Idle cost (no usage): $2.09/month
 - Web request duration: 30 seconds average
 
-## Infrastructure: Queue Execution
+### Training Job Performance and Cost
 
-### Cloud Scheduler for Background Queue Processing
-**Cost: $0.10/month (included in free tier)**
+Individual training job costs and durations for each workload type:
 
-The application uses Google Cloud Scheduler to process the training job queue in the background:
+| Configuration | Test Run<br/>(2000 iter × 5 trials) | Benchmark<br/>(5000 iter × 10 trials) | Production<br/>(10000 iter × 10 trials) |
+|---------------|-------------------------------------|---------------------------------------|------------------------------------------|
+| **Dev (2 vCPU, 8GB)** | 33 min, $0.14 | 165 min (2.8 hrs), $0.67 | 330 min (5.5 hrs), $1.35 |
+| **Prod (4 vCPU, 16GB)** | 18 min, $0.15 | 91 min (1.5 hrs), $0.75 | 183 min (3.1 hrs), $1.50 |
+| **2x Prod (8 vCPU, 32GB)** | 9 min, $0.16 | 48 min, $0.79 | 97 min (1.6 hrs), $1.59 |
+| **4x Prod (16 vCPU, 64GB)** | 5 min, $0.17 | 25 min, $0.83 | 50 min, $1.66 |
 
-**Configuration:**
-- **Schedule**: Every minute (`*/1 * * * *`)
-- **Endpoint**: `${WEB_SERVICE_URL}?queue_tick=1&name={queue_name}`
-  - Production: `?queue_tick=1&name=default`
-  - Dev: `?queue_tick=1&name=default-dev`
-- **Authentication**: OIDC token with dedicated service account (`robyn-queue-scheduler`)
-- **Timeout**: 320 seconds per tick
-- **Resource**: `google_cloud_scheduler_job.robyn_queue_tick` in `infra/terraform/main.tf`
-- **Environment Variable**: `DEFAULT_QUEUE_NAME` set via `var.queue_name` in terraform
+**Key Insights:**
+- Training jobs account for 85-96% of total costs at scale
+- Dev config is most cost-effective but takes longer (best for development/overnight runs)
+- Prod config (4 vCPU/16GB) offers good balance of speed and cost (current production default)
+- Larger machines (8-16 vCPU) provide faster results with modest cost increase (~11-23% more than dev)
+- Choose configuration based on urgency: dev for cost, larger configs for time-sensitive work
 
-**How it works:**
-1. Cloud Scheduler triggers the web service every minute with `?queue_tick=1` parameter
-2. Web service reads `DEFAULT_QUEUE_NAME` from environment (set to `var.queue_name` in terraform)
-3. Web service processes one queue tick: launches pending jobs or updates running job status
-4. Queue state is persisted in GCS at `gs://{bucket}/robyn-queues/{queue_name}/queue.json`
-5. Jobs execute independently as Cloud Run Jobs
+## Configuration Reference
 
-**Benefits:**
-- Queue processes automatically without requiring user to be on the page
-- Reliable execution even if browser is closed
-- Separate queues for dev and prod environments prevent interference
-- Minimal cost (~$0.10/month, covered by Cloud Scheduler free tier of 3 jobs)
+Current infrastructure uses:
+- **Dev environment**: 2 vCPU, 8GB memory for training jobs
+- **Prod environment**: 4 vCPU, 16GB memory for training jobs
+- **Queue execution**: Cloud Scheduler (every minute, ~$0.10/month, covered by free tier)
+- **Idle cost**: $2.09/month with `min_instances=0`
 
-**Cost Impact:**
-- Cloud Scheduler: $0.10/month (first 3 jobs free, then $0.10/job/month)
-- Already deployed and included in infrastructure
-- No additional costs for queue processing itself
-
-## Implemented Optimizations
-
-### 1. ✅ Reduced min_instances to 0 (IMPLEMENTED)
-**Savings: $42.94/month (95% of idle cost)**
-
-Changed `min_instances` from 2 to 0 in `infra/terraform/variables.tf`.
-
-**Impact:**
-- Eliminates always-on Cloud Run instances
-- Reduces idle cost from $45.03/month to $2.09/month
-- Trade-off: Adds 1-3 second cold start latency on first request
-
-**To apply:**
-```bash
-cd infra/terraform
-terraform apply -var-file="envs/prod.tfvars"
+To change training job resources, edit `infra/terraform/envs/dev.tfvars` or `prod.tfvars`:
+```hcl
+training_cpu       = "4.0"   # vCPU count
+training_memory    = "16Gi"  # Memory allocation
+training_max_cores = "4"     # Maximum cores
 ```
 
-### 2. ✅ GCS Lifecycle Policies (DOCUMENTED)
-**Savings: ~$0.78/month on storage, up to 80% on historical data**
+## Future Optimization Opportunities
 
-Created `infra/terraform/storage.tf` with lifecycle policy configuration.
-
-**Policy Rules:**
-- Move data to Nearline after 30 days (50% cheaper: $0.010/GB vs $0.020/GB)
-- Move data to Coldline after 90 days (80% cheaper: $0.004/GB vs $0.020/GB)
-- Delete old queue data after 365 days
-
-**To apply manually:**
-```bash
-cat > lifecycle.json << 'EOF'
-{
-  "lifecycle": {
-    "rule": [
-      {
-        "action": {"type": "SetStorageClass", "storageClass": "NEARLINE"},
-        "condition": {
-          "age": 30,
-          "matchesPrefix": ["robyn/", "datasets/", "training-data/"]
-        }
-      },
-      {
-        "action": {"type": "SetStorageClass", "storageClass": "COLDLINE"},
-        "condition": {
-          "age": 90,
-          "matchesPrefix": ["robyn/", "datasets/", "training-data/"]
-        }
-      },
-      {
-        "action": {"type": "Delete"},
-        "condition": {
-          "age": 365,
-          "matchesPrefix": ["robyn-queues/"]
-        }
-      }
-    ]
-  }
-}
-EOF
-
-gcloud storage buckets update gs://mmm-app-output --lifecycle-file=lifecycle.json
-```
-
-### 3. ✅ Request Caching for Snowflake (IMPLEMENTED)
-**Savings: Up to 70% of Snowflake costs when using cached data**
-
-Implemented a two-tier caching strategy for Snowflake queries.
-
-**What was implemented:**
-
-1. **Created `app/utils/snowflake_cache.py`**
-   - In-memory cache (TTL: 1 hour) for immediate access
-   - GCS persistent cache (TTL: 24 hours) for durability
-   - Automatic query normalization (ignores whitespace/case differences)
-
-2. **Updated `app/app_shared.py`**
-   - Modified `run_sql()` function to use caching by default
-   - Added `use_cache` parameter for fine-grained control
-   - Automatically initializes cache on application startup
-
-3. **Created Cache Management UI** (`app/nav/Cache_Management.py`)
-   - View cache statistics (in-memory and GCS)
-   - Clear cache when needed
-   - Cost savings calculator
-   - Cache hit rate monitoring
-
-**How it works:**
-
-```python
-# Queries are automatically cached
-df = run_sql("SELECT * FROM table")  # First call: hits Snowflake
-df = run_sql("SELECT * FROM table")  # Second call: uses cache
-
-# Disable caching for specific queries
-df = run_sql("INSERT INTO table VALUES ...", use_cache=False)
-```
-
-**Cache behavior:**
-- Tier 1: In-memory cache (fast, 1-hour TTL)
-- Tier 2: GCS cache (persistent, 24-hour TTL)
-- Queries are normalized (whitespace/case-insensitive)
-- Write operations automatically bypass cache
-
-**Expected savings with 70% cache hit rate:**
-- 100 calls/month: $10.00 → $3.00 (save $7/month)
-- 500 calls/month: $50.00 → $15.00 (save $35/month)
-- 1000 calls/month: $100.00 → $30.00 (save $70/month)
-- 5000 calls/month: $500.00 → $150.00 (save $350/month)
-
-### 4. 📝 Result Compression (RECOMMENDATION)
-**Savings: ~50% reduction in storage and egress costs**
+### 1. Result Compression
+**Potential Savings: ~50% reduction in storage and egress costs**
 
 Compress training results before uploading to GCS.
 
@@ -190,8 +92,8 @@ zip::zip(
 - Storage: 50% reduction (e.g., $12.80 → $6.40 at 5000 calls/month)
 - Egress: 50% reduction (e.g., $60.00 → $30.00 at 5000 calls/month)
 
-### 5. 📝 Log Retention Policies (RECOMMENDATION)
-**Savings: Minimal (first 50GB/month free)**
+### 2. Log Retention Policies
+**Potential Savings: Minimal (first 50GB/month free)**
 
 Configure log retention in Cloud Logging:
 
@@ -202,8 +104,8 @@ gcloud logging sinks create delete-old-logs \
   --log-filter='timestamp<"2024-01-01T00:00:00Z"'
 ```
 
-### 6. 📝 Optimize Docker Images (RECOMMENDATION)
-**Savings: ~$0.05-0.10/month**
+### 3. Optimize Docker Images
+**Potential Savings: ~$0.05-0.10/month**
 
 Reduce Artifact Registry storage by optimizing Docker images:
 
@@ -218,105 +120,79 @@ FROM python:3.11-slim
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 ```
 
-### 7. 📝 Preemptible Cloud Run Jobs (FUTURE)
-**Savings: Up to 50% on training job costs**
+### 4. Preemptible Cloud Run Jobs
+**Potential Savings: Up to 50% on training job costs**
 
 Currently not available for Cloud Run, but monitor GCP announcements for spot/preemptible instances.
 
-### 8. 📝 Regional vs Multi-Regional GCS (CURRENT STATE)
-**Cost: Optimal**
+## Monitoring and Cost Control
 
-Currently using regional GCS (europe-west1) which is already the most cost-effective option for this use case.
+### Tracking Costs
 
-## Updated Cost Estimates with Optimizations
-
-### With all optimizations applied (Current):
-
-Using current production baseline (10,000 iterations × 5 trials):
-
-| Scenario | Before Optimization | After Optimization | Savings | % Reduction |
-|----------|---------------------|-------------------|---------|-------------|
-| Idle | $45.03 | $2.09 | $42.94 | 95% |
-| 100 calls | $30.00 | $12.23 | $17.77 | 59% |
-| 500 calls | $120.00 | $52.81 | $67.19 | 56% |
-| 1,000 calls | $235.00 | $103.53 | $131.47 | 56% |
-| 5,000 calls | $1,145.00 | $509.31 | $635.69 | 56% |
-
-**Key optimizations:**
-- Reduced min_instances from 2 to 0 (eliminates idle cost)
-- Training job right-sizing from 8 vCPU/32GB to 4 vCPU/16GB
-- Snowflake query caching (70% cache hit rate)
-- GCS lifecycle policies for historical data
-
-### Web-Only Scenario (No Training Jobs):
-
-If users only browse/query without triggering training:
-
-| Scenario | Monthly Cost |
-|----------|-------------|
-| Idle | $2.09 |
-| 100 calls | $2.26 |
-| 500 calls | $2.96 |
-| 1,000 calls | $3.83 |
-| 5,000 calls | $10.79 |
-
-## Implementation Priority
-
-1. **High Priority (Implemented)**
-   - ✅ Set min_instances to 0
-   - ✅ Document GCS lifecycle policies
-   - ✅ Implement Snowflake query caching (two-tier: in-memory + GCS)
-   - ✅ Create cache management UI
-   - ✅ Training job right-sizing (4 vCPU/16GB vs 8/32)
-
-2. **Medium Priority (Recommended Next)**
-   - Apply GCS lifecycle policies to production bucket
-   - Monitor cache hit rate and adjust TTLs if needed
-   - Implement result compression
-
-3. **Low Priority (Future)**
-   - Optimize Docker images
-   - Configure log retention
-   - Monitor for preemptible/spot instances
-
-## Rollout Plan
-
-1. **Immediate (Today)**
-   - Deploy min_instances=0 change to dev environment
-   - Monitor cold start latency
-   - If acceptable, deploy to production
-
-2. **Week 1**
-   - Apply GCS lifecycle policies
-   - Monitor storage costs
-
-3. **Week 2-3**
-   - Implement Snowflake caching
-   - Test cache hit rate
-   - Monitor Snowflake costs
-
-4. **Week 4**
-   - Implement result compression
-   - Monitor storage and egress costs
-
-## Monitoring
-
-Track these metrics to measure optimization impact:
+Monitor these metrics to track cost optimization impact:
 
 ```bash
-# Cloud Run costs
+# View Cloud Run costs
 gcloud billing accounts list
-gcloud billing accounts get-iam-policy <ACCOUNT_ID>
+gcloud billing projects describe datawarehouse-422511
 
-# Storage costs
-gsutil du -s gs://mmm-app-output
+# Check storage usage
+gsutil du -sh gs://mmm-app-output
 gsutil lifecycle get gs://mmm-app-output
 
-# Snowflake costs
-# Check Snowflake UI for compute credit usage
+# View Cloud Run service metrics
+gcloud run services describe mmm-app --region=europe-west1 --format=json
 ```
 
-## Reverting Changes
+### GCP Console Dashboards
+
+- **Cloud Run**: Monitor request count, latency, and costs
+- **Cloud Storage**: Track storage usage and class distribution
+- **Cloud Logging**: Monitor log volume and retention
+- **Billing**: View cost breakdown by service
+
+### Key Metrics to Track
+
+1. **Training job costs**: Should be 85-96% of total variable costs
+2. **Cache hit rate**: Target >70% for Snowflake queries
+3. **Storage growth**: Monitor and apply lifecycle policies
+4. **Cold start frequency**: Balance with idle costs
+
+### Cost Alerts
+
+Set up budget alerts in GCP Console:
+```bash
+# Create budget alert
+gcloud billing budgets create \
+  --billing-account=<ACCOUNT_ID> \
+  --display-name="MMM App Monthly Budget" \
+  --budget-amount=1000 \
+  --threshold-rule=percent=50 \
+  --threshold-rule=percent=90
+```
+
+## Adjusting Configuration
+
+### Scaling Up for Production Workloads
+
+To increase training performance:
+
+1. Edit `infra/terraform/envs/prod.tfvars`:
+```hcl
+training_cpu       = "8.0"   # Double prod
+training_memory    = "32Gi"
+training_max_cores = "8"
+```
+
+2. Apply changes:
+```bash
+cd infra/terraform
+terraform apply -var-file="envs/prod.tfvars"
+```
+
+3. Consider cost vs time trade-off (see cost overview table)
+
+### Reverting Changes
 
 If cold starts become unacceptable:
 
@@ -326,127 +202,21 @@ cd infra/terraform
 terraform apply -var="min_instances=2" -var-file="envs/prod.tfvars"
 ```
 
-## Scenario Analysis
+## Cost Calculation Reference
 
-### Scenario 1: Dev vs Prod Workflow Cost Comparison
+**Baseline data** (from production testing):
+- Dev config (2 vCPU, 8GB): 1983 seconds with 2000 iterations × 5 trials
+- Scaling is linear with (iterations × trials)
+- Performance improves with CPU/memory but with diminishing returns
 
-**Baseline:** This analysis uses the **current production workload** (10,000 iterations × 5 trials, approximately 1.53 hours on production config).
+**Cloud Run pricing** (europe-west1):
+- CPU: $0.000024 per vCPU-second
+- Memory: $0.0000025 per GiB-second
+- Includes per-second billing (no minimum charge)
 
-The dev and prod environments use different training job configurations for cost optimization. This scenario compares the monthly costs for typical usage patterns.
-
-**Environment Configurations:**
-- **Dev** (ci-dev.yml): 2 vCPU, 8GB memory for training jobs
-- **Prod** (ci.yml): 4 vCPU, 16GB memory for training jobs
-- **Web Service**: Both use 2 vCPU, 4GB memory (same cost)
-
-**Monthly Cost Breakdown:**
-
-| Usage Scenario | Dev Environment | Prod Environment | Difference | % More for Prod |
-|----------------|-----------------|------------------|------------|-----------------|
-| **Idle** | $2.09 | $2.09 | $0.00 | 0% |
-| **100 calls/month** (10 training jobs) | $9.50 | $12.23 | +$2.73 | 29% |
-| **500 calls/month** (50 training jobs) | $39.93 | $52.81 | +$12.88 | 32% |
-| **1,000 calls/month** (100 training jobs) | $76.99 | $103.53 | +$26.54 | 34% |
-| **5,000 calls/month** (500 training jobs) | $379.90 | $509.31 | +$129.41 | 34% |
-
-**Cost Components (example: 500 calls/month):**
-
-**Dev Environment ($39.93 total):**
-- Web Service: $0.87
-- Training Jobs (50 runs): $37.08
-- Fixed Costs: $2.09
-
-**Prod Environment ($52.81 total):**
-- Web Service: $0.87
-- Training Jobs (50 runs): $49.85
-- Fixed Costs: $2.09
-
-**Key Insights:**
-- Dev environment is 29-34% cheaper depending on usage
-- Cost difference grows with higher usage (training job costs dominate)
-- Prod provides ~45% faster training at ~34% higher cost
-- Dev is ideal for experimentation and development
-- Prod is better for production workloads where speed matters
-
-### Scenario 2: Training Job Sizing Analysis
-
-This scenario analyzes the cost and time trade-offs for different machine sizes when running a **large training job with 10,000 iterations and 10 trials** (2x the current baseline workload).
-
-**Baseline Data:**
-- Configuration: Dev (2 vCPU, 8GB)
-- Training parameters: 10,000 iterations, 5 trials (current production baseline)
-- Actual runtime: 9,915 seconds (2.75 hours)
-
-**Extrapolation for 10,000 iterations × 10 trials:**
-
-Work scales linearly with iterations × trials:
-- Baseline work: 10,000 × 5 = 50,000 units
-- Target work: 10,000 × 10 = 100,000 units
-- Scaling factor: 2x
-
-| Configuration | vCPU | Memory | Duration | Duration (hours) | Cost per Run | Cost per 100 Runs | Cost per Month (500 runs) |
-|---------------|------|--------|----------|------------------|--------------|-------------------|---------------------------|
-| **Dev Config** | 2 | 8GB | 19,830 sec (5.5 hrs) | 5.51 | $1.48 | $148.33 | $741.64 |
-| **Prod Config** | 4 | 16GB | 11,017 sec (3.1 hrs) | 3.06 | $1.65 | $164.81 | $824.05 |
-| **2x Prod** | 8 | 32GB | 5,832 sec (1.6 hrs) | 1.62 | $1.75 | $174.50 | $872.52 |
-| **4x Prod** | 16 | 64GB | 3,005 sec (0.8 hrs) | 0.83 | $1.80 | $179.79 | $898.96 |
-
-**Performance vs Cost Trade-offs:**
-
-| Configuration | Time Savings vs Dev | Cost Premium vs Dev | Cost per Hour Saved |
-|---------------|---------------------|---------------------|---------------------|
-| **Dev Config** | Baseline | Baseline | - |
-| **Prod Config** | 44% faster (2.5 hrs saved) | +11% cost | $0.07 per hour saved |
-| **2x Prod** | 71% faster (3.9 hrs saved) | +18% cost | $0.07 per hour saved |
-| **4x Prod** | 85% faster (4.7 hrs saved) | +21% cost | $0.07 per hour saved |
-
-**Recommendations by Use Case:**
-
-1. **Development & Experimentation** → **Dev Config (2 vCPU, 8GB)**
-   - Best for iterative development
-   - Lowest cost per run ($1.48)
-   - Acceptable for overnight or background training
-   - 5.5 hour runtime is manageable for non-urgent work
-
-2. **Production Workloads** → **Prod Config (4 vCPU, 16GB)**
-   - Good balance of speed and cost
-   - 3 hour runtime fits within a work session
-   - Only 11% more expensive than dev
-   - Current production default
-
-3. **Time-Critical Analysis** → **2x Prod Config (8 vCPU, 32GB)**
-   - 1.6 hour runtime for quick turnaround
-   - Useful for urgent stakeholder requests
-   - 18% more expensive than dev
-   - Consider for high-value, time-sensitive work
-
-4. **Ultra-Fast Iteration** → **4x Prod Config (16 vCPU, 64GB)**
-   - 50 minute runtime for rapid experimentation
-   - Best for interactive/exploratory analysis
-   - 21% more expensive than dev
-   - Diminishing returns on cost efficiency
-
-**Cost-Efficiency Analysis:**
-
-- All configurations have similar cost per hour saved (~$0.07/hour)
-- The marginal cost increase is relatively small (11-21%)
-- Time savings are substantial (44-85%)
-- **Recommendation**: Use larger machines when:
-  - Results are needed urgently (stakeholder meetings, decisions)
-  - Running multiple experiments in a day
-  - Developer time is more valuable than compute cost
-  - Interactive exploration requires fast feedback
-
-**When to Scale Up:**
-
-```
-Developer hourly cost: ~$50-100/hour
-Compute savings: ~$0.30 for 4x faster execution
-Time saved: 4.7 hours
-
-If saving 4.7 hours of developer time = $235-470 value
-Additional compute cost = $0.30
-ROI = 780-1,560x return on investment
-```
-
-**Conclusion**: For time-sensitive work, the additional compute cost is negligible compared to the value of faster results. Choose configuration based on urgency, not just cost.
+**Fixed monthly costs**:
+- GCS storage: ~$0.50-2.00/month (depends on data volume)
+- Secret Manager: $0.06/month (6 secrets × $0.01)
+- Cloud Scheduler: $0.10/month (covered by free tier)
+- Artifact Registry: ~$0.50/month
+- Total fixed: ~$2.09/month
