@@ -15,7 +15,7 @@ from google.auth.iam import Signer as IAMSigner
 from google.auth.transport.requests import Request
 from google.cloud import storage
 
-from app.utils.gcs_utils import get_cet_now
+from utils.gcs_utils import get_cet_now
 
 try:
     from app_shared import (

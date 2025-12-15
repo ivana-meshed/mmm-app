@@ -54,7 +54,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from google.cloud import storage
 
-from app.utils.gcs_utils import format_cet_timestamp, get_cet_now
+from utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 __all__ = [
     # public constants & classes...

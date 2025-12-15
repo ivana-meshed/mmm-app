@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional
 import streamlit as st
 from utils.validation import validate_training_config
 
-from app.utils.gcs_utils import get_cet_now
+from utils.gcs_utils import get_cet_now
 
 logger = logging.getLogger(__name__)
 

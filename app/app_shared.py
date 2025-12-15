@@ -28,7 +28,7 @@ from google.cloud import run_v2, secretmanager, storage
 from utils.snowflake_cache import get_cached_query_result
 from utils.snowflake_cache import init_cache as init_snowflake_cache
 
-from app.utils.gcs_utils import format_cet_timestamp, get_cet_now
+from utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 # Environment constants
 PROJECT_ID = os.getenv("PROJECT_ID")

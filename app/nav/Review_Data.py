@@ -50,7 +50,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
 
-from app.utils.gcs_utils import get_cet_now
+from utils.gcs_utils import get_cet_now
 
 # Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
 

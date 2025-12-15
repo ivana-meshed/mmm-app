@@ -29,7 +29,7 @@ from app_shared import (
 )
 from google.cloud import storage
 
-from app.utils.gcs_utils import format_cet_timestamp, get_cet_now
+from utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 data_processor = get_data_processor()
 job_manager = get_job_manager()
