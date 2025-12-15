@@ -7,23 +7,19 @@ This document describes the cost reduction strategies implemented for the MMM Tr
 | Scenario | Web Service | Training Jobs | Fixed Costs | Total |
 |----------|-------------|---------------|-------------|-------|
 | **Idle** | $0.00 | $0.00 | $2.09 | **$2.09** |
-| 100 calls/month | $2.68 | $50.69 | $2.09 | **$55.46** |
-| 500 calls/month | $13.40 | $253.43 | $2.09 | **$268.92** |
-| 1,000 calls/month | $26.80 | $506.86 | $2.09 | **$535.75** |
-| 5,000 calls/month | $134.00 | $2,534.30 | $2.09 | **$2,670.39** |
+| 100 calls/month | $0.17 | $9.97 | $2.09 | **$12.23** |
+| 500 calls/month | $0.87 | $49.85 | $2.09 | **$52.81** |
+| 1,000 calls/month | $1.74 | $99.70 | $2.09 | **$103.53** |
+| 5,000 calls/month | $8.70 | $498.52 | $2.09 | **$509.31** |
 
-**Key insight:** Training jobs account for ~95% of variable costs at scale (1 training job per 10 web requests).
+**Key insight:** Training jobs account for ~96% of variable costs at scale (1 training job per 10 web requests).
 
-**Note:** This cost summary is based on **conservative assumptions** from `Cost estimate.csv`:
-- Training job duration: **1 hour (3600 seconds)** per job
+**Note:** This cost summary is based on **current production workload** baseline from `Cost estimate.csv`:
+- Training workload: **10,000 iterations × 5 trials** (typical production use case)
+- Training job duration: **5,508 seconds (1.53 hours)** on production config
 - Training config: 4 vCPU, 16GB memory (production default)
+- Cost per job: **$0.997** (compute + storage + egress + logging)
 - Web request duration: 30 seconds average
-
-For **actual measured performance** based on recent training runs, see [Scenario Analysis](#scenario-analysis) below, which uses real baseline data:
-- Typical training: **1983 seconds (33 minutes)** for 2000 iterations, 5 trials
-- Cost per job: **$0.30-1.80** depending on machine size (vs $5.07 in conservative estimate)
-
-The conservative estimate provides a **safety margin** for larger/longer workloads, while the scenario analysis reflects **current typical usage**.
 
 ## Infrastructure: Queue Execution
 
@@ -236,13 +232,21 @@ Currently using regional GCS (europe-west1) which is already the most cost-effec
 
 ### With all optimizations applied (Current):
 
-| Scenario | Original Cost | Optimized Cost | Savings | % Reduction |
-|----------|---------------|----------------|---------|-------------|
+Using current production baseline (10,000 iterations × 5 trials):
+
+| Scenario | Before Optimization | After Optimization | Savings | % Reduction |
+|----------|---------------------|-------------------|---------|-------------|
 | Idle | $45.03 | $2.09 | $42.94 | 95% |
-| 100 calls | $148.00 | $55.46 | $92.54 | 63% |
-| 500 calls | $519.56 | $268.92 | $250.64 | 48% |
-| 1,000 calls | $1,073.39 | $535.75 | $537.64 | 50% |
-| 5,000 calls | $5,142.33 | $2,670.39 | $2,471.94 | 48% |
+| 100 calls | $30.00 | $12.23 | $17.77 | 59% |
+| 500 calls | $120.00 | $52.81 | $67.19 | 56% |
+| 1,000 calls | $235.00 | $103.53 | $131.47 | 56% |
+| 5,000 calls | $1,145.00 | $509.31 | $635.69 | 56% |
+
+**Key optimizations:**
+- Reduced min_instances from 2 to 0 (eliminates idle cost)
+- Training job right-sizing from 8 vCPU/32GB to 4 vCPU/16GB
+- Snowflake query caching (70% cache hit rate)
+- GCS lifecycle policies for historical data
 
 ### Web-Only Scenario (No Training Jobs):
 
@@ -251,10 +255,10 @@ If users only browse/query without triggering training:
 | Scenario | Monthly Cost |
 |----------|-------------|
 | Idle | $2.09 |
-| 100 calls | $4.77 |
-| 500 calls | $15.49 |
-| 1,000 calls | $28.89 |
-| 5,000 calls | $136.09 |
+| 100 calls | $2.26 |
+| 500 calls | $2.96 |
+| 1,000 calls | $3.83 |
+| 5,000 calls | $10.79 |
 
 ## Implementation Priority
 
@@ -324,28 +328,9 @@ terraform apply -var="min_instances=2" -var-file="envs/prod.tfvars"
 
 ## Scenario Analysis
 
-### Overview: Conservative vs Actual Cost Estimates
-
-This document contains two sets of cost estimates for different planning purposes:
-
-| Estimate Type | Training Duration | Cost per Job | Use When |
-|---------------|------------------|--------------|----------|
-| **Conservative** (Cost Summary above) | 1 hour (3600s) | $5.07 | Long-running workloads, budget planning, worst-case estimates |
-| **Actual Measured** (Scenarios below) | 33 min (1983s) | $0.30-1.80 | Typical workloads (2K-10K iterations), current usage patterns |
-
-**Why the difference?**
-- The Cost Summary table provides a **safety margin** for larger experiments and conservative budgeting
-- The Scenario Analysis below uses **real measured performance** from actual training runs
-- Actual costs are **~6-17x lower** than conservative estimates for typical workloads
-
-**Which should you use?**
-- **Budget planning**: Use Cost Summary for safety margin
-- **Optimization decisions**: Use Scenario Analysis for realistic comparisons
-- **Large experiments** (>5K iterations): Actual duration may approach conservative estimate
-
 ### Scenario 1: Dev vs Prod Workflow Cost Comparison
 
-**Baseline:** This analysis uses **actual measured performance** (1983 seconds for 2000 iterations, 5 trials) rather than the conservative 1-hour assumption in the Cost Summary above.
+**Baseline:** This analysis uses the **current production workload** (10,000 iterations × 5 trials, approximately 1.53 hours on production config).
 
 The dev and prod environments use different training job configurations for cost optimization. This scenario compares the monthly costs for typical usage patterns.
 
@@ -359,45 +344,45 @@ The dev and prod environments use different training job configurations for cost
 | Usage Scenario | Dev Environment | Prod Environment | Difference | % More for Prod |
 |----------------|-----------------|------------------|------------|-----------------|
 | **Idle** | $2.09 | $2.09 | $0.00 | 0% |
-| **100 calls/month** (10 training jobs) | $3.60 | $5.09 | +$1.48 | 41% |
-| **500 calls/month** (50 training jobs) | $9.65 | $17.07 | +$7.42 | 77% |
-| **1,000 calls/month** (100 training jobs) | $17.21 | $32.05 | +$14.83 | 86% |
-| **5,000 calls/month** (500 training jobs) | $77.70 | $151.87 | +$74.16 | 95% |
+| **100 calls/month** (10 training jobs) | $9.50 | $12.23 | +$2.73 | 29% |
+| **500 calls/month** (50 training jobs) | $39.93 | $52.81 | +$12.88 | 32% |
+| **1,000 calls/month** (100 training jobs) | $76.99 | $103.53 | +$26.54 | 34% |
+| **5,000 calls/month** (500 training jobs) | $379.90 | $509.31 | +$129.41 | 34% |
 
 **Cost Components (example: 500 calls/month):**
 
-**Dev Environment ($9.65 total):**
-- Web Service: $0.15
-- Training Jobs (50 runs): $7.42
+**Dev Environment ($39.93 total):**
+- Web Service: $0.87
+- Training Jobs (50 runs): $37.08
 - Fixed Costs: $2.09
 
-**Prod Environment ($17.07 total):**
-- Web Service: $0.15
-- Training Jobs (50 runs): $14.83
+**Prod Environment ($52.81 total):**
+- Web Service: $0.87
+- Training Jobs (50 runs): $49.85
 - Fixed Costs: $2.09
 
 **Key Insights:**
-- Dev environment is 41-95% cheaper depending on usage
+- Dev environment is 29-34% cheaper depending on usage
 - Cost difference grows with higher usage (training job costs dominate)
-- Prod provides ~45% faster training at ~2x the cost
+- Prod provides ~45% faster training at ~34% higher cost
 - Dev is ideal for experimentation and development
 - Prod is better for production workloads where speed matters
 
 ### Scenario 2: Training Job Sizing Analysis
 
-This scenario analyzes the cost and time trade-offs for different machine sizes when running a large training job with **10,000 iterations and 10 trials**.
+This scenario analyzes the cost and time trade-offs for different machine sizes when running a **large training job with 10,000 iterations and 10 trials** (2x the current baseline workload).
 
 **Baseline Data:**
 - Configuration: Dev (2 vCPU, 8GB)
-- Training parameters: 2,000 iterations, 5 trials, daily data (2024-01-01 to 2025-12-02)
-- Actual runtime: 1,983 seconds (33 minutes)
+- Training parameters: 10,000 iterations, 5 trials (current production baseline)
+- Actual runtime: 9,915 seconds (2.75 hours)
 
 **Extrapolation for 10,000 iterations × 10 trials:**
 
 Work scales linearly with iterations × trials:
-- Baseline work: 2,000 × 5 = 10,000 units
+- Baseline work: 10,000 × 5 = 50,000 units
 - Target work: 10,000 × 10 = 100,000 units
-- Scaling factor: 10x
+- Scaling factor: 2x
 
 | Configuration | vCPU | Memory | Duration | Duration (hours) | Cost per Run | Cost per 100 Runs | Cost per Month (500 runs) |
 |---------------|------|--------|----------|------------------|--------------|-------------------|---------------------------|
