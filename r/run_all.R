@@ -350,7 +350,11 @@ date_var_name <- cfg$date_var %||% "date" # This is the column name to look for
 iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
-timestamp <- cfg$timestamp %||% format(Sys.time(), "%m%d_%H%M%S")
+timestamp <- cfg$timestamp %||% {
+  # Use CET (Central European Time) timezone to match Google Cloud Storage
+  cet_time <- as.POSIXlt(Sys.time(), tz = "Europe/Paris")
+  format(cet_time, "%m%d_%H%M%S")
+}
 
 # NEW: Training date range
 start_data_date <- as.Date(cfg$start_date %||% "2024-01-01")

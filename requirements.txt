@@ -5,3 +5,4 @@ google-cloud-secret-manager
 google-cloud-storage
 google-cloud-run
 protobuf<5
+pytz

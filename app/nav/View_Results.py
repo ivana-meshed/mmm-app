@@ -15,6 +15,8 @@ from google.auth.iam import Signer as IAMSigner
 from google.auth.transport.requests import Request
 from google.cloud import storage
 
+from utils.gcs_utils import get_cet_now
+
 try:
     from app_shared import (
         _sf_params_from_env,
@@ -1356,7 +1358,7 @@ def _get_cached_run_data(
         "country": country,
         "stamp": stamp,
         "key": run_key,
-        "cached_at": dt.datetime.now().isoformat(),
+        "cached_at": get_cet_now().isoformat(),
     }
 
 

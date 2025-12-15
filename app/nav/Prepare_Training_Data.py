@@ -52,6 +52,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
+from utils.gcs_utils import format_cet_timestamp
+
 # Authentication
 require_login_and_domain()
 ensure_session_defaults()
@@ -2428,7 +2430,7 @@ with st.expander(
                 # Use shared timestamp from Map Data if available, otherwise generate new one
                 timestamp = st.session_state.get(
                     "shared_save_timestamp",
-                    datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"),
+                    format_cet_timestamp(),
                 )
 
                 # Create temporary file

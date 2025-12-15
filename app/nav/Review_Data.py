@@ -50,6 +50,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
 
+from utils.gcs_utils import get_cet_now
+
 # Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
 
 require_login_and_domain()
@@ -89,7 +91,9 @@ with tab_load:
         st.session_state["country"] = country
 
     refresh_clicked = c4.button("↻ Refresh Lists")
-    refresh_key = str(pd.Timestamp.utcnow().value) if refresh_clicked else ""
+    refresh_key = (
+        str(int(get_cet_now().timestamp() * 1e9)) if refresh_clicked else ""
+    )
 
     data_versions = (
         list_data_versions(GCS_BUCKET, country, refresh_key)
