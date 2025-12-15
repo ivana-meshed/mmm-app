@@ -15,6 +15,8 @@ from google.auth.iam import Signer as IAMSigner
 from google.auth.transport.requests import Request
 from google.cloud import storage
 
+from utils.gcs_utils import get_cet_now
+
 try:
     from app_shared import (
         _sf_params_from_env,
@@ -764,12 +766,8 @@ def render_model_metrics_table(blobs, country, stamp):
 
         idx = row.name
         styles[1] = get_color(table_data["Prediction Quality"][idx], "r2")
-        styles[2] = get_color(
-            table_data["Prediction Error"][idx], "nrmse"
-        )
-        styles[3] = get_color(
-            table_data["ROAS Error"][idx], "decomp_rssd"
-        )
+        styles[2] = get_color(table_data["Prediction Error"][idx], "nrmse")
+        styles[3] = get_color(table_data["ROAS Error"][idx], "decomp_rssd")
         return styles
 
     # Format the values
@@ -823,12 +821,11 @@ def render_model_metrics_table(blobs, country, stamp):
         """
         )
 
-
     st.write("")
     st.write("")
     st.subheader("Model Outputs")
 
-    
+
 def render_metrics_section(blobs, country, stamp):
     st.subheader("Allocator Metrics")
     metrics_csv = find_blob(blobs, "/allocator_metrics.csv")
@@ -935,7 +932,7 @@ def render_forecast_allocator_section(blobs, country, stamp):
                 }
             ]
             if preview_cols:
-                st.dataframe(df_idx[preview_cols], use_container_width=True)
+                st.dataframe(df_idx[preview_cols], width="stretch")
 
             download_link_for_blob(
                 idx_blob,
@@ -1094,7 +1091,9 @@ def render_onepager_section(blobs, best_id, country, stamp):
 
     name = os.path.basename(op_blob.name)
     lower = name.lower()
-    st.success(f"Found model performancd summary: **{name}** ({op_blob.size:,} bytes)")
+    st.success(
+        f"Found model performancd summary: **{name}** ({op_blob.size:,} bytes)"
+    )
 
     if lower.endswith(".png"):
         try:
@@ -1335,7 +1334,9 @@ stamp_sel = st.selectbox(
     "Timestamp (optional)",
     stamp_options,
     index=default_stamp_index,
-    help=("Leave empty to use the latest run per tag number. Useful when you have multiple runs."),
+    help=(
+        "Leave empty to use the latest run per tag number. Useful when you have multiple runs."
+    ),
 )
 
 # Store selection in persistent session state key (not widget key)
@@ -1357,7 +1358,7 @@ def _get_cached_run_data(
         "country": country,
         "stamp": stamp,
         "key": run_key,
-        "cached_at": dt.datetime.now().isoformat(),
+        "cached_at": get_cet_now().isoformat(),
     }
 
 

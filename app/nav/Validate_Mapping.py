@@ -50,6 +50,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
 
+from utils.gcs_utils import get_cet_now
+
 # Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
 
 require_login_and_domain()
@@ -93,7 +95,9 @@ with tab_load:
         st.session_state["country"] = country
 
     refresh_clicked = c4.button("↻ Refresh Lists")
-    refresh_key = str(pd.Timestamp.utcnow().value) if refresh_clicked else ""
+    refresh_key = (
+        str(int(get_cet_now().timestamp() * 1e9)) if refresh_clicked else ""
+    )
 
     data_versions = (
         list_data_versions(GCS_BUCKET, country, refresh_key)
@@ -161,7 +165,7 @@ with tab_load:
                     st.warning("Declared vs observed type mismatches:")
                     st.dataframe(
                         report["type_mismatches"],
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
                 else:
@@ -420,7 +424,7 @@ with tab_biz:
             ),
             margin=dict(b=60),
         )
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig1, width="stretch")
 
     with cB:
         eff_t = res.copy()
@@ -466,7 +470,7 @@ with tab_biz:
             ),
             margin=dict(b=60),
         )
-        st.plotly_chart(fig2e, use_container_width=True)
+        st.plotly_chart(fig2e, width="stretch")
 
 
 # =============================
@@ -725,7 +729,7 @@ with tab_mkt:
                 yaxis_title=spend_label,
                 legend=dict(orientation="h"),
             )
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width="stretch")
         else:
             st.info("No spend data for the selected view.")
 
@@ -804,7 +808,7 @@ with tab_mkt:
                 title=f"Spend Change ({title_suffix})",
                 showlegend=False,
             )
-            st.plotly_chart(fig_w, use_container_width=True)
+            st.plotly_chart(fig_w, width="stretch")
         else:
             st.info("No spend data for the selected view.")
 
@@ -863,7 +867,7 @@ with tab_mkt:
                         )
                     )
                     figf.update_layout(margin=dict(l=40, r=20, t=10, b=20))
-                    st.plotly_chart(figf, use_container_width=True)
+                    st.plotly_chart(figf, width="stretch")
                 else:
                     st.info("No funnel metrics found.")
             with col_div:
@@ -898,7 +902,7 @@ with tab_mkt:
                         ],
                     }
                 )
-                st.dataframe(tbl, hide_index=True, use_container_width=True)
+                st.dataframe(tbl, hide_index=True, width="stretch")
             st.markdown("---")
     else:
         st.info("Platform mapping not available.")
@@ -1004,7 +1008,7 @@ with tab_driver:
             ),
             margin=dict(b=60),
         )
-        st.plotly_chart(fig_custom, use_container_width=True)
+        st.plotly_chart(fig_custom, width="stretch")
 
         if want_overlay and not can_overlay:
             st.caption(

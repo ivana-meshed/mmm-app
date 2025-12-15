@@ -145,7 +145,7 @@ with tab_load:
                 st.warning("Declared vs observed type mismatches:")
                 st.dataframe(
                     report["type_mismatches"],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
             else:
@@ -348,7 +348,7 @@ with tab_biz:
             ),
             margin=dict(b=60),
         )
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig1, width="stretch")
 
     with cB:
         eff_t = res.copy()
@@ -392,7 +392,7 @@ with tab_biz:
             ),
             margin=dict(b=60),
         )
-        st.plotly_chart(fig2e, use_container_width=True)
+        st.plotly_chart(fig2e, width="stretch")
 
     st.markdown("---")
 
@@ -495,7 +495,7 @@ with tab_biz:
             ),
             margin=dict(b=60),
         )
-        st.plotly_chart(fig_custom, use_container_width=True)
+        st.plotly_chart(fig_custom, width="stretch")
 
         if want_overlay and not can_overlay:
             st.caption(
@@ -539,7 +539,7 @@ with tab_reg:
             yaxis_title=nice(target),
             legend=dict(orientation="h"),
         )
-        st.plotly_chart(fig_cty, use_container_width=True)
+        st.plotly_chart(fig_cty, width="stretch")
 
     # -----------------------------
     # Channel mapping (from metadata)
@@ -644,7 +644,7 @@ with tab_reg:
                     perf_col_name,
                 ]
             ].rename(columns={"COUNTRY": "Country"}),
-            use_container_width=True,
+            width="stretch",
         )
     st.markdown("---")
 
@@ -722,7 +722,7 @@ with tab_reg:
             )
 
         st.markdown("### Channel KPIs — Outcomes & Costs")
-        st.dataframe(ch_disp, use_container_width=True)
+        st.dataframe(ch_disp, width="stretch")
 
         # -----------------------------
         # Channel breakdown (selector → component table with same columns)
@@ -836,7 +836,7 @@ with tab_reg:
                         lambda x: f"{x:.2f}" if pd.notna(x) else "–"
                     )
 
-                st.dataframe(comp_disp, use_container_width=True)
+                st.dataframe(comp_disp, width="stretch")
     else:
         st.info("No channel mapping available in metadata.")
 
@@ -866,7 +866,7 @@ with tab_reg:
         # Order channels (rows) by total spend desc, then transpose to Country x Channel
         mat = mat.loc[mat.sum(axis=1).sort_values(ascending=False).index]
         mat_t = mat.T  # TRANSPOSE: Countries as rows, Channels as columns
-        st.dataframe(mat_t.applymap(fmt_num), use_container_width=True)
+        st.dataframe(mat_t.applymap(fmt_num), width="stretch")
     else:
         st.info("Channel mapping or COUNTRY column not available.")
 
@@ -1129,7 +1129,7 @@ with tab_mkt:
             title=f"Spend Change — Waterfall ({title_suffix})",
             showlegend=False,
         )
-        st.plotly_chart(fig_w, use_container_width=True)
+        st.plotly_chart(fig_w, width="stretch")
     else:
         st.info("No spend data for the selected view.")
     st.markdown("---")
@@ -1192,7 +1192,7 @@ with tab_mkt:
             yaxis_title=spend_label,
             legend=dict(orientation="h"),
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
     else:
         st.info("No spend data for the selected view.")
     st.markdown("---")
@@ -1250,7 +1250,7 @@ with tab_mkt:
                         )
                     )
                     figf.update_layout(margin=dict(l=40, r=20, t=10, b=20))
-                    st.plotly_chart(figf, use_container_width=True)
+                    st.plotly_chart(figf, width="stretch")
                 else:
                     st.info("No funnel metrics found.")
             with col_right:
@@ -1280,7 +1280,7 @@ with tab_mkt:
                         ],
                     }
                 )
-                st.dataframe(tbl, hide_index=True, use_container_width=True)
+                st.dataframe(tbl, hide_index=True, width="stretch")
             st.markdown("---")
     else:
         st.info("Platform mapping not available.")

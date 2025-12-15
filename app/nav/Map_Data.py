@@ -26,6 +26,8 @@ from app_shared import (
 from app_split_helpers import *  # bring in all helper functions/constants
 from google.cloud import storage
 
+from utils.gcs_utils import format_cet_timestamp, get_cet_now
+
 # ──────────────────────────────────────────────────────────────
 # Constants
 # ──────────────────────────────────────────────────────────────
@@ -132,7 +134,7 @@ def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
 def _save_raw_to_gcs(
     df: pd.DataFrame, bucket: str, country: str, timestamp: str = None
 ) -> Dict[str, str]:
-    ts = timestamp or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = timestamp or format_cet_timestamp()
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         df.to_parquet(tmp.name, index=False)
         data_gcs_path = upload_to_gcs(bucket, tmp.name, _data_blob(country, ts))
@@ -145,7 +147,7 @@ def _save_mapped_to_gcs(
     df: pd.DataFrame, bucket: str, country: str, timestamp: str = None
 ) -> Dict[str, str]:
     """Save mapped dataset to mapped-datasets/ path (separate from raw datasets)."""
-    ts = timestamp or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = timestamp or format_cet_timestamp()
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         df.to_parquet(tmp.name, index=False)
         data_gcs_path = upload_to_gcs(
@@ -587,6 +589,15 @@ def _apply_automatic_aggregations(
                 for suffix, vars_list in suffixes.items():
                     custom_var_name = f"{channel.upper()}_{tag.upper()}_{suffix.upper()}_CUSTOM"
 
+                    # Always track aggregation sources (even if column already exists)
+                    aggregation_sources[custom_var_name] = {
+                        "source_columns": vars_list,
+                        "agg_method": "sum",
+                        "category": category,
+                        "channel": channel,
+                        "custom_tag": tag,
+                    }
+
                     # Only create if it doesn't already exist
                     if custom_var_name not in mapping_df["var"].values:
                         new_mapping_rows.append(
@@ -599,15 +610,6 @@ def _apply_automatic_aggregations(
                                 "custom_tags": tag,
                             }
                         )
-
-                        # Track aggregation sources
-                        aggregation_sources[custom_var_name] = {
-                            "source_columns": vars_list,
-                            "agg_method": "sum",
-                            "category": category,
-                            "channel": channel,
-                            "custom_tag": tag,
-                        }
 
                         # Calculate the sum in df_raw
                         if all(v in df_raw.columns for v in vars_list):
@@ -655,6 +657,15 @@ def _apply_automatic_aggregations(
                     f"{channel.upper()}_TOTAL_{suffix.upper()}_CUSTOM"
                 )
 
+                # Always track aggregation sources (even if column already exists)
+                aggregation_sources[total_var_name] = {
+                    "source_columns": vars_list,
+                    "agg_method": "sum",
+                    "category": category,
+                    "channel": channel,
+                    "custom_tag": "TOTAL",
+                }
+
                 # Only create if it doesn't already exist
                 if total_var_name not in mapping_df["var"].values:
                     new_mapping_rows.append(
@@ -667,15 +678,6 @@ def _apply_automatic_aggregations(
                             "custom_tags": "",
                         }
                     )
-
-                    # Track aggregation sources
-                    aggregation_sources[total_var_name] = {
-                        "source_columns": vars_list,
-                        "agg_method": "sum",
-                        "category": category,
-                        "channel": channel,
-                        "custom_tag": "TOTAL",
-                    }
 
                     # Calculate the sum in df_raw
                     if all(v in df_raw.columns for v in vars_list):
@@ -726,6 +728,15 @@ def _apply_automatic_aggregations(
                     f"{organic_prefix}_{tag.upper()}_{suffix.upper()}_CUSTOM"
                 )
 
+                # Always track aggregation sources (even if column already exists)
+                aggregation_sources[custom_var_name] = {
+                    "source_columns": vars_list,
+                    "agg_method": "sum",
+                    "category": "organic_vars",
+                    "channel": "organic",
+                    "custom_tag": tag,
+                }
+
                 if custom_var_name not in mapping_df["var"].values:
                     new_mapping_rows.append(
                         {
@@ -737,15 +748,6 @@ def _apply_automatic_aggregations(
                             "custom_tags": tag,
                         }
                     )
-
-                    # Track aggregation sources
-                    aggregation_sources[custom_var_name] = {
-                        "source_columns": vars_list,
-                        "agg_method": "sum",
-                        "category": "organic_vars",
-                        "channel": "organic",
-                        "custom_tag": tag,
-                    }
 
                     # Calculate sum
                     if all(v in df_raw.columns for v in vars_list):
@@ -766,19 +768,8 @@ def _apply_automatic_aggregations(
         )
         total_var_name = f"{organic_prefix}_TOTAL_CUSTOM"
 
-        if organic_vars and total_var_name not in mapping_df["var"].values:
-            new_mapping_rows.append(
-                {
-                    "var": total_var_name,
-                    "category": "organic_vars",
-                    "channel": "organic",
-                    "data_type": "numeric",
-                    "agg_strategy": "sum",
-                    "custom_tags": "",
-                }
-            )
-
-            # Track aggregation sources
+        # Always track aggregation sources if we have organic vars (even if column already exists)
+        if organic_vars:
             aggregation_sources[total_var_name] = {
                 "source_columns": organic_vars,
                 "agg_method": "sum",
@@ -787,7 +778,19 @@ def _apply_automatic_aggregations(
                 "custom_tag": "TOTAL",
             }
 
-            new_columns[total_var_name] = df_raw[organic_vars].sum(axis=1)
+            if total_var_name not in mapping_df["var"].values:
+                new_mapping_rows.append(
+                    {
+                        "var": total_var_name,
+                        "category": "organic_vars",
+                        "channel": "organic",
+                        "data_type": "numeric",
+                        "agg_strategy": "sum",
+                        "custom_tags": "",
+                    }
+                )
+
+                new_columns[total_var_name] = df_raw[organic_vars].sum(axis=1)
 
     # Add new mapping rows
     if new_mapping_rows:
@@ -984,16 +987,12 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
     # Handle All/Clear button clicks before rendering multiselect
     with c2:
         # Select All button
-        if st.button(
-            "All", key="select_all_countries", use_container_width=True
-        ):
+        if st.button("All", key="select_all_countries", width="stretch"):
             st.session_state["selected_countries_widget"] = countries
             st.rerun()
     with c3:
         # Clear button
-        if st.button(
-            "Clear", key="deselect_all_countries", use_container_width=True
-        ):
+        if st.button("Clear", key="deselect_all_countries", width="stretch"):
             st.session_state["selected_countries_widget"] = []
             st.rerun()
 
@@ -1097,12 +1096,10 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
             # Buttons row: Load + Refresh GCS list (side-by-side, wide)
             b1, b2 = st.columns([1, 1.2])
             with b1:
-                load_clicked = st.form_submit_button(
-                    "Load", use_container_width=True
-                )
+                load_clicked = st.form_submit_button("Load", width="stretch")
             with b2:
                 refresh_clicked = st.form_submit_button(
-                    "↻ Refresh GCS list", use_container_width=True
+                    "↻ Refresh GCS list", width="stretch"
                 )
 
         # --- right after the form block (i.e., after the `with st.form(...):` ends)
@@ -1122,7 +1119,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                     with st.expander(f"{country.upper()} - {len(df):,} rows"):
                         st.dataframe(
                             df.head(10),
-                            use_container_width=True,
+                            width="stretch",
                             hide_index=True,
                         )
             elif not st.session_state.get("df_raw", pd.DataFrame()).empty:
@@ -1130,7 +1127,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 st.caption("Preview (from session):")
                 st.dataframe(
                     st.session_state["df_raw"].head(20),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
             return
@@ -1278,7 +1275,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                     with st.expander(f"{country.upper()} - {len(df):,} rows"):
                         st.dataframe(
                             df.head(10),
-                            use_container_width=True,
+                            width="stretch",
                             hide_index=True,
                         )
 
@@ -1322,7 +1319,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
 
         try:
             # Generate shared timestamp for all countries
-            shared_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            shared_ts = format_cet_timestamp()
             saved_paths = []
 
             # Save each country's data to its own path
@@ -1358,7 +1355,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
     csave1.button(
         "💾 Save dataset to GCS",
         on_click=_save_current_raw,
-        use_container_width=True,
+        width="stretch",
     )
     if st.session_state["last_saved_raw_path"]:
         csave2.caption(
@@ -1448,20 +1445,20 @@ with st.expander(
         with col_load:
             load_metadata_clicked = st.button(
                 "Apply mapping",
-                use_container_width=True,
+                width="stretch",
                 key="load_metadata_btn",
             )
         with col_clear:
             clear_metadata_clicked = st.button(
                 "🗑️ Clear metadata",
-                use_container_width=True,
+                width="stretch",
                 key="clear_metadata_btn",
                 help="Clear all loaded metadata and reset mapping to defaults",
             )
         with col_refresh:
             refresh_metadata_clicked = st.button(
                 "↻ Refresh metadata list",
-                use_container_width=True,
+                width="stretch",
                 key="refresh_metadata_btn",
             )
 
@@ -1644,7 +1641,7 @@ with st.expander(
             if st.button(
                 "➕ Add Business Goals",
                 key="add_goals_btn",
-                use_container_width=True,
+                width="stretch",
                 help="Add selected goals to the table below without applying mappings yet",
             ):
                 new_primary = _mk(primary_goals, "primary")
@@ -1706,7 +1703,7 @@ with st.expander(
         with st.form("goals_form", clear_on_submit=False):
             goals_edit = st.data_editor(
                 goals_src,
-                use_container_width=True,
+                width="stretch",
                 num_rows="dynamic",
                 column_config={
                     "var": st.column_config.SelectboxColumn(
@@ -1849,7 +1846,7 @@ with st.expander(
         if st.button(
             "➕ Apply Channel Detection",
             key="add_channels_btn",
-            use_container_width=True,
+            width="stretch",
         ):
             # Parse the input
             entered_channels = [
@@ -2028,7 +2025,7 @@ with st.expander(
             )
         with sort_col3:
             if st.button(
-                "🔄 Apply Sort", key="apply_sort_btn", use_container_width=True
+                "🔄 Apply Sort", key="apply_sort_btn", width="stretch"
             ):
                 if sort_by != "Original order":
                     ascending = sort_order == "Ascending"
@@ -2105,7 +2102,7 @@ with st.expander(
 
             mapping_edit = st.data_editor(
                 mapping_src,
-                use_container_width=True,
+                width="stretch",
                 num_rows="dynamic",
                 column_config={
                     "var": st.column_config.TextColumn("Column", disabled=True),
@@ -2305,7 +2302,7 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
         help="By default, mappings are saved universally for all countries. Check this box to save metadata only for the primary country.",
     )
 
-    meta_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    meta_ts = format_cet_timestamp()
 
     # Build goals JSON with aggregation info based on type
     goals_json = []
@@ -2412,7 +2409,7 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
             if save_country_specific
             else "universal"
         ),
-        "saved_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
+        "saved_at": get_cet_now().isoformat(),
         "data": {
             "origin": st.session_state["data_origin"],
             "timestamp": st.session_state["picked_ts"] or "latest",
@@ -2446,7 +2443,7 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
     def _save_metadata():
         try:
             # Generate a shared timestamp for all saves
-            shared_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            shared_ts = format_cet_timestamp()
             st.session_state["shared_save_timestamp"] = shared_ts
 
             # Get data by country
@@ -2529,7 +2526,7 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
     cmeta1.button(
         "💾 Save dataset & metadata to GCS",
         on_click=_save_metadata,
-        use_container_width=True,
+        width="stretch",
         help="Saves both the current dataset (with custom variables) and metadata configuration to GCS",
     )
     if st.session_state["last_saved_meta_path"]:
@@ -2566,9 +2563,7 @@ if can_go_next:
     with coln1:
         try:
             # Streamlit >= 1.27
-            if st.button(
-                "Next → Prepare Training Data", use_container_width=True
-            ):
+            if st.button("Next → Prepare Training Data", width="stretch"):
                 # Store values from Map Data for prefilling Prepare Training Data
                 # 3.1: Store the main goal
                 if not goals_df.empty:

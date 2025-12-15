@@ -29,6 +29,8 @@ from app_shared import (
 )
 from google.cloud import storage
 
+from utils.gcs_utils import format_cet_timestamp, get_cet_now
+
 data_processor = get_data_processor()
 job_manager = get_job_manager()
 from app_split_helpers import *  # bring in all helper functions/constants
@@ -339,7 +341,9 @@ with tab_single:
 
         # Training Data Config from Prepare Training Data page
         st.markdown("---")
-        st.markdown("**Training Data Configuration (from Prepare Training Data)**")
+        st.markdown(
+            "**Training Data Configuration (from Prepare Training Data)**"
+        )
         st.caption(
             "Optionally load a saved selected_columns.json to prefill model inputs."
         )
@@ -372,7 +376,9 @@ with tab_single:
                 st.success(
                     f"✅ Loaded training data config: {selected_training_data}"
                 )
-                with st.expander("Preview Training Data Config", expanded=False):
+                with st.expander(
+                    "Preview Training Data Config", expanded=False
+                ):
                     st.json(training_data_config)
             else:
                 st.session_state["training_data_config"] = None
@@ -398,7 +404,7 @@ with tab_single:
         if st.button(
             "Load selected data",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="load_data_btn",
         ):
             tmp_path = None
@@ -483,6 +489,11 @@ with tab_single:
                                         f"**Date Field:** {data_info.get('date_field', 'N/A')}"
                                     )
 
+                        # Rerun to refresh UI and hide status message
+                        if tmp_path and os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+                        st.rerun()
+
             except Exception as e:
                 st.error(f"Failed to load data: {e}")
             finally:
@@ -496,7 +507,7 @@ with tab_single:
         ):
             st.write("**Preview (first 5 rows):**")
             st.dataframe(
-                st.session_state["preview_df"].head(5), use_container_width=True
+                st.session_state["preview_df"].head(5), width="stretch"
             )
 
     # Load Configuration (moved outside Data selection expander)
@@ -528,7 +539,7 @@ with tab_single:
 
                 if st.button(
                     "📥 Apply Settings",
-                    use_container_width=True,
+                    width="stretch",
                     key="load_config_btn",
                 ):
                     try:
@@ -545,7 +556,7 @@ with tab_single:
                         )
                         # Set a timestamp to force widget refresh
                         st.session_state["loaded_config_timestamp"] = (
-                            datetime.utcnow().timestamp()
+                            get_cet_now().timestamp()
                         )
 
                         st.success(
@@ -670,7 +681,7 @@ with tab_single:
             )
         with col2:
             # Parse loaded end date if available
-            default_end_date = datetime.now().date()
+            default_end_date = get_cet_now().date()
             if loaded_config and "end_date" in loaded_config:
                 try:
                     default_end_date = datetime.strptime(
@@ -1806,17 +1817,17 @@ with tab_single:
 
         save_config_clicked = col_btn1.button(
             "💾 Save Settings",
-            use_container_width=True,
+            width="stretch",
             key="save_config_btn",
         )
         add_to_queue_clicked = col_btn2.button(
             "➕ Save Settings & Add Run to Queue",
-            use_container_width=True,
+            width="stretch",
             key="add_to_queue_btn",
         )
         add_and_start_clicked = col_btn3.button(
             "▶️ Save, Add Run to Queue & Start Queue",
-            use_container_width=True,
+            width="stretch",
             key="add_and_start_btn",
         )
 
@@ -1889,7 +1900,7 @@ with tab_single:
             data=csv_df.to_csv(index=False),
             file_name=f"robyn_config_{country}_{revision}_{time.strftime('%Y%m%d')}.csv",
             mime="text/csv",
-            use_container_width=True,
+            width="stretch",
             help="Download current settings as CSV and use for batch processing",
         )
 
@@ -1905,7 +1916,7 @@ with tab_single:
                     # Build configuration payload
                     config_payload = {
                         "name": config_name,
-                        "created_at": datetime.utcnow().isoformat(),
+                        "created_at": get_cet_now().isoformat(),
                         "countries": config_countries,
                         "config": {
                             "iterations": int(iterations),
@@ -2191,7 +2202,7 @@ with tab_single:
         start_multi_training = st.button(
             "🌍 Start Training for All Countries",
             type="secondary",
-            use_container_width=True,
+            width="stretch",
             key="start_multi_training_job_btn",
             help=f"Start training jobs in parallel for all {len(multi_country_list)} countries",
         )
@@ -2200,16 +2211,14 @@ with tab_single:
         start_single_training = st.button(
             "🚀 Start Training Job",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="start_training_job_btn",
         )
 
     # Handle multi-country training
     if start_multi_training:
         if not multi_country_list or len(multi_country_list) == 0:
-            st.error(
-                "⚠️ No countries available. Please load data first."
-            )
+            st.error("⚠️ No countries available. Please load data first.")
             st.stop()
 
         if not revision or not revision.strip():
@@ -2226,10 +2235,7 @@ with tab_single:
 
         # Add jobs to queue for all countries
         try:
-            from app_split_helpers import (
-                save_queue_to_gcs,
-                set_queue_running,
-            )
+            from app_split_helpers import save_queue_to_gcs, set_queue_running
 
             # Get next queue ID
             next_id = (
@@ -2365,9 +2371,9 @@ with tab_single:
                 else:
                     timestamp = shared_ts
             except Exception:
-                timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+                timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
         else:
-            timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+            timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
 
         gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
         timings: List[Dict[str, float]] = []
@@ -2702,7 +2708,7 @@ with tab_queue:
                 uploaded_view,
                 key=f"uploaded_editor_{up_nonce}",
                 num_rows="dynamic",
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "Delete": st.column_config.CheckboxColumn(
@@ -3131,7 +3137,7 @@ with tab_queue:
                     data=example.to_csv(index=False),
                     file_name="robyn_batch_example_consistent.csv",
                     mime="text/csv",
-                    use_container_width=False,
+                    width="content",
                     help="All rows have the same columns – recommended starting point.",
                 )
             with col_ex2:
@@ -3140,7 +3146,7 @@ with tab_queue:
                     data=example_varied.to_csv(index=False),
                     file_name="robyn_batch_example_varied.csv",
                     mime="text/csv",
-                    use_container_width=False,
+                    width="content",
                     help="Rows can differ in columns – shows CSV flexibility.",
                 )
 
@@ -3162,7 +3168,7 @@ with tab_status:
 
         if st.button(
             "🔁 Refresh queue",
-            use_container_width=True,
+            width="stretch",
             key="refresh_queue_from_gcs",
         ):
             maybe_refresh_queue_from_gcs(force=True)

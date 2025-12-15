@@ -222,7 +222,7 @@ if submitted:
                 st.caption(
                     f"Preview: Showing first 20 rows of `{preview_table}`"
                 )
-                st.dataframe(df_prev, use_container_width=True, hide_index=True)
+                st.dataframe(df_prev, width="stretch", hide_index=True)
             except Exception as e:
                 st.warning(f"Could not preview table `{preview_table}`: {e}")
 

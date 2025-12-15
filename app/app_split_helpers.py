@@ -54,6 +54,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from google.cloud import storage
 
+from utils.gcs_utils import format_cet_timestamp, get_cet_now
+
 __all__ = [
     # public constants & classes...
     "PROJECT_ID",
@@ -185,7 +187,7 @@ def prepare_and_launch_job(params: dict) -> dict:
     Returns exec_info dict with execution_name, timestamp, gcs_prefix, etc.
     """
     gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
-    timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+    timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
     # Support both 'revision' and 'version' keys for backward compatibility
     revision = params.get("revision") or params.get("version") or ""
     country = params.get("country", "")
@@ -458,21 +460,30 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                         if actual_status in ("SUCCEEDED", "COMPLETED")
                         else actual_status
                     )
-                    
+
                     # Check for SKIPPED status in status.json on GCS
                     # A job that succeeded but was skipped should show as SKIPPED
                     gcs_prefix = row.get("gcs_prefix")
-                    if gcs_prefix and not pd.isna(gcs_prefix) and final_state == "SUCCEEDED":
+                    if (
+                        gcs_prefix
+                        and not pd.isna(gcs_prefix)
+                        and final_state == "SUCCEEDED"
+                    ):
                         try:
                             client = storage.Client()
                             status_blob = client.bucket(bucket_name).blob(
                                 f"{gcs_prefix}/status.json"
                             )
                             if status_blob.exists():
-                                status_data = json.loads(status_blob.download_as_text())
+                                status_data = json.loads(
+                                    status_blob.download_as_text()
+                                )
                                 if status_data.get("state") == "SKIPPED":
                                     final_state = "SKIPPED"
-                                    skip_reason = status_data.get("skip_reason", "No usable data in training window")
+                                    skip_reason = status_data.get(
+                                        "skip_reason",
+                                        "No usable data in training window",
+                                    )
                                     df_history.loc[idx, "message"] = skip_reason
                                     logger.info(
                                         f"[JOB_HISTORY] Job {row.get('job_id')} detected as SKIPPED: {skip_reason}"
@@ -481,7 +492,7 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                             logger.debug(
                                 f"[JOB_HISTORY] Could not check status.json for {gcs_prefix}: {e}"
                             )
-                    
+
                     df_history.loc[idx, "state"] = final_state
                     if final_state != "SKIPPED":
                         df_history.loc[idx, "message"] = (
@@ -650,7 +661,7 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
         df_job_history = df_job_history.reindex(columns=JOB_HISTORY_COLUMNS)
         st.dataframe(
             df_job_history,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             key=f"job_history_view_{key_prefix}_{st.session_state.get('job_history_nonce', 0)}",
         )
@@ -659,12 +670,16 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
 def render_job_status_monitor(key_prefix: str = "single") -> None:
     """Status UI showing all currently running jobs as a table (no manual checker)."""
     # Collect all running jobs from two sources:
-    # 1. Queue jobs (RUNNING/LAUNCHING status)
+    # 1. Queue jobs (RUNNING/LAUNCHING status) - always refresh from GCS
     # 2. Single run jobs from session state (check actual status)
     all_running_jobs = []
     job_manager = get_job_manager()
 
-    # --- Queue jobs ---
+    # --- Queue jobs: Refresh from GCS to stay in sync ---
+    # This ensures Model Run Status shows the same state as Current Queue
+    # Note: maybe_refresh_queue_from_gcs(force=False) only refreshes if remote changed
+    # (checks saved_at timestamp), so this is not expensive when called frequently
+    maybe_refresh_queue_from_gcs(force=False)  # Only refresh if remote changed
     queue = st.session_state.get("job_queue", [])
     for job in queue:
         if job.get("status") in ("RUNNING", "LAUNCHING"):
@@ -768,13 +783,13 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
         if st.button(
             "🔄 Refresh",
             key=f"refresh_status_table_{key_prefix}",
-            use_container_width=True,
+            width="stretch",
         ):
             # Refresh queue from GCS to get latest status
             maybe_refresh_queue_from_gcs(force=True)
             # Clear cached timestamp to force re-check of single run jobs
             st.session_state["status_refresh_timestamp"] = (
-                datetime.utcnow().timestamp()
+                get_cet_now().timestamp()
             )
             st.rerun()
 
@@ -838,7 +853,7 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     st.dataframe(
         display_df.style.applymap(color_status, subset=["Status"]),
         column_config=column_config,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -889,6 +904,7 @@ _builder_defaults = dict(
     resample_freq="none",
     resample_agg="sum",
     gcs_bucket=st.session_state.get("gcs_bucket", GCS_BUCKET),
+    budget_scenario="max_historical_response",  # Budget allocation mode
 )
 
 
@@ -1045,6 +1061,50 @@ def _make_normalizer(defaults: dict):
         if custom_hyperparameters:
             result["custom_hyperparameters"] = custom_hyperparameters
 
+        # Add budget parameters (new feature)
+        budget_scenario = str(
+            _g(
+                "budget_scenario",
+                defaults.get("budget_scenario", "max_historical_response"),
+            )
+        )
+        result["budget_scenario"] = budget_scenario
+
+        # Add expected_spend if using custom budget
+        if budget_scenario == "max_response_expected_spend":
+            expected_spend_str = str(_g("expected_spend", ""))
+            if expected_spend_str and expected_spend_str.strip():
+                try:
+                    result["expected_spend"] = float(expected_spend_str)
+                except (ValueError, TypeError):
+                    result["expected_spend"] = None
+            else:
+                result["expected_spend"] = None
+        else:
+            result["expected_spend"] = None
+
+        # Parse per-channel budgets from columns like {CHANNEL}_budget
+        channel_budgets = {}
+        for col in row.index:
+            if (
+                col.endswith("_budget")
+                and pd.notna(row[col])
+                and str(row[col]).strip()
+            ):
+                # Extract channel name (remove _budget suffix)
+                channel = col[:-7]  # Remove "_budget"
+                try:
+                    budget_val = float(row[col])
+                    if budget_val > 0:
+                        channel_budgets[channel] = budget_val
+                except (ValueError, TypeError):
+                    pass
+
+        if channel_budgets:
+            result["channel_budgets"] = channel_budgets
+        else:
+            result["channel_budgets"] = {}
+
         return result
 
     return _normalize_row
@@ -1197,9 +1257,8 @@ def _queue_tick():
                     "timestamp"
                 )  # fallback to launch timestamp if that’s all we have
             )
-            end_time = (
-                times.get("end_time")
-                or datetime.utcnow().isoformat(timespec="seconds") + "Z"
+            end_time = times.get("end_time") or get_cet_now().isoformat(
+                timespec="seconds"
             )
             duration_minutes = times.get("duration_minutes")
 

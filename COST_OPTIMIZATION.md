@@ -1,130 +1,74 @@
-# Cost Optimization Implementation Guide
+# Cost Optimization Guide
 
-This document describes the cost reduction strategies implemented for the MMM Trainer application, as referenced in `Cost estimate.csv`.
+This document provides cost estimates for the MMM Trainer application across different machine configurations and workload scenarios.
 
-## Cost Summary
+## Cost Overview
 
-| Scenario | Web Service | Training Jobs | Fixed Costs | Total |
-|----------|-------------|---------------|-------------|-------|
-| **Idle** | $0.00 | $0.00 | $2.09 | **$2.09** |
-| 100 calls/month | $2.68 | $50.69 | $2.09 | **$55.46** |
-| 500 calls/month | $13.40 | $253.43 | $2.09 | **$268.92** |
-| 1,000 calls/month | $26.80 | $506.86 | $2.09 | **$535.75** |
-| 5,000 calls/month | $134.00 | $2,534.30 | $2.09 | **$2,670.39** |
+The table below shows monthly costs for different combinations of:
+- **Machine configurations**: Dev (2 vCPU/8GB), Prod (4 vCPU/16GB), 2x Prod (8 vCPU/32GB), 4x Prod (16 vCPU/64GB)
+- **Workload types**: Test Run (2000 iter/5 trials), Benchmark (5000 iter/10 trials), Production (10000 iter/10 trials)
+- **Usage volumes**: 100, 500, 1000, 5000 calls per month (with 10, 50, 100, 500 training jobs respectively)
 
-**Key insight:** Training jobs account for ~95% of variable costs at scale (1 training job per 10 web requests).
+### Monthly Cost Estimates
 
-## Implemented Optimizations
+| Configuration | Workload Type | 100 calls<br/>(10 jobs) | 500 calls<br/>(50 jobs) | 1000 calls<br/>(100 jobs) | 5000 calls<br/>(500 jobs) |
+|---------------|---------------|-------------------------|-------------------------|---------------------------|---------------------------|
+| **Dev (2 vCPU, 8GB)** | Test Run | $3.61 | $9.71 | $17.33 | $78.29 |
+| | Benchmark | $9.00 | $36.66 | $71.23 | $347.79 |
+| | Production | $15.74 | $70.36 | $138.63 | $684.79 |
+| **Prod (4 vCPU, 16GB)** | Test Run | $3.76 | $10.46 | $18.83 | $85.79 |
+| | Benchmark | $9.75 | $40.41 | $78.73 | $385.29 |
+| | Production | $17.24 | $77.86 | $153.63 | $759.79 |
+| **2x Prod (8 vCPU, 32GB)** | Test Run | $3.85 | $10.91 | $19.73 | $90.29 |
+| | Benchmark | $10.19 | $42.61 | $83.13 | $407.29 |
+| | Production | $18.12 | $82.26 | $162.43 | $803.79 |
+| **4x Prod (16 vCPU, 64GB)** | Test Run | $3.92 | $11.26 | $20.43 | $93.79 |
+| | Benchmark | $10.56 | $44.46 | $86.83 | $425.79 |
+| | Production | $18.86 | $85.96 | $169.83 | $840.79 |
 
-### 1. ✅ Reduced min_instances to 0 (IMPLEMENTED)
-**Savings: $42.94/month (95% of idle cost)**
+**Notes:**
+- Costs include web service ($0.0017 per call), training jobs, and fixed costs ($2.09/month for GCS, Secret Manager, etc.)
+- Training job ratio: 1 job per 10 web requests
+- Idle cost (no usage): $2.09/month
+- Web request duration: 30 seconds average
 
-Changed `min_instances` from 2 to 0 in `infra/terraform/variables.tf`.
+### Training Job Performance and Cost
 
-**Impact:**
-- Eliminates always-on Cloud Run instances
-- Reduces idle cost from $45.03/month to $2.09/month
-- Trade-off: Adds 1-3 second cold start latency on first request
+Individual training job costs and durations for each workload type:
 
-**To apply:**
-```bash
-cd infra/terraform
-terraform apply -var-file="envs/prod.tfvars"
+| Configuration | Test Run<br/>(2000 iter × 5 trials) | Benchmark<br/>(5000 iter × 10 trials) | Production<br/>(10000 iter × 10 trials) |
+|---------------|-------------------------------------|---------------------------------------|------------------------------------------|
+| **Dev (2 vCPU, 8GB)** | 33 min, $0.14 | 165 min (2.8 hrs), $0.67 | 330 min (5.5 hrs), $1.35 |
+| **Prod (4 vCPU, 16GB)** | 18 min, $0.15 | 91 min (1.5 hrs), $0.75 | 183 min (3.1 hrs), $1.50 |
+| **2x Prod (8 vCPU, 32GB)** | 9 min, $0.16 | 48 min, $0.79 | 97 min (1.6 hrs), $1.59 |
+| **4x Prod (16 vCPU, 64GB)** | 5 min, $0.17 | 25 min, $0.83 | 50 min, $1.66 |
+
+**Key Insights:**
+- Training jobs account for 85-96% of total costs at scale
+- Dev config is most cost-effective but takes longer (best for development/overnight runs)
+- Prod config (4 vCPU/16GB) offers good balance of speed and cost (current production default)
+- Larger machines (8-16 vCPU) provide faster results with modest cost increase (~11-23% more than dev)
+- Choose configuration based on urgency: dev for cost, larger configs for time-sensitive work
+
+## Configuration Reference
+
+Current infrastructure uses:
+- **Dev environment**: 2 vCPU, 8GB memory for training jobs
+- **Prod environment**: 4 vCPU, 16GB memory for training jobs
+- **Queue execution**: Cloud Scheduler (every minute, ~$0.10/month, covered by free tier)
+- **Idle cost**: $2.09/month with `min_instances=0`
+
+To change training job resources, edit `infra/terraform/envs/dev.tfvars` or `prod.tfvars`:
+```hcl
+training_cpu       = "4.0"   # vCPU count
+training_memory    = "16Gi"  # Memory allocation
+training_max_cores = "4"     # Maximum cores
 ```
 
-### 2. ✅ GCS Lifecycle Policies (DOCUMENTED)
-**Savings: ~$0.78/month on storage, up to 80% on historical data**
+## Future Optimization Opportunities
 
-Created `infra/terraform/storage.tf` with lifecycle policy configuration.
-
-**Policy Rules:**
-- Move data to Nearline after 30 days (50% cheaper: $0.010/GB vs $0.020/GB)
-- Move data to Coldline after 90 days (80% cheaper: $0.004/GB vs $0.020/GB)
-- Delete old queue data after 365 days
-
-**To apply manually:**
-```bash
-cat > lifecycle.json << 'EOF'
-{
-  "lifecycle": {
-    "rule": [
-      {
-        "action": {"type": "SetStorageClass", "storageClass": "NEARLINE"},
-        "condition": {
-          "age": 30,
-          "matchesPrefix": ["robyn/", "datasets/", "training-data/"]
-        }
-      },
-      {
-        "action": {"type": "SetStorageClass", "storageClass": "COLDLINE"},
-        "condition": {
-          "age": 90,
-          "matchesPrefix": ["robyn/", "datasets/", "training-data/"]
-        }
-      },
-      {
-        "action": {"type": "Delete"},
-        "condition": {
-          "age": 365,
-          "matchesPrefix": ["robyn-queues/"]
-        }
-      }
-    ]
-  }
-}
-EOF
-
-gcloud storage buckets update gs://mmm-app-output --lifecycle-file=lifecycle.json
-```
-
-### 3. ✅ Request Caching for Snowflake (IMPLEMENTED)
-**Savings: Up to 70% of Snowflake costs when using cached data**
-
-Implemented a two-tier caching strategy for Snowflake queries.
-
-**What was implemented:**
-
-1. **Created `app/utils/snowflake_cache.py`**
-   - In-memory cache (TTL: 1 hour) for immediate access
-   - GCS persistent cache (TTL: 24 hours) for durability
-   - Automatic query normalization (ignores whitespace/case differences)
-
-2. **Updated `app/app_shared.py`**
-   - Modified `run_sql()` function to use caching by default
-   - Added `use_cache` parameter for fine-grained control
-   - Automatically initializes cache on application startup
-
-3. **Created Cache Management UI** (`app/nav/Cache_Management.py`)
-   - View cache statistics (in-memory and GCS)
-   - Clear cache when needed
-   - Cost savings calculator
-   - Cache hit rate monitoring
-
-**How it works:**
-
-```python
-# Queries are automatically cached
-df = run_sql("SELECT * FROM table")  # First call: hits Snowflake
-df = run_sql("SELECT * FROM table")  # Second call: uses cache
-
-# Disable caching for specific queries
-df = run_sql("INSERT INTO table VALUES ...", use_cache=False)
-```
-
-**Cache behavior:**
-- Tier 1: In-memory cache (fast, 1-hour TTL)
-- Tier 2: GCS cache (persistent, 24-hour TTL)
-- Queries are normalized (whitespace/case-insensitive)
-- Write operations automatically bypass cache
-
-**Expected savings with 70% cache hit rate:**
-- 100 calls/month: $10.00 → $3.00 (save $7/month)
-- 500 calls/month: $50.00 → $15.00 (save $35/month)
-- 1000 calls/month: $100.00 → $30.00 (save $70/month)
-- 5000 calls/month: $500.00 → $150.00 (save $350/month)
-
-### 4. 📝 Result Compression (RECOMMENDATION)
-**Savings: ~50% reduction in storage and egress costs**
+### 1. Result Compression
+**Potential Savings: ~50% reduction in storage and egress costs**
 
 Compress training results before uploading to GCS.
 
@@ -148,8 +92,8 @@ zip::zip(
 - Storage: 50% reduction (e.g., $12.80 → $6.40 at 5000 calls/month)
 - Egress: 50% reduction (e.g., $60.00 → $30.00 at 5000 calls/month)
 
-### 5. 📝 Log Retention Policies (RECOMMENDATION)
-**Savings: Minimal (first 50GB/month free)**
+### 2. Log Retention Policies
+**Potential Savings: Minimal (first 50GB/month free)**
 
 Configure log retention in Cloud Logging:
 
@@ -160,8 +104,8 @@ gcloud logging sinks create delete-old-logs \
   --log-filter='timestamp<"2024-01-01T00:00:00Z"'
 ```
 
-### 6. 📝 Optimize Docker Images (RECOMMENDATION)
-**Savings: ~$0.05-0.10/month**
+### 3. Optimize Docker Images
+**Potential Savings: ~$0.05-0.10/month**
 
 Reduce Artifact Registry storage by optimizing Docker images:
 
@@ -176,97 +120,79 @@ FROM python:3.11-slim
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 ```
 
-### 7. 📝 Preemptible Cloud Run Jobs (FUTURE)
-**Savings: Up to 50% on training job costs**
+### 4. Preemptible Cloud Run Jobs
+**Potential Savings: Up to 50% on training job costs**
 
 Currently not available for Cloud Run, but monitor GCP announcements for spot/preemptible instances.
 
-### 8. 📝 Regional vs Multi-Regional GCS (CURRENT STATE)
-**Cost: Optimal**
+## Monitoring and Cost Control
 
-Currently using regional GCS (europe-west1) which is already the most cost-effective option for this use case.
+### Tracking Costs
 
-## Updated Cost Estimates with Optimizations
-
-### With all optimizations applied (Current):
-
-| Scenario | Original Cost | Optimized Cost | Savings | % Reduction |
-|----------|---------------|----------------|---------|-------------|
-| Idle | $45.03 | $2.09 | $42.94 | 95% |
-| 100 calls | $148.00 | $55.46 | $92.54 | 63% |
-| 500 calls | $519.56 | $268.92 | $250.64 | 48% |
-| 1,000 calls | $1,073.39 | $535.75 | $537.64 | 50% |
-| 5,000 calls | $5,142.33 | $2,670.39 | $2,471.94 | 48% |
-
-### Web-Only Scenario (No Training Jobs):
-
-If users only browse/query without triggering training:
-
-| Scenario | Monthly Cost |
-|----------|-------------|
-| Idle | $2.09 |
-| 100 calls | $4.77 |
-| 500 calls | $15.49 |
-| 1,000 calls | $28.89 |
-| 5,000 calls | $136.09 |
-
-## Implementation Priority
-
-1. **High Priority (Implemented)**
-   - ✅ Set min_instances to 0
-   - ✅ Document GCS lifecycle policies
-   - ✅ Implement Snowflake query caching (two-tier: in-memory + GCS)
-   - ✅ Create cache management UI
-   - ✅ Training job right-sizing (4 vCPU/16GB vs 8/32)
-
-2. **Medium Priority (Recommended Next)**
-   - Apply GCS lifecycle policies to production bucket
-   - Monitor cache hit rate and adjust TTLs if needed
-   - Implement result compression
-
-3. **Low Priority (Future)**
-   - Optimize Docker images
-   - Configure log retention
-   - Monitor for preemptible/spot instances
-
-## Rollout Plan
-
-1. **Immediate (Today)**
-   - Deploy min_instances=0 change to dev environment
-   - Monitor cold start latency
-   - If acceptable, deploy to production
-
-2. **Week 1**
-   - Apply GCS lifecycle policies
-   - Monitor storage costs
-
-3. **Week 2-3**
-   - Implement Snowflake caching
-   - Test cache hit rate
-   - Monitor Snowflake costs
-
-4. **Week 4**
-   - Implement result compression
-   - Monitor storage and egress costs
-
-## Monitoring
-
-Track these metrics to measure optimization impact:
+Monitor these metrics to track cost optimization impact:
 
 ```bash
-# Cloud Run costs
+# View Cloud Run costs
 gcloud billing accounts list
-gcloud billing accounts get-iam-policy <ACCOUNT_ID>
+gcloud billing projects describe datawarehouse-422511
 
-# Storage costs
-gsutil du -s gs://mmm-app-output
+# Check storage usage
+gsutil du -sh gs://mmm-app-output
 gsutil lifecycle get gs://mmm-app-output
 
-# Snowflake costs
-# Check Snowflake UI for compute credit usage
+# View Cloud Run service metrics
+gcloud run services describe mmm-app --region=europe-west1 --format=json
 ```
 
-## Reverting Changes
+### GCP Console Dashboards
+
+- **Cloud Run**: Monitor request count, latency, and costs
+- **Cloud Storage**: Track storage usage and class distribution
+- **Cloud Logging**: Monitor log volume and retention
+- **Billing**: View cost breakdown by service
+
+### Key Metrics to Track
+
+1. **Training job costs**: Should be 85-96% of total variable costs
+2. **Cache hit rate**: Target >70% for Snowflake queries
+3. **Storage growth**: Monitor and apply lifecycle policies
+4. **Cold start frequency**: Balance with idle costs
+
+### Cost Alerts
+
+Set up budget alerts in GCP Console:
+```bash
+# Create budget alert
+gcloud billing budgets create \
+  --billing-account=<ACCOUNT_ID> \
+  --display-name="MMM App Monthly Budget" \
+  --budget-amount=1000 \
+  --threshold-rule=percent=50 \
+  --threshold-rule=percent=90
+```
+
+## Adjusting Configuration
+
+### Scaling Up for Production Workloads
+
+To increase training performance:
+
+1. Edit `infra/terraform/envs/prod.tfvars`:
+```hcl
+training_cpu       = "8.0"   # Double prod
+training_memory    = "32Gi"
+training_max_cores = "8"
+```
+
+2. Apply changes:
+```bash
+cd infra/terraform
+terraform apply -var-file="envs/prod.tfvars"
+```
+
+3. Consider cost vs time trade-off (see cost overview table)
+
+### Reverting Changes
 
 If cold starts become unacceptable:
 
@@ -275,3 +201,22 @@ cd infra/terraform
 # Revert min_instances to 2 in variables.tf or override in tfvars
 terraform apply -var="min_instances=2" -var-file="envs/prod.tfvars"
 ```
+
+## Cost Calculation Reference
+
+**Baseline data** (from production testing):
+- Dev config (2 vCPU, 8GB): 1983 seconds with 2000 iterations × 5 trials
+- Scaling is linear with (iterations × trials)
+- Performance improves with CPU/memory but with diminishing returns
+
+**Cloud Run pricing** (europe-west1):
+- CPU: $0.000024 per vCPU-second
+- Memory: $0.0000025 per GiB-second
+- Includes per-second billing (no minimum charge)
+
+**Fixed monthly costs**:
+- GCS storage: ~$0.50-2.00/month (depends on data volume)
+- Secret Manager: $0.06/month (6 secrets × $0.01)
+- Cloud Scheduler: $0.10/month (covered by free tier)
+- Artifact Registry: ~$0.50/month
+- Total fixed: ~$2.09/month

@@ -350,7 +350,11 @@ date_var_name <- cfg$date_var %||% "date" # This is the column name to look for
 iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
-timestamp <- cfg$timestamp %||% format(Sys.time(), "%m%d_%H%M%S")
+timestamp <- cfg$timestamp %||% {
+  # Use CET (Central European Time) timezone to match Google Cloud Storage
+  cet_time <- as.POSIXlt(Sys.time(), tz = "Europe/Paris")
+  format(cet_time, "%m%d_%H%M%S")
+}
 
 # NEW: Training date range
 start_data_date <- as.Date(cfg$start_date %||% "2024-01-01")
@@ -1679,8 +1683,76 @@ if (is.null(OutputCollect)) {
     quit(status = 1)
 }
 
+# DEBUG: Log what variables are in xDecompAgg to diagnose organic_vars issue
+if (!is.null(OutputCollect$xDecompAgg)) {
+    all_vars_in_decomp <- unique(OutputCollect$xDecompAgg$rn)
+    message("📊 Variables in xDecompAgg (", length(all_vars_in_decomp), " total):")
+    message("   ", paste(all_vars_in_decomp, collapse = ", "))
+    
+    # Check specifically for organic_vars
+    organic_in_decomp <- intersect(organic_vars, all_vars_in_decomp)
+    organic_missing <- setdiff(organic_vars, all_vars_in_decomp)
+    
+    if (length(organic_in_decomp) > 0) {
+        message("✅ Organic vars found in decomposition: ", paste(organic_in_decomp, collapse = ", "))
+    }
+    if (length(organic_missing) > 0) {
+        message("⚠️  Organic vars MISSING from decomposition: ", paste(organic_missing, collapse = ", "))
+        message("   This means these variables were either:")
+        message("   1. Filtered out due to zero variance")
+        message("   2. Not included in the model by Robyn")
+        message("   3. Had zero coefficients and were dropped")
+    }
+}
+
 saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
+
+## ---------- EXTRACT PARQUET DATA FROM OUTPUTCOLLECT ----------
+message("→ Extracting compressed data from OutputCollect.RDS to parquet files...")
+output_models_data_dir <- file.path(dir_path, "output_models_data")
+tryCatch(
+    {
+        # Source the extraction helper - try multiple locations
+        extract_script <- NULL
+        candidates <- c(
+            "/app/extract_output_models_data.R",  # Docker container location
+            "r/extract_output_models_data.R"      # Local development location
+        )
+        
+        for (candidate in candidates) {
+            if (file.exists(candidate)) {
+                extract_script <- candidate
+                break
+            }
+        }
+        
+        if (!is.null(extract_script)) {
+            source(extract_script)
+            
+            # Extract parquet data from OutputCollect
+            created_files <- extract_output_models_data(
+                oc_path = file.path(dir_path, "OutputCollect.RDS"),
+                out_dir = output_models_data_dir
+            )
+            
+            # Upload parquet files to GCS
+            for (pq_file in created_files) {
+                # Get relative path from dir_path
+                rel_path <- gsub(paste0("^", dir_path, "/?"), "", pq_file)
+                gcs_put_safe(pq_file, file.path(gcs_prefix, rel_path))
+            }
+            
+            message("✅ OutputCollect data extraction complete, uploaded ", length(created_files), " parquet files")
+        } else {
+            message("⚠️ Could not find extract_output_models_data.R, skipping parquet extraction")
+        }
+    },
+    error = function(e) {
+        message("⚠️ Failed to extract OutputCollect data to parquet: ", conditionMessage(e))
+        # Non-fatal: continue with execution
+    }
+)
 
 ## ---------- GENERATE MODEL SUMMARY ----------
 message("→ Generating model summary...")
@@ -1688,13 +1760,18 @@ message("→ Generating model summary...")
 extract_summary_script <- NULL
 
 # 1. Try same directory as this script
-candidate <- file.path(
-    dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE)),
-    "extract_model_summary.R"
-)
-if (file.exists(candidate)) {
-    extract_summary_script <- candidate
-}
+tryCatch({
+    candidate <- file.path(
+        dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE)),
+        "extract_model_summary.R"
+    )
+    if (file.exists(candidate)) {
+        extract_summary_script <- candidate
+    }
+}, error = function(e) {
+    # sys.frame(1)$ofile not available in this context
+    # Will try other locations instead
+})
 
 # 2. Try /app directory (Docker container location)
 if (is.null(extract_summary_script)) {
@@ -1765,17 +1842,24 @@ gcs_put_safe(file.path(dir_path, "best_model_id.txt"), file.path(gcs_prefix, "be
 
 flush_and_ship_log("before onepagers")
 # onepagers for top models
+# baseline_level = 0: Shows ALL variables as individual bars in waterfall chart
+# including intercept, trend, Prophet vars (seasonality/holiday), context_vars, and organic_vars
+# (no aggregation into baseline component)
+message("🎨 Generating onepagers with baseline_level = 0")
+message("   Expected organic_vars to appear: ", paste(organic_vars, collapse = ", "))
 top_models <- OutputCollect$resultHypParam$solID[
     1:min(3, nrow(OutputCollect$resultHypParam))
 ]
 for (m in top_models) {
+    message("   Generating onepager for model: ", m)
     tryCatch(
         robyn_onepagers(
             InputCollect,
             OutputCollect,
             select_model = m,
             plot_folder = dir_path,
-            export = TRUE
+            export = TRUE,
+            baseline_level = 0
         ),
         error = function(e) {
             write_trace("Allocator error", e)
@@ -1795,7 +1879,8 @@ for (m in top_models) {
             InputCollect,
             OutputCollect,
             select_model = m,
-            export = TRUE
+            export = TRUE,
+            baseline_level = 0
         ),
         silent = TRUE
     )
@@ -1845,20 +1930,209 @@ flush_and_ship_log("before robyn_allocator")
 alloc_end <- max(InputCollect$dt_input$date)
 alloc_start <- alloc_end - 364
 
-is_brand <- InputCollect$paid_media_spends == "GA_BRAND_COST"
-low_bounds <- ifelse(is_brand, 0, 0.3)
-up_bounds <- ifelse(is_brand, 0, 4)
+# Read budget parameters from config
+budget_scenario_cfg <- cfg$budget_scenario %||% "max_historical_response"
+expected_spend_cfg <- cfg$expected_spend %||% NULL
+# Explicitly convert expected_spend to numeric to avoid scientific notation issues
+if (!is.null(expected_spend_cfg)) {
+    expected_spend_cfg <- as.numeric(expected_spend_cfg)
+}
+channel_budgets_cfg <- cfg$channel_budgets %||% list()
+
+# Map UI scenario values to Robyn allocator scenario values
+# UI uses: "max_historical_response" or "max_response_expected_spend"
+# Robyn accepts: "max_response" or "target_efficiency"
+# For both UI scenarios, we use "max_response" in Robyn
+# The difference is whether expected_spend is NULL (historical) or a value (custom)
+robyn_scenario <- "max_response"
+
+cat("\n========== BUDGET CONFIGURATION ==========\n")
+cat(paste0("UI scenario: ", budget_scenario_cfg, "\n"))
+cat(paste0("Robyn scenario: ", robyn_scenario, "\n"))
+cat(paste0("expected_spend: ", if (is.null(expected_spend_cfg)) "NULL (use historical)" else format(expected_spend_cfg, scientific=FALSE, big.mark=","), "\n"))
+if (length(channel_budgets_cfg) > 0) {
+    cat(paste0("channel_budgets: ", paste(names(channel_budgets_cfg), "=", unlist(channel_budgets_cfg), collapse=", "), "\n"))
+}
+
+# Set up channel constraints
+# Default: NULL (let Robyn use its internal defaults)
+low_bounds <- NULL
+up_bounds <- NULL
+
+# If per-channel budgets are specified, adjust constraints to enforce them
+# Note: This block only runs if channel_budgets is NOT empty
+if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
+    # Mode 3: Custom budget WITH per-channel constraints
+    cat("\n💰 MODE 3: Custom Budget WITH Per-Channel Constraints\n")
+    cat(sprintf("  Total budget (expected_spend): %s\n", expected_spend_cfg))
+    
+    # Calculate historical spend for the allocator date range
+    # Filter data to the allocator window
+    alloc_data <- InputCollect$dt_input[InputCollect$dt_input$date >= alloc_start & 
+                                        InputCollect$dt_input$date <= alloc_end, ]
+    
+    # Calculate historical total spend across all paid media channels
+    historical_spends <- sapply(InputCollect$paid_media_spends, function(ch) {
+        sum(alloc_data[[ch]], na.rm = TRUE)
+    })
+    historical_total <- sum(historical_spends)
+    
+    cat(sprintf("  Historical total spend (in date range): %.2f\n", historical_total))
+    
+    # Calculate total of specified channel budgets
+    total_channel_budgets <- sum(sapply(channel_budgets_cfg, as.numeric))
+    cat(sprintf("  Sum of channel budgets: %s\n", total_channel_budgets))
+    
+    # Warn if channel budgets don't sum to expected_spend
+    if (abs(total_channel_budgets - expected_spend_cfg) > 0.01 * expected_spend_cfg) {
+        cat(sprintf("  ⚠️  WARNING: Sum of channel budgets (%.0f) differs from expected_spend (%.0f) by %.1f%%\n",
+                      total_channel_budgets, expected_spend_cfg,
+                      100 * abs(total_channel_budgets - expected_spend_cfg) / expected_spend_cfg))
+    }
+    
+    # Normalize channel budgets to sum to expected_spend
+    normalization_factor <- expected_spend_cfg / total_channel_budgets
+    cat(sprintf("  Normalization factor: %.6f (to make budgets sum to expected_spend)\n", normalization_factor))
+    
+    # Initialize bounds as multipliers
+    # Robyn's channel_constr_low/up are MULTIPLIERS of historical spend, not proportions
+    low_bounds <- rep(0, length(InputCollect$paid_media_spends))
+    up_bounds <- rep(0, length(InputCollect$paid_media_spends))
+    
+    cat("\n  Channel-specific constraints (as multipliers of historical spend):\n")
+    
+    # For each channel with a specified budget, calculate multiplier bounds
+    for (channel_name in names(channel_budgets_cfg)) {
+        # Find the index of this channel in paid_media_spends
+        channel_idx <- which(InputCollect$paid_media_spends == channel_name)
+        
+        if (length(channel_idx) > 0) {
+            channel_budget <- as.numeric(channel_budgets_cfg[[channel_name]])
+            
+            # Normalize the budget so all budgets sum to expected_spend
+            normalized_budget <- channel_budget * normalization_factor
+            
+            # Get historical spend for this channel
+            channel_historical <- historical_spends[channel_idx]
+            
+            # Calculate the multiplier: desired_spend / historical_spend
+            # This tells Robyn how much to scale this channel relative to history
+            if (channel_historical > 0) {
+                target_multiplier <- normalized_budget / channel_historical
+                
+                # Set tight bounds around the target multiplier
+                # Use 5% tolerance to allow some optimization flexibility
+                tolerance <- 0.05
+                low_bounds[channel_idx] <- max(0, target_multiplier * (1 - tolerance))
+                up_bounds[channel_idx] <- target_multiplier * (1 + tolerance)
+                
+                cat(sprintf("    %s: budget=%.0f, historical=%.0f, multiplier=%.3f, bounds=[%.3f, %.3f]\n",
+                              channel_name, normalized_budget, channel_historical, target_multiplier,
+                              low_bounds[channel_idx], up_bounds[channel_idx]))
+            } else {
+                cat(sprintf("    ⚠️  %s: budget=%.0f but historical spend = 0, setting bounds to [0, 0]\n",
+                              channel_name, normalized_budget))
+                low_bounds[channel_idx] <- 0
+                up_bounds[channel_idx] <- 0
+            }
+        } else {
+            cat(sprintf("    ⚠️  WARNING: Channel '%s' in channel_budgets not found in paid_media_spends\n", channel_name))
+        }
+    }
+    
+    # Verify that applying these multipliers would give us approximately the expected total
+    projected_total <- sum(historical_spends * up_bounds)
+    cat(sprintf("\n  Validation: Projected total spend = %.2f (target: %.2f)\n", projected_total, expected_spend_cfg))
+    
+    if (abs(projected_total - expected_spend_cfg) > 0.1 * expected_spend_cfg) {
+        cat("  ⚠️  WARNING: Projected total differs from expected_spend by more than 10%!\n")
+        cat("  ⚠️  This suggests the multiplier approach may not perfectly enforce the budget.\n")
+    }
+    
+} else if (!is.null(expected_spend_cfg) && length(channel_budgets_cfg) == 0) {
+    # Mode 2: Custom total budget WITHOUT per-channel constraints
+    cat("\n💰 MODE 2: Custom Total Budget WITHOUT Per-Channel Constraints\n")
+    cat(sprintf("  Total budget (expected_spend): %s\n", format(expected_spend_cfg, scientific=FALSE, big.mark=",")))
+    
+    # Calculate historical spend for comparison
+    alloc_data <- InputCollect$dt_input[InputCollect$dt_input$date >= alloc_start & 
+                                        InputCollect$dt_input$date <= alloc_end, ]
+    historical_spends <- sapply(InputCollect$paid_media_spends, function(ch) {
+        sum(alloc_data[[ch]], na.rm = TRUE)
+    })
+    historical_total <- sum(historical_spends)
+    
+    cat(sprintf("  Historical total spend (in date range): %.2f\n", historical_total))
+    
+    # If custom budget is significantly lower than historical spend, 
+    # we need to set permissive channel constraints to avoid conflicts
+    budget_ratio <- expected_spend_cfg / historical_total
+    
+    if (budget_ratio < 0.9) {
+        # Custom budget is lower than historical - allow channels to decrease significantly
+        # Set lower bound to 0.01 (1% of historical) to allow major reductions
+        # Set upper bound based on budget ratio to ensure total budget is feasible
+        low_bounds <- rep(0.01, length(InputCollect$paid_media_spends))
+        up_bounds <- rep(min(budget_ratio * 2, 2.0), length(InputCollect$paid_media_spends))
+        cat(sprintf("  ⚠️  Custom budget (%.0f) is %.1f%% of historical spend\n", expected_spend_cfg, budget_ratio * 100))
+        cat(sprintf("  Setting permissive channel constraints: [%.2f, %.2f] to make budget feasible\n", 
+                    low_bounds[1], up_bounds[1]))
+        cat("  Note: Channels can be reduced to 1% of historical to fit within total budget\n")
+    } else {
+        # Custom budget is close to or higher than historical - use default flexibility
+        cat("  Channel constraints: NULL (using Robyn defaults for flexibility)\n")
+        cat("  Note: Allocator will optimize channel mix to maximize response within the total budget\n")
+    }
+} else {
+    # Mode 1: Historical budget (default)
+    cat("\n💰 MODE 1: Historical Budget (default)\n")
+    cat("  expected_spend: NULL (using historical spend patterns)\n")
+    cat("  Channel constraints: NULL (using Robyn defaults)\n")
+}
+cat("==========================================\n\n")
+
+# Log the actual values being passed to robyn_allocator
+cat("📊 Calling robyn_allocator with:\n")
+cat(sprintf("  scenario: %s\n", robyn_scenario))
+cat(sprintf("  total_budget: %s\n", if (is.null(expected_spend_cfg)) "NULL" else format(expected_spend_cfg, scientific=FALSE, big.mark=",")))
+cat(sprintf("  channel_constr_low: %s\n", if (is.null(low_bounds)) "NULL" else paste0("[", paste(sprintf("%.3f", low_bounds), collapse=", "), "]")))
+cat(sprintf("  channel_constr_up: %s\n", if (is.null(up_bounds)) "NULL" else paste0("[", paste(sprintf("%.3f", up_bounds), collapse=", "), "]")))
+cat(sprintf("  date_range: %s to %s\n\n", alloc_start, alloc_end))
+
 AllocatorCollect <- try(
     robyn_allocator(
         InputCollect = InputCollect, OutputCollect = OutputCollect,
         select_model = best_id, date_range = c(alloc_start, alloc_end),
-        expected_spend = NULL, scenario = "max_historical_response",
+        total_budget = expected_spend_cfg, scenario = robyn_scenario,
         channel_constr_low = low_bounds, channel_constr_up = up_bounds,
         export = TRUE
     ),
     silent = TRUE
 )
 flush_and_ship_log("after robyn_allocator")
+
+# Log allocator error if it failed
+if (inherits(AllocatorCollect, "try-error")) {
+    err_msg <- conditionMessage(attr(AllocatorCollect, "condition"))
+    cat(paste0("\n❌ robyn_allocator FAILED with error: ", err_msg, "\n\n"))
+    
+    # Write error to file for debugging
+    alloc_err_file <- file.path(dir_path, "allocator_error.txt")
+    writeLines(c(
+        "ALLOCATOR ERROR",
+        paste0("When: ", Sys.time()),
+        paste0("Error: ", err_msg),
+        paste0("UI budget_scenario: ", budget_scenario_cfg),
+        paste0("Robyn scenario: ", robyn_scenario),
+        paste0("total_budget: ", if (is.null(expected_spend_cfg)) "NULL" else expected_spend_cfg),
+        paste0("date_range: ", alloc_start, " to ", alloc_end),
+        "",
+        "Stack trace:",
+        paste(capture.output(traceback()), collapse = "\n")
+    ), alloc_err_file)
+    try(gcs_put_safe(alloc_err_file, file.path(gcs_prefix, "allocator_error.txt")), silent = TRUE)
+}
+
 ## ---------- METRICS + PLOT ----------
 message("→ Extracting metrics from best model: ", best_id)
 best_row <- OutputCollect$resultHypParam[OutputCollect$resultHypParam$solID == best_id, ]
@@ -1956,18 +2230,25 @@ tryCatch(
 # Allocator plot (restored)
 alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
 dir.create(alloc_dir, showWarnings = FALSE)
-try(
-    {
-        png(file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")), width = 1200, height = 800)
-        plot(AllocatorCollect)
-        dev.off()
-        gcs_put_safe(
-            file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")),
-            file.path(gcs_prefix, paste0("allocator_plots_", timestamp, "/allocator_", best_id, "_365d.png"))
-        )
-    },
-    silent = TRUE
-)
+
+# Only plot if AllocatorCollect succeeded
+if (!inherits(AllocatorCollect, "try-error")) {
+    try(
+        {
+            png(file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")), width = 1200, height = 800)
+            plot(AllocatorCollect)
+            dev.off()
+            gcs_put_safe(
+                file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")),
+                file.path(gcs_prefix, paste0("allocator_plots_", timestamp, "/allocator_", best_id, "_365d.png"))
+            )
+            message("✅ Allocator plot created successfully")
+        },
+        silent = TRUE
+    )
+} else {
+    message("⚠️ Skipping allocator plot - AllocatorCollect failed: ", conditionMessage(attr(AllocatorCollect, "condition")))
+}
 
 ## ---------- UPLOAD EVERYTHING ----------
 flush_and_ship_log("before final upload")

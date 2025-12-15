@@ -25,10 +25,10 @@ from cryptography.hazmat.primitives import serialization
 from data_processor import DataProcessor
 from google.api_core.exceptions import PreconditionFailed
 from google.cloud import run_v2, secretmanager, storage
-from utils.snowflake_cache import (
-    get_cached_query_result,
-)
+from utils.snowflake_cache import get_cached_query_result
 from utils.snowflake_cache import init_cache as init_snowflake_cache
+
+from utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 # Environment constants
 PROJECT_ID = os.getenv("PROJECT_ID")
@@ -150,7 +150,7 @@ def _safe_tick_once(
     def _init_doc() -> dict:
         return {
             "version": 1,
-            "saved_at": datetime.utcnow().isoformat() + "Z",
+            "saved_at": get_cet_now().isoformat(),
             "entries": [],
             "queue_running": True,
         }
@@ -167,6 +167,11 @@ def _safe_tick_once(
             except PreconditionFailed:
                 # Someone created it concurrently; continue to normal path
                 pass
+
+        # After creation attempt, verify blob exists before reloading
+        if not blob.exists():
+            # Blob still doesn't exist, retry
+            continue
 
         blob.reload()  # get current generation
         gen = int(blob.generation)  # type: ignore
@@ -237,10 +242,7 @@ def _safe_tick_once(
                                 df_history.loc[mask, "state"] = final_state
                                 df_history.loc[mask, "message"] = message
                                 df_history.loc[mask, "end_time"] = (
-                                    datetime.utcnow().isoformat(
-                                        timespec="seconds"
-                                    )
-                                    + "Z"
+                                    get_cet_now().isoformat(timespec="seconds")
                                 )
 
                                 # Calculate duration if start_time exists
@@ -263,7 +265,7 @@ def _safe_tick_once(
                                                         "Z", "+00:00"
                                                     )
                                                 )
-                                                end_time = dt.utcnow()
+                                                end_time = get_cet_now()
                                                 duration = (
                                                     end_time - start_time
                                                 ).total_seconds() / 60.0
@@ -316,7 +318,7 @@ def _safe_tick_once(
                 )
 
             if changed:
-                doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
+                doc["saved_at"] = get_cet_now().isoformat()
                 try:
                     blob.upload_from_string(
                         json.dumps(doc, indent=2),
@@ -348,7 +350,7 @@ def _safe_tick_once(
         # --- Critical section: lease it (LAUNCHING) guarded by generation match ---
         entry["status"] = "LAUNCHING"
         entry["message"] = "Launching..."
-        doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
+        doc["saved_at"] = get_cet_now().isoformat()
         try:
             blob.upload_from_string(
                 json.dumps(doc, indent=2),
@@ -403,10 +405,9 @@ def _safe_tick_once(
                         "dep_var": params.get("dep_var"),
                         "date_var": params.get("date_var"),
                         "adstock": params.get("adstock"),
-                        "start_time": datetime.utcnow().isoformat(
+                        "start_time": get_cet_now().isoformat(
                             timespec="seconds"
-                        )
-                        + "Z",
+                        ),
                         "end_time": None,
                         "duration_minutes": None,
                         "gcs_prefix": entry.get("gcs_prefix"),
@@ -454,7 +455,7 @@ def _safe_tick_once(
         # Persist the post-launch state with another guarded write
         blob.reload()
         gen2 = int(blob.generation)  # type: ignore
-        doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
+        doc["saved_at"] = get_cet_now().isoformat()
         try:
             blob.upload_from_string(
                 json.dumps(doc, indent=2),
@@ -1337,6 +1338,14 @@ def build_job_config_from_params(
     if "column_agg_strategies" in params and params["column_agg_strategies"]:
         config["column_agg_strategies"] = params["column_agg_strategies"]
 
+    # Add budget allocation parameters if present
+    if "budget_scenario" in params:
+        config["budget_scenario"] = params["budget_scenario"]
+    if "expected_spend" in params:
+        config["expected_spend"] = params["expected_spend"]
+    if "channel_budgets" in params:
+        config["channel_budgets"] = params["channel_budgets"]
+
     return config
 
 
@@ -1366,7 +1375,7 @@ def load_queue_from_gcs(
     if not blob.exists():
         doc = {
             "version": 1,
-            "saved_at": datetime.utcnow().isoformat() + "Z",
+            "saved_at": get_cet_now().isoformat(),
             "entries": [],
             "queue_running": True,  # default to running
         }
@@ -1380,7 +1389,7 @@ def load_queue_from_gcs(
         if isinstance(payload, list):
             payload = {
                 "version": 1,
-                "saved_at": datetime.utcnow().isoformat() + "Z",
+                "saved_at": get_cet_now().isoformat(),
                 "entries": payload,
                 "queue_running": True,
             }
@@ -1398,7 +1407,7 @@ def load_queue_from_gcs(
         st.session_state.queue_running = True
         return {
             "version": 1,
-            "saved_at": datetime.utcnow().isoformat() + "Z",
+            "saved_at": get_cet_now().isoformat(),
             "entries": [],
             "queue_running": True,
         }
@@ -1426,7 +1435,7 @@ def save_queue_to_gcs(
     if queue_running is None:
         queue_running = st.session_state.get("queue_running", True)
 
-    saved_at = datetime.utcnow().isoformat() + "Z"
+    saved_at = get_cet_now().isoformat()
     payload = {
         "version": 1,
         "saved_at": saved_at,
@@ -1512,12 +1521,19 @@ def handle_queue_tick_from_query_params(
     if qp.get("queue_tick") != "1":
         return None
 
+    # Log that queue tick endpoint was called (helpful for debugging Cloud Scheduler)
     qname = qp.get("name") or DEFAULT_QUEUE_NAME
     bkt = bucket_name or GCS_BUCKET
+    logger.info(
+        f"[QUEUE_TICK] Endpoint called for queue '{qname}' in bucket '{bkt}'"
+    )
+
     try:
-        return queue_tick_once_headless(qname, bkt, launcher=launcher)
+        result = queue_tick_once_headless(qname, bkt, launcher=launcher)
+        logger.info(f"[QUEUE_TICK] Completed successfully: {result}")
+        return result
     except Exception as e:
-        logger.exception("queue_tick handler failed: %s", e)
+        logger.exception("[QUEUE_TICK] Handler failed: %s", e)
         return {"ok": False, "error": str(e)}
 
 
@@ -1571,10 +1587,11 @@ def require_login_and_domain(allowed_domain: Optional[str] = None) -> None:
                        If None, uses the ALLOWED_DOMAINS from settings.
                        If provided, checks against this single domain only.
     """
-    # Allow lightweight health checks to pass through if you use them on pages too
+    # Allow lightweight health checks and queue tick endpoints to pass through
+    # These endpoints are called by Cloud Scheduler with service account credentials
     q = getattr(st, "query_params", {})
-    if q.get("health") == "true":
-        return  # let the page handle its health endpoint and st.stop() later if needed
+    if q.get("health") == "true" or q.get("queue_tick") == "1":
+        return  # let the page handle its endpoint and st.stop() later if needed
 
     # Determine which domains to allow
     if allowed_domain is not None:
@@ -1906,15 +1923,24 @@ def list_data_versions(
 def list_mapped_data_versions(
     bucket: str, country: str, refresh_key: str = ""
 ) -> List[str]:
-    """List available versions of mapped data (from Map Data Step 3)."""
+    """List available versions of mapped data (from Map Data Step 3).
+
+    Expected blob structure: mapped-datasets/{country}/{timestamp}/raw.parquet
+    Example: mapped-datasets/de/20231201_120000/raw.parquet
+    """
     client = storage.Client()
     prefix = f"{mapped_data_root(country)}/"
     blobs = client.list_blobs(bucket, prefix=prefix)
     ts = set()
     for b in blobs:
         parts = b.name.split("/")
-        if len(parts) >= 4 and parts[-1] == "raw.parquet":
-            ts.add(parts[-2])
+        # Expect exactly 4 parts: ['mapped-datasets', '{country}', '{timestamp}', 'raw.parquet']
+        # This ensures we only get files directly in {timestamp}/ directories
+        if len(parts) == 4 and parts[-1] == "raw.parquet":
+            timestamp = parts[-2]
+            # Filter out empty timestamps (from double slashes)
+            if timestamp:
+                ts.add(timestamp)
     out = sorted_versions_newest_first(list(ts))
     return ["Latest"] + out
 

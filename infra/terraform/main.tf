@@ -374,7 +374,7 @@ resource "google_cloud_run_service" "web_service" {
 
         env {
           name  = "DEFAULT_QUEUE_NAME"
-          value = "default"
+          value = var.queue_name
         }
         env {
           name  = "QUEUE_ROOT"

@@ -20,7 +20,11 @@ file_exists_or_stop <- function(p) {
   p
 }
 
-get_timestamp <- function() format(Sys.time(), "%m%d_%H%M%S")
+get_timestamp <- function() {
+  # Use CET (Central European Time) timezone to match Google Cloud Storage
+  cet_time <- as.POSIXlt(Sys.time(), tz = "Europe/Paris")
+  format(cet_time, "%m%d_%H%M%S")
+}
 
 make_output_paths <- function(revision, country, timestamp) {
   dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))

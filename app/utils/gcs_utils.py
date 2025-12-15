@@ -7,6 +7,7 @@ Provides common operations for:
 - Managing blob paths and URIs
 - Listing and searching blobs
 - Caching for performance
+- Timezone utilities for GCS timestamps
 """
 
 import io
@@ -14,14 +15,56 @@ import json
 import logging
 import re
 import tempfile
+from datetime import datetime
 from typing import List, Optional
 
 import pandas as pd
+import pytz
 from google.cloud import storage
 
 from .cache import cached
 
 logger = logging.getLogger(__name__)
+
+# CET timezone used by Google internally
+CET_TIMEZONE = pytz.timezone("Europe/Paris")
+
+
+def get_cet_now() -> datetime:
+    """
+    Get current datetime in CET (Central European Time) timezone.
+
+    This is the timezone used internally by Google Cloud Storage.
+
+    Returns:
+        Timezone-aware datetime in CET
+    """
+    return datetime.now(CET_TIMEZONE)
+
+
+def format_cet_timestamp(
+    dt: datetime = None, format_str: str = "%Y%m%d_%H%M%S"
+) -> str:
+    """
+    Format a datetime as a timestamp string in CET timezone.
+
+    Args:
+        dt: Datetime to format. If None, uses current CET time.
+        format_str: strftime format string (default: YYYYMMdd_HHMMSS)
+
+    Returns:
+        Formatted timestamp string in CET timezone
+    """
+    if dt is None:
+        dt = get_cet_now()
+    elif dt.tzinfo is None:
+        # If naive datetime, assume it's UTC and convert to CET
+        dt = pytz.utc.localize(dt).astimezone(CET_TIMEZONE)
+    else:
+        # Convert to CET if it's aware but in different timezone
+        dt = dt.astimezone(CET_TIMEZONE)
+
+    return dt.strftime(format_str)
 
 
 def normalize_blob_path(path: str) -> str:

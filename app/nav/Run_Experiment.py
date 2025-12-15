@@ -29,6 +29,8 @@ from app_shared import (
 )
 from google.cloud import storage
 
+from utils.gcs_utils import format_cet_timestamp, get_cet_now
+
 data_processor = get_data_processor()
 job_manager = get_job_manager()
 from app_split_helpers import *  # bring in all helper functions/constants
@@ -111,6 +113,40 @@ def _load_training_data_json(
     except Exception as e:
         st.warning(f"Could not load training data config: {e}")
         return None
+
+
+def _list_all_training_data_configs(bucket: str) -> List[Dict[str, str]]:
+    """List all available training data configs from all countries.
+
+    Returns list of dicts with keys: 'country', 'timestamp', 'display_name'
+    Path pattern: training_data/{country}/{timestamp}/selected_columns.json
+    """
+    try:
+        client = storage.Client()
+        prefix = "training_data/"
+        blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+        configs = []
+        for blob in blobs:
+            if blob.name.endswith("selected_columns.json"):
+                parts = blob.name.split("/")
+                # training_data/<country>/<timestamp>/selected_columns.json
+                if len(parts) >= 4:
+                    country = parts[1].strip()
+                    timestamp = parts[2].strip()
+                    # Validate that country and timestamp are non-empty
+                    if country and timestamp:
+                        configs.append(
+                            {
+                                "country": country,
+                                "timestamp": timestamp,
+                                "display_name": f"{country.upper()} - {timestamp}",
+                            }
+                        )
+        # Sort by timestamp descending (newest first)
+        return sorted(configs, key=lambda x: x["timestamp"], reverse=True)
+    except Exception as e:
+        logging.warning(f"Could not list all training data configs: {e}")
+        return []
 
 
 def _list_country_versions(bucket: str, country: str) -> List[str]:
@@ -444,15 +480,45 @@ with tab_single:
         )
 
         try:
+            # First try to get configs for selected country
             training_data_versions = _list_training_data_versions(
                 gcs_bucket, selected_country
             )
+
             if training_data_versions:
+                # Found configs for selected country - show them with simple timestamps
                 training_data_options = ["None"] + training_data_versions
+                # Store mapping from display name to country/timestamp
+                config_mapping = {
+                    version: {"country": selected_country, "timestamp": version}
+                    for version in training_data_versions
+                }
             else:
-                training_data_options = ["None"]
-        except Exception:
+                # No configs for selected country - show configs from all countries
+                all_configs = _list_all_training_data_configs(gcs_bucket)
+                if all_configs:
+                    training_data_options = ["None"] + [
+                        cfg["display_name"] for cfg in all_configs
+                    ]
+                    # Store mapping from display name to country/timestamp
+                    config_mapping = {
+                        cfg["display_name"]: {
+                            "country": cfg["country"],
+                            "timestamp": cfg["timestamp"],
+                        }
+                        for cfg in all_configs
+                    }
+                    st.info(
+                        f"ℹ️ No training data configs found for {selected_country.upper()}. "
+                        "Showing configs from all countries."
+                    )
+                else:
+                    training_data_options = ["None"]
+                    config_mapping = {}
+        except Exception as e:
+            logging.warning(f"Error listing training data configs: {e}")
             training_data_options = ["None"]
+            config_mapping = {}
 
         selected_training_data = st.selectbox(
             "Select Training Data Config",
@@ -463,18 +529,32 @@ with tab_single:
 
         # Load and store training data config if selected
         if selected_training_data != "None":
-            training_data_config = _load_training_data_json(
-                gcs_bucket, selected_country, selected_training_data
-            )
-            if training_data_config:
-                st.session_state["training_data_config"] = training_data_config
-                st.success(
-                    f"✅ Loaded training data config: {selected_training_data}"
+            # Get country and timestamp from mapping
+            config_info = config_mapping.get(selected_training_data)
+            if config_info:
+                config_country = config_info["country"]
+                config_timestamp = config_info["timestamp"]
+                training_data_config = _load_training_data_json(
+                    gcs_bucket, config_country, config_timestamp
                 )
-                with st.expander(
-                    "Preview Training Data Config", expanded=False
-                ):
-                    st.json(training_data_config)
+                if training_data_config:
+                    st.session_state["training_data_config"] = (
+                        training_data_config
+                    )
+                    if config_country != selected_country:
+                        st.success(
+                            f"✅ Loaded training data config from {config_country.upper()}: {config_timestamp}"
+                        )
+                    else:
+                        st.success(
+                            f"✅ Loaded training data config: {selected_training_data}"
+                        )
+                    with st.expander(
+                        "Preview Training Data Config", expanded=False
+                    ):
+                        st.json(training_data_config)
+                else:
+                    st.session_state["training_data_config"] = None
             else:
                 st.session_state["training_data_config"] = None
         else:
@@ -502,7 +582,7 @@ with tab_single:
         if st.button(
             "Load selected data",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="load_data_btn",
         ):
             tmp_path: Optional[str] = None
@@ -551,6 +631,10 @@ with tab_single:
                                         if len(created_cols) > 5
                                         else ""
                                     )
+                                )
+                                # Set flag so training job knows to use updated data
+                                st.session_state["metadata_created_columns"] = (
+                                    created_cols
                                 )
 
                             # Check for custom columns in metadata mapping that couldn't be created
@@ -633,6 +717,11 @@ with tab_single:
                                         f"{data_info.get('date_field', 'N/A')}"
                                     )
 
+                        # Rerun to refresh UI and hide status message
+                        if tmp_path and os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+                        st.rerun()
+
             except Exception as e:
                 st.error(f"Failed to load data: {e}")
             finally:
@@ -647,7 +736,7 @@ with tab_single:
             st.write("**Preview (first 5 rows):**")
             st.dataframe(
                 st.session_state["preview_df"].head(5),
-                use_container_width=True,
+                width="stretch",
             )
 
     # Load Model settings
@@ -679,7 +768,7 @@ with tab_single:
 
                 if st.button(
                     "📥 Apply Settings",
-                    use_container_width=True,
+                    width="stretch",
                     key="load_config_btn",
                 ):
                     try:
@@ -694,7 +783,7 @@ with tab_single:
                             config_data.get("countries", [])
                         )
                         st.session_state["loaded_config_timestamp"] = (
-                            datetime.utcnow().timestamp()
+                            get_cet_now().timestamp()
                         )
 
                         st.success(
@@ -828,7 +917,7 @@ with tab_single:
             )
         with col2:
             # Parse loaded end date if available
-            default_end_date = datetime.now().date()
+            default_end_date = get_cet_now().date()
             if loaded_config and "end_date" in loaded_config:
                 try:
                     default_end_date = datetime.strptime(
@@ -1081,9 +1170,8 @@ with tab_single:
         # This takes priority over metadata defaults
         training_data_config = st.session_state.get("training_data_config")
         if training_data_config:
-            st.info(
-                "📋 **Using training data config from Prepare Training Data page**"
-            )
+            # Remove redundant info message - will show consolidated message later
+            pass
             # Prefill from training data config
             if training_data_config.get("paid_media_spends"):
                 default_values["paid_media_spends"] = training_data_config[
@@ -1201,6 +1289,20 @@ with tab_single:
                 if isinstance(cat_vars, list):
                     all_columns_set.update(cat_vars)
 
+        # Add all columns from training_data_config to available columns
+        # This ensures custom variables from Prepare Training Data are available
+        if training_data_config:
+            for key in [
+                "paid_media_spends",
+                "paid_media_vars",
+                "organic_vars",
+                "context_vars",
+                "factor_vars",
+            ]:
+                vars_from_config = training_data_config.get(key, [])
+                if vars_from_config:
+                    all_columns_set.update(vars_from_config)
+
         # Convert back to list
         all_columns = list(all_columns_set)
 
@@ -1237,11 +1339,10 @@ with tab_single:
 
         # Check for prefill from Prepare Training Data page (takes priority)
         training_prefill = st.session_state.get("training_prefill")
+        config_source = None  # Track which config source is being used
+
         if training_prefill and st.session_state.get("training_prefill_ready"):
-            st.info(
-                "📋 **Prefill from Prepare Training Data page detected!** "
-                "Variable selections have been pre-populated."
-            )
+            config_source = "prefill"
             # Use prefill data as loaded_config equivalent
             loaded_config = {
                 "paid_media_spends": training_prefill.get(
@@ -1261,7 +1362,7 @@ with tab_single:
             st.session_state["training_prefill_ready"] = False
             # Force widget refresh by updating timestamp
             st.session_state["loaded_config_timestamp"] = (
-                datetime.utcnow().timestamp()
+                get_cet_now().timestamp()
             )
 
         # Get all paid_media_spends from metadata (including CUSTOM columns)
@@ -1271,6 +1372,10 @@ with tab_single:
         # Determine default selections from loaded config
         default_paid_media_spends = available_spends  # All selected by default
         if loaded_config and "paid_media_spends" in loaded_config:
+            # Set config source if not already set
+            if config_source is None:
+                config_source = "saved_config"
+
             # Parse loaded config (could be comma-separated string or list)
             loaded_spends = loaded_config["paid_media_spends"]
             if isinstance(loaded_spends, str):
@@ -1282,12 +1387,6 @@ with tab_single:
             # Add loaded spends to available options (preserve order: metadata first, then loaded)
             available_spends = list(
                 dict.fromkeys(available_spends + loaded_spends)
-            )
-
-            # Debug info to help troubleshoot (wording updated)
-            st.info(
-                f"📋 Loaded settings. Identified {len(loaded_spends)} paid media channels. "
-                f"Added {len([s for s in loaded_spends if s not in default_values['paid_media_spends']])} new variables not in metadata."
             )
 
             # Initialize spend_var_mapping from loaded config (Issue #2 fix)
@@ -1327,11 +1426,6 @@ with tab_single:
                         # Otherwise fall back to the spend itself
                         elif not matched:
                             st.session_state["spend_var_mapping"][spend] = spend
-
-                    # Debug: Show mapping being applied
-                    st.caption(
-                        f"🔧 Applied variable mappings from loaded settings for {len(loaded_spends)} spends"
-                    )
                 else:
                     # Fallback: try to match by index
                     for i, spend in enumerate(loaded_spends):
@@ -1344,6 +1438,20 @@ with tab_single:
         default_paid_media_spends = [
             s for s in default_paid_media_spends if s in available_spends
         ]
+
+        # Show single consolidated info message about config source
+        if config_source == "prefill":
+            st.info(
+                "📋 **Variable selections loaded from Prepare Training Data page**"
+            )
+        elif config_source == "saved_config":
+            st.info(
+                "📋 **Variable selections loaded from saved model settings**"
+            )
+        elif training_data_config:
+            st.info(
+                "📋 **Variable selections loaded from training data configuration**"
+            )
 
         # Display paid_media_spends first (all selected by default)
         st.markdown("**Paid Media Settings**")
@@ -1580,8 +1688,8 @@ with tab_single:
                 ]
 
                 st.warning(
-                    f"⚠️ **Warning:** {len(missing_custom_vars)} custom variable(s) selected but not found in loaded data: "
-                    f"{', '.join(missing_custom_vars[:5])}"
+                    f"⚠️ **Missing Variables:** {len(missing_custom_vars)} custom variable(s) from your configuration are not found in the loaded dataset: "
+                    f"**{', '.join(missing_custom_vars[:5])}**"
                     + (
                         f" and {len(missing_custom_vars) - 5} more..."
                         if len(missing_custom_vars) > 5
@@ -1866,6 +1974,124 @@ with tab_single:
         factor_vars = ", ".join(factor_vars_list)
         organic_vars = ", ".join(organic_vars_list)
 
+    # Budget Allocation Settings
+    budget_scenario = "max_historical_response"
+    expected_spend = None
+    channel_budgets = {}
+
+    with st.expander("💰 Budget Allocation Settings", expanded=False):
+        st.caption(
+            "Configure budget allocation for the optimizer. Choose between "
+            "using historical spend patterns or defining a custom budget."
+        )
+
+        # Get loaded budget settings if available
+        loaded_budget_scenario = (
+            loaded_config.get("budget_scenario", "max_historical_response")
+            if loaded_config
+            else "max_historical_response"
+        )
+        loaded_expected_spend = (
+            loaded_config.get("expected_spend") if loaded_config else None
+        )
+
+        # Budget scenario selection
+        budget_scenario_options = [
+            "max_historical_response",
+            "max_response_expected_spend",
+        ]
+        budget_scenario_labels = {
+            "max_historical_response": "Historical Budget (use actual spend from data)",
+            "max_response_expected_spend": "Custom Budget (define total spend)",
+        }
+
+        default_scenario_index = 0
+        if loaded_budget_scenario in budget_scenario_options:
+            default_scenario_index = budget_scenario_options.index(
+                loaded_budget_scenario
+            )
+
+        budget_scenario_label = st.selectbox(
+            "Budget Allocation Mode",
+            options=[
+                budget_scenario_labels[opt] for opt in budget_scenario_options
+            ],
+            index=default_scenario_index,
+            help=(
+                "Choose 'Historical Budget' to optimize based on actual spend "
+                "in your data, or 'Custom Budget' to define your own total budget."
+            ),
+        )
+
+        # Map label back to scenario value
+        budget_scenario = [
+            k
+            for k, v in budget_scenario_labels.items()
+            if v == budget_scenario_label
+        ][0]
+
+        # Show expected spend input if custom budget is selected
+        if budget_scenario == "max_response_expected_spend":
+            st.markdown("**Custom Total Budget**")
+
+            expected_spend = st.number_input(
+                "Total Budget Amount",
+                value=float(loaded_expected_spend or 100000),
+                min_value=0.0,
+                step=1000.0,
+                help="Enter the total budget to allocate across all paid media channels",
+            )
+
+            st.markdown("**Per-Channel Budget Allocation (Optional)**")
+            st.caption(
+                "Optionally define budget for each channel. If left at 0, "
+                "the optimizer will distribute the total budget automatically."
+            )
+
+            # Show budget input for each paid media spend
+            if paid_media_spends_list:
+                for spend in paid_media_spends_list:
+                    # Get loaded value if available
+                    loaded_channel_budget = (
+                        loaded_config.get("channel_budgets", {}).get(spend, 0.0)
+                        if loaded_config
+                        else 0.0
+                    )
+
+                    channel_budget = st.number_input(
+                        f"Budget for {spend}",
+                        value=float(loaded_channel_budget),
+                        min_value=0.0,
+                        step=100.0,
+                        key=f"budget_{spend}",
+                        help=f"Budget allocated to {spend}. Set to 0 for automatic allocation.",
+                    )
+                    if channel_budget > 0:
+                        channel_budgets[spend] = channel_budget
+
+                # Show total allocated if any budgets are set
+                if channel_budgets:
+                    total_allocated = sum(channel_budgets.values())
+                    st.info(
+                        f"💡 Total allocated to specific channels: {total_allocated:,.2f} "
+                        f"({(total_allocated/expected_spend*100):.1f}% of total budget)"
+                    )
+                    if total_allocated > expected_spend:
+                        st.warning(
+                            f"⚠️ Total channel budgets ({total_allocated:,.2f}) exceed "
+                            f"the total budget ({expected_spend:,.2f})"
+                        )
+            else:
+                st.info(
+                    "👆 Please select paid media channels first to configure per-channel budgets"
+                )
+        else:
+            st.info(
+                "📊 Budget allocation will use historical spend from your data. "
+                "The optimizer will find the best allocation based on the actual "
+                "spend patterns in the selected date range."
+            )
+
     # Initialize revision variables with defaults (will be updated in expander)
     revision = ""
     revision_tag = ""
@@ -2045,17 +2271,17 @@ with tab_single:
 
         save_config_clicked = col_btn1.button(
             "💾 Save Settings",
-            use_container_width=True,
+            width="stretch",
             key="save_config_btn",
         )
         add_to_queue_clicked = col_btn2.button(
             "➕ Save Settings & Add to Queue",
-            use_container_width=True,
+            width="stretch",
             key="add_to_queue_btn",
         )
         add_and_start_clicked = col_btn3.button(
             "▶️ Save Settings, Add to Queue and Run Now",
-            use_container_width=True,
+            width="stretch",
             key="add_and_start_btn",
         )
 
@@ -2111,7 +2337,13 @@ with tab_single:
                 else ""
             ),
             "annotations_gcs_path": "",
+            "budget_scenario": budget_scenario,
+            "expected_spend": expected_spend if expected_spend else "",
         }
+
+        # Add per-channel budgets to CSV row
+        for channel, budget in channel_budgets.items():
+            csv_row[f"{channel}_budget"] = budget
 
         # Add custom hyperparameters to CSV row
         if hyperparameter_preset == "Custom" and custom_hyperparameters:
@@ -2128,7 +2360,7 @@ with tab_single:
             data=csv_df.to_csv(index=False),
             file_name=f"robyn_config_{country}_{revision}_{time.strftime('%Y%m%d')}.csv",
             mime="text/csv",
-            use_container_width=True,
+            width="stretch",
             help="Download current settings as CSV and use for batch processing",
         )
 
@@ -2144,7 +2376,7 @@ with tab_single:
                     # Build configuration payload
                     config_payload = {
                         "name": config_name,
-                        "created_at": datetime.utcnow().isoformat(),
+                        "created_at": get_cet_now().isoformat(),
                         "countries": config_countries,
                         "config": {
                             "iterations": int(iterations),
@@ -2172,6 +2404,9 @@ with tab_single:
                             ),
                             "resample_freq": resample_freq,
                             "column_agg_strategies": column_agg_strategies,
+                            "budget_scenario": budget_scenario,
+                            "expected_spend": expected_spend,
+                            "channel_budgets": channel_budgets,
                         },
                     }
 
@@ -2271,6 +2506,9 @@ with tab_single:
                             "start_date": start_date_str,
                             "end_date": end_date_str,
                             "data_gcs_path": f"gs://{gcs_bucket}/{data_blob_path}",
+                            "budget_scenario": budget_scenario,
+                            "expected_spend": expected_spend,
+                            "channel_budgets": channel_budgets,
                         }
 
                         new_entries.append(
@@ -2361,6 +2599,9 @@ with tab_single:
                 custom_hyperparameters,  # NEW
                 resample_freq,
                 column_agg_strategies,
+                budget_scenario,  # NEW
+                expected_spend,  # NEW
+                channel_budgets,  # NEW
             ),
             data_gcs_path,
             timestamp,
@@ -2389,6 +2630,9 @@ with tab_single:
         custom_hyperparameters,  # NEW
         resample_freq,
         column_agg_strategies,
+        budget_scenario,  # NEW
+        expected_spend,  # NEW
+        channel_budgets,  # NEW
     ) -> dict:
         return {
             "country": country,
@@ -2414,6 +2658,9 @@ with tab_single:
             "custom_hyperparameters": custom_hyperparameters,  # NEW
             "resample_freq": resample_freq,
             "column_agg_strategies": column_agg_strategies,
+            "budget_scenario": budget_scenario,  # NEW
+            "expected_spend": expected_spend,  # NEW
+            "channel_budgets": channel_budgets,  # NEW
             "data_gcs_path": "",  # Will be filled later
         }
 
@@ -2430,7 +2677,7 @@ with tab_single:
         start_multi_training = st.button(
             "🌍 Start Training for All Countries",
             type="secondary",
-            use_container_width=True,
+            width="stretch",
             key="start_multi_training_job_btn",
             help=f"Start training jobs in parallel for all {len(multi_country_list)} countries",
         )
@@ -2439,7 +2686,7 @@ with tab_single:
         start_single_training = st.button(
             "🚀 Start Training Job",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="start_training_job_btn",
         )
 
@@ -2463,10 +2710,7 @@ with tab_single:
 
         # Add jobs to queue for all countries
         try:
-            from app_split_helpers import (
-                save_queue_to_gcs,
-                set_queue_running,
-            )
+            from app_split_helpers import save_queue_to_gcs, set_queue_running
 
             # Get next queue ID
             next_id = (
@@ -2520,6 +2764,9 @@ with tab_single:
                     "start_date": start_date_str,
                     "end_date": end_date_str,
                     "data_gcs_path": f"gs://{gcs_bucket}/{data_blob_path}",
+                    "budget_scenario": budget_scenario,
+                    "expected_spend": expected_spend,
+                    "channel_budgets": channel_budgets,
                 }
 
                 new_entries.append(
@@ -2602,9 +2849,9 @@ with tab_single:
                 else:
                     timestamp = shared_ts
             except Exception:
-                timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+                timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
         else:
-            timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+            timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
 
         gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
         timings: List[Dict[str, float]] = []
@@ -2615,12 +2862,57 @@ with tab_single:
                     data_gcs_path = None
                     annotations_gcs_path = None
 
-                    # Use the already loaded GCS data
-                    blob_path = _get_data_blob(selected_country, selected_version)  # type: ignore
-                    data_gcs_path = f"gs://{gcs_bucket}/{blob_path}"
+                    # CRITICAL FIX: If metadata created custom columns, save the updated DataFrame
+                    # instead of using the original mapped data (which lacks those columns)
+                    df_with_custom_cols = st.session_state.get("preview_df")
+                    original_blob_path = _get_data_blob(selected_country, selected_version)  # type: ignore
 
-                    # No need to query and upload - data is already in GCS
-                    st.info(f"Using data from: {data_gcs_path}")
+                    # Check if we have auto-created columns by comparing with original data
+                    # If preview_df has more columns than the original, we need to use it
+                    use_updated_data = False
+                    if df_with_custom_cols is not None:
+                        try:
+                            # Read original data to compare
+                            original_data_path = (
+                                f"gs://{gcs_bucket}/{original_blob_path}"
+                            )
+                            # Quick check: if we recently created columns, use preview_df
+                            # This is indicated by session state or column count difference
+                            if "metadata_created_columns" in st.session_state:
+                                use_updated_data = True
+                        except Exception:
+                            pass
+
+                    if use_updated_data and df_with_custom_cols is not None:
+                        # Save the DataFrame with auto-created columns to a new GCS location
+                        with timed_step(
+                            "Upload data with auto-created columns to GCS",
+                            timings,
+                        ):
+                            temp_data_path = os.path.join(
+                                td, "training_data.parquet"
+                            )
+                            df_with_custom_cols.to_parquet(
+                                temp_data_path, index=False
+                            )
+
+                            # Upload to a training-specific location
+                            data_blob = f"training-data/{timestamp}/training_data.parquet"
+                            data_gcs_path = upload_to_gcs(
+                                gcs_bucket,  # type: ignore
+                                temp_data_path,
+                                data_blob,
+                            )
+                            st.success(
+                                f"✅ Uploaded training data with {len(df_with_custom_cols.columns)} columns "
+                                f"(including auto-created custom columns) to GCS"
+                            )
+                    else:
+                        # Use the already loaded GCS data (original mapped data)
+                        data_gcs_path = (
+                            f"gs://{gcs_bucket}/{original_blob_path}"
+                        )
+                        st.info(f"Using data from: {data_gcs_path}")
 
                     # Get annotation file from session state (set in Robyn Configuration section above)
                     ann_file = st.session_state.get("annotations_file")
@@ -2713,7 +3005,7 @@ with tab_single:
                                     "state": "RUNNING",  # Initial state
                                     "country": country,
                                     "revision": revision,
-                                    "date_input": dt.utcnow().strftime(
+                                    "date_input": get_cet_now().strftime(
                                         "%Y-%m-%d"
                                     ),  # Current date when job is run
                                     "iterations": int(iterations),
@@ -2730,10 +3022,9 @@ with tab_single:
                                     "dep_var": dep_var,
                                     "date_var": date_var,
                                     "adstock": adstock,
-                                    "start_time": dt.utcnow().isoformat(
+                                    "start_time": get_cet_now().isoformat(
                                         timespec="seconds"
-                                    )
-                                    + "Z",
+                                    ),
                                     "end_time": None,
                                     "duration_minutes": None,
                                     "gcs_prefix": gcs_prefix,
@@ -2936,7 +3227,7 @@ with tab_queue:
                 uploaded_view,
                 key=f"uploaded_editor_{up_nonce}",
                 num_rows="dynamic",
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "Delete": st.column_config.CheckboxColumn(
@@ -3150,6 +3441,8 @@ with tab_queue:
                 "ORGANIC_TRAFFIC_alphas": "",
                 "ORGANIC_TRAFFIC_gammas": "",
                 "ORGANIC_TRAFFIC_thetas": "",
+                "budget_scenario": "max_historical_response",
+                "expected_spend": "",
             },
             {
                 "country": "de",
@@ -3191,6 +3484,8 @@ with tab_queue:
                 "ORGANIC_TRAFFIC_alphas": "",
                 "ORGANIC_TRAFFIC_gammas": "",
                 "ORGANIC_TRAFFIC_thetas": "",
+                "budget_scenario": "max_response_expected_spend",
+                "expected_spend": "150000",
             },
             {
                 "country": "it",
@@ -3232,6 +3527,8 @@ with tab_queue:
                 "ORGANIC_TRAFFIC_alphas": "[0.5, 2.0]",
                 "ORGANIC_TRAFFIC_gammas": "[0.3, 0.7]",
                 "ORGANIC_TRAFFIC_thetas": "[0.9, 0.99]",
+                "budget_scenario": "max_historical_response",
+                "expected_spend": "",
             },
         ]
     )
@@ -3260,6 +3557,8 @@ with tab_queue:
                 "adstock": "geometric",
                 "hyperparameter_preset": "Meshed recommend",
                 "resample_freq": "none",
+                "budget_scenario": "max_historical_response",
+                "expected_spend": "",
             },
             {
                 "country": "de",
@@ -3280,6 +3579,8 @@ with tab_queue:
                 "adstock": "weibull_cdf",
                 "hyperparameter_preset": "Facebook recommend",
                 "resample_freq": "W",
+                "budget_scenario": "max_response_expected_spend",
+                "expected_spend": "100000",
             },
             {
                 "country": "it",
@@ -3303,6 +3604,8 @@ with tab_queue:
                 "BING_DEMAND_COST_alphas": "[1.0, 3.0]",
                 "BING_DEMAND_COST_gammas": "[0.6, 0.9]",
                 "BING_DEMAND_COST_thetas": "[0.1, 0.4]",
+                "budget_scenario": "max_historical_response",
+                "expected_spend": "",
             },
         ]
     )
@@ -3357,7 +3660,18 @@ with tab_queue:
 
         # --- CSV templates (collapsed, less prominent) ---
         with st.expander("CSV examples", expanded=False):
-            st.caption("Download example CSVs to see the expected structure.")
+            st.caption(
+                "Download example CSVs to see the expected structure. "
+                "New in these templates: **budget_scenario** and **expected_spend** "
+                "columns allow you to specify custom budgets for allocation."
+            )
+            st.info(
+                "💡 **Budget Allocation Options:**\n"
+                "- **budget_scenario**: Set to 'max_historical_response' (default) "
+                "to use historical spend, or 'max_response_expected_spend' for custom budget\n"
+                "- **expected_spend**: When using custom budget, specify total amount (e.g., '150000')\n"
+                "- **{CHANNEL}_budget**: Optional per-channel budgets (e.g., 'GA_SUPPLY_COST_budget')"
+            )
             col_ex1, col_ex2 = st.columns(2)
             with col_ex1:
                 st.download_button(
@@ -3365,7 +3679,7 @@ with tab_queue:
                     data=example.to_csv(index=False),
                     file_name="robyn_batch_example_consistent.csv",
                     mime="text/csv",
-                    use_container_width=False,
+                    width="content",
                     help="All rows have the same columns – recommended starting point.",
                 )
             with col_ex2:
@@ -3374,7 +3688,7 @@ with tab_queue:
                     data=example_varied.to_csv(index=False),
                     file_name="robyn_batch_example_varied.csv",
                     mime="text/csv",
-                    use_container_width=False,
+                    width="content",
                     help="Rows can differ in columns – shows CSV flexibility.",
                 )
 
@@ -3430,7 +3744,7 @@ with tab_status:
 
         if qc4.button(
             "🔁 Refresh queue",
-            use_container_width=True,
+            width="stretch",
             key="refresh_queue_from_gcs",
         ):
             maybe_refresh_queue_from_gcs(force=True)
