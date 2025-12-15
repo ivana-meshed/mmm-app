@@ -19,10 +19,10 @@ sf_role      = "ACCOUNTADMIN"
 # Training job resource sizing (cost optimization)
 # Reduced from 8 vCPU/32GB to 4 vCPU/16GB for 50% cost savings
 # Change to 2.0/8Gi for 75% savings (but longer training time)
-# Note: Cloud Run with 4.0 vCPU may only provide 3 actual cores due to scheduling
+# Note: Cloud Run with 4.0 vCPU may only provide 2 actual cores due to scheduling
 training_cpu       = "4.0"
 training_memory    = "16Gi"
-training_max_cores = "3"  # Conservative to avoid cgroups quota issues
+training_max_cores = "2"  # Very conservative - Cloud Run quota varies
 
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"
