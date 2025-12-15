@@ -811,7 +811,7 @@ with tab_single:
 
         # Iterations and Trials as presets
         preset_options = {
-            "Test Run": {"iterations": 200, "trials": 3},
+            "Test Run": {"iterations": 200, "trials": 5},
             "Benchmark": {"iterations": 2000, "trials": 5},
             "Production": {"iterations": 10000, "trials": 5},
             "Custom": {"iterations": 5000, "trials": 10},
@@ -821,7 +821,7 @@ with tab_single:
         default_preset_index = 0
         if loaded_config:
             loaded_iterations = loaded_config.get("iterations", 200)
-            loaded_trials = loaded_config.get("trials", 3)
+            loaded_trials = loaded_config.get("trials", 5)
             # Check if loaded values match a preset
             for idx, (preset_name, preset_vals) in enumerate(
                 preset_options.items()

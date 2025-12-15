@@ -6,25 +6,25 @@ This document provides cost estimates for the MMM Trainer application across dif
 
 The table below shows monthly costs for different combinations of:
 - **Machine configurations**: Dev (2 vCPU/8GB), Prod (4 vCPU/16GB), 2x Prod (8 vCPU/32GB), 4x Prod (16 vCPU/64GB)
-- **Workload types**: Test Run (2000 iter/5 trials), Benchmark (5000 iter/10 trials), Production (10000 iter/10 trials)
+- **Workload types**: Test Run (200 iter/5 trials), Benchmark (2000 iter/5 trials), Production (10000 iter/5 trials)
 - **Usage volumes**: 100, 500, 1000, 5000 calls per month (with 10, 50, 100, 500 training jobs respectively)
 
 ### Monthly Cost Estimates
 
 | Configuration | Workload Type | 100 calls<br/>(10 jobs) | 500 calls<br/>(50 jobs) | 1000 calls<br/>(100 jobs) | 5000 calls<br/>(500 jobs) |
 |---------------|---------------|-------------------------|-------------------------|---------------------------|---------------------------|
-| **Dev (2 vCPU, 8GB)** | Test Run | $3.61 | $9.71 | $17.33 | $78.29 |
-| | Benchmark | $9.00 | $36.66 | $71.23 | $347.79 |
-| | Production | $15.74 | $70.36 | $138.63 | $684.79 |
-| **Prod (4 vCPU, 16GB)** | Test Run | $3.76 | $10.46 | $18.83 | $85.79 |
-| | Benchmark | $9.75 | $40.41 | $78.73 | $385.29 |
-| | Production | $17.24 | $77.86 | $153.63 | $759.79 |
-| **2x Prod (8 vCPU, 32GB)** | Test Run | $3.85 | $10.91 | $19.73 | $90.29 |
-| | Benchmark | $10.19 | $42.61 | $83.13 | $407.29 |
-| | Production | $18.12 | $82.26 | $162.43 | $803.79 |
-| **4x Prod (16 vCPU, 64GB)** | Test Run | $3.92 | $11.26 | $20.43 | $93.79 |
-| | Benchmark | $10.56 | $44.46 | $86.83 | $425.79 |
-| | Production | $18.86 | $85.96 | $169.83 | $840.79 |
+| **Dev (2 vCPU, 8GB)** | Test Run | $2.36 | $3.46 | $4.83 | $15.79 |
+| | Benchmark | $3.56 | $9.46 | $16.83 | $75.79 |
+| | Production | $8.96 | $36.46 | $70.83 | $345.79 |
+| **Prod (4 vCPU, 16GB)** | Test Run | $2.36 | $3.46 | $4.83 | $15.79 |
+| | Benchmark | $2.96 | $6.46 | $10.83 | $45.79 |
+| | Production | $5.96 | $21.46 | $40.83 | $195.79 |
+| **2x Prod (8 vCPU, 32GB)** | Test Run | $2.36 | $3.46 | $4.83 | $15.79 |
+| | Benchmark | $2.96 | $6.46 | $10.83 | $45.79 |
+| | Production | $5.96 | $21.46 | $40.83 | $195.79 |
+| **4x Prod (16 vCPU, 64GB)** | Test Run | $2.36 | $3.46 | $4.83 | $15.79 |
+| | Benchmark | $3.06 | $6.96 | $11.83 | $50.79 |
+| | Production | $5.96 | $21.46 | $40.83 | $195.79 |
 
 **Notes:**
 - Costs include web service ($0.0017 per call), training jobs, and fixed costs ($2.09/month for GCS, Secret Manager, etc.)
@@ -36,12 +36,12 @@ The table below shows monthly costs for different combinations of:
 
 Individual training job costs and durations for each workload type:
 
-| Configuration | Test Run<br/>(2000 iter × 5 trials) | Benchmark<br/>(5000 iter × 10 trials) | Production<br/>(10000 iter × 10 trials) |
+| Configuration | Test Run<br/>(200 iter × 5 trials) | Benchmark<br/>(2000 iter × 5 trials) | Production<br/>(10000 iter × 5 trials) |
 |---------------|-------------------------------------|---------------------------------------|------------------------------------------|
-| **Dev (2 vCPU, 8GB)** | 33 min, $0.14 | 165 min (2.8 hrs), $0.67 | 330 min (5.5 hrs), $1.35 |
-| **Prod (4 vCPU, 16GB)** | 18 min, $0.15 | 91 min (1.5 hrs), $0.75 | 183 min (3.1 hrs), $1.50 |
-| **2x Prod (8 vCPU, 32GB)** | 9 min, $0.16 | 48 min, $0.79 | 97 min (1.6 hrs), $1.59 |
-| **4x Prod (16 vCPU, 64GB)** | 5 min, $0.17 | 25 min, $0.83 | 50 min, $1.66 |
+| **Dev (2 vCPU, 8GB)** | 3 min, $0.01 | 33 min, $0.13 | 165 min (2.8 hrs), $0.67 |
+| **Prod (4 vCPU, 16GB)** | 1 min, $0.01 | 9 min, $0.07 | 46 min, $0.37 |
+| **2x Prod (8 vCPU, 32GB)** | 0.5 min, $0.01 | 5 min, $0.07 | 23 min, $0.37 |
+| **4x Prod (16 vCPU, 64GB)** | 0.2 min, $0.01 | 2 min, $0.08 | 11 min, $0.37 |
 
 **Key Insights:**
 - Training jobs account for 85-96% of total costs at scale
@@ -206,6 +206,8 @@ terraform apply -var="min_instances=2" -var-file="envs/prod.tfvars"
 
 **Baseline data** (from production testing):
 - Dev config (2 vCPU, 8GB): 1983 seconds with 2000 iterations × 5 trials
+- New Test Run (200 iterations × 5 trials) = 1/10th of baseline
+- New Production (10000 iterations × 5 trials) = 5× baseline  
 - Scaling is linear with (iterations × trials)
 - Performance improves with CPU/memory but with diminishing returns
 
