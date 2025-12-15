@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import tempfile
+from datetime import timezone
 from typing import List, Optional
 
 import pandas as pd
@@ -104,8 +105,9 @@ def get_blob_timestamp(bucket_name: str, blob_path: str) -> str:
 
         blob.reload()  # Ensure we have the latest metadata
         time_created = blob.time_created
-        # Format as YYYYMMdd_HHMMSS in UTC
-        timestamp = time_created.strftime("%Y%m%d_%H%M%S")
+        # Convert to UTC and format as YYYYMMdd_HHMMSS
+        utc_time = time_created.astimezone(timezone.utc)
+        timestamp = utc_time.strftime("%Y%m%d_%H%M%S")
         logger.debug(
             f"Got timestamp {timestamp} for gs://{bucket_name}/{blob_path}"
         )
@@ -182,8 +184,9 @@ def upload_to_gcs_with_timestamp(
         # Reload to get the latest metadata including time_created
         blob.reload()
         time_created = blob.time_created
-        # Format as YYYYMMdd_HHMMSS in UTC
-        timestamp = time_created.strftime("%Y%m%d_%H%M%S")
+        # Convert to UTC and format as YYYYMMdd_HHMMSS
+        utc_time = time_created.astimezone(timezone.utc)
+        timestamp = utc_time.strftime("%Y%m%d_%H%M%S")
 
         gcs_uri = f"gs://{bucket_name}/{blob_path}"
         logger.info(

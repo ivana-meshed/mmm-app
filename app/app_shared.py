@@ -1151,8 +1151,9 @@ def upload_to_gcs_with_timestamp(
     # Reload to get the latest metadata including time_created
     blob.reload()
     time_created = blob.time_created
-    # Format as YYYYMMdd_HHMMSS in UTC
-    timestamp = time_created.strftime("%Y%m%d_%H%M%S")
+    # Convert to UTC and format as YYYYMMdd_HHMMSS
+    utc_time = time_created.astimezone(timezone.utc)
+    timestamp = utc_time.strftime("%Y%m%d_%H%M%S")
 
     gcs_uri = f"gs://{bucket_name}/{blob_path}"
     return gcs_uri, timestamp
