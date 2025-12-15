@@ -193,13 +193,7 @@ write_trace <- function(title, e) {
 
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 
-# Use parallelly::availableCores() to detect actual cores available (respects cgroups quota)
-# This prevents "X simultaneous processes spawned" errors on Cloud Run
-max_cores_requested <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
-max_cores_available <- parallelly::availableCores()
-max_cores <- min(max_cores_requested, max_cores_available)
-message(sprintf("Core allocation: requested=%d, available=%d, using=%d", 
-                max_cores_requested, max_cores_available, max_cores))
+max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
 plan(multisession, workers = max_cores)
 
 ## ---------- HELPERS ----------
