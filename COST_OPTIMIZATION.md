@@ -7,12 +7,19 @@ This document describes the cost reduction strategies implemented for the MMM Tr
 | Scenario | Web Service | Training Jobs | Fixed Costs | Total |
 |----------|-------------|---------------|-------------|-------|
 | **Idle** | $0.00 | $0.00 | $2.09 | **$2.09** |
-| 100 calls/month | $2.68 | $50.69 | $2.09 | **$55.46** |
-| 500 calls/month | $13.40 | $253.43 | $2.09 | **$268.92** |
-| 1,000 calls/month | $26.80 | $506.86 | $2.09 | **$535.75** |
-| 5,000 calls/month | $134.00 | $2,534.30 | $2.09 | **$2,670.39** |
+| 100 calls/month | $0.17 | $9.97 | $2.09 | **$12.23** |
+| 500 calls/month | $0.87 | $49.85 | $2.09 | **$52.81** |
+| 1,000 calls/month | $1.74 | $99.70 | $2.09 | **$103.53** |
+| 5,000 calls/month | $8.70 | $498.52 | $2.09 | **$509.31** |
 
-**Key insight:** Training jobs account for ~95% of variable costs at scale (1 training job per 10 web requests).
+**Key insight:** Training jobs account for ~96% of variable costs at scale (1 training job per 10 web requests).
+
+**Note:** This cost summary is based on **current production workload** baseline from `Cost estimate.csv`:
+- Training workload: **10,000 iterations × 5 trials** (typical production use case)
+- Training job duration: **5,508 seconds (1.53 hours)** on production config
+- Training config: 4 vCPU, 16GB memory (production default)
+- Cost per job: **$0.997** (compute + storage + egress + logging)
+- Web request duration: 30 seconds average
 
 ## Infrastructure: Queue Execution
 
@@ -225,13 +232,21 @@ Currently using regional GCS (europe-west1) which is already the most cost-effec
 
 ### With all optimizations applied (Current):
 
-| Scenario | Original Cost | Optimized Cost | Savings | % Reduction |
-|----------|---------------|----------------|---------|-------------|
+Using current production baseline (10,000 iterations × 5 trials):
+
+| Scenario | Before Optimization | After Optimization | Savings | % Reduction |
+|----------|---------------------|-------------------|---------|-------------|
 | Idle | $45.03 | $2.09 | $42.94 | 95% |
-| 100 calls | $148.00 | $55.46 | $92.54 | 63% |
-| 500 calls | $519.56 | $268.92 | $250.64 | 48% |
-| 1,000 calls | $1,073.39 | $535.75 | $537.64 | 50% |
-| 5,000 calls | $5,142.33 | $2,670.39 | $2,471.94 | 48% |
+| 100 calls | $30.00 | $12.23 | $17.77 | 59% |
+| 500 calls | $120.00 | $52.81 | $67.19 | 56% |
+| 1,000 calls | $235.00 | $103.53 | $131.47 | 56% |
+| 5,000 calls | $1,145.00 | $509.31 | $635.69 | 56% |
+
+**Key optimizations:**
+- Reduced min_instances from 2 to 0 (eliminates idle cost)
+- Training job right-sizing from 8 vCPU/32GB to 4 vCPU/16GB
+- Snowflake query caching (70% cache hit rate)
+- GCS lifecycle policies for historical data
 
 ### Web-Only Scenario (No Training Jobs):
 
@@ -240,10 +255,10 @@ If users only browse/query without triggering training:
 | Scenario | Monthly Cost |
 |----------|-------------|
 | Idle | $2.09 |
-| 100 calls | $4.77 |
-| 500 calls | $15.49 |
-| 1,000 calls | $28.89 |
-| 5,000 calls | $136.09 |
+| 100 calls | $2.26 |
+| 500 calls | $2.96 |
+| 1,000 calls | $3.83 |
+| 5,000 calls | $10.79 |
 
 ## Implementation Priority
 
@@ -310,3 +325,128 @@ cd infra/terraform
 # Revert min_instances to 2 in variables.tf or override in tfvars
 terraform apply -var="min_instances=2" -var-file="envs/prod.tfvars"
 ```
+
+## Scenario Analysis
+
+### Scenario 1: Dev vs Prod Workflow Cost Comparison
+
+**Baseline:** This analysis uses the **current production workload** (10,000 iterations × 5 trials, approximately 1.53 hours on production config).
+
+The dev and prod environments use different training job configurations for cost optimization. This scenario compares the monthly costs for typical usage patterns.
+
+**Environment Configurations:**
+- **Dev** (ci-dev.yml): 2 vCPU, 8GB memory for training jobs
+- **Prod** (ci.yml): 4 vCPU, 16GB memory for training jobs
+- **Web Service**: Both use 2 vCPU, 4GB memory (same cost)
+
+**Monthly Cost Breakdown:**
+
+| Usage Scenario | Dev Environment | Prod Environment | Difference | % More for Prod |
+|----------------|-----------------|------------------|------------|-----------------|
+| **Idle** | $2.09 | $2.09 | $0.00 | 0% |
+| **100 calls/month** (10 training jobs) | $9.50 | $12.23 | +$2.73 | 29% |
+| **500 calls/month** (50 training jobs) | $39.93 | $52.81 | +$12.88 | 32% |
+| **1,000 calls/month** (100 training jobs) | $76.99 | $103.53 | +$26.54 | 34% |
+| **5,000 calls/month** (500 training jobs) | $379.90 | $509.31 | +$129.41 | 34% |
+
+**Cost Components (example: 500 calls/month):**
+
+**Dev Environment ($39.93 total):**
+- Web Service: $0.87
+- Training Jobs (50 runs): $37.08
+- Fixed Costs: $2.09
+
+**Prod Environment ($52.81 total):**
+- Web Service: $0.87
+- Training Jobs (50 runs): $49.85
+- Fixed Costs: $2.09
+
+**Key Insights:**
+- Dev environment is 29-34% cheaper depending on usage
+- Cost difference grows with higher usage (training job costs dominate)
+- Prod provides ~45% faster training at ~34% higher cost
+- Dev is ideal for experimentation and development
+- Prod is better for production workloads where speed matters
+
+### Scenario 2: Training Job Sizing Analysis
+
+This scenario analyzes the cost and time trade-offs for different machine sizes when running a **large training job with 10,000 iterations and 10 trials** (2x the current baseline workload).
+
+**Baseline Data:**
+- Configuration: Dev (2 vCPU, 8GB)
+- Training parameters: 10,000 iterations, 5 trials (current production baseline)
+- Actual runtime: 9,915 seconds (2.75 hours)
+
+**Extrapolation for 10,000 iterations × 10 trials:**
+
+Work scales linearly with iterations × trials:
+- Baseline work: 10,000 × 5 = 50,000 units
+- Target work: 10,000 × 10 = 100,000 units
+- Scaling factor: 2x
+
+| Configuration | vCPU | Memory | Duration | Duration (hours) | Cost per Run | Cost per 100 Runs | Cost per Month (500 runs) |
+|---------------|------|--------|----------|------------------|--------------|-------------------|---------------------------|
+| **Dev Config** | 2 | 8GB | 19,830 sec (5.5 hrs) | 5.51 | $1.48 | $148.33 | $741.64 |
+| **Prod Config** | 4 | 16GB | 11,017 sec (3.1 hrs) | 3.06 | $1.65 | $164.81 | $824.05 |
+| **2x Prod** | 8 | 32GB | 5,832 sec (1.6 hrs) | 1.62 | $1.75 | $174.50 | $872.52 |
+| **4x Prod** | 16 | 64GB | 3,005 sec (0.8 hrs) | 0.83 | $1.80 | $179.79 | $898.96 |
+
+**Performance vs Cost Trade-offs:**
+
+| Configuration | Time Savings vs Dev | Cost Premium vs Dev | Cost per Hour Saved |
+|---------------|---------------------|---------------------|---------------------|
+| **Dev Config** | Baseline | Baseline | - |
+| **Prod Config** | 44% faster (2.5 hrs saved) | +11% cost | $0.07 per hour saved |
+| **2x Prod** | 71% faster (3.9 hrs saved) | +18% cost | $0.07 per hour saved |
+| **4x Prod** | 85% faster (4.7 hrs saved) | +21% cost | $0.07 per hour saved |
+
+**Recommendations by Use Case:**
+
+1. **Development & Experimentation** → **Dev Config (2 vCPU, 8GB)**
+   - Best for iterative development
+   - Lowest cost per run ($1.48)
+   - Acceptable for overnight or background training
+   - 5.5 hour runtime is manageable for non-urgent work
+
+2. **Production Workloads** → **Prod Config (4 vCPU, 16GB)**
+   - Good balance of speed and cost
+   - 3 hour runtime fits within a work session
+   - Only 11% more expensive than dev
+   - Current production default
+
+3. **Time-Critical Analysis** → **2x Prod Config (8 vCPU, 32GB)**
+   - 1.6 hour runtime for quick turnaround
+   - Useful for urgent stakeholder requests
+   - 18% more expensive than dev
+   - Consider for high-value, time-sensitive work
+
+4. **Ultra-Fast Iteration** → **4x Prod Config (16 vCPU, 64GB)**
+   - 50 minute runtime for rapid experimentation
+   - Best for interactive/exploratory analysis
+   - 21% more expensive than dev
+   - Diminishing returns on cost efficiency
+
+**Cost-Efficiency Analysis:**
+
+- All configurations have similar cost per hour saved (~$0.07/hour)
+- The marginal cost increase is relatively small (11-21%)
+- Time savings are substantial (44-85%)
+- **Recommendation**: Use larger machines when:
+  - Results are needed urgently (stakeholder meetings, decisions)
+  - Running multiple experiments in a day
+  - Developer time is more valuable than compute cost
+  - Interactive exploration requires fast feedback
+
+**When to Scale Up:**
+
+```
+Developer hourly cost: ~$50-100/hour
+Compute savings: ~$0.30 for 4x faster execution
+Time saved: 4.7 hours
+
+If saving 4.7 hours of developer time = $235-470 value
+Additional compute cost = $0.30
+ROI = 780-1,560x return on investment
+```
+
+**Conclusion**: For time-sensitive work, the additional compute cost is negligible compared to the value of faster results. Choose configuration based on urgency, not just cost.

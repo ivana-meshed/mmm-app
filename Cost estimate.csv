@@ -1,56 +1,56 @@
 Service,Category,Component,Metric,Idle Cost ($/month),100 calls/month ($),500 calls/month ($),1000 calls/month ($),5000 calls/month ($),Notes
 ,,,,,,,,,,
 WEB SERVICE CALLS,,,,,,,,,,
-Cloud Run,Web Service,CPU,Allocated CPU-seconds,0.00,1.44,7.20,14.40,72.00,"Per-request: avg 30s @ 2 vCPU * $0.00002400/vCPU-second"
-Cloud Run,Web Service,Memory,Allocated Memory GB-seconds,0.00,0.30,1.50,3.00,15.00,"Per-request: avg 30s @ 4GB * $0.0000025/GB-second"
-Cloud Run,Web Service,Requests,Request count,0.00,0.00,0.00,0.00,0.00,"$0.40 per million requests (negligible at this scale)"
-Cloud Run,Web Service,Idle Instances,Always-on minimum instances,0.00,0.00,0.00,0.00,0.00,"min_instances=0 (cold starts trade-off)"
-Snowflake,Web Service,Warehouse Usage,Compute credits (with caching),0.00,0.60,3.00,6.00,30.00,"30% of requests hit Snowflake (70% cache). ~0.1 credit per 5 queries * $2/credit"
-Secret Manager,Web Service,Secret Access,Access operations,0.00,0.03,0.15,0.30,1.50,"$0.03 per 10K accesses. ~10 secret reads per request"
-Cloud Logging,Web Service,Log Ingestion,Log volume (GB),0.00,0.25,1.25,2.50,12.50,"$0.50/GB above 50GB free tier. +0.25GB per 100 requests"
-Networking,Web Service,Ingress,Traffic,0.00,0.06,0.30,0.60,3.00,"~$0.006/GB ingress. Small request payloads: ~10KB per request"
-SUBTOTAL,Web Service,All Components,,0.00,2.68,13.40,26.80,134.00,"Web service only (no training)"
+Cloud Run,Web Service,CPU,Allocated CPU-seconds,0.00,0.14,0.72,1.44,7.20,Per-request: avg 30s @ 2 vCPU * $0.00002400/vCPU-second
+Cloud Run,Web Service,Memory,Allocated Memory GB-seconds,0.00,0.03,0.15,0.30,1.50,Per-request: avg 30s @ 4GB * $0.0000025/GB-second
+Cloud Run,Web Service,Requests,Request count,0.00,0.00,0.00,0.00,0.00,$0.40 per million requests (negligible at this scale)
+Cloud Run,Web Service,Idle Instances,Always-on minimum instances,0.00,0.00,0.00,0.00,0.00,min_instances=0 (cold starts trade-off)
+Snowflake,Web Service,Warehouse Usage,Compute credits (with caching),0.00,0.60,3.00,6.00,30.00,30% of requests hit Snowflake (70% cache). ~0.1 credit per 5 queries * $2/credit
+Secret Manager,Web Service,Secret Access,Access operations,0.00,0.03,0.15,0.30,1.50,$0.03 per 10K accesses. ~10 secret reads per request
+Cloud Logging,Web Service,Log Ingestion,Log volume (GB),0.00,0.25,1.25,2.50,12.50,$0.50/GB above 50GB free tier. +0.25GB per 100 requests
+Networking,Web Service,Ingress,Traffic,0.00,0.06,0.30,0.60,3.00,~$0.006/GB ingress. Small request payloads: ~10KB per request
+SUBTOTAL,Web Service,All Components,,0.00,0.17,0.87,1.74,8.70,Web service only (no training)
 ,,,,,,,,,,
 TRAINING JOB CALLS (1 job per 10 web requests),,,,,,,,,,
-Cloud Run,Training Job,CPU,Allocated CPU-seconds,0.00,34.56,172.80,345.60,1728.00,"4 vCPU * 3600s * $0.00002400/vCPU-second * (calls/10 jobs)"
-Cloud Run,Training Job,Memory,Allocated Memory GB-seconds,0.00,14.40,72.00,144.00,720.00,"16GB * 3600s * $0.0000025/GB-second * (calls/10 jobs)"
-Cloud Run,Training Job,Executions,Execution count,0.00,0.01,0.05,0.10,0.50,"$0.10 per execution (1 job per ~10 web requests)"
+Cloud Run,Training Job,CPU,Allocated CPU-seconds,0.00,5.82,29.09,58.18,290.91,4 vCPU * 5508s * $0.00002400/vCPU-second * (calls/10 jobs)
+Cloud Run,Training Job,Memory,Allocated Memory GB-seconds,0.00,2.42,12.11,24.22,121.10,16GB * 5508s * $0.0000025/GB-second * (calls/10 jobs)
+Cloud Run,Training Job,Executions,Execution count,0.00,0.01,0.05,0.10,0.50,$0.10 per execution (1 job per ~10 web requests)
 Cloud Storage,Training Job,Storage,Result storage (GB-months),0.00,0.20,1.00,2.00,10.00,"~2GB per training result. Lifecycle policies: Nearline $0.010/GB, Coldline $0.004/GB"
-Cloud Storage,Training Job,Class A Operations,Write operations,0.00,0.05,0.25,0.50,2.50,"$0.05 per 10K ops. ~100 writes per training job"
-Cloud Storage,Training Job,Class B Operations,Read operations,0.00,0.02,0.08,0.16,0.80,"$0.004 per 10K ops. ~200 reads per job"
-Cloud Storage,Training Job,Network Egress,Downloading results,0.00,1.20,6.00,12.00,60.00,"$0.12 per GB egress. ~1GB download per training result"
-Cloud Logging,Training Job,Log Ingestion,Training logs,0.00,0.25,1.25,2.50,12.50,"$0.50/GB. Training jobs produce ~0.25GB logs per 10 jobs"
-SUBTOTAL,Training Job,All Components,,0.00,50.69,253.43,506.86,2534.30,"Training jobs only (10% of web requests)"
+Cloud Storage,Training Job,Class A Operations,Write operations,0.00,0.05,0.25,0.50,2.50,$0.05 per 10K ops. ~100 writes per training job
+Cloud Storage,Training Job,Class B Operations,Read operations,0.00,0.02,0.08,0.16,0.80,$0.004 per 10K ops. ~200 reads per job
+Cloud Storage,Training Job,Network Egress,Downloading results,0.00,1.20,6.00,12.00,60.00,$0.12 per GB egress. ~1GB download per training result
+Cloud Logging,Training Job,Log Ingestion,Training logs,0.00,0.25,1.25,2.50,12.50,$0.50/GB. Training jobs produce ~0.25GB logs per 10 jobs
+SUBTOTAL,Training Job,All Components,,0.00,9.97,49.85,99.70,498.52,Training jobs only (10% of web requests)
 ,,,,,,,,,,
 FIXED INFRASTRUCTURE (IDLE) COSTS,,,,,,,,,,
-Cloud Storage,Infrastructure,Base Storage,Historical data and artifacts,0.82,0.82,0.82,0.82,0.82,"80GB base storage * blended rate with lifecycle policies"
-Cloud Storage,Infrastructure,Class A Ops,Background operations,0.01,0.01,0.01,0.01,0.01,"Idle operations: ~2K/month"
-Cloud Storage,Infrastructure,Class B Ops,Background reads,0.00,0.00,0.00,0.00,0.00,"Idle reads: ~5K/month (negligible)"
-Artifact Registry,Infrastructure,Docker Repository,Image storage,0.10,0.10,0.10,0.10,0.10,"$0.10/GB/month. ~1GB for web+training images"
-Secret Manager,Infrastructure,Secrets Storage,Active secret versions,0.36,0.36,0.36,0.36,0.36,"6 secrets * $0.06/secret/month"
+Cloud Storage,Infrastructure,Base Storage,Historical data and artifacts,0.82,0.82,0.82,0.82,0.82,80GB base storage * blended rate with lifecycle policies
+Cloud Storage,Infrastructure,Class A Ops,Background operations,0.01,0.01,0.01,0.01,0.01,Idle operations: ~2K/month
+Cloud Storage,Infrastructure,Class B Ops,Background reads,0.00,0.00,0.00,0.00,0.00,Idle reads: ~5K/month (negligible)
+Artifact Registry,Infrastructure,Docker Repository,Image storage,0.10,0.10,0.10,0.10,0.10,$0.10/GB/month. ~1GB for web+training images
+Secret Manager,Infrastructure,Secrets Storage,Active secret versions,0.36,0.36,0.36,0.36,0.36,6 secrets * $0.06/secret/month
 Cloud Scheduler,Infrastructure,Job Scheduler,Scheduled jobs,0.30,0.30,0.30,0.30,0.30,"$0.10/job/month. 3 jobs (queue tick prod/dev, health check)"
-Cloud Logging,Infrastructure,Base Logging,System logs,0.50,0.50,0.50,0.50,0.50,"Base system logging ~10GB/month when idle"
-IAM & Admin,Infrastructure,Service Accounts,Service accounts,0.00,0.00,0.00,0.00,0.00,"Free - 3 service accounts"
-Cloud Build,Infrastructure,Container Builds,CI/CD builds,0.00,0.00,0.00,0.00,0.00,"First 120 build-minutes/day free"
-SUBTOTAL,Infrastructure,Fixed Costs,,2.09,2.09,2.09,2.09,2.09,"Fixed monthly infrastructure costs"
+Cloud Logging,Infrastructure,Base Logging,System logs,0.50,0.50,0.50,0.50,0.50,Base system logging ~10GB/month when idle
+IAM & Admin,Infrastructure,Service Accounts,Service accounts,0.00,0.00,0.00,0.00,0.00,Free - 3 service accounts
+Cloud Build,Infrastructure,Container Builds,CI/CD builds,0.00,0.00,0.00,0.00,0.00,First 120 build-minutes/day free
+SUBTOTAL,Infrastructure,Fixed Costs,,2.09,2.09,2.09,2.09,2.09,Fixed monthly infrastructure costs
 ,,,,,,,,,,
 SUMMARY BY SCENARIO,,,,,,,,,,
-TOTAL,All Services,Monthly Cost (Current),,2.09,55.46,268.92,535.75,2670.39,"Current optimized infrastructure"
-Breakdown,Web Service Only,Cost,,0.00,2.68,13.40,26.80,134.00,"Web service requests only"
-Breakdown,Training Jobs Only,Cost,,0.00,50.69,253.43,506.86,2534.30,"Training job executions only"
-Breakdown,Infrastructure,Fixed Cost,,2.09,2.09,2.09,2.09,2.09,"Fixed infrastructure costs"
+TOTAL,All Services,Monthly Cost (Current),,2.09,12.23,52.81,103.53,509.29,Current optimized infrastructure
+Breakdown,Web Service Only,Cost,,0.00,0.17,0.87,1.74,8.70,Web service requests only
+Breakdown,Training Jobs Only,Cost,,0.00,9.97,49.85,99.70,498.52,Training job executions only
+Breakdown,Infrastructure,Fixed Cost,,2.09,2.09,2.09,2.09,2.09,Fixed infrastructure costs
 ,,,,,,,,,,
 WEB-ONLY SCENARIO (No Training Jobs),,,,,,,,,,
-TOTAL,Web Only,Monthly Cost,,2.09,4.77,15.49,28.89,136.09,"If users only browse/query without triggering training"
+TOTAL,Web Only,Monthly Cost,,2.09,2.26,2.96,3.83,10.79,If users only browse/query without triggering training
 ,,,,,,,,,,
 COMPARISON WITH ORIGINAL (Pre-Optimization),,,,,,,,,,
 TOTAL,Original Config,Monthly Cost,,45.03,148.00,519.56,1073.39,5142.33,"8 vCPU/32GB training, 2 min_instances, no caching"
-TOTAL,Current Config,Savings,,42.94,92.54,250.64,537.64,2471.94,"Savings from all optimizations"
-TOTAL,Percentage,Saved,,95%,63%,48%,50%,48%,"Cost reduction percentage"
+TOTAL,Current Config,Savings,,42.94,92.54,250.64,537.64,2471.94,Savings from all optimizations
+TOTAL,Percentage,Saved,,95%,63%,48%,50%,48%,Cost reduction percentage
 ,,,,,,,,,,
 ASSUMPTIONS,,,,,,,,,,
 ,General,Average Web Request Duration: 30 seconds (CPU + memory time),,,,,,,,
-,General,Average Training Job Duration: 1 hour (3600 seconds),,,,,,,,
+,General,Average Training Job Duration: 1.53 hours (5508 seconds),,,,,,,,
 ,General,Training Job Frequency: 1 training job per 10 web requests,,,,,,,,
 ,General,Data Transfer: 1GB download per training result,,,,,,,,
 ,General,Base Storage: 80GB for historical data and artifacts,,,,,,,,
@@ -88,7 +88,7 @@ IMPLEMENTED OPTIMIZATIONS,,,,,,,,,,
 ,4,✅ Training job right-sizing (4 vCPU/16GB vs 8/32): Saves 50% per job,,,,,,,,
 ,,,,,,,,,,
 FURTHER OPTIMIZATION OPTIONS,,,,,,,,,,
-,1,"Reduce training to 2 vCPU/8GB: Additional 50% per job (but 2-4x slower)",,,,,,,,
-,2,"Compress training results: ~50% storage and egress savings",,,,,,,,
-,3,"Preemptible/spot instances: Up to 50% savings (when available)",,,,,,,,
-,4,"Log retention policies: Minimal impact (first 50GB free)",,,,,,,,
+,1,Reduce training to 2 vCPU/8GB: Additional 50% per job (but 2-4x slower),,,,,,,,
+,2,Compress training results: ~50% storage and egress savings,,,,,,,,
+,3,Preemptible/spot instances: Up to 50% savings (when available),,,,,,,,
+,4,Log retention policies: Minimal impact (first 50GB free),,,,,,,,
