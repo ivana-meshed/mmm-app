@@ -227,16 +227,24 @@ def prepare_and_launch_job(params: dict) -> dict:
 
             # 3) Upload data and get blob timestamp
             with timed_step("Upload data to GCS", timings):
-                # Upload to a temporary/latest path first to get blob timestamp
-                temp_blob = f"training-data/_temp_latest/input_data.parquet"
+                # Upload to a temporary location first to get blob timestamp
+                import uuid
+
+                temp_blob = f"_temp_uploads/{uuid.uuid4()}.parquet"
                 _, timestamp = upload_to_gcs_with_timestamp(
                     gcs_bucket, parquet_path, temp_blob
                 )
-                # Now upload to the timestamped path
+
+                # Now upload to the timestamped path with the blob timestamp
                 data_blob = f"training-data/{timestamp}/input_data.parquet"
                 data_gcs_path = upload_to_gcs(
                     gcs_bucket, parquet_path, data_blob
                 )
+
+                # Clean up temporary blob
+                client = storage.Client()
+                temp_blob_obj = client.bucket(gcs_bucket).blob(temp_blob)
+                temp_blob_obj.delete()
 
             # Now that we have the timestamp, construct gcs_prefix
             gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"

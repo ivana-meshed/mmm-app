@@ -142,18 +142,32 @@ def _save_raw_to_gcs(
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         df.to_parquet(tmp.name, index=False)
 
-        # Upload to "latest" path first and get blob timestamp
+        if timestamp:
+            # Use provided timestamp - direct upload to versioned path
+            ts = timestamp
+            versioned_blob = _data_blob(country, ts)
+            data_gcs_path = upload_to_gcs(bucket, tmp.name, versioned_blob)
+        else:
+            # Upload to temporary location to get blob timestamp
+            import uuid
+
+            temp_blob_path = f"_temp_uploads/{uuid.uuid4()}.parquet"
+            _, ts = upload_to_gcs_with_timestamp(
+                bucket, tmp.name, temp_blob_path
+            )
+
+            # Now upload to final versioned path with the blob timestamp
+            versioned_blob = _data_blob(country, ts)
+            data_gcs_path = upload_to_gcs(bucket, tmp.name, versioned_blob)
+
+            # Clean up temporary blob
+            client = storage.Client()
+            temp_blob_obj = client.bucket(bucket).blob(temp_blob_path)
+            temp_blob_obj.delete()
+
+        # Also upload/update "latest" path
         latest_path = _latest_symlink_blob(country)
-        latest_gcs_path, blob_timestamp = upload_to_gcs_with_timestamp(
-            bucket, tmp.name, latest_path
-        )
-
-        # Use provided timestamp or blob timestamp
-        ts = timestamp or blob_timestamp
-
-        # Also upload to versioned path
-        versioned_blob = _data_blob(country, ts)
-        data_gcs_path = upload_to_gcs(bucket, tmp.name, versioned_blob)
+        upload_to_gcs(bucket, tmp.name, latest_path)
 
     return {"timestamp": ts, "data_gcs_path": data_gcs_path}
 
@@ -170,18 +184,32 @@ def _save_mapped_to_gcs(
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         df.to_parquet(tmp.name, index=False)
 
-        # Upload to "latest" path first and get blob timestamp
+        if timestamp:
+            # Use provided timestamp - direct upload to versioned path
+            ts = timestamp
+            versioned_blob = _mapped_data_blob(country, ts)
+            data_gcs_path = upload_to_gcs(bucket, tmp.name, versioned_blob)
+        else:
+            # Upload to temporary location to get blob timestamp
+            import uuid
+
+            temp_blob_path = f"_temp_uploads/{uuid.uuid4()}.parquet"
+            _, ts = upload_to_gcs_with_timestamp(
+                bucket, tmp.name, temp_blob_path
+            )
+
+            # Now upload to final versioned path with the blob timestamp
+            versioned_blob = _mapped_data_blob(country, ts)
+            data_gcs_path = upload_to_gcs(bucket, tmp.name, versioned_blob)
+
+            # Clean up temporary blob
+            client = storage.Client()
+            temp_blob_obj = client.bucket(bucket).blob(temp_blob_path)
+            temp_blob_obj.delete()
+
+        # Also upload/update "latest" path
         latest_path = _mapped_latest_symlink_blob(country)
-        latest_gcs_path, blob_timestamp = upload_to_gcs_with_timestamp(
-            bucket, tmp.name, latest_path
-        )
-
-        # Use provided timestamp or blob timestamp
-        ts = timestamp or blob_timestamp
-
-        # Also upload to versioned path
-        versioned_blob = _mapped_data_blob(country, ts)
-        data_gcs_path = upload_to_gcs(bucket, tmp.name, versioned_blob)
+        upload_to_gcs(bucket, tmp.name, latest_path)
 
     return {"timestamp": ts, "data_gcs_path": data_gcs_path}
 
