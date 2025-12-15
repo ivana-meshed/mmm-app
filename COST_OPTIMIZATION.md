@@ -157,6 +157,44 @@ gcloud run services describe mmm-app --region=europe-west1 --format=json
 2. **Cache hit rate**: Target >70% for Snowflake queries
 3. **Storage growth**: Monitor and apply lifecycle policies
 4. **Cold start frequency**: Balance with idle costs
+5. **Memory usage**: Monitor to optimize resource allocation (see below)
+
+### Memory Usage Monitoring
+
+Monitor memory usage to determine if you can reduce RAM allocation for cost savings:
+
+**Check memory usage in Cloud Run:**
+```bash
+# View recent job executions and resource usage
+gcloud run jobs executions list --job=mmm-app-training --region=europe-west1 --limit=10
+
+# Get detailed metrics for a specific execution
+gcloud run jobs executions describe EXECUTION_NAME \
+  --job=mmm-app-training \
+  --region=europe-west1 \
+  --format="get(status.resourceUsage)"
+```
+
+**Analyze memory in Cloud Logging:**
+```bash
+# Query memory usage from logs (last 7 days)
+gcloud logging read \
+  'resource.type="cloud_run_job" AND resource.labels.job_name="mmm-app-training" AND jsonPayload.memory' \
+  --limit=50 \
+  --format="table(timestamp, jsonPayload.memory)" \
+  --freshness=7d
+```
+
+**Memory optimization guidelines:**
+- **Safe to reduce to 8GB** if typical usage is <6GB (leaves 25% headroom)
+- **Keep 16GB** if usage regularly exceeds 10GB
+- **Consider 32GB** if jobs fail with OOM errors or usage approaches 14-15GB
+
+**Cost impact of RAM changes:**
+- Reducing 16GB → 8GB: ~15% cost savings (~$5/month at 500 jobs/month)
+- Increasing 16GB → 32GB: ~15% cost increase but prevents OOM failures
+
+Monitor for at least 1 week with representative workloads before making changes.
 
 ### Cost Alerts
 
@@ -191,6 +229,38 @@ terraform apply -var-file="envs/prod.tfvars"
 ```
 
 3. Consider cost vs time trade-off (see cost overview table)
+
+### Adjusting Memory Allocation
+
+To optimize costs based on actual memory usage:
+
+**Option 1: Reduce to 8GB (cost savings)**
+```hcl
+# In infra/terraform/envs/prod.tfvars or dev.tfvars
+training_memory = "8Gi"  # Reduce from 16Gi
+```
+
+**Before making this change:**
+1. Monitor memory usage for 1+ week (see Memory Usage Monitoring section)
+2. Ensure typical usage stays well below 6GB
+3. Test in dev environment first
+4. Watch for OOM errors or performance degradation
+
+**Option 2: Increase to 32GB (reliability)**
+```hcl
+training_memory = "32Gi"  # Increase from 16Gi
+```
+
+**When to increase:**
+- Jobs fail with out-of-memory errors
+- Memory usage regularly exceeds 14GB
+- Processing very large datasets
+
+**Apply changes:**
+```bash
+cd infra/terraform
+terraform apply -var-file="envs/prod.tfvars"
+```
 
 ### Reverting Changes
 
