@@ -489,6 +489,11 @@ with tab_single:
                                         f"**Date Field:** {data_info.get('date_field', 'N/A')}"
                                     )
 
+                        # Rerun to refresh UI and hide status message
+                        if tmp_path and os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+                        st.rerun()
+
             except Exception as e:
                 st.error(f"Failed to load data: {e}")
             finally:
