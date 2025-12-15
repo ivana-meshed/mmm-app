@@ -27,7 +27,7 @@ except Exception:
     keepalive_ping = None
     _sf_params_from_env = None
 
-#require_login_and_domain()
+require_login_and_domain()
 
 # Initialize session state defaults
 try:
