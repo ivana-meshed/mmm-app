@@ -14,6 +14,17 @@ This document describes the cost reduction strategies implemented for the MMM Tr
 
 **Key insight:** Training jobs account for ~95% of variable costs at scale (1 training job per 10 web requests).
 
+**Note:** This cost summary is based on **conservative assumptions** from `Cost estimate.csv`:
+- Training job duration: **1 hour (3600 seconds)** per job
+- Training config: 4 vCPU, 16GB memory (production default)
+- Web request duration: 30 seconds average
+
+For **actual measured performance** based on recent training runs, see [Scenario Analysis](#scenario-analysis) below, which uses real baseline data:
+- Typical training: **1983 seconds (33 minutes)** for 2000 iterations, 5 trials
+- Cost per job: **$0.30-1.80** depending on machine size (vs $5.07 in conservative estimate)
+
+The conservative estimate provides a **safety margin** for larger/longer workloads, while the scenario analysis reflects **current typical usage**.
+
 ## Infrastructure: Queue Execution
 
 ### Cloud Scheduler for Background Queue Processing
@@ -313,7 +324,28 @@ terraform apply -var="min_instances=2" -var-file="envs/prod.tfvars"
 
 ## Scenario Analysis
 
+### Overview: Conservative vs Actual Cost Estimates
+
+This document contains two sets of cost estimates for different planning purposes:
+
+| Estimate Type | Training Duration | Cost per Job | Use When |
+|---------------|------------------|--------------|----------|
+| **Conservative** (Cost Summary above) | 1 hour (3600s) | $5.07 | Long-running workloads, budget planning, worst-case estimates |
+| **Actual Measured** (Scenarios below) | 33 min (1983s) | $0.30-1.80 | Typical workloads (2K-10K iterations), current usage patterns |
+
+**Why the difference?**
+- The Cost Summary table provides a **safety margin** for larger experiments and conservative budgeting
+- The Scenario Analysis below uses **real measured performance** from actual training runs
+- Actual costs are **~6-17x lower** than conservative estimates for typical workloads
+
+**Which should you use?**
+- **Budget planning**: Use Cost Summary for safety margin
+- **Optimization decisions**: Use Scenario Analysis for realistic comparisons
+- **Large experiments** (>5K iterations): Actual duration may approach conservative estimate
+
 ### Scenario 1: Dev vs Prod Workflow Cost Comparison
+
+**Baseline:** This analysis uses **actual measured performance** (1983 seconds for 2000 iterations, 5 trials) rather than the conservative 1-hour assumption in the Cost Summary above.
 
 The dev and prod environments use different training job configurations for cost optimization. This scenario compares the monthly costs for typical usage patterns.
 
