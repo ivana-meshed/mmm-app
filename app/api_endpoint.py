@@ -19,6 +19,8 @@ from typing import Any, Dict, Optional
 import streamlit as st
 from utils.validation import validate_training_config
 
+from app.utils.gcs_utils import get_cet_now
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +41,7 @@ def _create_error_response(
         "status": "error",
         "error": error,
         "message": message or error,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": get_cet_now().isoformat(),
     }
 
 
@@ -58,7 +60,7 @@ def _create_success_response(
     """
     response = {
         "status": "success",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": get_cet_now().isoformat(),
         **data,
     }
     if message:
@@ -101,7 +103,7 @@ def handle_train_api():
             iterations = request_data.get("iterations", 2000)
             trials = request_data.get("trials", 5)
             job_id = request_data.get(
-                "job_id", f"api-job-{int(datetime.now().timestamp())}"
+                "job_id", f"api-job-{int(get_cet_now().timestamp())}"
             )
 
             # Create job config
@@ -110,7 +112,7 @@ def handle_train_api():
                 "iterations": iterations,
                 "trials": trials,
                 "revision": request_data.get("revision", "api-test"),
-                "date_input": datetime.now().strftime("%Y-%m-%d"),
+                "date_input": get_cet_now().strftime("%Y-%m-%d"),
                 "gcs_bucket": os.getenv("GCS_BUCKET", "mmm-app-output"),
                 "paid_media_spends": request_data.get(
                     "paid_media_spends", ["GA_SUPPLY_COST"]
@@ -138,7 +140,7 @@ def handle_train_api():
                 st.stop()
 
             # Execute training (simplified for API)
-            start_time = datetime.now()
+            start_time = get_cet_now()
 
             # For baseline testing, simulate training with a quick R execution
             with tempfile.NamedTemporaryFile(
@@ -154,7 +156,7 @@ def handle_train_api():
                     cmd, capture_output=True, text=True, timeout=30
                 )
 
-                end_time = datetime.now()
+                end_time = get_cet_now()
                 duration = (end_time - start_time).total_seconds() / 60
 
                 if result.returncode == 0:

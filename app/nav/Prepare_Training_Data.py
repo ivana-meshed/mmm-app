@@ -19,7 +19,6 @@ from typing import List, Union
 import numpy as np
 import pandas as pd
 import streamlit as st
-from app.utils.gcs_utils import format_cet_timestamp
 from app_shared import (
     GCS_BUCKET,
     build_meta_views,
@@ -52,6 +51,8 @@ from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+from app.utils.gcs_utils import format_cet_timestamp
 
 # Authentication
 require_login_and_domain()

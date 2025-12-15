@@ -20,7 +20,6 @@ import pandas as pd
 import plotly.express as px
 import snowflake.connector as sf
 import streamlit as st
-from app.utils.gcs_utils import format_cet_timestamp, get_cet_now
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from data_processor import DataProcessor
@@ -28,6 +27,8 @@ from google.api_core.exceptions import PreconditionFailed
 from google.cloud import run_v2, secretmanager, storage
 from utils.snowflake_cache import get_cached_query_result
 from utils.snowflake_cache import init_cache as init_snowflake_cache
+
+from app.utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 # Environment constants
 PROJECT_ID = os.getenv("PROJECT_ID")
@@ -241,9 +242,7 @@ def _safe_tick_once(
                                 df_history.loc[mask, "state"] = final_state
                                 df_history.loc[mask, "message"] = message
                                 df_history.loc[mask, "end_time"] = (
-                                    get_cet_now().isoformat(
-                                        timespec="seconds"
-                                    )
+                                    get_cet_now().isoformat(timespec="seconds")
                                 )
 
                                 # Calculate duration if start_time exists

@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import snowflake.connector as sf
 import streamlit as st
-from app.utils.gcs_utils import format_cet_timestamp, get_cet_now
 from app_shared import _queue_blob_path  # (kept for parity; not used below)
 from app_shared import _safe_tick_once  # (kept for parity; not used below
 from app_shared import _sanitize_queue_name  # (kept for parity; not used below)
@@ -54,6 +53,8 @@ from app_shared import (  # Env / constants (already read from env in app_shared
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from google.cloud import storage
+
+from app.utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 __all__ = [
     # public constants & classes...
@@ -555,7 +556,9 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                                                 from datetime import (
                                                     datetime as dt,
                                                 )
-                                                from datetime import timedelta
+                                                from datetime import (
+                                                    timedelta,
+                                                )
 
                                                 start_time = dt.fromisoformat(
                                                     str(start_time_str).replace(
@@ -1254,9 +1257,8 @@ def _queue_tick():
                     "timestamp"
                 )  # fallback to launch timestamp if that’s all we have
             )
-            end_time = (
-                times.get("end_time")
-                or get_cet_now().isoformat(timespec="seconds")
+            end_time = times.get("end_time") or get_cet_now().isoformat(
+                timespec="seconds"
             )
             duration_minutes = times.get("duration_minutes")
 

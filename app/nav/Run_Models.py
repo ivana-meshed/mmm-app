@@ -29,6 +29,8 @@ from app_shared import (
 )
 from google.cloud import storage
 
+from app.utils.gcs_utils import format_cet_timestamp, get_cet_now
+
 data_processor = get_data_processor()
 job_manager = get_job_manager()
 from app_split_helpers import *  # bring in all helper functions/constants
@@ -549,7 +551,7 @@ with tab_single:
                         )
                         # Set a timestamp to force widget refresh
                         st.session_state["loaded_config_timestamp"] = (
-                            datetime.utcnow().timestamp()
+                            get_cet_now().timestamp()
                         )
 
                         st.success(
@@ -674,7 +676,7 @@ with tab_single:
             )
         with col2:
             # Parse loaded end date if available
-            default_end_date = datetime.now().date()
+            default_end_date = get_cet_now().date()
             if loaded_config and "end_date" in loaded_config:
                 try:
                     default_end_date = datetime.strptime(
@@ -1909,7 +1911,7 @@ with tab_single:
                     # Build configuration payload
                     config_payload = {
                         "name": config_name,
-                        "created_at": datetime.utcnow().isoformat(),
+                        "created_at": get_cet_now().isoformat(),
                         "countries": config_countries,
                         "config": {
                             "iterations": int(iterations),
@@ -2364,9 +2366,9 @@ with tab_single:
                 else:
                     timestamp = shared_ts
             except Exception:
-                timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+                timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
         else:
-            timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+            timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
 
         gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
         timings: List[Dict[str, float]] = []
