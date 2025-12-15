@@ -6,7 +6,7 @@ This document provides cost estimates for the MMM Trainer application across dif
 
 The table below shows monthly costs for different combinations of:
 - **Machine configurations**: Dev (2 vCPU/8GB), Prod (4 vCPU/16GB), 2x Prod (8 vCPU/32GB), 4x Prod (16 vCPU/64GB)
-- **Workload types**: Test Run (200 iter/5 trials), Benchmark (2000 iter/5 trials), Production (10000 iter/5 trials)
+- **Workload types**: Test Run (200 iter/3 trials), Benchmark (2000 iter/5 trials), Production (10000 iter/5 trials)
 - **Usage volumes**: 100, 500, 1000, 5000 calls per month (with 10, 50, 100, 500 training jobs respectively)
 
 ### Monthly Cost Estimates
@@ -16,13 +16,13 @@ The table below shows monthly costs for different combinations of:
 | **Dev (2 vCPU, 8GB)** | Test Run | $2.36 | $3.46 | $4.83 | $15.79 |
 | | Benchmark | $3.56 | $9.46 | $16.83 | $75.79 |
 | | Production | $8.96 | $36.46 | $70.83 | $345.79 |
-| **Prod (4 vCPU, 16GB)** | Test Run | $2.36 | $3.46 | $4.83 | $15.79 |
+| **Prod (4 vCPU, 16GB)** | Test Run | $2.26 | $2.96 | $3.83 | $10.79 |
 | | Benchmark | $2.96 | $6.46 | $10.83 | $45.79 |
 | | Production | $5.96 | $21.46 | $40.83 | $195.79 |
-| **2x Prod (8 vCPU, 32GB)** | Test Run | $2.36 | $3.46 | $4.83 | $15.79 |
+| **2x Prod (8 vCPU, 32GB)** | Test Run | $2.26 | $2.96 | $3.83 | $10.79 |
 | | Benchmark | $2.96 | $6.46 | $10.83 | $45.79 |
 | | Production | $5.96 | $21.46 | $40.83 | $195.79 |
-| **4x Prod (16 vCPU, 64GB)** | Test Run | $2.36 | $3.46 | $4.83 | $15.79 |
+| **4x Prod (16 vCPU, 64GB)** | Test Run | $2.26 | $2.96 | $3.83 | $10.79 |
 | | Benchmark | $3.06 | $6.96 | $11.83 | $50.79 |
 | | Production | $5.96 | $21.46 | $40.83 | $195.79 |
 
@@ -36,12 +36,12 @@ The table below shows monthly costs for different combinations of:
 
 Individual training job costs and durations for each workload type:
 
-| Configuration | Test Run<br/>(200 iter × 5 trials) | Benchmark<br/>(2000 iter × 5 trials) | Production<br/>(10000 iter × 5 trials) |
+| Configuration | Test Run<br/>(200 iter × 3 trials) | Benchmark<br/>(2000 iter × 5 trials) | Production<br/>(10000 iter × 5 trials) |
 |---------------|-------------------------------------|---------------------------------------|------------------------------------------|
-| **Dev (2 vCPU, 8GB)** | 3 min, $0.01 | 33 min, $0.13 | 165 min (2.8 hrs), $0.67 |
-| **Prod (4 vCPU, 16GB)** | 1 min, $0.01 | 9 min, $0.07 | 46 min, $0.37 |
-| **2x Prod (8 vCPU, 32GB)** | 0.5 min, $0.01 | 5 min, $0.07 | 23 min, $0.37 |
-| **4x Prod (16 vCPU, 64GB)** | 0.2 min, $0.01 | 2 min, $0.08 | 11 min, $0.37 |
+| **Dev (2 vCPU, 8GB)** | 2 min, $0.01 | 33 min, $0.13 | 165 min (2.8 hrs), $0.67 |
+| **Prod (4 vCPU, 16GB)** | 0.6 min, $0.00 | 9 min, $0.07 | 46 min, $0.37 |
+| **2x Prod (8 vCPU, 32GB)** | 0.3 min, $0.00 | 5 min, $0.07 | 23 min, $0.37 |
+| **4x Prod (16 vCPU, 64GB)** | 0.1 min, $0.00 | 2 min, $0.08 | 11 min, $0.37 |
 
 **Key Insights:**
 - Training jobs account for 85-96% of total costs at scale
@@ -206,8 +206,8 @@ terraform apply -var="min_instances=2" -var-file="envs/prod.tfvars"
 
 **Baseline data** (from production testing):
 - Dev config (2 vCPU, 8GB): 1983 seconds with 2000 iterations × 5 trials
-- New Test Run (200 iterations × 5 trials) = 1/10th of baseline
-- New Production (10000 iterations × 5 trials) = 5× baseline  
+- Test Run (200 iterations × 3 trials) = 0.06× baseline (600 vs 10000 iteration-trials)
+- Production (10000 iterations × 5 trials) = 5× baseline (50000 vs 10000 iteration-trials)
 - Scaling is linear with (iterations × trials)
 - Performance improves with CPU/memory but with diminishing returns
 

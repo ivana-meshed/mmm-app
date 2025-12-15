@@ -29,7 +29,7 @@ This document describes the changes made to the Experiment page (Run_Experiment.
 **After:**
 - Country auto-filled from Data Selection (read-only display)
 - Training preset dropdown:
-  - **Test run**: 200 iterations, 5 trials
+  - **Test run**: 200 iterations, 3 trials
   - **Benchmark**: 2000 iterations, 5 trials
   - **Production**: 10000 iterations, 5 trials
   - **Custom**: 5000 iterations, 10 trials (editable)
