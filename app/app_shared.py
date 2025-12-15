@@ -20,6 +20,7 @@ import pandas as pd
 import plotly.express as px
 import snowflake.connector as sf
 import streamlit as st
+from app.utils.gcs_utils import format_cet_timestamp, get_cet_now
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from data_processor import DataProcessor
@@ -148,7 +149,7 @@ def _safe_tick_once(
     def _init_doc() -> dict:
         return {
             "version": 1,
-            "saved_at": datetime.utcnow().isoformat() + "Z",
+            "saved_at": get_cet_now().isoformat(),
             "entries": [],
             "queue_running": True,
         }
@@ -240,10 +241,9 @@ def _safe_tick_once(
                                 df_history.loc[mask, "state"] = final_state
                                 df_history.loc[mask, "message"] = message
                                 df_history.loc[mask, "end_time"] = (
-                                    datetime.utcnow().isoformat(
+                                    get_cet_now().isoformat(
                                         timespec="seconds"
                                     )
-                                    + "Z"
                                 )
 
                                 # Calculate duration if start_time exists
@@ -266,7 +266,7 @@ def _safe_tick_once(
                                                         "Z", "+00:00"
                                                     )
                                                 )
-                                                end_time = dt.utcnow()
+                                                end_time = get_cet_now()
                                                 duration = (
                                                     end_time - start_time
                                                 ).total_seconds() / 60.0
@@ -319,7 +319,7 @@ def _safe_tick_once(
                 )
 
             if changed:
-                doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
+                doc["saved_at"] = get_cet_now().isoformat()
                 try:
                     blob.upload_from_string(
                         json.dumps(doc, indent=2),
@@ -351,7 +351,7 @@ def _safe_tick_once(
         # --- Critical section: lease it (LAUNCHING) guarded by generation match ---
         entry["status"] = "LAUNCHING"
         entry["message"] = "Launching..."
-        doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
+        doc["saved_at"] = get_cet_now().isoformat()
         try:
             blob.upload_from_string(
                 json.dumps(doc, indent=2),
@@ -406,10 +406,9 @@ def _safe_tick_once(
                         "dep_var": params.get("dep_var"),
                         "date_var": params.get("date_var"),
                         "adstock": params.get("adstock"),
-                        "start_time": datetime.utcnow().isoformat(
+                        "start_time": get_cet_now().isoformat(
                             timespec="seconds"
-                        )
-                        + "Z",
+                        ),
                         "end_time": None,
                         "duration_minutes": None,
                         "gcs_prefix": entry.get("gcs_prefix"),
@@ -457,7 +456,7 @@ def _safe_tick_once(
         # Persist the post-launch state with another guarded write
         blob.reload()
         gen2 = int(blob.generation)  # type: ignore
-        doc["saved_at"] = datetime.utcnow().isoformat() + "Z"
+        doc["saved_at"] = get_cet_now().isoformat()
         try:
             blob.upload_from_string(
                 json.dumps(doc, indent=2),
@@ -1377,7 +1376,7 @@ def load_queue_from_gcs(
     if not blob.exists():
         doc = {
             "version": 1,
-            "saved_at": datetime.utcnow().isoformat() + "Z",
+            "saved_at": get_cet_now().isoformat(),
             "entries": [],
             "queue_running": True,  # default to running
         }
@@ -1391,7 +1390,7 @@ def load_queue_from_gcs(
         if isinstance(payload, list):
             payload = {
                 "version": 1,
-                "saved_at": datetime.utcnow().isoformat() + "Z",
+                "saved_at": get_cet_now().isoformat(),
                 "entries": payload,
                 "queue_running": True,
             }
@@ -1409,7 +1408,7 @@ def load_queue_from_gcs(
         st.session_state.queue_running = True
         return {
             "version": 1,
-            "saved_at": datetime.utcnow().isoformat() + "Z",
+            "saved_at": get_cet_now().isoformat(),
             "entries": [],
             "queue_running": True,
         }
@@ -1437,7 +1436,7 @@ def save_queue_to_gcs(
     if queue_running is None:
         queue_running = st.session_state.get("queue_running", True)
 
-    saved_at = datetime.utcnow().isoformat() + "Z"
+    saved_at = get_cet_now().isoformat()
     payload = {
         "version": 1,
         "saved_at": saved_at,

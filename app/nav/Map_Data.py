@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+from app.utils.gcs_utils import format_cet_timestamp, get_cet_now
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -132,7 +133,7 @@ def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
 def _save_raw_to_gcs(
     df: pd.DataFrame, bucket: str, country: str, timestamp: str = None
 ) -> Dict[str, str]:
-    ts = timestamp or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = timestamp or format_cet_timestamp()
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         df.to_parquet(tmp.name, index=False)
         data_gcs_path = upload_to_gcs(bucket, tmp.name, _data_blob(country, ts))
@@ -145,7 +146,7 @@ def _save_mapped_to_gcs(
     df: pd.DataFrame, bucket: str, country: str, timestamp: str = None
 ) -> Dict[str, str]:
     """Save mapped dataset to mapped-datasets/ path (separate from raw datasets)."""
-    ts = timestamp or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = timestamp or format_cet_timestamp()
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         df.to_parquet(tmp.name, index=False)
         data_gcs_path = upload_to_gcs(
@@ -1317,7 +1318,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
 
         try:
             # Generate shared timestamp for all countries
-            shared_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            shared_ts = format_cet_timestamp()
             saved_paths = []
 
             # Save each country's data to its own path
@@ -2300,7 +2301,7 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
         help="By default, mappings are saved universally for all countries. Check this box to save metadata only for the primary country.",
     )
 
-    meta_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    meta_ts = format_cet_timestamp()
 
     # Build goals JSON with aggregation info based on type
     goals_json = []
@@ -2407,7 +2408,7 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
             if save_country_specific
             else "universal"
         ),
-        "saved_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
+        "saved_at": get_cet_now().isoformat(),
         "data": {
             "origin": st.session_state["data_origin"],
             "timestamp": st.session_state["picked_ts"] or "latest",
@@ -2441,7 +2442,7 @@ with st.expander("💾 Store mapping for future use.", expanded=False):
     def _save_metadata():
         try:
             # Generate a shared timestamp for all saves
-            shared_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            shared_ts = format_cet_timestamp()
             st.session_state["shared_save_timestamp"] = shared_ts
 
             # Get data by country

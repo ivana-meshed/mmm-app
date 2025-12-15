@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+from app.utils.gcs_utils import format_cet_timestamp, get_cet_now
 from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
@@ -2367,7 +2368,7 @@ with tab_single:
                     # Build configuration payload
                     config_payload = {
                         "name": config_name,
-                        "created_at": datetime.utcnow().isoformat(),
+                        "created_at": get_cet_now().isoformat(),
                         "countries": config_countries,
                         "config": {
                             "iterations": int(iterations),
@@ -2840,9 +2841,9 @@ with tab_single:
                 else:
                     timestamp = shared_ts
             except Exception:
-                timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+                timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
         else:
-            timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+            timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
 
         gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
         timings: List[Dict[str, float]] = []

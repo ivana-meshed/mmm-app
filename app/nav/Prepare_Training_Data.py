@@ -19,6 +19,7 @@ from typing import List, Union
 import numpy as np
 import pandas as pd
 import streamlit as st
+from app.utils.gcs_utils import format_cet_timestamp
 from app_shared import (
     GCS_BUCKET,
     build_meta_views,
@@ -2428,7 +2429,7 @@ with st.expander(
                 # Use shared timestamp from Map Data if available, otherwise generate new one
                 timestamp = st.session_state.get(
                     "shared_save_timestamp",
-                    datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"),
+                    format_cet_timestamp(),
                 )
 
                 # Create temporary file

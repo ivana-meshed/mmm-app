@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import snowflake.connector as sf
 import streamlit as st
+from app.utils.gcs_utils import format_cet_timestamp, get_cet_now
 from app_shared import _queue_blob_path  # (kept for parity; not used below)
 from app_shared import _safe_tick_once  # (kept for parity; not used below
 from app_shared import _sanitize_queue_name  # (kept for parity; not used below)
@@ -185,7 +186,7 @@ def prepare_and_launch_job(params: dict) -> dict:
     Returns exec_info dict with execution_name, timestamp, gcs_prefix, etc.
     """
     gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
-    timestamp = datetime.utcnow().strftime("%m%d_%H%M%S")
+    timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
     # Support both 'revision' and 'version' keys for backward compatibility
     revision = params.get("revision") or params.get("version") or ""
     country = params.get("country", "")
@@ -785,7 +786,7 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
             maybe_refresh_queue_from_gcs(force=True)
             # Clear cached timestamp to force re-check of single run jobs
             st.session_state["status_refresh_timestamp"] = (
-                datetime.utcnow().timestamp()
+                get_cet_now().timestamp()
             )
             st.rerun()
 
@@ -1255,7 +1256,7 @@ def _queue_tick():
             )
             end_time = (
                 times.get("end_time")
-                or datetime.utcnow().isoformat(timespec="seconds") + "Z"
+                or get_cet_now().isoformat(timespec="seconds")
             )
             duration_minutes = times.get("duration_minutes")
 
