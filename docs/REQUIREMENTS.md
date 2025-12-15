@@ -257,9 +257,11 @@ Expected monthly costs (varies by usage):
 
 | Configuration | Training Resources | Estimated Monthly Cost |
 |--------------|-------------------|----------------------|
-| **Production (Default)** | 4 vCPU / 16GB RAM | $10-50 (typical)<br/>$200 (high volume) |
+| **Standard (Default)** | 4 vCPU / 16GB RAM | $10-50 (typical)<br/>$200 (high volume) |
 | **High Performance** | 8 vCPU / 32GB RAM | $10-50 (typical)<br/>$200 (high volume) |
-| **Cost Optimized** | 2 vCPU / 8GB RAM | $10-75 (typical)<br/>$350 (high volume) |
+| **Max Performance** | 16 vCPU / 64GB RAM | $10-50 (typical)<br/>$200 (high volume) |
+
+**Note:** Faster machines save time but have similar costs due to per-second billing. Choose based on urgency needs.
 
 Costs include:
 - Cloud Run service (web interface)
