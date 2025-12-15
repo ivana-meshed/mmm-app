@@ -2,6 +2,11 @@
 
 This document provides cost estimates for the MMM Trainer application across different machine configurations and workload scenarios.
 
+**Pricing References:**
+- [Cloud Run Pricing](https://cloud.google.com/run/pricing)
+- [Cloud Storage Pricing](https://cloud.google.com/storage/pricing)
+- [All Google Cloud Pricing](https://cloud.google.com/pricing)
+
 ## Cost Overview
 
 The table below shows monthly costs for different combinations of:
@@ -210,10 +215,11 @@ terraform apply -var="min_instances=2" -var-file="envs/prod.tfvars"
 - CPU: $0.000024 per vCPU-second
 - Memory: $0.0000025 per GiB-second
 - Includes per-second billing (no minimum charge)
+- [Official Cloud Run Pricing](https://cloud.google.com/run/pricing)
 
 **Fixed monthly costs**:
-- GCS storage: ~$0.50-2.00/month (depends on data volume)
-- Secret Manager: $0.06/month (6 secrets × $0.01)
-- Cloud Scheduler: $0.10/month (covered by free tier)
-- Artifact Registry: ~$0.50/month
+- GCS storage: ~$0.50-2.00/month (depends on data volume) - [Cloud Storage Pricing](https://cloud.google.com/storage/pricing)
+- Secret Manager: $0.06/month (6 secrets × $0.01) - [Secret Manager Pricing](https://cloud.google.com/secret-manager/pricing)
+- Cloud Scheduler: $0.10/month (covered by free tier) - [Cloud Scheduler Pricing](https://cloud.google.com/scheduler/pricing)
+- Artifact Registry: ~$0.50/month - [Artifact Registry Pricing](https://cloud.google.com/artifact-registry/pricing)
 - Total fixed: ~$2.09/month

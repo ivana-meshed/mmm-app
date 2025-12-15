@@ -264,14 +264,14 @@ Expected monthly costs (varies by usage):
 **Note:** Faster machines save time but have similar costs due to per-second billing. Choose based on urgency needs.
 
 Costs include:
-- Cloud Run service (web interface)
-- Cloud Run Jobs (training executions)
-- Cloud Storage (artifacts and data)
-- Artifact Registry (container images)
-- Cloud Scheduler (queue processing)
+- [Cloud Run](https://cloud.google.com/run/pricing) service (web interface)
+- [Cloud Run Jobs](https://cloud.google.com/run/pricing) (training executions)
+- [Cloud Storage](https://cloud.google.com/storage/pricing) (artifacts and data)
+- [Artifact Registry](https://cloud.google.com/artifact-registry/pricing) (container images)
+- [Cloud Scheduler](https://cloud.google.com/scheduler/pricing) (queue processing)
 - Networking (egress)
 
-**Note:** Snowflake costs are separate and depend on warehouse size and usage.
+**Note:** Snowflake costs are separate and depend on warehouse size and usage. See [Snowflake Pricing](https://www.snowflake.com/pricing/).
 
 For detailed cost optimization strategies, see [COST_OPTIMIZATION.md](../COST_OPTIMIZATION.md).
 
