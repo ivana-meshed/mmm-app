@@ -223,15 +223,34 @@ if (diagnostic_enabled == "always") {
 
 if (should_diagnose) {
     cat("\n⚠️  Core allocation discrepancy detected - running diagnostics...\n")
-    diagnostic_script <- file.path(dirname(sys.frame(1)$ofile %||% "."), "diagnose_cores.R")
-    if (file.exists(diagnostic_script)) {
+    
+    # Try to find the diagnostic script in multiple locations
+    script_locations <- c(
+        # Same directory as this script
+        file.path(dirname(tryCatch(sys.frame(1)$ofile, error = function(e) "")), "diagnose_cores.R"),
+        # r/ subdirectory from current working directory
+        file.path("r", "diagnose_cores.R"),
+        # Absolute path from typical deployment location
+        "/app/r/diagnose_cores.R"
+    )
+    
+    diagnostic_script <- NULL
+    for (loc in script_locations) {
+        if (file.exists(loc)) {
+            diagnostic_script <- loc
+            break
+        }
+    }
+    
+    if (!is.null(diagnostic_script)) {
         tryCatch({
             source(diagnostic_script, local = TRUE)
         }, error = function(e) {
             cat(sprintf("⚠️  Diagnostic script failed: %s\n", conditionMessage(e)))
         })
     } else {
-        cat(sprintf("⚠️  Diagnostic script not found: %s\n", diagnostic_script))
+        cat(sprintf("⚠️  Diagnostic script not found. Tried: %s\n", 
+                    paste(script_locations, collapse = ", ")))
     }
 }
 
