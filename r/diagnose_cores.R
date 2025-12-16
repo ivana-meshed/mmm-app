@@ -204,18 +204,18 @@ if (requireNamespace("future", quietly = TRUE)) {
     # Available workers
     avail_workers <- tryCatch(
         future::availableWorkers(),
-        error = function(e) NA
+        error = function(e) NULL
     )
-    if (!is.na(avail_workers)) {
+    if (!is.null(avail_workers) && length(avail_workers) > 0) {
         cat(sprintf("  Available workers            = %d\n", length(avail_workers)))
     }
     
     # Number of workers
     nb_workers <- tryCatch(
         future::nbrOfWorkers(),
-        error = function(e) NA
+        error = function(e) NULL
     )
-    if (!is.na(nb_workers)) {
+    if (!is.null(nb_workers) && !is.na(nb_workers)) {
         cat(sprintf("  Current workers              = %d\n", nb_workers))
     }
 } else {
