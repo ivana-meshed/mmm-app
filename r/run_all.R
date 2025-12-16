@@ -198,12 +198,42 @@ HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 # We need to be conservative to avoid "X simultaneous processes spawned" errors
 # which occur when Robyn's .check_ncores() validation fails
 
+# Run diagnostic script if core allocation looks suspicious
+# This helps investigate why Cloud Run may be limiting cores
+diagnostic_enabled <- Sys.getenv("ROBYN_DIAGNOSE_CORES", "auto")
+
 # Get requested cores from environment (set by terraform)
 requested_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
 
 # Detect actual available cores using multiple methods
 available_cores_parallelly <- parallelly::availableCores()
 available_cores_parallel <- parallel::detectCores()
+
+# Quick check: if there's a significant discrepancy, run diagnostics
+should_diagnose <- FALSE
+if (diagnostic_enabled == "always") {
+    should_diagnose <- TRUE
+} else if (diagnostic_enabled == "auto") {
+    # Auto-diagnose if available cores are much less than requested
+    if (available_cores_parallelly < (requested_cores * 0.5) || 
+        available_cores_parallel < (requested_cores * 0.5)) {
+        should_diagnose <- TRUE
+    }
+}
+
+if (should_diagnose) {
+    cat("\n⚠️  Core allocation discrepancy detected - running diagnostics...\n")
+    diagnostic_script <- file.path(dirname(sys.frame(1)$ofile %||% "."), "diagnose_cores.R")
+    if (file.exists(diagnostic_script)) {
+        tryCatch({
+            source(diagnostic_script, local = TRUE)
+        }, error = function(e) {
+            cat(sprintf("⚠️  Diagnostic script failed: %s\n", conditionMessage(e)))
+        })
+    } else {
+        cat(sprintf("⚠️  Diagnostic script not found: %s\n", diagnostic_script))
+    }
+}
 
 cat(sprintf("\n🔧 Core Detection:\n"))
 cat(sprintf("  - Requested (R_MAX_CORES):           %d\n", requested_cores))
