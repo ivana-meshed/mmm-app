@@ -492,6 +492,18 @@ resource "google_cloud_run_v2_job" "training_job" {
       timeout         = "21600s"
       max_retries     = 1
 
+      # Annotations for CPU allocation and performance
+      # Note: Some annotations may not be supported by Cloud Run Jobs v2
+      # They are included here for testing and future compatibility
+      annotations = {
+        # Disable CPU throttling to allow full CPU usage during training
+        "run.googleapis.com/cpu-throttling" = "false"
+        
+        # CPU boost can help get more cores during startup (if supported)
+        # This may help Cloud Run allocate closer to vCPU count
+        "run.googleapis.com/startup-cpu-boost" = "true"
+      }
+
       containers {
         name  = "training-container"
         image = var.training_image
@@ -536,6 +548,15 @@ resource "google_cloud_run_v2_job" "training_job" {
         env {
           name  = "REGION"
           value = var.region
+        }
+
+        # Enable automatic core diagnostics when core allocation is problematic
+        # Set to "always" to force diagnostic output on every run
+        # Set to "auto" (default) to only run when core discrepancy detected
+        # Set to "never" to disable diagnostics
+        env {
+          name  = "ROBYN_DIAGNOSE_CORES"
+          value = "auto"
         }
       }
     }
