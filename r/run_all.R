@@ -256,10 +256,16 @@ if (should_diagnose) {
     }
 }
 
-cat(sprintf("\n🔧 Core Detection:\n"))
-cat(sprintf("  - Requested (R_MAX_CORES):           %d\n", requested_cores))
-cat(sprintf("  - Available (parallelly):             %d\n", available_cores_parallelly))
-cat(sprintf("  - Available (parallel::detectCores): %d\n", available_cores_parallel))
+cat(sprintf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
+cat(sprintf("🔧 CORE DETECTION ANALYSIS\n"))
+cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"))
+cat(sprintf("📊 Environment Configuration:\n"))
+cat(sprintf("  - R_MAX_CORES (requested):           %d\n", requested_cores))
+cat(sprintf("  - OMP_NUM_THREADS:                   %s\n", Sys.getenv("OMP_NUM_THREADS", "not set")))
+cat(sprintf("  - OPENBLAS_NUM_THREADS:              %s\n\n", Sys.getenv("OPENBLAS_NUM_THREADS", "not set")))
+cat(sprintf("🔍 Detection Methods:\n"))
+cat(sprintf("  - parallelly::availableCores():      %d (cgroup-aware)\n", available_cores_parallelly))
+cat(sprintf("  - parallel::detectCores():           %d (system CPUs)\n", available_cores_parallel))
 
 # Use the most conservative estimate between the two methods
 # This accounts for Cloud Run's unpredictable core allocation
@@ -286,6 +292,34 @@ cat(sprintf("  - Conservative estimate:              %d\n", available_cores))
 cat(sprintf("  - Actual cores to use:                %d\n", actual_cores))
 cat(sprintf("  - Safety buffer applied:              %s\n", ifelse(buffer_applied, "Yes (-1)", "No")))
 cat(sprintf("  - Final cores for training:           %d\n\n", safe_cores))
+
+# Additional diagnostic information
+cat(sprintf("💡 Core Allocation Analysis:\n"))
+if (available_cores < requested_cores) {
+    discrepancy_pct <- round(100 * (requested_cores - available_cores) / requested_cores, 1)
+    cat(sprintf("  ⚠️  CORE SHORTFALL: Requested %d but only %d available (%.1f%% shortfall)\n", 
+                requested_cores, available_cores, discrepancy_pct))
+    
+    # Check if this looks like a Cloud Run cgroups quota issue
+    if (available_cores == 2 && requested_cores >= 4) {
+        cat(sprintf("  🔍 This pattern (2 cores with %d vCPU) suggests Cloud Run cgroups quota limitation\n", requested_cores))
+        cat(sprintf("  💡 Recommendation: Consider using training_cpu=4.0 or training_cpu=2.0 in Terraform\n"))
+        cat(sprintf("     to match actual core availability and reduce costs\n"))
+    } else if (available_cores < (requested_cores * 0.6)) {
+        cat(sprintf("  🔍 Available cores are significantly less than requested\n"))
+        cat(sprintf("  💡 Recommendation: Adjust training_max_cores to %d in Terraform configuration\n", available_cores))
+    }
+} else if (available_cores >= requested_cores) {
+    cat(sprintf("  ✅ Core allocation is good: %d cores available for %d requested\n", 
+                available_cores, requested_cores))
+    if (buffer_applied) {
+        cat(sprintf("  ℹ️  Using %d cores (safety buffer -1) to prevent Robyn validation errors\n", safe_cores))
+    }
+} else {
+    cat(sprintf("  ✅ Using all %d available cores\n", available_cores))
+}
+cat(sprintf("\n"))
+cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"))
 
 # Set max_cores for use in robyn_run()
 max_cores <- safe_cores
