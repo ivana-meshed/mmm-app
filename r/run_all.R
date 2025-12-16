@@ -214,12 +214,27 @@ cat(sprintf("  - Available (parallel::detectCores): %d\n", available_cores_paral
 # This accounts for Cloud Run's unpredictable core allocation
 available_cores <- min(available_cores_parallelly, available_cores_parallel)
 
-# Take minimum of requested and available, then reduce by 1 for safety
-# This prevents Robyn's .check_ncores() from failing due to system overhead
-safe_cores <- max(1, min(requested_cores, available_cores) - 1)
+# Strategy: Only apply -1 buffer if we're close to the requested amount
+# If Cloud Run is severely limiting cores (e.g., 2 when 8 requested), use what's available
+# The -1 buffer is only needed when we're at risk of the "X processes spawned" error
+actual_cores <- min(requested_cores, available_cores)
+
+# Apply -1 safety buffer only if we have enough cores (> 2) and we're using the requested amount
+# This prevents wasting cores when already constrained by Cloud Run
+if (actual_cores > 2 && actual_cores >= requested_cores) {
+    # We're at or above requested, apply safety buffer
+    safe_cores <- max(1, actual_cores - 1)
+    buffer_applied <- TRUE
+} else {
+    # Already constrained by Cloud Run, use what we have
+    safe_cores <- max(1, actual_cores)
+    buffer_applied <- FALSE
+}
 
 cat(sprintf("  - Conservative estimate:              %d\n", available_cores))
-cat(sprintf("  - Using (safe with -1 buffer):        %d\n\n", safe_cores))
+cat(sprintf("  - Actual cores to use:                %d\n", actual_cores))
+cat(sprintf("  - Safety buffer applied:              %s\n", ifelse(buffer_applied, "Yes (-1)", "No")))
+cat(sprintf("  - Final cores for training:           %d\n\n", safe_cores))
 
 # Set max_cores for use in robyn_run()
 max_cores <- safe_cores
