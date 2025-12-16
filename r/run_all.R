@@ -193,19 +193,41 @@ write_trace <- function(title, e) {
 
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 
+# ---------- DYNAMIC CORE DETECTION ----------
+# Cloud Run's actual core availability doesn't always match vCPU allocation
+# We need to be conservative to avoid "X simultaneous processes spawned" errors
+# which occur when Robyn's .check_ncores() validation fails
+
 # Get requested cores from environment (set by terraform)
 requested_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
 
-# Detect actual available cores (respects cgroups quota in Cloud Run)
-available_cores <- parallelly::availableCores()
+# Detect actual available cores using multiple methods
+available_cores_parallelly <- parallelly::availableCores()
+available_cores_parallel <- parallel::detectCores()
 
-# Use minimum of requested and available to prevent "X simultaneous processes spawned" errors
-max_cores <- min(requested_cores, available_cores)
+cat(sprintf("\n🔧 Core Detection:\n"))
+cat(sprintf("  - Requested (R_MAX_CORES):           %d\n", requested_cores))
+cat(sprintf("  - Available (parallelly):             %d\n", available_cores_parallelly))
+cat(sprintf("  - Available (parallel::detectCores): %d\n", available_cores_parallel))
 
-cat(sprintf("\n🔧 Core allocation: requested=%d, available=%d, using=%d\n\n", 
-            requested_cores, available_cores, max_cores))
+# Use the most conservative estimate between the two methods
+# This accounts for Cloud Run's unpredictable core allocation
+available_cores <- min(available_cores_parallelly, available_cores_parallel)
 
+# Take minimum of requested and available, then reduce by 1 for safety
+# This prevents Robyn's .check_ncores() from failing due to system overhead
+safe_cores <- max(1, min(requested_cores, available_cores) - 1)
+
+cat(sprintf("  - Conservative estimate:              %d\n", available_cores))
+cat(sprintf("  - Using (safe with -1 buffer):        %d\n\n", safe_cores))
+
+# Set max_cores for use in robyn_run()
+max_cores <- safe_cores
+
+# Set up future plan for parallel processing
 plan(multisession, workers = max_cores)
+
+cat(sprintf("✅ Parallel processing initialized with %d workers\n\n", max_cores))
 
 ## ---------- HELPERS ----------
 should_add_n_searches <- function(dtf, spend_cols, thr = 0.15) {
@@ -1486,6 +1508,72 @@ alloc_start <- alloc_end - 364
 
 
 ## ---------- TRAIN (exact error capture; hard stop on failure) ----------
+cat(sprintf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
+cat(sprintf("🚀 ROBYN TRAINING PREPARATION\n"))
+cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"))
+
+cat(sprintf("📊 Training Parameters:\n"))
+cat(sprintf("  - Iterations:      %d\n", iter))
+cat(sprintf("  - Trials:          %d\n", trials))
+cat(sprintf("  - Cores requested: %d\n", max_cores))
+cat(sprintf("  - Time validation: TRUE\n"))
+cat(sprintf("  - Penalty factor:  TRUE\n\n"))
+
+cat(sprintf("💻 System Information:\n"))
+cat(sprintf("  - R version:           %s\n", R.version$version.string))
+cat(sprintf("  - Platform:            %s\n", R.version$platform))
+cat(sprintf("  - OS:                  %s\n", Sys.info()["sysname"]))
+cat(sprintf("  - Available memory:    %s\n", 
+            if (file.exists("/sys/fs/cgroup/memory/memory.limit_in_bytes")) {
+                paste0(round(as.numeric(readLines("/sys/fs/cgroup/memory/memory.limit_in_bytes")[1]) / 1024^3, 1), " GB")
+            } else {
+                "Unknown"
+            }))
+cat(sprintf("  - CPU cores (system):  %d\n", parallel::detectCores()))
+cat(sprintf("  - CPU cores (actual):  %d\n", parallelly::availableCores()))
+cat(sprintf("  - Cores for training:  %d (safe buffer applied)\n", max_cores))
+cat(sprintf("  - Future plan:         %s with %d workers\n\n", 
+            class(future::plan())[1], future::nbrOfWorkers()))
+
+cat(sprintf("📁 Data Dimensions:\n"))
+cat(sprintf("  - Rows:    %d\n", nrow(InputCollect$dt_input)))
+cat(sprintf("  - Columns: %d\n", ncol(InputCollect$dt_input)))
+cat(sprintf("  - Date range: %s to %s\n", 
+            min(InputCollect$dt_input$date), 
+            max(InputCollect$dt_input$date)))
+cat(sprintf("  - Days:    %d\n\n", 
+            as.numeric(difftime(max(InputCollect$dt_input$date), 
+                               min(InputCollect$dt_input$date), 
+                               units = "days"))))
+
+cat(sprintf("🎯 Model Configuration:\n"))
+cat(sprintf("  - Dependent variable: %s\n", InputCollect$dep_var))
+cat(sprintf("  - Paid media spends:  %d variables\n", length(InputCollect$paid_media_spends)))
+cat(sprintf("  - Paid media vars:    %d variables\n", length(InputCollect$paid_media_vars)))
+cat(sprintf("  - Context vars:       %d variables\n", 
+            if (!is.null(InputCollect$context_vars)) length(InputCollect$context_vars) else 0))
+cat(sprintf("  - Organic vars:       %d variables\n", 
+            if (!is.null(InputCollect$organic_vars)) length(InputCollect$organic_vars) else 0))
+cat(sprintf("  - Factor vars:        %d variables\n\n", 
+            if (!is.null(InputCollect$factor_vars)) length(InputCollect$factor_vars) else 0))
+
+cat(sprintf("⚙️  Hyperparameters:\n"))
+if (!is.null(InputCollect$hyperparameters)) {
+    for (hp_name in names(InputCollect$hyperparameters)) {
+        hp_val <- InputCollect$hyperparameters[[hp_name]]
+        if (length(hp_val) <= 3) {
+            cat(sprintf("  - %-20s: %s\n", hp_name, paste(hp_val, collapse = ", ")))
+        } else {
+            cat(sprintf("  - %-20s: %d values\n", hp_name, length(hp_val)))
+        }
+    }
+}
+cat(sprintf("\n"))
+
+cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
+cat(sprintf("🎬 Starting robyn_run() with %d cores...\n", max_cores))
+cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"))
+
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
 t0 <- Sys.time()
 
@@ -1512,16 +1600,30 @@ OutputModels <- tryCatch(
     error = function(e) {
         calls_chr <- .format_calls(sys.calls())
         elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
-        writeLines(c(
+        
+        # Enhanced error information with core detection details
+        error_details <- c(
             "robyn_run() FAILED",
             paste0("When     : ", as.character(Sys.time())),
             paste0("Elapsed  : ", round(elapsed, 2), " sec"),
             paste0("Message  : ", conditionMessage(e)),
             paste0("Call     : ", paste(deparse(conditionCall(e)), collapse = " ")),
             paste0("Class    : ", paste(class(e), collapse = ", ")),
+            "",
+            "--- Core Detection Information ---",
+            paste0("Requested cores (R_MAX_CORES): ", requested_cores),
+            paste0("Available (parallelly):        ", available_cores_parallelly),
+            paste0("Available (parallel):          ", available_cores_parallel),
+            paste0("Conservative estimate:         ", available_cores),
+            paste0("Cores passed to robyn_run:     ", max_cores),
+            paste0("Future workers:                ", future::nbrOfWorkers()),
+            paste0("System CPU count:              ", parallel::detectCores()),
+            "",
             "--- Approximate R call stack (inner→outer) ---",
             paste(rev(calls_chr), collapse = "\n")
-        ), robyn_err_txt)
+        )
+        
+        writeLines(error_details, robyn_err_txt)
 
         err_payload <- list(
             state = "FAILED", step = "robyn_run",
@@ -1530,6 +1632,23 @@ OutputModels <- tryCatch(
             elapsed_seconds = elapsed,
             message = conditionMessage(e),
             call = paste(deparse(conditionCall(e)), collapse = " "),
+            class = unname(class(e)),
+            stack_inner_to_outer = as.list(calls_chr),
+            params = list(
+                iterations = iter, 
+                trials = trials, 
+                cores = max_cores
+            ),
+            core_detection = list(
+                requested_cores = requested_cores,
+                available_parallelly = available_cores_parallelly,
+                available_parallel = available_cores_parallel,
+                conservative_estimate = available_cores,
+                used_cores = max_cores,
+                future_workers = future::nbrOfWorkers(),
+                system_cpu_count = parallel::detectCores()
+            )
+        )
             class = unname(class(e)),
             stack_inner_to_outer = as.list(calls_chr),
             params = list(iterations = iter, trials = trials, cores = max_cores)
