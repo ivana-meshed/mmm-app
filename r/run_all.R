@@ -193,7 +193,18 @@ write_trace <- function(title, e) {
 
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 
-max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
+# Get requested cores from environment (set by terraform)
+requested_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
+
+# Detect actual available cores (respects cgroups quota in Cloud Run)
+available_cores <- parallelly::availableCores()
+
+# Use minimum of requested and available to prevent "X simultaneous processes spawned" errors
+max_cores <- min(requested_cores, available_cores)
+
+cat(sprintf("\n🔧 Core allocation: requested=%d, available=%d, using=%d\n\n", 
+            requested_cores, available_cores, max_cores))
+
 plan(multisession, workers = max_cores)
 
 ## ---------- HELPERS ----------

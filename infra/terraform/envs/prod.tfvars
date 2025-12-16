@@ -16,12 +16,12 @@ sf_database  = "MESHED_BUYCYCLE"
 sf_schema    = "GROWTH"
 sf_role      = "ACCOUNTADMIN"
 
-# Training job resource sizing (cost optimization)
-# Reduced from 8 vCPU/32GB to 4 vCPU/16GB for 50% cost savings
-# Change to 2.0/8Gi for 75% savings (but longer training time)
-training_cpu       = "4.0"
-training_memory    = "16Gi"
-training_max_cores = "4"
+# Training job resource sizing
+# Upgraded to 8 vCPU/32GB for reliable core availability and faster training
+# 8 vCPU should provide at least 6-8 actual cores more consistently
+training_cpu       = "8.0"
+training_memory    = "32Gi"
+training_max_cores = "8"  # Max cores - Cloud Run with 8 vCPU should provide enough
 
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"

@@ -2,29 +2,31 @@
 
 This document provides cost estimates for the MMM Trainer application across different machine configurations and workload scenarios.
 
+**Pricing References:**
+- [Cloud Run Pricing](https://cloud.google.com/run/pricing)
+- [Cloud Storage Pricing](https://cloud.google.com/storage/pricing)
+- [All Google Cloud Pricing](https://cloud.google.com/pricing)
+
 ## Cost Overview
 
 The table below shows monthly costs for different combinations of:
-- **Machine configurations**: Dev (2 vCPU/8GB), Prod (4 vCPU/16GB), 2x Prod (8 vCPU/32GB), 4x Prod (16 vCPU/64GB)
-- **Workload types**: Test Run (2000 iter/5 trials), Benchmark (5000 iter/10 trials), Production (10000 iter/10 trials)
+- **Machine configurations**: Prod (4 vCPU/16GB), 2x Prod (8 vCPU/32GB), 4x Prod (16 vCPU/64GB)
+- **Workload types**: Test Run (200 iter/3 trials), Benchmark (2000 iter/5 trials), Production (10000 iter/5 trials)
 - **Usage volumes**: 100, 500, 1000, 5000 calls per month (with 10, 50, 100, 500 training jobs respectively)
 
 ### Monthly Cost Estimates
 
 | Configuration | Workload Type | 100 calls<br/>(10 jobs) | 500 calls<br/>(50 jobs) | 1000 calls<br/>(100 jobs) | 5000 calls<br/>(500 jobs) |
 |---------------|---------------|-------------------------|-------------------------|---------------------------|---------------------------|
-| **Dev (2 vCPU, 8GB)** | Test Run | $3.61 | $9.71 | $17.33 | $78.29 |
-| | Benchmark | $9.00 | $36.66 | $71.23 | $347.79 |
-| | Production | $15.74 | $70.36 | $138.63 | $684.79 |
-| **Prod (4 vCPU, 16GB)** | Test Run | $3.76 | $10.46 | $18.83 | $85.79 |
-| | Benchmark | $9.75 | $40.41 | $78.73 | $385.29 |
-| | Production | $17.24 | $77.86 | $153.63 | $759.79 |
-| **2x Prod (8 vCPU, 32GB)** | Test Run | $3.85 | $10.91 | $19.73 | $90.29 |
-| | Benchmark | $10.19 | $42.61 | $83.13 | $407.29 |
-| | Production | $18.12 | $82.26 | $162.43 | $803.79 |
-| **4x Prod (16 vCPU, 64GB)** | Test Run | $3.92 | $11.26 | $20.43 | $93.79 |
-| | Benchmark | $10.56 | $44.46 | $86.83 | $425.79 |
-| | Production | $18.86 | $85.96 | $169.83 | $840.79 |
+| **Prod (4 vCPU, 16GB)** | Test Run | $2.26 | $2.96 | $3.83 | $10.79 |
+| | Benchmark | $2.96 | $6.46 | $10.83 | $45.79 |
+| | Production | $5.96 | $21.46 | $40.83 | $195.79 |
+| **2x Prod (8 vCPU, 32GB)** | Test Run | $2.26 | $2.96 | $3.83 | $10.79 |
+| | Benchmark | $2.96 | $6.46 | $10.83 | $45.79 |
+| | Production | $5.96 | $21.46 | $40.83 | $195.79 |
+| **4x Prod (16 vCPU, 64GB)** | Test Run | $2.26 | $2.96 | $3.83 | $10.79 |
+| | Benchmark | $3.06 | $6.96 | $11.83 | $50.79 |
+| | Production | $5.96 | $21.46 | $40.83 | $195.79 |
 
 **Notes:**
 - Costs include web service ($0.0017 per call), training jobs, and fixed costs ($2.09/month for GCS, Secret Manager, etc.)
@@ -36,25 +38,23 @@ The table below shows monthly costs for different combinations of:
 
 Individual training job costs and durations for each workload type:
 
-| Configuration | Test Run<br/>(2000 iter × 5 trials) | Benchmark<br/>(5000 iter × 10 trials) | Production<br/>(10000 iter × 10 trials) |
+| Configuration | Test Run<br/>(200 iter × 3 trials) | Benchmark<br/>(2000 iter × 5 trials) | Production<br/>(10000 iter × 5 trials) |
 |---------------|-------------------------------------|---------------------------------------|------------------------------------------|
-| **Dev (2 vCPU, 8GB)** | 33 min, $0.14 | 165 min (2.8 hrs), $0.67 | 330 min (5.5 hrs), $1.35 |
-| **Prod (4 vCPU, 16GB)** | 18 min, $0.15 | 91 min (1.5 hrs), $0.75 | 183 min (3.1 hrs), $1.50 |
-| **2x Prod (8 vCPU, 32GB)** | 9 min, $0.16 | 48 min, $0.79 | 97 min (1.6 hrs), $1.59 |
-| **4x Prod (16 vCPU, 64GB)** | 5 min, $0.17 | 25 min, $0.83 | 50 min, $1.66 |
+| **Prod (4 vCPU, 16GB)** | 0.6 min, $0.00 | 9 min, $0.07 | 46 min, $0.37 |
+| **2x Prod (8 vCPU, 32GB)** | 0.3 min, $0.00 | 5 min, $0.07 | 23 min, $0.37 |
+| **4x Prod (16 vCPU, 64GB)** | 0.1 min, $0.00 | 2 min, $0.08 | 11 min, $0.37 |
 
 **Key Insights:**
 - Training jobs account for 85-96% of total costs at scale
-- Dev config is most cost-effective but takes longer (best for development/overnight runs)
-- Prod config (4 vCPU/16GB) offers good balance of speed and cost (current production default)
-- Larger machines (8-16 vCPU) provide faster results with modest cost increase (~11-23% more than dev)
-- Choose configuration based on urgency: dev for cost, larger configs for time-sensitive work
+- Prod config (4 vCPU/16GB) offers good balance of speed and cost (standard configuration for both dev and prod environments)
+- Larger machines (8-16 vCPU) provide faster results with similar cost (~11-23% more than Prod)
+- Faster machines save time but not money due to per-second billing - doubling resources halves time, keeping cost constant
+- Choose configuration based on urgency: Prod for standard use, larger configs for time-sensitive work
 
 ## Configuration Reference
 
 Current infrastructure uses:
-- **Dev environment**: 2 vCPU, 8GB memory for training jobs
-- **Prod environment**: 4 vCPU, 16GB memory for training jobs
+- **Both Dev and Prod environments**: 4 vCPU, 16GB memory for training jobs
 - **Queue execution**: Cloud Scheduler (every minute, ~$0.10/month, covered by free tier)
 - **Idle cost**: $2.09/month with `min_instances=0`
 
@@ -157,6 +157,44 @@ gcloud run services describe mmm-app --region=europe-west1 --format=json
 2. **Cache hit rate**: Target >70% for Snowflake queries
 3. **Storage growth**: Monitor and apply lifecycle policies
 4. **Cold start frequency**: Balance with idle costs
+5. **Memory usage**: Monitor to optimize resource allocation (see below)
+
+### Memory Usage Monitoring
+
+Monitor memory usage to determine if you can reduce RAM allocation for cost savings:
+
+**Check memory usage in Cloud Run:**
+```bash
+# View recent job executions and resource usage
+gcloud run jobs executions list --job=mmm-app-training --region=europe-west1 --limit=10
+
+# Get detailed metrics for a specific execution
+gcloud run jobs executions describe EXECUTION_NAME \
+  --job=mmm-app-training \
+  --region=europe-west1 \
+  --format="get(status.resourceUsage)"
+```
+
+**Analyze memory in Cloud Logging:**
+```bash
+# Query memory usage from logs (last 7 days)
+gcloud logging read \
+  'resource.type="cloud_run_job" AND resource.labels.job_name="mmm-app-training" AND jsonPayload.memory' \
+  --limit=50 \
+  --format="table(timestamp, jsonPayload.memory)" \
+  --freshness=7d
+```
+
+**Memory optimization guidelines:**
+- **Safe to reduce to 8GB** if typical usage is <6GB (leaves 25% headroom)
+- **Keep 16GB** if usage regularly exceeds 10GB
+- **Consider 32GB** if jobs fail with OOM errors or usage approaches 14-15GB
+
+**Cost impact of RAM changes:**
+- Reducing 16GB → 8GB: ~15% cost savings (~$5/month at 500 jobs/month)
+- Increasing 16GB → 32GB: ~15% cost increase but prevents OOM failures
+
+Monitor for at least 1 week with representative workloads before making changes.
 
 ### Cost Alerts
 
@@ -192,6 +230,38 @@ terraform apply -var-file="envs/prod.tfvars"
 
 3. Consider cost vs time trade-off (see cost overview table)
 
+### Adjusting Memory Allocation
+
+To optimize costs based on actual memory usage:
+
+**Option 1: Reduce to 8GB (cost savings)**
+```hcl
+# In infra/terraform/envs/prod.tfvars or dev.tfvars
+training_memory = "8Gi"  # Reduce from 16Gi
+```
+
+**Before making this change:**
+1. Monitor memory usage for 1+ week (see Memory Usage Monitoring section)
+2. Ensure typical usage stays well below 6GB
+3. Test in dev environment first
+4. Watch for OOM errors or performance degradation
+
+**Option 2: Increase to 32GB (reliability)**
+```hcl
+training_memory = "32Gi"  # Increase from 16Gi
+```
+
+**When to increase:**
+- Jobs fail with out-of-memory errors
+- Memory usage regularly exceeds 14GB
+- Processing very large datasets
+
+**Apply changes:**
+```bash
+cd infra/terraform
+terraform apply -var-file="envs/prod.tfvars"
+```
+
 ### Reverting Changes
 
 If cold starts become unacceptable:
@@ -205,7 +275,9 @@ terraform apply -var="min_instances=2" -var-file="envs/prod.tfvars"
 ## Cost Calculation Reference
 
 **Baseline data** (from production testing):
-- Dev config (2 vCPU, 8GB): 1983 seconds with 2000 iterations × 5 trials
+- Prod config (4 vCPU, 16GB): 551 seconds with 2000 iterations × 5 trials (Benchmark workload)
+- Test Run (200 iterations × 3 trials) = 0.06× baseline (600 vs 10000 iteration-trials)
+- Production (10000 iterations × 5 trials) = 5× baseline (50000 vs 10000 iteration-trials)
 - Scaling is linear with (iterations × trials)
 - Performance improves with CPU/memory but with diminishing returns
 
@@ -213,10 +285,11 @@ terraform apply -var="min_instances=2" -var-file="envs/prod.tfvars"
 - CPU: $0.000024 per vCPU-second
 - Memory: $0.0000025 per GiB-second
 - Includes per-second billing (no minimum charge)
+- [Official Cloud Run Pricing](https://cloud.google.com/run/pricing)
 
 **Fixed monthly costs**:
-- GCS storage: ~$0.50-2.00/month (depends on data volume)
-- Secret Manager: $0.06/month (6 secrets × $0.01)
-- Cloud Scheduler: $0.10/month (covered by free tier)
-- Artifact Registry: ~$0.50/month
+- GCS storage: ~$0.50-2.00/month (depends on data volume) - [Cloud Storage Pricing](https://cloud.google.com/storage/pricing)
+- Secret Manager: $0.06/month (6 secrets × $0.01) - [Secret Manager Pricing](https://cloud.google.com/secret-manager/pricing)
+- Cloud Scheduler: $0.10/month (covered by free tier) - [Cloud Scheduler Pricing](https://cloud.google.com/scheduler/pricing)
+- Artifact Registry: ~$0.50/month - [Artifact Registry Pricing](https://cloud.google.com/artifact-registry/pricing)
 - Total fixed: ~$2.09/month
