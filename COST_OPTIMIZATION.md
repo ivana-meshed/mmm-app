@@ -54,16 +54,23 @@ Individual training job costs and durations for each workload type:
 ## Configuration Reference
 
 Current infrastructure uses:
-- **Both Dev and Prod environments**: 4 vCPU, 16GB memory for training jobs
+- **Both Dev and Prod environments**: 8 vCPU, 32GB memory for training jobs
+- **Dynamic core detection**: Automatically detects and uses available cores (typically 7 cores with 8 vCPU)
 - **Queue execution**: Cloud Scheduler (every minute, ~$0.10/month, covered by free tier)
 - **Idle cost**: $2.09/month with `min_instances=0`
 
 To change training job resources, edit `infra/terraform/envs/dev.tfvars` or `prod.tfvars`:
 ```hcl
-training_cpu       = "4.0"   # vCPU count
-training_memory    = "16Gi"  # Memory allocation
-training_max_cores = "4"     # Maximum cores
+training_cpu       = "8.0"   # vCPU count
+training_memory    = "32Gi"  # Memory allocation
+training_max_cores = "8"     # Maximum cores (actual usage will be 7 due to safety buffer)
 ```
+
+**Important Note on Core Detection:**
+- The system uses a conservative approach: `actual_cores = max(1, min(requested, available) - 1)`
+- A -1 safety buffer prevents "simultaneous processes spawned" errors from Robyn
+- For 8 vCPU, training typically uses 7 cores (see [ROBYN_CORE_DETECTION_FIX.md](docs/ROBYN_CORE_DETECTION_FIX.md))
+- This ensures reliability in Cloud Run's unpredictable core allocation environment
 
 ## Future Optimization Opportunities
 
