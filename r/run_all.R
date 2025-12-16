@@ -1715,10 +1715,6 @@ OutputModels <- tryCatch(
                 system_cpu_count = parallel::detectCores()
             )
         )
-            class = unname(class(e)),
-            stack_inner_to_outer = as.list(calls_chr),
-            params = list(iterations = iter, trials = trials, cores = max_cores)
-        )
         writeLines(jsonlite::toJSON(err_payload, auto_unbox = TRUE, pretty = TRUE), robyn_err_json)
         gcs_put_safe(robyn_err_txt, file.path(gcs_prefix, basename(robyn_err_txt)))
         gcs_put_safe(robyn_err_json, file.path(gcs_prefix, basename(robyn_err_json)))
@@ -1743,8 +1739,86 @@ OutputModels <- tryCatch(
 )
 
 flush_and_ship_log("after robyn_run")
+
+# Check if robyn_run() returned NULL (silent failure)
+if (is.null(OutputModels)) {
+    elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+    error_msg <- "robyn_run() returned NULL - no models were generated. This typically indicates a silent failure during training."
+    
+    error_details <- c(
+        "robyn_run() RETURNED NULL",
+        paste0("When     : ", as.character(Sys.time())),
+        paste0("Elapsed  : ", round(elapsed, 2), " sec"),
+        paste0("Message  : ", error_msg),
+        "",
+        "Possible causes:",
+        "1. Data validation failed silently",
+        "2. All hyperparameter trials failed",
+        "3. Insufficient memory during training",
+        "4. Optimization algorithm failed to converge",
+        "5. Internal Robyn error was suppressed",
+        "",
+        "--- Core Detection Information ---",
+        paste0("Requested cores (R_MAX_CORES): ", requested_cores),
+        paste0("Available (parallelly):        ", available_cores_parallelly),
+        paste0("Available (parallel):          ", available_cores_parallel),
+        paste0("Conservative estimate:         ", available_cores),
+        paste0("Cores passed to robyn_run:     ", max_cores),
+        paste0("Future workers:                ", future::nbrOfWorkers()),
+        paste0("System CPU count:              ", parallel::detectCores())
+    )
+    
+    writeLines(error_details, robyn_err_txt)
+    
+    err_payload <- list(
+        state = "FAILED", step = "robyn_run",
+        timestamp = as.character(Sys.time()),
+        training_started_at = as.character(t0),
+        elapsed_seconds = elapsed,
+        message = error_msg,
+        return_value = "NULL",
+        class = "NULL_RETURN",
+        params = list(
+            iterations = iter, 
+            trials = trials, 
+            cores = max_cores
+        ),
+        core_detection = list(
+            requested_cores = requested_cores,
+            available_parallelly = available_cores_parallelly,
+            available_parallel = available_cores_parallel,
+            conservative_estimate = available_cores,
+            used_cores = max_cores,
+            future_workers = future::nbrOfWorkers(),
+            system_cpu_count = parallel::detectCores()
+        )
+    )
+    
+    writeLines(jsonlite::toJSON(err_payload, auto_unbox = TRUE, pretty = TRUE), robyn_err_json)
+    gcs_put_safe(robyn_err_txt, file.path(gcs_prefix, basename(robyn_err_txt)))
+    gcs_put_safe(robyn_err_json, file.path(gcs_prefix, basename(robyn_err_json)))
+    
+    # Update status.json
+    try(
+        {
+            writeLines(jsonlite::toJSON(list(
+                state = "FAILED",
+                start_time = as.character(job_started),
+                end_time = as.character(Sys.time()),
+                failed_step = "robyn_run",
+                error_message = error_msg
+            ), auto_unbox = TRUE, pretty = TRUE), status_json)
+            gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+        },
+        silent = TRUE
+    )
+    
+    stop(error_msg, call. = FALSE)
+}
+
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
+message("✅ OutputModels object created with class: ", class(OutputModels)[1])
 
 ## ---------- APPEND R TRAINING TIME TO timings.csv --
 
