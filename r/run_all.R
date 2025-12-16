@@ -226,11 +226,13 @@ if (should_diagnose) {
     
     # Try to find the diagnostic script in multiple locations
     script_locations <- c(
-        # Same directory as this script
+        # Deployment location (matching Dockerfile.training COPY location)
+        "/app/diagnose_cores.R",
+        # Same directory as this script (if running locally)
         file.path(dirname(tryCatch(sys.frame(1)$ofile, error = function(e) "")), "diagnose_cores.R"),
         # r/ subdirectory from current working directory
         file.path("r", "diagnose_cores.R"),
-        # Absolute path from typical deployment location
+        # Alternative deployment path
         "/app/r/diagnose_cores.R"
     )
     

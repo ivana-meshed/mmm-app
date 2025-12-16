@@ -4,6 +4,7 @@ FROM ${BASE_REF}
 
 WORKDIR /app
 COPY r/run_all.R /app/run_all.R
+COPY r/diagnose_cores.R /app/diagnose_cores.R
 COPY r/extract_model_summary.R /app/extract_model_summary.R
 COPY r/extract_output_models_data.R /app/extract_output_models_data.R
 COPY r/generate_summary_from_rds.R /app/generate_summary_from_rds.R
