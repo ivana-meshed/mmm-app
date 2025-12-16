@@ -498,7 +498,7 @@ resource "google_cloud_run_v2_job" "training_job" {
       annotations = {
         # Disable CPU throttling to allow full CPU usage during training
         "run.googleapis.com/cpu-throttling" = "false"
-        
+
         # CPU boost can help get more cores during startup (if supported)
         # This may help Cloud Run allocate closer to vCPU count
         "run.googleapis.com/startup-cpu-boost" = "true"
