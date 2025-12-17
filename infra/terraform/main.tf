@@ -419,6 +419,10 @@ resource "google_cloud_run_service" "web_service" {
           value = google_secret_manager_secret.sf_private_key.secret_id
         }
         env {
+          name  = "R_MAX_CORES"
+          value = var.training_max_cores
+        }
+        env {
           name  = "SF_PERSISTENT_KEY_SECRET"
           value = google_secret_manager_secret.sf_private_key_persistent.secret_id
         }
@@ -536,6 +540,15 @@ resource "google_cloud_run_v2_job" "training_job" {
         env {
           name  = "REGION"
           value = var.region
+        }
+
+        # Enable automatic core diagnostics when core allocation is problematic
+        # Set to "always" to force diagnostic output on every run
+        # Set to "auto" (default) to only run when core discrepancy detected
+        # Set to "never" to disable diagnostics
+        env {
+          name  = "ROBYN_DIAGNOSE_CORES"
+          value = "auto"
         }
       }
     }

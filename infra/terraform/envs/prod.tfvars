@@ -17,11 +17,12 @@ sf_schema    = "GROWTH"
 sf_role      = "ACCOUNTADMIN"
 
 # Training job resource sizing
-# Upgraded to 8 vCPU/32GB for reliable core availability and faster training
-# 8 vCPU should provide at least 6-8 actual cores more consistently
-training_cpu       = "8.0"
-training_memory    = "32Gi"
-training_max_cores = "8"  # Max cores - Cloud Run with 8 vCPU should provide enough
+# Testing: Cloud Run with 8 vCPU only provides 2 actual cores due to cgroups quota
+# Using 4 vCPU as intermediate test to check if more cores become available
+# This provides better cost/performance ratio while investigating core allocation
+training_cpu       = "4.0"
+training_memory    = "16Gi"
+training_max_cores = "4"  # Test if 4 vCPU provides more than 2 cores
 
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"
