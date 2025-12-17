@@ -419,6 +419,10 @@ resource "google_cloud_run_service" "web_service" {
           value = google_secret_manager_secret.sf_private_key.secret_id
         }
         env {
+          name  = "R_MAX_CORES"
+          value = var.training_max_cores
+        }
+        env {
           name  = "SF_PERSISTENT_KEY_SECRET"
           value = google_secret_manager_secret.sf_private_key_persistent.secret_id
         }
