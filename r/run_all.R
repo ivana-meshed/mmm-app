@@ -215,6 +215,8 @@ if (nzchar(override_cores)) {
     override_value <- as.numeric(override_cores)
     if (!is.na(override_value) && override_value > 0) {
         cat(sprintf("\n🔧 Overriding parallelly core detection with %d cores (PARALLELLY_OVERRIDE_CORES)\n", override_value))
+        # Load parallelly package first to ensure option takes effect
+        library(parallelly)
         # Set the fallback that parallelly will use when it rejects cgroups quota
         options(parallelly.availableCores.fallback = override_value)
     }
