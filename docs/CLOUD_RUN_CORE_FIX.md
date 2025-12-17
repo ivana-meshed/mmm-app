@@ -28,7 +28,7 @@ Cloud Run may enforce stricter cgroups CPU quotas on lower vCPU tiers because:
 
 **Changes Implemented**:
 1. **Terraform Configuration**: Updated to use 8 vCPU / 32GB
-2. **Execution Environment**: Added `execution_environment = "EXECUTION_ENVIRONMENT_GEN2"` for better resource allocation
+2. **Gen2 Execution Environment**: Cloud Run v2 Jobs automatically use Gen2 (default behavior)
 3. **Core Detection**: Existing diagnostic tools will validate the improvement
 
 ### Configuration Changes
@@ -39,16 +39,9 @@ training_cpu       = "8.0"  # Upgraded from 4.0
 training_memory    = "32Gi" # Upgraded from 16Gi
 training_max_cores = "8"    # Upgraded from 4
 
-# infra/terraform/main.tf
-resource "google_cloud_run_v2_job" "training_job" {
-  template {
-    template {
-      # Added Gen2 execution environment for better CPU allocation
-      execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
-      # ... rest of configuration
-    }
-  }
-}
+# Note: Cloud Run v2 Jobs use Gen2 execution environment by default
+# Gen2 provides improved resource allocation without explicit configuration
+```
 ```
 
 ## Expected Outcomes

@@ -38,21 +38,11 @@ training_memory    = "32Gi"
 training_max_cores = "8"
 ```
 
-### 2. Enable Gen2 Execution Environment
+### 2. Use Gen2 Execution Environment (Default)
 
-**Rationale**: Gen2 provides improved resource allocation and fewer platform limitations.
+**Rationale**: Cloud Run v2 Jobs automatically use Gen2 execution environment, which provides improved resource allocation and fewer platform limitations.
 
-**Changes**:
-```hcl
-resource "google_cloud_run_v2_job" "training_job" {
-  template {
-    template {
-      execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
-      # ...
-    }
-  }
-}
-```
+**Note**: Gen2 is the default for Cloud Run v2 API - no explicit configuration needed in Terraform.
 
 ## Expected Results
 

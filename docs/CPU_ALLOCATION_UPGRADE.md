@@ -36,23 +36,11 @@ training_max_cores = "8"     # Upgraded from 4
 
 **Rationale**: Higher vCPU tiers (8+) are scheduled onto less-constrained host pools and typically provide better core allocation (6-8 actual cores vs 2).
 
-### 2. Added Gen2 Execution Environment
+### 2. Cloud Run v2 Jobs Use Gen2 by Default
 
-**File Changed**: `infra/terraform/main.tf`
+**Note**: Cloud Run v2 Jobs automatically use the Gen2 execution environment, which provides improved resource allocation and fewer platform-imposed limitations. No explicit configuration is needed.
 
-**Configuration**:
-```hcl
-resource "google_cloud_run_v2_job" "training_job" {
-  template {
-    template {
-      execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
-      # ... rest of configuration
-    }
-  }
-}
-```
-
-**Rationale**: Gen2 execution environment provides improved resource allocation and fewer platform-imposed limitations.
+**Rationale**: Gen2 execution environment is the default for Cloud Run v2 API and provides better CPU and memory allocation compared to the legacy Gen1 environment.
 
 ## Expected Outcomes
 

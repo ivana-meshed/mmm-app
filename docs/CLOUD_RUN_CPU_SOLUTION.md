@@ -21,46 +21,20 @@ After reviewing the Terraform configuration and Cloud Run Jobs documentation, th
 
 ## Recommended Solution
 
-### Option 1: Configure Execution Environment (RECOMMENDED)
+### Option 1: Configure for Higher vCPU Tier (RECOMMENDED)
 
-Add explicit execution environment configuration to the Cloud Run Job:
+Upgrade to 8 vCPU configuration to bypass platform quotas affecting lower tiers:
 
 ```hcl
-resource "google_cloud_run_v2_job" "training_job" {
-  name     = "${var.service_name}-training"
-  location = var.region
-
-  template {
-    template {
-      service_account = google_service_account.training_job_sa.email
-      timeout         = "21600s"
-      max_retries     = 1
-      
-      # Add execution environment specification
-      execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
-
-      containers {
-        name  = "training-container"
-        image = var.training_image
-
-        resources {
-          limits = {
-            cpu    = var.training_cpu
-            memory = var.training_memory
-          }
-          
-          # Ensure CPU is always allocated (not throttled)
-          cpu_idle = true
-        }
-
-        # ... rest of configuration
-      }
-    }
-  }
-}
+# infra/terraform/envs/prod.tfvars
+training_cpu       = "8.0"   # Upgraded from 4.0
+training_memory    = "32Gi"  # Upgraded from 16Gi
+training_max_cores = "8"     # Upgraded from 4
 ```
 
-**Expected Outcome**: Gen2 execution environment provides better CPU quota enforcement, should provide closer to requested vCPU count in actual cores.
+**Note**: Cloud Run v2 Jobs automatically use Gen2 execution environment, which provides improved resource allocation. Gen2 is the default for the v2 API and requires no explicit configuration.
+
+**Expected Outcome**: Gen2 with 8 vCPU should provide 6-8 actual cores (vs 2 currently).
 
 ### Option 2: Test Higher vCPU Tiers
 
@@ -111,9 +85,9 @@ Cloud Batch is designed for batch processing workloads:
 
 ## Implementation Plan
 
-### Phase 1: Test Execution Environment Setting (1-2 hours)
+### Phase 1: Test 8 vCPU Configuration (1-2 hours)
 
-1. Update Terraform configuration with `execution_environment = "EXECUTION_ENVIRONMENT_GEN2"`
+1. Update Terraform configuration to 8 vCPU / 32GB (already completed)
 2. Deploy to dev environment
 3. Run test training job
 4. Check logs for core allocation:
@@ -125,28 +99,16 @@ Cloud Batch is designed for batch processing workloads:
 5. If successful: Deploy to prod
 
 **Success Criteria**: 
-- `parallelly::availableCores()` reports 3-4 cores (75-100% of requested)
-- Training performance improves by 50-100%
+- `parallelly::availableCores()` reports 6-8 cores (vs 2 currently)
+- Training performance improves by 3-4x
 
-### Phase 2: Test Higher vCPU Tier (if Phase 1 doesn't work)
-
-1. Update Terraform to use 8 vCPU / 32GB
-2. Deploy to dev environment
-3. Run test training job
-4. Check core allocation and training time
-5. Calculate cost vs. performance improvement
-
-**Success Criteria**:
-- Get 4+ cores available
-- Cost increase justified by performance improvement
-- Total cost per training job remains acceptable
-
-### Phase 3: Evaluate Alternatives (if Phase 1 & 2 don't work)
+### Phase 2: Evaluate Alternatives (if Phase 1 doesn't work)
 
 Research and prototype:
-1. GKE Autopilot with training jobs
-2. Cloud Batch API integration
-3. Compute Engine with managed instance groups
+1. Try 16 vCPU tier (even higher resource tier)
+2. GKE Autopilot with training jobs (guaranteed allocation)
+3. Cloud Batch API integration (batch-optimized)
+4. Compute Engine with managed instance groups (full control)
 
 ## Testing and Validation
 
@@ -249,6 +211,6 @@ Track these metrics before and after changes:
 
 | Date | Decision | Rationale | Outcome |
 |------|----------|-----------|---------|
-| 2025-12-17 | Test execution_environment=GEN2 | Low risk, high potential impact | TBD |
+| 2025-12-17 | Upgrade to 8 vCPU with Gen2 (default) | Higher tiers bypass platform quotas, Gen2 is default for v2 Jobs | TBD |
 | TBD | Consider 8 vCPU tier | If Gen2 doesn't provide 4 cores | TBD |
 | TBD | Evaluate GKE Autopilot | If Cloud Run limitations persist | TBD |
