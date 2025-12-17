@@ -210,19 +210,17 @@ requested_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
 # This works around parallelly package rejecting Cloud Run's cgroups quota (8.342 CPUs)
 # which it considers "out of range" and falls back to 2 cores
 # See: https://github.com/ivana-meshed/mmm-app/blob/main/docs/8_VCPU_TEST_RESULTS.md
+# CRITICAL: Set env var BEFORE parallelly is ever loaded/called
 override_cores <- Sys.getenv("PARALLELLY_OVERRIDE_CORES", "")
 if (nzchar(override_cores)) {
     override_value <- as.numeric(override_cores)
     if (!is.na(override_value) && override_value > 0) {
         cat(sprintf("\n🔧 Overriding parallelly core detection with %d cores (PARALLELLY_OVERRIDE_CORES)\n", override_value))
-        # Load parallelly package first
-        library(parallelly)
-        # Set R_PARALLELLY_AVAILABLECORES_FALLBACK environment variable
-        # This is checked by parallelly BEFORE it tries cgroups detection
+        # Set R_PARALLELLY_AVAILABLECORES_FALLBACK BEFORE loading parallelly
+        # This env var is checked by parallelly at package load time
         Sys.setenv(R_PARALLELLY_AVAILABLECORES_FALLBACK = override_value)
-        # Also set the option as a backup
-        options(parallelly.availableCores.fallback = override_value)
         cat(sprintf("   Set R_PARALLELLY_AVAILABLECORES_FALLBACK=%d\n", override_value))
+        cat(sprintf("   This will override parallelly::availableCores() to return %d\n\n", override_value))
     }
 }
 
