@@ -495,6 +495,10 @@ resource "google_cloud_run_v2_job" "training_job" {
       service_account = google_service_account.training_job_sa.email
       timeout         = "21600s"
       max_retries     = 1
+      
+      # Use Gen2 execution environment for better CPU allocation
+      # Gen2 provides improved resource allocation and fewer platform quotas
+      execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
       containers {
         name  = "training-container"
