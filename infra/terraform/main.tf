@@ -506,8 +506,8 @@ resource "google_cloud_run_v2_job" "training_job" {
 
         resources {
           limits = {
-            cpu    = var.training_cpu    # Configurable: 4.0 (recommended) or 2.0 for more savings
-            memory = var.training_memory # Configurable: 16Gi (recommended) or 8Gi for more savings
+            cpu    = var.training_cpu    # Configurable: 8.0 (recommended) for better core allocation
+            memory = var.training_memory # Configurable: 32Gi (recommended) or 16Gi for cost savings
           }
         }
 
