@@ -561,7 +561,7 @@ resource "google_cloud_run_v2_job" "training_job" {
         # Leave empty to use default auto-detection behavior
         env {
           name  = "PARALLELLY_OVERRIDE_CORES"
-          value = var.training_max_cores  # Override with requested cores
+          value = var.training_max_cores
         }
       }
     }
