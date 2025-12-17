@@ -1327,7 +1327,7 @@ def build_job_config_from_params(
         ),  # Resampling frequency
         "use_parquet": True,
         "parallel_processing": True,
-        "max_cores": 8,
+        "max_cores": int(os.getenv("R_MAX_CORES", "4")),
     }
 
     # Add custom_hyperparameters if present
