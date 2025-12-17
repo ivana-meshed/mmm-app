@@ -553,6 +553,16 @@ resource "google_cloud_run_v2_job" "training_job" {
           name  = "ROBYN_DIAGNOSE_CORES"
           value = "auto"
         }
+
+        # Override parallelly core detection (experimental)
+        # When set, forces parallelly to use this many cores instead of auto-detection
+        # This works around parallelly rejecting Cloud Run's cgroups quota format
+        # Set to match training_max_cores (e.g., "8") to use all allocated vCPUs
+        # Leave empty to use default auto-detection behavior
+        env {
+          name  = "PARALLELLY_OVERRIDE_CORES"
+          value = var.training_max_cores  # Override with requested cores
+        }
       }
     }
   }

@@ -206,6 +206,20 @@ diagnostic_enabled <- Sys.getenv("ROBYN_DIAGNOSE_CORES", "auto")
 # Get requested cores from environment (set by terraform)
 requested_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
 
+# Override parallelly detection to force use of requested cores
+# This works around parallelly package rejecting Cloud Run's cgroups quota (8.342 CPUs)
+# which it considers "out of range" and falls back to 2 cores
+# See: https://github.com/ivana-meshed/mmm-app/blob/main/docs/8_VCPU_TEST_RESULTS.md
+override_cores <- Sys.getenv("PARALLELLY_OVERRIDE_CORES", "")
+if (nzchar(override_cores)) {
+    override_value <- as.numeric(override_cores)
+    if (!is.na(override_value) && override_value > 0) {
+        cat(sprintf("\n🔧 Overriding parallelly core detection with %d cores (PARALLELLY_OVERRIDE_CORES)\n", override_value))
+        # Set the fallback that parallelly will use when it rejects cgroups quota
+        options(parallelly.availableCores.fallback = override_value)
+    }
+}
+
 # Detect actual available cores using multiple methods
 available_cores_parallelly <- parallelly::availableCores()
 available_cores_parallel <- parallel::detectCores()
