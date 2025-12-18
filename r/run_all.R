@@ -49,6 +49,40 @@ suppressPackageStartupMessages({
     a
 }
 
+## ---------- PARALLELLY OVERRIDE (MUST BE SET BEFORE LOADING ROBYN) ----------
+# CRITICAL: This MUST be set BEFORE library(Robyn) because:
+# 1. Robyn depends on parallelly package
+# 2. parallelly reads R_PARALLELLY_AVAILABLECORES_FALLBACK at package load time
+# 3. If we set it after loading, it has no effect
+#
+# This override works around parallelly rejecting Cloud Run's cgroups quota (8.342 CPUs)
+# which it considers "out of range" and falls back to 2 cores
+# See: https://github.com/ivana-meshed/mmm-app/blob/main/docs/8_VCPU_TEST_RESULTS.md
+override_cores <- Sys.getenv("PARALLELLY_OVERRIDE_CORES", "")
+if (nzchar(override_cores)) {
+    override_value <- as.numeric(override_cores)
+    if (!is.na(override_value) && override_value > 0) {
+        cat(sprintf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
+        cat(sprintf("🔧 PARALLELLY CORE OVERRIDE ACTIVE\n"))
+        cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"))
+        cat(sprintf("⚙️  Setting R_PARALLELLY_AVAILABLECORES_FALLBACK=%d\n", override_value))
+        cat(sprintf("📍 Timing: BEFORE library(Robyn) loads (critical for success)\n"))
+        cat(sprintf("🎯 Expected: parallelly::availableCores() will return %d\n", override_value))
+        cat(sprintf("📝 Override source: PARALLELLY_OVERRIDE_CORES env var\n\n"))
+        
+        # Set the environment variable that parallelly checks at load time
+        Sys.setenv(R_PARALLELLY_AVAILABLECORES_FALLBACK = override_value)
+        
+        cat(sprintf("✅ Override configured - will verify after Robyn loads\n"))
+        cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"))
+    } else {
+        cat(sprintf("\n⚠️  PARALLELLY_OVERRIDE_CORES set but invalid value: '%s'\n", override_cores))
+        cat(sprintf("    Must be a positive number. Override will not be applied.\n\n"))
+    }
+} else {
+    cat(sprintf("\n💡 No parallelly override configured (PARALLELLY_OVERRIDE_CORES not set)\n"))
+    cat(sprintf("   Will use default core detection (may result in only 2 cores)\n\n"))
+}
 
 library(Robyn)
 
@@ -206,27 +240,27 @@ diagnostic_enabled <- Sys.getenv("ROBYN_DIAGNOSE_CORES", "auto")
 # Get requested cores from environment (set by terraform)
 requested_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
 
-# Override parallelly detection to force use of requested cores
-# This works around parallelly package rejecting Cloud Run's cgroups quota (8.342 CPUs)
-# which it considers "out of range" and falls back to 2 cores
-# See: https://github.com/ivana-meshed/mmm-app/blob/main/docs/8_VCPU_TEST_RESULTS.md
-# CRITICAL: Set env var BEFORE parallelly is ever loaded/called
-override_cores <- Sys.getenv("PARALLELLY_OVERRIDE_CORES", "")
-if (nzchar(override_cores)) {
-    override_value <- as.numeric(override_cores)
-    if (!is.na(override_value) && override_value > 0) {
-        cat(sprintf("\n🔧 Overriding parallelly core detection with %d cores (PARALLELLY_OVERRIDE_CORES)\n", override_value))
-        # Set R_PARALLELLY_AVAILABLECORES_FALLBACK BEFORE loading parallelly
-        # This env var is checked by parallelly at package load time
-        Sys.setenv(R_PARALLELLY_AVAILABLECORES_FALLBACK = override_value)
-        cat(sprintf("   Set R_PARALLELLY_AVAILABLECORES_FALLBACK=%d\n", override_value))
-        cat(sprintf("   This will override parallelly::availableCores() to return %d\n\n", override_value))
-    }
-}
-
 # Detect actual available cores using multiple methods
+# Note: If PARALLELLY_OVERRIDE_CORES was set, parallelly should now respect it
 available_cores_parallelly <- parallelly::availableCores()
 available_cores_parallel <- parallel::detectCores()
+
+# Verify if override was successful
+override_cores_check <- Sys.getenv("PARALLELLY_OVERRIDE_CORES", "")
+if (nzchar(override_cores_check)) {
+    override_value_check <- as.numeric(override_cores_check)
+    if (!is.na(override_value_check) && override_value_check > 0) {
+        if (available_cores_parallelly == override_value_check) {
+            cat(sprintf("\n✅ OVERRIDE VERIFICATION: SUCCESS\n"))
+            cat(sprintf("   parallelly::availableCores() = %d (matches override)\n\n", available_cores_parallelly))
+        } else {
+            cat(sprintf("\n❌ OVERRIDE VERIFICATION: FAILED\n"))
+            cat(sprintf("   Expected: %d cores (from override)\n", override_value_check))
+            cat(sprintf("   Actual:   %d cores (from parallelly)\n", available_cores_parallelly))
+            cat(sprintf("   The override did not take effect - parallelly may have loaded before env var was set\n\n"))
+        }
+    }
+}
 
 # Quick check: if there's a significant discrepancy, run diagnostics
 should_diagnose <- FALSE

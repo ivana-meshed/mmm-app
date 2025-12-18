@@ -1,9 +1,28 @@
 # Parallelly Core Override Implementation
 
 **Date**: December 17, 2025  
-**Status**: Implemented, Ready for Testing  
+**Updated**: December 18, 2025  
+**Status**: ✅ FIXED - See `PARALLELLY_OVERRIDE_FIX.md` for the correct implementation  
 **Issue**: parallelly package rejects Cloud Run's cgroups quota (8.342) as "out of range"  
 **Solution**: Override parallelly detection to force use of allocated cores
+
+## ⚠️ IMPORTANT UPDATE (Dec 18, 2025)
+
+**The original implementation in this document had a critical timing issue.**
+
+The override code was placed AFTER `library(Robyn)`, which meant the parallelly package was already loaded before the environment variable was set. This caused the override to have no effect.
+
+**✅ THE FIX HAS BEEN IMPLEMENTED**
+
+See `docs/PARALLELLY_OVERRIDE_FIX.md` for:
+- Detailed explanation of why the original implementation didn't work
+- The correct implementation (override BEFORE library(Robyn))
+- Testing and verification instructions
+- Expected behavior after the fix
+
+---
+
+## Original Documentation (For Historical Reference)
 
 ## Problem
 
