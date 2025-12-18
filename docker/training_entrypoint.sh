@@ -3,6 +3,14 @@ set -e
 
 echo "Starting MMM Training Job on Cloud Run..."
 
+# CRITICAL: Set parallelly override BEFORE R starts
+# parallelly package caches availableCores during initialization
+# Setting it in R script (even at the top) is too late
+if [ -n "${PARALLELLY_OVERRIDE_CORES}" ]; then
+    export R_PARALLELLY_AVAILABLECORES_SYSTEM="${PARALLELLY_OVERRIDE_CORES}"
+    echo "🔧 Parallelly override: R_PARALLELLY_AVAILABLECORES_SYSTEM=${PARALLELLY_OVERRIDE_CORES}"
+fi
+
 # Verify environment
 echo "Environment Check:"
 echo "- CPU cores available: $(nproc)"
