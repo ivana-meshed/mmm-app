@@ -52,36 +52,45 @@ suppressPackageStartupMessages({
 ## ---------- PARALLELLY OVERRIDE (MUST BE SET BEFORE LOADING ROBYN) ----------
 # CRITICAL: This MUST be set BEFORE library(Robyn) because:
 # 1. Robyn depends on parallelly package
-# 2. parallelly reads R_PARALLELLY_AVAILABLECORES_FALLBACK at package load time
+# 2. parallelly reads these environment variables at package load time
 # 3. If we set it after loading, it has no effect
 #
 # This override works around parallelly rejecting Cloud Run's cgroups quota (8.342 CPUs)
 # which it considers "out of range" and falls back to 2 cores
 # See: https://github.com/ivana-meshed/mmm-app/blob/main/docs/8_VCPU_TEST_RESULTS.md
+
+# Capture early log messages before logging infrastructure is set up
+early_log_messages <- character(0)
+capture_early_log <- function(msg) {
+    early_log_messages <<- c(early_log_messages, msg)
+    cat(msg)  # Also print to stdout immediately
+}
+
 override_cores <- Sys.getenv("PARALLELLY_OVERRIDE_CORES", "")
 if (nzchar(override_cores)) {
     override_value <- as.numeric(override_cores)
     if (!is.na(override_value) && override_value > 0) {
-        cat(sprintf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
-        cat(sprintf("🔧 PARALLELLY CORE OVERRIDE ACTIVE\n"))
-        cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"))
-        cat(sprintf("⚙️  Setting R_PARALLELLY_AVAILABLECORES_FALLBACK=%d\n", override_value))
-        cat(sprintf("📍 Timing: BEFORE library(Robyn) loads (critical for success)\n"))
-        cat(sprintf("🎯 Expected: parallelly::availableCores() will return %d\n", override_value))
-        cat(sprintf("📝 Override source: PARALLELLY_OVERRIDE_CORES env var\n\n"))
+        capture_early_log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+        capture_early_log("🔧 PARALLELLY CORE OVERRIDE ACTIVE\n")
+        capture_early_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+        capture_early_log(sprintf("⚙️  Setting R_PARALLELLY_AVAILABLECORES_SYSTEM=%d\n", override_value))
+        capture_early_log("📍 Timing: BEFORE library(Robyn) loads (critical for success)\n")
+        capture_early_log(sprintf("🎯 Expected: parallelly::availableCores() will return %d\n", override_value))
+        capture_early_log("📝 Override source: PARALLELLY_OVERRIDE_CORES env var\n\n")
         
-        # Set the environment variable that parallelly checks at load time
-        Sys.setenv(R_PARALLELLY_AVAILABLECORES_FALLBACK = override_value)
+        # Set R_PARALLELLY_AVAILABLECORES_SYSTEM which forces parallelly to use this value
+        # This takes precedence over all detection methods including cgroups
+        Sys.setenv(R_PARALLELLY_AVAILABLECORES_SYSTEM = override_value)
         
-        cat(sprintf("✅ Override configured - will verify after Robyn loads\n"))
-        cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"))
+        capture_early_log("✅ Override configured - will verify after Robyn loads\n")
+        capture_early_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
     } else {
-        cat(sprintf("\n⚠️  PARALLELLY_OVERRIDE_CORES set but invalid value: '%s'\n", override_cores))
-        cat(sprintf("    Must be a positive number. Override will not be applied.\n\n"))
+        capture_early_log(sprintf("\n⚠️  PARALLELLY_OVERRIDE_CORES set but invalid value: '%s'\n", override_cores))
+        capture_early_log("    Must be a positive number. Override will not be applied.\n\n")
     }
 } else {
-    cat(sprintf("\n💡 No parallelly override configured (PARALLELLY_OVERRIDE_CORES not set)\n"))
-    cat(sprintf("   Will use default core detection (may result in only 2 cores)\n\n"))
+    capture_early_log("\n💡 No parallelly override configured (PARALLELLY_OVERRIDE_CORES not set)\n")
+    capture_early_log("   Will use default core detection (may result in only 2 cores)\n\n")
 }
 
 library(Robyn)
@@ -642,6 +651,12 @@ log_file <- file.path(dir_path, "console.log")
 dir.create(dirname(log_file), recursive = TRUE, showWarnings = FALSE)
 log_con_out <- file(log_file, open = "wt")
 log_con_err <- file(log_file, open = "at")
+
+# Write early log messages (from before logging was set up) to the log file
+if (exists("early_log_messages") && length(early_log_messages) > 0) {
+    writeLines(early_log_messages, log_con_out)
+}
+
 sink(log_con_out, split = TRUE)
 sink(log_con_err, type = "message")
 
