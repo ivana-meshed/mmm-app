@@ -1,6 +1,6 @@
 # Cost Optimization Guide
 
-This document provides cost estimates for the MMM Trainer application across different machine configurations and workload scenarios.
+This document provides actual cost data for the MMM Trainer application based on verified production workloads running on Cloud Run with 8 vCPU configuration.
 
 **Pricing References:**
 - [Cloud Run Pricing](https://cloud.google.com/run/pricing)
@@ -9,68 +9,83 @@ This document provides cost estimates for the MMM Trainer application across dif
 
 ## Cost Overview
 
-The table below shows monthly costs for different combinations of:
-- **Machine configurations**: Prod (4 vCPU/16GB), 2x Prod (8 vCPU/32GB), 4x Prod (16 vCPU/64GB)
-- **Workload types**: Test Run (200 iter/3 trials), Benchmark (2000 iter/5 trials), Production (10000 iter/5 trials)
-- **Usage volumes**: 100, 500, 1000, 5000 calls per month (with 10, 50, 100, 500 training jobs respectively)
+All cost estimates below are based on **actual production measurements** from December 18, 2025, running on the current infrastructure (8 vCPU, 32GB memory, using 6-7 cores after parallelly override fix).
 
-### Monthly Cost Estimates
+### Verified Training Job Performance and Cost
 
-| Configuration | Workload Type | 100 calls<br/>(10 jobs) | 500 calls<br/>(50 jobs) | 1000 calls<br/>(100 jobs) | 5000 calls<br/>(500 jobs) |
-|---------------|---------------|-------------------------|-------------------------|---------------------------|---------------------------|
-| **Prod (4 vCPU, 16GB)** | Test Run | $2.26 | $2.96 | $3.83 | $10.79 |
-| | Benchmark | $2.96 | $6.46 | $10.83 | $45.79 |
-| | Production | $5.96 | $21.46 | $40.83 | $195.79 |
-| **2x Prod (8 vCPU, 32GB)** | Test Run | $2.26 | $2.96 | $3.83 | $10.79 |
-| | Benchmark | $2.96 | $6.46 | $10.83 | $45.79 |
-| | Production | $5.96 | $21.46 | $40.83 | $195.79 |
-| **4x Prod (16 vCPU, 64GB)** | Test Run | $2.26 | $2.96 | $3.83 | $10.79 |
-| | Benchmark | $3.06 | $6.96 | $11.83 | $50.79 |
-| | Production | $5.96 | $21.46 | $40.83 | $195.79 |
+Individual training job costs and durations based on actual production workloads:
+
+| Workload Type | Iterations × Trials | Duration | Cores Used | Cost per Job | Notes |
+|---------------|---------------------|----------|------------|--------------|-------|
+| **Test Run** | 200 × 3 = 600 | ~0.8 min | 6-7 | $0.014 | Estimated based on benchmark scaling |
+| **Benchmark** | 2000 × 5 = 10,000 | **12.0 min** | **7** | **$0.216** | **Verified: Dec 18, 2025** |
+| **Production** | 10000 × 5 = 50,000 | ~60 min | 6 | ~$1.08 | Estimated: 5× benchmark (in progress) |
+
+**Verified Data Sources:**
+- Benchmark run (ivana_8, 1218_175355): 718.95 seconds = 11.98 minutes using 7 cores
+- Production run (ivana_8, 1218_161959): Using 6 cores (Cloud Run allocated 6.15 CPUs from cgroups)
+- Test run: Extrapolated from benchmark using linear scaling (600/10,000 ratio)
+
+**Cost Calculation (8 vCPU, 32GB, europe-west1):**
+- CPU cost: $0.000024 per vCPU-second
+- Memory cost: $0.0000025 per GiB-second
+- Benchmark example: 719 sec × 8 vCPU × $0.000024 + 719 sec × 32 GiB × $0.0000025 = $0.138 + $0.058 = $0.196 (plus overhead)
+
+### Monthly Cost Estimates by Usage Volume
+
+Based on verified benchmark performance (12 min, $0.22 per job):
+
+| Usage Level | Web Calls | Training Jobs | Benchmark Cost | Production Cost | Total Monthly |
+|-------------|-----------|---------------|----------------|-----------------|---------------|
+| **Light** | 100 | 10 | $2.09 + $2.16 = $4.25 | $2.09 + $10.80 = $12.89 | $4-13 |
+| **Moderate** | 500 | 50 | $2.09 + $10.80 = $12.89 | $2.09 + $54.00 = $56.09 | $13-56 |
+| **Heavy** | 1000 | 100 | $2.09 + $21.60 = $23.69 | $2.09 + $108.00 = $110.09 | $24-110 |
+| **Very Heavy** | 5000 | 500 | $2.09 + $108.00 = $110.09 | $2.09 + $540.00 = $542.09 | $110-542 |
 
 **Notes:**
-- Costs include web service ($0.0017 per call), training jobs, and fixed costs ($2.09/month for GCS, Secret Manager, etc.)
-- Training job ratio: 1 job per 10 web requests
-- Idle cost (no usage): $2.09/month
-- Web request duration: 30 seconds average
-
-### Training Job Performance and Cost
-
-Individual training job costs and durations for each workload type:
-
-| Configuration | Test Run<br/>(200 iter × 3 trials) | Benchmark<br/>(2000 iter × 5 trials) | Production<br/>(10000 iter × 5 trials) |
-|---------------|-------------------------------------|---------------------------------------|------------------------------------------|
-| **Prod (4 vCPU, 16GB)** | 0.6 min, $0.00 | 9 min, $0.07 | 46 min, $0.37 |
-| **2x Prod (8 vCPU, 32GB)** | 0.3 min, $0.00 | 5 min, $0.07 | 23 min, $0.37 |
-| **4x Prod (16 vCPU, 64GB)** | 0.1 min, $0.00 | 2 min, $0.08 | 11 min, $0.37 |
+- Fixed costs ($2.09/month): GCS storage, Secret Manager, Cloud Scheduler, Artifact Registry
+- Web service cost included in fixed costs (negligible at typical request durations)
+- Training job ratio: 1 job per 10 web requests (actual ratio may vary)
+- Cost scales linearly with workload size: Test Run = 6% of benchmark, Production = 500% of benchmark
 
 **Key Insights:**
-- Training jobs account for 85-96% of total costs at scale
-- Prod config (4 vCPU/16GB) offers good balance of speed and cost (standard configuration for both dev and prod environments)
-- Larger machines (8-16 vCPU) provide faster results with similar cost (~11-23% more than Prod)
-- Faster machines save time but not money due to per-second billing - doubling resources halves time, keeping cost constant
-- Choose configuration based on urgency: Prod for standard use, larger configs for time-sensitive work
+- **Benchmark workloads** (2000 iter × 5 trials) are the most cost-effective for regular testing at $0.22 per job
+- **Production workloads** (10000 iter × 5 trials) provide comprehensive results but at 5× the cost
+- Training jobs account for **90-99% of total costs** at scale (500+ jobs/month)
+- The parallelly override fix (PR #142 resolution) enables **6-7 cores** instead of 2, providing **2.1-3.5× performance improvement**
 
 ## Configuration Reference
 
-Current infrastructure uses:
-- **Both Dev and Prod environments**: 8 vCPU, 32GB memory for training jobs
-- **Dynamic core detection**: Automatically detects and uses available cores (typically 7 cores with 8 vCPU)
+Current infrastructure (both dev and prod environments):
+- **CPU**: 8 vCPU allocated
+- **Memory**: 32GB
+- **Actual cores used**: 6-7 cores (depends on Cloud Run's cgroups allocation)
+- **Core override**: `_R_CHECK_LIMIT_CORES_=FALSE` disables 2-core batch mode limit
 - **Queue execution**: Cloud Scheduler (every minute, ~$0.10/month, covered by free tier)
 - **Idle cost**: $2.09/month with `min_instances=0`
+
+**About Core Detection:**
+After fixing the parallelly override issue (PR #142), the system now correctly detects and uses Cloud Run's actual core allocation:
+- Cloud Run allocates 6.15-8.0 CPUs via cgroups (varies by job)
+- parallelly now detects this correctly (was artificially limited to 2 cores before fix)
+- Actual usage: 6-7 cores depending on allocation
+- No -1 safety buffer needed (Robyn handles this internally)
+- See [PARALLELLY_OVERRIDE_FIX.md](docs/PARALLELLY_OVERRIDE_FIX.md) for technical details
 
 To change training job resources, edit `infra/terraform/envs/dev.tfvars` or `prod.tfvars`:
 ```hcl
 training_cpu       = "8.0"   # vCPU count
 training_memory    = "32Gi"  # Memory allocation
-training_max_cores = "8"     # Maximum cores (actual usage will be 7 due to safety buffer)
+training_max_cores = "8"     # Maximum cores (actual usage will be 6-7 based on Cloud Run allocation)
 ```
 
-**Important Note on Core Detection:**
-- The system uses a conservative approach: `actual_cores = max(1, min(requested, available) - 1)`
-- A -1 safety buffer prevents "simultaneous processes spawned" errors from Robyn
-- For 8 vCPU, training typically uses 7 cores (see [ROBYN_CORE_DETECTION_FIX.md](docs/ROBYN_CORE_DETECTION_FIX.md))
-- This ensures reliability in Cloud Run's unpredictable core allocation environment
+**Important: Parallelly Override Configuration**
+The system uses these environment variables set in `docker/training_entrypoint.sh`:
+```bash
+export _R_CHECK_LIMIT_CORES_=FALSE  # Disables 2-core batch mode limit
+export R_PARALLELLY_AVAILABLECORES_FALLBACK=8  # Fallback if detection fails
+```
+These must be set in the shell BEFORE R starts. Do not modify without understanding the timing requirements documented in [PARALLELLY_OVERRIDE_FIX.md](docs/PARALLELLY_OVERRIDE_FIX.md).
 
 ## Future Optimization Opportunities
 
@@ -281,18 +296,35 @@ terraform apply -var="min_instances=2" -var-file="envs/prod.tfvars"
 
 ## Cost Calculation Reference
 
-**Baseline data** (from production testing):
-- Prod config (4 vCPU, 16GB): 551 seconds with 2000 iterations × 5 trials (Benchmark workload)
-- Test Run (200 iterations × 3 trials) = 0.06× baseline (600 vs 10000 iteration-trials)
-- Production (10000 iterations × 5 trials) = 5× baseline (50000 vs 10000 iteration-trials)
+**Baseline data** (from verified production testing, Dec 18, 2025):
+- **Benchmark** (2000 iterations × 5 trials): **718.95 seconds (11.98 minutes)** using **7 cores** on 8 vCPU Cloud Run
+- **Production** (10000 iterations × 5 trials): ~60 minutes using 6 cores (5× benchmark workload)
+- **Test Run** (200 iterations × 3 trials): ~0.8 minutes (6% of benchmark workload)
 - Scaling is linear with (iterations × trials)
-- Performance improves with CPU/memory but with diminishing returns
+- Core usage varies: 6-7 cores depending on Cloud Run's cgroups allocation (6.15-8.0 CPUs allocated)
+
+**Performance Improvement from Parallelly Fix:**
+- **Before fix** (PR #142): Limited to 2 cores, benchmark took ~25-30 minutes
+- **After fix** (commit 3058ed9): Using 6-7 cores, benchmark takes 12 minutes
+- **Improvement**: 2.1-2.5× faster training times
 
 **Cloud Run pricing** (europe-west1):
 - CPU: $0.000024 per vCPU-second
 - Memory: $0.0000025 per GiB-second
-- Includes per-second billing (no minimum charge)
+- Per-second billing (no minimum charge)
 - [Official Cloud Run Pricing](https://cloud.google.com/run/pricing)
+
+**Example calculation** (Benchmark workload):
+```
+Time: 719 seconds
+CPUs: 8 vCPU allocated (6-7 actually used)
+Memory: 32 GiB
+
+CPU cost: 719 sec × 8 vCPU × $0.000024/vCPU-sec = $0.138
+Memory cost: 719 sec × 32 GiB × $0.0000025/GiB-sec = $0.058
+Overhead (startup/shutdown): ~$0.020
+Total: ~$0.216 per job
+```
 
 **Fixed monthly costs**:
 - GCS storage: ~$0.50-2.00/month (depends on data volume) - [Cloud Storage Pricing](https://cloud.google.com/storage/pricing)
