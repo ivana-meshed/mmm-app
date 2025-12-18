@@ -1,6 +1,14 @@
 #!/usr/bin/env Rscript
 
 ## ---------- ENV ----------
+# CRITICAL: Set parallelly override FIRST, before any package loads
+# parallelly reads R_PARALLELLY_AVAILABLECORES_SYSTEM during initialization
+override_cores_value <- Sys.getenv("PARALLELLY_OVERRIDE_CORES", "")
+if (nzchar(override_cores_value)) {
+    # Set this BEFORE Sys.setenv block to ensure it's available when parallelly loads
+    Sys.setenv(R_PARALLELLY_AVAILABLECORES_SYSTEM = override_cores_value)
+}
+
 Sys.setenv(
     RETICULATE_PYTHON = "/usr/bin/python3",
     RETICULATE_AUTOCONFIGURE = "0",
@@ -49,11 +57,9 @@ suppressPackageStartupMessages({
     a
 }
 
-## ---------- PARALLELLY OVERRIDE (MUST BE SET BEFORE LOADING ROBYN) ----------
-# CRITICAL: This MUST be set BEFORE library(Robyn) because:
-# 1. Robyn depends on parallelly package
-# 2. parallelly reads these environment variables at package load time
-# 3. If we set it after loading, it has no effect
+## ---------- PARALLELLY OVERRIDE LOGGING ----------
+# Note: R_PARALLELLY_AVAILABLECORES_SYSTEM was already set at the top of the script
+# (lines 5-10) BEFORE any packages loaded. This logging section just reports status.
 #
 # This override works around parallelly rejecting Cloud Run's cgroups quota (8.342 CPUs)
 # which it considers "out of range" and falls back to 2 cores
@@ -73,16 +79,12 @@ if (nzchar(override_cores)) {
         capture_early_log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
         capture_early_log("🔧 PARALLELLY CORE OVERRIDE ACTIVE\n")
         capture_early_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
-        capture_early_log(sprintf("⚙️  Setting R_PARALLELLY_AVAILABLECORES_SYSTEM=%d\n", override_value))
-        capture_early_log("📍 Timing: BEFORE library(Robyn) loads (critical for success)\n")
+        capture_early_log(sprintf("⚙️  R_PARALLELLY_AVAILABLECORES_SYSTEM was set to %d\n", override_value))
+        capture_early_log("📍 Timing: Set at script startup (line 9), BEFORE any package loads\n")
         capture_early_log(sprintf("🎯 Expected: parallelly::availableCores() will return %d\n", override_value))
         capture_early_log("📝 Override source: PARALLELLY_OVERRIDE_CORES env var\n\n")
         
-        # Set R_PARALLELLY_AVAILABLECORES_SYSTEM which forces parallelly to use this value
-        # This takes precedence over all detection methods including cgroups
-        Sys.setenv(R_PARALLELLY_AVAILABLECORES_SYSTEM = override_value)
-        
-        capture_early_log("✅ Override configured - will verify after Robyn loads\n")
+        capture_early_log("✅ Override was configured at script startup - will verify after Robyn loads\n")
         capture_early_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
     } else {
         capture_early_log(sprintf("\n⚠️  PARALLELLY_OVERRIDE_CORES set but invalid value: '%s'\n", override_cores))
