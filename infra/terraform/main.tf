@@ -496,14 +496,17 @@ resource "google_cloud_run_v2_job" "training_job" {
       timeout         = "21600s"
       max_retries     = 1
 
+      # Note: Cloud Run v2 Jobs use Gen2 execution environment by default
+      # Gen2 provides improved resource allocation and fewer platform quotas
+
       containers {
         name  = "training-container"
         image = var.training_image
 
         resources {
           limits = {
-            cpu    = var.training_cpu    # Configurable: 4.0 (recommended) or 2.0 for more savings
-            memory = var.training_memory # Configurable: 16Gi (recommended) or 8Gi for more savings
+            cpu    = var.training_cpu    # Configurable: 8.0 (recommended) for better core allocation
+            memory = var.training_memory # Configurable: 32Gi (recommended) or 16Gi for cost savings
           }
         }
 
@@ -549,6 +552,16 @@ resource "google_cloud_run_v2_job" "training_job" {
         env {
           name  = "ROBYN_DIAGNOSE_CORES"
           value = "auto"
+        }
+
+        # Override parallelly core detection (experimental)
+        # When set, forces parallelly to use this many cores instead of auto-detection
+        # This works around parallelly rejecting Cloud Run's cgroups quota format
+        # Set to match training_max_cores (e.g., "8") to use all allocated vCPUs
+        # Leave empty to use default auto-detection behavior
+        env {
+          name  = "PARALLELLY_OVERRIDE_CORES"
+          value = var.training_max_cores
         }
       }
     }

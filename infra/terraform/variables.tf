@@ -57,21 +57,21 @@ variable "memory_limit" {
 
 # Training job resource sizing variables
 variable "training_cpu" {
-  description = "CPU limit for training job (4.0 recommended for 50% cost savings, 2.0 for 75%)"
+  description = "CPU limit for training job (8.0 recommended for better core allocation, 4.0 or 2.0 for cost savings)"
   type        = string
-  default     = "4.0"
+  default     = "8.0"
 }
 
 variable "training_memory" {
-  description = "Memory limit for training job (16Gi recommended, 8Gi for maximum savings)"
+  description = "Memory limit for training job (32Gi recommended, 16Gi or 8Gi for cost savings)"
   type        = string
-  default     = "16Gi"
+  default     = "32Gi"
 }
 
 variable "training_max_cores" {
-  description = "Maximum cores for R/Robyn training (should match training_cpu)"
+  description = "Maximum cores for R/Robyn training (should match training_cpu, 8 recommended)"
   type        = string
-  default     = "4"
+  default     = "8"
 }
 
 variable "min_instances" {

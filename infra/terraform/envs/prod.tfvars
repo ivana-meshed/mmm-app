@@ -17,12 +17,14 @@ sf_schema    = "GROWTH"
 sf_role      = "ACCOUNTADMIN"
 
 # Training job resource sizing
-# Testing: Cloud Run with 8 vCPU only provides 2 actual cores due to cgroups quota
-# Using 4 vCPU as intermediate test to check if more cores become available
-# This provides better cost/performance ratio while investigating core allocation
-training_cpu       = "4.0"
-training_memory    = "16Gi"
-training_max_cores = "4"  # Test if 4 vCPU provides more than 2 cores
+# Using 8 vCPU to bypass Cloud Run platform quotas that affect lower tiers
+# 8 vCPU tier typically provides better core allocation (6-8 actual cores)
+# Higher vCPU tiers are scheduled onto less-constrained host pools
+# Cost: ~$1.17/hour = ~$5.85 per 30-min job (vs $2.92 at 4 vCPU)
+# Expected: 3-4x performance improvement = net cost savings per unit of work
+training_cpu       = "8.0"
+training_memory    = "32Gi"
+training_max_cores = "8"  # Should provide 6-8 actual cores
 
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"
