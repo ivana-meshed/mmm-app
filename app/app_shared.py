@@ -1618,7 +1618,7 @@ def require_login_and_domain(allowed_domain: Optional[str] = None) -> None:
                 f"Sign in with your Google account from one of these domains: {domains_str}"
             )
         if st.button("Sign in with Google"):
-            st.login("google")  # type: ignore # explicitly pass provider name
+            st.login("google")  # type: ignore # nested [auth.google] config
         st.stop()
 
     email = (getattr(st.user, "email", "") or "").lower().strip()  # type: ignore
@@ -1637,7 +1637,7 @@ def require_login_and_domain(allowed_domain: Optional[str] = None) -> None:
                 f"This app is restricted to accounts from these domains: {domains_str}"
             )
         if st.button("Sign out"):
-            st.logout("google")  # type: ignore # explicitly pass provider name
+            st.logout("google")  # type: ignore # nested [auth.google] config
         st.stop()
 
 

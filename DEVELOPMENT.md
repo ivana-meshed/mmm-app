@@ -241,13 +241,12 @@ export SNOWFLAKE_SCHEMA=your_schema
 Create `app/.streamlit/secrets.toml`:
 
 ```toml
-[auth]
+[auth.google]
 redirect_uri = "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
 cookie_secret = "xxx"
 client_id = "xxx"
 client_secret = "xxx"
 server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
-providers = ["google"]
 
 [snowflake]
 account = "IPENC"
