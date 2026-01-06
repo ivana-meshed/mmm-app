@@ -241,7 +241,7 @@ export SNOWFLAKE_SCHEMA=your_schema
 Create `app/.streamlit/secrets.toml`:
 
 ```toml
-[auth.google]
+[auth]
 redirect_uri = "https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app/oauth2callback"
 cookie_secret = "xxx"
 client_id = "xxx"
