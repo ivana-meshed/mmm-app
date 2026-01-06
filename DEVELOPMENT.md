@@ -247,6 +247,7 @@ cookie_secret = "xxx"
 client_id = "xxx"
 client_secret = "xxx"
 server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+providers = ["google"]
 
 [snowflake]
 account = "IPENC"
