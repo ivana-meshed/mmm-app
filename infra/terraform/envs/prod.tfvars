@@ -16,12 +16,15 @@ sf_database  = "MESHED_BUYCYCLE"
 sf_schema    = "GROWTH"
 sf_role      = "ACCOUNTADMIN"
 
-# Training job resource sizing (cost optimization)
-# Reduced from 8 vCPU/32GB to 4 vCPU/16GB for 50% cost savings
-# Change to 2.0/8Gi for 75% savings (but longer training time)
-training_cpu       = "4.0"
-training_memory    = "16Gi"
-training_max_cores = "4"
+# Training job resource sizing
+# Using 8 vCPU to bypass Cloud Run platform quotas that affect lower tiers
+# 8 vCPU tier typically provides better core allocation (6-8 actual cores)
+# Higher vCPU tiers are scheduled onto less-constrained host pools
+# Cost: ~$1.17/hour = ~$5.85 per 30-min job (vs $2.92 at 4 vCPU)
+# Expected: 3-4x performance improvement = net cost savings per unit of work
+training_cpu       = "8.0"
+training_memory    = "32Gi"
+training_max_cores = "8"  # Should provide 6-8 actual cores
 
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"

@@ -1,6 +1,14 @@
 #!/usr/bin/env Rscript
 
 ## ---------- ENV ----------
+# CRITICAL: Set parallelly override FIRST, before any package loads
+# parallelly reads R_PARALLELLY_AVAILABLECORES_SYSTEM during initialization
+override_cores_value <- Sys.getenv("PARALLELLY_OVERRIDE_CORES", "")
+if (nzchar(override_cores_value)) {
+    # Set this BEFORE Sys.setenv block to ensure it's available when parallelly loads
+    Sys.setenv(R_PARALLELLY_AVAILABLECORES_SYSTEM = override_cores_value)
+}
+
 Sys.setenv(
     RETICULATE_PYTHON = "/usr/bin/python3",
     RETICULATE_AUTOCONFIGURE = "0",
@@ -10,6 +18,7 @@ Sys.setenv(
     OPENBLAS_NUM_THREADS = Sys.getenv("OPENBLAS_NUM_THREADS", "32")
 )
 
+# Force rebuild timestamp: 2025-12-17T10:18
 suppressPackageStartupMessages({
     library(jsonlite)
     library(dplyr)
@@ -48,6 +57,43 @@ suppressPackageStartupMessages({
     a
 }
 
+## ---------- PARALLELLY OVERRIDE LOGGING ----------
+# Note: R_PARALLELLY_AVAILABLECORES_SYSTEM was already set at the top of the script
+# (lines 5-10) BEFORE any packages loaded. This logging section just reports status.
+#
+# This override works around parallelly rejecting Cloud Run's cgroups quota (8.342 CPUs)
+# which it considers "out of range" and falls back to 2 cores
+# See: https://github.com/ivana-meshed/mmm-app/blob/main/docs/8_VCPU_TEST_RESULTS.md
+
+# Capture early log messages before logging infrastructure is set up
+early_log_messages <- character(0)
+capture_early_log <- function(msg) {
+    early_log_messages <<- c(early_log_messages, msg)
+    cat(msg)  # Also print to stdout immediately
+}
+
+override_cores <- Sys.getenv("PARALLELLY_OVERRIDE_CORES", "")
+if (nzchar(override_cores)) {
+    override_value <- as.numeric(override_cores)
+    if (!is.na(override_value) && override_value > 0) {
+        capture_early_log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+        capture_early_log("🔧 PARALLELLY CORE OVERRIDE ACTIVE\n")
+        capture_early_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+        capture_early_log(sprintf("⚙️  R_PARALLELLY_AVAILABLECORES_SYSTEM was set to %d\n", override_value))
+        capture_early_log("📍 Timing: Set at script startup (line 9), BEFORE any package loads\n")
+        capture_early_log(sprintf("🎯 Expected: parallelly::availableCores() will return %d\n", override_value))
+        capture_early_log("📝 Override source: PARALLELLY_OVERRIDE_CORES env var\n\n")
+        
+        capture_early_log("✅ Override was configured at script startup - will verify after Robyn loads\n")
+        capture_early_log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+    } else {
+        capture_early_log(sprintf("\n⚠️  PARALLELLY_OVERRIDE_CORES set but invalid value: '%s'\n", override_cores))
+        capture_early_log("    Must be a positive number. Override will not be applied.\n\n")
+    }
+} else {
+    capture_early_log("\n💡 No parallelly override configured (PARALLELLY_OVERRIDE_CORES not set)\n")
+    capture_early_log("   Will use default core detection (may result in only 2 cores)\n\n")
+}
 
 library(Robyn)
 
@@ -193,8 +239,168 @@ write_trace <- function(title, e) {
 
 HAVE_FORECAST <- requireNamespace("forecast", quietly = TRUE)
 
-max_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
+# ---------- DYNAMIC CORE DETECTION ----------
+# Cloud Run's actual core availability doesn't always match vCPU allocation
+# We need to be conservative to avoid "X simultaneous processes spawned" errors
+# which occur when Robyn's .check_ncores() validation fails
+
+# Run diagnostic script if core allocation looks suspicious
+# This helps investigate why Cloud Run may be limiting cores
+diagnostic_enabled <- Sys.getenv("ROBYN_DIAGNOSE_CORES", "auto")
+
+# Get requested cores from environment (set by terraform)
+requested_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
+
+# Detect actual available cores using multiple methods
+# Note: If PARALLELLY_OVERRIDE_CORES was set, parallelly should now respect it
+available_cores_parallelly <- parallelly::availableCores()
+available_cores_parallel <- parallel::detectCores()
+
+# Verify if override was successful
+override_cores_check <- Sys.getenv("PARALLELLY_OVERRIDE_CORES", "")
+if (nzchar(override_cores_check)) {
+    override_value_check <- as.numeric(override_cores_check)
+    if (!is.na(override_value_check) && override_value_check > 0) {
+        if (available_cores_parallelly == override_value_check) {
+            cat(sprintf("\n✅ OVERRIDE VERIFICATION: SUCCESS\n"))
+            cat(sprintf("   parallelly::availableCores() = %d (matches override)\n\n", available_cores_parallelly))
+        } else {
+            cat(sprintf("\n❌ OVERRIDE VERIFICATION: FAILED\n"))
+            cat(sprintf("   Expected: %d cores (from override)\n", override_value_check))
+            cat(sprintf("   Actual:   %d cores (from parallelly)\n", available_cores_parallelly))
+            cat(sprintf("   The override did not take effect - parallelly may have loaded before env var was set\n\n"))
+        }
+    }
+}
+
+# Quick check: if there's a significant discrepancy, run diagnostics
+should_diagnose <- FALSE
+if (diagnostic_enabled == "always") {
+    should_diagnose <- TRUE
+} else if (diagnostic_enabled == "auto") {
+    # Auto-diagnose if available cores are much less than requested
+    if (available_cores_parallelly < (requested_cores * 0.5) ||
+        available_cores_parallel < (requested_cores * 0.5)) {
+        should_diagnose <- TRUE
+    }
+}
+
+if (should_diagnose) {
+    cat("\n⚠️  Core allocation discrepancy detected - running diagnostics...\n")
+
+    # Try to find the diagnostic script in multiple locations
+    script_locations <- c(
+        # Deployment location (matching Dockerfile.training COPY location)
+        "/app/diagnose_cores.R",
+        # Same directory as this script (if running locally)
+        file.path(dirname(tryCatch(sys.frame(1)$ofile, error = function(e) "")), "diagnose_cores.R"),
+        # r/ subdirectory from current working directory
+        file.path("r", "diagnose_cores.R"),
+        # Alternative deployment path
+        "/app/r/diagnose_cores.R"
+    )
+
+    diagnostic_script <- NULL
+    for (loc in script_locations) {
+        if (file.exists(loc)) {
+            diagnostic_script <- loc
+            break
+        }
+    }
+
+    if (!is.null(diagnostic_script)) {
+        tryCatch(
+            {
+                source(diagnostic_script, local = TRUE)
+            },
+            error = function(e) {
+                cat(sprintf("⚠️  Diagnostic script failed: %s\n", conditionMessage(e)))
+            }
+        )
+    } else {
+        cat(sprintf(
+            "⚠️  Diagnostic script not found. Tried: %s\n",
+            paste(script_locations, collapse = ", ")
+        ))
+    }
+}
+
+cat(sprintf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
+cat(sprintf("🔧 CORE DETECTION ANALYSIS\n"))
+cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"))
+cat(sprintf("📊 Environment Configuration:\n"))
+cat(sprintf("  - R_MAX_CORES (requested):           %d\n", requested_cores))
+cat(sprintf("  - OMP_NUM_THREADS:                   %s\n", Sys.getenv("OMP_NUM_THREADS", "not set")))
+cat(sprintf("  - OPENBLAS_NUM_THREADS:              %s\n\n", Sys.getenv("OPENBLAS_NUM_THREADS", "not set")))
+cat(sprintf("🔍 Detection Methods:\n"))
+cat(sprintf("  - parallelly::availableCores():      %d (cgroup-aware)\n", available_cores_parallelly))
+cat(sprintf("  - parallel::detectCores():           %d (system CPUs)\n", available_cores_parallel))
+
+# Use the most conservative estimate between the two methods
+# This accounts for Cloud Run's unpredictable core allocation
+available_cores <- min(available_cores_parallelly, available_cores_parallel)
+
+# Strategy: Only apply -1 buffer if we're close to the requested amount
+# If Cloud Run is severely limiting cores (e.g., 2 when 8 requested), use what's available
+# The -1 buffer is only needed when we're at risk of the "X processes spawned" error
+actual_cores <- min(requested_cores, available_cores)
+
+# Apply -1 safety buffer only if we have enough cores (> 2) and we're using the requested amount
+# This prevents wasting cores when already constrained by Cloud Run
+if (actual_cores > 2 && actual_cores >= requested_cores) {
+    # We're at or above requested, apply safety buffer
+    safe_cores <- max(1, actual_cores - 1)
+    buffer_applied <- TRUE
+} else {
+    # Already constrained by Cloud Run, use what we have
+    safe_cores <- max(1, actual_cores)
+    buffer_applied <- FALSE
+}
+
+cat(sprintf("  - Conservative estimate:              %d\n", available_cores))
+cat(sprintf("  - Actual cores to use:                %d\n", actual_cores))
+cat(sprintf("  - Safety buffer applied:              %s\n", ifelse(buffer_applied, "Yes (-1)", "No")))
+cat(sprintf("  - Final cores for training:           %d\n\n", safe_cores))
+
+# Additional diagnostic information
+cat(sprintf("💡 Core Allocation Analysis:\n"))
+if (available_cores < requested_cores) {
+    discrepancy_pct <- round(100 * (requested_cores - available_cores) / requested_cores, 1)
+    cat(sprintf(
+        "  ⚠️  CORE SHORTFALL: Requested %d but only %d available (%.1f%% shortfall)\n",
+        requested_cores, available_cores, discrepancy_pct
+    ))
+
+    # Check if this looks like a Cloud Run cgroups quota issue
+    if (available_cores == 2 && requested_cores >= 4) {
+        cat(sprintf("  🔍 This pattern (2 cores with %d vCPU) suggests Cloud Run cgroups quota limitation\n", requested_cores))
+        cat(sprintf("  💡 Recommendation: Consider using training_cpu=4.0 or training_cpu=2.0 in Terraform\n"))
+        cat(sprintf("     to match actual core availability and reduce costs\n"))
+    } else if (available_cores < (requested_cores * 0.6)) {
+        cat(sprintf("  🔍 Available cores are significantly less than requested\n"))
+        cat(sprintf("  💡 Recommendation: Adjust training_max_cores to %d in Terraform configuration\n", available_cores))
+    }
+} else if (available_cores >= requested_cores) {
+    cat(sprintf(
+        "  ✅ Core allocation is good: %d cores available for %d requested\n",
+        available_cores, requested_cores
+    ))
+    if (buffer_applied) {
+        cat(sprintf("  ℹ️  Using %d cores (safety buffer -1) to prevent Robyn validation errors\n", safe_cores))
+    }
+} else {
+    cat(sprintf("  ✅ Using all %d available cores\n", available_cores))
+}
+cat(sprintf("\n"))
+cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"))
+
+# Set max_cores for use in robyn_run()
+max_cores <- safe_cores
+
+# Set up future plan for parallel processing
 plan(multisession, workers = max_cores)
+
+cat(sprintf("✅ Parallel processing initialized with %d workers\n\n", max_cores))
 
 ## ---------- HELPERS ----------
 should_add_n_searches <- function(dtf, spend_cols, thr = 0.15) {
@@ -351,9 +557,9 @@ iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
 timestamp <- cfg$timestamp %||% {
-  # Use CET (Central European Time) timezone to match Google Cloud Storage
-  cet_time <- as.POSIXlt(Sys.time(), tz = "Europe/Paris")
-  format(cet_time, "%m%d_%H%M%S")
+    # Use CET (Central European Time) timezone to match Google Cloud Storage
+    cet_time <- as.POSIXlt(Sys.time(), tz = "Europe/Paris")
+    format(cet_time, "%m%d_%H%M%S")
 }
 
 # NEW: Training date range
@@ -447,6 +653,12 @@ log_file <- file.path(dir_path, "console.log")
 dir.create(dirname(log_file), recursive = TRUE, showWarnings = FALSE)
 log_con_out <- file(log_file, open = "wt")
 log_con_err <- file(log_file, open = "at")
+
+# Write early log messages (from before logging was set up) to the log file
+if (exists("early_log_messages") && length(early_log_messages) > 0) {
+    writeLines(early_log_messages, log_con_out)
+}
+
 sink(log_con_out, split = TRUE)
 sink(log_con_err, type = "message")
 
@@ -732,7 +944,7 @@ if (skip_country) {
     message("   Reason(s): ", paste(skip_reason, collapse = "; "))
     message("   Training window: ", start_data_date, " to ", end_data_date)
     message("   Rows in window: ", nrow(df))
-    
+
     # Write skip notification to GCS
     skip_file <- file.path(dir_path, "SKIPPED.txt")
     writeLines(c(
@@ -745,7 +957,7 @@ if (skip_country) {
         paste0("  - ", skip_reason)
     ), skip_file)
     gcs_put_safe(skip_file, file.path(gcs_prefix, "SKIPPED.txt"))
-    
+
     # Update status.json to SKIPPED state
     writeLines(
         jsonlite::toJSON(
@@ -760,7 +972,7 @@ if (skip_country) {
         status_json
     )
     gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
-    
+
     flush_and_ship_log("country skipped - no usable data")
     message("✅ Country skipped successfully. Exiting without error.")
     quit(save = "no", status = 0)
@@ -954,9 +1166,13 @@ organic_vars <- if (should_add_n_searches(df, paid_media_spends) && "N_SEARCHES"
 # This prevents robyn_inputs() from failing with "no-variance" error
 # after data filtering/resampling may have reduced variance
 zero_var_check <- function(var_list, data) {
-    if (length(var_list) == 0) return(character(0))
+    if (length(var_list) == 0) {
+        return(character(0))
+    }
     has_variance <- vapply(var_list, function(v) {
-        if (!v %in% names(data)) return(FALSE)
+        if (!v %in% names(data)) {
+            return(FALSE)
+        }
         x <- data[[v]]
         # Check variance for both numeric and factor/character columns
         dplyr::n_distinct(x, na.rm = TRUE) > 1
@@ -1475,6 +1691,87 @@ alloc_start <- alloc_end - 364
 
 
 ## ---------- TRAIN (exact error capture; hard stop on failure) ----------
+cat(sprintf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
+cat(sprintf("🚀 ROBYN TRAINING PREPARATION\n"))
+cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"))
+
+cat(sprintf("📊 Training Parameters:\n"))
+cat(sprintf("  - Iterations:      %d\n", iter))
+cat(sprintf("  - Trials:          %d\n", trials))
+cat(sprintf("  - Cores requested: %d\n", max_cores))
+cat(sprintf("  - Time validation: TRUE\n"))
+cat(sprintf("  - Penalty factor:  TRUE\n\n"))
+
+cat(sprintf("💻 System Information:\n"))
+cat(sprintf("  - R version:           %s\n", R.version$version.string))
+cat(sprintf("  - Platform:            %s\n", R.version$platform))
+cat(sprintf("  - OS:                  %s\n", Sys.info()["sysname"]))
+cat(sprintf(
+    "  - Available memory:    %s\n",
+    if (file.exists("/sys/fs/cgroup/memory/memory.limit_in_bytes")) {
+        paste0(round(as.numeric(readLines("/sys/fs/cgroup/memory/memory.limit_in_bytes")[1]) / 1024^3, 1), " GB")
+    } else {
+        "Unknown"
+    }
+))
+cat(sprintf("  - CPU cores (system):  %d\n", parallel::detectCores()))
+cat(sprintf("  - CPU cores (actual):  %d\n", parallelly::availableCores()))
+cat(sprintf("  - Cores for training:  %d (safe buffer applied)\n", max_cores))
+cat(sprintf(
+    "  - Future plan:         %s with %d workers\n\n",
+    class(future::plan())[1], future::nbrOfWorkers()
+))
+
+cat(sprintf("📁 Data Dimensions:\n"))
+cat(sprintf("  - Rows:    %d\n", nrow(InputCollect$dt_input)))
+cat(sprintf("  - Columns: %d\n", ncol(InputCollect$dt_input)))
+cat(sprintf(
+    "  - Date range: %s to %s\n",
+    min(InputCollect$dt_input$date),
+    max(InputCollect$dt_input$date)
+))
+cat(sprintf(
+    "  - Days:    %d\n\n",
+    as.numeric(difftime(max(InputCollect$dt_input$date),
+        min(InputCollect$dt_input$date),
+        units = "days"
+    ))
+))
+
+cat(sprintf("🎯 Model Configuration:\n"))
+cat(sprintf("  - Dependent variable: %s\n", InputCollect$dep_var))
+cat(sprintf("  - Paid media spends:  %d variables\n", length(InputCollect$paid_media_spends)))
+cat(sprintf("  - Paid media vars:    %d variables\n", length(InputCollect$paid_media_vars)))
+cat(sprintf(
+    "  - Context vars:       %d variables\n",
+    if (!is.null(InputCollect$context_vars)) length(InputCollect$context_vars) else 0
+))
+cat(sprintf(
+    "  - Organic vars:       %d variables\n",
+    if (!is.null(InputCollect$organic_vars)) length(InputCollect$organic_vars) else 0
+))
+cat(sprintf(
+    "  - Factor vars:        %d variables\n\n",
+    if (!is.null(InputCollect$factor_vars)) length(InputCollect$factor_vars) else 0
+))
+
+cat(sprintf("⚙️  Hyperparameters:\n"))
+if (!is.null(InputCollect$hyperparameters)) {
+    for (hp_name in names(InputCollect$hyperparameters)) {
+        hp_val <- InputCollect$hyperparameters[[hp_name]]
+        if (length(hp_val) <= 3) {
+            cat(sprintf("  - %-20s: %s\n", hp_name, paste(hp_val, collapse = ", ")))
+        } else {
+            cat(sprintf("  - %-20s: %d values\n", hp_name, length(hp_val)))
+        }
+    }
+}
+cat(sprintf("\n"))
+
+cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"))
+cat(sprintf("🎬 Starting robyn_run() with %d cores...\n", max_cores))
+cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"))
+
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
 t0 <- Sys.time()
 
@@ -1501,16 +1798,30 @@ OutputModels <- tryCatch(
     error = function(e) {
         calls_chr <- .format_calls(sys.calls())
         elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
-        writeLines(c(
+
+        # Enhanced error information with core detection details
+        error_details <- c(
             "robyn_run() FAILED",
             paste0("When     : ", as.character(Sys.time())),
             paste0("Elapsed  : ", round(elapsed, 2), " sec"),
             paste0("Message  : ", conditionMessage(e)),
             paste0("Call     : ", paste(deparse(conditionCall(e)), collapse = " ")),
             paste0("Class    : ", paste(class(e), collapse = ", ")),
+            "",
+            "--- Core Detection Information ---",
+            paste0("Requested cores (R_MAX_CORES): ", requested_cores),
+            paste0("Available (parallelly):        ", available_cores_parallelly),
+            paste0("Available (parallel):          ", available_cores_parallel),
+            paste0("Conservative estimate:         ", available_cores),
+            paste0("Cores passed to robyn_run:     ", max_cores),
+            paste0("Future workers:                ", future::nbrOfWorkers()),
+            paste0("System CPU count:              ", parallel::detectCores()),
+            "",
             "--- Approximate R call stack (inner→outer) ---",
             paste(rev(calls_chr), collapse = "\n")
-        ), robyn_err_txt)
+        )
+
+        writeLines(error_details, robyn_err_txt)
 
         err_payload <- list(
             state = "FAILED", step = "robyn_run",
@@ -1521,7 +1832,20 @@ OutputModels <- tryCatch(
             call = paste(deparse(conditionCall(e)), collapse = " "),
             class = unname(class(e)),
             stack_inner_to_outer = as.list(calls_chr),
-            params = list(iterations = iter, trials = trials, cores = max_cores)
+            params = list(
+                iterations = iter,
+                trials = trials,
+                cores = max_cores
+            ),
+            core_detection = list(
+                requested_cores = requested_cores,
+                available_parallelly = available_cores_parallelly,
+                available_parallel = available_cores_parallel,
+                conservative_estimate = available_cores,
+                used_cores = max_cores,
+                future_workers = future::nbrOfWorkers(),
+                system_cpu_count = parallel::detectCores()
+            )
         )
         writeLines(jsonlite::toJSON(err_payload, auto_unbox = TRUE, pretty = TRUE), robyn_err_json)
         gcs_put_safe(robyn_err_txt, file.path(gcs_prefix, basename(robyn_err_txt)))
@@ -1547,8 +1871,86 @@ OutputModels <- tryCatch(
 )
 
 flush_and_ship_log("after robyn_run")
+
+# Check if robyn_run() returned NULL (silent failure)
+if (is.null(OutputModels)) {
+    elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+    error_msg <- "robyn_run() returned NULL - no models were generated. This typically indicates a silent failure during training."
+
+    error_details <- c(
+        "robyn_run() RETURNED NULL",
+        paste0("When     : ", as.character(Sys.time())),
+        paste0("Elapsed  : ", round(elapsed, 2), " sec"),
+        paste0("Message  : ", error_msg),
+        "",
+        "Possible causes:",
+        "1. Data validation failed silently",
+        "2. All hyperparameter trials failed",
+        "3. Insufficient memory during training",
+        "4. Optimization algorithm failed to converge",
+        "5. Internal Robyn error was suppressed",
+        "",
+        "--- Core Detection Information ---",
+        paste0("Requested cores (R_MAX_CORES): ", requested_cores),
+        paste0("Available (parallelly):        ", available_cores_parallelly),
+        paste0("Available (parallel):          ", available_cores_parallel),
+        paste0("Conservative estimate:         ", available_cores),
+        paste0("Cores passed to robyn_run:     ", max_cores),
+        paste0("Future workers:                ", future::nbrOfWorkers()),
+        paste0("System CPU count:              ", parallel::detectCores())
+    )
+
+    writeLines(error_details, robyn_err_txt)
+
+    err_payload <- list(
+        state = "FAILED", step = "robyn_run",
+        timestamp = as.character(Sys.time()),
+        training_started_at = as.character(t0),
+        elapsed_seconds = elapsed,
+        message = error_msg,
+        return_value = "NULL",
+        class = "NULL_RETURN",
+        params = list(
+            iterations = iter,
+            trials = trials,
+            cores = max_cores
+        ),
+        core_detection = list(
+            requested_cores = requested_cores,
+            available_parallelly = available_cores_parallelly,
+            available_parallel = available_cores_parallel,
+            conservative_estimate = available_cores,
+            used_cores = max_cores,
+            future_workers = future::nbrOfWorkers(),
+            system_cpu_count = parallel::detectCores()
+        )
+    )
+
+    writeLines(jsonlite::toJSON(err_payload, auto_unbox = TRUE, pretty = TRUE), robyn_err_json)
+    gcs_put_safe(robyn_err_txt, file.path(gcs_prefix, basename(robyn_err_txt)))
+    gcs_put_safe(robyn_err_json, file.path(gcs_prefix, basename(robyn_err_json)))
+
+    # Update status.json
+    try(
+        {
+            writeLines(jsonlite::toJSON(list(
+                state = "FAILED",
+                start_time = as.character(job_started),
+                end_time = as.character(Sys.time()),
+                failed_step = "robyn_run",
+                error_message = error_msg
+            ), auto_unbox = TRUE, pretty = TRUE), status_json)
+            gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+        },
+        silent = TRUE
+    )
+
+    stop(error_msg, call. = FALSE)
+}
+
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
+message("✅ OutputModels object created with class: ", class(OutputModels)[1])
 
 ## ---------- APPEND R TRAINING TIME TO timings.csv --
 
@@ -1688,11 +2090,11 @@ if (!is.null(OutputCollect$xDecompAgg)) {
     all_vars_in_decomp <- unique(OutputCollect$xDecompAgg$rn)
     message("📊 Variables in xDecompAgg (", length(all_vars_in_decomp), " total):")
     message("   ", paste(all_vars_in_decomp, collapse = ", "))
-    
+
     # Check specifically for organic_vars
     organic_in_decomp <- intersect(organic_vars, all_vars_in_decomp)
     organic_missing <- setdiff(organic_vars, all_vars_in_decomp)
-    
+
     if (length(organic_in_decomp) > 0) {
         message("✅ Organic vars found in decomposition: ", paste(organic_in_decomp, collapse = ", "))
     }
@@ -1716,33 +2118,33 @@ tryCatch(
         # Source the extraction helper - try multiple locations
         extract_script <- NULL
         candidates <- c(
-            "/app/extract_output_models_data.R",  # Docker container location
-            "r/extract_output_models_data.R"      # Local development location
+            "/app/extract_output_models_data.R", # Docker container location
+            "r/extract_output_models_data.R" # Local development location
         )
-        
+
         for (candidate in candidates) {
             if (file.exists(candidate)) {
                 extract_script <- candidate
                 break
             }
         }
-        
+
         if (!is.null(extract_script)) {
             source(extract_script)
-            
+
             # Extract parquet data from OutputCollect
             created_files <- extract_output_models_data(
                 oc_path = file.path(dir_path, "OutputCollect.RDS"),
                 out_dir = output_models_data_dir
             )
-            
+
             # Upload parquet files to GCS
             for (pq_file in created_files) {
                 # Get relative path from dir_path
                 rel_path <- gsub(paste0("^", dir_path, "/?"), "", pq_file)
                 gcs_put_safe(pq_file, file.path(gcs_prefix, rel_path))
             }
-            
+
             message("✅ OutputCollect data extraction complete, uploaded ", length(created_files), " parquet files")
         } else {
             message("⚠️ Could not find extract_output_models_data.R, skipping parquet extraction")
@@ -1760,18 +2162,21 @@ message("→ Generating model summary...")
 extract_summary_script <- NULL
 
 # 1. Try same directory as this script
-tryCatch({
-    candidate <- file.path(
-        dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE)),
-        "extract_model_summary.R"
-    )
-    if (file.exists(candidate)) {
-        extract_summary_script <- candidate
+tryCatch(
+    {
+        candidate <- file.path(
+            dirname(normalizePath(sys.frame(1)$ofile, mustWork = FALSE)),
+            "extract_model_summary.R"
+        )
+        if (file.exists(candidate)) {
+            extract_summary_script <- candidate
+        }
+    },
+    error = function(e) {
+        # sys.frame(1)$ofile not available in this context
+        # Will try other locations instead
     }
-}, error = function(e) {
-    # sys.frame(1)$ofile not available in this context
-    # Will try other locations instead
-})
+)
 
 # 2. Try /app directory (Docker container location)
 if (is.null(extract_summary_script)) {
@@ -1949,9 +2354,9 @@ robyn_scenario <- "max_response"
 cat("\n========== BUDGET CONFIGURATION ==========\n")
 cat(paste0("UI scenario: ", budget_scenario_cfg, "\n"))
 cat(paste0("Robyn scenario: ", robyn_scenario, "\n"))
-cat(paste0("expected_spend: ", if (is.null(expected_spend_cfg)) "NULL (use historical)" else format(expected_spend_cfg, scientific=FALSE, big.mark=","), "\n"))
+cat(paste0("expected_spend: ", if (is.null(expected_spend_cfg)) "NULL (use historical)" else format(expected_spend_cfg, scientific = FALSE, big.mark = ","), "\n"))
 if (length(channel_budgets_cfg) > 0) {
-    cat(paste0("channel_budgets: ", paste(names(channel_budgets_cfg), "=", unlist(channel_budgets_cfg), collapse=", "), "\n"))
+    cat(paste0("channel_budgets: ", paste(names(channel_budgets_cfg), "=", unlist(channel_budgets_cfg), collapse = ", "), "\n"))
 }
 
 # Set up channel constraints
@@ -1965,73 +2370,79 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
     # Mode 3: Custom budget WITH per-channel constraints
     cat("\n💰 MODE 3: Custom Budget WITH Per-Channel Constraints\n")
     cat(sprintf("  Total budget (expected_spend): %s\n", expected_spend_cfg))
-    
+
     # Calculate historical spend for the allocator date range
     # Filter data to the allocator window
-    alloc_data <- InputCollect$dt_input[InputCollect$dt_input$date >= alloc_start & 
-                                        InputCollect$dt_input$date <= alloc_end, ]
-    
+    alloc_data <- InputCollect$dt_input[InputCollect$dt_input$date >= alloc_start &
+        InputCollect$dt_input$date <= alloc_end, ]
+
     # Calculate historical total spend across all paid media channels
     historical_spends <- sapply(InputCollect$paid_media_spends, function(ch) {
         sum(alloc_data[[ch]], na.rm = TRUE)
     })
     historical_total <- sum(historical_spends)
-    
+
     cat(sprintf("  Historical total spend (in date range): %.2f\n", historical_total))
-    
+
     # Calculate total of specified channel budgets
     total_channel_budgets <- sum(sapply(channel_budgets_cfg, as.numeric))
     cat(sprintf("  Sum of channel budgets: %s\n", total_channel_budgets))
-    
+
     # Warn if channel budgets don't sum to expected_spend
     if (abs(total_channel_budgets - expected_spend_cfg) > 0.01 * expected_spend_cfg) {
-        cat(sprintf("  ⚠️  WARNING: Sum of channel budgets (%.0f) differs from expected_spend (%.0f) by %.1f%%\n",
-                      total_channel_budgets, expected_spend_cfg,
-                      100 * abs(total_channel_budgets - expected_spend_cfg) / expected_spend_cfg))
+        cat(sprintf(
+            "  ⚠️  WARNING: Sum of channel budgets (%.0f) differs from expected_spend (%.0f) by %.1f%%\n",
+            total_channel_budgets, expected_spend_cfg,
+            100 * abs(total_channel_budgets - expected_spend_cfg) / expected_spend_cfg
+        ))
     }
-    
+
     # Normalize channel budgets to sum to expected_spend
     normalization_factor <- expected_spend_cfg / total_channel_budgets
     cat(sprintf("  Normalization factor: %.6f (to make budgets sum to expected_spend)\n", normalization_factor))
-    
+
     # Initialize bounds as multipliers
     # Robyn's channel_constr_low/up are MULTIPLIERS of historical spend, not proportions
     low_bounds <- rep(0, length(InputCollect$paid_media_spends))
     up_bounds <- rep(0, length(InputCollect$paid_media_spends))
-    
+
     cat("\n  Channel-specific constraints (as multipliers of historical spend):\n")
-    
+
     # For each channel with a specified budget, calculate multiplier bounds
     for (channel_name in names(channel_budgets_cfg)) {
         # Find the index of this channel in paid_media_spends
         channel_idx <- which(InputCollect$paid_media_spends == channel_name)
-        
+
         if (length(channel_idx) > 0) {
             channel_budget <- as.numeric(channel_budgets_cfg[[channel_name]])
-            
+
             # Normalize the budget so all budgets sum to expected_spend
             normalized_budget <- channel_budget * normalization_factor
-            
+
             # Get historical spend for this channel
             channel_historical <- historical_spends[channel_idx]
-            
+
             # Calculate the multiplier: desired_spend / historical_spend
             # This tells Robyn how much to scale this channel relative to history
             if (channel_historical > 0) {
                 target_multiplier <- normalized_budget / channel_historical
-                
+
                 # Set tight bounds around the target multiplier
                 # Use 5% tolerance to allow some optimization flexibility
                 tolerance <- 0.05
                 low_bounds[channel_idx] <- max(0, target_multiplier * (1 - tolerance))
                 up_bounds[channel_idx] <- target_multiplier * (1 + tolerance)
-                
-                cat(sprintf("    %s: budget=%.0f, historical=%.0f, multiplier=%.3f, bounds=[%.3f, %.3f]\n",
-                              channel_name, normalized_budget, channel_historical, target_multiplier,
-                              low_bounds[channel_idx], up_bounds[channel_idx]))
+
+                cat(sprintf(
+                    "    %s: budget=%.0f, historical=%.0f, multiplier=%.3f, bounds=[%.3f, %.3f]\n",
+                    channel_name, normalized_budget, channel_historical, target_multiplier,
+                    low_bounds[channel_idx], up_bounds[channel_idx]
+                ))
             } else {
-                cat(sprintf("    ⚠️  %s: budget=%.0f but historical spend = 0, setting bounds to [0, 0]\n",
-                              channel_name, normalized_budget))
+                cat(sprintf(
+                    "    ⚠️  %s: budget=%.0f but historical spend = 0, setting bounds to [0, 0]\n",
+                    channel_name, normalized_budget
+                ))
                 low_bounds[channel_idx] <- 0
                 up_bounds[channel_idx] <- 0
             }
@@ -2039,35 +2450,34 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
             cat(sprintf("    ⚠️  WARNING: Channel '%s' in channel_budgets not found in paid_media_spends\n", channel_name))
         }
     }
-    
+
     # Verify that applying these multipliers would give us approximately the expected total
     projected_total <- sum(historical_spends * up_bounds)
     cat(sprintf("\n  Validation: Projected total spend = %.2f (target: %.2f)\n", projected_total, expected_spend_cfg))
-    
+
     if (abs(projected_total - expected_spend_cfg) > 0.1 * expected_spend_cfg) {
         cat("  ⚠️  WARNING: Projected total differs from expected_spend by more than 10%!\n")
         cat("  ⚠️  This suggests the multiplier approach may not perfectly enforce the budget.\n")
     }
-    
 } else if (!is.null(expected_spend_cfg) && length(channel_budgets_cfg) == 0) {
     # Mode 2: Custom total budget WITHOUT per-channel constraints
     cat("\n💰 MODE 2: Custom Total Budget WITHOUT Per-Channel Constraints\n")
-    cat(sprintf("  Total budget (expected_spend): %s\n", format(expected_spend_cfg, scientific=FALSE, big.mark=",")))
-    
+    cat(sprintf("  Total budget (expected_spend): %s\n", format(expected_spend_cfg, scientific = FALSE, big.mark = ",")))
+
     # Calculate historical spend for comparison
-    alloc_data <- InputCollect$dt_input[InputCollect$dt_input$date >= alloc_start & 
-                                        InputCollect$dt_input$date <= alloc_end, ]
+    alloc_data <- InputCollect$dt_input[InputCollect$dt_input$date >= alloc_start &
+        InputCollect$dt_input$date <= alloc_end, ]
     historical_spends <- sapply(InputCollect$paid_media_spends, function(ch) {
         sum(alloc_data[[ch]], na.rm = TRUE)
     })
     historical_total <- sum(historical_spends)
-    
+
     cat(sprintf("  Historical total spend (in date range): %.2f\n", historical_total))
-    
-    # If custom budget is significantly lower than historical spend, 
+
+    # If custom budget is significantly lower than historical spend,
     # we need to set permissive channel constraints to avoid conflicts
     budget_ratio <- expected_spend_cfg / historical_total
-    
+
     if (budget_ratio < 0.9) {
         # Custom budget is lower than historical - allow channels to decrease significantly
         # Set lower bound to 0.01 (1% of historical) to allow major reductions
@@ -2075,8 +2485,10 @@ if (length(channel_budgets_cfg) > 0 && !is.null(expected_spend_cfg)) {
         low_bounds <- rep(0.01, length(InputCollect$paid_media_spends))
         up_bounds <- rep(min(budget_ratio * 2, 2.0), length(InputCollect$paid_media_spends))
         cat(sprintf("  ⚠️  Custom budget (%.0f) is %.1f%% of historical spend\n", expected_spend_cfg, budget_ratio * 100))
-        cat(sprintf("  Setting permissive channel constraints: [%.2f, %.2f] to make budget feasible\n", 
-                    low_bounds[1], up_bounds[1]))
+        cat(sprintf(
+            "  Setting permissive channel constraints: [%.2f, %.2f] to make budget feasible\n",
+            low_bounds[1], up_bounds[1]
+        ))
         cat("  Note: Channels can be reduced to 1% of historical to fit within total budget\n")
     } else {
         # Custom budget is close to or higher than historical - use default flexibility
@@ -2094,9 +2506,9 @@ cat("==========================================\n\n")
 # Log the actual values being passed to robyn_allocator
 cat("📊 Calling robyn_allocator with:\n")
 cat(sprintf("  scenario: %s\n", robyn_scenario))
-cat(sprintf("  total_budget: %s\n", if (is.null(expected_spend_cfg)) "NULL" else format(expected_spend_cfg, scientific=FALSE, big.mark=",")))
-cat(sprintf("  channel_constr_low: %s\n", if (is.null(low_bounds)) "NULL" else paste0("[", paste(sprintf("%.3f", low_bounds), collapse=", "), "]")))
-cat(sprintf("  channel_constr_up: %s\n", if (is.null(up_bounds)) "NULL" else paste0("[", paste(sprintf("%.3f", up_bounds), collapse=", "), "]")))
+cat(sprintf("  total_budget: %s\n", if (is.null(expected_spend_cfg)) "NULL" else format(expected_spend_cfg, scientific = FALSE, big.mark = ",")))
+cat(sprintf("  channel_constr_low: %s\n", if (is.null(low_bounds)) "NULL" else paste0("[", paste(sprintf("%.3f", low_bounds), collapse = ", "), "]")))
+cat(sprintf("  channel_constr_up: %s\n", if (is.null(up_bounds)) "NULL" else paste0("[", paste(sprintf("%.3f", up_bounds), collapse = ", "), "]")))
 cat(sprintf("  date_range: %s to %s\n\n", alloc_start, alloc_end))
 
 AllocatorCollect <- try(
@@ -2115,7 +2527,7 @@ flush_and_ship_log("after robyn_allocator")
 if (inherits(AllocatorCollect, "try-error")) {
     err_msg <- conditionMessage(attr(AllocatorCollect, "condition"))
     cat(paste0("\n❌ robyn_allocator FAILED with error: ", err_msg, "\n\n"))
-    
+
     # Write error to file for debugging
     alloc_err_file <- file.path(dir_path, "allocator_error.txt")
     writeLines(c(

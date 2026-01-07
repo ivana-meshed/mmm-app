@@ -25,10 +25,9 @@ from cryptography.hazmat.primitives import serialization
 from data_processor import DataProcessor
 from google.api_core.exceptions import PreconditionFailed
 from google.cloud import run_v2, secretmanager, storage
+from utils.gcs_utils import format_cet_timestamp, get_cet_now
 from utils.snowflake_cache import get_cached_query_result
 from utils.snowflake_cache import init_cache as init_snowflake_cache
-
-from utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 # Environment constants
 PROJECT_ID = os.getenv("PROJECT_ID")
@@ -1327,7 +1326,7 @@ def build_job_config_from_params(
         ),  # Resampling frequency
         "use_parquet": True,
         "parallel_processing": True,
-        "max_cores": 8,
+        "max_cores": int(os.getenv("R_MAX_CORES", "4")),
     }
 
     # Add custom_hyperparameters if present
@@ -1619,7 +1618,7 @@ def require_login_and_domain(allowed_domain: Optional[str] = None) -> None:
                 f"Sign in with your Google account from one of these domains: {domains_str}"
             )
         if st.button("Sign in with Google"):
-            st.login()  # type: ignore # flat [auth] config → no provider arg
+            st.login()  # type: ignore # uses providers list from [auth] config
         st.stop()
 
     email = (getattr(st.user, "email", "") or "").lower().strip()  # type: ignore
@@ -1638,7 +1637,7 @@ def require_login_and_domain(allowed_domain: Optional[str] = None) -> None:
                 f"This app is restricted to accounts from these domains: {domains_str}"
             )
         if st.button("Sign out"):
-            st.logout()  # type: ignore # flat [auth] config → no provider arg
+            st.logout()  # type: ignore # uses providers list from [auth] config
         st.stop()
 
 

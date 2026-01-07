@@ -294,6 +294,7 @@ All API responses follow a standardized format:
 - **nevergrad not found**: verify `pip3 show nevergrad` inside container; ensure `RETICULATE_PYTHON` points to the same python.
 - **GCS auth error**: confirm Cloud Run service account has `storage.objectAdmin` and *the revision* uses that SA.
 - **Duplicate dates**: the R script collapses duplicates per day; ensure your SQL produces one row/day or let the script aggregate.
+- **Training only uses 2 cores on 8 vCPU**: This is a known issue with the R `parallelly` package rejecting Cloud Run's cgroups quota. An override is implemented via the `PARALLELLY_OVERRIDE_CORES` environment variable. See [docs/PARALLELLY_OVERRIDE_FIX.md](docs/PARALLELLY_OVERRIDE_FIX.md) and [docs/TROUBLESHOOTING_PARALLELLY_OVERRIDE.md](docs/TROUBLESHOOTING_PARALLELLY_OVERRIDE.md) for details.
 
 For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting](docs/DEPLOYMENT_GUIDE.md#troubleshooting).
 
@@ -308,6 +309,9 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 | [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | **Complete deployment guide for new projects** |
 | [docs/MODEL_SUMMARY.md](docs/MODEL_SUMMARY.md) | Model summary file structure |
 | [docs/OUTPUT_MODELS_PARQUET.md](docs/OUTPUT_MODELS_PARQUET.md) | OutputModels parquet data extraction |
+| [docs/PARALLELLY_OVERRIDE_FIX.md](docs/PARALLELLY_OVERRIDE_FIX.md) | **Fix for 8 vCPU core allocation issue** |
+| [docs/TROUBLESHOOTING_PARALLELLY_OVERRIDE.md](docs/TROUBLESHOOTING_PARALLELLY_OVERRIDE.md) | **Diagnostic checklist for parallelly override** |
+| [docs/8_VCPU_TEST_RESULTS.md](docs/8_VCPU_TEST_RESULTS.md) | Analysis of 8 vCPU upgrade testing |
 | [docs/google_auth_domain_configuration.md](docs/google_auth_domain_configuration.md) | OAuth domain configuration |
 | [docs/persistent_private_key.md](docs/persistent_private_key.md) | Snowflake key storage |
 | [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Cost optimization strategies |

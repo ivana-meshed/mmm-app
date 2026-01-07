@@ -17,11 +17,13 @@ sf_database  = "MESHED_BUYCYCLE"
 sf_schema    = "GROWTH"
 sf_role      = "ACCOUNTADMIN"
 
-# Training job resource sizing (cost optimization)
-# Start with smaller config for dev to save costs
-training_cpu       = "2.0"
-training_memory    = "8Gi"
-training_max_cores = "2"
+# Training job resource sizing
+# Testing with 8 vCPU to bypass Cloud Run platform quotas that affect lower tiers
+# 8 vCPU tier typically provides better core allocation (6-8 actual cores)
+# Higher vCPU tiers are scheduled onto less-constrained host pools
+training_cpu       = "8.0"
+training_memory    = "32Gi"
+training_max_cores = "8"  # Test if 8 vCPU provides 6-8 actual cores
 
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"

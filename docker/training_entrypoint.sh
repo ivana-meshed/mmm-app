@@ -3,6 +3,18 @@ set -e
 
 echo "Starting MMM Training Job on Cloud Run..."
 
+# CRITICAL: Disable R CMD check core limit that restricts parallelly to 2 cores
+# This is what causes parallelly to return 2 cores even when more are available
+export _R_CHECK_LIMIT_CORES_=FALSE
+
+# CRITICAL: Set parallelly override BEFORE R starts
+# parallelly package caches availableCores during initialization
+# Setting it in R script (even at the top) is too late
+if [ -n "${PARALLELLY_OVERRIDE_CORES}" ]; then
+    export R_PARALLELLY_AVAILABLECORES_FALLBACK="${PARALLELLY_OVERRIDE_CORES}"
+    echo "🔧 Parallelly override: _R_CHECK_LIMIT_CORES_=FALSE and R_PARALLELLY_AVAILABLECORES_FALLBACK=${PARALLELLY_OVERRIDE_CORES}"
+fi
+
 # Verify environment
 echo "Environment Check:"
 echo "- CPU cores available: $(nproc)"
