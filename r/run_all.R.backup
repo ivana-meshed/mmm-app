@@ -1870,89 +1870,6 @@ if (is.list(OutputModels) && !is.null(OutputModels$error)) {
             timestamp = as.character(Sys.time()),
             training_started_at = as.character(t0),
             elapsed_seconds = elapsed,
-            retry_attempted = TRUE,
-            cores_first_attempt = cores_first_attempt,
-            cores_retry_attempt = fallback_cores,
-            message = conditionMessage(e),
-            call = paste(deparse(conditionCall(e)), collapse = " "),
-            class = unname(class(e)),
-            stack_inner_to_outer = as.list(calls_chr),
-            params = list(
-                iterations = iter,
-                trials = trials,
-                cores = fallback_cores
-            ),
-            core_detection = list(
-                requested_cores = requested_cores,
-                available_parallelly = available_cores_parallelly,
-                available_parallel = available_cores_parallel,
-                conservative_estimate = available_cores,
-                used_cores = fallback_cores,
-                future_workers = future::nbrOfWorkers(),
-                system_cpu_count = parallel::detectCores()
-            )
-        )
-        writeLines(jsonlite::toJSON(err_payload, auto_unbox = TRUE, pretty = TRUE), robyn_err_json)
-        gcs_put_safe(robyn_err_txt, file.path(gcs_prefix, basename(robyn_err_txt)))
-        gcs_put_safe(robyn_err_json, file.path(gcs_prefix, basename(robyn_err_json)))
-        # reflect failure in status.json
-        try(
-            {
-                writeLines(jsonlite::toJSON(list(
-                    state = "FAILED",
-                    start_time = as.character(job_started),
-                    end_time = as.character(Sys.time()),
-                    failed_step = "robyn_run",
-                    error_message = conditionMessage(e),
-                    retry_attempted = TRUE,
-                    cores_attempted = paste(cores_first_attempt, fallback_cores, sep = ", ")
-                ), auto_unbox = TRUE, pretty = TRUE), status_json)
-                gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
-            },
-            silent = TRUE
-        )
-
-        # HARD stop (avoid "wrapup: argument 'e' missing" & avoid continuing)
-        stop(conditionMessage(e), call. = FALSE)
-        } else {
-            # Retry succeeded!
-            cat(sprintf("✅ Retry succeeded with %d cores\n\n", fallback_cores))
-        }
-    } else {
-        # Error was not core-related or we can't reduce cores further
-        # Handle as regular error
-        e <- first_error
-        calls_chr <- .format_calls(sys.calls())
-        elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
-        
-        error_details <- c(
-            "robyn_run() FAILED",
-            paste0("When     : ", as.character(Sys.time())),
-            paste0("Elapsed  : ", round(elapsed, 2), " sec"),
-            paste0("Message  : ", conditionMessage(e)),
-            paste0("Call     : ", paste(deparse(conditionCall(e)), collapse = " ")),
-            paste0("Class    : ", paste(class(e), collapse = ", ")),
-            "",
-            "--- Core Detection Information ---",
-            paste0("Requested cores (R_MAX_CORES): ", requested_cores),
-            paste0("Available (parallelly):        ", available_cores_parallelly),
-            paste0("Available (parallel):          ", available_cores_parallel),
-            paste0("Conservative estimate:         ", available_cores),
-            paste0("Cores passed to robyn_run:     ", max_cores),
-            paste0("Future workers:                ", future::nbrOfWorkers()),
-            paste0("System CPU count:              ", parallel::detectCores()),
-            "",
-            "--- Approximate R call stack (inner→outer) ---",
-            paste(rev(calls_chr), collapse = "\n")
-        )
-
-        writeLines(error_details, robyn_err_txt)
-
-        err_payload <- list(
-            state = "FAILED", step = "robyn_run",
-            timestamp = as.character(Sys.time()),
-            training_started_at = as.character(t0),
-            elapsed_seconds = elapsed,
             message = conditionMessage(e),
             call = paste(deparse(conditionCall(e)), collapse = " "),
             class = unname(class(e)),
@@ -1990,10 +1907,10 @@ if (is.list(OutputModels) && !is.null(OutputModels$error)) {
             silent = TRUE
         )
 
-        # HARD stop (avoid "wrapup: argument 'e' missing" & avoid continuing)
+        # HARD stop (avoid “wrapup: argument 'e' missing” & avoid continuing)
         stop(conditionMessage(e), call. = FALSE)
     }
-}
+)
 
 flush_and_ship_log("after robyn_run")
 
