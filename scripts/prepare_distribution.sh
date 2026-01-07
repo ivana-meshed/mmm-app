@@ -64,7 +64,7 @@ git archive --format=tar HEAD | tar -x -C "${TEMP_EXPORT}"
 print_info "Copying files (excluding development artifacts)..."
 rsync -av \
     --exclude='.git' \
-    --exclude='.github' \
+    --exclude='.github/workflows/config.yml' \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
     --exclude='*.pyo' \
@@ -82,6 +82,9 @@ rsync -av \
     --exclude='*.egg-info' \
     "${TEMP_EXPORT}/" \
     "${APP_DIR}/"
+
+# Note: .github/workflows are NOW INCLUDED for customer use
+# Only config.yml (company-specific settings) is excluded
 
 # Clean up temp export
 rm -rf "${TEMP_EXPORT}"

@@ -220,12 +220,17 @@ tar -czf customer-name-v1.0.0-with-git.tar.gz customer-repo/
 
 **Exclude from Distribution:**
 - `.git/` directory (commit history)
-- `.github/workflows/` (your CI/CD setup)
+- `.github/workflows/config.yml` (your company-specific workflow settings)
 - Development environment files (`.env`, `.venv/`)
 - Build artifacts (`__pycache__/`, `*.pyc`)
 - Test artifacts (`.pytest_cache/`)
 - Your internal documentation
 - Customer-specific configurations from other deployments
+
+**Include in Distribution:**
+- `.github/workflows/` directory (CI/CD workflows for customer use)
+- `.github/workflows/config.example.yml` (template for customer configuration)
+- Customers will need to create their own `config.yml` with their settings
 
 ## Customer Onboarding
 

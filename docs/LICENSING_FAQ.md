@@ -226,7 +226,12 @@ See [LICENSING.md](LICENSING.md) for detailed procedures.
 
 ### Should I include the .github workflows in distributions?
 
-**No.** The CI/CD workflows in `.github/workflows/` are specific to your deployment infrastructure and should not be included in customer distributions. The distribution script automatically excludes these.
+**Yes.** As of the latest version, GitHub workflows ARE included in customer distributions to enable them to use CI/CD. However:
+- The `config.example.yml` file provides a template for configuration
+- Your actual `config.yml` (with company-specific settings) is excluded
+- Customers must create their own `config.yml` with their GCP project settings
+- Customers must configure their own GitHub Secrets
+- See `.github/workflows/config.example.yml` for instructions
 
 ### How do I handle security vulnerabilities?
 

@@ -404,10 +404,11 @@ ls -la dist/acme-corp-v1.0.0/
 1. **Exports code:** Uses `git archive` to get clean copy of current HEAD
 2. **Copies files:** Uses rsync to copy files excluding:
    - .git directory (no history)
-   - .github workflows (your CI/CD)
+   - .github/workflows/config.yml (YOUR company-specific settings only)
    - Build artifacts (__pycache__, .pyc, etc.)
    - Development files (.venv, .env, etc.)
    - Node_modules and other dependencies
+   - **NOTE:** `.github/workflows/` directory IS NOW INCLUDED for customer use
 3. **Creates LICENSE_AUTHORIZATION.txt:** Template file for you to complete
 4. **Creates README_DISTRIBUTION.txt:** Instructions for customer
 5. **Generates checksums:** CHECKSUMS.txt with file hashes
@@ -424,8 +425,8 @@ git archive --format=tar HEAD | tar -x -C /tmp/mmm-export
 # Create distribution directory
 mkdir -p dist/customer-v1.0.0/mmm-app
 
-# Copy with exclusions
-rsync -av --exclude='.git' --exclude='.github' \
+# Copy with exclusions (only exclude config.yml, not entire .github)
+rsync -av --exclude='.git' --exclude='.github/workflows/config.yml' \
   --exclude='__pycache__' --exclude='*.pyc' \
   --exclude='.venv' --exclude='.env' \
   /tmp/mmm-export/ dist/customer-v1.0.0/mmm-app/
