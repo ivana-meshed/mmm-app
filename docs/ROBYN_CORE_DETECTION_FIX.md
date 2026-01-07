@@ -20,7 +20,7 @@ This error occurred after PR #137 upgraded to 8 vCPU/32GB configuration with dyn
 
 ## Solution
 
-Implemented a **multi-layered conservative approach with smart buffering**:
+Implemented a **try-then-fallback strategy** to maximize core utilization:
 
 ### 1. Multiple Detection Methods
 ```r
@@ -29,22 +29,26 @@ available_cores_parallel <- parallel::detectCores()
 available_cores <- min(available_cores_parallelly, available_cores_parallel)
 ```
 
-### 2. Smart Safety Buffer
+### 2. Try-Then-Fallback Strategy
 ```r
 actual_cores <- min(requested_cores, available_cores)
 
-# Only apply -1 buffer if we have enough cores and we're using the requested amount
-if (actual_cores > 2 && actual_cores >= requested_cores) {
-    safe_cores <- max(1, actual_cores - 1)  # Apply buffer
-} else {
-    safe_cores <- max(1, actual_cores)  # Use what we have
-}
+# Try with full cores first (no preemptive -1 buffer)
+safe_cores <- max(1, actual_cores)
+
+# Attempt robyn_run() with full cores
+# If it fails with core allocation error, retry with cores - 1
 ```
 
-The -1 buffer is **conditionally applied**:
-- **Applied** when we have > 2 cores AND we're at/above requested amount (prevents "8 simultaneous processes spawned")
-- **NOT applied** when Cloud Run severely limits cores (e.g., 2 when 8 requested) - use what's available
-- This prevents wasting cores in already-constrained environments
+The new strategy:
+- **First attempt**: Use full available cores (no -1 buffer)
+- **On core error**: Automatically retry with cores - 1
+- **Result**: Maximizes resource usage when possible, with automatic safety fallback
+
+Benefits over previous approach:
+- **Better resource utilization**: Uses all available cores when Robyn accepts them
+- **Automatic fallback**: Only reduces cores if actually needed
+- **Enhanced logging**: Shows both attempts and which succeeded
 
 ### 3. Enhanced Logging
 
@@ -54,6 +58,7 @@ Added comprehensive logging before `robyn_run()` to diagnose issues:
 - Data dimensions (rows, columns, date range)
 - Model configuration (variables, hyperparameters)
 - Core detection details from all methods
+- **New**: Retry attempts and outcomes
 
 ### 4. Enhanced Error Capture
 
@@ -62,83 +67,94 @@ Error messages now include:
 - The conservative estimate used
 - Future workers count
 - System CPU count
+- **New**: Cores attempted in first and retry attempts
 
 ## Example Scenarios
 
-### Scenario 1: Full 8 vCPU Available (Ideal Case)
+### Scenario 1: Full 8 vCPU Available - Accepted by Robyn (Ideal Case)
 ```
 Requested (R_MAX_CORES):           8
 Available (parallelly):             8
 Available (parallel::detectCores): 8
 Conservative estimate:              8
-Actual cores to use:                8
-Safety buffer applied:              Yes (-1)
-Final cores for training:           7  ← Prevents "8 simultaneous processes" error
+Initial cores for training:         8
+
+🔄 Attempt 1: Running with 8 cores...
+✅ Training successful with 8 cores  ← All cores utilized!
 ```
 
-### Scenario 2: Cloud Run Limits to 2 Cores (Current Issue)
+### Scenario 2: Full 8 vCPU Available - Rejected by Robyn (Fallback Case)
+```
+Requested (R_MAX_CORES):           8
+Available (parallelly):             8
+Available (parallel::detectCores): 8
+Conservative estimate:              8
+Initial cores for training:         8
+Fallback cores if needed:           7
+
+🔄 Attempt 1: Running with 8 cores...
+⚠️  Core allocation error detected
+📉 Retrying with fallback: 7 cores (reduced from 8)
+
+🔄 Attempt 2: Running with 7 cores...
+✅ Retry succeeded with 7 cores  ← Automatic fallback worked!
+```
+
+### Scenario 3: Cloud Run Limits to 2 Cores (Constrained Environment)
 ```
 Requested (R_MAX_CORES):           8
 Available (parallelly):             2
 Available (parallel::detectCores): 8
 Conservative estimate:              2
-Actual cores to use:                2
-Safety buffer applied:              No
-Final cores for training:           2  ← Use all available, don't waste with buffer
+Initial cores for training:         2
+
+🔄 Attempt 1: Running with 2 cores...
+✅ Training successful with 2 cores  ← Uses all available, no fallback needed
 ```
 
-### Scenario 3: Moderate Limitation (6 cores)
+### Scenario 4: Moderate Limitation (6 cores available, Robyn accepts)
 ```
 Requested (R_MAX_CORES):           8
 Available (parallelly):             6
 Available (parallel::detectCores): 8
 Conservative estimate:              6
-Actual cores to use:                6
-Safety buffer applied:              No
-Final cores for training:           6  ← Use available since below requested
-```
+Initial cores for training:         6
 
-### Scenario 4: Very Limited Resources
-```
-Requested (R_MAX_CORES):           8
-Available (parallelly):             1
-Available (parallel::detectCores): 2
-Conservative estimate:              1
-Actual cores to use:                1
-Safety buffer applied:              No
-Final cores for training:           1  ← Use what we have (≤2 threshold)
+🔄 Attempt 1: Running with 6 cores...
+✅ Training successful with 6 cores  ← All available cores used efficiently
 ```
 
 ## Why This Works
 
 1. **Multiple Methods**: Different detection methods may report different values. Using the minimum ensures we don't overcommit.
 
-2. **Smart Safety Buffer**: 
-   - The `-1` buffer is **only applied when we're at or above the requested cores**
-   - This prevents the "X simultaneous processes spawned" error in ideal scenarios
-   - When Cloud Run already limits cores below requested, we use all available
-   - Prevents wasting scarce resources with unnecessary buffering
+2. **Try-Then-Fallback Strategy**: 
+   - First attempt uses **all available cores** (no preemptive buffer)
+   - Only reduces cores if Robyn actually rejects the allocation
+   - Maximizes performance by using full capacity when possible
+   - Automatic safety fallback when needed
 
-3. **Minimum of 1**: Ensures training can always proceed with at least 1 core, even in very constrained environments.
+3. **Intelligent Error Detection**: Only retries for core-related errors (e.g., "simultaneous processes spawned"), not for other failures
 
 4. **Adaptive to Reality**: Recognizes when Cloud Run is imposing severe limitations and adapts accordingly
 
 ## Trade-offs
 
-- **Pro**: Training jobs succeed reliably
-- **Pro**: Better error messages for debugging
+- **Pro**: Training jobs succeed reliably with automatic retry
+- **Pro**: **Better performance**: Uses all cores when Robyn accepts them (no unnecessary -1)
+- **Pro**: Better error messages showing retry attempts
 - **Pro**: Adapts to Cloud Run's actual core allocation
-- **Pro**: Uses all available cores when already constrained
-- **Con**: May use 1 fewer core than theoretically possible **only in ideal scenarios** (minimal performance impact)
+- **Pro**: Optimal resource usage in all scenarios
+- **Con**: Slightly longer failure path when cores need to be reduced (one extra attempt)
 
 For an 8 vCPU machine with full availability:
-- **Before**: Failed with "8 simultaneous processes spawned"
-- **After**: Succeeds with 7 cores (12.5% slower, but works reliably)
+- **Old approach**: Always used 7 cores (wasted 1 core preemptively)
+- **New approach**: Tries 8 cores first, falls back to 7 only if needed
+- **Result**: Better performance when 8 cores work, same safety when they don't
 
-For an 8 vCPU machine with 2 cores available (current Cloud Run issue):
-- **Before my fix**: Would use 2 cores (if error was fixed)
-- **My initial fix**: Used only 1 core (wasted resources)
-- **This improved fix**: Uses 2 cores (optimal for constrained environment)
+For an 8 vCPU machine with 2 cores available (Cloud Run limitation):
+- **Behavior**: Uses all 2 cores efficiently (no unnecessary buffer)
+- **Result**: Optimal for constrained environment
 
 ## Configuration
 
@@ -155,12 +171,11 @@ The actual cores used will be:
 ```
 actual_cores = min(training_max_cores, available_cores)
 
-# Smart buffer logic:
-if (actual_cores > 2 && actual_cores >= training_max_cores) {
-    final_cores = actual_cores - 1  # Apply safety buffer
-} else {
-    final_cores = actual_cores       # Use what's available
-}
+# Try-then-fallback logic:
+# 1. Try robyn_run() with actual_cores
+# 2. If core allocation error detected:
+#       Retry with actual_cores - 1
+# 3. Otherwise: Use actual_cores successfully
 ```
 
 ### Important: Cloud Run Core Allocation Issue
