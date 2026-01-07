@@ -45,6 +45,11 @@ data/
 tmp/
 temp/
 *.tmp
+dist/
+
+# Distribution packages created by prepare_distribution.sh
+# These contain customer-specific license certificates
+# and should not be committed to version control
 
 # Documentation (generated)
 *.pdf
