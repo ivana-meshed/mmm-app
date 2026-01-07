@@ -38,24 +38,6 @@ review_page = st.Page(
     icon="📊",
 )
 
-prepare_training_page = st.Page(
-    "nav/Prepare_Training_Data_new.py",
-    title="Prepare Training Data new",
-    icon="⚙️",
-)
-
-prepare_training_page_old = st.Page(
-    "nav/Prepare_Training_Data_old.py",
-    title="Prepare Training Data old",
-    icon="⚙️",
-)
-
-prepare_training_page_oldv2 = st.Page(
-    "nav/Prepare_Training_Data_oldv2.py",
-    title="Prepare Training Data old v2",
-    icon="⚙️",
-)
-
 # experiment_page = st.Page("nav/Run_Models.py", title="5. Run Models", icon="🧪")
 
 experiment_page = st.Page(
@@ -77,6 +59,14 @@ cache_management_page = st.Page(
     icon="⚡",
 )
 
+model_stability_page = st.Page(
+    "nav/Review_Model_Stability.py",
+    title="8. View Model Stability",
+    icon="🛡️",
+)
+
+
+
 # Create navigation - this replaces the default sidebar navigation
 pg = st.navigation(
     [
@@ -84,12 +74,10 @@ pg = st.navigation(
         map_page,
         review_page,
         prepare_training_data_page,
-        # prepare_training_page,
-        # prepare_training_page_old,
-        # prepare_training_page_oldv2,
         experiment_page,
         results_page,
         best_results_page,
+        model_stability_page,
         # cache_management_page,
     ],
     position="sidebar",
