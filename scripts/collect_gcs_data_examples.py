@@ -20,7 +20,7 @@ import logging
 import os
 import sys
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -492,7 +492,7 @@ def main():
 
     # Collect all data examples
     report = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "bucket": args.bucket,
         "countries_scanned": args.countries,
         "mapped_datasets": collect_mapped_datasets(args.bucket, args.countries),

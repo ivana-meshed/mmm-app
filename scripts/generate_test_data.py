@@ -10,7 +10,7 @@ import argparse
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -223,7 +223,10 @@ def generate_queue_structure(output_dir: Path) -> None:
     # Create placeholder queue.json
     queue_file = output_path / "queue.json"
     with open(queue_file, "w") as f:
-        json.dump({"queue": [], "timestamp": datetime.utcnow().isoformat()}, f)
+        json.dump(
+            {"queue": [], "timestamp": datetime.now(timezone.utc).isoformat()},
+            f,
+        )
 
     logger.info(f"  Created: {queue_file}")
 
