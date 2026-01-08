@@ -8,8 +8,11 @@ This script scans the mmm-app-output GCS bucket to collect examples of:
 - metadata (mapping.json files)
 - training_data (selected_columns.json and parquet files)
 - training_config files
+- training-configs files
 - training-data folders
 - robyn output structures
+- robyn-jobs structures
+- robyn-queues structures
 
 The output is a JSON report that can be used to generate test data.
 """
@@ -464,6 +467,28 @@ def collect_queue_data(bucket_name: str) -> Dict[str, Any]:
     return examples
 
 
+def collect_robyn_jobs(bucket_name: str) -> Dict[str, Any]:
+    """Collect examples of robyn jobs structures."""
+    logger.info("Collecting robyn jobs examples...")
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    examples = {"jobs": [], "files": []}
+
+    prefix = "robyn-jobs/"
+    blobs = bucket.list_blobs(prefix=prefix)
+
+    for blob in blobs:
+        examples["files"].append(
+            {
+                "path": blob.name,
+                "size": blob.size,
+                "updated": blob.updated.isoformat() if blob.updated else None,
+            }
+        )
+
+    return examples
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Collect GCS data examples for test generation"
@@ -506,6 +531,7 @@ def main():
         "training_configs": collect_training_configs(args.bucket),
         "training_data_alt": collect_training_data_alt(args.bucket),
         "robyn_outputs": collect_robyn_outputs(args.bucket, args.countries),
+        "robyn_jobs": collect_robyn_jobs(args.bucket),
         "queue_data": collect_queue_data(args.bucket),
     }
 
@@ -527,6 +553,7 @@ def main():
         f"  - Training-data alt: {len(report['training_data_alt']['files'])} files"
     )
     logger.info(f"  - Robyn outputs: {len(report['robyn_outputs'])} countries")
+    logger.info(f"  - Robyn jobs: {len(report['robyn_jobs']['files'])} files")
     logger.info(f"  - Queue files: {len(report['queue_data']['files'])} files")
 
 
