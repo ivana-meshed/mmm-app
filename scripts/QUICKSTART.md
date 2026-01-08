@@ -11,8 +11,10 @@ This guide shows you how to quickly collect data from your GCS bucket and genera
 
 2. **Python Dependencies**
    ```bash
-   pip install google-cloud-storage pandas numpy
+   pip install google-cloud-storage pandas numpy pyarrow
    ```
+   
+   **Note:** PyArrow is needed for reading certain parquet files that may have compatibility issues.
 
 ## Step-by-Step Instructions
 
@@ -187,8 +189,19 @@ python scripts/collect_gcs_data_examples.py --countries $(gsutil ls gs://mmm-app
 
 **Solution:**
 ```bash
-pip install google-cloud-storage pandas numpy
+pip install google-cloud-storage pandas numpy pyarrow
 ```
+
+### "Repetition level histogram size mismatch" warnings
+
+**Problem:** Parquet files created with different parquet library versions
+
+**Solution:** The script automatically handles this by falling back to PyArrow when pandas fails. Make sure PyArrow is installed:
+```bash
+pip install pyarrow
+```
+
+The script will continue and try other files. If all files fail, you may need to regenerate the parquet files with a compatible version.
 
 ## Example Complete Workflow
 

@@ -209,8 +209,10 @@ All scripts require:
 - Google Cloud authentication configured
 - Required packages:
   ```bash
-  pip install google-cloud-storage pandas numpy
+  pip install google-cloud-storage pandas numpy pyarrow
   ```
+  
+**Note:** PyArrow is required for reading certain parquet files that may have compatibility issues with pandas' default parquet reader. The collection script will automatically fall back to PyArrow if pandas fails to read a parquet file.
 
 ## Authentication
 

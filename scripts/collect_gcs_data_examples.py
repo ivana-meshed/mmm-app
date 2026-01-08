@@ -110,26 +110,51 @@ def collect_mapped_datasets(
                                 suffix=".parquet"
                             ) as tmp:
                                 blob.download_to_filename(tmp.name)
-                                df = pd.read_parquet(tmp.name)
-                                country_data["sample_schemas"][version] = {
-                                    "columns": list(df.columns),
-                                    "dtypes": {
-                                        col: str(dtype)
-                                        for col, dtype in df.dtypes.items()
-                                    },
-                                    "row_count": len(df),
-                                    "sample_values": {
-                                        col: (
-                                            df[col].head(3).tolist()
-                                            if not df[col].empty
-                                            else []
+
+                                # Try reading with pandas first
+                                df = None
+                                try:
+                                    df = pd.read_parquet(tmp.name)
+                                except Exception as pandas_error:
+                                    # If pandas fails, try PyArrow directly with lenient settings
+                                    logger.debug(
+                                        f"  Pandas read failed for {blob.name}, trying PyArrow: {pandas_error}"
+                                    )
+                                    try:
+                                        import pyarrow.parquet as pq
+
+                                        # Read with PyArrow's more lenient parser
+                                        table = pq.read_table(tmp.name)
+                                        df = table.to_pandas()
+                                        logger.debug(
+                                            f"  Successfully read {blob.name} with PyArrow"
                                         )
-                                        for col in df.columns
-                                    },
-                                }
-                                logger.info(
-                                    f"  Read schema from {blob.name}: {len(df.columns)} columns"
-                                )
+                                    except Exception as pyarrow_error:
+                                        logger.warning(
+                                            f"  Could not read parquet {blob.name} with PyArrow: {pyarrow_error}"
+                                        )
+                                        raise  # Re-raise to be caught by outer exception handler
+
+                                if df is not None:
+                                    country_data["sample_schemas"][version] = {
+                                        "columns": list(df.columns),
+                                        "dtypes": {
+                                            col: str(dtype)
+                                            for col, dtype in df.dtypes.items()
+                                        },
+                                        "row_count": len(df),
+                                        "sample_values": {
+                                            col: (
+                                                df[col].head(3).tolist()
+                                                if not df[col].empty
+                                                else []
+                                            )
+                                            for col in df.columns
+                                        },
+                                    }
+                                    logger.info(
+                                        f"  Read schema from {blob.name}: {len(df.columns)} columns"
+                                    )
                         except Exception as e:
                             logger.warning(
                                 f"  Could not read parquet {blob.name}: {e}"
@@ -320,17 +345,42 @@ def collect_training_data_alt(bucket_name: str) -> Dict[str, Any]:
 
                 with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
                     blob.download_to_filename(tmp.name)
-                    df = pd.read_parquet(tmp.name)
-                    examples["sample_schemas"][blob.name] = {
-                        "columns": list(df.columns),
-                        "dtypes": {
-                            col: str(dtype) for col, dtype in df.dtypes.items()
-                        },
-                        "row_count": len(df),
-                    }
-                    logger.info(
-                        f"  Read schema from {blob.name}: {len(df.columns)} columns"
-                    )
+
+                    # Try reading with pandas first
+                    df = None
+                    try:
+                        df = pd.read_parquet(tmp.name)
+                    except Exception as pandas_error:
+                        # If pandas fails, try PyArrow directly
+                        logger.debug(
+                            f"  Pandas read failed for {blob.name}, trying PyArrow: {pandas_error}"
+                        )
+                        try:
+                            import pyarrow.parquet as pq
+
+                            table = pq.read_table(tmp.name)
+                            df = table.to_pandas()
+                            logger.debug(
+                                f"  Successfully read {blob.name} with PyArrow"
+                            )
+                        except Exception as pyarrow_error:
+                            logger.warning(
+                                f"  Could not read parquet {blob.name} with PyArrow: {pyarrow_error}"
+                            )
+                            raise  # Re-raise to be caught by outer exception handler
+
+                    if df is not None:
+                        examples["sample_schemas"][blob.name] = {
+                            "columns": list(df.columns),
+                            "dtypes": {
+                                col: str(dtype)
+                                for col, dtype in df.dtypes.items()
+                            },
+                            "row_count": len(df),
+                        }
+                        logger.info(
+                            f"  Read schema from {blob.name}: {len(df.columns)} columns"
+                        )
             except Exception as e:
                 logger.warning(f"  Could not read parquet {blob.name}: {e}")
 
