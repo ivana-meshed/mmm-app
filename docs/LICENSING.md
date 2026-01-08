@@ -229,7 +229,7 @@ tar -czf customer-name-v1.0.0-with-git.tar.gz customer-repo/
 
 **Include in Distribution:**
 - `.github/workflows/` directory (CI/CD workflows for customer use)
-- `.github/workflows/config.example.yml` (template for customer configuration)
+- `.github/workflows/config.example.txt` (template for customer configuration)
 - Customers will need to create their own `config.yml` with their settings
 
 ## Customer Onboarding

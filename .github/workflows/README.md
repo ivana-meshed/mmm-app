@@ -6,7 +6,7 @@ This directory contains CI/CD workflows for automated deployment to Google Cloud
 
 1. **Copy the configuration template:**
    ```bash
-   cp .github/workflows/config.example.yml .github/workflows/config.yml
+   cp .github/workflows/config.example.txt .github/workflows/config.yml
    ```
 
 2. **Edit `config.yml`** with your GCP project details:
@@ -45,10 +45,10 @@ This directory contains CI/CD workflows for automated deployment to Google Cloud
 
 ## Configuration Files
 
-- **`config.example.yml`** - Template with documentation (commit this)
+- **`config.example.txt`** - Template with documentation (commit this)
 - **`config.yml`** - Your actual settings (**DO NOT COMMIT** - in .gitignore)
-- **`ci.yml`** - Production workflow (references config.yml)
-- **`ci-dev.yml`** - Development workflow (references config.yml)
+- **`ci.yml`** - Production workflow (uses environment variables)
+- **`ci-dev.yml`** - Development workflow (uses environment variables)
 
 ## What These Workflows Do
 
