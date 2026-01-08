@@ -43,9 +43,16 @@ def safe_json_serialize(obj: Any) -> Any:
         return obj.to_dict(orient="records")
     elif isinstance(obj, (set, frozenset)):
         return list(obj)
+    elif isinstance(obj, defaultdict):
+        return dict(obj)
     elif hasattr(obj, "__dict__"):
         return str(obj)
-    return obj
+    # If all else fails, convert to string to avoid circular references
+    try:
+        json.dumps(obj)
+        return obj
+    except (TypeError, ValueError):
+        return str(obj)
 
 
 def list_all_blobs(bucket_name: str, prefix: str = "") -> List[Dict]:
