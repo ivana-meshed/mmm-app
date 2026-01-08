@@ -298,29 +298,34 @@ def collect_training_configs(bucket_name: str) -> Dict[str, Any]:
     bucket = client.bucket(bucket_name)
     examples = {"configs": [], "sample_data": {}}
 
-    prefix = "training_config/"
-    blobs = bucket.list_blobs(prefix=prefix)
+    # Try both possible paths (training-configs/ and training_config/)
+    prefixes = ["training-configs/", "training_config/"]
 
-    for blob in blobs:
-        if blob.name.endswith(".json"):
-            examples["configs"].append(
-                {
-                    "path": blob.name,
-                    "size": blob.size,
-                    "updated": (
-                        blob.updated.isoformat() if blob.updated else None
-                    ),
-                }
-            )
+    for prefix in prefixes:
+        blobs = bucket.list_blobs(prefix=prefix)
 
-            # Read first config found
-            if not examples["sample_data"]:
-                try:
-                    content = json.loads(blob.download_as_bytes())
-                    examples["sample_data"][blob.name] = content
-                    logger.info(f"  Read config from {blob.name}")
-                except Exception as e:
-                    logger.warning(f"  Could not read JSON {blob.name}: {e}")
+        for blob in blobs:
+            if blob.name.endswith(".json"):
+                examples["configs"].append(
+                    {
+                        "path": blob.name,
+                        "size": blob.size,
+                        "updated": (
+                            blob.updated.isoformat() if blob.updated else None
+                        ),
+                    }
+                )
+
+                # Read first few configs found (up to 3)
+                if len(examples["sample_data"]) < 3:
+                    try:
+                        content = json.loads(blob.download_as_bytes())
+                        examples["sample_data"][blob.name] = content
+                        logger.info(f"  Read config from {blob.name}")
+                    except Exception as e:
+                        logger.warning(
+                            f"  Could not read JSON {blob.name}: {e}"
+                        )
 
     return examples
 
