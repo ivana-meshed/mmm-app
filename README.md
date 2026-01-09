@@ -298,6 +298,19 @@ All API responses follow a standardized format:
 
 For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting](docs/DEPLOYMENT_GUIDE.md#troubleshooting).
 
+## GCS Data Management Scripts
+
+The repository includes scripts for managing test data and cleaning up the GCS bucket:
+
+- **`scripts/collect_gcs_data_examples.py`** - Collect data structure examples from GCS
+- **`scripts/generate_test_data.py`** - Generate synthetic test data
+- **`scripts/upload_test_data.py`** - Upload test data to GCS
+- **`scripts/delete_non_revision_data.py`** - Clean up non-revision data
+
+For detailed documentation and usage instructions:
+- [scripts/QUICKSTART.md](scripts/QUICKSTART.md) - Quick start guide
+- [scripts/README_GCS_SCRIPTS.md](scripts/README_GCS_SCRIPTS.md) - Complete documentation
+
 ## Documentation
 
 | Document | Description |
@@ -315,6 +328,8 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 | [docs/google_auth_domain_configuration.md](docs/google_auth_domain_configuration.md) | OAuth domain configuration |
 | [docs/persistent_private_key.md](docs/persistent_private_key.md) | Snowflake key storage |
 | [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Cost optimization strategies |
+| [scripts/README_GCS_SCRIPTS.md](scripts/README_GCS_SCRIPTS.md) | **GCS data management scripts** |
+| [scripts/QUICKSTART.md](scripts/QUICKSTART.md) | **Quick start for data collection** |
 
 ## License
 
