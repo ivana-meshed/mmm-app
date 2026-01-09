@@ -19,11 +19,11 @@ sf_role      = "ACCOUNTADMIN"
 
 # Training job resource sizing
 # Testing with 8 vCPU to bypass Cloud Run platform quotas that affect lower tiers
-# 8 vCPU tier typically provides better core allocation (6-8 actual cores)
+# With strong override fix (PR #161), now consistently uses all 8 cores
 # Higher vCPU tiers are scheduled onto less-constrained host pools
 training_cpu       = "8.0"
 training_memory    = "32Gi"
-training_max_cores = "8"  # Test if 8 vCPU provides 6-8 actual cores
+training_max_cores = "8"  # Now consistently provides all 8 cores
 
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"
