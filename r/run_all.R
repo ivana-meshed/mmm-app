@@ -340,30 +340,23 @@ cat(sprintf("  - parallel::detectCores():           %d (system CPUs)\n", availab
 # This accounts for Cloud Run's unpredictable core allocation
 available_cores <- min(available_cores_parallelly, available_cores_parallel)
 
-# Strategy: Only apply -1 buffer if we're close to the requested amount
-# If Cloud Run is severely limiting cores (e.g., 2 when 8 requested), use what's available
-# The -1 buffer is only needed when we're at risk of the "X processes spawned" error
+# Strategy: Try using the full available cores first (no -1 buffer)
+# If Robyn fails with core allocation error, we'll retry with cores-1
+# This maximizes resource utilization while maintaining a fallback
 actual_cores <- min(requested_cores, available_cores)
 
-# Apply -1 safety buffer only if we have enough cores (> 2) and we're using the requested amount
-# This prevents wasting cores when already constrained by Cloud Run
-if (actual_cores > 2 && actual_cores >= requested_cores) {
-    # We're at or above requested, apply safety buffer
-    safe_cores <- max(1, actual_cores - 1)
-    buffer_applied <- TRUE
-} else {
-    # Already constrained by Cloud Run, use what we have
-    safe_cores <- max(1, actual_cores)
-    buffer_applied <- FALSE
-}
+# Start with full cores (no safety buffer)
+# We'll apply -1 fallback only if robyn_run() fails with core-related errors
+safe_cores <- max(1, actual_cores)
+buffer_applied <- FALSE
 
 cat(sprintf("  - Conservative estimate:              %d\n", available_cores))
 cat(sprintf("  - Actual cores to use:                %d\n", actual_cores))
-cat(sprintf("  - Safety buffer applied:              %s\n", ifelse(buffer_applied, "Yes (-1)", "No")))
-cat(sprintf("  - Final cores for training:           %d\n\n", safe_cores))
+cat(sprintf("  - Initial cores for training:         %d\n", safe_cores))
+cat(sprintf("  - Fallback cores if needed:           %d\n\n", max(1, safe_cores - 1)))
 
 # Additional diagnostic information
-cat(sprintf("💡 Core Allocation Analysis:\n"))
+cat(sprintf("💡 Core Allocation Strategy:\n"))
 if (available_cores < requested_cores) {
     discrepancy_pct <- round(100 * (requested_cores - available_cores) / requested_cores, 1)
     cat(sprintf(
@@ -385,8 +378,8 @@ if (available_cores < requested_cores) {
         "  ✅ Core allocation is good: %d cores available for %d requested\n",
         available_cores, requested_cores
     ))
-    if (buffer_applied) {
-        cat(sprintf("  ℹ️  Using %d cores (safety buffer -1) to prevent Robyn validation errors\n", safe_cores))
+    if (safe_cores > 1) {
+        cat(sprintf("  🚀 Strategy: Trying full %d cores first, will fallback to %d if needed\n", safe_cores, safe_cores - 1))
     }
 } else {
     cat(sprintf("  ✅ Using all %d available cores\n", available_cores))
@@ -1779,27 +1772,159 @@ robyn_err_txt <- file.path(dir_path, "robyn_run_error.txt")
 robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
 .format_calls <- function(cs) vapply(cs, function(z) paste0(deparse(z, nlines = 3L), collapse = " "), character(1))
 
-flush_and_ship_log("before robyn_run")
-OutputModels <- tryCatch(
-    withCallingHandlers(
-        robyn_run(
-            InputCollect = InputCollect,
-            iterations = iter,
-            trials = trials,
-            ts_validation = TRUE,
-            add_penalty_factor = TRUE,
-            cores = max_cores
+# Helper function to check if error is core-related
+.is_core_allocation_error <- function(err_msg) {
+    # Check for common core allocation error patterns
+    grepl("simultaneous processes spawned|ncores|cores.*exceeded|parallel.*failed", 
+          err_msg, ignore.case = TRUE)
+}
+
+# Helper function to attempt robyn_run with specified cores
+.try_robyn_run <- function(cores_to_use, attempt_number = 1) {
+    cat(sprintf("\n🔄 Attempt %d: Running with %d cores...\n", attempt_number, cores_to_use))
+    
+    # Update future plan with new core count
+    plan(multisession, workers = cores_to_use)
+    
+    tryCatch(
+        withCallingHandlers(
+            robyn_run(
+                InputCollect = InputCollect,
+                iterations = iter,
+                trials = trials,
+                ts_validation = TRUE,
+                add_penalty_factor = TRUE,
+                cores = cores_to_use
+            ),
+            warning = function(w) {
+                message("⚠️ [robyn_run warning] ", conditionMessage(w))
+                invokeRestart("muffleWarning")
+            }
         ),
-        warning = function(w) {
-            message("⚠️ [robyn_run warning] ", conditionMessage(w))
-            invokeRestart("muffleWarning")
+        error = function(e) {
+            # Return the error rather than stopping, so we can handle retry
+            return(list(error = e, cores_attempted = cores_to_use))
         }
-    ),
-    error = function(e) {
+    )
+}
+
+flush_and_ship_log("before robyn_run")
+
+# Try with full cores first
+OutputModels <- .try_robyn_run(max_cores, attempt_number = 1)
+
+# Check if we got an error and should retry with fewer cores
+if (is.list(OutputModels) && !is.null(OutputModels$error)) {
+    first_error <- OutputModels$error
+    err_msg <- conditionMessage(first_error)
+    
+    # Check if error is core-related and we have room to reduce cores
+    if (.is_core_allocation_error(err_msg) && max_cores > 1) {
+        fallback_cores <- max(1, max_cores - 1)
+        
+        cat(sprintf("\n⚠️  Core allocation error detected\n"))
+        cat(sprintf("📉 Retrying with fallback: %d cores (reduced from %d)\n", fallback_cores, max_cores))
+        cat(sprintf("   Error message: %s\n\n", err_msg))
+        
+        # Update max_cores for logging purposes
+        cores_first_attempt <- max_cores
+        max_cores <- fallback_cores
+        
+        # Retry with reduced cores
+        OutputModels <- .try_robyn_run(fallback_cores, attempt_number = 2)
+        
+        # Check if retry also failed
+        if (is.list(OutputModels) && !is.null(OutputModels$error)) {
+            # Both attempts failed, handle as error
+            e <- OutputModels$error
+            calls_chr <- .format_calls(sys.calls())
+            elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+            
+            error_details <- c(
+                "robyn_run() FAILED (after retry)",
+                paste0("When     : ", as.character(Sys.time())),
+                paste0("Elapsed  : ", round(elapsed, 2), " sec"),
+                paste0("First attempt cores: ", cores_first_attempt),
+                paste0("Retry attempt cores: ", fallback_cores),
+                paste0("Message  : ", conditionMessage(e)),
+            paste0("Call     : ", paste(deparse(conditionCall(e)), collapse = " ")),
+            paste0("Class    : ", paste(class(e), collapse = ", ")),
+            "",
+            "--- Core Detection Information ---",
+            paste0("Requested cores (R_MAX_CORES): ", requested_cores),
+            paste0("Available (parallelly):        ", available_cores_parallelly),
+            paste0("Available (parallel):          ", available_cores_parallel),
+            paste0("Conservative estimate:         ", available_cores),
+            paste0("Cores passed to robyn_run:     ", max_cores),
+            paste0("Future workers:                ", future::nbrOfWorkers()),
+            paste0("System CPU count:              ", parallel::detectCores()),
+            "",
+            "--- Approximate R call stack (inner→outer) ---",
+            paste(rev(calls_chr), collapse = "\n")
+        )
+
+        writeLines(error_details, robyn_err_txt)
+
+        err_payload <- list(
+            state = "FAILED", step = "robyn_run",
+            timestamp = as.character(Sys.time()),
+            training_started_at = as.character(t0),
+            elapsed_seconds = elapsed,
+            retry_attempted = TRUE,
+            cores_first_attempt = cores_first_attempt,
+            cores_retry_attempt = fallback_cores,
+            message = conditionMessage(e),
+            call = paste(deparse(conditionCall(e)), collapse = " "),
+            class = unname(class(e)),
+            stack_inner_to_outer = as.list(calls_chr),
+            params = list(
+                iterations = iter,
+                trials = trials,
+                cores = fallback_cores
+            ),
+            core_detection = list(
+                requested_cores = requested_cores,
+                available_parallelly = available_cores_parallelly,
+                available_parallel = available_cores_parallel,
+                conservative_estimate = available_cores,
+                used_cores = fallback_cores,
+                future_workers = future::nbrOfWorkers(),
+                system_cpu_count = parallel::detectCores()
+            )
+        )
+        writeLines(jsonlite::toJSON(err_payload, auto_unbox = TRUE, pretty = TRUE), robyn_err_json)
+        gcs_put_safe(robyn_err_txt, file.path(gcs_prefix, basename(robyn_err_txt)))
+        gcs_put_safe(robyn_err_json, file.path(gcs_prefix, basename(robyn_err_json)))
+        # reflect failure in status.json
+        try(
+            {
+                writeLines(jsonlite::toJSON(list(
+                    state = "FAILED",
+                    start_time = as.character(job_started),
+                    end_time = as.character(Sys.time()),
+                    failed_step = "robyn_run",
+                    error_message = conditionMessage(e),
+                    retry_attempted = TRUE,
+                    cores_attempted = paste(cores_first_attempt, fallback_cores, sep = ", ")
+                ), auto_unbox = TRUE, pretty = TRUE), status_json)
+                gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+            },
+            silent = TRUE
+        )
+
+        # HARD stop (avoid "wrapup: argument 'e' missing" & avoid continuing)
+        stop(conditionMessage(e), call. = FALSE)
+        } else {
+            # Retry succeeded!
+            cat(sprintf("✅ Retry succeeded with %d cores\n\n", fallback_cores))
+        }
+    } else {
+        # Error was not core-related or we can't reduce cores further
+        # Handle as regular error
+        e <- first_error
         calls_chr <- .format_calls(sys.calls())
         elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
-
-        # Enhanced error information with core detection details
+        
         error_details <- c(
             "robyn_run() FAILED",
             paste0("When     : ", as.character(Sys.time())),
@@ -1865,10 +1990,10 @@ OutputModels <- tryCatch(
             silent = TRUE
         )
 
-        # HARD stop (avoid “wrapup: argument 'e' missing” & avoid continuing)
+        # HARD stop (avoid "wrapup: argument 'e' missing" & avoid continuing)
         stop(conditionMessage(e), call. = FALSE)
     }
-)
+}
 
 flush_and_ship_log("after robyn_run")
 
