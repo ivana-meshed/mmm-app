@@ -1708,7 +1708,7 @@ cat(sprintf(
     }
 ))
 cat(sprintf("  - CPU cores (system):  %d\n", parallel::detectCores()))
-cat(sprintf("  - CPU cores (actual):  %d\n", parallelly::availableCores()))
+cat(sprintf("  - CPU cores (actual):  %d\n", available_cores_parallelly))
 cat(sprintf("  - Cores for training:  %d (safe buffer applied)\n", max_cores))
 cat(sprintf(
     "  - Future plan:         %s with %d workers\n\n",
