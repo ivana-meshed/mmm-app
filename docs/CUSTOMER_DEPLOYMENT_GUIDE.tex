@@ -1,0 +1,810 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{fancyhdr}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{textcomp}
+
+% Header and footer
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{MMM Trainer Deployment Guide}
+\fancyhead[R]{\thepage}
+\fancyfoot[C]{Confidential}
+
+% Colors
+\definecolor{darkblue}{RGB}{0,51,102}
+\definecolor{lightgray}{RGB}{240,240,240}
+
+% Title page
+\title{\Huge\textbf{MMM Trainer\\Deployment Guide}\\[0.5cm]\Large Self-Hosted Marketing Mix Modeling Platform}
+\author{Deployment Documentation for Customers}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\newpage
+\tableofcontents
+\newpage
+
+\section{Executive Summary}
+
+The MMM Trainer is a cloud-native Marketing Mix Modeling platform built on Google Cloud Platform (GCP). It provides a web-based interface for data scientists and analysts to run Facebook's Robyn MMM framework at scale, processing data from Snowflake and delivering production-ready model insights.
+
+\subsection{Key Features}
+
+\begin{itemize}
+    \item \textbf{Web-Based Interface:} Streamlit application accessible via browser
+    \item \textbf{Snowflake Integration:} Direct connection to your data warehouse
+    \item \textbf{Robyn MMM Engine:} Industry-standard R/Robyn framework
+    \item \textbf{Cloud-Native Architecture:} Scalable, secure, and cost-effective
+    \item \textbf{Batch Processing:} Queue system for running multiple experiments
+    \item \textbf{Results Management:} Automated storage and visualization of model outputs
+\end{itemize}
+
+\subsection{Infrastructure Overview}
+
+The platform consists of:
+\begin{itemize}
+    \item \textbf{Web Service:} Streamlit application on Cloud Run (always-on)
+    \item \textbf{Training Jobs:} R/Robyn execution on Cloud Run Jobs (on-demand)
+    \item \textbf{Storage:} Google Cloud Storage for data and model artifacts
+    \item \textbf{Scheduler:} Cloud Scheduler for batch job processing
+    \item \textbf{Secrets:} Google Secret Manager for credential management
+\end{itemize}
+
+\newpage
+
+\section{Cost Estimates}
+
+All costs are based on actual production measurements using Google Cloud Platform services in the \texttt{europe-west1} region. Costs are billed per-second for compute resources.
+
+\subsection{Training Job Performance}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrrl}
+\toprule
+\textbf{Workload} & \textbf{Iterations × Trials} & \textbf{Duration} & \textbf{Cost/Job} & \textbf{Use Case} \\
+\midrule
+Test Run & 200 × 3 = 600 & 0.8 min & \$0.01 & Quick validation \\
+\textbf{Benchmark} & \textbf{2,000 × 5 = 10K} & \textbf{12 min} & \textbf{\$0.20} & \textbf{Standard testing} \\
+\textbf{Production} & \textbf{10,000 × 5 = 50K} & \textbf{60 min} & \textbf{\$1.00} & \textbf{Production runs} \\
+Large Production & 10,000 × 10 = 100K & 120 min & \$2.00 & High-quality runs \\
+\bottomrule
+\end{tabular}
+\caption{Training job durations and costs (8 vCPU, 32GB RAM configuration)}
+\end{table}
+
+\textbf{Note:} Benchmark runs (12-18 minutes) are ideal for experimentation and testing. Production runs (80-120 minutes) provide more thorough model exploration and are recommended for final models.
+
+\subsection{Monthly Cost Scenarios}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Usage Level} & \textbf{Web Calls} & \textbf{Training Jobs} & \textbf{Benchmark Cost} & \textbf{Production Cost} \\
+\midrule
+Light & 100 & 10 & \$4 & \$12 \\
+Moderate & 500 & 50 & \$12 & \$52 \\
+Heavy & 1,000 & 100 & \$22 & \$102 \\
+Very Heavy & 5,000 & 500 & \$102 & \$502 \\
+\bottomrule
+\end{tabular}
+\caption{Monthly cost estimates by usage volume}
+\end{table}
+
+\subsection{Cost Breakdown}
+
+\textbf{Fixed Monthly Costs} (\textasciitilde\$2/month):
+\begin{itemize}
+    \item GCS storage: \$0.50-\$2.00 (depends on data retention)
+    \item Secret Manager: \$0.36 (6 secrets × \$0.06)
+    \item Cloud Scheduler: \$0.30 (covered by free tier)
+    \item Artifact Registry: \$0.50 (container images)
+\end{itemize}
+
+\textbf{Variable Costs (per usage):}
+\begin{itemize}
+    \item Training jobs: \$0.20 (benchmark) to \$1.00 (production) per job
+    \item Web service: \textasciitilde\$0.002 per request (negligible)
+    \item Snowflake: Separate (depends on warehouse size and queries)
+\end{itemize}
+
+\textbf{Key Cost Drivers:}
+\begin{itemize}
+    \item Training jobs account for 90-99\% of total costs at scale
+    \item Faster machines have similar costs due to per-second billing
+    \item Storage costs are minimal with lifecycle policies
+    \item Network egress charged only for downloads outside GCP region
+\end{itemize}
+
+\newpage
+
+\section{Minimum Technical Requirements}
+
+\subsection{Required Skills and Knowledge}
+
+The technical team maintaining this application should have:
+
+\subsubsection{Essential Skills}
+\begin{itemize}
+    \item \textbf{Google Cloud Platform:}
+    \begin{itemize}
+        \item Basic understanding of Cloud Run, GCS, and IAM
+        \item Ability to navigate GCP Console
+        \item Understanding of billing and cost management
+    \end{itemize}
+    \item \textbf{Infrastructure as Code:}
+    \begin{itemize}
+        \item Basic Terraform knowledge for infrastructure changes
+        \item Ability to read and modify Terraform configuration files
+    \end{itemize}
+    \item \textbf{Version Control:}
+    \begin{itemize}
+        \item Git and GitHub workflows
+        \item Understanding of CI/CD concepts
+    \end{itemize}
+    \item \textbf{Container Technology:}
+    \begin{itemize}
+        \item Basic Docker concepts
+        \item Understanding of container registries
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Recommended Skills}
+\begin{itemize}
+    \item \textbf{Programming Languages:}
+    \begin{itemize}
+        \item Python (for Streamlit application modifications)
+        \item R (for Robyn MMM customizations)
+    \end{itemize}
+    \item \textbf{Data Warehouse:}
+    \begin{itemize}
+        \item Snowflake query optimization
+        \item SQL for data extraction
+    \end{itemize}
+    \item \textbf{Monitoring and Debugging:}
+    \begin{itemize}
+        \item Cloud Logging for troubleshooting
+        \item Performance monitoring and optimization
+    \end{itemize}
+\end{itemize}
+
+\subsection{Required Tools}
+
+All team members should have access to:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Tool} & \textbf{Version} & \textbf{Purpose} \\
+\midrule
+Google Cloud SDK & Latest & GCP CLI operations \\
+Terraform & $\geq$ 1.5.0 & Infrastructure management \\
+Docker & Latest & Container testing (optional) \\
+Git & Latest & Version control \\
+Python & $\geq$ 3.11 & Local development (optional) \\
+\bottomrule
+\end{tabular}
+\caption{Required development tools}
+\end{table}
+
+\subsection{Access Requirements}
+
+\subsubsection{Google Cloud Platform}
+\begin{itemize}
+    \item \textbf{For Monitoring:} Viewer role
+    \item \textbf{For Deployments:} Editor or specific roles:
+    \begin{itemize}
+        \item Cloud Run Admin
+        \item Storage Admin
+        \item Secret Manager Admin
+        \item Service Account Admin
+    \end{itemize}
+    \item \textbf{For Debugging:} Logs Viewer, Monitoring Viewer
+\end{itemize}
+
+\subsubsection{GitHub Repository}
+\begin{itemize}
+    \item \textbf{For Development:} Write access
+    \item \textbf{For Releases:} Maintain or Admin access
+    \item \textbf{For Secrets Management:} Admin access
+\end{itemize}
+
+\subsubsection{Snowflake}
+\begin{itemize}
+    \item Read access to source data tables
+    \item Access to a dedicated warehouse for queries
+    \item Appropriate role (not ACCOUNTADMIN in production)
+\end{itemize}
+
+\newpage
+
+\section{Infrastructure Requirements}
+
+\subsection{Google Cloud Platform Resources}
+
+\subsubsection{Required GCP APIs}
+The following APIs must be enabled in your GCP project:
+
+\begin{itemize}
+    \item \texttt{run.googleapis.com} - Cloud Run
+    \item \texttt{artifactregistry.googleapis.com} - Container registry
+    \item \texttt{cloudbuild.googleapis.com} - Container builds
+    \item \texttt{cloudscheduler.googleapis.com} - Job scheduling
+    \item \texttt{secretmanager.googleapis.com} - Secrets management
+    \item \texttt{storage.googleapis.com} - Cloud Storage
+    \item \texttt{iamcredentials.googleapis.com} - Service accounts
+    \item \texttt{iam.googleapis.com} - IAM management
+    \item \texttt{cloudresourcemanager.googleapis.com} - Project management
+\end{itemize}
+
+\subsubsection{Required GCP Resources}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Resource} & \textbf{Purpose} & \textbf{Example Name} \\
+\midrule
+GCP Project & Container for all resources & \texttt{mmm-production} \\
+GCS Bucket (State) & Terraform state storage & \texttt{project-tf-state} \\
+GCS Bucket (App) & Model outputs \& data & \texttt{mmm-app-output} \\
+Artifact Registry & Docker image storage & \texttt{mmm-repo} \\
+Workload Identity Pool & GitHub authentication & \texttt{github-pool} \\
+Service Account (Deploy) & CI/CD deployment & \texttt{github-deployer} \\
+Service Account (Web) & Web service runtime & \texttt{mmm-web-sa} \\
+Service Account (Training) & Training job runtime & \texttt{mmm-training-sa} \\
+\bottomrule
+\end{tabular}
+\caption{Required GCP resources}
+\end{table}
+
+\subsection{Compute Resources}
+
+\subsubsection{Web Service Configuration}
+\begin{itemize}
+    \item \textbf{Platform:} Cloud Run Service
+    \item \textbf{CPU:} 2 vCPU
+    \item \textbf{Memory:} 4GB RAM
+    \item \textbf{Min Instances:} 0 (cost-optimized) or 1+ (low latency)
+    \item \textbf{Max Instances:} 10 (adjustable)
+    \item \textbf{Timeout:} 60 seconds per request
+    \item \textbf{Concurrency:} 80 requests per instance
+\end{itemize}
+
+\subsubsection{Training Job Configuration}
+\begin{itemize}
+    \item \textbf{Platform:} Cloud Run Jobs
+    \item \textbf{CPU:} 8 vCPU (recommended for 12-minute runs)
+    \item \textbf{Memory:} 32GB RAM
+    \item \textbf{Timeout:} 6 hours (adjustable)
+    \item \textbf{Max Retries:} 1
+    \item \textbf{Parallelism:} 1 (single job at a time)
+\end{itemize}
+
+\textbf{Note:} CPU/memory can be adjusted in Terraform configuration. More cores = faster training but similar cost due to per-second billing.
+
+\subsection{Storage Requirements}
+
+\subsubsection{Google Cloud Storage}
+\begin{itemize}
+    \item \textbf{Estimated Usage:}
+    \begin{itemize}
+        \item Base: 80GB for historical data
+        \item Growth: \textasciitilde2GB per training run
+    \end{itemize}
+    \item \textbf{Lifecycle Policies:}
+    \begin{itemize}
+        \item Move to Nearline after 30 days (50\% cost reduction)
+        \item Move to Coldline after 90 days (80\% cost reduction)
+    \end{itemize}
+    \item \textbf{Backup:} Enabled via versioning
+\end{itemize}
+
+\subsection{Network Requirements}
+
+\begin{itemize}
+    \item \textbf{Outbound:} HTTPS access to:
+    \begin{itemize}
+        \item Snowflake data warehouse
+        \item GitHub (for CI/CD)
+        \item Docker Hub / Package registries
+    \end{itemize}
+    \item \textbf{Inbound:} HTTPS only (TLS 1.2+)
+    \item \textbf{Domain:} Optional custom domain via Cloud Run
+    \item \textbf{Firewall:} Managed by GCP (no configuration needed)
+\end{itemize}
+
+\subsection{Security Requirements}
+
+\subsubsection{Authentication}
+\begin{itemize}
+    \item \textbf{User Authentication:} Google OAuth 2.0
+    \begin{itemize}
+        \item Domain-restricted access (e.g., @company.com)
+        \item OAuth consent screen configuration
+        \item Client ID and Client Secret
+    \end{itemize}
+    \item \textbf{Service Authentication:} GCP service accounts
+    \item \textbf{Snowflake Authentication:} RSA private key (preferred) or password
+\end{itemize}
+
+\subsubsection{Secrets Management}
+\begin{itemize}
+    \item All secrets stored in Google Secret Manager
+    \item Automatic secret rotation supported
+    \item No secrets in code or environment variables
+    \item Audit logging for secret access
+\end{itemize}
+
+\subsubsection{IAM Permissions}
+Service accounts follow principle of least privilege:
+\begin{itemize}
+    \item \textbf{Web Service:} Artifact Registry Reader, Storage Object Admin, Secret Accessor
+    \item \textbf{Training Job:} Storage Object Admin, Secret Accessor
+    \item \textbf{Deployer:} Cloud Run Admin, Storage Admin, Service Account User
+\end{itemize}
+
+\newpage
+
+\section{Deployment Overview}
+
+\subsection{Deployment Architecture}
+
+The application uses GitHub Actions for continuous deployment with Terraform managing infrastructure as code.
+
+\subsubsection{Deployment Flow}
+\begin{enumerate}
+    \item Developer pushes code to GitHub repository
+    \item GitHub Actions triggered automatically
+    \item Docker images built (web service + training job)
+    \item Images pushed to Artifact Registry
+    \item Terraform applies infrastructure changes
+    \item Cloud Run service and jobs updated
+    \item Health checks verify deployment
+\end{enumerate}
+
+\subsubsection{Environments}
+\begin{itemize}
+    \item \textbf{Production:} Deployed from \texttt{main} branch
+    \item \textbf{Development:} Deployed from \texttt{dev} or \texttt{feat-*} branches
+    \item Separate Terraform workspaces for isolation
+\end{itemize}
+
+\subsection{Initial Setup Steps}
+
+\subsubsection{Phase 1: GCP Project Setup (1-2 hours)}
+\begin{enumerate}
+    \item Create or select GCP project
+    \item Enable required APIs
+    \item Create Terraform state bucket
+    \item Set up billing alerts
+\end{enumerate}
+
+\subsubsection{Phase 2: Authentication Setup (1-2 hours)}
+\begin{enumerate}
+    \item Configure Workload Identity Federation for GitHub
+    \item Create service accounts with appropriate roles
+    \item Set up Google OAuth consent screen and credentials
+    \item Generate or obtain Snowflake RSA key pair
+\end{enumerate}
+
+\subsubsection{Phase 3: Infrastructure Deployment (30 minutes)}
+\begin{enumerate}
+    \item Create Artifact Registry repository
+    \item Create GCS bucket for outputs
+    \item Configure Terraform backend and variables
+    \item Update GitHub repository secrets
+\end{enumerate}
+
+\subsubsection{Phase 4: Application Deployment (15 minutes)}
+\begin{enumerate}
+    \item Push code to trigger CI/CD
+    \item Monitor GitHub Actions workflow
+    \item Verify Cloud Run service deployment
+    \item Test web interface access
+\end{enumerate}
+
+\subsubsection{Phase 5: Verification (30 minutes)}
+\begin{enumerate}
+    \item Test Snowflake connection
+    \item Run benchmark training job
+    \item Verify results in GCS
+    \item Check logs and monitoring
+\end{enumerate}
+
+\textbf{Total Estimated Time:} 3-5 hours for initial deployment
+
+\subsection{Configuration Files}
+
+Key configuration files to customize:
+
+\begin{itemize}
+    \item \texttt{infra/terraform/backend.tf} - Terraform state bucket
+    \item \texttt{infra/terraform/envs/prod.tfvars} - Production settings
+    \item \texttt{infra/terraform/envs/dev.tfvars} - Development settings
+    \item \texttt{.github/workflows/ci.yml} - Production CI/CD
+    \item \texttt{.github/workflows/ci-dev.yml} - Development CI/CD
+\end{itemize}
+
+\subsection{Required Credentials}
+
+Collect these credentials before deployment:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lp{8cm}}
+\toprule
+\textbf{Credential} & \textbf{Description} \\
+\midrule
+GCP Project ID & Your Google Cloud project identifier \\
+GCP Project Number & Numeric project identifier (auto-generated) \\
+OAuth Client ID & From GCP OAuth consent screen \\
+OAuth Client Secret & From GCP OAuth consent screen \\
+Cookie Secret & Random 32-byte hex (generate with \texttt{openssl rand -hex 32}) \\
+SF Account & Snowflake account identifier \\
+SF User & Snowflake username \\
+SF Private Key & RSA private key in PEM format (preferred) \\
+SF Warehouse & Snowflake warehouse name \\
+SF Database & Snowflake database name \\
+SF Schema & Snowflake schema name \\
+\bottomrule
+\end{tabular}
+\caption{Required credentials for deployment}
+\end{table}
+
+\newpage
+
+\section{Ongoing Maintenance}
+
+\subsection{Regular Maintenance Tasks}
+
+\subsubsection{Daily/Weekly}
+\begin{itemize}
+    \item Monitor Cloud Run service health
+    \item Check training job success rates
+    \item Review logs for errors or warnings
+    \item Monitor GCS storage growth
+\end{itemize}
+
+\subsubsection{Monthly}
+\begin{itemize}
+    \item Review GCP billing and optimize costs
+    \item Analyze Snowflake warehouse usage
+    \item Clean up old training artifacts (automated via lifecycle)
+    \item Review and update access permissions
+\end{itemize}
+
+\subsubsection{Quarterly}
+\begin{itemize}
+    \item Update Python dependencies (security patches)
+    \item Update R packages for Robyn
+    \item Review and optimize Cloud Run resources
+    \item Test disaster recovery procedures
+    \item Rotate sensitive credentials (OAuth, Snowflake keys)
+\end{itemize}
+
+\subsection{Monitoring and Alerting}
+
+\subsubsection{Key Metrics to Monitor}
+\begin{itemize}
+    \item \textbf{Web Service:}
+    \begin{itemize}
+        \item Request latency (target: <2s)
+        \item Error rate (target: <1\%)
+        \item CPU/Memory utilization
+    \end{itemize}
+    \item \textbf{Training Jobs:}
+    \begin{itemize}
+        \item Job success rate (target: >95\%)
+        \item Average execution time
+        \item Resource utilization
+    \end{itemize}
+    \item \textbf{Storage:}
+    \begin{itemize}
+        \item Storage growth rate
+        \item Bucket size vs lifecycle policies
+    \end{itemize}
+    \item \textbf{Costs:}
+    \begin{itemize}
+        \item Monthly spend by service
+        \item Cost per training job
+        \item Storage costs
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Recommended Alerts}
+\begin{itemize}
+    \item Budget alert at 50\% and 90\% of monthly budget
+    \item Error rate exceeds 5\% for 5 minutes
+    \item Training job failures exceed 10\%
+    \item Storage exceeds 500GB (adjust based on usage)
+\end{itemize}
+
+\subsection{Backup and Disaster Recovery}
+
+\subsubsection{What is Backed Up}
+\begin{itemize}
+    \item \textbf{Code:} Version controlled in GitHub
+    \item \textbf{Infrastructure:} Defined in Terraform (version controlled)
+    \item \textbf{Terraform State:} Stored in GCS with versioning enabled
+    \item \textbf{Model Artifacts:} Stored in GCS with retention policies
+    \item \textbf{Secrets:} Managed in Google Secret Manager with versions
+\end{itemize}
+
+\subsubsection{Recovery Time Objectives}
+\begin{itemize}
+    \item \textbf{Web Service:} <15 minutes (redeploy from GitHub)
+    \item \textbf{Infrastructure:} <30 minutes (Terraform apply)
+    \item \textbf{Data Loss:} Minimal (GCS has 11 nines durability)
+\end{itemize}
+
+\subsubsection{Disaster Recovery Procedure}
+\begin{enumerate}
+    \item Create new GCP project (if primary is unavailable)
+    \item Run initial setup (APIs, buckets, service accounts)
+    \item Deploy infrastructure via Terraform
+    \item Trigger CI/CD deployment from GitHub
+    \item Restore secrets from backup documentation
+    \item Verify functionality and notify users
+\end{enumerate}
+
+\subsection{Security Maintenance}
+
+\subsubsection{Credential Rotation Schedule}
+\begin{itemize}
+    \item \textbf{Snowflake Private Key:} Annually or upon personnel changes
+    \item \textbf{OAuth Secrets:} Annually
+    \item \textbf{Service Account Keys:} Not needed (uses Workload Identity)
+    \item \textbf{Cookie Secret:} Annually or after security incidents
+\end{itemize}
+
+\subsubsection{Access Review}
+\begin{itemize}
+    \item Review GCP IAM permissions quarterly
+    \item Remove access for departed team members immediately
+    \item Audit service account permissions annually
+    \item Review Google OAuth allowed domains
+\end{itemize}
+
+\subsubsection{Security Updates}
+\begin{itemize}
+    \item Apply Python security updates within 30 days
+    \item Update base Docker images quarterly
+    \item Monitor GitHub security advisories
+    \item Subscribe to GCP security bulletins
+\end{itemize}
+
+\subsection{Troubleshooting Common Issues}
+
+\subsubsection{Web Service Not Responding}
+\begin{enumerate}
+    \item Check Cloud Run service status in GCP Console
+    \item Review logs in Cloud Logging
+    \item Verify service account permissions
+    \item Check OAuth configuration
+    \item Restart service if needed (redeploy from GitHub)
+\end{enumerate}
+
+\subsubsection{Training Jobs Failing}
+\begin{enumerate}
+    \item Check job execution logs in Cloud Logging
+    \item Verify Snowflake connectivity and credentials
+    \item Check GCS bucket permissions
+    \item Review memory/CPU allocation (increase if OOM errors)
+    \item Examine \texttt{robyn\_console.log} in GCS results folder
+\end{enumerate}
+
+\subsubsection{High Costs}
+\begin{enumerate}
+    \item Review Cloud Run billing in GCP Console
+    \item Check number of training jobs executed
+    \item Verify min\_instances setting (should be 0 for cost optimization)
+    \item Review GCS storage lifecycle policies
+    \item Analyze Snowflake warehouse usage
+\end{enumerate}
+
+\subsection{Update Procedures}
+
+\subsubsection{Updating Application Code}
+\begin{enumerate}
+    \item Create feature branch from \texttt{dev}
+    \item Make and test changes locally
+    \item Push to GitHub (triggers dev deployment)
+    \item Test in dev environment
+    \item Create pull request to \texttt{main}
+    \item Review and merge (triggers production deployment)
+\end{enumerate}
+
+\subsubsection{Updating Infrastructure}
+\begin{enumerate}
+    \item Modify Terraform files in \texttt{infra/terraform/}
+    \item Test changes in dev environment first
+    \item Review Terraform plan output carefully
+    \item Apply changes via GitHub Actions
+    \item Verify resources in GCP Console
+\end{enumerate}
+
+\subsubsection{Updating Dependencies}
+\begin{enumerate}
+    \item Update \texttt{requirements.txt} (Python) or \texttt{Dockerfile.training-base} (R)
+    \item Test locally or in dev environment
+    \item Check for breaking changes in package release notes
+    \item Deploy to dev, verify functionality
+    \item Deploy to production after successful testing
+\end{enumerate}
+
+\newpage
+
+\section{Support and Resources}
+
+\subsection{Documentation}
+
+\begin{itemize}
+    \item \textbf{README.md} - Project overview and quick start
+    \item \textbf{ARCHITECTURE.md} - System architecture and components
+    \item \textbf{DEVELOPMENT.md} - Local development setup
+    \item \textbf{REQUIREMENTS.md} - Detailed technical requirements
+    \item \textbf{DEPLOYMENT\_GUIDE.md} - Step-by-step deployment instructions
+    \item \textbf{COST\_OPTIMIZATION.md} - Cost management strategies
+\end{itemize}
+
+\subsection{External Resources}
+
+\begin{itemize}
+    \item \textbf{Google Cloud Documentation:} \url{https://cloud.google.com/docs}
+    \item \textbf{Cloud Run Pricing:} \url{https://cloud.google.com/run/pricing}
+    \item \textbf{Terraform GCP Provider:} \url{https://registry.terraform.io/providers/hashicorp/google/latest}
+    \item \textbf{Robyn MMM:} \url{https://github.com/facebookexperimental/Robyn}
+    \item \textbf{Streamlit Documentation:} \url{https://docs.streamlit.io}
+\end{itemize}
+
+\subsection{Getting Help}
+
+For technical support:
+\begin{enumerate}
+    \item Review relevant documentation in the \texttt{docs/} directory
+    \item Check Cloud Logging for error details
+    \item Review GitHub repository issues
+    \item Contact your implementation partner or technical lead
+\end{enumerate}
+
+\newpage
+
+\section{Appendix A: Quick Reference}
+
+\subsection{Cost Calculator}
+
+Use this formula to estimate monthly costs:
+
+\begin{equation}
+\text{Monthly Cost} = \text{Fixed} + (\text{Jobs} \times \text{Cost per Job})
+\end{equation}
+
+Where:
+\begin{itemize}
+    \item Fixed = \$2-\$3/month
+    \item Jobs = Number of training jobs per month
+    \item Cost per Job = \$0.20 (benchmark) or \$1.00 (production)
+\end{itemize}
+
+\textbf{Example:} 100 production jobs/month = \$2 + (100 × \$1.00) = \$102/month
+
+\subsection{GCP Regions}
+
+Recommended regions for deployment:
+\begin{itemize}
+    \item \texttt{europe-west1} (Belgium) - EU, low latency
+    \item \texttt{europe-west4} (Netherlands) - EU, low latency
+    \item \texttt{us-central1} (Iowa) - US, low cost
+    \item \texttt{us-east1} (South Carolina) - US, low cost
+\end{itemize}
+
+Choose region closest to your Snowflake instance for optimal performance.
+
+\subsection{Service Limits}
+
+Default GCP quotas (can be increased via support request):
+\begin{itemize}
+    \item Cloud Run services per project: 100
+    \item Cloud Run jobs per project: 1000
+    \item Concurrent Cloud Run job executions: 100
+    \item GCS buckets per project: 10,000
+    \item Cloud Run request timeout: 60 minutes
+\end{itemize}
+
+\subsection{Glossary}
+
+\begin{description}
+    \item[Cloud Run] GCP's serverless container platform for web services and batch jobs
+    \item[GCS] Google Cloud Storage - object storage service
+    \item[IAM] Identity and Access Management - GCP's permission system
+    \item[Robyn] Facebook's open-source Marketing Mix Modeling framework
+    \item[Terraform] Infrastructure as Code tool for managing cloud resources
+    \item[vCPU] Virtual CPU - compute allocation unit in cloud environments
+    \item[Workload Identity] GCP's recommended way to authenticate from external services
+\end{description}
+
+\newpage
+
+\section{Appendix B: Deployment Checklist}
+
+Use this checklist for initial deployment:
+
+\subsection{Pre-Deployment}
+\begin{itemize}
+    \item Install required tools (gcloud, terraform, docker, git)
+    \item Create GCP project with billing enabled
+    \item Enable required GCP APIs
+    \item Create Terraform state bucket
+    \item Create Artifact Registry repository
+    \item Set up Workload Identity Federation for GitHub
+    \item Create deployer service account with permissions
+    \item Create output GCS bucket
+    \item Configure Google OAuth (consent screen + credentials)
+    \item Generate Snowflake RSA key pair (or obtain password)
+    \item Configure GitHub repository secrets
+\end{itemize}
+
+\subsection{Configuration}
+\begin{itemize}
+    \item Update \texttt{infra/terraform/backend.tf} with state bucket
+    \item Update \texttt{infra/terraform/envs/prod.tfvars} with project details
+    \item Update \texttt{.github/workflows/ci.yml} with project ID and region
+    \item Verify all environment variables in workflows
+    \item Review and adjust resource allocations (CPU/memory)
+\end{itemize}
+
+\subsection{Deployment}
+\begin{itemize}
+    \item Push code to GitHub (main branch)
+    \item Monitor GitHub Actions workflow
+    \item Verify Docker images in Artifact Registry
+    \item Verify Cloud Run service deployment
+    \item Verify Cloud Run job registration
+    \item Verify Cloud Scheduler jobs created
+\end{itemize}
+
+\subsection{Verification}
+\begin{itemize}
+    \item Access web application URL
+    \item Test Google OAuth login
+    \item Test Snowflake connection
+    \item Test data query and preview
+    \item Run test training job (200×3 iterations)
+    \item Verify results in GCS bucket
+    \item Check Cloud Logging for errors
+    \item Verify IAM permissions are correct
+    \item Set up billing alerts
+    \item Document deployment details
+\end{itemize}
+
+\subsection{Post-Deployment}
+\begin{itemize}
+    \item Run benchmark training job (2000×5)
+    \item Run production training job (10000×5)
+    \item Verify all features work as expected
+    \item Train team on platform usage
+    \item Set up monitoring dashboards
+    \item Configure alerting rules
+    \item Document any customizations made
+    \item Schedule first maintenance review
+\end{itemize}
+
+\end{document}
