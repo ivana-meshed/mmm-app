@@ -1,0 +1,79 @@
+# GitHub Actions Workflow Configuration
+# 
+# This file contains company-specific settings for CI/CD workflows.
+# Copy this file to 'config.yml' and update with your own values.
+# Add 'config.yml' to .gitignore to keep your settings private.
+#
+# IMPORTANT: DO NOT commit config.yml with actual credentials to version control.
+# Use GitHub Secrets for sensitive data (see documentation below).
+
+# Google Cloud Project Configuration
+gcp:
+  project_id: "your-gcp-project-id"            # e.g., "my-company-prod-123456"
+  project_number: "your-project-number"        # e.g., "123456789012"
+  region: "europe-west1"                       # GCP region for deployment
+  
+  # Artifact Registry
+  artifact_repo: "mmm-repo"                    # Artifact Registry repository name
+  web_image: "mmm-web"                         # Web service image name
+  training_image: "mmm-training"               # Training job image name
+  
+  # Cloud Run Service Names
+  service_name_prod: "mmm-app"                 # Production service name
+  service_name_dev: "mmm-app-dev"              # Development service name
+  
+  # Storage
+  bucket: "mmm-app-output"                     # GCS bucket for model outputs
+  
+  # Workload Identity Federation
+  wif_pool: "github-pool"                      # Workload Identity Pool name
+  wif_provider: "github-oidc"                  # Workload Identity Provider name
+  
+  # Service Accounts
+  deployer_sa: "github-deployer@your-project.iam.gserviceaccount.com"
+  web_runtime_sa: "mmm-web-service-sa@your-project.iam.gserviceaccount.com"
+  training_runtime_sa: "mmm-training-job-sa@your-project.iam.gserviceaccount.com"
+
+# Terraform Configuration
+terraform:
+  scheduler_job_name_prod: "robyn-queue-tick"
+  scheduler_job_name_dev: "robyn-queue-tick-dev"
+  queue_name_prod: "default"
+  queue_name_dev: "default-dev"
+
+# GitHub Secrets Required
+# Configure these in: GitHub Repository > Settings > Secrets and variables > Actions
+#
+# Required Secrets:
+#   SF_PRIVATE_KEY              - Snowflake private key (PEM format)
+#   GOOGLE_OAUTH_CLIENT_ID      - Google OAuth client ID
+#   GOOGLE_OAUTH_CLIENT_SECRET  - Google OAuth client secret
+#   STREAMLIT_COOKIE_SECRET     - Streamlit authentication cookie secret
+#
+# How to create these secrets:
+#   1. Go to your GitHub repository
+#   2. Click Settings > Secrets and variables > Actions
+#   3. Click "New repository secret"
+#   4. Add each secret with the exact names listed above
+#
+# For Workload Identity Federation setup, see:
+#   docs/DEPLOYMENT_GUIDE.md#workload-identity-federation
+
+# Branch Configuration
+branches:
+  production:
+    - main
+  development:
+    - feat-*
+    - copilot/*
+    - dev
+
+# Notes for Customers:
+#
+# 1. **Update all email addresses** above with your organization's addresses
+# 2. **Configure GitHub Secrets** as documented above (DO NOT put secrets in this file)
+# 3. **Set up Workload Identity Federation** before first deployment (see DEPLOYMENT_GUIDE.md)
+# 4. **Test in development** environment before deploying to production
+# 5. **Update service account names** to match your GCP project naming
+#
+# For detailed setup instructions, see docs/DEPLOYMENT_GUIDE.md

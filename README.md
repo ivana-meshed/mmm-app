@@ -303,10 +303,16 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 | Document | Description |
 |----------|-------------|
 | [README.md](README.md) | Project overview and quick start |
+| [LICENSE](LICENSE) | **Proprietary software license** |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture and components |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Local development setup and testing |
 | [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | **Basic requirements for deployment and maintenance** |
 | [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | **Complete deployment guide for new projects** |
+| [docs/LICENSING.md](docs/LICENSING.md) | **Licensing guide for administrators and customers** |
+| [docs/LICENSING_FAQ.md](docs/LICENSING_FAQ.md) | **Frequently asked questions about licensing** |
+| [docs/LICENSING_IMPLEMENTATION_GUIDE.md](docs/LICENSING_IMPLEMENTATION_GUIDE.md) | **Step-by-step guide for implementing licensing** |
+| [docs/LICENSE_AGREEMENT_TEMPLATE.txt](docs/LICENSE_AGREEMENT_TEMPLATE.txt) | Customizable license agreement template |
+| [docs/LICENSE_HEADER_TEMPLATE.md](docs/LICENSE_HEADER_TEMPLATE.md) | Source code copyright header templates |
 | [docs/MODEL_SUMMARY.md](docs/MODEL_SUMMARY.md) | Model summary file structure |
 | [docs/OUTPUT_MODELS_PARQUET.md](docs/OUTPUT_MODELS_PARQUET.md) | OutputModels parquet data extraction |
 | [docs/PARALLELLY_OVERRIDE_FIX.md](docs/PARALLELLY_OVERRIDE_FIX.md) | **Fix for 8 vCPU core allocation issue** |
@@ -318,5 +324,30 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 
 ## License
 
-Apache-2.0 (or your preferred license).
+This software is proprietary and confidential. Copyright (c) 2024-2026 Meshed Data. All Rights Reserved.
+
+**This is NOT open source software.**
+
+The MMM Trainer is licensed under a custom proprietary license that:
+- Allows installation on customer infrastructure with explicit written authorization
+- Prohibits redistribution or making the software available to third parties
+- Restricts use to internal business purposes only
+
+### For Potential Licensees
+
+To obtain a license to use this software:
+
+1. Review the [LICENSE](LICENSE) file for complete terms
+2. Contact licensing@mesheddata.com to discuss your requirements
+3. Receive written authorization to install and use the software
+
+### For License Administrators
+
+See [docs/LICENSING.md](docs/LICENSING.md) for:
+- License distribution procedures
+- Customer onboarding guidelines
+- Compliance and audit procedures
+- Creating clean distributions without git history
+
+See [scripts/prepare_distribution.sh](scripts/prepare_distribution.sh) for automated distribution package creation.
 

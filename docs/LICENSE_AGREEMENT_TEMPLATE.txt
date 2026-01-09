@@ -1,0 +1,316 @@
+SOFTWARE LICENSE AGREEMENT
+
+This Software License Agreement (the "Agreement") is entered into as of 
+[DATE] (the "Effective Date") by and between:
+
+LICENSOR:
+    Meshed Data
+    [Address]
+    [City, State, Zip]
+    Email: licensing@mesheddata.com
+    
+    (hereinafter referred to as "Licensor")
+
+and
+
+LICENSEE:
+    [Customer Legal Name]
+    [Address]
+    [City, State, Zip]
+    Email: [Customer Email]
+    
+    (hereinafter referred to as "Licensee")
+
+WHEREAS, Licensor owns certain proprietary software known as "MMM Trainer" 
+(the "Software");
+
+WHEREAS, Licensee desires to obtain a license to use the Software for its 
+internal business purposes; and
+
+WHEREAS, Licensor desires to grant such a license to Licensee under the 
+terms and conditions set forth in this Agreement.
+
+NOW, THEREFORE, in consideration of the mutual covenants and agreements 
+contained herein, and for other good and valuable consideration, the receipt 
+and sufficiency of which are hereby acknowledged, the parties agree as 
+follows:
+
+1. DEFINITIONS
+
+   1.1 "Software" means the MMM Trainer application, including all source 
+       code, object code, documentation, and related materials provided by 
+       Licensor to Licensee under this Agreement.
+
+   1.2 "Installation" means a single deployment of the Software on 
+       Licensee's infrastructure capable of being accessed by users.
+
+   1.3 "Authorized Users" means Licensee's employees and contractors who 
+       have a legitimate need to access the Software for Licensee's 
+       internal business purposes.
+
+   1.4 "Confidential Information" means the Software and all related 
+       technical information, documentation, and business information 
+       disclosed by Licensor to Licensee.
+
+2. LICENSE GRANT
+
+   2.1 Subject to the terms and conditions of this Agreement, Licensor 
+       hereby grants to Licensee a limited, non-exclusive, non-transferable, 
+       non-sublicensable license to:
+
+       (a) Install and use the Software on Licensee's own infrastructure 
+           for Licensee's internal business purposes only;
+
+       (b) Make [NUMBER] Installation(s) of the Software;
+
+       (c) Allow access to the Software by Authorized Users;
+
+       (d) Modify the Software for Licensee's internal use, provided that 
+           all modifications remain subject to this Agreement.
+
+   2.2 The license granted herein is [SELECT ONE]:
+       [ ] Perpetual (effective indefinitely from Effective Date)
+       [ ] Term-Limited (effective for _____ [months/years] from Effective 
+           Date, expiring on [EXPIRATION DATE])
+
+3. RESTRICTIONS
+
+   Licensee shall NOT:
+
+   3.1 Distribute, sublicense, lease, rent, loan, or otherwise transfer the 
+       Software to any third party;
+
+   3.2 Make the Software available to any third party through hosting, 
+       software-as-a-service, cloud services, or any other means;
+
+   3.3 Remove, modify, or obscure any copyright, trademark, or proprietary 
+       notices in the Software;
+
+   3.4 Use the Software to create competing products or services;
+
+   3.5 Disclose benchmarking or performance data without prior written 
+       consent;
+
+   3.6 Reverse engineer, decompile, or disassemble the Software, except as 
+       expressly permitted by applicable law;
+
+   3.7 Transfer or assign this Agreement without Licensor's prior written 
+       consent;
+
+   3.8 Exceed the number of Installations specified in Section 2.1(b).
+
+4. FEES AND PAYMENT
+
+   4.1 License Fee: Licensee shall pay Licensor a one-time license fee of 
+       [AMOUNT] [CURRENCY] [or: annual license fee of [AMOUNT] [CURRENCY]].
+
+   4.2 Payment Terms: Payment is due [NET 30 / upon execution / other] 
+       from the Effective Date.
+
+   4.3 Additional Installations: Additional installations beyond those 
+       specified in Section 2.1(b) require prior authorization and 
+       additional fees of [AMOUNT] per installation.
+
+   4.4 Late Payment: Late payments shall incur interest at [RATE]% per 
+       month or the maximum rate permitted by law, whichever is lower.
+
+5. SUPPORT AND MAINTENANCE
+
+   5.1 Support Level: [SELECT ONE]
+       [ ] Basic Support: Email support, business hours only
+       [ ] Standard Support: Email support with [X] hour response time
+       [ ] Premium Support: 24/7 support with [X] hour response time
+       [ ] No Support: Software provided as-is
+
+   5.2 Support Period: [SELECT ONE]
+       [ ] [NUMBER] months/years from Effective Date
+       [ ] Coterminous with license term
+       [ ] Perpetual
+
+   5.3 Support includes:
+       [ ] Bug fixes
+       [ ] Security updates
+       [ ] Version upgrades (major/minor)
+       [ ] Technical assistance
+       [ ] Documentation updates
+
+   5.4 Support Contact: [SUPPORT EMAIL/PHONE]
+
+6. DELIVERY
+
+   6.1 Licensor shall deliver the Software to Licensee within [NUMBER] 
+       business days of receiving payment via [METHOD: secure download, 
+       encrypted email, physical media].
+
+   6.2 Delivery shall include:
+       - Software source code and binaries
+       - Documentation
+       - LICENSE_AUTHORIZATION.txt certificate
+       - Deployment guides
+       - [OTHER: _________________]
+
+7. OWNERSHIP AND INTELLECTUAL PROPERTY
+
+   7.1 The Software is licensed, not sold. Licensor retains all right, 
+       title, and interest in and to the Software, including all 
+       intellectual property rights.
+
+   7.2 Licensee acknowledges that the Software contains proprietary and 
+       confidential information of Licensor.
+
+   7.3 Any modifications made by Licensee to the Software shall be owned by 
+       Licensee but shall remain subject to this Agreement and may not be 
+       distributed.
+
+8. CONFIDENTIALITY
+
+   8.1 Licensee shall maintain the confidentiality of the Software and all 
+       Confidential Information using at least the same degree of care it 
+       uses to protect its own confidential information, but no less than 
+       reasonable care.
+
+   8.2 Licensee shall restrict access to the Software to Authorized Users 
+       who have a need to know and who have been informed of the 
+       confidential nature of the Software.
+
+   8.3 Confidentiality obligations survive termination of this Agreement 
+       for [NUMBER] years.
+
+9. WARRANTIES AND DISCLAIMERS
+
+   9.1 Licensor warrants that it has the right to grant the license 
+       contained in this Agreement.
+
+   9.2 [OPTIONAL] Licensor warrants that the Software will substantially 
+       conform to its documentation for [NUMBER] days from delivery.
+
+   9.3 EXCEPT AS EXPRESSLY PROVIDED IN THIS SECTION 9, THE SOFTWARE IS 
+       PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, 
+       INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS 
+       FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+10. LIMITATION OF LIABILITY
+
+   10.1 IN NO EVENT SHALL LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL, 
+        SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING BUT NOT 
+        LIMITED TO PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF 
+        USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND 
+        ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, 
+        OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT 
+        OF THE USE OF THE SOFTWARE.
+
+   10.2 LICENSOR'S TOTAL CUMULATIVE LIABILITY UNDER THIS AGREEMENT SHALL 
+        NOT EXCEED THE AMOUNTS PAID BY LICENSEE TO LICENSOR UNDER THIS 
+        AGREEMENT IN THE [12] MONTHS PRECEDING THE CLAIM.
+
+11. TERM AND TERMINATION
+
+   11.1 Term: This Agreement is effective as of the Effective Date and 
+        continues until terminated as provided herein.
+
+   11.2 Termination for Cause: Either party may terminate this Agreement 
+        immediately upon written notice if the other party materially 
+        breaches this Agreement and fails to cure such breach within [30] 
+        days of receiving written notice.
+
+   11.3 Termination for Convenience: [IF APPLICABLE] Either party may 
+        terminate this Agreement with [60] days' written notice.
+
+   11.4 Effect of Termination: Upon termination:
+        (a) All licenses granted herein immediately terminate;
+        (b) Licensee shall cease all use of the Software;
+        (c) Licensee shall destroy or return all copies of the Software;
+        (d) Licensee shall certify in writing compliance with (b) and (c);
+        (e) Sections 7, 8, 9, 10, 13, and 14 survive termination.
+
+12. AUDIT RIGHTS
+
+   12.1 Licensor may, upon [30] days' written notice and during normal 
+        business hours, audit Licensee's use of the Software to verify 
+        compliance with this Agreement.
+
+   12.2 Audits shall be conducted no more than [once per year] unless a 
+        prior audit revealed non-compliance.
+
+   12.3 If an audit reveals non-compliance, Licensee shall pay for 
+        additional licenses and, if non-compliance exceeds [10%], 
+        Licensee shall reimburse Licensor for audit costs.
+
+13. GENERAL PROVISIONS
+
+   13.1 Governing Law: This Agreement shall be governed by the laws of 
+        [JURISDICTION], without regard to conflicts of law principles.
+
+   13.2 Jurisdiction: Any disputes shall be resolved in the courts of 
+        [JURISDICTION].
+
+   13.3 Entire Agreement: This Agreement constitutes the entire agreement 
+        between the parties and supersedes all prior agreements or 
+        understandings, whether written or oral.
+
+   13.4 Amendment: This Agreement may only be amended by a written document 
+        signed by both parties.
+
+   13.5 Waiver: No waiver of any provision of this Agreement shall be 
+        deemed or shall constitute a waiver of any other provision.
+
+   13.6 Severability: If any provision is held invalid or unenforceable, 
+        the remaining provisions shall remain in full force and effect.
+
+   13.7 Assignment: Licensee may not assign this Agreement without 
+        Licensor's prior written consent. Licensor may assign this 
+        Agreement without restriction.
+
+   13.8 Notices: All notices shall be in writing and delivered to the 
+        addresses specified above or as otherwise specified by the parties.
+
+   13.9 Force Majeure: Neither party shall be liable for delays or failure 
+        to perform due to causes beyond its reasonable control.
+
+   13.10 Independent Contractors: The parties are independent contractors 
+         and this Agreement does not create a partnership, joint venture, 
+         or agency relationship.
+
+14. SPECIAL PROVISIONS
+
+   [Insert any special terms, conditions, or requirements specific to this 
+   customer, such as:
+   - Data processing requirements
+   - Regulatory compliance obligations
+   - Service level agreements
+   - Custom support terms
+   - Training or onboarding services
+   - Future version rights
+   - Volume discounts
+   - etc.]
+
+15. SIGNATURES
+
+IN WITNESS WHEREOF, the parties have executed this Agreement as of the 
+Effective Date.
+
+LICENSOR:
+
+Meshed Data
+
+By: _________________________________
+Name: [NAME]
+Title: [TITLE]
+Date: _______________________________
+
+
+LICENSEE:
+
+[Customer Legal Name]
+
+By: _________________________________
+Name: [NAME]
+Title: [TITLE]
+Date: _______________________________
+
+
+ATTACHMENTS:
+Exhibit A: Software Description and Version
+Exhibit B: Support Terms and Service Level Agreement (if applicable)
+Exhibit C: Approved Installations and Locations
+Exhibit D: Authorized Users (if applicable)
