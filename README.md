@@ -300,6 +300,14 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 
 ## Documentation
 
+### Customer Documentation
+
+| Document | Description |
+|----------|-------------|
+| [docs/CUSTOMER_DEPLOYMENT_GUIDE.pdf](docs/CUSTOMER_DEPLOYMENT_GUIDE.pdf) | **📄 Complete customer deployment guide (PDF, 21 pages)** - Cost estimates, technical requirements, deployment steps, and maintenance procedures |
+
+### Technical Documentation
+
 | Document | Description |
 |----------|-------------|
 | [README.md](README.md) | Project overview and quick start |
