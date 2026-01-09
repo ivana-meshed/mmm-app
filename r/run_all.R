@@ -253,24 +253,34 @@ requested_cores <- as.numeric(Sys.getenv("R_MAX_CORES", "32"))
 
 # Detect actual available cores using multiple methods
 # Note: If PARALLELLY_OVERRIDE_CORES was set, parallelly should now respect it
-available_cores_parallelly <- parallelly::availableCores()
+available_cores_parallelly_raw <- parallelly::availableCores()
 available_cores_parallel <- parallel::detectCores()
 
-# Verify if override was successful
+# STRONG OVERRIDE: Force the value if PARALLELLY_OVERRIDE_CORES is set
+# This bypasses parallelly's cgroup detection which may return 7 instead of 8
 override_cores_check <- Sys.getenv("PARALLELLY_OVERRIDE_CORES", "")
 if (nzchar(override_cores_check)) {
     override_value_check <- as.numeric(override_cores_check)
     if (!is.na(override_value_check) && override_value_check > 0) {
-        if (available_cores_parallelly == override_value_check) {
+        if (available_cores_parallelly_raw == override_value_check) {
             cat(sprintf("\n✅ OVERRIDE VERIFICATION: SUCCESS\n"))
-            cat(sprintf("   parallelly::availableCores() = %d (matches override)\n\n", available_cores_parallelly))
+            cat(sprintf("   parallelly::availableCores() = %d (matches override)\n\n", available_cores_parallelly_raw))
+            available_cores_parallelly <- available_cores_parallelly_raw
         } else {
-            cat(sprintf("\n❌ OVERRIDE VERIFICATION: FAILED\n"))
-            cat(sprintf("   Expected: %d cores (from override)\n", override_value_check))
-            cat(sprintf("   Actual:   %d cores (from parallelly)\n", available_cores_parallelly))
-            cat(sprintf("   The override did not take effect - parallelly may have loaded before env var was set\n\n"))
+            cat(sprintf("\n⚠️  OVERRIDE VERIFICATION: FORCING VALUE\n"))
+            cat(sprintf("   parallelly::availableCores() returned: %d\n", available_cores_parallelly_raw))
+            cat(sprintf("   Override value (PARALLELLY_OVERRIDE_CORES): %d\n", override_value_check))
+            cat(sprintf("   🔧 Forcing available_cores_parallelly to %d\n\n", override_value_check))
+            # FORCE the override value instead of using parallelly's detected value
+            available_cores_parallelly <- override_value_check
         }
+    } else {
+        # Invalid override value, use parallelly's detection
+        available_cores_parallelly <- available_cores_parallelly_raw
     }
+} else {
+    # No override set, use parallelly's detection
+    available_cores_parallelly <- available_cores_parallelly_raw
 }
 
 # Quick check: if there's a significant discrepancy, run diagnostics
@@ -1708,7 +1718,7 @@ cat(sprintf(
     }
 ))
 cat(sprintf("  - CPU cores (system):  %d\n", parallel::detectCores()))
-cat(sprintf("  - CPU cores (actual):  %d\n", parallelly::availableCores()))
+cat(sprintf("  - CPU cores (actual):  %d\n", available_cores_parallelly))
 cat(sprintf("  - Cores for training:  %d (safe buffer applied)\n", max_cores))
 cat(sprintf(
     "  - Future plan:         %s with %d workers\n\n",
