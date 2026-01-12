@@ -1,0 +1,670 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{fancyhdr}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{textcomp}
+
+% Header and footer
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{MMM Trainer Cost Estimates}
+\fancyhead[R]{\thepage}
+\fancyfoot[C]{Confidential}
+
+% Colors
+\definecolor{darkblue}{RGB}{0,51,102}
+\definecolor{lightgray}{RGB}{240,240,240}
+
+% Title page
+\title{\Huge\textbf{MMM Trainer\\Cost Estimates \& Technical Requirements}\\[0.5cm]\Large Pricing Guide for Self-Hosted Deployment}
+\author{Cost Analysis \& Requirements Documentation}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\newpage
+
+\section{Overview}
+
+This document provides comprehensive cost estimates for deploying and operating the MMM Trainer platform on Google Cloud Platform. All costs are based on actual production measurements from January 2026, running on the current infrastructure configuration (8 vCPU, 32GB RAM, full core utilization).
+
+\subsection{Key Takeaways}
+
+\begin{itemize}
+    \item \textbf{Training jobs} account for 90-99\% of total variable costs
+    \item \textbf{Fixed infrastructure} costs approximately \$2/month
+    \item \textbf{Per-second billing} means faster machines don't necessarily cost more
+    \item \textbf{Actual production runs} take 80-120 minutes (not linear scaling from benchmark)
+\end{itemize}
+
+\newpage
+
+\section{Training Job Costs}
+
+All costs are based on actual production measurements using Google Cloud Platform services in the \texttt{europe-west1} region with 8 vCPU and 32GB RAM configuration.
+
+\subsection{Job Performance and Costs}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrrl}
+\toprule
+\textbf{Workload} & \textbf{Iterations × Trials} & \textbf{Duration} & \textbf{Cost/Job} & \textbf{Use Case} \\
+\midrule
+Test Run & 200 × 3 = 600 & 0.8 min & \$0.01 & Quick validation \\
+\textbf{Benchmark} & \textbf{2,000 × 5 = 10K} & \textbf{12 min} & \textbf{\$0.20} & \textbf{Standard testing} \\
+\textbf{Production} & \textbf{10,000 × 5 = 50K} & \textbf{80-120 min} & \textbf{\$1.33-\$2.00} & \textbf{Production runs} \\
+Large Production & 10,000 × 10 = 100K & 160-240 min & \$2.67-\$4.00 & High-quality runs \\
+\bottomrule
+\end{tabular}
+\caption{Training job durations and costs}
+\end{table}
+
+\textbf{Important Notes:}
+\begin{itemize}
+    \item Benchmark runs (12 minutes) are ideal for experimentation and testing
+    \item Production runs (80-120 minutes) provide more thorough model exploration and are recommended for final models
+    \item Large production runs with 10 trials offer highest quality results but take longer
+    \item All durations based on verified production measurements with full 8-core utilization
+\end{itemize}
+
+\subsection{Cost Calculation Details}
+
+\textbf{Cloud Run Pricing (europe-west1):}
+\begin{itemize}
+    \item CPU: \$0.000024 per vCPU-second
+    \item Memory: \$0.0000025 per GiB-second
+    \item Per-second billing (no minimum charge)
+\end{itemize}
+
+\textbf{Example: Benchmark Workload (2,000 × 5)}
+\begin{verbatim}
+Time: 720 seconds (12 minutes)
+CPUs: 8 vCPU
+Memory: 32 GiB
+
+CPU cost:    720 sec × 8 vCPU × $0.000024 = $0.138
+Memory cost: 720 sec × 32 GiB × $0.0000025 = $0.058
+Total: ~$0.20 per job
+\end{verbatim}
+
+\textbf{Example: Production Workload (10,000 × 5)}
+\begin{verbatim}
+Low estimate (80 minutes):
+Time: 4,800 seconds
+CPU cost:    4,800 sec × 8 vCPU × $0.000024 = $0.922
+Memory cost: 4,800 sec × 32 GiB × $0.0000025 = $0.384
+Total: ~$1.33 per job
+
+High estimate (120 minutes):
+Time: 7,200 seconds
+CPU cost:    7,200 sec × 8 vCPU × $0.000024 = $1.382
+Memory cost: 7,200 sec × 32 GiB × $0.0000025 = $0.576
+Total: ~$2.00 per job
+\end{verbatim}
+
+\newpage
+
+\section{Monthly Cost Scenarios}
+
+\subsection{Usage-Based Estimates}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Usage Level} & \textbf{Web Calls} & \textbf{Training Jobs} & \textbf{Benchmark Cost} & \textbf{Production Cost} \\
+\midrule
+Light & 100 & 10 & \$4 & \$15-22 \\
+Moderate & 500 & 50 & \$12 & \$69-102 \\
+Heavy & 1,000 & 100 & \$22 & \$135-202 \\
+Very Heavy & 5,000 & 500 & \$102 & \$667-1,002 \\
+\bottomrule
+\end{tabular}
+\caption{Monthly cost estimates by usage volume}
+\end{table}
+
+\textbf{Assumptions:}
+\begin{itemize}
+    \item Training job ratio: 1 job per 10 web requests (adjust based on your usage patterns)
+    \item Fixed costs included: \$2/month for infrastructure
+    \item Web service costs are negligible (\textasciitilde\$0.002 per request)
+    \item Snowflake costs are separate and depend on your warehouse configuration
+\end{itemize}
+
+\subsection{Cost Comparison: Benchmark vs Production}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrr}
+\toprule
+\textbf{Jobs per Month} & \textbf{Benchmark Cost} & \textbf{Production Cost} \\
+\midrule
+10 & \$4 & \$15-22 \\
+25 & \$7 & \$35-52 \\
+50 & \$12 & \$69-102 \\
+100 & \$22 & \$135-202 \\
+250 & \$52 & \$335-502 \\
+500 & \$102 & \$667-1,002 \\
+\bottomrule
+\end{tabular}
+\caption{Monthly costs for different job volumes (includes \$2 fixed costs)}
+\end{table}
+
+\newpage
+
+\section{Cost Breakdown}
+
+\subsection{Fixed Monthly Costs}
+
+\textbf{Total Fixed: \textasciitilde\$2/month}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrl}
+\toprule
+\textbf{Service} & \textbf{Cost/Month} & \textbf{Notes} \\
+\midrule
+GCS Storage & \$0.50-\$2.00 & Depends on data retention \\
+Secret Manager & \$0.36 & 6 secrets × \$0.06 \\
+Cloud Scheduler & \$0.30 & Covered by free tier \\
+Artifact Registry & \$0.50 & Container image storage \\
+\bottomrule
+\end{tabular}
+\caption{Fixed infrastructure costs}
+\end{table}
+
+\subsection{Variable Costs}
+
+\textbf{Per Training Job:}
+\begin{itemize}
+    \item Benchmark (2K × 5): \$0.20
+    \item Production (10K × 5): \$1.33-\$2.00
+    \item Large Production (10K × 10): \$2.67-\$4.00
+\end{itemize}
+
+\textbf{Per Web Request:}
+\begin{itemize}
+    \item Web service: \textasciitilde\$0.002 (negligible at typical volumes)
+    \item Secret access: \textasciitilde\$0.00003 per request
+\end{itemize}
+
+\textbf{Storage Growth:}
+\begin{itemize}
+    \item \textasciitilde2GB per training result
+    \item Lifecycle policies move data to cheaper storage after 30/90 days
+    \item Nearline: \$0.010/GB/month (after 30 days)
+    \item Coldline: \$0.004/GB/month (after 90 days)
+\end{itemize}
+
+\subsection{Key Cost Drivers}
+
+\begin{enumerate}
+    \item \textbf{Training Jobs (90-99\% of costs):}
+    \begin{itemize}
+        \item Compute resources (CPU + memory) for 80-120 minutes
+        \item Number of jobs per month is the primary cost driver
+        \item Production workloads cost 6.7-10× more than benchmark per job
+    \end{itemize}
+    
+    \item \textbf{Storage (Minor):}
+    \begin{itemize}
+        \item Base storage: \textasciitilde80GB for historical data
+        \item Growth: \textasciitilde2GB per training run
+        \item Lifecycle policies reduce costs by 50-80\% over time
+    \end{itemize}
+    
+    \item \textbf{Web Service (Negligible):}
+    \begin{itemize}
+        \item Minimal cost due to short request durations
+        \item \texttt{min\_instances=0} eliminates idle costs
+    \end{itemize}
+    
+    \item \textbf{Snowflake (Separate):}
+    \begin{itemize}
+        \item Billed separately by Snowflake
+        \item Depends on warehouse size and query volume
+        \item 70\% cache hit rate reduces warehouse usage
+    \end{itemize}
+\end{enumerate}
+
+\newpage
+
+\section{Cost Optimization Strategies}
+
+\subsection{Immediate Cost Savings}
+
+\begin{enumerate}
+    \item \textbf{Use Benchmark Runs for Testing:}
+    \begin{itemize}
+        \item 5× cheaper than production runs (\$0.20 vs \$1.33-\$2.00)
+        \item 6-10× faster (12 min vs 80-120 min)
+        \item Ideal for experimentation and parameter tuning
+    \end{itemize}
+    
+    \item \textbf{Set min\_instances=0:}
+    \begin{itemize}
+        \item Saves \textasciitilde\$43/month in idle costs
+        \item Trade-off: 10-30 second cold start delay
+        \item Recommended for most deployments
+    \end{itemize}
+    
+    \item \textbf{Implement Lifecycle Policies:}
+    \begin{itemize}
+        \item Move data to Nearline after 30 days (50\% cost reduction)
+        \item Move data to Coldline after 90 days (80\% cost reduction)
+        \item Automatically applied to GCS bucket
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Advanced Optimizations}
+
+\begin{enumerate}
+    \item \textbf{Adjust Resource Allocation:}
+    \begin{itemize}
+        \item Monitor actual memory usage
+        \item Consider reducing from 32GB to 16GB if usage is low
+        \item 15\% cost savings if memory can be reduced
+    \end{itemize}
+    
+    \item \textbf{Compress Results:}
+    \begin{itemize}
+        \item Reduce storage and egress costs by 50\%
+        \item Requires code changes in R scripts
+        \item Minimal impact on total costs (storage is minor driver)
+    \end{itemize}
+    
+    \item \textbf{Optimize Snowflake Caching:}
+    \begin{itemize}
+        \item Current 70\% cache hit rate already saves significant costs
+        \item Further optimization possible with query patterns
+        \item Snowflake costs are separate from GCP
+    \end{itemize}
+\end{enumerate}
+
+\newpage
+
+\section{Cost Calculator}
+
+\subsection{Simple Cost Estimation Formula}
+
+\begin{equation}
+\text{Monthly Cost} = \text{Fixed} + (\text{Jobs} \times \text{Cost per Job})
+\end{equation}
+
+Where:
+\begin{itemize}
+    \item Fixed = \$2-\$3/month (infrastructure)
+    \item Jobs = Number of training jobs per month
+    \item Cost per Job = \$0.20 (benchmark) or \$1.67 avg (production)
+\end{itemize}
+
+\textbf{Examples:}
+\begin{itemize}
+    \item 50 benchmark jobs/month: \$2 + (50 × \$0.20) = \textbf{\$12/month}
+    \item 50 production jobs/month: \$2 + (50 × \$1.67) = \textbf{\$86/month}
+    \item 100 production jobs/month: \$2 + (100 × \$1.67) = \textbf{\$169/month}
+    \item 200 production jobs/month: \$2 + (200 × \$1.67) = \textbf{\$336/month}
+\end{itemize}
+
+\subsection{Detailed Cost Estimation}
+
+For more precise estimates, consider:
+
+\begin{enumerate}
+    \item \textbf{Training Job Mix:}
+    \begin{itemize}
+        \item Percentage of benchmark vs production runs
+        \item Average duration based on your data complexity
+        \item Number of trials per job (5 vs 10)
+    \end{itemize}
+    
+    \item \textbf{Usage Patterns:}
+    \begin{itemize}
+        \item Peak vs steady-state usage
+        \item Seasonal variations in modeling needs
+        \item Team size and concurrent users
+    \end{itemize}
+    
+    \item \textbf{Storage Requirements:}
+    \begin{itemize}
+        \item Data retention policies
+        \item Archive older results to cheaper storage
+        \item Estimate based on 2GB per training result
+    \end{itemize}
+    
+    \item \textbf{Snowflake Costs:}
+    \begin{itemize}
+        \item Warehouse size (SMALL, MEDIUM, LARGE)
+        \item Query frequency and cache hit rate
+        \item Data transfer volumes
+    \end{itemize}
+\end{enumerate}
+
+\newpage
+
+\section{Regional Pricing}
+
+\subsection{GCP Region Selection}
+
+\textbf{Recommended Regions:}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Region} & \textbf{Location} & \textbf{Notes} \\
+\midrule
+\texttt{europe-west1} & Belgium & Low cost, EU compliance \\
+\texttt{europe-west4} & Netherlands & Low cost, EU compliance \\
+\texttt{us-central1} & Iowa & Lowest US cost \\
+\texttt{us-east1} & South Carolina & Low US cost \\
+\bottomrule
+\end{tabular}
+\caption{Recommended GCP regions for deployment}
+\end{table}
+
+\textbf{Important Considerations:}
+\begin{itemize}
+    \item Choose region closest to your Snowflake instance for optimal performance
+    \item EU regions required for GDPR compliance if processing EU data
+    \item Pricing varies by region (typically ±10-20\% from \texttt{europe-west1})
+    \item Network egress charges apply for data leaving the region
+\end{itemize}
+
+\newpage
+
+\section{Pricing References}
+
+\subsection{Official GCP Pricing}
+
+\begin{itemize}
+    \item \textbf{Cloud Run:} \url{https://cloud.google.com/run/pricing}
+    \item \textbf{Cloud Storage:} \url{https://cloud.google.com/storage/pricing}
+    \item \textbf{Secret Manager:} \url{https://cloud.google.com/secret-manager/pricing}
+    \item \textbf{Artifact Registry:} \url{https://cloud.google.com/artifact-registry/pricing}
+    \item \textbf{Cloud Scheduler:} \url{https://cloud.google.com/scheduler/pricing}
+\end{itemize}
+
+\subsection{Current Infrastructure Configuration}
+
+\textbf{Web Service:}
+\begin{itemize}
+    \item CPU: 2 vCPU
+    \item Memory: 4GB
+    \item Min instances: 0 (cost-optimized)
+    \item Max instances: 10
+\end{itemize}
+
+\textbf{Training Jobs:}
+\begin{itemize}
+    \item CPU: 8 vCPU
+    \item Memory: 32GB
+    \item Timeout: 6 hours
+    \item Max retries: 1
+    \item Actual cores used: 8 (full utilization achieved)
+\end{itemize}
+
+\subsection{Verified Performance Data}
+
+All cost estimates in this document are based on:
+\begin{itemize}
+    \item \textbf{Benchmark runs:} Verified January 9, 2026 (12.0 minutes with 8 cores)
+    \item \textbf{Production runs:} Actual observed durations of 80-120 minutes
+    \item \textbf{Infrastructure:} 8 vCPU, 32GB RAM, full core utilization
+    \item \textbf{Region:} \texttt{europe-west1} (Belgium)
+\end{itemize}
+
+\newpage
+
+\section{FAQ}
+
+\subsection{Common Cost Questions}
+
+\textbf{Q: Why don't production runs scale linearly from benchmark?}
+
+A: Production runs (10K × 5 iterations) are 5× larger than benchmark (2K × 5) but take 6.7-10× longer (80-120 min vs 12 min) due to non-linear scaling and overhead factors in the Robyn algorithm.
+
+\textbf{Q: Can I reduce costs by using fewer vCPUs?}
+
+A: While 4 vCPU would be cheaper per second, the job would take 2× longer, resulting in similar total cost due to per-second billing. 8 vCPU provides optimal balance of speed and cost.
+
+\textbf{Q: What's the cost difference between min\_instances=0 and min\_instances=1?}
+
+A: \texttt{min\_instances=1} costs \textasciitilde\$43/month for always-on service but eliminates cold starts. \texttt{min\_instances=0} saves this cost but adds 10-30 second startup delay.
+
+\textbf{Q: How much does Snowflake add to total costs?}
+
+A: Snowflake costs are separate and depend on your warehouse configuration. With 70\% cache hit rate, only 30\% of queries hit Snowflake. Estimate \textasciitilde\$0.10-0.20 per query on SMALL warehouse.
+
+\textbf{Q: Are there free tier benefits?}
+
+A: Yes, Cloud Scheduler jobs are free (first 3 jobs), and Cloud Run has a small monthly free tier. These are included in the \$2/month fixed cost estimate.
+
+\textbf{Q: What causes cost variations month-to-month?}
+
+A: Primary variation comes from number of training jobs executed. Storage costs grow gradually (2GB per job), but this is minor compared to compute costs.
+
+\subsection{Cost Predictability}
+
+\textbf{Highly Predictable:}
+\begin{itemize}
+    \item Training job costs (\$0.20 or \$1.33-\$2.00 per job)
+    \item Fixed infrastructure (\$2/month)
+    \item Per-second billing eliminates surprises
+\end{itemize}
+
+\textbf{Variables to Monitor:}
+\begin{itemize}
+    \item Number of training jobs per month (primary driver)
+    \item Storage accumulation over time (minor impact)
+    \item Snowflake warehouse usage (separate billing)
+\end{itemize}
+
+\textbf{Recommended Budget Alerts:}
+\begin{itemize}
+    \item Set at 50\% and 90\% of expected monthly spend
+    \item Monitor job counts weekly
+    \item Review storage growth monthly
+\end{itemize}
+
+\newpage
+
+\section{Minimum Technical Requirements}
+
+\subsection{Required Skills and Knowledge}
+
+The technical team maintaining this application should have:
+
+\subsubsection{Essential Skills}
+\begin{itemize}
+    \item \textbf{Google Cloud Platform:}
+    \begin{itemize}
+        \item Basic understanding of Cloud Run, GCS, and IAM
+        \item Ability to navigate GCP Console
+        \item Understanding of billing and cost management
+    \end{itemize}
+    \item \textbf{Infrastructure as Code:}
+    \begin{itemize}
+        \item Basic Terraform knowledge for infrastructure changes
+        \item Ability to read and modify Terraform configuration files
+    \end{itemize}
+    \item \textbf{Version Control:}
+    \begin{itemize}
+        \item Git and GitHub workflows
+        \item Understanding of CI/CD concepts
+    \end{itemize}
+    \item \textbf{Container Technology:}
+    \begin{itemize}
+        \item Basic Docker concepts
+        \item Understanding of container registries
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Recommended Skills}
+\begin{itemize}
+    \item \textbf{Programming Languages:}
+    \begin{itemize}
+        \item Python (for Streamlit application modifications)
+        \item R (for Robyn MMM customizations)
+    \end{itemize}
+    \item \textbf{Data Warehouse:}
+    \begin{itemize}
+        \item Snowflake query optimization
+        \item SQL for data extraction
+    \end{itemize}
+    \item \textbf{Monitoring and Debugging:}
+    \begin{itemize}
+        \item Cloud Logging for troubleshooting
+        \item Performance monitoring and optimization
+    \end{itemize}
+\end{itemize}
+
+\subsection{Required Tools}
+
+All team members should have access to:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Tool} & \textbf{Version} & \textbf{Purpose} \\
+\midrule
+Google Cloud SDK & Latest & GCP CLI operations \\
+Terraform & $\geq$ 1.5.0 & Infrastructure management \\
+Docker & Latest & Container testing (optional) \\
+Git & Latest & Version control \\
+Python & $\geq$ 3.11 & Local development (optional) \\
+\bottomrule
+\end{tabular}
+\caption{Required development tools}
+\end{table}
+
+\subsection{Access Requirements}
+
+\subsubsection{Google Cloud Platform}
+\begin{itemize}
+    \item \textbf{For Monitoring:} Viewer role
+    \item \textbf{For Deployments:} Editor or specific roles:
+    \begin{itemize}
+        \item Cloud Run Admin
+        \item Storage Admin
+        \item Secret Manager Admin
+        \item Service Account Admin
+    \end{itemize}
+    \item \textbf{For Debugging:} Logs Viewer, Monitoring Viewer
+\end{itemize}
+
+\subsubsection{GitHub Repository}
+\begin{itemize}
+    \item \textbf{For Development:} Write access
+    \item \textbf{For Releases:} Maintain or Admin access
+    \item \textbf{For Secrets Management:} Admin access
+\end{itemize}
+
+\subsubsection{Snowflake}
+\begin{itemize}
+    \item Read access to source data tables
+    \item Access to a dedicated warehouse for queries
+    \item Appropriate role (not ACCOUNTADMIN in production)
+\end{itemize}
+
+\subsection{Team Structure Recommendations}
+
+For successful deployment and maintenance, we recommend:
+
+\textbf{Minimum Team:}
+\begin{itemize}
+    \item 1 DevOps Engineer (GCP, Terraform, CI/CD expertise)
+    \item 1 Data Scientist/Analyst (familiar with MMM and Robyn)
+\end{itemize}
+
+\textbf{Recommended Team:}
+\begin{itemize}
+    \item 1-2 DevOps Engineers (deployment, maintenance, monitoring)
+    \item 2-3 Data Scientists/Analysts (model development, analysis)
+    \item 1 Data Engineer (Snowflake integration, data pipelines)
+\end{itemize}
+
+\textbf{Time Commitment:}
+\begin{itemize}
+    \item Initial deployment: 3-5 hours (one-time)
+    \item Ongoing maintenance: 2-4 hours/month
+    \item Model development: Varies by business needs
+\end{itemize}
+
+\subsection{Training and Onboarding}
+
+\textbf{Recommended Training Topics:}
+
+\begin{enumerate}
+    \item \textbf{GCP Fundamentals (4-8 hours):}
+    \begin{itemize}
+        \item Cloud Run architecture and deployment
+        \item IAM and service accounts
+        \item Cloud Storage and lifecycle policies
+        \item Billing and cost management
+    \end{itemize}
+    
+    \item \textbf{Platform-Specific Training (2-4 hours):}
+    \begin{itemize}
+        \item MMM Trainer web interface walkthrough
+        \item Training job configuration and execution
+        \item Results interpretation and visualization
+        \item Troubleshooting common issues
+    \end{itemize}
+    
+    \item \textbf{Robyn MMM Framework (8-16 hours):}
+    \begin{itemize}
+        \item MMM concepts and methodology
+        \item Robyn-specific features and parameters
+        \item Model interpretation and validation
+        \item Best practices for production use
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Learning Resources:}
+\begin{itemize}
+    \item Google Cloud documentation and tutorials
+    \item Robyn GitHub repository and documentation
+    \item Platform-specific documentation in repository
+    \item Community forums and support channels
+\end{itemize}
+
+\subsection{Support Requirements}
+
+\textbf{Internal Support:}
+\begin{itemize}
+    \item Designated DevOps contact for infrastructure issues
+    \item Data science lead for modeling questions
+    \item Documentation maintenance and updates
+\end{itemize}
+
+\textbf{External Dependencies:}
+\begin{itemize}
+    \item GCP support plan (optional but recommended)
+    \item Snowflake support for data warehouse issues
+    \item Community support for Robyn framework questions
+\end{itemize}
+
+\textbf{Recommended Support Plan:}
+\begin{itemize}
+    \item GCP Standard Support: \$100/month minimum
+    \item Response times: 4 hours for production issues
+    \item 24/7 support availability
+    \item Technical account management for larger deployments
+\end{itemize}
+
+\end{document}
