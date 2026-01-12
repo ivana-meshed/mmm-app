@@ -19,44 +19,45 @@ Individual training job costs and durations based on actual production workloads
 |---------------|---------------------|----------|------------|--------------|-------|
 | **Test Run** | 200 × 3 = 600 | ~0.8 min | 8 | $0.014 | Estimated based on benchmark scaling |
 | **Benchmark** | 2000 × 5 = 10,000 | **12.0 min** | **8** | **$0.20** | **Verified: Jan 9, 2026 (with 8-core fix)** |
-| **Production** | 10000 × 5 = 50,000 | **~60 min** | **8** | **~$1.00** | **Estimated: 5× benchmark workload** |
+| **Production** | 10000 × 5 = 50,000 | **80-120 min** | **8** | **$1.33-$2.00** | **Actual: Based on observed production runs** |
 
 **Verified Data Sources:**
 - Benchmark run (ivana_10, 0109_151819): 12.0 minutes using all 8 cores (strong override fix, PR #161)
-- Production estimate: Based on linear scaling from benchmark (50,000 / 10,000 = 5× workload = 5 × 12 min = 60 min)
+- Production runs: Actual observed duration of 80-120 minutes (10,000 iterations × 5 trials)
 - Test run: Extrapolated from benchmark using linear scaling (600/10,000 ratio)
 
 **Note on Production Scaling:**
 The production workload is 5× larger than benchmark (50,000 vs 10,000 total iterations).
-Linear scaling suggests ~60 minutes, though actual runs may vary due to overhead.
+Actual production runs take 80-120 minutes due to non-linear scaling and overhead factors.
 
 **Cost Calculation (8 vCPU, 32GB, europe-west1):**
 - CPU cost: $0.000024 per vCPU-second
 - Memory cost: $0.0000025 per GiB-second
 - Benchmark: 720 sec × 8 vCPU × $0.000024 + 720 sec × 32 GiB × $0.0000025 = $0.138 + $0.058 = $0.196 ≈ $0.20
-- Production (estimated): 3,600 sec × 8 vCPU × $0.000024 + 3,600 sec × 32 GiB × $0.0000025 = $0.691 + $0.288 = $0.979 ≈ $1.00
+- Production (low): 4,800 sec × 8 vCPU × $0.000024 + 4,800 sec × 32 GiB × $0.0000025 = $0.922 + $0.384 = $1.306 ≈ $1.33
+- Production (high): 7,200 sec × 8 vCPU × $0.000024 + 7,200 sec × 32 GiB × $0.0000025 = $1.382 + $0.576 = $1.958 ≈ $2.00
 
 ### Monthly Cost Estimates by Usage Volume
 
-Based on verified benchmark (12 min, $0.20) and estimated production (60 min, $1.00) for 10K×5 workload:
+Based on verified benchmark (12 min, $0.20) and actual production (80-120 min, $1.33-$2.00) for 10K×5 workload:
 
 | Usage Level | Web Calls | Training Jobs | Benchmark Cost | Production Cost | Total Monthly |
 |-------------|-----------|---------------|----------------|-----------------|---------------|
-| **Light** | 100 | 10 | $2.09 + $2.00 = $4.09 | $2.09 + $10.00 = $12.09 | $4-12 |
-| **Moderate** | 500 | 50 | $2.09 + $10.00 = $12.09 | $2.09 + $50.00 = $52.09 | $12-52 |
-| **Heavy** | 1000 | 100 | $2.09 + $20.00 = $22.09 | $2.09 + $100.00 = $102.09 | $22-102 |
-| **Very Heavy** | 5000 | 500 | $2.09 + $100.00 = $102.09 | $2.09 + $500.00 = $502.09 | $102-502 |
+| **Light** | 100 | 10 | $2.09 + $2.00 = $4.09 | $2.09 + $13-20 = $15-22 | $4-22 |
+| **Moderate** | 500 | 50 | $2.09 + $10.00 = $12.09 | $2.09 + $67-100 = $69-102 | $12-102 |
+| **Heavy** | 1000 | 100 | $2.09 + $20.00 = $22.09 | $2.09 + $133-200 = $135-202 | $22-202 |
+| **Very Heavy** | 5000 | 500 | $2.09 + $100.00 = $102.09 | $2.09 + $665-1000 = $667-1002 | $102-1002 |
 
 **Notes:**
 - Fixed costs ($2.09/month): GCS storage, Secret Manager, Cloud Scheduler, Artifact Registry
 - Web service cost included in fixed costs (negligible at typical request durations)
 - Training job ratio: 1 job per 10 web requests (actual ratio may vary)
 - Benchmark cost: $0.20 per job (12 min with 8 cores, verified Jan 9, 2026)
-- Production cost: ~$1.00 per job (estimated 60 min based on 5× workload scaling)
+- Production cost: $1.33-$2.00 per job (80-120 min actual production runs)
 
 **Key Insights:**
 - **Benchmark workloads** (2000 iter × 5 trials) are cost-effective for regular testing at $0.20 per job (12 min)
-- **Production workloads** (10000 iter × 5 trials) take ~60 minutes at ~$1.00 per job with 8 cores (5× benchmark)
+- **Production workloads** (10000 iter × 5 trials) take 80-120 minutes at $1.33-$2.00 per job with 8 cores
 - Training jobs account for **90-99% of total costs** at scale (500+ jobs/month)
 - The strong override fix (PR #161) enables **consistent 8 cores** usage, providing **33% performance improvement over original 6-core runs**
 
@@ -304,11 +305,10 @@ terraform apply -var="min_instances=2" -var-file="envs/prod.tfvars"
 
 **Baseline data** (from verified production testing with 8-core fix):
 - **Benchmark** (2000 iterations × 5 trials = 10,000): **12.0 minutes** using **8 cores** (Jan 9, 2026)
-- **Production** (10000 iterations × 5 trials = 50,000): **~60 minutes (estimated)** using **8 cores**
-  - Based on 5× workload scaling from benchmark (50,000 / 10,000 = 5×)
-  - Expected: 5 × 12 min = 60 minutes
+- **Production** (10000 iterations × 5 trials = 50,000): **80-120 minutes** using **8 cores**
+  - Based on actual observed production runs
+  - Non-linear scaling due to overhead factors
 - **Test Run** (200 iterations × 3 trials = 600): ~0.8 minutes (6% of benchmark workload)
-- Scaling is approximately linear with (iterations × trials)
 - Core usage: Consistently 8 cores with strong override fix (PR #161)
 
 **Performance Improvement History:**
@@ -335,13 +335,18 @@ Total: ~$0.20 per job
 
 **Example calculation** (Production workload - 10K×5):
 ```
-Time: 3,600 seconds (60 minutes estimated, 5× benchmark)
+Time (low): 4,800 seconds (80 minutes)
+Time (high): 7,200 seconds (120 minutes)
 CPUs: 8 vCPU allocated (8 actually used)
 Memory: 32 GiB
 
-CPU cost: 3,600 sec × 8 vCPU × $0.000024/vCPU-sec = $0.691
-Memory cost: 3,600 sec × 32 GiB × $0.0000025/GiB-sec = $0.288
-Total: ~$1.00 per job
+CPU cost (low): 4,800 sec × 8 vCPU × $0.000024/vCPU-sec = $0.922
+Memory cost (low): 4,800 sec × 32 GiB × $0.0000025/GiB-sec = $0.384
+Total (low): ~$1.33 per job
+
+CPU cost (high): 7,200 sec × 8 vCPU × $0.000024/vCPU-sec = $1.382
+Memory cost (high): 7,200 sec × 32 GiB × $0.0000025/GiB-sec = $0.576
+Total (high): ~$2.00 per job
 ```
 
 **Fixed monthly costs**:
