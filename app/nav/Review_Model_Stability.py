@@ -25,7 +25,7 @@ GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 # Format: robyn/{revision}/{country}/{timestamp}/output_models_data
 DEFAULT_GCS_PREFIX = os.getenv(
     "MODEL_STABILITY_GCS_PREFIX",
-    "robyn/fethu_beta_run_1/fr/1208_124644/output_models_data",  # Example default
+    "",  # Empty by default - user must configure
 )
 
 FILE_XAGG = "xDecompAgg.parquet"
@@ -57,12 +57,22 @@ st.sidebar.caption(
 GCS_PREFIX = st.sidebar.text_input(
     "GCS Prefix",
     value=DEFAULT_GCS_PREFIX,
+    placeholder="robyn/my_revision/country/timestamp/output_models_data",
     help="Path to the output_models_data folder containing Robyn parquet exports",
     key="gcs_prefix_input",
 )
 
 if not GCS_PREFIX or not GCS_PREFIX.strip():
-    st.error("Please provide a valid GCS prefix in the sidebar.")
+    st.error(
+        "⚠️ **Model Output Path Required**\n\n"
+        "Please enter the GCS path to your Robyn model outputs in the sidebar.\n\n"
+        "**How to find your path:**\n"
+        "1. Go to the [View Results](View_Results) page\n"
+        "2. Select your model run\n"
+        "3. Copy the path from the run details\n"
+        "4. Add `/output_models_data` to the end\n\n"
+        "**Example:** `robyn/my_revision_1/us/0113_120000/output_models_data`"
+    )
     st.stop()
 
 GCS_PREFIX = GCS_PREFIX.strip()
@@ -358,9 +368,16 @@ try:
     xVec = load_parquet_from_gcs(blob_xvec)
 except Exception as e:
     st.error(
-        "Failed to load Robyn Parquet exports from GCS.\n\n"
-        f"Bucket: {GCS_BUCKET}\nPrefix: {GCS_PREFIX}\n\n"
-        f"Error: {e}"
+        "❌ **Failed to load Robyn model outputs from GCS**\n\n"
+        f"**Bucket:** `{GCS_BUCKET}`\n\n"
+        f"**Prefix:** `{GCS_PREFIX}`\n\n"
+        f"**Error:** {e}\n\n"
+        "---\n\n"
+        "**Troubleshooting:**\n"
+        "- Verify the path exists in GCS by checking the [View Results](View_Results) page\n"
+        "- Ensure the path ends with `/output_models_data`\n"
+        "- Check that the model run completed successfully\n"
+        "- Confirm you have access to the GCS bucket"
     )
     st.stop()
 
