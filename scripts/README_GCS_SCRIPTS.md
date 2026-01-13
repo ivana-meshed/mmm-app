@@ -84,11 +84,14 @@ Uploads generated test data to GCS bucket.
 # Dry run (preview what would be uploaded)
 python scripts/upload_test_data.py --dry-run
 
-# Upload to GCS with default settings
+# Upload to GCS root paths (same as app would use)
 python scripts/upload_test_data.py
 
-# Upload to specific bucket and prefix
-python scripts/upload_test_data.py --bucket my-bucket --prefix test-data
+# Upload to specific bucket
+python scripts/upload_test_data.py --bucket my-bucket
+
+# Upload with custom prefix (to separate test data)
+python scripts/upload_test_data.py --prefix test-data
 
 # Upload from custom directory
 python scripts/upload_test_data.py --source-dir my_test_data
@@ -100,7 +103,7 @@ python scripts/upload_test_data.py --force
 **Options:**
 - `--bucket` - Target GCS bucket (default: `mmm-app-output`)
 - `--source-dir` - Source directory (default: `test_data`)
-- `--prefix` - GCS prefix for uploaded data (default: `test-data`)
+- `--prefix` - GCS prefix for uploaded data (default: empty - uploads to root paths like the app)
 - `--dry-run` - Preview without uploading
 - `--force` - Skip confirmation prompt
 
@@ -110,7 +113,42 @@ python scripts/upload_test_data.py --force
 - Requires confirmation (unless --force)
 - Preserves directory structure
 
-### 4. delete_non_revision_data.py
+### 4. compare_data_structures.py
+
+Compares generated test data structure with actual GCS data to verify compatibility.
+
+**Usage:**
+```bash
+# Compare test data with GCS
+python scripts/compare_data_structures.py
+
+# Compare with specific bucket
+python scripts/compare_data_structures.py --bucket my-bucket
+
+# Compare custom local directory
+python scripts/compare_data_structures.py --local-dir my_test_data
+
+# Save detailed comparison report
+python scripts/compare_data_structures.py --output comparison_report.json
+
+# Compare specific countries
+python scripts/compare_data_structures.py --countries de universal
+```
+
+**What it checks:**
+- Folder structure matches (mapped-datasets, metadata, training_data, robyn, etc.)
+- Parquet file schemas match (columns and data types)
+- JSON file structures match (top-level keys)
+- File naming conventions
+
+**Output:**
+- Summary of matches, warnings, and issues
+- Detailed comparison for each file
+- Exit code 0 if all good, 1 if issues found
+
+**Use this before uploading to ensure compatibility!**
+
+### 5. delete_non_revision_data.py
 
 Deletes all GCS data except revision folders (e.g., r12, r24).
 
@@ -151,9 +189,46 @@ python scripts/delete_non_revision_data.py --yes-i-am-sure --force
   - `mapped-datasets/de/latest/` ✗ DELETED
   - `training_data/universal/20231015/` ✗ DELETED
 
-## Complete Workflow
+## Typical Workflow
 
-### Creating Test Data
+1. **Collect data examples from GCS:**
+   ```bash
+   python scripts/collect_gcs_data_examples.py --countries de universal
+   ```
+
+2. **Generate synthetic test data:**
+   ```bash
+   python scripts/generate_test_data.py
+   ```
+
+3. **Compare structures before uploading:**
+   ```bash
+   python scripts/compare_data_structures.py
+   ```
+   Review any issues or warnings and fix if needed.
+
+4. **Upload to GCS (preview first):**
+   ```bash
+   # Preview what will be uploaded
+   python scripts/upload_test_data.py --dry-run
+   
+   # Upload to root paths (same as app)
+   python scripts/upload_test_data.py
+   
+   # Or upload to test prefix to keep separate
+   python scripts/upload_test_data.py --prefix test-data
+   ```
+
+5. **Clean up old data (optional):**
+   ```bash
+   # Always preview first!
+   python scripts/delete_non_revision_data.py --dry-run
+   
+   # Delete after confirming
+   python scripts/delete_non_revision_data.py --yes-i-am-sure
+   ```
+
+### Deleting Old Data
 
 1. **Collect examples from GCS:**
    ```bash

@@ -40,7 +40,10 @@ def upload_file_to_gcs(
     """Upload a single file to GCS."""
     # Calculate relative path from source_dir
     relative_path = local_path.relative_to(source_dir)
-    gcs_path = os.path.join(prefix, str(relative_path)).replace("\\", "/")
+    if prefix:
+        gcs_path = os.path.join(prefix, str(relative_path)).replace("\\", "/")
+    else:
+        gcs_path = str(relative_path).replace("\\", "/")
 
     if dry_run:
         logger.info(f"[DRY RUN] Would upload: {local_path} -> {gcs_path}")
@@ -119,8 +122,8 @@ def main():
     )
     parser.add_argument(
         "--prefix",
-        default="test-data",
-        help="GCS prefix/folder for test data (default: test-data)",
+        default="",
+        help="GCS prefix/folder for test data (default: empty string - uploads to root paths)",
     )
     parser.add_argument(
         "--dry-run",
@@ -144,7 +147,10 @@ def main():
 
     logger.info(f"Source directory: {source_dir}")
     logger.info(f"Target bucket: {args.bucket}")
-    logger.info(f"GCS prefix: {args.prefix}")
+    if args.prefix:
+        logger.info(f"GCS prefix: {args.prefix}")
+    else:
+        logger.info("GCS prefix: (none - uploading to root paths)")
 
     # Verify GCS access
     if not args.dry_run and not verify_gcs_access(args.bucket):
@@ -156,8 +162,9 @@ def main():
 
     # Confirmation
     if not args.dry_run and not args.force:
+        target_path = f"gs://{args.bucket}/{args.prefix}" if args.prefix else f"gs://{args.bucket}/"
         response = input(
-            f"\nUpload {len(files)} files to gs://{args.bucket}/{args.prefix}? (yes/no): "
+            f"\nUpload {len(files)} files to {target_path}? (yes/no): "
         )
         if response.lower() not in ["yes", "y"]:
             logger.info("Upload cancelled")
@@ -174,7 +181,8 @@ def main():
         logger.info("Run without --dry-run to actually upload")
     else:
         logger.info(f"\n✅ Successfully uploaded {uploaded} files")
-        logger.info(f"   to gs://{args.bucket}/{args.prefix}/")
+        target_path = f"gs://{args.bucket}/{args.prefix}/" if args.prefix else f"gs://{args.bucket}/"
+        logger.info(f"   to {target_path}")
 
 
 if __name__ == "__main__":

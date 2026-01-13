@@ -78,6 +78,55 @@ python scripts/generate_test_data.py
 
 This will:
 - Read `gcs_data_examples.json`
+- Generate synthetic data matching the schema
+- Create a `test_data/` directory with all files
+
+**Expected output:**
+```
+2024-01-08 12:05:00 - INFO - Reading examples from: gcs_data_examples.json
+2024-01-08 12:05:00 - INFO - Generating test data in: test_data
+2024-01-08 12:05:00 - INFO - Generating mapped dataset for de...
+2024-01-08 12:05:01 - INFO -   Created: test_data/mapped-datasets/de/latest/raw.parquet
+2024-01-08 12:05:01 - INFO -   Shape: (365, 118)
+...
+✅ Test data generation complete!
+```
+
+### Step 4: Compare Data Structures
+
+Before uploading, verify that your test data matches the GCS structure:
+
+```bash
+python scripts/compare_data_structures.py
+```
+
+This will:
+- Compare local test data with actual GCS data
+- Check folder structures match
+- Verify parquet schemas (columns and types)
+- Verify JSON structures
+
+**Expected output:**
+```
+2024-01-08 12:10:00 - INFO - Comparing local and GCS data structures...
+2024-01-08 12:10:01 - INFO - Scanning local directory...
+2024-01-08 12:10:01 - INFO -   Found 15 local folders
+2024-01-08 12:10:02 - INFO - Scanning GCS bucket...
+2024-01-08 12:10:05 - INFO -   Found 12 GCS folder patterns
+
+Comparing folder structures...
+  ✓ mapped-datasets: Found in both
+  ✓ metadata: Found in both
+  ✓ training_data: Found in both
+  ✓ robyn: Found in both
+  ✓ robyn-queues: Found in both
+...
+✅ All structures match! Test data is compatible.
+```
+
+**If there are issues**, review and fix them before uploading.
+
+### Step 5: Upload to GCS (Preview First)
 - Generate synthetic data matching the schemas
 - Create files in `test_data/` directory
 
@@ -107,15 +156,23 @@ python -c "import pandas as pd; df = pd.read_parquet('test_data/mapped-datasets/
 cat test_data/metadata/de/latest/mapping.json | jq .
 ```
 
-### Step 5: Upload Test Data to GCS (Optional)
+### Step 5: Upload to GCS (Preview First)
+
+**IMPORTANT:** By default, the script uploads to root paths (same as the app would use). Use `--prefix` if you want to keep test data separate.
 
 **Preview what will be uploaded (dry run):**
 
 ```bash
-python scripts/upload_test_data.py --dry-run --prefix test-data-2024
+python scripts/upload_test_data.py --dry-run
 ```
 
-**Upload to GCS:**
+**Upload to root paths (same as app):**
+
+```bash
+python scripts/upload_test_data.py
+```
+
+**Or upload to a test prefix to keep separate:**
 
 ```bash
 python scripts/upload_test_data.py --prefix test-data-2024
@@ -125,9 +182,20 @@ You'll be prompted to confirm before uploading.
 
 ## Advanced Usage
 
-### Collect from Specific Countries
+### Compare Test Data with GCS
 
 ```bash
+# Compare and save detailed report
+python scripts/compare_data_structures.py --output comparison_report.json
+
+# Compare specific countries
+python scripts/compare_data_structures.py --countries de universal
+
+# Compare custom local directory
+python scripts/compare_data_structures.py --local-dir my_test_data
+```
+
+### Collect from Specific Countries
 python scripts/collect_gcs_data_examples.py --countries us uk de fr
 ```
 
