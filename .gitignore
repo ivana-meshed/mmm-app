@@ -76,3 +76,7 @@ infra/terraform/~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/goog
 infra/terraform/~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/google-beta/7.0.1/darwin_arm64/terraform-provider-google-beta_v7.0.1_x5
 infra/terraform/~/.terraform.d/plugin-cache/registry.terraform.io/hashicorp/google-beta/7.7.0/darwin_arm64/LICENSE.txt
 scripts/perf_test.py
+*.csv
+*.log
+*.json
+*.txt
