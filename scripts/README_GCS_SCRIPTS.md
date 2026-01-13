@@ -6,13 +6,14 @@ This directory contains scripts for managing test data in the `mmm-app-output` G
 
 ### 1. `download_test_data.py`
 
-Downloads specific data from GCS bucket for testing purposes.
+Downloads data from ALL folders in the GCS bucket for testing purposes.
 
 **What it downloads:**
-- Data with timestamp "20251211_115528" (or close to it)
-- ~3 latest examples for countries "de", "fr", "es"
+- Data with timestamp "20251211_115528" (or close to it) from structured folders
+- ~3 latest examples for countries "de", "fr", "es" from country-based folders
 - Files in folders/subfolders "latest" and "universal"
 - From "robyn" folder: only data in folders starting with "r" (like r100, r101)
+- From other folders (training-configs, training-data, etc.): latest 3 files
 
 **Usage:**
 
@@ -182,7 +183,7 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
 
 ## Bucket Structure
 
-The scripts understand the following bucket structure:
+The scripts handle ALL folders in the bucket:
 
 ```
 mmm-app-output/
@@ -201,9 +202,24 @@ mmm-app-output/
 │       └── latest/    # ← Downloaded by download_test_data.py
 ├── mapped-datasets/
 │   └── */latest/      # ← Downloaded by download_test_data.py
-└── metadata/
-    ├── universal/     # ← Downloaded by download_test_data.py
-    └── */
+├── metadata/
+│   ├── universal/     # ← Downloaded by download_test_data.py
+│   └── */
+├── training-configs/  # ← Latest 3 files downloaded
+├── training-data/     # ← Latest 3 files downloaded
+└── (any other folder) # ← Latest 3 files downloaded
+```
+
+**Download behavior:**
+- **Structured folders** (robyn, datasets, mapped-datasets, metadata): Downloads based on country/timestamp filters
+- **Other folders** (training-configs, training-data, etc.): Downloads latest 3 files based on modification time
+
+**Delete behavior:**
+- **Protected**: Only `robyn/r*/` folders are kept
+- **Deleted**: Everything else including all other folders
+
+**Upload behavior:**
+- All files from local test_data directory are uploaded maintaining the structure
 ```
 
 ## Troubleshooting

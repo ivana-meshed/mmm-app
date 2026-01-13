@@ -2,11 +2,12 @@
 """
 Download test data from GCS bucket mmm-app-output.
 
-This script downloads specific data for testing purposes:
-- Data with timestamp "20251211_115528" (or close to it)
-- ~3 latest examples for countries "de", "fr", "es"
+This script downloads data from ALL folders in the bucket:
+- Data with timestamp "20251211_115528" (or close to it) from structured folders
+- ~3 latest examples for countries "de", "fr", "es" from country-based folders
 - Files in folders/subfolders "latest" and "universal"
 - From "robyn" folder: only data in folders starting with "r" (like r100, r101)
+- From other folders (training-configs, training-data, etc.): latest 3 files
 
 The folder/subfolder/naming structure is preserved when downloading.
 """
@@ -287,6 +288,75 @@ class TestDataDownloader:
         )
         return blobs_to_download
 
+    def find_latest_files_from_other_folders(self, limit: int = 3) -> List[str]:
+        """
+        Find latest files from folders that don't have structured paths.
+
+        For folders like training-configs, training-data, etc. that don't
+        follow the country/timestamp pattern, get the latest N files.
+
+        Args:
+            limit: Number of latest files to get per folder
+
+        Returns:
+            List of blob names
+        """
+        logger.info("Searching for files in other folders...")
+
+        # Known structured folders to skip
+        structured_folders = {
+            "robyn",
+            "datasets",
+            "mapped-datasets",
+            "metadata",
+        }
+
+        blobs_to_download = []
+
+        # Get all blobs and group by top-level folder
+        all_blobs = list(self.client.list_blobs(self.bucket_name))
+        folders_dict = {}
+
+        for blob in all_blobs:
+            parts = blob.name.split("/")
+            if len(parts) > 0:
+                top_folder = parts[0]
+
+                # Skip structured folders (handled by other methods)
+                if top_folder in structured_folders:
+                    continue
+
+                if top_folder not in folders_dict:
+                    folders_dict[top_folder] = []
+
+                folders_dict[top_folder].append(
+                    {
+                        "name": blob.name,
+                        "updated": blob.updated,
+                    }
+                )
+
+        # For each other folder, get latest N files
+        for folder, blobs in folders_dict.items():
+            logger.info(f"  Processing folder: {folder}/")
+
+            # Sort by updated time (most recent first)
+            sorted_blobs = sorted(
+                blobs, key=lambda x: x["updated"], reverse=True
+            )
+
+            # Take latest N
+            latest_blobs = sorted_blobs[:limit]
+            for blob_info in latest_blobs:
+                blobs_to_download.append(blob_info["name"])
+                logger.info(
+                    f"    Including: {blob_info['name']} "
+                    f"(updated: {blob_info['updated']})"
+                )
+
+        logger.info(f"Found {len(blobs_to_download)} files from other folders")
+        return blobs_to_download
+
     def download_test_data(self, target_timestamp: str = "20251211_115528"):
         """
         Download all test data based on criteria
@@ -324,6 +394,10 @@ class TestDataDownloader:
             countries=countries
         )
         all_blobs.update(latest_universal_blobs)
+
+        # 4. Find latest files from other folders (training-configs, etc.)
+        other_blobs = self.find_latest_files_from_other_folders(limit=3)
+        all_blobs.update(other_blobs)
 
         # Download all collected blobs
         logger.info("=" * 60)
