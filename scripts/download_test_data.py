@@ -61,6 +61,12 @@ class TestDataDownloader:
         """
         try:
             local_path = self.output_dir / blob_name
+
+            # Check if file already exists
+            if local_path.exists():
+                logger.info(f"[SKIP] Already exists: {blob_name}")
+                return True
+
             local_path.parent.mkdir(parents=True, exist_ok=True)
 
             if self.dry_run:
@@ -76,7 +82,9 @@ class TestDataDownloader:
             return False
 
     def find_blobs_by_timestamp(
-        self, target_timestamp: str = "20251211_115528"
+        self,
+        target_timestamp: str = "20251211_115528",
+        countries: List[str] = None,
     ) -> List[str]:
         """
         Find blobs with specific timestamp (or close to it)
@@ -89,13 +97,20 @@ class TestDataDownloader:
         - metadata/{country}/{timestamp}/
         - metadata/universal/{timestamp}/
 
+        Only downloads for specified countries or 'latest'/'universal' folders.
+
         Args:
             target_timestamp: Target timestamp to search for
+            countries: List of countries to filter (default: ['de', 'fr', 'es'])
 
         Returns:
             List of blob names
         """
+        if countries is None:
+            countries = ["de", "fr", "es"]
+
         logger.info(f"Searching for blobs with timestamp: {target_timestamp}")
+        logger.info(f"  Filtering for countries: {countries}")
         blobs_to_download = []
 
         # Define all prefixes to search
@@ -118,9 +133,11 @@ class TestDataDownloader:
                 if parts[0] == "robyn":
                     # Structure: robyn/{revision}/{country}/{timestamp}/
                     # Only include revisions starting with 'r'
+                    # and only for specified countries
                     if (
                         len(parts) >= 4
                         and parts[1].startswith("r")
+                        and parts[2] in countries
                         and target_timestamp in parts[3]
                     ):
                         blobs_to_download.append(blob.name)
@@ -128,14 +145,26 @@ class TestDataDownloader:
                 elif parts[0] in ["datasets", "mapped-datasets"]:
                     # Structure: datasets/{country}/{timestamp}/
                     # Structure: mapped-datasets/{country}/{timestamp}/
+                    # Only download for specified countries or 'latest'
                     if len(parts) >= 3 and target_timestamp in parts[2]:
-                        blobs_to_download.append(blob.name)
+                        country_or_latest = parts[1]
+                        if (
+                            country_or_latest in countries
+                            or country_or_latest == "latest"
+                        ):
+                            blobs_to_download.append(blob.name)
 
                 elif parts[0] == "metadata":
                     # Structure: metadata/{country}/{timestamp}/
                     # Structure: metadata/universal/{timestamp}/
+                    # Only download for specified countries or 'universal'
                     if len(parts) >= 3 and target_timestamp in parts[2]:
-                        blobs_to_download.append(blob.name)
+                        country_or_universal = parts[1]
+                        if (
+                            country_or_universal in countries
+                            or country_or_universal == "universal"
+                        ):
+                            blobs_to_download.append(blob.name)
 
         logger.info(
             f"Found {len(blobs_to_download)} blobs with timestamp "
@@ -209,23 +238,48 @@ class TestDataDownloader:
         )
         return blobs_to_download
 
-    def find_latest_and_universal_blobs(self) -> List[str]:
+    def find_latest_and_universal_blobs(
+        self, countries: List[str] = None
+    ) -> List[str]:
         """
         Find blobs in 'latest' and 'universal' folders
+
+        Args:
+            countries: List of countries to filter (default: ['de', 'fr', 'es'])
 
         Returns:
             List of blob names
         """
+        if countries is None:
+            countries = ["de", "fr", "es"]
+
         logger.info("Searching for 'latest' and 'universal' blobs")
+        logger.info(f"  Filtering for countries: {countries}")
         blobs_to_download = []
 
         # Search for 'latest' folders in datasets and mapped-datasets
         for prefix in ["datasets/", "mapped-datasets/", "metadata/"]:
             blobs = self.client.list_blobs(self.bucket_name, prefix=prefix)
             for blob in blobs:
+                parts = blob.name.split("/")
+
                 # Check if 'latest' or 'universal' is in the path
                 if "/latest/" in blob.name or "/universal/" in blob.name:
-                    blobs_to_download.append(blob.name)
+                    # For datasets and mapped-datasets, check country
+                    if parts[0] in ["datasets", "mapped-datasets"]:
+                        # Structure: datasets/{country}/latest/
+                        if len(parts) >= 2 and (
+                            parts[1] in countries or parts[1] == "latest"
+                        ):
+                            blobs_to_download.append(blob.name)
+                    # For metadata, check for universal or country
+                    elif parts[0] == "metadata":
+                        # Structure: metadata/{country}/latest/
+                        # or metadata/universal/...
+                        if len(parts) >= 2 and (
+                            parts[1] in countries or parts[1] == "universal"
+                        ):
+                            blobs_to_download.append(blob.name)
 
         logger.info(
             f"Found {len(blobs_to_download)} blobs in 'latest' "
@@ -247,21 +301,28 @@ class TestDataDownloader:
         logger.info(f"Dry run: {self.dry_run}")
         logger.info("=" * 60)
 
+        # Define countries to filter
+        countries = ["de", "fr", "es"]
+
         # Collect all blobs to download
         all_blobs: Set[str] = set()
 
         # 1. Find blobs with specific timestamp
-        timestamp_blobs = self.find_blobs_by_timestamp(target_timestamp)
+        timestamp_blobs = self.find_blobs_by_timestamp(
+            target_timestamp, countries=countries
+        )
         all_blobs.update(timestamp_blobs)
 
         # 2. Find latest country examples
         country_blobs = self.find_latest_country_examples(
-            countries=["de", "fr", "es"], limit=3
+            countries=countries, limit=3
         )
         all_blobs.update(country_blobs)
 
         # 3. Find latest and universal blobs
-        latest_universal_blobs = self.find_latest_and_universal_blobs()
+        latest_universal_blobs = self.find_latest_and_universal_blobs(
+            countries=countries
+        )
         all_blobs.update(latest_universal_blobs)
 
         # Download all collected blobs
