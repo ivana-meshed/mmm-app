@@ -56,6 +56,11 @@ docker/
 .github/workflows/
   ci.yml                    # Production CI/CD (main branch)
   ci-dev.yml                # Development CI/CD (feat-*, dev branches)
+scripts/                    # Utility scripts for data management
+  download_test_data.py     # Download test data from GCS
+  upload_test_data.py       # Upload test data to GCS
+  delete_bucket_data.py     # Clean GCS bucket (with protections)
+  README_GCS_SCRIPTS.md     # Documentation for GCS scripts
 tests/                      # Unit and integration tests
 docs/                       # Additional documentation
 ```
