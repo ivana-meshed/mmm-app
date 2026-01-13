@@ -44,12 +44,13 @@ python scripts/download_test_data.py --bucket my-bucket-name
 
 ### 2. `delete_bucket_data.py`
 
-Deletes all data in the bucket **EXCEPT** folders in "robyn" that start with "r".
+Deletes all data in the bucket **EXCEPT** protected folders.
 
 ⚠️ **WARNING: This is a destructive operation!** Always use `--dry-run` first!
 
 **What it keeps:**
 - `robyn/r*/**` - All data in robyn folders with revisions starting with "r" (e.g., r100, r101)
+- `TEST/**` - All data in TEST folder (staging area)
 
 **What it deletes:**
 - Everything else in the bucket
@@ -250,6 +251,10 @@ mmm-app-output/
 │   │       └── 20251211_115528/
 │   ├── r101/          # ← PROTECTED (starts with 'r')
 │   └── v1/            # ← NOT PROTECTED (doesn't start with 'r')
+├── TEST/              # ← PROTECTED (staging area)
+│   ├── datasets/
+│   ├── robyn/
+│   └── ...
 ├── datasets/
 │   ├── de/
 │   │   └── latest/    # ← Downloaded by download_test_data.py
@@ -270,7 +275,7 @@ mmm-app-output/
 - **Other folders** (training-configs, training-data, etc.): Downloads latest 3 files based on modification time
 
 **Delete behavior:**
-- **Protected**: Only `robyn/r*/` folders are kept
+- **Protected**: `robyn/r*/` folders and `TEST/` folder are kept
 - **Deleted**: Everything else including all other folders
 
 **Upload behavior:**

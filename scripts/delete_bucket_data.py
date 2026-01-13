@@ -42,7 +42,9 @@ class BucketDataCleaner:
         """
         Determine if a blob should be kept (not deleted)
 
-        Keep blobs in robyn folder with revision starting with 'r'
+        Keep blobs in:
+        - robyn folder with revision starting with 'r'
+        - TEST folder (staging area)
 
         Args:
             blob_name: Name of the blob
@@ -57,6 +59,10 @@ class BucketDataCleaner:
             revision = parts[1]
             if revision.startswith("r"):
                 return True
+
+        # Keep blobs in TEST/ folder (staging area)
+        if len(parts) >= 1 and parts[0] == "TEST":
+            return True
 
         return False
 
@@ -96,6 +102,7 @@ class BucketDataCleaner:
         logger.info(
             "  - Keep: robyn/{revision}/* where revision starts with 'r'"
         )
+        logger.info("  - Keep: TEST/* (staging area)")
         logger.info("  - Delete: Everything else")
         logger.info("=" * 60)
 
@@ -176,6 +183,7 @@ WARNING: This is a destructive operation!
 
 Protected folders (will NOT be deleted):
   - robyn/{revision}/* where revision starts with 'r' (e.g., r100, r101)
+  - TEST/* (staging area)
 
 Everything else WILL BE DELETED!
 

@@ -87,7 +87,7 @@ class TestDeleteScript(unittest.TestCase):
         )
 
     def test_should_not_keep_other_folders(self):
-        """Test that non-robyn folders are deleted."""
+        """Test that non-protected folders are deleted."""
         self.assertFalse(
             self.cleaner.should_keep_blob("datasets/de/latest/file.txt")
         )
@@ -97,6 +97,16 @@ class TestDeleteScript(unittest.TestCase):
         self.assertFalse(
             self.cleaner.should_keep_blob("metadata/universal/file.txt")
         )
+
+    def test_should_keep_test_folder(self):
+        """Test that TEST folder is kept."""
+        self.assertTrue(
+            self.cleaner.should_keep_blob("TEST/datasets/de/file.txt")
+        )
+        self.assertTrue(
+            self.cleaner.should_keep_blob("TEST/robyn/r100/de/file.txt")
+        )
+        self.assertTrue(self.cleaner.should_keep_blob("TEST/file.txt"))
 
     def test_delete_blob_dry_run(self):
         """Test delete in dry run mode."""
