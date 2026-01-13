@@ -201,6 +201,12 @@ class StructureComparison:
     ) -> Dict[str, Any]:
         """Compare local and GCS structures."""
         logger.info("Comparing local and GCS data structures...")
+        logger.info("")
+        logger.info("NOTE: This compares generated test data against CURRENT GCS data.")
+        logger.info("If schemas mismatch, regenerate test data by running:")
+        logger.info("  1. python scripts/collect_gcs_data_examples.py --countries <your-countries>")
+        logger.info("  2. python scripts/generate_test_data.py")
+        logger.info("")
 
         # Get structures
         logger.info("Scanning local directory...")

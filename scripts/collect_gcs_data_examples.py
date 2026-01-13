@@ -88,10 +88,12 @@ def collect_mapped_datasets(
 
     for country in countries:
         prefix = f"mapped-datasets/{country}/"
-        blobs = bucket.list_blobs(prefix=prefix)
+        blobs = list(bucket.list_blobs(prefix=prefix))
 
         country_data = {"versions": [], "sample_schemas": {}}
 
+        # Collect all parquet files with their metadata
+        parquet_blobs = []
         for blob in blobs:
             if blob.name.endswith("raw.parquet"):
                 parts = blob.name.split("/")
@@ -109,48 +111,71 @@ def collect_mapped_datasets(
                             ),
                         }
                     )
+                    parquet_blobs.append((blob, version))
 
-                    # Try to read schema from first parquet file only
-                    if not country_data["sample_schemas"]:
+        # Sort by updated timestamp (most recent first) and try to read from the most recent
+        # If "latest" version exists, prioritize it, otherwise use most recently updated
+        latest_blob = None
+        for blob, version in parquet_blobs:
+            if version == "latest":
+                latest_blob = blob
+                break
+        
+        if not latest_blob and parquet_blobs:
+            # Sort by updated timestamp, most recent first
+            parquet_blobs_sorted = sorted(
+                parquet_blobs, 
+                key=lambda x: x[0].updated if x[0].updated else datetime(1970, 1, 1),
+                reverse=True
+            )
+            latest_blob = parquet_blobs_sorted[0][0] if parquet_blobs_sorted else None
+
+        # Try to read schema from the latest/most recent parquet file
+        if latest_blob:
+            blob = latest_blob
+            parts = blob.name.split("/")
+            version = parts[2] if len(parts) >= 4 else "unknown"
+            
+            if not country_data["sample_schemas"]:
+                try:
+                    # Read just first few rows for schema
+                    import tempfile
+
+                    with tempfile.NamedTemporaryFile(
+                        suffix=".parquet"
+                    ) as tmp:
+                        blob.download_to_filename(tmp.name)
+
+                        # Try reading with pandas first
+                        df = None
                         try:
-                            # Read just first few rows for schema
-                            import tempfile
+                            df = pd.read_parquet(tmp.name)
+                        except Exception as pandas_error:
+                            # If pandas fails, try PyArrow directly with lenient settings
+                            logger.debug(
+                                f"  Pandas read failed for {blob.name}, trying PyArrow: {pandas_error}"
+                            )
+                            try:
+                                import pyarrow.parquet as pq
 
-                            with tempfile.NamedTemporaryFile(
-                                suffix=".parquet"
-                            ) as tmp:
-                                blob.download_to_filename(tmp.name)
+                                # Read with PyArrow's more lenient parser
+                                table = pq.read_table(tmp.name)
+                                df = table.to_pandas()
+                                logger.debug(
+                                    f"  Successfully read {blob.name} with PyArrow"
+                                )
+                            except Exception as pyarrow_error:
+                                logger.warning(
+                                    f"  Could not read parquet {blob.name} with PyArrow: {pyarrow_error}"
+                                )
+                                raise  # Re-raise to be caught by outer exception handler
 
-                                # Try reading with pandas first
-                                df = None
-                                try:
-                                    df = pd.read_parquet(tmp.name)
-                                except Exception as pandas_error:
-                                    # If pandas fails, try PyArrow directly with lenient settings
-                                    logger.debug(
-                                        f"  Pandas read failed for {blob.name}, trying PyArrow: {pandas_error}"
-                                    )
-                                    try:
-                                        import pyarrow.parquet as pq
-
-                                        # Read with PyArrow's more lenient parser
-                                        table = pq.read_table(tmp.name)
-                                        df = table.to_pandas()
-                                        logger.debug(
-                                            f"  Successfully read {blob.name} with PyArrow"
-                                        )
-                                    except Exception as pyarrow_error:
-                                        logger.warning(
-                                            f"  Could not read parquet {blob.name} with PyArrow: {pyarrow_error}"
-                                        )
-                                        raise  # Re-raise to be caught by outer exception handler
-
-                                if df is not None:
-                                    country_data["sample_schemas"][version] = {
-                                        "columns": list(df.columns),
-                                        "dtypes": {
-                                            col: str(dtype)
-                                            for col, dtype in df.dtypes.items()
+                        if df is not None:
+                            country_data["sample_schemas"][version] = {
+                                "columns": list(df.columns),
+                                "dtypes": {
+                                    col: str(dtype)
+                                    for col, dtype in df.dtypes.items()
                                         },
                                         "row_count": len(df),
                                         "sample_values": {
@@ -162,13 +187,13 @@ def collect_mapped_datasets(
                                             for col in df.columns
                                         },
                                     }
-                                    logger.info(
-                                        f"  Read schema from {blob.name}: {len(df.columns)} columns"
-                                    )
-                        except Exception as e:
-                            logger.warning(
-                                f"  Could not read parquet {blob.name}: {e}"
+                            logger.info(
+                                f"  Read schema from {blob.name}: {len(df.columns)} columns"
                             )
+                except Exception as e:
+                    logger.warning(
+                        f"  Could not read parquet {blob.name}: {e}"
+                    )
 
         if country_data["versions"]:
             examples[country] = country_data
@@ -341,8 +366,10 @@ def collect_training_data_alt(bucket_name: str) -> Dict[str, Any]:
     examples = {"files": [], "sample_schemas": {}}
 
     prefix = "training-data/"
-    blobs = bucket.list_blobs(prefix=prefix)
-
+    blobs = list(bucket.list_blobs(prefix=prefix))
+    
+    # Collect all parquet files
+    parquet_blobs = []
     for blob in blobs:
         examples["files"].append(
             {
@@ -352,52 +379,63 @@ def collect_training_data_alt(bucket_name: str) -> Dict[str, Any]:
                 "updated": blob.updated.isoformat() if blob.updated else None,
             }
         )
+        
+        if blob.name.endswith(".parquet"):
+            parquet_blobs.append(blob)
+    
+    # Sort parquet files by updated timestamp (most recent first)
+    if parquet_blobs and not examples["sample_schemas"]:
+        parquet_blobs_sorted = sorted(
+            parquet_blobs,
+            key=lambda x: x.updated if x.updated else datetime(1970, 1, 1),
+            reverse=True
+        )
+        latest_blob = parquet_blobs_sorted[0]
+        
+        # Try to read the most recent parquet file
+        try:
+            import tempfile
 
-        # Try to read first parquet found
-        if blob.name.endswith(".parquet") and not examples["sample_schemas"]:
-            try:
-                import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
+                latest_blob.download_to_filename(tmp.name)
 
-                with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
-                    blob.download_to_filename(tmp.name)
-
-                    # Try reading with pandas first
-                    df = None
+                # Try reading with pandas first
+                df = None
+                try:
+                    df = pd.read_parquet(tmp.name)
+                except Exception as pandas_error:
+                    # If pandas fails, try PyArrow directly
+                    logger.debug(
+                        f"  Pandas read failed for {latest_blob.name}, trying PyArrow: {pandas_error}"
+                    )
                     try:
-                        df = pd.read_parquet(tmp.name)
-                    except Exception as pandas_error:
-                        # If pandas fails, try PyArrow directly
+                        import pyarrow.parquet as pq
+
+                        table = pq.read_table(tmp.name)
+                        df = table.to_pandas()
                         logger.debug(
-                            f"  Pandas read failed for {blob.name}, trying PyArrow: {pandas_error}"
+                            f"  Successfully read {latest_blob.name} with PyArrow"
                         )
-                        try:
-                            import pyarrow.parquet as pq
-
-                            table = pq.read_table(tmp.name)
-                            df = table.to_pandas()
-                            logger.debug(
-                                f"  Successfully read {blob.name} with PyArrow"
-                            )
-                        except Exception as pyarrow_error:
-                            logger.warning(
-                                f"  Could not read parquet {blob.name} with PyArrow: {pyarrow_error}"
-                            )
-                            raise  # Re-raise to be caught by outer exception handler
-
-                    if df is not None:
-                        examples["sample_schemas"][blob.name] = {
-                            "columns": list(df.columns),
-                            "dtypes": {
-                                col: str(dtype)
-                                for col, dtype in df.dtypes.items()
-                            },
-                            "row_count": len(df),
-                        }
-                        logger.info(
-                            f"  Read schema from {blob.name}: {len(df.columns)} columns"
+                    except Exception as pyarrow_error:
+                        logger.warning(
+                            f"  Could not read parquet {latest_blob.name} with PyArrow: {pyarrow_error}"
                         )
-            except Exception as e:
-                logger.warning(f"  Could not read parquet {blob.name}: {e}")
+                        raise  # Re-raise to be caught by outer exception handler
+
+                if df is not None:
+                    examples["sample_schemas"][latest_blob.name] = {
+                        "columns": list(df.columns),
+                        "dtypes": {
+                            col: str(dtype)
+                            for col, dtype in df.dtypes.items()
+                        },
+                        "row_count": len(df),
+                    }
+                    logger.info(
+                        f"  Read schema from {latest_blob.name}: {len(df.columns)} columns"
+                    )
+        except Exception as e:
+            logger.warning(f"  Could not read parquet {latest_blob.name}: {e}")
 
     return examples
 
