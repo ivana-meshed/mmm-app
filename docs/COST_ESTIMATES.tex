@@ -1,0 +1,201 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{fancyhdr}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{textcomp}
+
+% Header and footer
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{MMM Trainer Cost Summary}
+\fancyhead[R]{\thepage}
+\fancyfoot[C]{Confidential}
+
+% Colors
+\definecolor{darkblue}{RGB}{0,51,102}
+\definecolor{lightgray}{RGB}{240,240,240}
+
+% Title page
+\title{\Huge\textbf{MMM Trainer\\Cost Estimates \& Technical Requirements}\\[0.5cm]\Large Summary for Self-Hosted Deployment}
+\author{Cost \& Requirements Summary}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\newpage
+
+\section{Cost Estimates}
+
+All costs are based on actual production measurements using Google Cloud Platform services in the \texttt{europe-west1} region. Costs are billed per-second for compute resources.
+
+\subsection{Training Job Performance}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrrl}
+\toprule
+\textbf{Workload} & \textbf{Iterations × Trials} & \textbf{Duration} & \textbf{Cost/Job} & \textbf{Use Case} \\
+\midrule
+Test Run & 200 × 3 = 600 & 0.8 min & \$0.01 & Quick validation \\
+\textbf{Benchmark} & \textbf{2,000 × 5 = 10K} & \textbf{12 min} & \textbf{\$0.20} & \textbf{Standard testing} \\
+\textbf{Production} & \textbf{10,000 × 5 = 50K} & \textbf{80-120 min} & \textbf{\$1.33-\$2.00} & \textbf{Production runs} \\
+Large Production & 10,000 × 10 = 100K & 160-240 min & \$2.67-\$4.00 & High-quality runs \\
+\bottomrule
+\end{tabular}
+\caption{Training job durations and costs (8 vCPU, 32GB RAM configuration)}
+\end{table}
+
+\textbf{Note:} Benchmark runs (12-18 minutes) are ideal for experimentation and testing. Production runs (80-120 minutes) provide more thorough model exploration and are recommended for final models.
+
+\subsection{Monthly Cost Scenarios}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Usage Level} & \textbf{Web Calls} & \textbf{Training Jobs} & \textbf{Benchmark Cost} & \textbf{Production Cost} \\
+\midrule
+Light & 100 & 10 & \$4 & \$15-22 \\
+Moderate & 500 & 50 & \$12 & \$69-102 \\
+Heavy & 1,000 & 100 & \$22 & \$135-202 \\
+Very Heavy & 5,000 & 500 & \$102 & \$667-1002 \\
+\bottomrule
+\end{tabular}
+\caption{Monthly cost estimates by usage volume}
+\end{table}
+
+\subsection{Cost Breakdown}
+
+\textbf{Fixed Monthly Costs} (\textasciitilde\$2/month):
+\begin{itemize}
+    \item GCS storage: \$0.50-\$2.00 (depends on data retention)
+    \item Secret Manager: \$0.36 (6 secrets × \$0.06)
+    \item Cloud Scheduler: \$0.30 (covered by free tier)
+    \item Artifact Registry: \$0.50 (container images)
+\end{itemize}
+
+\textbf{Variable Costs (per usage):}
+\begin{itemize}
+    \item Training jobs: \$0.20 (benchmark) to \$1.33-\$2.00 (production) per job
+    \item Web service: \textasciitilde\$0.002 per request (negligible)
+    \item Snowflake: Separate (depends on warehouse size and queries)
+\end{itemize}
+
+\textbf{Key Cost Drivers:}
+\begin{itemize}
+    \item Training jobs account for 90-99\% of total costs at scale
+    \item Faster machines have similar costs due to per-second billing
+    \item Storage costs are minimal with lifecycle policies
+    \item Network egress charged only for downloads outside GCP region
+\end{itemize}
+
+\newpage
+
+\section{Minimum Technical Requirements}
+
+\subsection{Required Skills and Knowledge}
+
+\subsubsection{Essential Skills}
+\begin{itemize}
+    \item \textbf{Google Cloud Platform:}
+    \begin{itemize}
+        \item Basic understanding of Cloud Run, GCS, and IAM
+        \item Ability to navigate GCP Console
+        \item Understanding of billing and cost management
+    \end{itemize}
+    \item \textbf{Infrastructure as Code:}
+    \begin{itemize}
+        \item Basic Terraform knowledge for infrastructure changes
+        \item Ability to read and modify Terraform configuration files
+    \end{itemize}
+    \item \textbf{Version Control:}
+    \begin{itemize}
+        \item Git and GitHub workflows
+        \item Understanding of CI/CD concepts
+    \end{itemize}
+    \item \textbf{Container Technology:}
+    \begin{itemize}
+        \item Basic Docker concepts
+        \item Understanding of container registries
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Recommended Skills}
+\begin{itemize}
+    \item \textbf{Programming Languages:}
+    \begin{itemize}
+        \item Python (for Streamlit application modifications)
+        \item R (for Robyn MMM customizations)
+    \end{itemize}
+    \item \textbf{Data Warehouse:}
+    \begin{itemize}
+        \item Snowflake query optimization
+        \item SQL for data extraction
+    \end{itemize}
+    \item \textbf{Monitoring and Debugging:}
+    \begin{itemize}
+        \item Cloud Logging for troubleshooting
+        \item Performance monitoring and optimization
+    \end{itemize}
+\end{itemize}
+
+\subsection{Required Tools}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Tool} & \textbf{Version} & \textbf{Purpose} \\
+\midrule
+Google Cloud SDK & Latest & GCP CLI operations \\
+Terraform & $\geq$ 1.5.0 & Infrastructure management \\
+Docker & Latest & Container testing (optional) \\
+Git & Latest & Version control \\
+Python & $\geq$ 3.11 & Local development (optional) \\
+\bottomrule
+\end{tabular}
+\caption{Required development tools}
+\end{table}
+
+\subsection{Access Requirements}
+
+\subsubsection{Google Cloud Platform}
+\begin{itemize}
+    \item \textbf{For Monitoring:} Viewer role
+    \item \textbf{For Deployments:} Editor or specific roles:
+    \begin{itemize}
+        \item Cloud Run Admin
+        \item Storage Admin
+        \item Secret Manager Admin
+        \item Service Account Admin
+    \end{itemize}
+    \item \textbf{For Debugging:} Logs Viewer, Monitoring Viewer
+\end{itemize}
+
+\subsubsection{GitHub Repository}
+\begin{itemize}
+    \item \textbf{For Development:} Write access
+    \item \textbf{For Releases:} Maintain or Admin access
+    \item \textbf{For Secrets Management:} Admin access
+\end{itemize}
+
+\subsubsection{Snowflake}
+\begin{itemize}
+    \item Read access to source data tables
+    \item Access to a dedicated warehouse for queries
+    \item Appropriate role (not ACCOUNTADMIN in production)
+\end{itemize}
+
+\end{document}

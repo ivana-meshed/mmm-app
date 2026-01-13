@@ -122,15 +122,18 @@ After Robyn loads and cores are detected:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   - parallelly::availableCores():      8 (cgroup-aware)
   - parallel::detectCores():           8 (system CPUs)
-  - Final cores for training:           7  ← 8 with -1 safety buffer
+  - Initial cores for training:        8  ← Try full cores first
+  - Fallback cores if needed:          7
 
-🎬 Starting robyn_run() with 7 cores...
+🔄 Attempt 1: Running with 8 cores...
+✅ Training successful with 8 cores  ← Or falls back to 7 if needed
 ```
 
 ### Performance Improvement
 - **Before fix**: Training time ~2.3 minutes with 2 cores
-- **After fix**: Training time ~0.6-0.8 minutes with 7-8 cores
+- **After fix**: Training time ~0.6-0.8 minutes with 8 cores (or 7 if fallback needed)
 - **Improvement**: ~3-4x faster
+- **Optimization**: Uses all 8 cores when possible, automatic -1 fallback only if needed
 
 ## Why Previous Attempts Failed
 
