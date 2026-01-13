@@ -31,6 +31,7 @@ class TestDataUploader:
         input_dir: str = "./test_data",
         dry_run: bool = False,
         skip_existing: bool = True,
+        prefix: str = "",
     ):
         """
         Initialize the uploader
@@ -40,11 +41,13 @@ class TestDataUploader:
             input_dir: Local directory containing files to upload
             dry_run: If True, only list files without uploading
             skip_existing: If True, skip files that already exist on GCS
+            prefix: Optional prefix to prepend to all uploaded files
         """
         self.bucket_name = bucket_name
         self.input_dir = Path(input_dir)
         self.dry_run = dry_run
         self.skip_existing = skip_existing
+        self.prefix = prefix.rstrip("/") + "/" if prefix else ""
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
 
@@ -121,6 +124,7 @@ class TestDataUploader:
         logger.info("Starting test data upload")
         logger.info(f"Bucket: {self.bucket_name}")
         logger.info(f"Input directory: {self.input_dir}")
+        logger.info(f"Prefix: {self.prefix if self.prefix else '(root)'}")
         logger.info(f"Dry run: {self.dry_run}")
         logger.info(f"Skip existing: {self.skip_existing}")
         logger.info("=" * 60)
@@ -141,7 +145,7 @@ class TestDataUploader:
         for local_path in sorted(local_files):
             # Calculate blob name (relative path from input_dir)
             relative_path = local_path.relative_to(self.input_dir)
-            blob_name = str(relative_path).replace(os.sep, "/")
+            blob_name = self.prefix + str(relative_path).replace(os.sep, "/")
 
             # Check if already exists before attempting upload
             if self.skip_existing and not self.dry_run:
@@ -183,6 +187,9 @@ Examples:
   # Upload with skipping existing files (default)
   python scripts/upload_test_data.py
 
+  # Upload to TEST folder
+  python scripts/upload_test_data.py --prefix TEST
+
   # Force upload (overwrite existing files)
   python scripts/upload_test_data.py --no-skip-existing
 
@@ -200,6 +207,12 @@ Examples:
         default="./test_data",
         help="Input directory containing files to upload "
         "(default: ./test_data)",
+    )
+    parser.add_argument(
+        "--prefix",
+        default="",
+        help="Optional prefix to prepend to all uploaded files "
+        "(e.g., TEST to upload to TEST/ folder)",
     )
     parser.add_argument(
         "--dry-run",
@@ -227,6 +240,7 @@ Examples:
         input_dir=args.input_dir,
         dry_run=args.dry_run,
         skip_existing=args.skip_existing,
+        prefix=args.prefix,
     )
     uploader.upload_test_data()
 

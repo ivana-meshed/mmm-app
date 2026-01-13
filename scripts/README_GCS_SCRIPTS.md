@@ -87,6 +87,7 @@ Uploads downloaded test data back to GCS bucket, maintaining the same structure.
 - Maintains folder/subfolder/naming structure
 - Skips files that already exist on GCS (by default)
 - Can force overwrite with `--no-skip-existing`
+- Can upload to a specific folder prefix (e.g., TEST/)
 
 **Usage:**
 
@@ -96,6 +97,9 @@ python scripts/upload_test_data.py --dry-run
 
 # Upload with skipping existing files (default)
 python scripts/upload_test_data.py
+
+# Upload to TEST folder
+python scripts/upload_test_data.py --prefix TEST
 
 # Force upload (overwrite existing files)
 python scripts/upload_test_data.py --no-skip-existing
@@ -110,9 +114,42 @@ python scripts/upload_test_data.py --bucket my-bucket-name
 **Arguments:**
 - `--bucket`: GCS bucket name (default: mmm-app-output)
 - `--input-dir`: Input directory containing files to upload (default: ./test_data)
+- `--prefix`: Optional prefix to prepend to all files (e.g., TEST)
 - `--dry-run`: Only list files without uploading
 - `--skip-existing`: Skip files that already exist on GCS (default: True)
 - `--no-skip-existing`: Overwrite files that already exist on GCS
+
+---
+
+### 4. `copy_test_to_root.py`
+
+Copies all files from the TEST/ folder to the root of the bucket, maintaining folder structure.
+
+**Features:**
+- Copies within the same bucket (no download needed)
+- Skips existing files by default
+- Can overwrite with `--overwrite` flag
+
+**Usage:**
+
+```bash
+# Dry run (safe, only lists what would be copied)
+python scripts/copy_test_to_root.py --dry-run
+
+# Copy files (skip existing)
+python scripts/copy_test_to_root.py
+
+# Copy and overwrite existing files
+python scripts/copy_test_to_root.py --overwrite
+
+# Copy from different bucket
+python scripts/copy_test_to_root.py --bucket my-bucket-name
+```
+
+**Arguments:**
+- `--bucket`: GCS bucket name (default: mmm-app-output)
+- `--dry-run`: Only list files without copying
+- `--overwrite`: Overwrite existing files in destination (default: False)
 
 ---
 
@@ -157,6 +194,24 @@ python scripts/upload_test_data.py --bucket my-bucket-name
    ```bash
    python scripts/delete_bucket_data.py --no-dry-run
    ```
+
+### Using TEST folder as staging:
+
+1. **Upload test data to TEST folder:**
+   ```bash
+   python scripts/upload_test_data.py --prefix TEST --dry-run  # Check what will be uploaded
+   python scripts/upload_test_data.py --prefix TEST            # Upload to TEST/ folder
+   ```
+
+2. **Verify data in TEST folder** (using GCS console or gsutil)
+
+3. **Copy from TEST to root:**
+   ```bash
+   python scripts/copy_test_to_root.py --dry-run  # Check what will be copied
+   python scripts/copy_test_to_root.py            # Actually copy to root
+   ```
+
+This workflow allows you to stage data in TEST/ folder first, verify it, then copy to production.
 
 ---
 

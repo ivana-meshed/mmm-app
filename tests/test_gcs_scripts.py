@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 # We'll import the classes after mocking storage.Client
 with patch("google.cloud.storage.Client"):
+    from scripts.copy_test_to_root import TestFolderCopier
     from scripts.delete_bucket_data import BucketDataCleaner
     from scripts.download_test_data import TestDataDownloader
     from scripts.upload_test_data import TestDataUploader
@@ -137,6 +138,39 @@ class TestUploadScript(unittest.TestCase):
         result = self.uploader.upload_file(
             Path("/tmp/test/file.txt"), "file.txt"
         )
+        self.assertTrue(result)
+
+    def test_uploader_with_prefix(self):
+        """Test uploader with prefix."""
+        with patch("google.cloud.storage.Client"):
+            uploader = TestDataUploader(
+                bucket_name="test-bucket",
+                input_dir="/tmp/test",
+                dry_run=True,
+                prefix="TEST",
+            )
+            self.assertEqual(uploader.prefix, "TEST/")
+
+
+class TestCopyScript(unittest.TestCase):
+    """Tests for copy_test_to_root.py"""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        with patch("google.cloud.storage.Client"):
+            self.copier = TestFolderCopier(
+                bucket_name="test-bucket", dry_run=True
+            )
+
+    def test_copier_initialization(self):
+        """Test copier initializes correctly."""
+        self.assertEqual(self.copier.bucket_name, "test-bucket")
+        self.assertTrue(self.copier.dry_run)
+        self.assertFalse(self.copier.overwrite)
+
+    def test_copy_blob_dry_run(self):
+        """Test copy in dry run mode."""
+        result = self.copier.copy_blob("TEST/file.txt", "file.txt")
         self.assertTrue(result)
 
 
