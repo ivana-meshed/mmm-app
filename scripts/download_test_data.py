@@ -81,6 +81,14 @@ class TestDataDownloader:
         """
         Find blobs with specific timestamp (or close to it)
 
+        Searches across multiple folder structures:
+        - robyn/{revision}/{country}/{timestamp}/
+          (only revisions starting with 'r')
+        - datasets/{country}/{timestamp}/
+        - mapped-datasets/{country}/{timestamp}/
+        - metadata/{country}/{timestamp}/
+        - metadata/universal/{timestamp}/
+
         Args:
             target_timestamp: Target timestamp to search for
 
@@ -90,23 +98,44 @@ class TestDataDownloader:
         logger.info(f"Searching for blobs with timestamp: {target_timestamp}")
         blobs_to_download = []
 
-        # Search in robyn folder (only folders starting with 'r')
-        # Structure: robyn/{revision}/{country}/{timestamp}/
-        prefix = "robyn/"
-        blobs = self.client.list_blobs(self.bucket_name, prefix=prefix)
+        # Define all prefixes to search
+        # We'll search the entire bucket to find timestamp folders
+        prefixes_to_search = [
+            "robyn/",
+            "datasets/",
+            "mapped-datasets/",
+            "metadata/",
+        ]
 
-        for blob in blobs:
-            parts = blob.name.split("/")
-            # Check if it's in robyn folder with revision starting with 'r'
-            if (
-                len(parts) >= 4
-                and parts[0] == "robyn"
-                and parts[1].startswith("r")
-            ):
-                # Check if timestamp matches or is close
-                timestamp_part = parts[3] if len(parts) > 3 else ""
-                if target_timestamp in timestamp_part:
-                    blobs_to_download.append(blob.name)
+        for prefix in prefixes_to_search:
+            logger.info(f"  Searching in {prefix}...")
+            blobs = self.client.list_blobs(self.bucket_name, prefix=prefix)
+
+            for blob in blobs:
+                parts = blob.name.split("/")
+
+                # Handle different folder structures
+                if parts[0] == "robyn":
+                    # Structure: robyn/{revision}/{country}/{timestamp}/
+                    # Only include revisions starting with 'r'
+                    if (
+                        len(parts) >= 4
+                        and parts[1].startswith("r")
+                        and target_timestamp in parts[3]
+                    ):
+                        blobs_to_download.append(blob.name)
+
+                elif parts[0] in ["datasets", "mapped-datasets"]:
+                    # Structure: datasets/{country}/{timestamp}/
+                    # Structure: mapped-datasets/{country}/{timestamp}/
+                    if len(parts) >= 3 and target_timestamp in parts[2]:
+                        blobs_to_download.append(blob.name)
+
+                elif parts[0] == "metadata":
+                    # Structure: metadata/{country}/{timestamp}/
+                    # Structure: metadata/universal/{timestamp}/
+                    if len(parts) >= 3 and target_timestamp in parts[2]:
+                        blobs_to_download.append(blob.name)
 
         logger.info(
             f"Found {len(blobs_to_download)} blobs with timestamp "
