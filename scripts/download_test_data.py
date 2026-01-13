@@ -14,7 +14,6 @@ The folder/subfolder/naming structure is preserved when downloading.
 import argparse
 import logging
 import os
-import re
 from pathlib import Path
 from typing import List, Set
 
