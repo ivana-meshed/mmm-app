@@ -45,6 +45,7 @@ data/
 tmp/
 temp/
 *.tmp
+test_data/
 
 # Documentation (generated)
 *.pdf
