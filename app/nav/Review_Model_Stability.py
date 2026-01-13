@@ -1,24 +1,32 @@
 import os
 import re
+
 import numpy as np
 import pandas as pd
-import streamlit as st
 import plotly.express as px  # kept (used for bar)
 import plotly.graph_objects as go
+import streamlit as st
+from app_shared import (
+    download_parquet_from_gcs_cached,
+    require_login_and_domain,
+)
+from app_split_helpers import ensure_session_defaults
 from plotly.subplots import make_subplots
 
-from app_shared import download_parquet_from_gcs_cached, require_login_and_domain
-from app_split_helpers import ensure_session_defaults
-
-
-# require_login_and_domain()
+require_login_and_domain()
 ensure_session_defaults()
 
 # ---------------------------------------------------------------------
 # Paths & constants
 # ---------------------------------------------------------------------
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
-GCS_PREFIX = "robyn/fethu_beta_run_1/fr/1208_124644/output_models_data"
+
+# Default GCS_PREFIX can be set via environment variable for quick access
+# Format: robyn/{revision}/{country}/{timestamp}/output_models_data
+DEFAULT_GCS_PREFIX = os.getenv(
+    "MODEL_STABILITY_GCS_PREFIX",
+    "robyn/fethu_beta_run_1/fr/1208_124644/output_models_data",  # Example default
+)
 
 FILE_XAGG = "xDecompAgg.parquet"
 FILE_HYP = "resultHypParam.parquet"
@@ -26,17 +34,43 @@ FILE_MEDIA = "mediaVecCollect.parquet"
 FILE_XVEC = "xDecompVecCollect.parquet"
 
 # Raw spend parquet (business ROAS denominator)
+# Can be a GCS path (gs://bucket/path) or local path
+# Example: gs://mmm-app-output/datasets/fr/20251208_115448/raw.parquet
 RAW_SPEND_PARQUET = os.getenv(
     "RAW_SPEND_PARQUET",
-    "/Users/fethullahertugrul/Downloads/datasets_fr_20251208_115448_raw.parquet",
+    "",  # Empty by default - user must configure via env var or GCS
 )
+
+st.set_page_config(page_title="Review Model Stability", layout="wide")
+st.title("Review Model Stability")
+
+# ---------------------------------------------------------------------
+# Configuration: Model Output Path
+# ---------------------------------------------------------------------
+st.sidebar.header("Configuration")
+st.sidebar.markdown("### Model Output Path")
+st.sidebar.caption(
+    "Path to the Robyn model outputs in GCS.\n\n"
+    "Format: `robyn/{revision}/{country}/{timestamp}/output_models_data`"
+)
+
+GCS_PREFIX = st.sidebar.text_input(
+    "GCS Prefix",
+    value=DEFAULT_GCS_PREFIX,
+    help="Path to the output_models_data folder containing Robyn parquet exports",
+    key="gcs_prefix_input",
+)
+
+if not GCS_PREFIX or not GCS_PREFIX.strip():
+    st.error("Please provide a valid GCS prefix in the sidebar.")
+    st.stop()
+
+GCS_PREFIX = GCS_PREFIX.strip()
 
 # Best model id text file is in the RUN folder, NOT output_models_data/
 RUN_PREFIX = GCS_PREFIX.rsplit("/output_models_data", 1)[0]
 BEST_MODEL_BLOB = f"{RUN_PREFIX}/best_model_id.txt"
 
-st.set_page_config(page_title="Review Model Stability", layout="wide")
-st.title("Review Model Stability")
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -48,12 +82,63 @@ def load_parquet_from_gcs(blob_path: str) -> pd.DataFrame:
 
 @st.cache_data
 def load_raw_spend(path: str) -> pd.DataFrame | None:
-    if not path or not os.path.exists(path):
+    """
+    Load raw spend data from either GCS (gs://...) or local filesystem.
+
+    Args:
+        path: Either a GCS URI (gs://bucket/path) or local file path
+
+    Returns:
+        DataFrame with raw spend data, or None if path is empty or file not found
+    """
+    if not path or not path.strip():
         return None
-    df = pd.read_parquet(path)
-    if "DATE" in df.columns:
-        df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
-    return df
+
+    path = path.strip()
+
+    # Handle GCS paths (gs://bucket/path)
+    if path.startswith("gs://"):
+        try:
+            # Parse gs://bucket/path into bucket and blob_path
+            path_without_prefix = path[5:]  # Remove 'gs://'
+            if "/" not in path_without_prefix:
+                st.error(f"Invalid GCS path format: {path}")
+                return None
+
+            bucket_name, blob_path = path_without_prefix.split("/", 1)
+            df = download_parquet_from_gcs_cached(bucket_name, blob_path)
+
+            if "DATE" in df.columns:
+                df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
+            return df
+        except FileNotFoundError:
+            st.warning(
+                f"Raw spend file not found in GCS: {path}\n\n"
+                "ROAS analysis will be disabled."
+            )
+            return None
+        except Exception as e:
+            st.error(f"Failed to load raw spend from GCS: {path}\n\nError: {e}")
+            return None
+
+    # Handle local filesystem paths
+    if not os.path.exists(path):
+        st.warning(
+            f"Raw spend file not found locally: {path}\n\n"
+            "ROAS analysis will be disabled."
+        )
+        return None
+
+    try:
+        df = pd.read_parquet(path)
+        if "DATE" in df.columns:
+            df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
+        return df
+    except Exception as e:
+        st.error(
+            f"Failed to load raw spend from local file: {path}\n\nError: {e}"
+        )
+        return None
 
 
 def to_ts(series: pd.Series) -> pd.Series:
@@ -132,14 +217,18 @@ def try_read_best_model_id() -> tuple[str, str]:
         return "", f"Failed reading gs://{GCS_BUCKET}/{BEST_MODEL_BLOB} — {e}"
 
 
-def build_share_summary(contrib_driver: pd.DataFrame, drivers: list[str]) -> pd.DataFrame:
+def build_share_summary(
+    contrib_driver: pd.DataFrame, drivers: list[str]
+) -> pd.DataFrame:
     """
     Per-driver stats with missing drivers per model treated as 0 share.
     If you include ALL drivers, sum(mean_share) ~= 1.
     """
     mat = (
         contrib_driver[contrib_driver["driver"].isin(drivers)]
-        .pivot_table(index="solID", columns="driver", values="share", aggfunc="sum")
+        .pivot_table(
+            index="solID", columns="driver", values="share", aggfunc="sum"
+        )
         .fillna(0.0)
     )
 
@@ -277,10 +366,17 @@ except Exception as e:
 
 raw_spend = load_raw_spend(RAW_SPEND_PARQUET)
 if raw_spend is None or raw_spend.empty:
-    st.warning(
-        f"Raw spend data not found at:\n{RAW_SPEND_PARQUET}\n\n"
-        "Business ROAS (raw currency) will be disabled. Driver shares still work."
-    )
+    if RAW_SPEND_PARQUET:
+        # Path was provided but failed to load (error already shown by load_raw_spend)
+        pass
+    else:
+        st.info(
+            "⚠️ Raw spend data not configured.\n\n"
+            "To enable ROAS analysis, set the `RAW_SPEND_PARQUET` environment variable:\n"
+            "- For GCS: `gs://bucket/path/to/raw.parquet`\n"
+            "- For local: `/path/to/raw.parquet`\n\n"
+            "Driver share analysis will still work without raw spend data."
+        )
 
 best_model_id, best_dbg = try_read_best_model_id()
 if not best_model_id:
@@ -305,7 +401,9 @@ if "solID" not in hyp.columns:
 
 for col in ["solID", "ds"]:
     if col not in xVec.columns:
-        st.error("xDecompVecCollect is missing required columns ('solID', 'ds').")
+        st.error(
+            "xDecompVecCollect is missing required columns ('solID', 'ds')."
+        )
         st.stop()
 
 if "solID" not in media.columns:
@@ -319,7 +417,9 @@ val_col = detect_val_col(xAgg)
 # ---------------------------------------------------------------------
 st.sidebar.header("Model selection")
 
-mode = st.sidebar.selectbox("Model Quality:", ["Good", "Acceptable", "All", "Custom"], index=1)
+mode = st.sidebar.selectbox(
+    "Model Quality:", ["Good", "Acceptable", "All", "Custom"], index=1
+)
 
 preset = {
     "Good": {"rsq_min": 0.70, "nrmse_max": 0.15, "decomp_max": 0.10},
@@ -364,7 +464,9 @@ for c in hyp_f.columns:
         mask &= hyp_f[c] <= decomp_max
 
 good_models = hyp_f.loc[mask, "solID"].astype(str).unique()
-st.write(f"Selected **{len(good_models)} / {len(hyp)}** models (mode: **{mode}**)")
+st.write(
+    f"Selected **{len(good_models)} / {len(hyp)}** models (mode: **{mode}**)"
+)
 
 if len(good_models) == 0:
     st.warning("No models match the selected thresholds.")
@@ -399,11 +501,17 @@ if (
     spend_max = raw_spend["DATE"].max()
 
     total_spend_days = raw_spend["DATE"].dropna().nunique()
-    overlap_days = raw_spend[
-        (raw_spend["DATE"] >= model_min) & (raw_spend["DATE"] <= model_max)
-    ]["DATE"].dropna().nunique()
+    overlap_days = (
+        raw_spend[
+            (raw_spend["DATE"] >= model_min) & (raw_spend["DATE"] <= model_max)
+        ]["DATE"]
+        .dropna()
+        .nunique()
+    )
 
-    overlap_pct = (overlap_days / total_spend_days * 100) if total_spend_days > 0 else 0.0
+    overlap_pct = (
+        (overlap_days / total_spend_days * 100) if total_spend_days > 0 else 0.0
+    )
 
     # Always clip to model window for ROAS correctness
     raw_spend_roas = raw_spend[
@@ -463,12 +571,16 @@ media_drivers = sorted(media_long["driver"].unique())
 # Raw spend mapping driver -> spend column
 driver_to_spend: dict[str, str] = {}
 if raw_spend_roas is not None and not raw_spend_roas.empty:
-    spend_cols = [c for c in raw_spend_roas.columns if c != "DATE" and is_paid_like(c)]
+    spend_cols = [
+        c for c in raw_spend_roas.columns if c != "DATE" and is_paid_like(c)
+    ]
     spend_root_map = {c: canonical_media_name(c) for c in spend_cols}
 
     for d in media_drivers:
         d_root = canonical_media_name(d)
-        match = next((sc for sc, sr in spend_root_map.items() if sr == d_root), None)
+        match = next(
+            (sc for sc, sr in spend_root_map.items() if sr == d_root), None
+        )
         if match:
             driver_to_spend[d] = match
 
@@ -485,7 +597,9 @@ tab_drivers, tab_roas = st.tabs(["Drivers", "ROAS"])
 with tab_drivers:
     st.subheader("Driver share stability across models")
 
-    default_drivers = [d for d in all_drivers if "COST" in d.upper()][:6] or all_drivers[:6]
+    default_drivers = [d for d in all_drivers if "COST" in d.upper()][
+        :6
+    ] or all_drivers[:6]
     sel_drivers = st.multiselect(
         "Select Drivers",
         options=all_drivers,
@@ -497,7 +611,9 @@ with tab_drivers:
 
     plot_df = contrib_driver[contrib_driver["driver"].isin(sel_drivers)].copy()
 
-    st.caption(f"Note: Best model is highlighted with larger dots: **{best_model_id}**")
+    st.caption(
+        f"Note: Best model is highlighted with larger dots: **{best_model_id}**"
+    )
     fig_share = box_with_best_dot(
         df_plot=plot_df,
         x="driver",
@@ -519,9 +635,13 @@ with tab_drivers:
         st.subheader("Paid-media Summary - Total vs Paid Effect")
         paid_plot = [d for d in sel_drivers if d in set(media_drivers)]
         if not paid_plot:
-            st.info("None of your selected drivers are in mediaVecCollect (paid pool).")
+            st.info(
+                "None of your selected drivers are in mediaVecCollect (paid pool)."
+            )
         else:
-            paid_contrib = contrib_driver[contrib_driver["driver"].isin(media_drivers)].copy()
+            paid_contrib = contrib_driver[
+                contrib_driver["driver"].isin(media_drivers)
+            ].copy()
             paid_tot = (
                 paid_contrib.groupby("solID", as_index=False)["contrib"]
                 .sum()
@@ -536,12 +656,22 @@ with tab_drivers:
 
             mat_total = (
                 paid_contrib[paid_contrib["driver"].isin(paid_plot)]
-                .pivot_table(index="solID", columns="driver", values="share", aggfunc="sum")
+                .pivot_table(
+                    index="solID",
+                    columns="driver",
+                    values="share",
+                    aggfunc="sum",
+                )
                 .fillna(0.0)
             )
             mat_paid = (
                 paid_contrib[paid_contrib["driver"].isin(paid_plot)]
-                .pivot_table(index="solID", columns="driver", values="share_of_paid", aggfunc="sum")
+                .pivot_table(
+                    index="solID",
+                    columns="driver",
+                    values="share_of_paid",
+                    aggfunc="sum",
+                )
                 .fillna(0.0)
             )
 
@@ -550,12 +680,26 @@ with tab_drivers:
                 rows.append(
                     {
                         "driver": d,
-                        "mean_share_of_total": float(mat_total[d].mean()) if d in mat_total.columns else 0.0,
-                        "mean_share_of_paid": float(mat_paid[d].mean()) if d in mat_paid.columns else 0.0,
-                        "sd_share_of_paid": float(mat_paid[d].std(ddof=1)) if d in mat_paid.columns and len(mat_paid[d]) > 1 else 0.0,
+                        "mean_share_of_total": (
+                            float(mat_total[d].mean())
+                            if d in mat_total.columns
+                            else 0.0
+                        ),
+                        "mean_share_of_paid": (
+                            float(mat_paid[d].mean())
+                            if d in mat_paid.columns
+                            else 0.0
+                        ),
+                        "sd_share_of_paid": (
+                            float(mat_paid[d].std(ddof=1))
+                            if d in mat_paid.columns and len(mat_paid[d]) > 1
+                            else 0.0
+                        ),
                     }
                 )
-            paid_summary = pd.DataFrame(rows).sort_values("mean_share_of_paid", ascending=False)
+            paid_summary = pd.DataFrame(rows).sort_values(
+                "mean_share_of_paid", ascending=False
+            )
             st.dataframe(paid_summary, use_container_width=True)
             st.caption(
                 "mean_share_of_total = share of TOTAL modeled outcome (paid driver’s average contribution share). "
@@ -565,14 +709,20 @@ with tab_drivers:
     st.markdown("---")
     st.subheader("Driver contribution over time")
 
-    freq = st.selectbox("Time aggregation", ["Monthly", "Quarterly", "Yearly"], index=0)
+    freq = st.selectbox(
+        "Time aggregation", ["Monthly", "Quarterly", "Yearly"], index=0
+    )
     bucket_fn = make_bucket_fn(freq)
 
     drivers_ts_candidates = [d for d in all_drivers if d in xVec_gm.columns]
     if not drivers_ts_candidates:
-        st.info("No drivers from xDecompAgg found as columns in xDecompVecCollect.")
+        st.info(
+            "No drivers from xDecompAgg found as columns in xDecompVecCollect."
+        )
     else:
-        driver_ts = st.selectbox("Driver (time series)", options=drivers_ts_candidates, index=0)
+        driver_ts = st.selectbox(
+            "Driver (time series)", options=drivers_ts_candidates, index=0
+        )
 
         xsub = xVec_gm[["ds", "solID", driver_ts]].copy()
         xsub["bucket"] = bucket_fn(xsub["ds"])
@@ -587,7 +737,9 @@ with tab_drivers:
         # denominator: modeled outcome per (bucket, solID)
         total_col, created_temp = pick_total_col_for_share(xVec_gm)
         if not total_col:
-            st.info("Could not compute share-over-time denominator (no yhat/dep_var/y and no numeric fallback).")
+            st.info(
+                "Could not compute share-over-time denominator (no yhat/dep_var/y and no numeric fallback)."
+            )
         else:
             denom = xVec_gm[["ds", "solID", total_col]].copy()
             denom["bucket"] = bucket_fn(denom["ds"])
@@ -614,7 +766,10 @@ with tab_drivers:
                     points="all",
                     title=f"Total Contribution over time — {driver_ts}",
                 )
-                fig_units.update_layout(xaxis_title="Period", yaxis_title="Total Contribution (outcome units)")
+                fig_units.update_layout(
+                    xaxis_title="Period",
+                    yaxis_title="Total Contribution (outcome units)",
+                )
                 st.plotly_chart(fig_units, use_container_width=True)
 
             with c2:
@@ -625,11 +780,16 @@ with tab_drivers:
                     points="all",
                     title=f"Percentage Contribution over time — {driver_ts}",
                 )
-                fig_share_ts.update_layout(xaxis_title="Period", yaxis_title=f"Pct Contribution ({total_col})")
+                fig_share_ts.update_layout(
+                    xaxis_title="Period",
+                    yaxis_title=f"Pct Contribution ({total_col})",
+                )
                 st.plotly_chart(fig_share_ts, use_container_width=True)
 
             if created_temp:
-                st.caption("Note: share denominator fallback used a numeric-column sum (no yhat/dep_var/y found).")
+                st.caption(
+                    "Note: share denominator fallback used a numeric-column sum (no yhat/dep_var/y found)."
+                )
 
 # =====================================================================
 # ROAS TAB
@@ -639,24 +799,35 @@ with tab_roas:
 
     if raw_spend_roas is None or raw_spend_roas.empty:
         st.info(
-            "Raw spend parquet not available (or empty after clipping). "
-            "Set RAW_SPEND_PARQUET env var or update RAW_SPEND_PARQUET path."
+            "⚠️ Raw spend data not available (or empty after clipping to model window).\n\n"
+            "To enable ROAS analysis, set the `RAW_SPEND_PARQUET` environment variable:\n"
+            "- For GCS: `gs://bucket/path/to/raw.parquet`\n"
+            "- For local: `/path/to/raw.parquet`"
         )
         st.stop()
 
     if "DATE" not in raw_spend_roas.columns:
-        st.error("Raw spend parquet must have a DATE column for over-time analysis.")
+        st.error(
+            "Raw spend parquet must have a DATE column for over-time analysis."
+        )
         st.stop()
 
     if not paid_like_drivers:
-        st.info("No paid drivers could be mapped to raw spend columns (cost/spend/EUR/USD/BUDGET).")
+        st.info(
+            "No paid drivers could be mapped to raw spend columns (cost/spend/EUR/USD/BUDGET)."
+        )
         st.stop()
 
     # deterministic order + default selection
     paid_like_drivers = sorted(paid_like_drivers)
-    default_roas = sorted([d for d in paid_like_drivers if "COST" in d.upper()] or paid_like_drivers)[:6]
+    default_roas = sorted(
+        [d for d in paid_like_drivers if "COST" in d.upper()]
+        or paid_like_drivers
+    )[:6]
 
-    st.caption(f"Note: Best model is highlighted with larger dots: **{best_model_id}**")
+    st.caption(
+        f"Note: Best model is highlighted with larger dots: **{best_model_id}**"
+    )
     sel_roas_drivers = st.multiselect(
         "Select Paid Drivers",
         options=paid_like_drivers,
@@ -697,12 +868,18 @@ with tab_roas:
         )
 
     if spend_totals.empty:
-        st.info("No selected drivers have positive spend in the model window after mapping.")
+        st.info(
+            "No selected drivers have positive spend in the model window after mapping."
+        )
         st.stop()
 
     roas_df = contrib.merge(spend_totals, on="driver", how="inner")
     roas_df["roas"] = roas_df["contrib"] / roas_df["total_spend_raw"]
-    roas_plot = roas_df.replace([np.inf, -np.inf], np.nan).dropna(subset=["roas"]).copy()
+    roas_plot = (
+        roas_df.replace([np.inf, -np.inf], np.nan)
+        .dropna(subset=["roas"])
+        .copy()
+    )
 
     if roas_plot.empty:
         st.info("No valid ROAS values after spend filtering.")
@@ -710,10 +887,14 @@ with tab_roas:
 
     # align ordering across ROAS + spend charts (alphabetical by driver name)
     drivers_show = sorted(spend_totals["driver"].unique().tolist())
-    roas_plot["driver"] = pd.Categorical(roas_plot["driver"], categories=drivers_show, ordered=True)
+    roas_plot["driver"] = pd.Categorical(
+        roas_plot["driver"], categories=drivers_show, ordered=True
+    )
     roas_plot = roas_plot.sort_values("driver")
 
-    spend_show = spend_totals.set_index("driver").reindex(drivers_show).reset_index()
+    spend_show = (
+        spend_totals.set_index("driver").reindex(drivers_show).reset_index()
+    )
 
     c1, c2 = st.columns(2)
 
@@ -755,21 +936,31 @@ with tab_roas:
     st.markdown("---")
     st.subheader("ROAS and Spend over time")
 
-    freq2 = st.selectbox("Time aggregation", ["Monthly", "Quarterly", "Yearly"], index=0, key="roas_ot_freq")
+    freq2 = st.selectbox(
+        "Time aggregation",
+        ["Monthly", "Quarterly", "Yearly"],
+        index=0,
+        key="roas_ot_freq",
+    )
     bucket_fn2 = make_bucket_fn(freq2)
 
     ts_candidates = sorted(
         [
             d
             for d in drivers_show
-            if d in xVec_gm.columns and (driver_to_spend.get(d) in raw_spend_roas.columns)
+            if d in xVec_gm.columns
+            and (driver_to_spend.get(d) in raw_spend_roas.columns)
         ]
     )
     if not ts_candidates:
-        st.info("None of the selected paid drivers exist in xDecompVecCollect AND map to a raw spend column.")
+        st.info(
+            "None of the selected paid drivers exist in xDecompVecCollect AND map to a raw spend column."
+        )
         st.stop()
 
-    driver_ot = st.selectbox("Driver", options=ts_candidates, index=0, key="roas_ot_driver")
+    driver_ot = st.selectbox(
+        "Driver", options=ts_candidates, index=0, key="roas_ot_driver"
+    )
     spend_col = driver_to_spend[driver_ot]
 
     # Contributions per bucket per model
@@ -796,8 +987,12 @@ with tab_roas:
     if not spend_active.empty:
         min_b = spend_active["bucket"].min()
         max_b = spend_active["bucket"].max()
-        contrib_ot = contrib_ot[(contrib_ot["bucket"] >= min_b) & (contrib_ot["bucket"] <= max_b)].copy()
-        spend_ot = spend_ot[(spend_ot["bucket"] >= min_b) & (spend_ot["bucket"] <= max_b)].copy()
+        contrib_ot = contrib_ot[
+            (contrib_ot["bucket"] >= min_b) & (contrib_ot["bucket"] <= max_b)
+        ].copy()
+        spend_ot = spend_ot[
+            (spend_ot["bucket"] >= min_b) & (spend_ot["bucket"] <= max_b)
+        ].copy()
 
     ts = contrib_ot.merge(spend_ot, on="bucket", how="left")
     ts["roas_bucket"] = np.where(
@@ -805,10 +1000,16 @@ with tab_roas:
         ts["contrib_bucket"] / ts["spend_bucket_raw"],
         np.nan,
     )
-    ts = ts.replace([np.inf, -np.inf], np.nan).dropna(subset=["roas_bucket"]).copy()
+    ts = (
+        ts.replace([np.inf, -np.inf], np.nan)
+        .dropna(subset=["roas_bucket"])
+        .copy()
+    )
 
     if ts.empty:
-        st.info("No valid ROAS values over time (zero/missing spend in buckets).")
+        st.info(
+            "No valid ROAS values over time (zero/missing spend in buckets)."
+        )
         st.stop()
 
     # mark best model for over-time highlighting
@@ -821,7 +1022,9 @@ with tab_roas:
     ts["period"] = ts["bucket"].dt.strftime("%Y-%m-%d")
 
     buckets_sorted = list(pd.unique(ts.sort_values("bucket")["bucket"]))
-    periods_sorted = [pd.Timestamp(b).strftime("%Y-%m-%d") for b in buckets_sorted]
+    periods_sorted = [
+        pd.Timestamp(b).strftime("%Y-%m-%d") for b in buckets_sorted
+    ]
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
 
@@ -899,9 +1102,13 @@ with tab_roas:
             min_roas=("roas_bucket", "min"),
             max_roas=("roas_bucket", "max"),
         )
-        .merge(spend_ot[["bucket", "spend_bucket_raw"]], on="bucket", how="left")
+        .merge(
+            spend_ot[["bucket", "spend_bucket_raw"]], on="bucket", how="left"
+        )
         .sort_values("bucket")
         .rename(columns={"bucket": "period"})
     )
-    roas_ot_summary["period"] = pd.to_datetime(roas_ot_summary["period"]).dt.strftime("%Y-%m-%d")
+    roas_ot_summary["period"] = pd.to_datetime(
+        roas_ot_summary["period"]
+    ).dt.strftime("%Y-%m-%d")
     st.dataframe(roas_ot_summary, use_container_width=True)
