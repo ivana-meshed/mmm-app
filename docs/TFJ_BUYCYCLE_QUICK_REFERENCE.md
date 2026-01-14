@@ -34,8 +34,9 @@
 ### 3. Finalize Distribution (AUTOMATED)
 ```bash
 ./scripts/finalize_distribution.sh \
-  "TFJ Buycycle GmbH" \
+  tfj-buycycle \
   "v1.0.0" \
+  "TFJ Buycycle GmbH" \
   "LIC-TFJ-001" \
   "5" \
   "2028-02-01" \
@@ -166,7 +167,7 @@
   "dist/tfj-buycycle-v1.0.0/mmm-app"
 
 ./scripts/finalize_distribution.sh \
-  "TFJ Buycycle GmbH" "v1.0.0" "LIC-TFJ-001" \
+  tfj-buycycle "v1.0.0" "TFJ Buycycle GmbH" "LIC-TFJ-001" \
   "5" "2028-02-01" "info@buycycle.de" \
   "Theodor Golditchuk" "Managing Director"
 ```

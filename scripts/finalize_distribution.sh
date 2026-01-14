@@ -8,8 +8,8 @@
 #   - Completes LICENSE_AUTHORIZATION.txt with provided details
 #   - Creates final archive with checksum
 #
-# Usage: ./finalize_distribution.sh <customer-name> <version> <license-id> <installations> <valid-until> <contact-email> <authorized-by> <title>
-# Example: ./finalize_distribution.sh "TFJ Buycycle GmbH" "v1.0.0" "LIC-TFJ-001" "5" "2028-02-01" "tech@tfj-buycycle.de" "John Doe" "CTO"
+# Usage: ./finalize_distribution.sh <customer-slug> <version> <full-customer-name> <license-id> <installations> <valid-until> <contact-email> <authorized-by> <title>
+# Example: ./finalize_distribution.sh tfj-buycycle "v1.0.0" "TFJ Buycycle GmbH" "LIC-TFJ-001" "5" "2028-02-01" "info@buycycle.de" "Theodor Golditchuk" "Managing Director"
 #
 
 set -e
@@ -34,36 +34,38 @@ print_error() {
 }
 
 # Check arguments
-if [ "$#" -ne 8 ]; then
-    print_error "Usage: $0 <customer-name> <version> <license-id> <installations> <valid-until> <contact-email> <authorized-by> <title>"
+if [ "$#" -ne 9 ]; then
+    print_error "Usage: $0 <customer-slug> <version> <full-customer-name> <license-id> <installations> <valid-until> <contact-email> <authorized-by> <title>"
     echo ""
     echo "Arguments:"
-    echo "  customer-name    : Name of customer organization (e.g., \"TFJ Buycycle GmbH\")"
-    echo "  version          : Version number (e.g., \"v1.0.0\")"
-    echo "  license-id       : Unique license identifier (e.g., \"LIC-TFJ-001\")"
-    echo "  installations    : Number of installations allowed (e.g., \"5\")"
-    echo "  valid-until      : Expiration date or \"Perpetual\" (e.g., \"2028-02-01\")"
-    echo "  contact-email    : Customer contact email (e.g., \"tech@tfj-buycycle.de\")"
-    echo "  authorized-by    : Name of person authorizing (e.g., \"John Doe\")"
-    echo "  title            : Title of authorizing person (e.g., \"CTO\")"
+    echo "  customer-slug     : Slug for directory name (e.g., \"tfj-buycycle\" - must match prepare_distribution.sh)"
+    echo "  version           : Version number (e.g., \"v1.0.0\")"
+    echo "  full-customer-name: Full legal name of customer (e.g., \"TFJ Buycycle GmbH\")"
+    echo "  license-id        : Unique license identifier (e.g., \"LIC-TFJ-001\")"
+    echo "  installations     : Number of installations allowed (e.g., \"5\")"
+    echo "  valid-until       : Expiration date or \"Perpetual\" (e.g., \"2028-02-01\")"
+    echo "  contact-email     : Customer contact email (e.g., \"info@buycycle.de\")"
+    echo "  authorized-by     : Name of person authorizing (e.g., \"Theodor Golditchuk\")"
+    echo "  title             : Title of authorizing person (e.g., \"Managing Director\")"
     echo ""
     echo "Example:"
-    echo "  $0 \"TFJ Buycycle GmbH\" \"v1.0.0\" \"LIC-TFJ-001\" \"5\" \"2028-02-01\" \"tech@tfj-buycycle.de\" \"John Doe\" \"CTO\""
+    echo "  $0 tfj-buycycle \"v1.0.0\" \"TFJ Buycycle GmbH\" \"LIC-TFJ-001\" \"5\" \"2028-02-01\" \"info@buycycle.de\" \"Theodor Golditchuk\" \"Managing Director\""
     exit 1
 fi
 
-CUSTOMER_NAME="$1"
+CUSTOMER_SLUG="$1"
 VERSION="$2"
-LICENSE_ID="$3"
-INSTALLATIONS="$4"
-VALID_UNTIL="$5"
-CONTACT_EMAIL="$6"
-AUTHORIZED_BY="$7"
-TITLE="$8"
+CUSTOMER_NAME="$3"
+LICENSE_ID="$4"
+INSTALLATIONS="$5"
+VALID_UNTIL="$6"
+CONTACT_EMAIL="$7"
+AUTHORIZED_BY="$8"
+TITLE="$9"
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_ROOT="$( cd "${SCRIPT_DIR}/.." && pwd )"
-DIST_DIR="${REPO_ROOT}/dist/${CUSTOMER_NAME}-${VERSION}"
+DIST_DIR="${REPO_ROOT}/dist/${CUSTOMER_SLUG}-${VERSION}"
 APP_DIR="${DIST_DIR}/mmm-app"
 
 # Validate distribution exists
@@ -140,7 +142,7 @@ echo ""
 # Step 3: Create final archive
 print_info "Step 3: Creating final distribution archive..."
 cd "${REPO_ROOT}/dist"
-ARCHIVE_NAME="${CUSTOMER_NAME}-${VERSION}-FINAL.tar.gz"
+ARCHIVE_NAME="${CUSTOMER_SLUG}-${VERSION}-FINAL.tar.gz"
 
 # Remove old archive if exists
 if [ -f "${ARCHIVE_NAME}" ]; then
@@ -148,7 +150,7 @@ if [ -f "${ARCHIVE_NAME}" ]; then
     rm -f "${ARCHIVE_NAME}"
 fi
 
-tar -czf "${ARCHIVE_NAME}" "${CUSTOMER_NAME}-${VERSION}/"
+tar -czf "${ARCHIVE_NAME}" "${CUSTOMER_SLUG}-${VERSION}/"
 print_info "✓ Created archive: ${ARCHIVE_NAME}"
 
 # Generate archive checksum
@@ -159,7 +161,7 @@ echo ""
 
 # Create distribution manifest
 print_info "Creating distribution manifest..."
-MANIFEST_FILE="${REPO_ROOT}/dist/${CUSTOMER_NAME}-${VERSION}-MANIFEST.txt"
+MANIFEST_FILE="${REPO_ROOT}/dist/${CUSTOMER_SLUG}-${VERSION}-MANIFEST.txt"
 cat > "${MANIFEST_FILE}" << EOF
 DISTRIBUTION MANIFEST
 =====================
@@ -197,7 +199,7 @@ To verify archive integrity:
 
 To verify package contents:
   tar -xzf ${ARCHIVE_NAME}
-  cd ${CUSTOMER_NAME}-${VERSION}
+  cd ${CUSTOMER_SLUG}-${VERSION}
   sha256sum -c CHECKSUMS.txt
 
 DELIVERY:

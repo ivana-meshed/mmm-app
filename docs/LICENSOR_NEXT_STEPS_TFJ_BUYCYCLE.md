@@ -69,14 +69,15 @@
 - [ ] **Finalize distribution** (AUTOMATED - regenerates checksums, completes authorization, creates final archive)
   ```bash
   ./scripts/finalize_distribution.sh \
-    "TFJ Buycycle GmbH" \
+    tfj-buycycle \
     "v1.0.0" \
+    "TFJ Buycycle GmbH" \
     "LIC-TFJ-001" \
     "5" \
     "2028-02-01" \
-    "tech@tfj-buycycle.de" \
-    "John Doe" \
-    "CTO"
+    "info@buycycle.de" \
+    "Theodor Golditchuk" \
+    "Managing Director"
   ```
   - Automatically regenerates checksums (including watermarked files)
   - Completes LICENSE_AUTHORIZATION.txt with provided details
