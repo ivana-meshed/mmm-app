@@ -61,24 +61,28 @@
   - Creates WATERMARK_MANIFEST.txt
   - Files watermarked: ~150+ source files
 
-- [ ] **Regenerate checksums** (after watermarking)
+- [ ] **Finalize distribution** (AUTOMATED - regenerates checksums, completes authorization, creates final archive)
   ```bash
-  cd dist/tfj-buycycle-v1.0.0
-  find mmm-app -type f -exec sha256sum {} \; > CHECKSUMS.txt
-  cd ../..
+  ./scripts/finalize_distribution.sh \
+    "TFJ Buycycle GmbH" \
+    "v1.0.0" \
+    "LIC-TFJ-001" \
+    "5" \
+    "2028-02-01" \
+    "tech@tfj-buycycle.de" \
+    "John Doe" \
+    "CTO"
   ```
-
-- [ ] **Complete LICENSE_AUTHORIZATION.txt**
-  - Location: `dist/tfj-buycycle-v1.0.0/mmm-app/LICENSE_AUTHORIZATION.txt`
-  - Fill in:
-    - Contact: [Customer contact email]
-    - License ID: LIC-TFJ-001
-    - Number of Installations: [e.g., 3]
-    - Valid Until: 2028-02-01
-    - Additional Terms: [Any specific terms]
-    - Authorized by: [Your name and title]
-    - Date: [Current date]
-  - **Sign the certificate** (digital signature recommended)
+  - Automatically regenerates checksums (including watermarked files)
+  - Completes LICENSE_AUTHORIZATION.txt with provided details
+  - Creates final archive: `tfj-buycycle-v1.0.0-FINAL.tar.gz`
+  - Generates archive checksum: `tfj-buycycle-v1.0.0-FINAL.tar.gz.sha256`
+  - Creates distribution manifest with all details
+  
+  **Note**: Adjust parameters:
+  - Number of installations (e.g., "5")
+  - Customer contact email
+  - Your name and title for authorization
 
 ### 3. Quality Assurance ✅
 
@@ -93,7 +97,7 @@
 - [ ] **Test extraction**
   ```bash
   cd /tmp
-  tar -xzf /path/to/dist/tfj-buycycle-v1.0.0.tar.gz
+  tar -xzf /path/to/dist/tfj-buycycle-v1.0.0-FINAL.tar.gz
   cd tfj-buycycle-v1.0.0/mmm-app
   sha256sum -c ../CHECKSUMS.txt
   ```
@@ -104,6 +108,12 @@
   - [ ] `.github/workflows/config.example.txt` present
   - [ ] `.github/workflows/README.md` present
   - [ ] `.github/workflows/config.yml` NOT present (your private config)
+
+- [ ] **Verify finalization artifacts**
+  - [ ] `tfj-buycycle-v1.0.0-FINAL.tar.gz` exists
+  - [ ] `tfj-buycycle-v1.0.0-FINAL.tar.gz.sha256` exists
+  - [ ] `tfj-buycycle-v1.0.0-MANIFEST.txt` exists with complete details
+  - [ ] LICENSE_AUTHORIZATION.txt is fully populated (no placeholders)
 
 ### 4. Update License Registry 📋
 
@@ -123,12 +133,10 @@
 
 ### 5. Prepare Customer Handoff Package 📬
 
-- [ ] **Create final deliverable archive**
-  ```bash
-  cd dist
-  tar -czf tfj-buycycle-v1.0.0-FINAL.tar.gz tfj-buycycle-v1.0.0/
-  sha256sum tfj-buycycle-v1.0.0-FINAL.tar.gz > tfj-buycycle-v1.0.0-FINAL.tar.gz.sha256
-  ```
+- [ ] **Verify final deliverables** (created by finalize_distribution.sh)
+  - [ ] `tfj-buycycle-v1.0.0-FINAL.tar.gz` - Ready for delivery
+  - [ ] `tfj-buycycle-v1.0.0-FINAL.tar.gz.sha256` - Integrity checksum
+  - [ ] `tfj-buycycle-v1.0.0-MANIFEST.txt` - Distribution details
 
 - [ ] **Prepare delivery email** with:
   - Link to secure file transfer (or encrypted attachment)
@@ -138,7 +146,7 @@
   - License expiration reminder
 
 - [ ] **Create support ticket/channel** for customer
-  - Email: support@mesheddata.com
+  - Email: fethu@mesheddata.com
   - Slack/Teams channel (if applicable)
   - Calendar invite for onboarding call
 
