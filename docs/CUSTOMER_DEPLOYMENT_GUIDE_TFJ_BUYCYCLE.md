@@ -3,6 +3,10 @@
 ## License Information
 
 - **Licensed to**: TFJ Buycycle GmbH
+- **Company Address**: Atelierstraße 12, 81671 München, Deutschland
+- **Register**: HRB 263786, Amtsgericht München
+- **Managing Directors**: Theodor Golditchuk, Jonas Jäger
+- **VAT ID**: DE341044568
 - **License ID**: LIC-TFJ-001
 - **Valid From**: February 1, 2026
 - **Valid Until**: February 1, 2028

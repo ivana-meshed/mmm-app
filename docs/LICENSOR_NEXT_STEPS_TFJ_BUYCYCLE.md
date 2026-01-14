@@ -4,6 +4,11 @@
 
 - **Licensor**: Meshed Data Consulting
 - **Licensee**: TFJ Buycycle GmbH
+  - **Address**: Atelierstraße 12, 81671 München, Deutschland
+  - **Register**: HRB 263786, Amtsgericht München
+  - **Managing Directors**: Theodor Golditchuk, Jonas Jäger
+  - **VAT ID**: DE341044568
+  - **Contact Email**: info@buycycle.de
 - **License ID**: LIC-TFJ-001
 - **License Period**: February 2026 - February 2028 (2 years)
 - **Software**: MMM Trainer v1.0.0

@@ -2,6 +2,11 @@
 
 ## License Details
 - **Licensee**: TFJ Buycycle GmbH
+  - Address: Atelierstraße 12, 81671 München, Deutschland
+  - Register: HRB 263786, Amtsgericht München
+  - Managing Directors: Theodor Golditchuk, Jonas Jäger
+  - VAT ID: DE341044568
+  - Contact: info@buycycle.de
 - **License ID**: LIC-TFJ-001
 - **Period**: February 1, 2026 - February 1, 2028 (2 years)
 - **Software**: MMM Trainer v1.0.0
@@ -34,9 +39,9 @@
   "LIC-TFJ-001" \
   "5" \
   "2028-02-01" \
-  "tech@tfj-buycycle.de" \
-  "John Doe" \
-  "CTO"
+  "info@buycycle.de" \
+  "Theodor Golditchuk" \
+  "Managing Director"
 ```
 **Automatically**:
 - Regenerates checksums (including watermarked files)
@@ -162,8 +167,8 @@
 
 ./scripts/finalize_distribution.sh \
   "TFJ Buycycle GmbH" "v1.0.0" "LIC-TFJ-001" \
-  "5" "2028-02-01" "tech@tfj-buycycle.de" \
-  "John Doe" "CTO"
+  "5" "2028-02-01" "info@buycycle.de" \
+  "Theodor Golditchuk" "Managing Director"
 ```
 
 **Result**: Ready-to-deliver `tfj-buycycle-v1.0.0-FINAL.tar.gz` with checksum and manifest
