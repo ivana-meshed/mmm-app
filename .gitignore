@@ -45,6 +45,11 @@ data/
 tmp/
 temp/
 *.tmp
+dist/
+
+# Distribution packages created by prepare_distribution.sh
+# These contain customer-specific license certificates
+# and should not be committed to version control
 test_data/
 
 # Documentation (generated)
@@ -56,6 +61,9 @@ docs/*.png
 *sa-key*.json
 *credentials*.json
 secrets/
+
+# GitHub Workflows - company-specific config
+.github/workflows/config.yml
 
 # Reports
 baseline_report.md
