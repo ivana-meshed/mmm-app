@@ -40,6 +40,46 @@ RAW_SPEND_PARQUET = os.getenv(
 st.set_page_config(page_title="Review Model Stability", layout="wide")
 st.title("Review Model Stability")
 
+# Add helpful documentation at the top
+with st.expander("ℹ️ About This Page", expanded=False):
+    st.markdown(
+        """
+        ### Purpose
+        This page analyzes the **stability of your Robyn MMM models** across multiple model iterations 
+        within a single training run. It helps you understand:
+        
+        - **Driver Share Stability**: How consistent are the contribution shares across models?
+        - **ROAS Stability** (optional): How stable are Return on Ad Spend metrics?
+        - **Model Quality Distribution**: Distribution of key metrics across the model ensemble
+        
+        ### How to Use
+        1. **Select Your Model Run**: Choose experiment name, country, and optionally a specific timestamp
+        2. **Set Quality Filters**: Use the sidebar to filter models by quality thresholds
+        3. **Review Stability**: Analyze driver shares and ROAS across the filtered models
+        
+        ### Configuration
+        
+        **Required:**
+        - Select a model run using the dropdowns below (Experiment Name, Country, Timestamp)
+        
+        **Optional - For ROAS Analysis:**
+        - Set the `RAW_SPEND_PARQUET` environment variable to enable ROAS metrics
+        - This should point to the raw spend data used for training
+        - Format: `gs://mmm-app-output/datasets/{country}/{timestamp}/raw.parquet`
+        - If not configured, driver share analysis will still work
+        
+        ### Model Quality Filters
+        Use the sidebar to filter models by:
+        - **R² (coefficient of determination)**: Model fit quality
+        - **NRMSE (normalized root mean squared error)**: Prediction accuracy
+        - **decomp.rssd**: Decomposition residual sum of squares
+        
+        Choose from presets (Good, Acceptable, All) or set custom thresholds.
+        """
+    )
+
+st.markdown("---")
+
 
 # ---------------------------------------------------------------------
 # GCS helpers (adapted from View_Results.py)
@@ -603,11 +643,24 @@ if raw_spend is None or raw_spend.empty:
         pass
     else:
         st.info(
-            "⚠️ Raw spend data not configured.\n\n"
-            "To enable ROAS analysis, set the `RAW_SPEND_PARQUET` environment variable:\n"
-            "- For GCS: `gs://bucket/path/to/raw.parquet`\n"
-            "- For local: `/path/to/raw.parquet`\n\n"
-            "Driver share analysis will still work without raw spend data."
+            "ℹ️ **Raw Spend Data (Optional)**\n\n"
+            "Raw spend data is needed for **ROAS (Return on Ad Spend) analysis**. "
+            "Without it, you can still view driver share stability, but ROAS metrics won't be available.\n\n"
+            "**What is raw spend data?**\n"
+            "- Contains actual marketing spend per channel over time\n"
+            "- Usually comes from your original training data (the dataset used for Robyn training)\n"
+            "- Should have a DATE column and spend columns for each paid media channel\n\n"
+            "**How to configure:**\n"
+            "Set the `RAW_SPEND_PARQUET` environment variable to point to your raw spend parquet file:\n"
+            "- **For GCS**: `gs://mmm-app-output/datasets/{country}/{timestamp}/raw.parquet`\n"
+            "- **For local development**: `/path/to/raw.parquet`\n\n"
+            "**Example paths:**\n"
+            "```\n"
+            "# If your model is r24/de/0812_163049, your raw data might be at:\n"
+            "gs://mmm-app-output/datasets/de/20240812_163049/raw.parquet\n"
+            "```\n\n"
+            "💡 **Tip**: Check the 'datasets' folder in your GCS bucket to find the raw data "
+            "that corresponds to your model training run."
         )
 
 best_model_id, best_dbg = try_read_best_model_id()
