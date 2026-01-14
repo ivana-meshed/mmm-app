@@ -608,6 +608,100 @@ st.info(
 RUN_PREFIX = GCS_PREFIX.rsplit("/output_models_data", 1)[0]
 BEST_MODEL_BLOB = f"{RUN_PREFIX}/best_model_id.txt"
 
+
+# ---------------------------------------------------------------------
+# Auto-discover raw spend data
+# ---------------------------------------------------------------------
+def try_auto_discover_raw_spend(
+    bucket: str, country: str, timestamp: str
+) -> str | None:
+    """
+    Try to automatically find raw spend data for the selected model.
+
+    Tries multiple path patterns:
+    1. datasets/{country}/{YYYYMMDD_HHMMSS}/raw.parquet (expanded timestamp)
+    2. datasets/{country}/{MMDD_HHMMSS}/raw.parquet (original timestamp)
+    3. training-data/{YYYYMMDD_HHMMSS}/input_data.parquet (alternative location)
+
+    Args:
+        bucket: GCS bucket name
+        country: Country code (e.g., "de", "fr")
+        timestamp: Model timestamp (e.g., "0812_163049")
+
+    Returns:
+        GCS URI if found, None otherwise
+    """
+    # Parse timestamp to try different formats
+    # timestamp format: MMDD_HHMMSS (e.g., "0812_163049")
+    try:
+        # Try to expand to full date with year
+        # Assume current year or previous year if month is in future
+        from datetime import datetime
+
+        now = datetime.now()
+        current_month = now.month
+
+        # Parse MMDD from timestamp
+        month_day = timestamp.split("_")[0]
+        month = int(month_day[:2])
+        day = int(month_day[2:])
+        time_part = timestamp.split("_")[1] if "_" in timestamp else "000000"
+
+        # If month is greater than current month, assume it's from previous year
+        year = now.year if month <= current_month else now.year - 1
+
+        # Create expanded timestamp: YYYYMMDD_HHMMSS
+        expanded_timestamp = f"{year}{month_day}_{time_part}"
+
+        # List of paths to try in order of likelihood
+        paths_to_try = [
+            f"datasets/{country}/{expanded_timestamp}/raw.parquet",
+            f"datasets/{country}/{timestamp}/raw.parquet",
+            f"training-data/{expanded_timestamp}/input_data.parquet",
+            f"training-data/{timestamp}/input_data.parquet",
+        ]
+
+        for path in paths_to_try:
+            full_path = f"gs://{bucket}/{path}"
+            try:
+                # Check if blob exists
+                blob = client.bucket(bucket).blob(path)
+                if blob.exists():
+                    return full_path
+            except Exception:
+                continue
+
+        return None
+
+    except Exception as e:
+        st.warning(f"Error during auto-discovery: {e}")
+        return None
+
+
+# Try to auto-discover raw spend data if not configured
+if not RAW_SPEND_PARQUET:
+    with st.spinner("🔍 Auto-discovering raw spend data..."):
+        discovered_path = try_auto_discover_raw_spend(
+            GCS_BUCKET, analysis_key[1], analysis_key[2]
+        )
+        if discovered_path:
+            RAW_SPEND_PARQUET = discovered_path
+            st.success(
+                f"✅ Auto-discovered raw spend data: `{discovered_path}`"
+            )
+        else:
+            st.info(
+                "ℹ️ **Raw Spend Data Not Found**\n\n"
+                "Could not auto-discover raw spend data. ROAS analysis will be disabled.\n\n"
+                "**Auto-discovery tried:**\n"
+                f"- `datasets/{analysis_key[1]}/YYYY{analysis_key[2]}/raw.parquet` (with expanded year)\n"
+                f"- `datasets/{analysis_key[1]}/{analysis_key[2]}/raw.parquet` (original timestamp)\n"
+                f"- `training-data/` paths\n\n"
+                "**To manually configure:**\n"
+                "Set the `RAW_SPEND_PARQUET` environment variable to point to your raw spend parquet file.\n\n"
+                "Driver share analysis will still work without raw spend data."
+            )
+
 # ---------------------------------------------------------------------
 # Load Robyn exports from GCS
 # ---------------------------------------------------------------------
@@ -639,29 +733,9 @@ except Exception as e:
 raw_spend = load_raw_spend(RAW_SPEND_PARQUET)
 if raw_spend is None or raw_spend.empty:
     if RAW_SPEND_PARQUET:
-        # Path was provided but failed to load (error already shown by load_raw_spend)
+        # Path was provided (either manually or auto-discovered) but failed to load
+        # Error already shown by load_raw_spend function
         pass
-    else:
-        st.info(
-            "ℹ️ **Raw Spend Data (Optional)**\n\n"
-            "Raw spend data is needed for **ROAS (Return on Ad Spend) analysis**. "
-            "Without it, you can still view driver share stability, but ROAS metrics won't be available.\n\n"
-            "**What is raw spend data?**\n"
-            "- Contains actual marketing spend per channel over time\n"
-            "- Usually comes from your original training data (the dataset used for Robyn training)\n"
-            "- Should have a DATE column and spend columns for each paid media channel\n\n"
-            "**How to configure:**\n"
-            "Set the `RAW_SPEND_PARQUET` environment variable to point to your raw spend parquet file:\n"
-            "- **For GCS**: `gs://mmm-app-output/datasets/{country}/{timestamp}/raw.parquet`\n"
-            "- **For local development**: `/path/to/raw.parquet`\n\n"
-            "**Example paths:**\n"
-            "```\n"
-            "# If your model is r24/de/0812_163049, your raw data might be at:\n"
-            "gs://mmm-app-output/datasets/de/20240812_163049/raw.parquet\n"
-            "```\n\n"
-            "💡 **Tip**: Check the 'datasets' folder in your GCS bucket to find the raw data "
-            "that corresponds to your model training run."
-        )
 
 best_model_id, best_dbg = try_read_best_model_id()
 if not best_model_id:
