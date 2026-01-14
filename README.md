@@ -337,7 +337,7 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 
 ## License
 
-This software is proprietary and confidential. Copyright (c) 2024-2026 Meshed Data. All Rights Reserved.
+This software is proprietary and confidential. Copyright (c) 2024-2026 Meshed Data Consulting. All Rights Reserved.
 
 **This is NOT open source software.**
 
@@ -351,7 +351,7 @@ The MMM Trainer is licensed under a custom proprietary license that:
 To obtain a license to use this software:
 
 1. Review the [LICENSE](LICENSE) file for complete terms
-2. Contact licensing@mesheddata.com to discuss your requirements
+2. Contact fethu@mesheddata.com to discuss your requirements
 3. Receive written authorization to install and use the software
 
 ### For License Administrators

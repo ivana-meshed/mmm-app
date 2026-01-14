@@ -198,7 +198,7 @@ All code will execute normally.
 
 For support or licensing questions, contact:
   Meshed Data Consulting
-  licensing@mesheddata.com
+  fethu@mesheddata.com
 EOF
 
 print_info "============================================"

@@ -21,7 +21,7 @@ This guide provides step-by-step instructions for licensing your MMM Trainer rep
 Your repository now implements a **proprietary licensing model** that:
 
 ✅ Allows companies to install and use the software on their infrastructure  
-✅ Requires explicit written authorization from you (Meshed Data)  
+✅ Requires explicit written authorization from you (Meshed Data Consulting)  
 ✅ Prevents licensees from redistributing the software to others  
 ✅ Restricts use to internal business purposes only  
 ✅ Allows you to control who has access to your software  
@@ -96,7 +96,7 @@ The README.md now clearly states:
    cat LICENSE
    ```
    - Update `[YOUR JURISDICTION]` in the Governing Law section
-   - Update contact email if different from licensing@mesheddata.com
+   - Update contact email if different from fethu@mesheddata.com
    - Have legal counsel approve the terms
 
 2. **Customize the LICENSE_AGREEMENT_TEMPLATE.txt:**
@@ -268,7 +268,7 @@ Example completed certificate:
 ```
 LICENSE AUTHORIZATION CERTIFICATE
 
-Meshed Data hereby authorizes:
+Meshed Data Consulting hereby authorizes:
 
 Organization: Acme Corporation
 Contact: john.doe@acmecorp.com
@@ -653,7 +653,7 @@ Consider obtaining:
 
 - [ ] Have lawyer review all legal documents
 - [ ] Customize LICENSE file with your jurisdiction
-- [ ] Update all contact information (licensing@mesheddata.com → yours)
+- [ ] Update all contact information (fethu@mesheddata.com → yours)
 - [ ] Set up license registry system
 - [ ] Test distribution creation script
 - [ ] Define pricing structure
@@ -763,5 +763,5 @@ For questions about implementing this licensing system:
 
 **Document Version:** 1.0  
 **Last Updated:** January 2026  
-**Created by:** Meshed Data  
+**Created by:** Meshed Data Consulting  
 **Purpose:** Guide for implementing proprietary software licensing

@@ -35,7 +35,7 @@ The MMM Trainer is **proprietary software** licensed under a custom commercial l
 To obtain a license for your organization:
 
 1. **Contact Meshed Data:**
-   - Email: licensing@mesheddata.com
+   - Email: fethu@mesheddata.com
    - Subject: "MMM Trainer License Request"
 
 2. **Provide Information:**
@@ -57,7 +57,7 @@ To obtain a license for your organization:
 
 ## License Grant Process
 
-### For License Administrators (Meshed Data)
+### For License Administrators (Meshed Data Consulting)
 
 When granting a license to a customer:
 
@@ -88,7 +88,7 @@ Create a file `LICENSE_AUTHORIZATION.txt`:
 ```text
 LICENSE AUTHORIZATION CERTIFICATE
 
-Meshed Data hereby authorizes:
+Meshed Data Consulting hereby authorizes:
 
 Organization: [Customer Name]
 Contact: [Customer Contact Email]
@@ -295,9 +295,9 @@ To maintain compliance:
    - Ensure contractors sign NDAs if they access the software
 
 3. **Report Changes:**
-   - Notify Meshed Data if you need additional installations
+   - Notify Meshed Data Consulting if you need additional installations
    - Report any security incidents involving the software
-   - Coordinate with Meshed Data before major modifications
+   - Coordinate with Meshed Data Consulting before major modifications
 
 ## FAQ
 
@@ -321,27 +321,27 @@ A: Create security patches, notify all licensees promptly, provide updated code,
 A: Yes, for internal use only. Modifications remain subject to the license terms and cannot be distributed.
 
 **Q: What if I need more installations?**
-A: Contact licensing@mesheddata.com to request an amendment to your license agreement.
+A: Contact fethu@mesheddata.com to request an amendment to your license agreement.
 
 **Q: Can I use this in a subsidiary or affiliated company?**
-A: Only if explicitly authorized in your LICENSE_AUTHORIZATION.txt. Contact Meshed Data to extend the license.
+A: Only if explicitly authorized in your LICENSE_AUTHORIZATION.txt. Contact Meshed Data Consulting to extend the license.
 
 **Q: What happens if my company is acquired?**
-A: Notify Meshed Data immediately. License transfer requires approval and may require new agreement.
+A: Notify Meshed Data Consulting immediately. License transfer requires approval and may require new agreement.
 
 **Q: Can I show the software to potential partners?**
-A: Only for evaluation purposes with prior approval from Meshed Data and appropriate NDAs in place.
+A: Only for evaluation purposes with prior approval from Meshed Data Consulting and appropriate NDAs in place.
 
 **Q: What support is included?**
 A: Support terms are specified in your license agreement. Contact your designated support channel for assistance.
 
-**Q: Can I contribute improvements back to Meshed Data?**
+**Q: Can I contribute improvements back to Meshed Data Consulting?**
 A: Yes, you can propose improvements, but intellectual property terms must be negotiated separately.
 
 ## Contact Information
 
 For licensing questions:
-- Email: licensing@mesheddata.com
+- Email: fethu@mesheddata.com
 - Website: https://mesheddata.com
 
 For technical support (licensed customers only):

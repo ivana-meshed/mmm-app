@@ -126,7 +126,7 @@ sha256sum tfj-buycycle-v1.0.0-FINAL.tar.gz > tfj-buycycle-v1.0.0-FINAL.tar.gz.sh
 ## Support Contacts
 
 **For Meshed Data Consulting:**
-- Licensing: licensing@mesheddata.com
+- Licensing: fethu@mesheddata.com
 - Technical: support@mesheddata.com
 
 **For TFJ Buycycle GmbH:**

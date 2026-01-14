@@ -4,10 +4,10 @@ This Software License Agreement (the "Agreement") is entered into as of
 [DATE] (the "Effective Date") by and between:
 
 LICENSOR:
-    Meshed Data
+    Meshed Data Consulting
     [Address]
     [City, State, Zip]
-    Email: licensing@mesheddata.com
+    Email: fethu@mesheddata.com
     
     (hereinafter referred to as "Licensor")
 

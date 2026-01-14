@@ -17,7 +17,7 @@ This document answers frequently asked questions about the MMM Trainer proprieta
 
 ### What kind of license is this?
 
-The MMM Trainer uses a proprietary, commercial software license. This is NOT open source. The software is owned by Meshed Data and is licensed (not sold) to customers under specific terms that prohibit redistribution.
+The MMM Trainer uses a proprietary, commercial software license. This is NOT open source. The software is owned by Meshed Data Consulting and is licensed (not sold) to customers under specific terms that prohibit redistribution.
 
 ### Why not use an open source license?
 
@@ -39,7 +39,7 @@ Yes, the complete license text is in the [LICENSE](../LICENSE) file in this repo
 ### How do I obtain a license?
 
 1. Review the LICENSE file to understand the terms
-2. Contact licensing@mesheddata.com with:
+2. Contact fethu@mesheddata.com with:
    - Your organization details
    - Intended use case
    - Number of installations needed
@@ -57,11 +57,11 @@ Pricing is determined based on:
 - License duration (annual vs. perpetual)
 - Custom requirements
 
-Contact licensing@mesheddata.com for a quote.
+Contact fethu@mesheddata.com for a quote.
 
 ### Can I try it before buying?
 
-Evaluation licenses may be available. Contact licensing@mesheddata.com to discuss trial options. Trials typically include:
+Evaluation licenses may be available. Contact fethu@mesheddata.com to discuss trial options. Trials typically include:
 - Time-limited license (e.g., 30-60 days)
 - Technical support during evaluation
 - Limited number of installations
@@ -88,7 +88,7 @@ Each deployment/installation must be authorized in your LICENSE_AUTHORIZATION.tx
 
 ### What if I need more installations later?
 
-Contact licensing@mesheddata.com to amend your license. This typically involves:
+Contact fethu@mesheddata.com to amend your license. This typically involves:
 - Updating your LICENSE_AUTHORIZATION.txt
 - Additional license fee (if applicable)
 - New authorization certificate
@@ -108,15 +108,15 @@ Contact licensing@mesheddata.com to amend your license. This typically involves:
 ### Can I share the software with our subsidiary?
 
 Only if explicitly authorized in your LICENSE_AUTHORIZATION.txt. If not authorized:
-1. Contact licensing@mesheddata.com
+1. Contact fethu@mesheddata.com
 2. Request extension to cover subsidiary
 3. Provide subsidiary details
 4. Receive updated authorization
 
 ### Can I show the software to potential business partners?
 
-Only with prior approval from Meshed Data:
-1. Contact licensing@mesheddata.com
+Only with prior approval from Meshed Data Consulting:
+1. Contact fethu@mesheddata.com
 2. Explain the business purpose
 3. Have partner sign appropriate NDA
 4. Get written approval
@@ -124,7 +124,7 @@ Only with prior approval from Meshed Data:
 
 ### What if our company is acquired or merges?
 
-**Immediately notify Meshed Data** when:
+**Immediately notify Meshed Data Consulting** when:
 - Your company is acquired
 - Your company merges with another
 - Ownership structure changes significantly
@@ -155,7 +155,7 @@ Support terms vary by license agreement. Common support options include:
 
 Check your LICENSE_AUTHORIZATION.txt for specific support terms.
 
-### Can I contribute improvements back to Meshed Data?
+### Can I contribute improvements back to Meshed Data Consulting?
 
 You can propose improvements, but:
 - Intellectual property rights must be negotiated
@@ -163,7 +163,7 @@ You can propose improvements, but:
 - You may receive credit or compensation
 - Meshed Data retains rights to incorporate changes
 
-Contact licensing@mesheddata.com to discuss contribution terms.
+Contact fethu@mesheddata.com to discuss contribution terms.
 
 ### What happens if my license expires?
 
@@ -415,7 +415,7 @@ Consult international business attorney for cross-border licensing.
 ## Contact
 
 For licensing questions not covered here:
-- Email: licensing@mesheddata.com
+- Email: fethu@mesheddata.com
 - Website: https://mesheddata.com
 
 For legal consultation:
