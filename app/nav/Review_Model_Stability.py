@@ -1,3 +1,4 @@
+import datetime as dt
 import os
 import re
 
@@ -11,6 +12,7 @@ from app_shared import (
     require_login_and_domain,
 )
 from app_split_helpers import ensure_session_defaults
+from google.cloud import storage
 from plotly.subplots import make_subplots
 
 require_login_and_domain()
@@ -20,13 +22,7 @@ ensure_session_defaults()
 # Paths & constants
 # ---------------------------------------------------------------------
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
-
-# Default GCS_PREFIX can be set via environment variable for quick access
-# Format: robyn/{revision}/{country}/{timestamp}/output_models_data
-DEFAULT_GCS_PREFIX = os.getenv(
-    "MODEL_STABILITY_GCS_PREFIX",
-    "",  # Empty by default - user must configure
-)
+DEFAULT_PREFIX = "robyn/"
 
 FILE_XAGG = "xDecompAgg.parquet"
 FILE_HYP = "resultHypParam.parquet"
@@ -44,42 +40,86 @@ RAW_SPEND_PARQUET = os.getenv(
 st.set_page_config(page_title="Review Model Stability", layout="wide")
 st.title("Review Model Stability")
 
+
 # ---------------------------------------------------------------------
-# Configuration: Model Output Path
+# GCS helpers (adapted from View_Results.py)
 # ---------------------------------------------------------------------
-st.sidebar.header("Configuration")
-st.sidebar.markdown("### Model Output Path")
-st.sidebar.caption(
-    "Path to the Robyn model outputs in GCS.\n\n"
-    "Format: `robyn/{revision}/{country}/{timestamp}/output_models_data`"
-)
+@st.cache_resource
+def gcs_client():
+    return storage.Client()
 
-GCS_PREFIX = st.sidebar.text_input(
-    "GCS Prefix",
-    value=DEFAULT_GCS_PREFIX,
-    placeholder="robyn/my_revision/country/timestamp/output_models_data",
-    help="Path to the output_models_data folder containing Robyn parquet exports",
-    key="gcs_prefix_input",
-)
 
-if not GCS_PREFIX or not GCS_PREFIX.strip():
-    st.error(
-        "⚠️ **Model Output Path Required**\n\n"
-        "Please enter the GCS path to your Robyn model outputs in the sidebar.\n\n"
-        "**How to find your path:**\n"
-        "1. Go to the [View Results](View_Results) page\n"
-        "2. Select your model run\n"
-        "3. Copy the path from the run details\n"
-        "4. Add `/output_models_data` to the end\n\n"
-        "**Example:** `robyn/my_revision_1/us/0113_120000/output_models_data`"
-    )
-    st.stop()
+client = gcs_client()
 
-GCS_PREFIX = GCS_PREFIX.strip()
 
-# Best model id text file is in the RUN folder, NOT output_models_data/
-RUN_PREFIX = GCS_PREFIX.rsplit("/output_models_data", 1)[0]
-BEST_MODEL_BLOB = f"{RUN_PREFIX}/best_model_id.txt"
+def list_blobs(bucket_name: str, prefix: str):
+    """List blobs in GCS with the given prefix."""
+    try:
+        bucket = client.bucket(bucket_name)
+        return list(client.list_blobs(bucket_or_name=bucket, prefix=prefix))
+    except Exception as e:
+        st.error(f"❌ Failed to list gs://{bucket_name}/{prefix} — {e}")
+        return []
+
+
+def parse_path(name: str):
+    """Parse GCS blob path into components (revision, country, stamp, file)."""
+    # Expected format: robyn/<TAG_NUMBER>/<country>/<stamp>/file...
+    parts = name.split("/")
+    if len(parts) >= 5 and parts[0] == "robyn":
+        rev_part = parts[1]
+        if "_" in rev_part:
+            # New format with TAG_NUMBER
+            tag_num_parts = rev_part.rsplit("_", 1)
+            rev = rev_part  # Keep full TAG_NUMBER as rev
+            tag = tag_num_parts[0]
+            try:
+                number = int(tag_num_parts[1])
+            except (ValueError, IndexError):
+                number = None
+        else:
+            # Old format (e.g., "r100")
+            rev = rev_part
+            tag = rev_part
+            number = None
+
+        return {
+            "rev": rev,
+            "tag": tag,
+            "number": number,
+            "country": parts[2],
+            "stamp": parts[3],
+            "file": "/".join(parts[4:]),
+        }
+    return None
+
+
+def group_runs(blobs):
+    """Group blobs by (revision, country, stamp)."""
+    runs = {}
+    for b in blobs:
+        info = parse_path(b.name)
+        if not info or not info["file"]:
+            continue
+        key = (info["rev"], info["country"], info["stamp"])
+        runs.setdefault(key, []).append(b)
+    return runs
+
+
+def parse_stamp(stamp: str):
+    """Parse timestamp string."""
+    try:
+        return dt.datetime.strptime(stamp, "%m%d_%H%M%S")
+    except Exception:
+        return stamp
+
+
+def parse_rev_key(rev: str):
+    """Parse revision for sorting."""
+    m = re.search(r"(\d+)$", (rev or "").strip())
+    if m:
+        return (0, int(m.group(1)))
+    return (1, (rev or "").lower())
 
 
 # ---------------------------------------------------------------------
@@ -352,6 +392,181 @@ def pick_total_col_for_share(xvec: pd.DataFrame) -> tuple[str, bool]:
     xvec["_temp_total"] = xvec[num_cols].sum(axis=1)
     return "_temp_total", True
 
+
+# ---------------------------------------------------------------------
+# Configuration: Select Model Run (similar to View_Results.py)
+# ---------------------------------------------------------------------
+# Load and cache runs from GCS
+if (
+    "model_stability_runs_cache" not in st.session_state
+    or st.session_state.get("model_stability_last_bucket") != GCS_BUCKET
+    or st.session_state.get("model_stability_last_prefix") != DEFAULT_PREFIX
+):
+    with st.spinner("Loading available model runs from GCS..."):
+        blobs = list_blobs(GCS_BUCKET, DEFAULT_PREFIX)
+        runs = group_runs(blobs)
+        st.session_state["model_stability_runs_cache"] = runs
+        st.session_state["model_stability_last_bucket"] = GCS_BUCKET
+        st.session_state["model_stability_last_prefix"] = DEFAULT_PREFIX
+else:
+    runs = st.session_state["model_stability_runs_cache"]
+
+if not runs:
+    st.info(
+        f"No model runs found under gs://{GCS_BUCKET}/{DEFAULT_PREFIX}. "
+        "Run some experiments first to analyze model stability."
+    )
+    st.stop()
+
+# Sort runs by revision and timestamp (newest first)
+keys_sorted = sorted(
+    runs.keys(),
+    key=lambda k: (parse_rev_key(k[0]), parse_stamp(k[2])),
+    reverse=True,
+)
+
+# Default to the newest run
+seed_key = keys_sorted[0]
+default_rev = seed_key[0]
+
+# UI: Experiment Name (revision) dropdown
+all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
+
+# Restore previous selection if available
+if (
+    "model_stability_revision_value" in st.session_state
+    and st.session_state["model_stability_revision_value"] in all_revs
+):
+    default_rev_index = all_revs.index(
+        st.session_state["model_stability_revision_value"]
+    )
+else:
+    default_rev_index = (
+        all_revs.index(default_rev) if default_rev in all_revs else 0
+    )
+
+rev = st.selectbox(
+    "Experiment Name (tag & number, e.g. gmv001)",
+    all_revs,
+    index=default_rev_index,
+    key="model_stability_revision",
+)
+
+# Store selection
+if rev != st.session_state.get("model_stability_revision_value"):
+    st.session_state["model_stability_revision_value"] = rev
+
+# Countries available in this revision
+rev_keys = [k for k in runs.keys() if k[0] == rev]
+rev_countries = sorted({k[1] for k in rev_keys})
+
+# Default country = newest run in this revision
+rev_keys_sorted = sorted(
+    rev_keys, key=lambda k: parse_stamp(k[2]), reverse=True
+)
+default_country_in_rev = rev_keys_sorted[0][1] if rev_keys_sorted else ""
+
+# Restore previous selection if available
+if "model_stability_countries_value" in st.session_state:
+    current_countries = st.session_state["model_stability_countries_value"]
+    valid_countries = [c for c in current_countries if c in rev_countries]
+    default_countries = (
+        valid_countries
+        if valid_countries
+        else (
+            [default_country_in_rev]
+            if default_country_in_rev in rev_countries
+            else []
+        )
+    )
+else:
+    default_countries = [default_country_in_rev]
+
+countries_sel = st.multiselect(
+    "Country",
+    rev_countries,
+    default=default_countries,
+    key="model_stability_countries",
+)
+
+# Store selection
+if countries_sel != st.session_state.get("model_stability_countries_value"):
+    st.session_state["model_stability_countries_value"] = countries_sel
+
+if not countries_sel:
+    st.info("Select at least one country.")
+    st.stop()
+
+# Timestamps available for selected revision and countries
+rev_country_keys = [
+    k for k in runs.keys() if k[0] == rev and k[1] in countries_sel
+]
+all_stamps = sorted(
+    {k[2] for k in rev_country_keys}, key=parse_stamp, reverse=True
+)
+
+# Restore previous selection if available
+stamp_options = [""] + all_stamps
+if "model_stability_timestamp_value" in st.session_state:
+    saved_timestamp = st.session_state["model_stability_timestamp_value"]
+    default_stamp_index = (
+        stamp_options.index(saved_timestamp)
+        if saved_timestamp in stamp_options
+        else 0
+    )
+else:
+    default_stamp_index = 0
+
+stamp_sel = st.selectbox(
+    "Timestamp (optional)",
+    stamp_options,
+    index=default_stamp_index,
+    help="Leave empty to use the latest run. Select a specific timestamp if needed.",
+    key="model_stability_timestamp",
+)
+
+# Store selection
+if stamp_sel != st.session_state.get("model_stability_timestamp_value"):
+    st.session_state["model_stability_timestamp_value"] = stamp_sel
+
+# Determine which run(s) to use for analysis
+# For stability analysis, we typically want to use a specific timestamp
+# If no timestamp selected, use the latest for the first selected country
+if stamp_sel:
+    # Specific timestamp selected - use it for all selected countries
+    selected_runs = [(rev, c, stamp_sel) for c in countries_sel]
+    # Filter to only runs that exist
+    selected_runs = [r for r in selected_runs if r in runs]
+    if not selected_runs:
+        st.error(
+            f"No runs found for {rev}/{', '.join(countries_sel)}/{stamp_sel}"
+        )
+        st.stop()
+    # Use the first country's run for the analysis
+    analysis_key = selected_runs[0]
+else:
+    # No timestamp - use latest for first country
+    country_runs = [k for k in rev_country_keys if k[1] == countries_sel[0]]
+    if not country_runs:
+        st.error(f"No runs found for {rev}/{countries_sel[0]}")
+        st.stop()
+    country_runs_sorted = sorted(
+        country_runs, key=lambda k: parse_stamp(k[2]), reverse=True
+    )
+    analysis_key = country_runs_sorted[0]
+
+# Construct GCS_PREFIX from selected run
+GCS_PREFIX = f"robyn/{analysis_key[0]}/{analysis_key[1]}/{analysis_key[2]}/output_models_data"
+
+# Display selected configuration
+st.info(
+    f"📊 Analyzing: **{analysis_key[0]}** / **{analysis_key[1]}** / **{analysis_key[2]}**\n\n"
+    f"Path: `gs://{GCS_BUCKET}/{GCS_PREFIX}`"
+)
+
+# Best model id text file is in the RUN folder, NOT output_models_data/
+RUN_PREFIX = GCS_PREFIX.rsplit("/output_models_data", 1)[0]
+BEST_MODEL_BLOB = f"{RUN_PREFIX}/best_model_id.txt"
 
 # ---------------------------------------------------------------------
 # Load Robyn exports from GCS
