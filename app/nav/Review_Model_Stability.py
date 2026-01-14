@@ -8,6 +8,7 @@ import plotly.express as px  # kept (used for bar)
 import plotly.graph_objects as go
 import streamlit as st
 from app_shared import (
+    download_json_from_gcs_cached,
     download_parquet_from_gcs_cached,
     require_login_and_domain,
 )
@@ -610,93 +611,73 @@ BEST_MODEL_BLOB = f"{RUN_PREFIX}/best_model_id.txt"
 
 
 # ---------------------------------------------------------------------
-# Auto-discover raw spend data
+# Auto-discover raw spend data from job config
 # ---------------------------------------------------------------------
-def try_auto_discover_raw_spend(
-    bucket: str, country: str, timestamp: str
+def try_auto_discover_raw_spend_from_config(
+    bucket: str, timestamp: str
 ) -> str | None:
     """
-    Try to automatically find raw spend data for the selected model.
+    Try to automatically find raw spend data by reading the job_config.json
+    file from training-configs folder.
 
-    Tries multiple path patterns:
-    1. datasets/{country}/{YYYYMMDD_HHMMSS}/raw.parquet (expanded timestamp)
-    2. datasets/{country}/{MMDD_HHMMSS}/raw.parquet (original timestamp)
-    3. training-data/{YYYYMMDD_HHMMSS}/input_data.parquet (alternative location)
+    This is the most reliable method as it uses the exact data path that
+    was used during model training.
 
     Args:
         bucket: GCS bucket name
-        country: Country code (e.g., "de", "fr")
         timestamp: Model timestamp (e.g., "0812_163049")
 
     Returns:
         GCS URI if found, None otherwise
     """
-    # Parse timestamp to try different formats
-    # timestamp format: MMDD_HHMMSS (e.g., "0812_163049")
     try:
-        # Try to expand to full date with year
-        # Assume current year or previous year if month is in future
-        from datetime import datetime
+        # Path to job config for this training run
+        config_path = f"training-configs/{timestamp}/job_config.json"
 
-        now = datetime.now()
-        current_month = now.month
+        # Try to read the job config
+        try:
+            job_config = download_json_from_gcs_cached(bucket, config_path)
+        except Exception:
+            # Config not found, return None
+            return None
 
-        # Parse MMDD from timestamp
-        month_day = timestamp.split("_")[0]
-        month = int(month_day[:2])
-        day = int(month_day[2:])
-        time_part = timestamp.split("_")[1] if "_" in timestamp else "000000"
+        # Extract data_gcs_path from config
+        data_gcs_path = job_config.get("data_gcs_path")
 
-        # If month is greater than current month, assume it's from previous year
-        year = now.year if month <= current_month else now.year - 1
-
-        # Create expanded timestamp: YYYYMMDD_HHMMSS
-        expanded_timestamp = f"{year}{month_day}_{time_part}"
-
-        # List of paths to try in order of likelihood
-        paths_to_try = [
-            f"datasets/{country}/{expanded_timestamp}/raw.parquet",
-            f"datasets/{country}/{timestamp}/raw.parquet",
-            f"training-data/{expanded_timestamp}/input_data.parquet",
-            f"training-data/{timestamp}/input_data.parquet",
-        ]
-
-        for path in paths_to_try:
-            full_path = f"gs://{bucket}/{path}"
-            try:
-                # Check if blob exists
-                blob = client.bucket(bucket).blob(path)
-                if blob.exists():
-                    return full_path
-            except Exception:
-                continue
+        if data_gcs_path:
+            # data_gcs_path is typically a full gs:// URI or just the path
+            if data_gcs_path.startswith("gs://"):
+                return data_gcs_path
+            else:
+                # If it's just a path, prepend the bucket
+                return f"gs://{bucket}/{data_gcs_path}"
 
         return None
 
     except Exception as e:
-        st.warning(f"Error during auto-discovery: {e}")
+        # Log error but don't fail - just return None
         return None
 
 
 # Try to auto-discover raw spend data if not configured
 if not RAW_SPEND_PARQUET:
-    with st.spinner("🔍 Auto-discovering raw spend data..."):
-        discovered_path = try_auto_discover_raw_spend(
-            GCS_BUCKET, analysis_key[1], analysis_key[2]
+    with st.spinner("🔍 Reading training configuration..."):
+        discovered_path = try_auto_discover_raw_spend_from_config(
+            GCS_BUCKET, analysis_key[2]
         )
         if discovered_path:
             RAW_SPEND_PARQUET = discovered_path
             st.success(
-                f"✅ Auto-discovered raw spend data: `{discovered_path}`"
+                f"✅ Found raw spend data from training config: `{discovered_path}`"
             )
         else:
             st.info(
                 "ℹ️ **Raw Spend Data Not Found**\n\n"
-                "Could not auto-discover raw spend data. ROAS analysis will be disabled.\n\n"
-                "**Auto-discovery tried:**\n"
-                f"- `datasets/{analysis_key[1]}/YYYY{analysis_key[2]}/raw.parquet` (with expanded year)\n"
-                f"- `datasets/{analysis_key[1]}/{analysis_key[2]}/raw.parquet` (original timestamp)\n"
-                f"- `training-data/` paths\n\n"
+                "Could not find raw spend data from training configuration. "
+                "ROAS analysis will be disabled.\n\n"
+                "**What was checked:**\n"
+                f"- Job config: `training-configs/{analysis_key[2]}/job_config.json`\n"
+                f"- Looking for `data_gcs_path` field in the config\n\n"
                 "**To manually configure:**\n"
                 "Set the `RAW_SPEND_PARQUET` environment variable to point to your raw spend parquet file.\n\n"
                 "Driver share analysis will still work without raw spend data."
