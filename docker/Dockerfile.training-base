@@ -141,8 +141,11 @@ RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.
     if (!requireNamespace('patchwork', quietly=TRUE) || utils::packageVersion('patchwork') < '1.3.1') \
     remotes::install_version('patchwork', version='1.3.1', repos=repos, upgrade='never')"
 
-# ---------- Robyn (pin) ----------
+# ---------- Robyn (pin to v3.12.0) ----------
+# Pinned to v3.12.0 (2024-12-19) due to breaking changes in later versions
+# Issue: adj_rsq_window column not found error in robyn_inputs()
+# See: https://github.com/ivana-meshed/mmm-app/issues/[issue_number]
 RUN R -q -e "options(Ncpus=8); \
-    remotes::install_github('facebookexperimental/Robyn', subdir='R', upgrade='never', dependencies=c('Depends','Imports')); \
+    remotes::install_github('facebookexperimental/Robyn', ref='v3.12.0', subdir='R', upgrade='never', dependencies=c('Depends','Imports')); \
     library(Robyn); cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')"
 
