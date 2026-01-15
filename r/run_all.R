@@ -97,10 +97,105 @@ if (nzchar(override_cores)) {
 
 library(Robyn)
 
+## ---------- ROBYN VERSION LOGGING ----------
+# Log Robyn version immediately after loading
+robyn_version <- tryCatch(
+    as.character(utils::packageVersion('Robyn')),
+    error = function(e) "UNKNOWN"
+)
+robyn_loaded_from <- tryCatch({
+    pkg_path <- system.file(package = "Robyn")
+    if (nzchar(pkg_path)) {
+        # Try to detect if it's from GitHub or CRAN
+        desc_file <- file.path(pkg_path, "DESCRIPTION")
+        if (file.exists(desc_file)) {
+            desc_lines <- readLines(desc_file, warn = FALSE)
+            remote_line <- grep("^RemoteType:", desc_lines, value = TRUE)
+            if (length(remote_line) > 0 && grepl("github", remote_line, ignore.case = TRUE)) {
+                remote_ref <- grep("^RemoteRef:", desc_lines, value = TRUE)
+                remote_sha <- grep("^RemoteSha:", desc_lines, value = TRUE)
+                if (length(remote_sha) > 0) {
+                    sha_short <- sub("^RemoteSha: ", "", remote_sha)
+                    sha_short <- substr(sha_short, 1, 7)
+                    "GitHub (commit: " + sha_short + ")"
+                } else if (length(remote_ref) > 0) {
+                    ref <- sub("^RemoteRef: ", "", remote_ref)
+                    paste0("GitHub (ref: ", ref, ")")
+                } else {
+                    "GitHub (unknown ref)"
+                }
+            } else {
+                "CRAN/Repository"
+            }
+        } else {
+            "Unknown source"
+        }
+    } else {
+        "Unknown location"
+    }
+}, error = function(e) "Unknown source")
+
+cat("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+cat("📦 ROBYN PACKAGE INFORMATION\n")
+cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+cat(sprintf("   Version:     %s\n", robyn_version))
+cat(sprintf("   Source:      %s\n", robyn_loaded_from))
+cat(sprintf("   Loaded at:   %s\n", Sys.time()))
+cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
 ## ---------- LOG HELPERS ----------
 safe_write <- function(txt, path) {
     dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
     writeLines(txt, path, useBytes = TRUE)
+}
+
+## Enhanced error logging with Robyn version context
+log_robyn_error <- function(func_name, error_obj, additional_context = NULL) {
+    error_details <- c(
+        sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"),
+        sprintf("❌ %s FAILED", func_name),
+        sprintf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"),
+        sprintf("When:           %s", Sys.time()),
+        sprintf("Robyn Version:  %s", robyn_version),
+        sprintf("Robyn Source:   %s", robyn_loaded_from),
+        "",
+        sprintf("Error Message:  %s", conditionMessage(error_obj)),
+        sprintf("Error Class:    %s", paste(class(error_obj), collapse = ", ")),
+        ""
+    )
+    
+    if (!is.null(conditionCall(error_obj))) {
+        error_details <- c(error_details,
+            sprintf("Error Call:     %s", paste(deparse(conditionCall(error_obj)), collapse = " ")),
+            ""
+        )
+    }
+    
+    if (!is.null(additional_context)) {
+        error_details <- c(error_details, "Additional Context:", additional_context, "")
+    }
+    
+    # Try to capture stack trace
+    stack <- tryCatch({
+        capture.output(traceback())
+    }, error = function(e) "No traceback available")
+    
+    if (length(stack) > 0 && !all(stack == "No traceback available")) {
+        error_details <- c(error_details, "Stack trace:", stack)
+    } else {
+        error_details <- c(error_details, "Stack trace:", "No traceback available")
+    }
+    
+    error_details <- c(error_details,
+        "",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    )
+    
+    # Print to console
+    message(paste(error_details, collapse = "\n"))
+    
+    # Return for file writing
+    return(error_details)
 }
 
 flush_and_ship_log <- function(step = NULL) {
@@ -1399,21 +1494,21 @@ InputCollect <- tryCatch(
     },
     error = function(e) {
         msg <- conditionMessage(e)
-        message("❌ robyn_inputs() FAILED: ", msg)
-        message("Call: ", paste(deparse(conditionCall(e)), collapse = " "))
+        
+        # Use enhanced error logging
+        error_details <- log_robyn_error("robyn_inputs()", e, additional_context = c(
+            "Phase: Preflight (without hyperparameters)",
+            sprintf("Data rows: %d", nrow(df)),
+            sprintf("Data cols: %d", ncol(df)),
+            sprintf("Date range: %s to %s", min(df$date), max(df$date)),
+            sprintf("Dependent variable: %s", dep_var_from_cfg),
+            sprintf("Paid media vars: %s", paste(paid_media_vars, collapse = ", ")),
+            sprintf("Paid media spends: %s", paste(paid_media_spends, collapse = ", "))
+        ))
 
         # Write error file
         err_file <- file.path(dir_path, "robyn_inputs_error.txt")
-        writeLines(c(
-            "robyn_inputs() FAILED",
-            paste0("When: ", Sys.time()),
-            paste0("Message: ", msg),
-            paste0("Call: ", paste(deparse(conditionCall(e)), collapse = " ")),
-            paste0("Class: ", paste(class(e), collapse = ", ")),
-            "",
-            "Stack trace:",
-            paste(capture.output(traceback()), collapse = "\n")
-        ), err_file)
+        writeLines(error_details, err_file)
         gcs_put_safe(err_file, file.path(gcs_prefix, basename(err_file)))
 
         # Return NULL so we can check it below
@@ -1488,20 +1583,21 @@ InputCollect <- tryCatch(
     },
     error = function(e) {
         msg <- conditionMessage(e)
-        message("❌ robyn_inputs() FAILED: ", msg)
-        message("Call: ", paste(deparse(conditionCall(e)), collapse = " "))
+        
+        # Use enhanced error logging
+        error_details <- log_robyn_error("robyn_inputs()", e, additional_context = c(
+            "Phase: Final (with hyperparameters)",
+            sprintf("Data rows: %d", nrow(df)),
+            sprintf("Data cols: %d", ncol(df)),
+            sprintf("Date range: %s to %s", min(df$date), max(df$date)),
+            sprintf("Dependent variable: %s", dep_var_from_cfg),
+            sprintf("Paid media vars: %s", paste(paid_media_vars, collapse = ", ")),
+            sprintf("Paid media spends: %s", paste(paid_media_spends, collapse = ", ")),
+            sprintf("Hyperparameters: %d keys", length(hyperparameters_filtered))
+        ))
 
         err_file <- file.path(dir_path, "robyn_inputs_error.txt")
-        writeLines(c(
-            "robyn_inputs() FAILED",
-            paste0("When: ", Sys.time()),
-            paste0("Message: ", msg),
-            paste0("Call: ", paste(deparse(conditionCall(e)), collapse = " ")),
-            paste0("Class: ", paste(class(e), collapse = ", ")),
-            "",
-            "Stack trace:",
-            paste(capture.output(traceback()), collapse = "\n")
-        ), err_file)
+        writeLines(error_details, err_file)
         gcs_put_safe(err_file, file.path(gcs_prefix, basename(err_file)))
 
         return(NULL)
@@ -1850,28 +1946,23 @@ if (is.list(OutputModels) && !is.null(OutputModels$error)) {
             calls_chr <- .format_calls(sys.calls())
             elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
             
-            error_details <- c(
-                "robyn_run() FAILED (after retry)",
-                paste0("When     : ", as.character(Sys.time())),
-                paste0("Elapsed  : ", round(elapsed, 2), " sec"),
-                paste0("First attempt cores: ", cores_first_attempt),
-                paste0("Retry attempt cores: ", fallback_cores),
-                paste0("Message  : ", conditionMessage(e)),
-            paste0("Call     : ", paste(deparse(conditionCall(e)), collapse = " ")),
-            paste0("Class    : ", paste(class(e), collapse = ", ")),
-            "",
-            "--- Core Detection Information ---",
-            paste0("Requested cores (R_MAX_CORES): ", requested_cores),
-            paste0("Available (parallelly):        ", available_cores_parallelly),
-            paste0("Available (parallel):          ", available_cores_parallel),
-            paste0("Conservative estimate:         ", available_cores),
-            paste0("Cores passed to robyn_run:     ", max_cores),
-            paste0("Future workers:                ", future::nbrOfWorkers()),
-            paste0("System CPU count:              ", parallel::detectCores()),
-            "",
-            "--- Approximate R call stack (inner→outer) ---",
-            paste(rev(calls_chr), collapse = "\n")
-        )
+            # Use enhanced error logging
+            additional_context <- c(
+                sprintf("First attempt cores: %d", cores_first_attempt),
+                sprintf("Retry attempt cores: %d", fallback_cores),
+                sprintf("Elapsed: %.2f sec", elapsed),
+                "",
+                "--- Core Detection Information ---",
+                sprintf("Requested cores (R_MAX_CORES): %d", requested_cores),
+                sprintf("Available (parallelly):        %d", available_cores_parallelly),
+                sprintf("Available (parallel):          %d", available_cores_parallel),
+                sprintf("Conservative estimate:         %d", available_cores),
+                sprintf("Cores passed to robyn_run:     %d", max_cores),
+                sprintf("Future workers:                %d", future::nbrOfWorkers()),
+                sprintf("System CPU count:              %d", parallel::detectCores())
+            )
+            
+            error_details <- log_robyn_error("robyn_run() (after retry)", e, additional_context)
 
         writeLines(error_details, robyn_err_txt)
 
@@ -1935,26 +2026,22 @@ if (is.list(OutputModels) && !is.null(OutputModels$error)) {
         calls_chr <- .format_calls(sys.calls())
         elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
         
-        error_details <- c(
-            "robyn_run() FAILED",
-            paste0("When     : ", as.character(Sys.time())),
-            paste0("Elapsed  : ", round(elapsed, 2), " sec"),
-            paste0("Message  : ", conditionMessage(e)),
-            paste0("Call     : ", paste(deparse(conditionCall(e)), collapse = " ")),
-            paste0("Class    : ", paste(class(e), collapse = ", ")),
+        # Use enhanced error logging
+        additional_context <- c(
+            sprintf("Elapsed: %.2f sec", elapsed),
+            sprintf("Error was %s core-related", if (.is_core_allocation_error(conditionMessage(e))) "" else "NOT"),
             "",
             "--- Core Detection Information ---",
-            paste0("Requested cores (R_MAX_CORES): ", requested_cores),
-            paste0("Available (parallelly):        ", available_cores_parallelly),
-            paste0("Available (parallel):          ", available_cores_parallel),
-            paste0("Conservative estimate:         ", available_cores),
-            paste0("Cores passed to robyn_run:     ", max_cores),
-            paste0("Future workers:                ", future::nbrOfWorkers()),
-            paste0("System CPU count:              ", parallel::detectCores()),
-            "",
-            "--- Approximate R call stack (inner→outer) ---",
-            paste(rev(calls_chr), collapse = "\n")
+            sprintf("Requested cores (R_MAX_CORES): %d", requested_cores),
+            sprintf("Available (parallelly):        %d", available_cores_parallelly),
+            sprintf("Available (parallel):          %d", available_cores_parallel),
+            sprintf("Conservative estimate:         %d", available_cores),
+            sprintf("Cores passed to robyn_run:     %d", max_cores),
+            sprintf("Future workers:                %d", future::nbrOfWorkers()),
+            sprintf("System CPU count:              %d", parallel::detectCores())
         )
+        
+        error_details <- log_robyn_error("robyn_run()", e, additional_context)
 
         writeLines(error_details, robyn_err_txt)
 
@@ -2181,18 +2268,19 @@ OutputCollect <- tryCatch(
     },
     error = function(e) {
         msg <- conditionMessage(e)
-        message("❌ robyn_outputs() FAILED: ", msg)
+        
+        # Use enhanced error logging
+        error_details <- log_robyn_error("robyn_outputs()", e, additional_context = c(
+            sprintf("pareto_fronts: %d", 2),
+            sprintf("csv_out: %s", "pareto"),
+            sprintf("min_candidates: %d", 5),
+            sprintf("OutputModels available: %s", !is.null(OutputModels)),
+            sprintf("InputCollect available: %s", !is.null(InputCollect))
+        ))
 
         # Write error file
         err_file <- file.path(dir_path, "robyn_outputs_error.txt")
-        writeLines(c(
-            "robyn_outputs() FAILED",
-            paste0("When: ", Sys.time()),
-            paste0("Message: ", msg),
-            "",
-            "Stack trace:",
-            paste(capture.output(traceback()), collapse = "\n")
-        ), err_file)
+        writeLines(error_details, err_file)
         gcs_put_safe(err_file, file.path(gcs_prefix, basename(err_file)))
 
         return(NULL)
