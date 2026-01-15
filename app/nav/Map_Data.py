@@ -25,7 +25,6 @@ from app_shared import (
 )
 from app_split_helpers import *  # bring in all helper functions/constants
 from google.cloud import storage
-
 from utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 # ──────────────────────────────────────────────────────────────
@@ -971,6 +970,9 @@ st.title("Map Data & Define Goals")
 st.session_state.setdefault("sf_table", "DB.SCHEMA.TABLE")
 st.session_state.setdefault("sf_sql", "")
 st.session_state.setdefault("sf_country_field", "COUNTRY")
+st.session_state.setdefault("bq_table", "")
+st.session_state.setdefault("bq_sql", "")
+st.session_state.setdefault("bq_country_field", "country")
 st.session_state.setdefault("source_mode", "Latest (GCS)")
 
 # ──────────────────────────────────────────────────────────────
@@ -1065,6 +1067,20 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
             ["Latest"] + [v for v in versions if v != "Latest"] + ["Snowflake"]
         )
 
+        # Add CSV Upload option if CSV data is available in session
+        if (
+            st.session_state.get("csv_connected")
+            and st.session_state.get("csv_data") is not None
+        ):
+            source_options.append("CSV Upload")
+
+        # Add BigQuery option if BigQuery is connected
+        if (
+            st.session_state.get("bq_connected")
+            and st.session_state.get("bq_client") is not None
+        ):
+            source_options.append("BigQuery")
+
         # Use a FORM so edits don’t commit on every keystroke
         with st.form("load_data_form", clear_on_submit=False):
             st.write("**Select previously loaded data:**")
@@ -1086,12 +1102,66 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
 
             # Snowflake inputs (only relevant if Snowflake is chosen)
             st.write("Alternatively: connect and load new dataset")
-            st.text_input(
-                "Select table",
-                key="sf_table",
-            )
-            st.text_area("Or: Write a custom SQL", key="sf_sql")
-            st.text_input("Select country field:", key="sf_country_field")
+
+            # Show appropriate inputs based on available connections
+            if "Snowflake" in source_options:
+                with st.expander(
+                    "❄️ Snowflake Query", expanded=(source_choice == "Snowflake")
+                ):
+                    st.text_input(
+                        "Select table",
+                        key="sf_table",
+                    )
+                    st.text_area("Or: Write a custom SQL", key="sf_sql")
+                    st.text_input(
+                        "Select country field:", key="sf_country_field"
+                    )
+
+            # BigQuery inputs (only relevant if BigQuery is connected)
+            if "BigQuery" in source_options:
+                with st.expander(
+                    "🔍 BigQuery Query", expanded=(source_choice == "BigQuery")
+                ):
+                    st.text_input(
+                        "Table ID (project.dataset.table)",
+                        key="bq_table",
+                        value=st.session_state.get("bq_table", ""),
+                        help="Fully qualified table ID: project.dataset.table",
+                    )
+                    st.text_area(
+                        "Or: Write a custom SQL query",
+                        key="bq_sql",
+                        value=st.session_state.get("bq_sql", ""),
+                        help="Custom BigQuery SQL. Use {country} as placeholder for country filter.",
+                    )
+                    st.text_input(
+                        "Country field name:",
+                        key="bq_country_field",
+                        value=st.session_state.get(
+                            "bq_country_field", "country"
+                        ),
+                        help="Column name to filter by country",
+                    )
+
+            # CSV Upload info (only relevant if CSV is uploaded)
+            if "CSV Upload" in source_options:
+                with st.expander(
+                    "📁 CSV Upload", expanded=(source_choice == "CSV Upload")
+                ):
+                    csv_filename = st.session_state.get(
+                        "csv_filename", "unknown"
+                    )
+                    csv_shape = (
+                        st.session_state.get("csv_data").shape
+                        if st.session_state.get("csv_data") is not None
+                        else (0, 0)
+                    )
+                    st.info(
+                        f"**Loaded CSV**: {csv_filename}\n\n**Shape**: {csv_shape[0]:,} rows × {csv_shape[1]} columns"
+                    )
+                    st.caption(
+                        "Note: CSV data will be used as-is for all selected countries."
+                    )
 
             # Buttons row: Load + Refresh GCS list (side-by-side, wide)
             b1, b2 = st.columns([1, 1.2])
@@ -1170,6 +1240,53 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                     )
                                 df = _load_from_snowflake_cached(sql)
                                 load_method = f"Snowflake ({len(df) if df is not None else 0} rows)"
+
+                        elif choice == "BigQuery":
+                            # Load from BigQuery with country-specific WHERE clause
+                            from utils.bigquery_connector import execute_query
+
+                            bq_client = st.session_state.get("bq_client")
+                            if not bq_client:
+                                raise ValueError(
+                                    "BigQuery client not found. Please reconnect in Connect Data page."
+                                )
+
+                            bq_table = st.session_state.get("bq_table", "")
+                            bq_sql = st.session_state.get("bq_sql", "")
+
+                            if bq_sql.strip():
+                                # Custom SQL - replace country placeholder
+                                sql = bq_sql.replace(
+                                    "{country}", country.upper()
+                                )
+                            elif bq_table.strip():
+                                # Use table with country filter
+                                country_field = st.session_state.get(
+                                    "bq_country_field", "country"
+                                )
+                                sql = f"SELECT * FROM `{bq_table}` WHERE {country_field} = '{country.upper()}'"
+                            else:
+                                raise ValueError(
+                                    "Please provide either a BigQuery table ID or custom SQL query."
+                                )
+
+                            df = execute_query(
+                                bq_client, sql, fetch_pandas=True
+                            )
+                            load_method = f"BigQuery ({len(df) if df is not None else 0} rows)"
+
+                        elif choice == "CSV Upload":
+                            # Load from uploaded CSV (same data for all countries)
+                            csv_data = st.session_state.get("csv_data")
+                            if csv_data is None or csv_data.empty:
+                                raise ValueError(
+                                    "CSV data not found. Please upload a CSV in Connect Data page."
+                                )
+
+                            # For CSV, we use the same data for all countries
+                            # Users can filter by country column if they have one
+                            df = csv_data.copy()
+                            load_method = f"CSV Upload ({len(df)} rows)"
 
                         else:
                             # Load from GCS
