@@ -45,7 +45,10 @@ def load_credentials_from_secret_manager(secret_id: str) -> dict:
     else:
         if not settings.PROJECT_ID:
             raise RuntimeError("PROJECT_ID environment variable is not set")
-        name = f"projects/{settings.PROJECT_ID}/secrets/{secret_id}/versions/latest"
+        name = (
+            f"projects/{settings.PROJECT_ID}/secrets/{secret_id}/"
+            f"versions/latest"
+        )
 
     try:
         response = client.access_secret_version(name=name)

@@ -1,9 +1,5 @@
-import io
-import json
 import os
-import tempfile
-from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
@@ -11,8 +7,6 @@ from app_shared import (
     GCS_BUCKET,
     PROJECT_ID,
     _connect_snowflake,
-    _require_sf_session,
-    get_data_processor,
     require_login_and_domain,
     run_sql,
 )
@@ -53,7 +47,7 @@ def save_persisted_key(pem: str) -> bool:
     """Save the private key to Secret Manager for persistence."""
     try:
         # Validate the key first by loading it
-        key = serialization.load_pem_private_key(
+        _ = serialization.load_pem_private_key(
             pem.encode("utf-8"), password=None, backend=default_backend()
         )
         # Save the PEM format to Secret Manager
@@ -72,7 +66,11 @@ data_source_type = st.radio(
     options=["Snowflake", "BigQuery", "CSV Upload"],
     index=0,
     horizontal=True,
-    help="Choose how you want to connect your data. Snowflake and BigQuery allow querying cloud databases, while CSV Upload lets you upload a local file.",
+    help=(
+        "Choose how you want to connect your data. Snowflake and "
+        "BigQuery allow querying cloud databases, while CSV Upload "
+        "lets you upload a local file."
+    ),
 )
 st.session_state["data_source_type"] = data_source_type
 
@@ -255,13 +253,13 @@ if data_source_type == "Snowflake":
             st.markdown("**Status:** ✅ Connected")
             c1, c2, c3 = st.columns(3)
             c1.write(
-                f"**Warehouse:** `{st.session_state.sf_params.get('warehouse','')}`"
+                f"**Warehouse:** `{st.session_state.sf_params.get('warehouse', '')}`"
             )
             c2.write(
-                f"**Database:** `{st.session_state.sf_params.get('database','')}`"
+                f"**Database:** `{st.session_state.sf_params.get('database', '')}`"
             )
             c3.write(
-                f"**Schema:** `{st.session_state.sf_params.get('schema','')}`"
+                f"**Schema:** `{st.session_state.sf_params.get('schema', '')}`"
             )
             dc1, dc2, dc3 = st.columns(3)
             if dc1.button("🔄 Reconnect"):
@@ -318,8 +316,6 @@ elif data_source_type == "BigQuery":
     persisted_creds_available = False
     if not st.session_state.get("_checked_persisted_bq_creds"):
         try:
-            from gcp_secrets import access_secret
-
             creds_json = access_secret(
                 BQ_PERSISTENT_CREDS_SECRET_ID, PROJECT_ID
             )
@@ -329,7 +325,8 @@ elif data_source_type == "BigQuery":
                 )
                 persisted_creds_available = True
                 st.info(
-                    "✅ Found previously saved credentials. You can use them to connect without uploading new credentials."
+                    "✅ Found previously saved credentials. You can use "
+                    "them to connect without uploading new credentials."
                 )
         except Exception:
             pass
