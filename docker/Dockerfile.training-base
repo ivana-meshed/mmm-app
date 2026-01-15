@@ -141,12 +141,8 @@ RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.
     if (!requireNamespace('patchwork', quietly=TRUE) || utils::packageVersion('patchwork') < '1.3.1') \
     remotes::install_version('patchwork', version='1.3.1', repos=repos, upgrade='never')"
 
-# ---------- Robyn (install from CRAN v3.10.3) ----------
-# Install stable CRAN version - v3.10.3 is the last CRAN release before v3.11.0
-# Note: v3.10.5 was a GitHub-only release, not published to CRAN
-# CRAN versions are tested and stable, GitHub versions may have breaking changes
+# ---------- Robyn (pin) ----------
 RUN R -q -e "options(Ncpus=8); \
-    repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.org'); \
-    remotes::install_version('Robyn', version='3.10.3', repos=repos, upgrade='never'); \
+    remotes::install_github('facebookexperimental/Robyn', subdir='R', upgrade='never', dependencies=c('Depends','Imports')); \
     library(Robyn); cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')"
 
