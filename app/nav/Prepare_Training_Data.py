@@ -51,7 +51,6 @@ from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from statsmodels.stats.outliers_influence import variance_inflation_factor
-
 from utils.gcs_utils import format_cet_timestamp
 
 # Authentication

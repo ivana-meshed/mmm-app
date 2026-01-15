@@ -28,7 +28,6 @@ from app_shared import (
     upload_to_gcs,
 )
 from google.cloud import storage
-
 from utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 data_processor = get_data_processor()

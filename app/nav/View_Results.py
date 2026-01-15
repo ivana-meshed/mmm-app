@@ -14,7 +14,6 @@ from google.auth import default as google_auth_default
 from google.auth.iam import Signer as IAMSigner
 from google.auth.transport.requests import Request
 from google.cloud import storage
-
 from utils.gcs_utils import get_cet_now
 
 try:

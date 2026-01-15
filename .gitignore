@@ -54,7 +54,13 @@ test_data/
 
 # Documentation (generated)
 *.pdf
+*.aux
+*.log
+*.out
+*.toc
 docs/*.png
+*.csv
+CHECKSUMS.txt
 
 # Credentials (never commit!)
 *service*account*.json

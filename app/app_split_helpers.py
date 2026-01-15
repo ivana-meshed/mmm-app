@@ -53,7 +53,6 @@ from app_shared import (  # Env / constants (already read from env in app_shared
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from google.cloud import storage
-
 from utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 __all__ = [
