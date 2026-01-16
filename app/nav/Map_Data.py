@@ -1065,17 +1065,17 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
         # Split options into two categories
         # 1. Previously loaded data (GCS versions)
         saved_data_options = ["Latest"] + [v for v in versions if v != "Latest"]
-        
+
         # 2. New data sources (Snowflake, BigQuery, CSV)
         new_source_options = ["Snowflake"]
-        
+
         # Add CSV Upload option if CSV data is available in session
         if (
             st.session_state.get("csv_connected")
             and st.session_state.get("csv_data") is not None
         ):
             new_source_options.append("CSV Upload")
-        
+
         # Add BigQuery option if BigQuery is connected
         if (
             st.session_state.get("bq_connected")
@@ -1086,118 +1086,24 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
         # Use a FORM so edits don't commit on every keystroke
         with st.form("load_data_form", clear_on_submit=False):
             st.write("**1.1 Select previously loaded data:**")
-            
-            # Get current selection to determine initial dropdown values
-            current_choice = st.session_state.get("source_choice", "Latest")
-            
-            # Determine which dropdown should show the current selection
-            if current_choice in saved_data_options:
-                saved_idx = saved_data_options.index(current_choice)
-                new_idx = 0
-            elif current_choice in new_source_options:
-                saved_idx = 0
-                new_idx = new_source_options.index(current_choice)
-            else:
-                saved_idx = 0
-                new_idx = 0
-            
+
             saved_data_choice = st.selectbox(
                 " ",
                 options=saved_data_options,
-                index=saved_idx,
-                key="saved_data_choice",
+                index=0,
+                key="saved_data_choice_form",
                 label_visibility="collapsed",
             )
-            
+
             st.write("**1.2 Alternatively: connect and load new dataset**")
-            
+
             new_source_choice = st.selectbox(
                 " ",
                 options=new_source_options,
-                index=new_idx,
-                key="new_source_choice",
+                index=0,
+                key="new_source_choice_form",
                 label_visibility="collapsed",
             )
-            
-            # Determine which source to use - check which dropdown changed
-            # Store previous values to detect changes
-            prev_saved = st.session_state.get("_prev_saved_choice", saved_data_options[0])
-            prev_new = st.session_state.get("_prev_new_choice", new_source_options[0])
-            
-            # If saved data dropdown changed, use that
-            if saved_data_choice != prev_saved:
-                source_choice = saved_data_choice
-            # If new source dropdown changed, use that
-            elif new_source_choice != prev_new:
-                source_choice = new_source_choice
-            # If neither changed (first load or no interaction), use current selection or default to saved
-            elif current_choice in new_source_options:
-                source_choice = new_source_choice
-            else:
-                source_choice = saved_data_choice
-            
-            # Update stored values
-            st.session_state["_prev_saved_choice"] = saved_data_choice
-            st.session_state["_prev_new_choice"] = new_source_choice
-            st.session_state["source_choice"] = source_choice
-
-            # Show appropriate inputs only for the selected new data source
-            if source_choice == "Snowflake":
-                with st.expander(
-                    "❄️ Snowflake Query", expanded=True
-                ):
-                    st.text_input(
-                        "Select table",
-                        key="sf_table",
-                    )
-                    st.text_area("Or: Write a custom SQL", key="sf_sql")
-                    st.text_input(
-                        "Select country field:", key="sf_country_field"
-                    )
-
-            elif source_choice == "BigQuery":
-                with st.expander(
-                    "🔍 BigQuery Query", expanded=True
-                ):
-                    st.text_input(
-                        "Table ID (project.dataset.table)",
-                        key="bq_table",
-                        value=st.session_state.get("bq_table", ""),
-                        help="Fully qualified table ID: project.dataset.table",
-                    )
-                    st.text_area(
-                        "Or: Write a custom SQL query",
-                        key="bq_sql",
-                        value=st.session_state.get("bq_sql", ""),
-                        help="Custom BigQuery SQL. Use {country} as placeholder for country filter.",
-                    )
-                    st.text_input(
-                        "Country field name:",
-                        key="bq_country_field",
-                        value=st.session_state.get(
-                            "bq_country_field", "country"
-                        ),
-                        help="Column name to filter by country",
-                    )
-
-            elif source_choice == "CSV Upload":
-                with st.expander(
-                    "📁 CSV Upload", expanded=True
-                ):
-                    csv_filename = st.session_state.get(
-                        "csv_filename", "unknown"
-                    )
-                    csv_shape = (
-                        st.session_state.get("csv_data").shape
-                        if st.session_state.get("csv_data") is not None
-                        else (0, 0)
-                    )
-                    st.info(
-                        f"**Loaded CSV**: {csv_filename}\n\n**Shape**: {csv_shape[0]:,} rows × {csv_shape[1]} columns"
-                    )
-                    st.caption(
-                        "Note: CSV data will be used as-is for all selected countries."
-                    )
 
             # Buttons row: Load + Refresh GCS list (side-by-side, wide)
             b1, b2 = st.columns([1, 1.2])
@@ -1206,6 +1112,88 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
             with b2:
                 refresh_clicked = st.form_submit_button(
                     "↻ Refresh GCS list", width="stretch"
+                )
+
+        # Determine which source is selected (outside form for immediate reactivity)
+        # Get the form values
+        saved_choice = st.session_state.get(
+            "saved_data_choice_form", saved_data_options[0]
+        )
+        new_choice = st.session_state.get(
+            "new_source_choice_form", new_source_options[0]
+        )
+
+        # Track which dropdown was last changed
+        prev_saved = st.session_state.get(
+            "_prev_saved_choice", saved_data_options[0]
+        )
+        prev_new = st.session_state.get(
+            "_prev_new_choice", new_source_options[0]
+        )
+
+        # Determine active source based on which dropdown changed
+        if saved_choice != prev_saved:
+            source_choice = saved_choice
+            st.session_state["_last_changed"] = "saved"
+        elif new_choice != prev_new:
+            source_choice = new_choice
+            st.session_state["_last_changed"] = "new"
+        else:
+            # No change detected, use last changed or current choice
+            if st.session_state.get("_last_changed") == "new":
+                source_choice = new_choice
+            else:
+                source_choice = saved_choice
+
+        # Update stored values
+        st.session_state["_prev_saved_choice"] = saved_choice
+        st.session_state["_prev_new_choice"] = new_choice
+        st.session_state["source_choice"] = source_choice
+
+        # Show appropriate inputs only for the selected new data source (OUTSIDE FORM)
+        if source_choice == "Snowflake":
+            with st.expander("❄️ Snowflake Query", expanded=True):
+                st.text_input(
+                    "Select table",
+                    key="sf_table",
+                )
+                st.text_area("Or: Write a custom SQL", key="sf_sql")
+                st.text_input("Select country field:", key="sf_country_field")
+
+        elif source_choice == "BigQuery":
+            with st.expander("🔍 BigQuery Query", expanded=True):
+                st.text_input(
+                    "Table ID (project.dataset.table)",
+                    key="bq_table",
+                    value=st.session_state.get("bq_table", ""),
+                    help="Fully qualified table ID: project.dataset.table",
+                )
+                st.text_area(
+                    "Or: Write a custom SQL query",
+                    key="bq_sql",
+                    value=st.session_state.get("bq_sql", ""),
+                    help="Custom BigQuery SQL. Use {country} as placeholder for country filter.",
+                )
+                st.text_input(
+                    "Country field name:",
+                    key="bq_country_field",
+                    value=st.session_state.get("bq_country_field", "country"),
+                    help="Column name to filter by country",
+                )
+
+        elif source_choice == "CSV Upload":
+            with st.expander("📁 CSV Upload", expanded=True):
+                csv_filename = st.session_state.get("csv_filename", "unknown")
+                csv_shape = (
+                    st.session_state.get("csv_data").shape
+                    if st.session_state.get("csv_data") is not None
+                    else (0, 0)
+                )
+                st.info(
+                    f"**Loaded CSV**: {csv_filename}\n\n**Shape**: {csv_shape[0]:,} rows × {csv_shape[1]} columns"
+                )
+                st.caption(
+                    "Note: CSV data will be used as-is for all selected countries."
                 )
 
         # --- right after the form block (i.e., after the `with st.form(...):` ends)
