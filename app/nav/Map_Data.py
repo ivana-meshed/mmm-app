@@ -1062,51 +1062,89 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 versions.append(vv)
                 seen.add(vv)
 
-        # Build source options with a single 'Latest' entry and no duplicate 'latest'
-        source_options = (
-            ["Latest"] + [v for v in versions if v != "Latest"] + ["Snowflake"]
-        )
-
+        # Split options into two categories
+        # 1. Previously loaded data (GCS versions)
+        saved_data_options = ["Latest"] + [v for v in versions if v != "Latest"]
+        
+        # 2. New data sources (Snowflake, BigQuery, CSV)
+        new_source_options = ["Snowflake"]
+        
         # Add CSV Upload option if CSV data is available in session
         if (
             st.session_state.get("csv_connected")
             and st.session_state.get("csv_data") is not None
         ):
-            source_options.append("CSV Upload")
-
+            new_source_options.append("CSV Upload")
+        
         # Add BigQuery option if BigQuery is connected
         if (
             st.session_state.get("bq_connected")
             and st.session_state.get("bq_client") is not None
         ):
-            source_options.append("BigQuery")
+            new_source_options.append("BigQuery")
 
-        # Use a FORM so edits don’t commit on every keystroke
+        # Use a FORM so edits don't commit on every keystroke
         with st.form("load_data_form", clear_on_submit=False):
-            st.write("**Select previously loaded data:**")
-            src_idx = (
-                source_options.index(
-                    st.session_state.get("source_choice", "Latest")
-                )
-                if st.session_state.get("source_choice", "Latest")
-                in source_options
-                else 0
-            )
-            source_choice = st.selectbox(
+            st.write("**1.1 Select previously loaded data:**")
+            
+            # Get current selection to determine initial dropdown values
+            current_choice = st.session_state.get("source_choice", "Latest")
+            
+            # Determine which dropdown should show the current selection
+            if current_choice in saved_data_options:
+                saved_idx = saved_data_options.index(current_choice)
+                new_idx = 0
+            elif current_choice in new_source_options:
+                saved_idx = 0
+                new_idx = new_source_options.index(current_choice)
+            else:
+                saved_idx = 0
+                new_idx = 0
+            
+            saved_data_choice = st.selectbox(
                 " ",
-                options=source_options,
-                index=src_idx,
-                key="source_choice",
+                options=saved_data_options,
+                index=saved_idx,
+                key="saved_data_choice",
                 label_visibility="collapsed",
             )
+            
+            st.write("**1.2 Alternatively: connect and load new dataset**")
+            
+            new_source_choice = st.selectbox(
+                " ",
+                options=new_source_options,
+                index=new_idx,
+                key="new_source_choice",
+                label_visibility="collapsed",
+            )
+            
+            # Determine which source to use - check which dropdown changed
+            # Store previous values to detect changes
+            prev_saved = st.session_state.get("_prev_saved_choice", saved_data_options[0])
+            prev_new = st.session_state.get("_prev_new_choice", new_source_options[0])
+            
+            # If saved data dropdown changed, use that
+            if saved_data_choice != prev_saved:
+                source_choice = saved_data_choice
+            # If new source dropdown changed, use that
+            elif new_source_choice != prev_new:
+                source_choice = new_source_choice
+            # If neither changed (first load or no interaction), use current selection or default to saved
+            elif current_choice in new_source_options:
+                source_choice = new_source_choice
+            else:
+                source_choice = saved_data_choice
+            
+            # Update stored values
+            st.session_state["_prev_saved_choice"] = saved_data_choice
+            st.session_state["_prev_new_choice"] = new_source_choice
+            st.session_state["source_choice"] = source_choice
 
-            # Snowflake inputs (only relevant if Snowflake is chosen)
-            st.write("Alternatively: connect and load new dataset")
-
-            # Show appropriate inputs based on available connections
-            if "Snowflake" in source_options:
+            # Show appropriate inputs only for the selected new data source
+            if source_choice == "Snowflake":
                 with st.expander(
-                    "❄️ Snowflake Query", expanded=(source_choice == "Snowflake")
+                    "❄️ Snowflake Query", expanded=True
                 ):
                     st.text_input(
                         "Select table",
@@ -1117,10 +1155,9 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                         "Select country field:", key="sf_country_field"
                     )
 
-            # BigQuery inputs (only relevant if BigQuery is connected)
-            if "BigQuery" in source_options:
+            elif source_choice == "BigQuery":
                 with st.expander(
-                    "🔍 BigQuery Query", expanded=(source_choice == "BigQuery")
+                    "🔍 BigQuery Query", expanded=True
                 ):
                     st.text_input(
                         "Table ID (project.dataset.table)",
@@ -1143,10 +1180,9 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                         help="Column name to filter by country",
                     )
 
-            # CSV Upload info (only relevant if CSV is uploaded)
-            if "CSV Upload" in source_options:
+            elif source_choice == "CSV Upload":
                 with st.expander(
-                    "📁 CSV Upload", expanded=(source_choice == "CSV Upload")
+                    "📁 CSV Upload", expanded=True
                 ):
                     csv_filename = st.session_state.get(
                         "csv_filename", "unknown"
