@@ -1086,20 +1086,35 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
         # Selectboxes OUTSIDE form for immediate reactivity
         st.write("**1.1 Select previously loaded data:**")
         
+        # Get current selection from session state or default to first option
+        current_source = st.session_state.get("source_choice", "Latest")
+        
+        # Determine index for saved data dropdown
+        if current_source in saved_data_options:
+            saved_idx = saved_data_options.index(current_source)
+        else:
+            saved_idx = 0
+        
         saved_data_choice = st.selectbox(
             " ",
             options=saved_data_options,
-            index=0,
+            index=saved_idx,
             key="saved_data_choice",
             label_visibility="collapsed",
         )
         
         st.write("**1.2 Alternatively: connect and load new dataset**")
         
+        # Determine index for new source dropdown
+        if current_source in new_source_options:
+            new_idx = new_source_options.index(current_source)
+        else:
+            new_idx = 0
+        
         new_source_choice = st.selectbox(
             " ",
             options=new_source_options,
-            index=0,
+            index=new_idx,
             key="new_source_choice",
             label_visibility="collapsed",
         )
