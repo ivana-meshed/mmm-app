@@ -1083,46 +1083,28 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
         ):
             new_source_options.append("BigQuery")
 
-        # Use a FORM so edits don't commit on every keystroke
-        with st.form("load_data_form", clear_on_submit=False):
-            st.write("**1.1 Select previously loaded data:**")
-
-            saved_data_choice = st.selectbox(
-                " ",
-                options=saved_data_options,
-                index=0,
-                key="saved_data_choice_form",
-                label_visibility="collapsed",
-            )
-
-            st.write("**1.2 Alternatively: connect and load new dataset**")
-
-            new_source_choice = st.selectbox(
-                " ",
-                options=new_source_options,
-                index=0,
-                key="new_source_choice_form",
-                label_visibility="collapsed",
-            )
-
-            # Buttons row: Load + Refresh GCS list (side-by-side, wide)
-            b1, b2 = st.columns([1, 1.2])
-            with b1:
-                load_clicked = st.form_submit_button("Load", width="stretch")
-            with b2:
-                refresh_clicked = st.form_submit_button(
-                    "↻ Refresh GCS list", width="stretch"
-                )
-
-        # Determine which source is selected (outside form for immediate reactivity)
-        # Get the form values
-        saved_choice = st.session_state.get(
-            "saved_data_choice_form", saved_data_options[0]
+        # Selectboxes OUTSIDE form for immediate reactivity
+        st.write("**1.1 Select previously loaded data:**")
+        
+        saved_data_choice = st.selectbox(
+            " ",
+            options=saved_data_options,
+            index=0,
+            key="saved_data_choice",
+            label_visibility="collapsed",
         )
-        new_choice = st.session_state.get(
-            "new_source_choice_form", new_source_options[0]
+        
+        st.write("**1.2 Alternatively: connect and load new dataset**")
+        
+        new_source_choice = st.selectbox(
+            " ",
+            options=new_source_options,
+            index=0,
+            key="new_source_choice",
+            label_visibility="collapsed",
         )
-
+        
+        # Determine which source is selected (for immediate reactivity)
         # Track which dropdown was last changed
         prev_saved = st.session_state.get(
             "_prev_saved_choice", saved_data_options[0]
@@ -1130,24 +1112,24 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
         prev_new = st.session_state.get(
             "_prev_new_choice", new_source_options[0]
         )
-
+        
         # Determine active source based on which dropdown changed
-        if saved_choice != prev_saved:
-            source_choice = saved_choice
+        if saved_data_choice != prev_saved:
+            source_choice = saved_data_choice
             st.session_state["_last_changed"] = "saved"
-        elif new_choice != prev_new:
-            source_choice = new_choice
+        elif new_source_choice != prev_new:
+            source_choice = new_source_choice
             st.session_state["_last_changed"] = "new"
         else:
             # No change detected, use last changed or current choice
             if st.session_state.get("_last_changed") == "new":
-                source_choice = new_choice
+                source_choice = new_source_choice
             else:
-                source_choice = saved_choice
-
+                source_choice = saved_data_choice
+        
         # Update stored values
-        st.session_state["_prev_saved_choice"] = saved_choice
-        st.session_state["_prev_new_choice"] = new_choice
+        st.session_state["_prev_saved_choice"] = saved_data_choice
+        st.session_state["_prev_new_choice"] = new_source_choice
         st.session_state["source_choice"] = source_choice
 
         # Show appropriate inputs only for the selected new data source (OUTSIDE FORM)
@@ -1194,6 +1176,17 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 )
                 st.caption(
                     "Note: CSV data will be used as-is for all selected countries."
+                )
+
+        # Use a FORM only for the action buttons
+        with st.form("load_data_form", clear_on_submit=False):
+            # Buttons row: Load + Refresh GCS list (side-by-side, wide)
+            b1, b2 = st.columns([1, 1.2])
+            with b1:
+                load_clicked = st.form_submit_button("Load", width="stretch")
+            with b2:
+                refresh_clicked = st.form_submit_button(
+                    "↻ Refresh GCS list", width="stretch"
                 )
 
         # --- right after the form block (i.e., after the `with st.form(...):` ends)
