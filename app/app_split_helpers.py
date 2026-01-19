@@ -727,24 +727,23 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                     # If we can't check status, use the queued status
                     pass
             
-            # Only show jobs that are actually running/launching or beyond
-            # Don't show PENDING jobs even if queue says RUNNING (job hasn't started yet)
-            if actual_status not in ("PENDING", "UNKNOWN"):
-                all_running_jobs.append(
-                    {
-                        "Source": "Queue",
-                        "Job ID": str(job.get("id", "?")),
-                        "Status": actual_status,
-                        "Country": job.get("params", {}).get("country", "N/A"),
-                        "Revision": job.get("params", {}).get("revision", "N/A"),
-                        "Iterations": str(
-                            job.get("params", {}).get("iterations", "N/A")
-                        ),
-                        "Trials": str(job.get("params", {}).get("trials", "N/A")),
-                        "GCS Prefix": job.get("gcs_prefix", ""),
-                        "Execution Details": job.get("execution_name", ""),
-                    }
-                )
+            # Show all jobs that queue thinks are RUNNING/LAUNCHING
+            # Display actual Cloud Run status, which may differ from queue status
+            all_running_jobs.append(
+                {
+                    "Source": "Queue",
+                    "Job ID": str(job.get("id", "?")),
+                    "Status": actual_status,
+                    "Country": job.get("params", {}).get("country", "N/A"),
+                    "Revision": job.get("params", {}).get("revision", "N/A"),
+                    "Iterations": str(
+                        job.get("params", {}).get("iterations", "N/A")
+                    ),
+                    "Trials": str(job.get("params", {}).get("trials", "N/A")),
+                    "GCS Prefix": job.get("gcs_prefix", ""),
+                    "Execution Details": job.get("execution_name", ""),
+                }
+            )
     
     # Save queue to GCS if any jobs changed status
     if queue_changed:

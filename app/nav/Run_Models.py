@@ -43,14 +43,6 @@ list_mapped_data_versions.clear()
 
 st.title("Run Marketing Mix Models")
 
-# Check if we should show a message to switch to Queue tab (Requirement 8)
-if st.session_state.get("switch_to_queue_tab", False):
-    st.success("✅ **Configuration added to queue successfully!**")
-    st.info(
-        "👉 **Please click on the 'Queue' tab above** to monitor your job's progress."
-    )
-    st.session_state["switch_to_queue_tab"] = False
-
 tab_single, tab_queue, tab_status = st.tabs(
     ["Single Run", "Batch Run", "Queue Monitor"]
 )
@@ -2569,6 +2561,14 @@ with tab_single:
 
 # Extracted from streamlit_app.py tab_queue (Batch/Queue run):
 with tab_queue:
+    # Check if we should show a message to switch to Queue Monitor tab
+    if st.session_state.get("switch_to_queue_tab", False):
+        st.success("✅ **Configuration added to queue successfully!**")
+        st.info(
+            "👉 **Please click on the 'Queue Monitor' tab above** to monitor your job's progress."
+        )
+        st.session_state["switch_to_queue_tab"] = False
+
     if st.session_state.get("queue_running") and not (
         st.session_state.get("job_queue") or []
     ):
