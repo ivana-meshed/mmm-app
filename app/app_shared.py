@@ -717,6 +717,9 @@ def timed_step(name: str, bucket: list):
         ph.success(f"✅ {name} – {_fmt_secs(dt)}")
         bucket.append({"Step": name, "Time (s)": round(dt, 2)})
         logger.info(f"Step '{name}' completed in {dt:.2f}s")
+        # Clear the success message after 2 seconds to prevent it from appearing in other tabs
+        time.sleep(2)
+        ph.empty()
 
 
 def parse_train_size(txt: str):

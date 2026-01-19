@@ -710,37 +710,44 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
             f"[STATUS_MONITOR] Checking job {job.get('id')} with status {job.get('status')}"
         )
         if job.get("status") in ("RUNNING", "LAUNCHING"):
-            # Get actual status from Cloud Run for queue jobs too
+            # Get actual status from Cloud Run for queue jobs
             exec_name = job.get("execution_name", "")
-            actual_status = job.get("status", "UNKNOWN")
+            # Start with queue status as the source of truth
+            display_status = job.get("status", "UNKNOWN")
             
             logger.info(
-                f"[STATUS_MONITOR] Job {job.get('id')} is {actual_status}, exec_name: {exec_name}"
+                f"[STATUS_MONITOR] Job {job.get('id')} queue status: {display_status}, exec_name: {exec_name}"
             )
             
             if exec_name:
                 try:
                     status_info = job_manager.get_execution_status(exec_name)
-                    checked_status = (
-                        status_info.get("overall_status") or actual_status
+                    cloud_run_status = (
+                        status_info.get("overall_status") or display_status
                     ).upper()
                     
                     logger.info(
-                        f"[STATUS_MONITOR] Cloud Run status for job {job.get('id')}: {checked_status}"
+                        f"[STATUS_MONITOR] Cloud Run status for job {job.get('id')}: {cloud_run_status}"
                     )
                     
-                    # If status changed to a terminal state, update the queue entry
-                    if checked_status in ("SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"):
-                        if job.get("status") != checked_status:
-                            final_state = "SUCCEEDED" if checked_status in ("SUCCEEDED", "COMPLETED") else checked_status
+                    # Update queue status to match Cloud Run status for consistency
+                    if cloud_run_status != job.get("status"):
+                        logger.info(
+                            f"[STATUS_MONITOR] Syncing job {job.get('id')} status from {job.get('status')} to {cloud_run_status}"
+                        )
+                        job["status"] = cloud_run_status
+                        
+                        # If it's a terminal state, add message
+                        if cloud_run_status in ("SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"):
+                            final_state = "SUCCEEDED" if cloud_run_status in ("SUCCEEDED", "COMPLETED") else cloud_run_status
                             job["status"] = final_state
                             job["message"] = status_info.get("error", "") or final_state
-                            queue_changed = True
-                            logger.info(
-                                f"[STATUS_MONITOR] Updated job {job.get('id')} status: {job.get('status')} -> {final_state}"
-                            )
+                        
+                        queue_changed = True
+                        display_status = cloud_run_status
+                    else:
+                        display_status = cloud_run_status
                     
-                    actual_status = checked_status
                 except Exception as e:
                     # If we can't check status, use the queued status
                     logger.warning(
@@ -748,15 +755,15 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                     )
             
             # Show all jobs that queue thinks are RUNNING/LAUNCHING
-            # Display actual Cloud Run status, which may differ from queue status
+            # Display status now matches queue status (which we've synced with Cloud Run)
             logger.info(
-                f"[STATUS_MONITOR] Adding job {job.get('id')} to display with status {actual_status}"
+                f"[STATUS_MONITOR] Adding job {job.get('id')} to display with status {display_status}"
             )
             all_running_jobs.append(
                 {
                     "Source": "Queue",
                     "Job ID": str(job.get("id", "?")),
-                    "Status": actual_status,
+                    "Status": display_status,
                     "Country": job.get("params", {}).get("country", "N/A"),
                     "Revision": job.get("params", {}).get("revision", "N/A"),
                     "Iterations": str(
