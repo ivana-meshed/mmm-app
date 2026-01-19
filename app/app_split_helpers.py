@@ -676,11 +676,12 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     all_running_jobs = []
     job_manager = get_job_manager()
 
-    # --- Queue jobs: Always force-refresh from GCS to stay in sync ---
+    # --- Queue jobs: Force-refresh from GCS when queue is running ---
     # This ensures Model Run Status shows the latest state from GCS
-    # Force refresh is necessary because queue ticks may happen externally
-    # (e.g., Cloud Scheduler) and we need to reflect those changes immediately
-    maybe_refresh_queue_from_gcs(force=True)  # Always force refresh
+    # Force refresh when queue is running to catch external updates (e.g., Cloud Scheduler)
+    # Use conditional refresh when queue is stopped to reduce API calls
+    is_queue_running = st.session_state.get("queue_running", False)
+    maybe_refresh_queue_from_gcs(force=is_queue_running)
     queue = st.session_state.get("job_queue", [])
     for job in queue:
         if job.get("status") in ("RUNNING", "LAUNCHING"):
