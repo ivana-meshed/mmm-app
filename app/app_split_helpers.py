@@ -1334,8 +1334,21 @@ def _queue_tick():
     # Sweep finished jobs into history and remove them from queue
     q = st.session_state.job_queue or []
     logger.info(f"After tick: {len(q)} jobs in queue")
+    
+    # If queue is empty and queue is running, stop it
+    if not q and st.session_state.get("queue_running"):
+        logger.info("Queue is now empty - stopping queue")
+        st.session_state.queue_running = False
+        # Save the stopped queue state to GCS
+        st.session_state.queue_saved_at = save_queue_to_gcs(
+            st.session_state.queue_name,
+            [],
+            queue_running=False,
+        )
+        return
+    
     if not q:
-        logger.info("Queue is now empty after tick")
+        logger.info("Queue is empty")
         return
 
     remaining = []
@@ -1425,6 +1438,12 @@ def _queue_tick():
             f"Moved {moved} finished job(s) to history, {len(remaining)} remaining in queue"
         )
         st.session_state.job_queue = remaining
+        
+        # If no jobs remain and queue is running, stop it
+        if not remaining and st.session_state.get("queue_running"):
+            logger.info("All jobs completed - stopping queue")
+            st.session_state.queue_running = False
+        
         st.session_state.queue_saved_at = save_queue_to_gcs(
             st.session_state.queue_name,
             st.session_state.job_queue,
