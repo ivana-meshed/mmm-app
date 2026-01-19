@@ -299,8 +299,16 @@ def _safe_tick_once(
                         logger.info(
                             f"[QUEUE] Job {entry.get('id')} completed with status {final_state}"
                         )
+                elif s == "RUNNING" and entry.get("status") in ("PENDING", "LAUNCHING"):
+                    # Forward progression: PENDING/LAUNCHING → RUNNING
+                    entry["status"] = "RUNNING"
+                    message = "running"
+                    changed = True
+                    logger.info(
+                        f"[QUEUE_TICK] Job {entry.get('id')} progressed from {entry.get('status')} to RUNNING"
+                    )
                 elif entry.get("status") == "LAUNCHING":
-                    # Visible execution, promote to RUNNING
+                    # Visible execution, promote to RUNNING (fallback for when Cloud Run doesn't report status)
                     entry["status"] = "RUNNING"
                     message = "running"
                     changed = True
