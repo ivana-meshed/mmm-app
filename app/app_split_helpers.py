@@ -628,7 +628,7 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
         return 0
 
 
-@st.fragment
+@st.fragment(run_every="10s")
 def render_jobs_job_history(key_prefix: str = "single") -> None:
     with st.expander("📚 Run History", expanded=False):
         # Refresh control first
@@ -649,6 +649,14 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
             )
             # Use fragment rerun to avoid full page refresh
             st.rerun(scope="fragment")
+
+        # Auto-update running jobs in history (check every 10s via fragment)
+        try:
+            update_running_jobs_in_history(
+                st.session_state.get("gcs_bucket", GCS_BUCKET)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to auto-update job history: {e}")
 
         try:
             df_job_history = read_job_history_from_gcs(
@@ -686,6 +694,10 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     )
     maybe_refresh_queue_from_gcs(force=is_queue_running)
     queue = st.session_state.get("job_queue", [])
+    
+    # Track if we need to save queue changes
+    queue_changed = False
+    
     for job in queue:
         if job.get("status") in ("RUNNING", "LAUNCHING"):
             # Get actual status from Cloud Run for queue jobs too
@@ -698,8 +710,18 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                     checked_status = (
                         status_info.get("overall_status") or actual_status
                     ).upper()
-                    # Only update displayed status, don't modify queue entry
-                    # (that's the responsibility of queue tick)
+                    
+                    # If status changed to a terminal state, update the queue entry
+                    if checked_status in ("SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"):
+                        if job.get("status") != checked_status:
+                            final_state = "SUCCEEDED" if checked_status in ("SUCCEEDED", "COMPLETED") else checked_status
+                            job["status"] = final_state
+                            job["message"] = status_info.get("error", "") or final_state
+                            queue_changed = True
+                            logger.info(
+                                f"[STATUS_MONITOR] Updated job {job.get('id')} status: {job.get('status')} -> {final_state}"
+                            )
+                    
                     actual_status = checked_status
                 except Exception:
                     # If we can't check status, use the queued status
@@ -720,6 +742,15 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                     "Execution Details": job.get("execution_name", ""),
                 }
             )
+    
+    # Save queue to GCS if any jobs changed status
+    if queue_changed:
+        logger.info(f"[STATUS_MONITOR] Saving updated queue to GCS")
+        st.session_state.queue_saved_at = save_queue_to_gcs(
+            st.session_state.queue_name,
+            st.session_state.job_queue,
+            queue_running=st.session_state.queue_running,
+        )
 
     # --- Single run jobs (poll actual status) ---
     jobs_to_remove = []
