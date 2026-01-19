@@ -667,27 +667,45 @@ def render_jobs_job_history(key_prefix: str = "single") -> None:
         )
 
 
+@st.fragment(run_every="5s")
 def render_job_status_monitor(key_prefix: str = "single") -> None:
-    """Status UI showing all currently running jobs as a table (no manual checker)."""
+    """Status UI showing all currently running jobs as a table with auto-refresh every 5 seconds."""
     # Collect all running jobs from two sources:
     # 1. Queue jobs (RUNNING/LAUNCHING status) - always refresh from GCS
     # 2. Single run jobs from session state (check actual status)
     all_running_jobs = []
     job_manager = get_job_manager()
 
-    # --- Queue jobs: Refresh from GCS to stay in sync ---
-    # This ensures Model Run Status shows the same state as Current Queue
-    # Note: maybe_refresh_queue_from_gcs(force=False) only refreshes if remote changed
-    # (checks saved_at timestamp), so this is not expensive when called frequently
-    maybe_refresh_queue_from_gcs(force=False)  # Only refresh if remote changed
+    # --- Queue jobs: Always force-refresh from GCS to stay in sync ---
+    # This ensures Model Run Status shows the latest state from GCS
+    # Force refresh is necessary because queue ticks may happen externally
+    # (e.g., Cloud Scheduler) and we need to reflect those changes immediately
+    maybe_refresh_queue_from_gcs(force=True)  # Always force refresh
     queue = st.session_state.get("job_queue", [])
     for job in queue:
         if job.get("status") in ("RUNNING", "LAUNCHING"):
+            # Get actual status from Cloud Run for queue jobs too
+            exec_name = job.get("execution_name", "")
+            actual_status = job.get("status", "UNKNOWN")
+            
+            if exec_name:
+                try:
+                    status_info = job_manager.get_execution_status(exec_name)
+                    checked_status = (
+                        status_info.get("overall_status") or actual_status
+                    ).upper()
+                    # Only update displayed status, don't modify queue entry
+                    # (that's the responsibility of queue tick)
+                    actual_status = checked_status
+                except Exception:
+                    # If we can't check status, use the queued status
+                    pass
+            
             all_running_jobs.append(
                 {
                     "Source": "Queue",
                     "Job ID": str(job.get("id", "?")),
-                    "Status": job.get("status", "UNKNOWN"),
+                    "Status": actual_status,
                     "Country": job.get("params", {}).get("country", "N/A"),
                     "Revision": job.get("params", {}).get("revision", "N/A"),
                     "Iterations": str(
