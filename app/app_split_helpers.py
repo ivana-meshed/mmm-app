@@ -709,8 +709,8 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
         logger.debug(
             f"[STATUS_MONITOR] Checking job {job.get('id')} with status {job.get('status')}"
         )
-        if job.get("status") in ("RUNNING", "LAUNCHING"):
-            # Get actual status from Cloud Run for queue jobs
+        if job.get("status") in ("RUNNING", "LAUNCHING", "PENDING"):
+            # Get actual status from Cloud Run for queue jobs (including PENDING to catch status changes)
             exec_name = job.get("execution_name", "")
             # Start with queue status as the source of truth
             display_status = job.get("status", "UNKNOWN")
@@ -745,23 +745,31 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                         job["status"] = final_state
                         job["message"] = status_info.get("error", "") or final_state
                         display_status = final_state
-                    elif cloud_run_status == "RUNNING" and job.get("status") == "LAUNCHING":
-                        # Progress from LAUNCHING to RUNNING
+                    elif cloud_run_status == "LAUNCHING" and job.get("status") == "PENDING":
+                        # Progress from PENDING to LAUNCHING
+                        should_update = True
+                        job["status"] = "LAUNCHING"
+                        display_status = "LAUNCHING"
+                        logger.info(
+                            f"[STATUS_MONITOR] Job {job.get('id')} progressed from PENDING to LAUNCHING"
+                        )
+                    elif cloud_run_status == "RUNNING" and job.get("status") in ("PENDING", "LAUNCHING"):
+                        # Progress from PENDING/LAUNCHING to RUNNING
                         should_update = True
                         job["status"] = "RUNNING"
                         display_status = "RUNNING"
                         logger.info(
-                            f"[STATUS_MONITOR] Job {job.get('id')} progressed from LAUNCHING to RUNNING"
+                            f"[STATUS_MONITOR] Job {job.get('id')} progressed from {job.get('status')} to RUNNING"
                         )
-                    elif cloud_run_status == "RUNNING":
-                        # Cloud Run says RUNNING - always display as RUNNING
-                        display_status = "RUNNING"
-                        # Update queue if it's not already RUNNING
-                        if job.get("status") != "RUNNING":
+                    elif cloud_run_status in ("LAUNCHING", "RUNNING"):
+                        # Cloud Run says LAUNCHING or RUNNING - always display that status
+                        display_status = cloud_run_status
+                        # Update queue if it's not already at this status
+                        if job.get("status") != cloud_run_status:
                             should_update = True
-                            job["status"] = "RUNNING"
+                            job["status"] = cloud_run_status
                             logger.info(
-                                f"[STATUS_MONITOR] Job {job.get('id')} updated to RUNNING from {job.get('status')}"
+                                f"[STATUS_MONITOR] Job {job.get('id')} updated to {cloud_run_status} from {job.get('status')}"
                             )
                     else:
                         # For any other case, use Cloud Run status for display
