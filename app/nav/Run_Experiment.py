@@ -3756,7 +3756,7 @@ with tab_status:
             st.rerun()
 
         # Queue table (refresh to show latest from GCS)
-        maybe_refresh_queue_from_gcs()
+        maybe_refresh_queue_from_gcs(force=True)  # Always force refresh for Current Queue
         st.caption(
             f"GCS saved_at: {st.session_state.get('queue_saved_at') or '—'} · "
             f"{sum(e['status']=='PENDING' for e in st.session_state.job_queue)} pending · "
