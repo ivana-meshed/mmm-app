@@ -3228,13 +3228,13 @@ with tab_status:
                     {
                         "ID": e["id"],
                         "Status": (
-                            # Check actual Cloud Run status for all active jobs
+                            # Check actual Cloud Run status for all launched jobs
                             (
                                 lambda exec_name: (
                                     job_manager.get_execution_status(exec_name).get("overall_status")
-                                    if exec_name and e.get("status") in ("PENDING", "RUNNING", "LAUNCHING")
-                                    else e.get("status")
-                                ) or e.get("status")
+                                    if exec_name  # If job has been launched, always check Cloud Run
+                                    else e.get("status")  # Otherwise use cached status
+                                ) or e.get("status")  # Fallback to cached status
                             )(e.get("execution_name"))
                         ).upper(),
                         "Country": e["params"]["country"],
