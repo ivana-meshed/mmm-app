@@ -3765,22 +3765,12 @@ with tab_status:
         )
 
         if st.session_state.job_queue:
-            # Get real-time status from Cloud Run for each job
-            job_manager = get_job_manager()
+            # Display status from queue (Model Run Status/queue tick already update it)
             df_queue = pd.DataFrame(
                 [
                     {
                         "ID": e["id"],
-                        "Status": (
-                            # Check actual Cloud Run status for all launched jobs
-                            (
-                                lambda exec_name: (
-                                    job_manager.get_execution_status(exec_name).get("overall_status")
-                                    if exec_name  # If job has been launched, always check Cloud Run
-                                    else e.get("status")  # Otherwise use cached status
-                                ) or e.get("status")  # Fallback to cached status
-                            )(e.get("execution_name"))
-                        ).upper(),
+                        "Status": e.get("status", "PENDING").upper(),
                         "Country": e["params"].get("country", ""),
                         "Revision": e["params"].get(
                             "revision", e["params"].get("version", "")
