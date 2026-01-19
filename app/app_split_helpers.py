@@ -681,6 +681,9 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     # Force refresh when queue is running to catch external updates (e.g., Cloud Scheduler)
     # Use conditional refresh when queue is stopped to reduce API calls
     is_queue_running = st.session_state.get("queue_running", False)
+    logger.debug(
+        f"[STATUS_MONITOR] Refreshing queue (force={is_queue_running})"
+    )
     maybe_refresh_queue_from_gcs(force=is_queue_running)
     queue = st.session_state.get("job_queue", [])
     for job in queue:
