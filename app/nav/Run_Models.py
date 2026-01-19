@@ -3156,7 +3156,11 @@ with tab_queue:
 # ===================== STATUS TAB =====================
 with tab_status:
 
-    # Job Status Monitor
+    # Auto-refresh and tick mechanism (runs even when expander is collapsed)
+    # This advances the queue by checking job statuses and launching pending jobs
+    _auto_refresh_and_tick(interval_ms=2000)
+
+    # Job Status Monitor (auto-refreshes every 5s via fragment)
     render_job_status_monitor(key_prefix="status")
 
     with st.expander("📋 Current Queue", expanded=False):
@@ -3207,9 +3211,7 @@ with tab_status:
             st.toast("Ticked queue")
             st.rerun()
 
-        _auto_refresh_and_tick(interval_ms=2000)
-
-        # Queue table
+        # Queue table (refresh to show latest from GCS)
         maybe_refresh_queue_from_gcs()
         st.caption(
             f"GCS saved_at: {st.session_state.get('queue_saved_at') or '—'} · "
