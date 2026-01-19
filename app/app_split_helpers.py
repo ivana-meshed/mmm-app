@@ -753,12 +753,22 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                         logger.info(
                             f"[STATUS_MONITOR] Job {job.get('id')} progressed from LAUNCHING to RUNNING"
                         )
+                    elif cloud_run_status == "RUNNING":
+                        # Cloud Run says RUNNING - always display as RUNNING
+                        display_status = "RUNNING"
+                        # Update queue if it's not already RUNNING
+                        if job.get("status") != "RUNNING":
+                            should_update = True
+                            job["status"] = "RUNNING"
+                            logger.info(
+                                f"[STATUS_MONITOR] Job {job.get('id')} updated to RUNNING from {job.get('status')}"
+                            )
                     else:
-                        # Keep queue status, display Cloud Run status but don't update queue
-                        # This prevents downgrading from RUNNING to PENDING
-                        display_status = job.get("status")  # Use queue status for display
+                        # For any other case, use Cloud Run status for display
+                        # But don't downgrade queue status (keep queue intact if it's further along)
+                        display_status = cloud_run_status
                         logger.debug(
-                            f"[STATUS_MONITOR] Job {job.get('id')} keeping queue status {display_status} (Cloud Run: {cloud_run_status})"
+                            f"[STATUS_MONITOR] Job {job.get('id')} displaying Cloud Run status {display_status} (queue: {job.get('status')})"
                         )
                     
                     if should_update:
