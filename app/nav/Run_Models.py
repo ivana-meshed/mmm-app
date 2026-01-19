@@ -3228,11 +3228,11 @@ with tab_status:
                     {
                         "ID": e["id"],
                         "Status": (
-                            # Check actual Cloud Run status for active jobs
+                            # Check actual Cloud Run status for all active jobs
                             (
                                 lambda exec_name: (
                                     job_manager.get_execution_status(exec_name).get("overall_status")
-                                    if exec_name and e.get("status") in ("RUNNING", "LAUNCHING")
+                                    if exec_name and e.get("status") in ("PENDING", "RUNNING", "LAUNCHING")
                                     else e.get("status")
                                 ) or e.get("status")
                             )(e.get("execution_name"))
