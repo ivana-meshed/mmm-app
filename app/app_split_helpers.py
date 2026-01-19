@@ -132,26 +132,31 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────
-# Session defaults
+# Session defaults - only initialize if session_state is available
 # ─────────────────────────────
-st.session_state.setdefault("job_executions", [])
-st.session_state.setdefault("gcs_bucket", GCS_BUCKET)
-st.session_state.setdefault("last_timings", None)
-st.session_state.setdefault("auto_refresh", False)
+try:
+    if hasattr(st, 'session_state'):
+        st.session_state.setdefault("job_executions", [])
+        st.session_state.setdefault("gcs_bucket", GCS_BUCKET)
+        st.session_state.setdefault("last_timings", None)
+        st.session_state.setdefault("auto_refresh", False)
 
-# Persistent Snowflake session objects/params
-st.session_state.setdefault("sf_params", None)
-st.session_state.setdefault("sf_connected", False)
-st.session_state.setdefault("sf_conn", None)
+        # Persistent Snowflake session objects/params
+        st.session_state.setdefault("sf_params", None)
+        st.session_state.setdefault("sf_connected", False)
+        st.session_state.setdefault("sf_conn", None)
 
-# Batch queue state
-st.session_state.setdefault("job_queue", [])  # list of dicts
-st.session_state.setdefault("queue_running", False)
+        # Batch queue state
+        st.session_state.setdefault("job_queue", [])  # list of dicts
+        st.session_state.setdefault("queue_running", False)
 
-# Persistent queue session vars
-st.session_state.setdefault("queue_name", DEFAULT_QUEUE_NAME)
-st.session_state.setdefault("queue_loaded_from_gcs", False)
-st.session_state.setdefault("queue_saved_at", None)
+        # Persistent queue session vars
+        st.session_state.setdefault("queue_name", DEFAULT_QUEUE_NAME)
+        st.session_state.setdefault("queue_loaded_from_gcs", False)
+        st.session_state.setdefault("queue_saved_at", None)
+except Exception:
+    # Session state not available yet, will be initialized by ensure_session_defaults() later
+    pass
 
 
 # ─────────────────────────────
