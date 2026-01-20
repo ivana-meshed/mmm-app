@@ -104,6 +104,8 @@ st.session_state.setdefault("paid_spend_selections", {})
 st.session_state.setdefault("paid_var_selections", {})
 # Toggle for filtering leading zero rows in quality indicators
 st.session_state.setdefault("filter_leading_zeros", False)
+# Track selections per goal to handle goal-specific configurations
+st.session_state.setdefault("goal_specific_selections", {})
 
 
 def _filter_leading_zeros_from_media_vars(
@@ -412,18 +414,7 @@ def nice_title(col: str) -> str:
         return pretty(raw)
 
 
-# Sidebar for timeframe and aggregation selection (no Goal selector for this page)
-# Countries
-if "COUNTRY" in df.columns:
-    country_list = sorted(df["COUNTRY"].dropna().astype(str).unique().tolist())
-    default_countries = country_list or []
-    sel_countries = st.sidebar.multiselect(
-        "Country", country_list, default=default_countries
-    )
-else:
-    sel_countries = []
-    st.sidebar.caption("Dataset has no COUNTRY column — showing all rows.")
-
+# Sidebar for timeframe and aggregation selection (no Goal selector, no Country selector for this page)
 # Timeframe - default to ALL for this page
 tf_label_map = {
     "ALL": "all",
@@ -449,7 +440,13 @@ agg_map = {
 agg_label = st.sidebar.selectbox("Aggregation", list(agg_map.keys()), index=0)
 FREQ = agg_map[agg_label]
 
-# Country filter
+# Country filter - apply but don't show in sidebar
+sel_countries = []
+if "COUNTRY" in df.columns:
+    country_list = sorted(df["COUNTRY"].dropna().astype(str).unique().tolist())
+    # Use all countries by default (no filtering)
+    sel_countries = country_list
+
 if sel_countries and "COUNTRY" in df.columns:
     df = df[df["COUNTRY"].astype(str).isin(sel_countries)].copy()
 
@@ -1163,6 +1160,24 @@ with st.expander(
             index=default_idx if goal_vars else None,
             key="selected_goal_dropdown",
         )
+        
+        # Detect goal change and save/restore selections per goal
+        prev_goal = st.session_state.get("selected_goal")
+        if prev_goal and prev_goal != selected_goal:
+            # Save current selections for the previous goal
+            st.session_state["goal_specific_selections"][prev_goal] = {
+                "paid_spend_selections": st.session_state.get("paid_spend_selections", {}).copy(),
+                "selected_paid_spends": st.session_state.get("selected_paid_spends", []).copy(),
+                "vif_selections": st.session_state.get("vif_selections", {}).copy(),
+            }
+            
+            # Restore selections for the new goal if they exist
+            if selected_goal in st.session_state["goal_specific_selections"]:
+                saved = st.session_state["goal_specific_selections"][selected_goal]
+                st.session_state["paid_spend_selections"] = saved.get("paid_spend_selections", {}).copy()
+                st.session_state["selected_paid_spends"] = saved.get("selected_paid_spends", []).copy()
+                st.session_state["vif_selections"] = saved.get("vif_selections", {}).copy()
+        
         st.session_state["selected_goal"] = selected_goal
 
     # 3.2 Select Paid Media Spends to optimize
@@ -1268,14 +1283,19 @@ with st.expander(
                     {
                         "Select": is_selected,
                         "Paid Media Spend": spend_col,
+                        "Spearman's ρ": _safe_float(spearman_rho),
                         "R²": _safe_float(r2),
                         "NMAE": _safe_float(nmae),
-                        "Spearman's ρ": _safe_float(spearman_rho),
                     }
                 )
 
         if metrics_data:
             metrics_df = pd.DataFrame(metrics_data)
+            
+            # Sort by Spearman's ρ descending (highest first)
+            metrics_df = metrics_df.sort_values(
+                by="Spearman's ρ", ascending=False, na_position="last"
+            ).reset_index(drop=True)
 
             # Display editable table
             edited_metrics = st.data_editor(
@@ -1288,21 +1308,25 @@ with st.expander(
                     "Paid Media Spend": st.column_config.TextColumn(
                         "Paid Media Spend", disabled=True
                     ),
-                    "R²": st.column_config.NumberColumn("R²", format="%.4f"),
-                    "NMAE": st.column_config.NumberColumn(
-                        "NMAE", format="%.4f"
-                    ),
                     "Spearman's ρ": st.column_config.NumberColumn(
-                        "Spearman's ρ", format="%.4f"
+                        "Spearman's ρ", format="%.4f", disabled=True
+                    ),
+                    "R²": st.column_config.NumberColumn("R²", format="%.4f", disabled=True),
+                    "NMAE": st.column_config.NumberColumn(
+                        "NMAE", format="%.4f", disabled=True
                     ),
                 },
                 key="paid_spends_metrics_table",
             )
 
             # Update session state with current selections
+            selection_changed = False
             for _, row in edited_metrics.iterrows():
                 spend_col = row["Paid Media Spend"]
                 is_selected = bool(row["Select"])
+                old_val = st.session_state["paid_spend_selections"].get(spend_col)
+                if old_val != is_selected:
+                    selection_changed = True
                 st.session_state["paid_spend_selections"][
                     spend_col
                 ] = is_selected
@@ -1312,6 +1336,10 @@ with st.expander(
                 "Paid Media Spend"
             ].tolist()
             st.session_state["selected_paid_spends"] = selected_paid_spends
+            
+            # Trigger rerun if selections changed to refresh dependent sections
+            if selection_changed:
+                st.rerun()
 
     # 3.3 Select Media Response Variables
     st.markdown("---")
@@ -1446,14 +1474,19 @@ with st.expander(
                     var_metrics_data.append(
                         {
                             "Media Response Variable": label,
+                            "Spearman's ρ": _safe_float(spearman_rho),
                             "R²": _safe_float(r2),
                             "NMAE": _safe_float(nmae),
-                            "Spearman's ρ": _safe_float(spearman_rho),
                         }
                     )
 
             if var_metrics_data:
                 var_metrics_df = pd.DataFrame(var_metrics_data)
+                
+                # Sort by Spearman's ρ descending (highest first)
+                var_metrics_df = var_metrics_df.sort_values(
+                    by="Spearman's ρ", ascending=False, na_position="last"
+                ).reset_index(drop=True)
 
                 # Dropdown to select the media response variable
                 st.selectbox(
@@ -1471,14 +1504,14 @@ with st.expander(
                         "Media Response Variable": st.column_config.TextColumn(
                             "Media Response Variable"
                         ),
+                        "Spearman's ρ": st.column_config.NumberColumn(
+                            "Spearman's ρ", format="%.4f"
+                        ),
                         "R²": st.column_config.NumberColumn(
                             "R²", format="%.4f"
                         ),
                         "NMAE": st.column_config.NumberColumn(
                             "NMAE", format="%.4f"
-                        ),
-                        "Spearman's ρ": st.column_config.NumberColumn(
-                            "Spearman's ρ", format="%.4f"
                         ),
                     },
                 )
@@ -1805,15 +1838,23 @@ with st.expander(
                 {
                     "Use": use_val,
                     "Variable": var_col,
+                    "Spearman's ρ": _safe_float(spearman_rho),
                     "R²": _safe_float(r2),
                     "NMAE": _safe_float(nmae),
-                    "Spearman's ρ": _safe_float(spearman_rho),
                     "VIF": _format_vif_value(_safe_float(vif)),
                     "VIF Band": vif_band,
                 }
             )
 
-        return pd.DataFrame(metrics_data)
+        metrics_df = pd.DataFrame(metrics_data)
+        
+        # Sort by Spearman's ρ descending (highest first) if there are rows
+        if not metrics_df.empty:
+            metrics_df = metrics_df.sort_values(
+                by="Spearman's ρ", ascending=False, na_position="last"
+            ).reset_index(drop=True)
+        
+        return metrics_df
 
     def _format_vif_value(vif: float) -> str:
         """Format VIF value for display.
@@ -1913,14 +1954,14 @@ with st.expander(
                 "Variable": st.column_config.TextColumn(
                     "Variable", disabled=True
                 ),
+                "Spearman's ρ": st.column_config.NumberColumn(
+                    "Spearman's ρ", format="%.4f", disabled=True
+                ),
                 "R²": st.column_config.NumberColumn(
                     "R²", format="%.4f", disabled=True
                 ),
                 "NMAE": st.column_config.NumberColumn(
                     "NMAE", format="%.4f", disabled=True
-                ),
-                "Spearman's ρ": st.column_config.NumberColumn(
-                    "Spearman's ρ", format="%.4f", disabled=True
                 ),
                 "VIF": st.column_config.TextColumn(
                     "VIF",
@@ -2458,6 +2499,13 @@ with st.expander(
                     "shared_save_timestamp",
                     format_cet_timestamp(),
                 )
+                
+                # Store the timestamp back to session state for consistency
+                if not st.session_state.get("shared_save_timestamp"):
+                    st.session_state["shared_save_timestamp"] = timestamp
+                
+                # Add timestamp to export data for Run Models page to use
+                export_data["timestamp"] = timestamp
 
                 # Create temporary file
                 with tempfile.NamedTemporaryFile(
@@ -2481,7 +2529,7 @@ with st.expander(
                     f"**Organic Vars:** {len([v for v in selected_organic_step4 if v in final_vars])}\n"
                     f"**Context Vars:** {len([v for v in selected_context_step4 if v in final_vars])}\n"
                     f"**Factor Vars:** {len([v for v in selected_factor_step4 if v in final_vars])}\n\n"
-                    "👉 Navigate to **Experiment** page to see prefilled values."
+                    "👉 Navigate to **Run Models** page to see prefilled values."
                 )
             except Exception as e:
                 st.error(f"Failed to export training settings: {e}")
