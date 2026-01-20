@@ -189,6 +189,74 @@ def _load_from_snowflake_cached(sql: str) -> pd.DataFrame:
     return run_sql(sql)
 
 
+def _simplify_error_message(error_msg: str, data_source: str, country: str) -> str:
+    """
+    Convert technical database errors into user-friendly messages.
+    
+    Args:
+        error_msg: The raw error message from the database
+        data_source: The data source type (Snowflake, BigQuery, CSV Upload)
+        country: The country code being processed
+        
+    Returns:
+        A simplified, user-friendly error message
+    """
+    error_lower = error_msg.lower()
+    
+    # Snowflake invalid identifier errors
+    if "invalid identifier" in error_lower and data_source == "Snowflake":
+        # Extract the invalid column name if present
+        import re
+        match = re.search(r"invalid identifier ['\"]?(\w+)['\"]?", error_lower)
+        if match:
+            col_name = match.group(1).upper()
+            return f"Column '{col_name}' not found in Snowflake table. Check your country field name or table structure."
+        return "Invalid column name in Snowflake query. Check your country field name."
+    
+    # BigQuery table qualification errors
+    if "must be qualified with a dataset" in error_lower and data_source == "BigQuery":
+        # Extract table name if present
+        import re
+        match = re.search(r'table ["\']?(\w+)["\']?', error_lower, re.IGNORECASE)
+        if match:
+            table_name = match.group(1)
+            return f"Table '{table_name}' needs dataset qualification. Use format: project.dataset.table (e.g., 'my-project.my_dataset.{table_name}')"
+        return "Table name needs dataset qualification. Use format: project.dataset.table"
+    
+    # BigQuery syntax errors
+    if "syntax error" in error_lower and data_source == "BigQuery":
+        return "SQL syntax error in BigQuery query. Check your table name and SQL syntax."
+    
+    # Snowflake SQL compilation errors
+    if "sql compilation error" in error_lower and data_source == "Snowflake":
+        # Try to extract the specific error
+        import re
+        match = re.search(r"error line \d+ at position \d+ (.+?)(?:\.|$)", error_lower)
+        if match:
+            specific_error = match.group(1).strip()
+            return f"SQL error in Snowflake: {specific_error}. Check your query syntax and column names."
+        return "SQL compilation error in Snowflake. Check your table name, country field, and query syntax."
+    
+    # Connection errors
+    if "connection" in error_lower or "timeout" in error_lower:
+        return f"Connection problem with {data_source}. Check your network and credentials."
+    
+    # Permission errors
+    if "permission" in error_lower or "access denied" in error_lower or "forbidden" in error_lower:
+        return f"Permission denied for {data_source}. Check your access rights to the table."
+    
+    # Table not found errors
+    if "does not exist" in error_lower or "not found" in error_lower or "unknown table" in error_lower:
+        return f"Table not found in {data_source}. Check that the table name is correct and you have access."
+    
+    # If error is very long (> 200 chars), truncate but keep the beginning
+    if len(error_msg) > 200:
+        return error_msg[:197] + "..."
+    
+    # Return original error if we can't simplify it
+    return error_msg
+
+
 # --- Session bootstrap (call once, early) ---
 def _init_state():
     st.session_state.setdefault("country", "de")
@@ -1448,17 +1516,26 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                 f"✅ {country.upper()}: {load_method}"
                             )
                         else:
-                            failed_countries.append(country)
-                            load_details.append(
-                                f"❌ {country.upper()}: {load_method or 'No data'}"
-                            )
+                            # Country has no data (0 rows or None)
+                            if df is not None and df.empty:
+                                # Data source returned empty result
+                                load_details.append(
+                                    f"⚠️ {country.upper()}: Skipped - No data found (0 rows)"
+                                )
+                            else:
+                                # df is None - data source had no data
+                                failed_countries.append(country)
+                                load_details.append(
+                                    f"❌ {country.upper()}: {load_method or 'No data available'}"
+                                )
 
                     except Exception as e:
                         failed_countries.append(country)
-                        # Show full error message for debugging
+                        # Parse and simplify error message for business users
                         error_msg = str(e)
+                        user_friendly_error = _simplify_error_message(error_msg, choice, country)
                         load_details.append(
-                            f"❌ {country.upper()}: Error - {error_msg}"
+                            f"❌ {country.upper()}: {user_friendly_error}"
                         )
 
             # Update session state
