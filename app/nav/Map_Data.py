@@ -1316,14 +1316,16 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                     )
                                 
                                 # Log the SQL for debugging
-                                st.write(f"DEBUG: Executing SQL for {country.upper()}: {sql}")
+                                st.write(f"Executing SQL for {country.upper()}: {sql}")
                                 
                                 df = _load_from_snowflake_cached(sql)
                                 
-                                # Validate that country field exists in the data
+                                # Validate that country field exists in the data (case-insensitive)
                                 if df is not None and not df.empty and not st.session_state["sf_sql"].strip():
                                     country_field = st.session_state.get("sf_country_field", "COUNTRY").strip()
-                                    if country_field not in df.columns:
+                                    # Case-insensitive column name matching
+                                    df_columns_lower = {col.lower(): col for col in df.columns}
+                                    if country_field.lower() not in df_columns_lower:
                                         raise ValueError(
                                             f"Country field '{country_field}' not found in Snowflake table. "
                                             f"Available columns: {', '.join(df.columns.tolist())}. "
@@ -1365,10 +1367,12 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                 bq_client, sql, fetch_pandas=True
                             )
                             
-                            # Validate that country field exists in the data
+                            # Validate that country field exists in the data (case-insensitive)
                             if df is not None and not df.empty and not bq_sql.strip():
                                 country_field = st.session_state.get("bq_country_field", "country").strip()
-                                if country_field not in df.columns:
+                                # Case-insensitive column name matching
+                                df_columns_lower = {col.lower(): col for col in df.columns}
+                                if country_field.lower() not in df_columns_lower:
                                     raise ValueError(
                                         f"Country field '{country_field}' not found in BigQuery table. "
                                         f"Available columns: {', '.join(df.columns.tolist())}. "
