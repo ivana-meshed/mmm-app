@@ -983,20 +983,17 @@ st.header("1. Select Dataset")
 with st.expander("📊 Choose the data you want to analyze.", expanded=False):
     
     # ═══════════════════════════════════════════════════════════
-    # STEP 1.1: Data Source Type Selection (Radio Buttons)
+    # STEP 1.1: Data Source Type Selection (Dropdown)
     # ═══════════════════════════════════════════════════════════
-    st.subheader("1.1 Choose Data Source Type")
+    st.markdown("#### 1.1 Choose Data Source Type")
     
-    # Radio button for primary selection (horizontal layout)
-    data_source_mode = st.radio(
+    # Dropdown for primary selection
+    data_source_mode = st.selectbox(
         "How would you like to load data?",
         options=["Load previously saved data from GCS", "Connect and load new dataset"],
         key="data_source_mode",
-        horizontal=True,
         help="Choose whether to load already saved data or connect to a new data source"
     )
-    
-    st.divider()
     
     @_fragment()
     def step1_loader():
@@ -1020,8 +1017,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
         # ═══════════════════════════════════════════════════════════
         # STEP 1.2: Data Source Selection Based on Mode
         # ═══════════════════════════════════════════════════════════
-        st.divider()
-        st.subheader("1.2 Select Data Source")
+        st.markdown("#### 1.2 Select Data Source")
         
         # Get data source mode from radio button
         data_source_mode = st.session_state.get("data_source_mode", "Load previously saved data from GCS")
@@ -1164,7 +1160,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
         # STEP 1.3: Country Selection
         # ═══════════════════════════════════════════════════════════
         st.divider()
-        st.subheader("1.3 Select Countries")
+        st.markdown("#### 1.3 Select Countries")
         
         # Country picker (ISO2, GCS-first) as multiselect
         c1, c2, c3 = st.columns([3, 0.8, 0.8])
