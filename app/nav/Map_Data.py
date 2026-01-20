@@ -1286,6 +1286,10 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                     sql = st.session_state["sf_sql"].replace(
                                         "{country}", country.upper()
                                     )
+                                
+                                # Log the SQL for debugging
+                                st.write(f"DEBUG: Executing SQL for {country.upper()}: {sql}")
+                                
                                 df = _load_from_snowflake_cached(sql)
                                 load_method = f"Snowflake ({len(df) if df is not None else 0} rows)"
 
@@ -1397,8 +1401,10 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
 
                     except Exception as e:
                         failed_countries.append(country)
+                        # Show full error message for debugging
+                        error_msg = str(e)
                         load_details.append(
-                            f"❌ {country.upper()}: Error - {str(e)[:50]}"
+                            f"❌ {country.upper()}: Error - {error_msg}"
                         )
 
             # Update session state
