@@ -24,11 +24,11 @@ from app_shared import (
     parse_train_size,
     require_login_and_domain,
     run_sql,
+    safe_read_parquet,
     timed_step,
     upload_to_gcs,
 )
 from google.cloud import storage
-
 from utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 data_processor = get_data_processor()
@@ -408,7 +408,7 @@ with tab_single:
                     ) as tmp:
                         tmp_path = tmp.name
                         _download_from_gcs(gcs_bucket, blob_path, tmp_path)
-                        df_prev = pd.read_parquet(tmp_path)
+                        df_prev = safe_read_parquet(tmp_path)
                         st.session_state["preview_df"] = df_prev
                         st.session_state["selected_country"] = selected_country
                         st.session_state["selected_version"] = selected_version
@@ -876,7 +876,9 @@ with tab_single:
             agg_summary = ", ".join(
                 [f"{count} {agg}" for agg, count in sorted(agg_counts.items())]
             )
-            st.info(f"ℹ️ Using column aggregations from metadata: {agg_summary}")
+            st.info(
+                f"ℹ️ Using column aggregations from metadata: {agg_summary}"
+            )
         elif resample_freq != "none" and not column_agg_strategies:
             st.warning(
                 "⚠️ No column aggregations found in metadata. Default 'sum' will be used for all numeric columns."
@@ -1751,7 +1753,9 @@ with tab_single:
             )
         else:
             combined_revision = ""
-            st.warning("⚠️ Please select or create a tag for the experiment run")
+            st.warning(
+                "⚠️ Please select or create a tag for the experiment run"
+            )
 
         # For backward compatibility, create a combined "revision" field
         revision = combined_revision
@@ -1761,12 +1765,12 @@ with tab_single:
         st.caption(
             "Save the current model settings so you can reuse them later."
         )
-        
+
         # Add checkbox to toggle visibility of save settings fields
         save_settings_enabled = st.checkbox(
             "Save Model Settings",
             value=False,
-            help="Enable this to save model settings for reuse later"
+            help="Enable this to save model settings for reuse later",
         )
 
         # Only show fields if checkbox is checked
@@ -1778,18 +1782,18 @@ with tab_single:
                 placeholder="e.g., gmv_model_v1",
                 help="Name for this training configuration",
             )
-            
+
             # Use available countries from Select Data section
             available_countries_for_multi = st.session_state.get(
                 "run_models_available_countries", ["de"]
             )
-            
+
             # Default to ALL available countries
             config_countries = st.multiselect(
                 "Select countries",
                 options=available_countries_for_multi,
                 default=available_countries_for_multi,  # All countries selected by default
-                help="Model settings will be saved for all selected countries"
+                help="Model settings will be saved for all selected countries",
             )
 
             # Add action buttons - removed "Save settings & Add to Queue", renamed last button
@@ -1804,9 +1808,9 @@ with tab_single:
                 "▶️ Save Settings & Run Now",
                 width="stretch",
                 key="add_and_start_btn",
-                type="primary"
+                type="primary",
             )
-            
+
             # Set flag for removed button to False
             add_to_queue_clicked = False
         else:
@@ -1818,7 +1822,7 @@ with tab_single:
 
         # Add Download as CSV button
         st.markdown("---")
-        
+
         # Info box explaining CSV usage for batch run
         st.info(
             "💡 **Download as CSV Template**: Download current model settings as a CSV file. "
@@ -1839,15 +1843,21 @@ with tab_single:
 
         # Build CSV rows for ALL selected countries (not just current one)
         # Get countries to include in CSV based on whether save settings is enabled
-        csv_countries = config_countries if save_settings_enabled and config_countries else [country]
-        
+        csv_countries = (
+            config_countries
+            if save_settings_enabled and config_countries
+            else [country]
+        )
+
         csv_rows = []
         for ctry in csv_countries:
             csv_row = {
                 "country": ctry,
                 "revision": revision,
                 "revision_tag": (
-                    revision_tag if revision_tag != "-- Create New Tag --" else ""
+                    revision_tag
+                    if revision_tag != "-- Create New Tag --"
+                    else ""
                 ),
                 "revision_number": (
                     revision_number
@@ -1889,7 +1899,7 @@ with tab_single:
                         custom_hyperparameters, adstock
                     )
                 )
-            
+
             csv_rows.append(csv_row)
 
         csv_df = pd.DataFrame(csv_rows)
@@ -2192,23 +2202,25 @@ with tab_single:
     # This is used for multi-country training
     # If Save Model Settings is enabled and countries are selected, use those
     # Otherwise, show a country selector above the training buttons
-    
+
     # Check if save settings is enabled and has countries selected
-    save_settings_has_countries = save_settings_enabled and len(config_countries) > 0
-    
+    save_settings_has_countries = (
+        save_settings_enabled and len(config_countries) > 0
+    )
+
     if not save_settings_has_countries:
         # Show country selector above training buttons when Save Model Settings is not enabled
         available_countries_for_training = st.session_state.get(
             "run_models_available_countries", []
         )
-        
+
         if available_countries_for_training:
             st.markdown("**Select Countries for Training**")
             multi_country_list = st.multiselect(
                 "Countries to train",
                 options=available_countries_for_training,
                 default=available_countries_for_training,  # All countries preselected
-                help="Select which countries to train models for"
+                help="Select which countries to train models for",
             )
         else:
             multi_country_list = []
@@ -2227,7 +2239,7 @@ with tab_single:
             width="stretch",
             key="start_multi_training_job_btn",
             help=f"Start training jobs in parallel for {len(multi_country_list)} selected countries",
-            disabled=len(multi_country_list) == 0
+            disabled=len(multi_country_list) == 0,
         )
 
     with col_single:
@@ -3244,7 +3256,9 @@ with tab_status:
             st.rerun()
 
         # Queue table (refresh to show latest from GCS)
-        maybe_refresh_queue_from_gcs(force=True)  # Always force refresh for Current Queue
+        maybe_refresh_queue_from_gcs(
+            force=True
+        )  # Always force refresh for Current Queue
         st.caption(
             f"GCS saved_at: {st.session_state.get('queue_saved_at') or '—'} · "
             f"{sum(e['status']=='PENDING' for e in st.session_state.job_queue)} pending · "

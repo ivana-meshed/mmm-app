@@ -17,9 +17,8 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 import streamlit as st
-from utils.validation import validate_training_config
-
 from utils.gcs_utils import get_cet_now
+from utils.validation import validate_training_config
 
 logger = logging.getLogger(__name__)
 

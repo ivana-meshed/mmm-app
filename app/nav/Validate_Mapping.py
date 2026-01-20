@@ -49,7 +49,6 @@ from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.preprocessing import PolynomialFeatures
-
 from utils.gcs_utils import get_cet_now
 
 # Note: st.set_page_config() removed - it conflicts with custom navigation in streamlit_app.py
@@ -153,7 +152,7 @@ with tab_load:
                 # Validate & notify
                 report = validate_against_metadata(df, meta)
                 st.success(
-                    f"Loaded {len(df):,} rows from gs://{GCS_BUCKET}/{db} and metadata gs://{GCS_BUCKET}/{mb}"
+                    f"✅ Successfully loaded {len(df):,} rows from gs://{GCS_BUCKET}/{db} and metadata gs://{GCS_BUCKET}/{mb}"
                 )
 
                 c_extra, _ = st.columns([1, 1])
@@ -170,8 +169,35 @@ with tab_load:
                     )
                 else:
                     st.caption("No type mismatches detected (coarse check).")
+            except ValueError as e:
+                # Specific handling for data type errors
+                st.error(f"❌ Data type error: {e}")
+                st.info(
+                    "💡 **Tip**: This error often occurs when the data contains "
+                    "database-specific types (like 'dbdate' from BigQuery). "
+                    "The data should be re-exported with standard types, or the "
+                    "source data connector should handle type conversion."
+                )
+                with st.expander("🔧 Technical Details"):
+                    st.code(str(e), language="text")
+                    import traceback
+
+                    st.code(traceback.format_exc(), language="text")
+            except FileNotFoundError as e:
+                st.error(f"❌ File not found: {e}")
+                st.info(
+                    "💡 **Tip**: Make sure the data and metadata files exist in GCS. "
+                    "You may need to upload data first in the Connect Data page."
+                )
             except Exception as e:
-                st.error(f"Load failed: {e}")
+                st.error(f"❌ Load failed: {e}")
+                st.info(
+                    "💡 **Tip**: Check the technical details below for more information."
+                )
+                with st.expander("🔧 Technical Details"):
+                    import traceback
+
+                    st.code(traceback.format_exc(), language="text")
 
 # -----------------------------
 # State

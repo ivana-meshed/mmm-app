@@ -11,6 +11,7 @@ from app_shared import (
     download_json_from_gcs_cached,
     download_parquet_from_gcs_cached,
     require_login_and_domain,
+    safe_read_parquet,
 )
 from app_split_helpers import ensure_session_defaults
 from google.cloud import storage
@@ -43,8 +44,7 @@ st.title("Review Model Stability")
 
 # Add helpful documentation at the top
 with st.expander("ℹ️ About This Page", expanded=False):
-    st.markdown(
-        """
+    st.markdown("""
         ### Purpose
         This page analyzes the **stability of your Robyn MMM models** across multiple model iterations 
         within a single training run. It helps you understand:
@@ -76,8 +76,7 @@ with st.expander("ℹ️ About This Page", expanded=False):
         - **decomp.rssd**: Decomposition residual sum of squares
         
         Choose from presets (Good, Acceptable, All) or set custom thresholds.
-        """
-    )
+        """)
 
 st.markdown("---")
 
@@ -221,7 +220,7 @@ def load_raw_spend(path: str) -> pd.DataFrame | None:
         return None
 
     try:
-        df = pd.read_parquet(path)
+        df = safe_read_parquet(path)
         if "DATE" in df.columns:
             df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
         return df
