@@ -24,6 +24,7 @@ from app_shared import (
     parse_train_size,
     require_login_and_domain,
     run_sql,
+    safe_read_parquet,
     timed_step,
     upload_to_gcs,
 )
@@ -407,7 +408,7 @@ with tab_single:
                     ) as tmp:
                         tmp_path = tmp.name
                         _download_from_gcs(gcs_bucket, blob_path, tmp_path)
-                        df_prev = pd.read_parquet(tmp_path)
+                        df_prev = safe_read_parquet(tmp_path)
                         st.session_state["preview_df"] = df_prev
                         st.session_state["selected_country"] = selected_country
                         st.session_state["selected_version"] = selected_version

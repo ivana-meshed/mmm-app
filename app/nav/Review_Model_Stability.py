@@ -11,6 +11,7 @@ from app_shared import (
     download_json_from_gcs_cached,
     download_parquet_from_gcs_cached,
     require_login_and_domain,
+    safe_read_parquet,
 )
 from app_split_helpers import ensure_session_defaults
 from google.cloud import storage
@@ -219,7 +220,7 @@ def load_raw_spend(path: str) -> pd.DataFrame | None:
         return None
 
     try:
-        df = pd.read_parquet(path)
+        df = safe_read_parquet(path)
         if "DATE" in df.columns:
             df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
         return df

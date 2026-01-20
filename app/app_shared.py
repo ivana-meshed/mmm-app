@@ -2146,6 +2146,39 @@ def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
             raise
 
 
+def safe_read_parquet(file_path: str) -> pd.DataFrame:
+    """
+    Safely read a parquet file with database-specific type handling.
+
+    Handles database-specific types (dbdate, dbtime, etc.) that may come from
+    BigQuery/Snowflake exports by logging warnings and allowing downstream
+    processing to handle them.
+
+    Args:
+        file_path: Path to the parquet file
+
+    Returns:
+        DataFrame with the parquet data
+    """
+    try:
+        df = pd.read_parquet(file_path)
+
+        # Check for database-specific types
+        db_types = [
+            col for col in df.columns if str(df[col].dtype).startswith("db")
+        ]
+        if db_types:
+            logger.warning(
+                f"Found database-specific types in columns: {db_types}. "
+                "These should be handled during date parsing."
+            )
+
+        return df
+    except Exception as e:
+        logger.error(f"Error reading parquet file from {file_path}: {e}")
+        raise
+
+
 def _download_json_from_gcs(bucket: str, blob_path: str) -> dict:
     client = storage.Client()
     blob = client.bucket(bucket).blob(blob_path)

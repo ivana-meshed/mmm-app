@@ -131,11 +131,19 @@ with tab_load:
                 )
 
                 # Download
+                st.info(f"📥 Downloading data from: gs://{GCS_BUCKET}/{db}")
                 df = download_parquet_from_gcs_cached(GCS_BUCKET, db)
+                st.info(
+                    f"✓ Loaded {len(df):,} rows with {len(df.columns)} columns"
+                )
+
+                st.info(f"📥 Downloading metadata from: gs://{GCS_BUCKET}/{mb}")
                 meta = download_json_from_gcs_cached(GCS_BUCKET, mb)
 
                 # Parse dates using metadata
+                st.info("📅 Parsing date column...")
                 df, date_col = parse_date(df, meta)
+                st.info(f"✓ Successfully parsed date column: {date_col}")
 
                 # Persist in session
                 st.session_state["df"] = df
@@ -148,7 +156,7 @@ with tab_load:
                 # Validate & notify
                 report = validate_against_metadata(df, meta)
                 st.success(
-                    f"Loaded {len(df):,} rows from gs://{GCS_BUCKET}/{db} and metadata gs://{GCS_BUCKET}/{mb}"
+                    f"✅ Successfully loaded {len(df):,} rows from gs://{GCS_BUCKET}/{db} and metadata gs://{GCS_BUCKET}/{mb}"
                 )
 
                 c_extra, _ = st.columns([1, 1])
@@ -165,8 +173,35 @@ with tab_load:
                     )
                 else:
                     st.caption("No type mismatches detected (coarse check).")
+            except ValueError as e:
+                # Specific handling for data type errors
+                st.error(f"❌ Data type error: {e}")
+                st.info(
+                    "💡 **Tip**: This error often occurs when the data contains "
+                    "database-specific types (like 'dbdate' from BigQuery). "
+                    "The data should be re-exported with standard types, or the "
+                    "source data connector should handle type conversion."
+                )
+                with st.expander("🔧 Technical Details"):
+                    st.code(str(e), language="text")
+                    import traceback
+
+                    st.code(traceback.format_exc(), language="text")
+            except FileNotFoundError as e:
+                st.error(f"❌ File not found: {e}")
+                st.info(
+                    "💡 **Tip**: Make sure the data and metadata files exist in GCS. "
+                    "You may need to upload data first in the Connect Data page."
+                )
             except Exception as e:
-                st.error(f"Load failed: {e}")
+                st.error(f"❌ Load failed: {e}")
+                st.info(
+                    "💡 **Tip**: Check the technical details below for more information."
+                )
+                with st.expander("🔧 Technical Details"):
+                    import traceback
+
+                    st.code(traceback.format_exc(), language="text")
 
 # -----------------------------
 # State

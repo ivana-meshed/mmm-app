@@ -119,6 +119,10 @@ def _list_metadata_versions(bucket: str, country: str) -> List[str]:
 
 
 def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
+    """Download parquet file from GCS with database-specific type handling."""
+    import logging
+
+    logger = logging.getLogger(__name__)
     client = storage.Client()
     b = client.bucket(gs_bucket)
     blob = b.blob(blob_path)
@@ -126,8 +130,31 @@ def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
         raise FileNotFoundError(f"gs://{gs_bucket}/{blob_path} not found")
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         blob.download_to_filename(tmp.name)
-        df = pd.read_parquet(tmp.name)
-    return df
+        try:
+            df = pd.read_parquet(tmp.name)
+
+            # Log data types for debugging
+            logger.info(
+                f"Loaded parquet from gs://{gs_bucket}/{blob_path}: "
+                f"{len(df)} rows, {len(df.columns)} columns"
+            )
+
+            # Check for database-specific types (dbdate, dbtime, etc.)
+            db_types = [
+                col for col in df.columns if str(df[col].dtype).startswith("db")
+            ]
+            if db_types:
+                logger.warning(
+                    f"Found database-specific types in columns: {db_types}. "
+                    "These will be handled during date parsing."
+                )
+
+            return df
+        except Exception as e:
+            logger.error(
+                f"Error reading parquet file from gs://{gs_bucket}/{blob_path}: {e}"
+            )
+            raise
 
 
 def _save_raw_to_gcs(
