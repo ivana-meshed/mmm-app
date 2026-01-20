@@ -983,17 +983,20 @@ st.header("1. Select Dataset")
 with st.expander("📊 Choose the data you want to analyze.", expanded=False):
     
     # ═══════════════════════════════════════════════════════════
-    # STEP 1.1: Data Source Type Selection (Dropdown)
+    # STEP 1.1: Data Source Type Selection (Radio Buttons)
     # ═══════════════════════════════════════════════════════════
     st.markdown("#### 1.1 Choose Data Source Type")
     
-    # Dropdown for primary selection
-    data_source_mode = st.selectbox(
+    # Radio button for primary selection (horizontal layout)
+    data_source_mode = st.radio(
         "How would you like to load data?",
         options=["Load previously saved data from GCS", "Connect and load new dataset"],
         key="data_source_mode",
+        horizontal=True,
         help="Choose whether to load already saved data or connect to a new data source"
     )
+    
+    st.divider()
     
     @_fragment()
     def step1_loader():
@@ -1022,36 +1025,14 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
         # Get data source mode from radio button
         data_source_mode = st.session_state.get("data_source_mode", "Load previously saved data from GCS")
         
-        # Split options into two categories
-        # 1. Previously loaded data (GCS versions)
-        saved_data_options = ["Latest"] + [v for v in versions if v != "Latest"]
-
-        # 2. New data sources (Snowflake, BigQuery, CSV)
-        # Build new source options with connection status
-        new_source_options = []
-        
-        # Check Snowflake connection
-        sf_connected = st.session_state.get("sf_connected", False)
-        new_source_options.append(("Snowflake", sf_connected))
-        
-        # Check BigQuery connection
-        bq_connected = (
-            st.session_state.get("bq_connected", False)
-            and st.session_state.get("bq_client") is not None
-        )
-        new_source_options.append(("BigQuery", bq_connected))
-        
-        # Check CSV upload
-        csv_connected = (
-            st.session_state.get("csv_connected", False)
-            and st.session_state.get("csv_data") is not None
-        )
-        new_source_options.append(("CSV Upload", csv_connected))
-        
         # Show appropriate UI based on mode
         if data_source_mode == "Load previously saved data from GCS":
             # Show GCS version selector
             st.info("📦 Loading from previously saved datasets in GCS")
+            
+            # Split options into two categories
+            # 1. Previously loaded data (GCS versions)
+            saved_data_options = ["Latest"] + [v for v in versions if v != "Latest"]
             
             current_source = st.session_state.get("source_choice", "Latest")
             if current_source not in saved_data_options:
@@ -1066,46 +1047,54 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
             )
             
         else:
-            # Show new data source options with connection status
-            st.info("🔌 Connect to a new data source")
-            
-            # Display available options with connection status
-            for source_name, is_connected in new_source_options:
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.write(f"**{source_name}**")
-                with col2:
-                    if is_connected:
-                        st.success("✅ Connected")
-                    else:
-                        st.warning("⚠️ Not connected")
-            
-            st.caption("💡 Connect to data sources in the **Connect Data** page")
-            
-            # Filter to show only connected sources, or all if none connected
-            connected_sources = [name for name, connected in new_source_options if connected]
-            
-            if not connected_sources:
-                st.warning(
-                    "⚠️ No data sources are connected. Please go to **Connect Data** page to set up a connection."
-                )
-                # Still allow selection but show all options
-                available_sources = [name for name, _ in new_source_options]
-            else:
-                available_sources = connected_sources
-            
-            # Get current selection or default to first available
-            current_source = st.session_state.get("source_choice", None)
-            if current_source not in available_sources:
-                current_source = available_sources[0] if available_sources else "Snowflake"
-            
-            source_choice = st.selectbox(
-                "Select data source:",
-                options=available_sources,
-                index=available_sources.index(current_source) if current_source in available_sources else 0,
-                key="new_source_selection",
-                help="Choose which data source to load from"
+            # Show new data source options with all 3 options in dropdown
+            # Build new source options with connection status
+            sf_connected = st.session_state.get("sf_connected", False)
+            bq_connected = (
+                st.session_state.get("bq_connected", False)
+                and st.session_state.get("bq_client") is not None
             )
+            csv_connected = (
+                st.session_state.get("csv_connected", False)
+                and st.session_state.get("csv_data") is not None
+            )
+            
+            # All data source options (always show all 3)
+            all_source_options = ["Snowflake", "BigQuery", "CSV Upload"]
+            connection_status = {
+                "Snowflake": sf_connected,
+                "BigQuery": bq_connected,
+                "CSV Upload": csv_connected
+            }
+            
+            # Get current selection or default to first option
+            current_source = st.session_state.get("source_choice", None)
+            if current_source not in all_source_options:
+                current_source = "Snowflake"
+            
+            # Create columns for dropdown and connection status
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                source_choice = st.selectbox(
+                    "Select data source:",
+                    options=all_source_options,
+                    index=all_source_options.index(current_source),
+                    key="new_source_selection",
+                    help="Choose which data source to load from"
+                )
+            
+            with col2:
+                # Show connection status for the selected source
+                st.write("")  # Add spacing to align with selectbox
+                if connection_status.get(source_choice, False):
+                    st.success("✅ Connected")
+                else:
+                    st.warning("⚠️ Not connected")
+            
+            # Show message if not connected
+            if not connection_status.get(source_choice, False):
+                st.caption(f"💡 Connect to {source_choice} in the **Connect Data** page")
         
         # Store the final choice
         st.session_state["source_choice"] = source_choice
