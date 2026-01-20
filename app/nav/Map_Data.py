@@ -139,9 +139,11 @@ def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
                 f"{len(df)} rows, {len(df.columns)} columns"
             )
 
-            # Check for database-specific types (dbdate, dbtime, etc.)
+            # Check for database-specific types (dbdate, dbtime, etc.) - case-insensitive
             db_types = [
-                col for col in df.columns if str(df[col].dtype).startswith("db")
+                col
+                for col in df.columns
+                if str(df[col].dtype).strip().lower().startswith("db")
             ]
             if db_types:
                 logger.warning(

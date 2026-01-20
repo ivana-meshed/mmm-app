@@ -1838,7 +1838,8 @@ def parse_date(df: pd.DataFrame, meta: dict) -> Tuple[pd.DataFrame, str]:
 
             # Handle custom data types (dbdate, dbtime, etc.) by converting to string first
             # These are common in BigQuery/Snowflake parquet exports
-            if str(original_dtype).startswith("db"):
+            dtype_str = str(original_dtype).strip().lower()
+            if dtype_str.startswith("db"):
                 logger.info(
                     f"Detected database-specific type '{original_dtype}', converting to string first"
                 )
@@ -2128,9 +2129,11 @@ def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
                 f"{len(df)} rows, {len(df.columns)} columns"
             )
 
-            # Check for database-specific types
+            # Check for database-specific types (case-insensitive)
             db_types = [
-                col for col in df.columns if str(df[col].dtype).startswith("db")
+                col
+                for col in df.columns
+                if str(df[col].dtype).strip().lower().startswith("db")
             ]
             if db_types:
                 logger.warning(
@@ -2163,9 +2166,11 @@ def safe_read_parquet(file_path: str) -> pd.DataFrame:
     try:
         df = pd.read_parquet(file_path)
 
-        # Check for database-specific types
+        # Check for database-specific types (case-insensitive)
         db_types = [
-            col for col in df.columns if str(df[col].dtype).startswith("db")
+            col
+            for col in df.columns
+            if str(df[col].dtype).strip().lower().startswith("db")
         ]
         if db_types:
             logger.warning(
