@@ -299,7 +299,10 @@ def _safe_tick_once(
                         logger.info(
                             f"[QUEUE] Job {entry.get('id')} completed with status {final_state}"
                         )
-                elif s == "RUNNING" and entry.get("status") in ("PENDING", "LAUNCHING"):
+                elif s == "RUNNING" and entry.get("status") in (
+                    "PENDING",
+                    "LAUNCHING",
+                ):
                     # Forward progression: PENDING/LAUNCHING → RUNNING
                     entry["status"] = "RUNNING"
                     message = "running"
@@ -1826,12 +1829,50 @@ def parse_date(df: pd.DataFrame, meta: dict) -> Tuple[pd.DataFrame, str]:
         date_col = lower_map.get(wanted.lower(), wanted)
 
     if date_col in df.columns:
-        # Works for tz-aware and tz-naive inputs
-        s = pd.to_datetime(
-            df[date_col], errors="coerce", utc=True
-        ).dt.tz_convert(None)
-        df[date_col] = s
-        df = df.sort_values(date_col).reset_index(drop=True)
+        try:
+            # Get the current dtype for logging
+            original_dtype = df[date_col].dtype
+            logger.info(
+                f"Parsing date column '{date_col}' with dtype: {original_dtype}"
+            )
+
+            # Handle custom data types (dbdate, dbtime, etc.) by converting to string first
+            # These are common in BigQuery/Snowflake parquet exports
+            dtype_str = str(original_dtype).strip().lower()
+            if dtype_str.startswith("db"):
+                logger.info(
+                    f"Detected database-specific type '{original_dtype}', converting to string first"
+                )
+                df[date_col] = df[date_col].astype(str)
+
+            # Works for tz-aware and tz-naive inputs
+            s = pd.to_datetime(
+                df[date_col], errors="coerce", utc=True
+            ).dt.tz_convert(None)
+
+            # Check for conversion issues
+            null_count = s.isna().sum()
+            if null_count > 0:
+                logger.warning(
+                    f"Date parsing resulted in {null_count} null values out of {len(s)} total"
+                )
+
+            df[date_col] = s
+            df = df.sort_values(date_col).reset_index(drop=True)
+            logger.info(
+                f"Successfully parsed date column '{date_col}', final dtype: {df[date_col].dtype}"
+            )
+        except Exception as e:
+            logger.error(
+                f"Error parsing date column '{date_col}' (dtype: {df[date_col].dtype}): {e}"
+            )
+            raise ValueError(
+                f"Failed to parse date column '{date_col}' with data type '{df[date_col].dtype}'. "
+                f"Error: {str(e)}"
+            ) from e
+    else:
+        logger.warning(f"Date column '{date_col}' not found in DataFrame")
+
     return df, date_col
 
 
@@ -2078,7 +2119,69 @@ def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
         raise FileNotFoundError(f"gs://{bucket}/{blob_path} not found")
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         blob.download_to_filename(tmp.name)
-        return pd.read_parquet(tmp.name)
+        try:
+            # Read parquet file
+            df = pd.read_parquet(tmp.name)
+
+            # Log data types for debugging
+            logger.info(
+                f"Loaded parquet from gs://{bucket}/{blob_path}: "
+                f"{len(df)} rows, {len(df.columns)} columns"
+            )
+
+            # Check for database-specific types (case-insensitive)
+            db_types = [
+                col
+                for col in df.columns
+                if str(df[col].dtype).strip().lower().startswith("db")
+            ]
+            if db_types:
+                logger.warning(
+                    f"Found database-specific types in columns: {db_types}. "
+                    "These will be handled during date parsing."
+                )
+
+            return df
+        except Exception as e:
+            logger.error(
+                f"Error reading parquet file from gs://{bucket}/{blob_path}: {e}"
+            )
+            raise
+
+
+def safe_read_parquet(file_path: str) -> pd.DataFrame:
+    """
+    Safely read a parquet file with database-specific type handling.
+
+    Handles database-specific types (dbdate, dbtime, etc.) that may come from
+    BigQuery/Snowflake exports by logging warnings and allowing downstream
+    processing to handle them.
+
+    Args:
+        file_path: Path to the parquet file
+
+    Returns:
+        DataFrame with the parquet data
+    """
+    try:
+        df = pd.read_parquet(file_path)
+
+        # Check for database-specific types (case-insensitive)
+        db_types = [
+            col
+            for col in df.columns
+            if str(df[col].dtype).strip().lower().startswith("db")
+        ]
+        if db_types:
+            logger.warning(
+                f"Found database-specific types in columns: {db_types}. "
+                "These should be handled during date parsing."
+            )
+
+        return df
+    except Exception as e:
+        logger.error(f"Error reading parquet file from {file_path}: {e}")
+        raise
 
 
 def _download_json_from_gcs(bucket: str, blob_path: str) -> dict:
