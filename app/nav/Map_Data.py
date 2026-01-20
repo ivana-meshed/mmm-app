@@ -189,6 +189,74 @@ def _load_from_snowflake_cached(sql: str) -> pd.DataFrame:
     return run_sql(sql)
 
 
+def _simplify_error_message(error_msg: str, data_source: str, country: str) -> str:
+    """
+    Convert technical database errors into user-friendly messages.
+    
+    Args:
+        error_msg: The raw error message from the database
+        data_source: The data source type (Snowflake, BigQuery, CSV Upload)
+        country: The country code being processed
+        
+    Returns:
+        A simplified, user-friendly error message
+    """
+    error_lower = error_msg.lower()
+    
+    # Snowflake invalid identifier errors
+    if "invalid identifier" in error_lower and data_source == "Snowflake":
+        # Extract the invalid column name if present
+        import re
+        match = re.search(r"invalid identifier ['\"]?(\w+)['\"]?", error_lower)
+        if match:
+            col_name = match.group(1).upper()
+            return f"Column '{col_name}' not found in Snowflake table. Check your country field name or table structure."
+        return "Invalid column name in Snowflake query. Check your country field name."
+    
+    # BigQuery table qualification errors
+    if "must be qualified with a dataset" in error_lower and data_source == "BigQuery":
+        # Extract table name if present
+        import re
+        match = re.search(r'table ["\']?(\w+)["\']?', error_lower, re.IGNORECASE)
+        if match:
+            table_name = match.group(1)
+            return f"Table '{table_name}' needs dataset qualification. Use format: project.dataset.table (e.g., 'my-project.my_dataset.{table_name}')"
+        return "Table name needs dataset qualification. Use format: project.dataset.table"
+    
+    # BigQuery syntax errors
+    if "syntax error" in error_lower and data_source == "BigQuery":
+        return "SQL syntax error in BigQuery query. Check your table name and SQL syntax."
+    
+    # Snowflake SQL compilation errors
+    if "sql compilation error" in error_lower and data_source == "Snowflake":
+        # Try to extract the specific error
+        import re
+        match = re.search(r"error line \d+ at position \d+ (.+?)(?:\.|$)", error_lower)
+        if match:
+            specific_error = match.group(1).strip()
+            return f"SQL error in Snowflake: {specific_error}. Check your query syntax and column names."
+        return "SQL compilation error in Snowflake. Check your table name, country field, and query syntax."
+    
+    # Connection errors
+    if "connection" in error_lower or "timeout" in error_lower:
+        return f"Connection problem with {data_source}. Check your network and credentials."
+    
+    # Permission errors
+    if "permission" in error_lower or "access denied" in error_lower or "forbidden" in error_lower:
+        return f"Permission denied for {data_source}. Check your access rights to the table."
+    
+    # Table not found errors
+    if "does not exist" in error_lower or "not found" in error_lower or "unknown table" in error_lower:
+        return f"Table not found in {data_source}. Check that the table name is correct and you have access."
+    
+    # If error is very long (> 200 chars), truncate but keep the beginning
+    if len(error_msg) > 200:
+        return error_msg[:197] + "..."
+    
+    # Return original error if we can't simplify it
+    return error_msg
+
+
 # --- Session bootstrap (call once, early) ---
 def _init_state():
     st.session_state.setdefault("country", "de")
@@ -981,77 +1049,32 @@ st.session_state.setdefault("source_mode", "Latest (GCS)")
 st.header("1. Select Dataset")
 
 with st.expander("📊 Choose the data you want to analyze.", expanded=False):
-    # Country picker (ISO2, GCS-first) as multiselect
-    c1, c2, c3 = st.columns([3, 0.8, 0.8])
-
-    countries = _iso2_countries_gcs_first(BUCKET)
-
-    # Handle All/Clear button clicks before rendering multiselect
-    with c2:
-        # Select All button
-        if st.button("All", key="select_all_countries", width="stretch"):
-            st.session_state["selected_countries_widget"] = countries
-            st.rerun()
-    with c3:
-        # Clear button
-        if st.button("Clear", key="deselect_all_countries", width="stretch"):
-            st.session_state["selected_countries_widget"] = []
-            st.rerun()
-
-    with c1:
-        # Get previously selected countries or default to all countries with data
-        default_countries = st.session_state.get(
-            "selected_countries_widget", []
-        )
-        if (
-            not default_countries
-            and "selected_countries_widget" not in st.session_state
-        ):
-            # Default to all countries that have data in GCS
-            default_countries = [
-                c for c in countries if _list_country_versions_cached(BUCKET, c)
-            ][
-                :10
-            ]  # Limit to first 10 to avoid overwhelming
-            if not default_countries and countries:
-                default_countries = [countries[0]]
-
-        selected_countries = st.multiselect(
-            "Countries",
-            options=countries,
-            default=default_countries,
-            key="selected_countries_widget",
-            help="Select one or more countries to analyze. All selected countries will use the same mapping.",
-        )
-        # Update session state
-        st.session_state["selected_countries"] = selected_countries
-        # Keep backward compatibility with single country field
-        if selected_countries:
-            st.session_state["country"] = selected_countries[0]
-
-    st.caption(f"GCS Bucket: **{BUCKET}**")
-
+    
+    # ═══════════════════════════════════════════════════════════
+    # STEP 1.1: Data Source Type Selection (Radio Buttons)
+    # ═══════════════════════════════════════════════════════════
+    st.markdown("#### 1.1 Choose Data Source Type")
+    
+    # Radio button for primary selection (horizontal layout)
+    data_source_mode = st.radio(
+        "How would you like to load data?",
+        options=["Load previously saved data from GCS", "Connect and load new dataset"],
+        key="data_source_mode",
+        horizontal=True,
+        help="Choose whether to load already saved data or connect to a new data source"
+    )
+    
+    st.divider()
+    
     @_fragment()
     def step1_loader():
-        selected_countries = st.session_state.get("selected_countries", [])
-        if not selected_countries:
-            st.warning("Please select at least one country.")
-            return
-
-        # Show info about multi-country behavior
-        if len(selected_countries) > 1:
-            st.info(
-                f"📍 Loading data for **{len(selected_countries)} countries**: "
-                f"{', '.join([c.upper() for c in selected_countries])}. "
-                f"Each country's data will be loaded and saved separately."
-            )
-
-        # Use the first selected country for version checking (UI display)
-        first_country = selected_countries[0]
-
         # Get available GCS versions for the first country (for UI display)
+        # We need at least one country to get versions, so use a default if none selected yet
+        temp_country = st.session_state.get("country", "de")
+        
+        # Get available GCS versions for version checking (UI display)
         versions_raw = _list_country_versions_cached(
-            BUCKET, first_country
+            BUCKET, temp_country
         )  # e.g. ["20250107_101500", "20241231_235959", "latest"]
         # Normalize versions: canonicalize any 'latest' -> 'Latest' and de-duplicate, preserving order
         seen = set()
@@ -1062,89 +1085,86 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 versions.append(vv)
                 seen.add(vv)
 
-        # Split options into two categories
-        # 1. Previously loaded data (GCS versions)
-        saved_data_options = ["Latest"] + [v for v in versions if v != "Latest"]
-
-        # 2. New data sources (Snowflake, BigQuery, CSV)
-        new_source_options = ["Snowflake"]
-
-        # Add CSV Upload option if CSV data is available in session
-        if (
-            st.session_state.get("csv_connected")
-            and st.session_state.get("csv_data") is not None
-        ):
-            new_source_options.append("CSV Upload")
-
-        # Add BigQuery option if BigQuery is connected
-        if (
-            st.session_state.get("bq_connected")
-            and st.session_state.get("bq_client") is not None
-        ):
-            new_source_options.append("BigQuery")
-
-        # Selectboxes OUTSIDE form for immediate reactivity
-        st.write("**1.1 Select previously loaded data:**")
+        # ═══════════════════════════════════════════════════════════
+        # STEP 1.2: Data Source Selection Based on Mode
+        # ═══════════════════════════════════════════════════════════
+        st.markdown("#### 1.2 Select Data Source")
         
-        # Get current selection from session state or default to first option
-        current_source = st.session_state.get("source_choice", "Latest")
+        # Get data source mode from radio button
+        data_source_mode = st.session_state.get("data_source_mode", "Load previously saved data from GCS")
         
-        # Determine index for saved data dropdown
-        if current_source in saved_data_options:
-            saved_idx = saved_data_options.index(current_source)
+        # Show appropriate UI based on mode
+        if data_source_mode == "Load previously saved data from GCS":
+            # Show GCS version selector
+            st.info("📦 Loading from previously saved datasets in GCS")
+            
+            # Split options into two categories
+            # 1. Previously loaded data (GCS versions)
+            saved_data_options = ["Latest"] + [v for v in versions if v != "Latest"]
+            
+            current_source = st.session_state.get("source_choice", "Latest")
+            if current_source not in saved_data_options:
+                current_source = "Latest"
+            
+            source_choice = st.selectbox(
+                "Select GCS version:",
+                options=saved_data_options,
+                index=saved_data_options.index(current_source),
+                key="gcs_version_choice",
+                help="Choose which saved dataset version to load"
+            )
+            
         else:
-            saved_idx = 0
+            # Show new data source options with all 3 options in dropdown
+            # Build new source options with connection status
+            sf_connected = st.session_state.get("sf_connected", False)
+            bq_connected = (
+                st.session_state.get("bq_connected", False)
+                and st.session_state.get("bq_client") is not None
+            )
+            csv_connected = (
+                st.session_state.get("csv_connected", False)
+                and st.session_state.get("csv_data") is not None
+            )
+            
+            # All data source options (always show all 3)
+            all_source_options = ["Snowflake", "BigQuery", "CSV Upload"]
+            connection_status = {
+                "Snowflake": sf_connected,
+                "BigQuery": bq_connected,
+                "CSV Upload": csv_connected
+            }
+            
+            # Get current selection or default to first option
+            current_source = st.session_state.get("source_choice", None)
+            if current_source not in all_source_options:
+                current_source = "Snowflake"
+            
+            # Create columns for dropdown and connection status
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                source_choice = st.selectbox(
+                    "Select data source:",
+                    options=all_source_options,
+                    index=all_source_options.index(current_source),
+                    key="new_source_selection",
+                    help="Choose which data source to load from"
+                )
+            
+            with col2:
+                # Show connection status for the selected source
+                st.write("")  # Add spacing to align with selectbox
+                if connection_status.get(source_choice, False):
+                    st.success("✅ Connected")
+                else:
+                    st.warning("⚠️ Not connected")
+            
+            # Show message if not connected
+            if not connection_status.get(source_choice, False):
+                st.caption(f"💡 Connect to {source_choice} in the **Connect Data** page")
         
-        saved_data_choice = st.selectbox(
-            " ",
-            options=saved_data_options,
-            index=saved_idx,
-            key="saved_data_choice",
-            label_visibility="collapsed",
-        )
-        
-        st.write("**1.2 Alternatively: connect and load new dataset**")
-        
-        # Determine index for new source dropdown
-        if current_source in new_source_options:
-            new_idx = new_source_options.index(current_source)
-        else:
-            new_idx = 0
-        
-        new_source_choice = st.selectbox(
-            " ",
-            options=new_source_options,
-            index=new_idx,
-            key="new_source_choice",
-            label_visibility="collapsed",
-        )
-        
-        # Determine which source is selected (for immediate reactivity)
-        # Track which dropdown was last changed
-        prev_saved = st.session_state.get(
-            "_prev_saved_choice", saved_data_options[0]
-        )
-        prev_new = st.session_state.get(
-            "_prev_new_choice", new_source_options[0]
-        )
-        
-        # Determine active source based on which dropdown changed
-        if saved_data_choice != prev_saved:
-            source_choice = saved_data_choice
-            st.session_state["_last_changed"] = "saved"
-        elif new_source_choice != prev_new:
-            source_choice = new_source_choice
-            st.session_state["_last_changed"] = "new"
-        else:
-            # No change detected, use last changed or current choice
-            if st.session_state.get("_last_changed") == "new":
-                source_choice = new_source_choice
-            else:
-                source_choice = saved_data_choice
-        
-        # Update stored values
-        st.session_state["_prev_saved_choice"] = saved_data_choice
-        st.session_state["_prev_new_choice"] = new_source_choice
+        # Store the final choice
         st.session_state["source_choice"] = source_choice
 
         # Show appropriate inputs only for the selected new data source (OUTSIDE FORM)
@@ -1193,6 +1213,70 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                     "Note: CSV data will be used as-is for all selected countries."
                 )
 
+        # ═══════════════════════════════════════════════════════════
+        # STEP 1.3: Country Selection
+        # ═══════════════════════════════════════════════════════════
+        st.divider()
+        st.markdown("#### 1.3 Select Countries")
+        
+        # Country picker (ISO2, GCS-first) as multiselect
+        c1, c2, c3 = st.columns([3, 0.8, 0.8])
+
+        countries = _iso2_countries_gcs_first(BUCKET)
+
+        # Handle All/Clear button clicks before rendering multiselect
+        with c2:
+            # Select All button
+            if st.button("All", key="select_all_countries", width="stretch"):
+                st.session_state["selected_countries_widget"] = countries
+                st.rerun()
+        with c3:
+            # Clear button
+            if st.button("Clear", key="deselect_all_countries", width="stretch"):
+                st.session_state["selected_countries_widget"] = []
+                st.rerun()
+
+        with c1:
+            # Initialize default countries if not already in session state
+            if "selected_countries_widget" not in st.session_state:
+                # Default to all countries that have data in GCS
+                default_countries = [
+                    c for c in countries if _list_country_versions_cached(BUCKET, c)
+                ][
+                    :10
+                ]  # Limit to first 10 to avoid overwhelming
+                if not default_countries and countries:
+                    default_countries = [countries[0]]
+                st.session_state["selected_countries_widget"] = default_countries
+
+            selected_countries = st.multiselect(
+                "Countries",
+                options=countries,
+                key="selected_countries_widget",
+                help="Select one or more countries to analyze. All selected countries will use the same mapping.",
+            )
+            # Update session state
+            st.session_state["selected_countries"] = selected_countries
+            # Keep backward compatibility with single country field
+            if selected_countries:
+                st.session_state["country"] = selected_countries[0]
+
+        st.caption(f"GCS Bucket: **{BUCKET}**")
+        
+        # Check if countries are selected before proceeding
+        selected_countries = st.session_state.get("selected_countries", [])
+        if not selected_countries:
+            st.warning("Please select at least one country above.")
+            return
+
+        # Show info about multi-country behavior
+        if len(selected_countries) > 1:
+            st.info(
+                f"📍 Loading data for **{len(selected_countries)} countries**: "
+                f"{', '.join([c.upper() for c in selected_countries])}. "
+                f"Each country's data will be loaded and saved separately."
+            )
+
         # Use a FORM only for the action buttons
         with st.form("load_data_form", clear_on_submit=False):
             # Buttons row: Load + Refresh GCS list (side-by-side, wide)
@@ -1234,8 +1318,36 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 )
             return
 
+        # Validate required fields before loading
+        choice = st.session_state.get("source_choice", "Latest")
+        
+        # Validate country field for Snowflake/BigQuery/CSV when using table mode
+        if choice == "Snowflake":
+            # Check if using table mode (not custom SQL)
+            if not st.session_state.get("sf_sql", "").strip():
+                country_field = st.session_state.get("sf_country_field", "").strip()
+                if not country_field:
+                    st.error(
+                        "⚠️ **Country field is required for Snowflake table queries**\n\n"
+                        "Please fill in the 'Select country field:' input above. "
+                        "This should be the column name in your Snowflake table that contains country codes "
+                        "(e.g., 'COUNTRY', 'COUNTRY_CODE', 'ISO_CODE')."
+                    )
+                    return
+        elif choice == "BigQuery":
+            # Check if using table mode (not custom SQL)
+            if not st.session_state.get("bq_sql", "").strip():
+                country_field = st.session_state.get("bq_country_field", "").strip()
+                if not country_field:
+                    st.error(
+                        "⚠️ **Country field is required for BigQuery table queries**\n\n"
+                        "Please fill in the 'Country field name:' input above. "
+                        "This should be the column name in your BigQuery table that contains country codes "
+                        "(e.g., 'country', 'country_code', 'iso_code')."
+                    )
+                    return
+
         try:
-            choice = st.session_state.get("source_choice", "Latest")
             df_by_country = {}
             loaded_count = 0
             failed_countries = []
@@ -1262,7 +1374,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                 if not st.session_state["sf_sql"].strip():
                                     country_field = st.session_state.get(
                                         "sf_country_field", "COUNTRY"
-                                    )
+                                    ).strip()
                                     sql = f"{base_sql} WHERE {country_field} = '{country.upper()}'"
                                 else:
                                     # Custom SQL - user must include country filter themselves
@@ -1270,7 +1382,24 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                     sql = st.session_state["sf_sql"].replace(
                                         "{country}", country.upper()
                                     )
+                                
+                                # Log the SQL for debugging
+                                st.write(f"Executing SQL for {country.upper()}: {sql}")
+                                
                                 df = _load_from_snowflake_cached(sql)
+                                
+                                # Validate that country field exists in the data (case-insensitive)
+                                if df is not None and not df.empty and not st.session_state["sf_sql"].strip():
+                                    country_field = st.session_state.get("sf_country_field", "COUNTRY").strip()
+                                    # Case-insensitive column name matching
+                                    df_columns_lower = {col.lower(): col for col in df.columns}
+                                    if country_field.lower() not in df_columns_lower:
+                                        raise ValueError(
+                                            f"Country field '{country_field}' not found in Snowflake table. "
+                                            f"Available columns: {', '.join(df.columns.tolist())}. "
+                                            f"Please check the 'Select country field:' input and ensure it matches a column name in your table."
+                                        )
+                                
                                 load_method = f"Snowflake ({len(df) if df is not None else 0} rows)"
 
                         elif choice == "BigQuery":
@@ -1295,7 +1424,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                 # Use table with country filter
                                 country_field = st.session_state.get(
                                     "bq_country_field", "country"
-                                )
+                                ).strip()
                                 sql = f"SELECT * FROM `{bq_table}` WHERE {country_field} = '{country.upper()}'"
                             else:
                                 raise ValueError(
@@ -1305,6 +1434,19 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                             df = execute_query(
                                 bq_client, sql, fetch_pandas=True
                             )
+                            
+                            # Validate that country field exists in the data (case-insensitive)
+                            if df is not None and not df.empty and not bq_sql.strip():
+                                country_field = st.session_state.get("bq_country_field", "country").strip()
+                                # Case-insensitive column name matching
+                                df_columns_lower = {col.lower(): col for col in df.columns}
+                                if country_field.lower() not in df_columns_lower:
+                                    raise ValueError(
+                                        f"Country field '{country_field}' not found in BigQuery table. "
+                                        f"Available columns: {', '.join(df.columns.tolist())}. "
+                                        f"Please check the 'Country field name:' input and ensure it matches a column name in your table."
+                                    )
+                            
                             load_method = f"BigQuery ({len(df) if df is not None else 0} rows)"
 
                         elif choice == "CSV Upload":
@@ -1374,15 +1516,26 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                 f"✅ {country.upper()}: {load_method}"
                             )
                         else:
-                            failed_countries.append(country)
-                            load_details.append(
-                                f"❌ {country.upper()}: {load_method or 'No data'}"
-                            )
+                            # Country has no data (0 rows or None)
+                            if df is not None and df.empty:
+                                # Data source returned empty result
+                                load_details.append(
+                                    f"⚠️ {country.upper()}: Skipped - No data found (0 rows)"
+                                )
+                            else:
+                                # df is None - data source had no data
+                                failed_countries.append(country)
+                                load_details.append(
+                                    f"❌ {country.upper()}: {load_method or 'No data available'}"
+                                )
 
                     except Exception as e:
                         failed_countries.append(country)
+                        # Parse and simplify error message for business users
+                        error_msg = str(e)
+                        user_friendly_error = _simplify_error_message(error_msg, choice, country)
                         load_details.append(
-                            f"❌ {country.upper()}: Error - {str(e)[:50]}"
+                            f"❌ {country.upper()}: {user_friendly_error}"
                         )
 
             # Update session state
