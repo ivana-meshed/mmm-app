@@ -43,14 +43,6 @@ list_mapped_data_versions.clear()
 
 st.title("Run Marketing Mix Models")
 
-# Check if we should show a message to switch to Queue tab (Requirement 8)
-if st.session_state.get("switch_to_queue_tab", False):
-    st.success("✅ **Configuration added to queue successfully!**")
-    st.info(
-        "👉 **Please click on the 'Queue' tab above** to monitor your job's progress."
-    )
-    st.session_state["switch_to_queue_tab"] = False
-
 tab_single, tab_queue, tab_status = st.tabs(
     ["Single Run", "Batch Run", "Queue Monitor"]
 )
@@ -2569,6 +2561,14 @@ with tab_single:
 
 # Extracted from streamlit_app.py tab_queue (Batch/Queue run):
 with tab_queue:
+    # Check if we should show a message to switch to Queue Monitor tab
+    if st.session_state.get("switch_to_queue_tab", False):
+        st.success("✅ **Configuration added to queue successfully!**")
+        st.info(
+            "👉 **Please click on the 'Queue Monitor' tab above** to monitor your job's progress."
+        )
+        st.session_state["switch_to_queue_tab"] = False
+
     if st.session_state.get("queue_running") and not (
         st.session_state.get("job_queue") or []
     ):
@@ -3156,7 +3156,11 @@ with tab_queue:
 # ===================== STATUS TAB =====================
 with tab_status:
 
-    # Job Status Monitor
+    # Auto-refresh and tick mechanism (runs even when expander is collapsed)
+    # This advances the queue by checking job statuses and launching pending jobs
+    _auto_refresh_and_tick(interval_ms=2000)
+
+    # Job Status Monitor (auto-refreshes every 5s via fragment)
     render_job_status_monitor(key_prefix="status")
 
     with st.expander("📋 Current Queue", expanded=False):
@@ -3207,10 +3211,8 @@ with tab_status:
             st.toast("Ticked queue")
             st.rerun()
 
-        _auto_refresh_and_tick(interval_ms=2000)
-
-        # Queue table
-        maybe_refresh_queue_from_gcs()
+        # Queue table (refresh to show latest from GCS)
+        maybe_refresh_queue_from_gcs(force=True)  # Always force refresh for Current Queue
         st.caption(
             f"GCS saved_at: {st.session_state.get('queue_saved_at') or '—'} · "
             f"{sum(e['status']=='PENDING' for e in st.session_state.job_queue)} pending · "
@@ -3219,11 +3221,12 @@ with tab_status:
         )
 
         if st.session_state.job_queue:
+            # Display status from queue (Model Run Status/queue tick already update it)
             df_queue = pd.DataFrame(
                 [
                     {
                         "ID": e["id"],
-                        "Status": e["status"],
+                        "Status": e.get("status", "PENDING").upper(),
                         "Country": e["params"]["country"],
                         "Revision": e["params"]["revision"],
                         "Timestamp": e.get("timestamp", ""),
