@@ -1761,70 +1761,70 @@ with tab_single:
         st.caption(
             "Save the current model settings so you can reuse them later."
         )
+        
+        # Add checkbox to toggle visibility of save settings fields
+        save_settings_enabled = st.checkbox(
+            "Save Model Settings",
+            value=False,
+            help="Enable this to save model settings for reuse later"
+        )
 
-        gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
+        # Only show fields if checkbox is checked
+        if save_settings_enabled:
+            gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
 
-        col1, col2 = st.columns([3, 1])
-        with col1:
             config_name = st.text_input(
                 "Settings name",
                 placeholder="e.g., gmv_model_v1",
                 help="Name for this training configuration",
             )
-        with col2:
-            # Pre-check "Multi-country" if loaded config has multiple countries
-            loaded_countries = st.session_state.get(
-                "loaded_config_countries", []
-            )
-            default_multi = len(loaded_countries) > 1
-            save_for_multi = st.checkbox(
-                "Apply to multiple countries",
-                value=default_multi,
-            )
-
-        if save_for_multi:
-            # Use loaded countries if available, otherwise default to selected_country
-            loaded_countries = st.session_state.get(
-                "loaded_config_countries", []
-            )
-            default_countries = (
-                loaded_countries
-                if loaded_countries
-                else [st.session_state.get("selected_country", "de")]
-            )
-            # Use available countries from Select Data section instead of hardcoded list
+            
+            # Use available countries from Select Data section
             available_countries_for_multi = st.session_state.get(
                 "run_models_available_countries", ["de"]
             )
+            
+            # Default to ALL available countries
             config_countries = st.multiselect(
                 "Select countries",
                 options=available_countries_for_multi,
-                default=default_countries,
+                default=available_countries_for_multi,  # All countries selected by default
+                help="Model settings will be saved for all selected countries"
             )
+
+            # Add action buttons - removed "Save settings & Add to Queue", renamed last button
+            col_btn1, col_btn2 = st.columns(2)
+
+            save_config_clicked = col_btn1.button(
+                "💾 Save Settings",
+                width="stretch",
+                key="save_config_btn",
+            )
+            add_and_start_clicked = col_btn2.button(
+                "▶️ Save Settings & Run Now",
+                width="stretch",
+                key="add_and_start_btn",
+                type="primary"
+            )
+            
+            # Set flag for removed button to False
+            add_to_queue_clicked = False
         else:
-            config_countries = [st.session_state.get("selected_country", "de")]
-
-        # Add action buttons (Issue #5 fix: add queue options)
-        col_btn1, col_btn2, col_btn3 = st.columns(3)
-
-        save_config_clicked = col_btn1.button(
-            "💾 Save Settings",
-            width="stretch",
-            key="save_config_btn",
-        )
-        add_to_queue_clicked = col_btn2.button(
-            "➕ Save Settings & Add Run to Queue",
-            width="stretch",
-            key="add_to_queue_btn",
-        )
-        add_and_start_clicked = col_btn3.button(
-            "▶️ Save, Add Run to Queue & Start Queue",
-            width="stretch",
-            key="add_and_start_btn",
-        )
+            # When checkbox is not enabled, set defaults
+            save_config_clicked = False
+            add_to_queue_clicked = False
+            add_and_start_clicked = False
+            config_countries = []
 
         # Add Download as CSV button
         st.markdown("---")
+        
+        # Info box explaining CSV usage for batch run
+        st.info(
+            "💡 **Download as CSV Template**: Download current model settings as a CSV file. "
+            "This can be used as a template for batch runs in the 'Batch Run' tab. "
+            "The CSV will contain one row for each selected country."
+        )
 
         # Helper function to convert custom_hyperparameters to CSV format
         def convert_hyperparams_to_csv_format(custom_hp, adstock_type):
@@ -1837,63 +1837,70 @@ with tab_single:
                         csv_cols[key] = str(value)
             return csv_cols
 
-        # Build CSV row for current configuration
-        csv_row = {
-            "country": country,
-            "revision": revision,
-            "revision_tag": (
-                revision_tag if revision_tag != "-- Create New Tag --" else ""
-            ),
-            "revision_number": (
-                revision_number
-                if revision_tag != "-- Create New Tag --"
-                else ""
-            ),
-            "start_date": start_date_str,
-            "end_date": end_date_str,
-            "iterations": int(iterations),
-            "trials": int(trials),
-            "train_size": train_size,
-            "paid_media_spends": paid_media_spends,
-            "paid_media_vars": paid_media_vars,
-            "context_vars": context_vars,
-            "factor_vars": factor_vars,
-            "organic_vars": organic_vars,
-            "gcs_bucket": gcs_bucket,
-            "data_gcs_path": f"gs://{gcs_bucket}/mapped-datasets/{country}/latest/raw.parquet",
-            "table": "",
-            "query": "",
-            "dep_var": dep_var,
-            "dep_var_type": dep_var_type,
-            "date_var": date_var,
-            "adstock": adstock,
-            "hyperparameter_preset": hyperparameter_preset,
-            "resample_freq": resample_freq,
-            "column_agg_strategies": (
-                json.dumps(column_agg_strategies)
-                if column_agg_strategies
-                else ""
-            ),
-            "annotations_gcs_path": "",
-        }
+        # Build CSV rows for ALL selected countries (not just current one)
+        # Get countries to include in CSV based on whether save settings is enabled
+        csv_countries = config_countries if save_settings_enabled and config_countries else [country]
+        
+        csv_rows = []
+        for ctry in csv_countries:
+            csv_row = {
+                "country": ctry,
+                "revision": revision,
+                "revision_tag": (
+                    revision_tag if revision_tag != "-- Create New Tag --" else ""
+                ),
+                "revision_number": (
+                    revision_number
+                    if revision_tag != "-- Create New Tag --"
+                    else ""
+                ),
+                "start_date": start_date_str,
+                "end_date": end_date_str,
+                "iterations": int(iterations),
+                "trials": int(trials),
+                "train_size": train_size,
+                "paid_media_spends": paid_media_spends,
+                "paid_media_vars": paid_media_vars,
+                "context_vars": context_vars,
+                "factor_vars": factor_vars,
+                "organic_vars": organic_vars,
+                "gcs_bucket": gcs_bucket,
+                "data_gcs_path": f"gs://{gcs_bucket}/mapped-datasets/{ctry}/latest/raw.parquet",
+                "table": "",
+                "query": "",
+                "dep_var": dep_var,
+                "dep_var_type": dep_var_type,
+                "date_var": date_var,
+                "adstock": adstock,
+                "hyperparameter_preset": hyperparameter_preset,
+                "resample_freq": resample_freq,
+                "column_agg_strategies": (
+                    json.dumps(column_agg_strategies)
+                    if column_agg_strategies
+                    else ""
+                ),
+                "annotations_gcs_path": "",
+            }
 
-        # Add custom hyperparameters to CSV row
-        if hyperparameter_preset == "Custom" and custom_hyperparameters:
-            csv_row.update(
-                convert_hyperparams_to_csv_format(
-                    custom_hyperparameters, adstock
+            # Add custom hyperparameters to CSV row
+            if hyperparameter_preset == "Custom" and custom_hyperparameters:
+                csv_row.update(
+                    convert_hyperparams_to_csv_format(
+                        custom_hyperparameters, adstock
+                    )
                 )
-            )
+            
+            csv_rows.append(csv_row)
 
-        csv_df = pd.DataFrame([csv_row])
+        csv_df = pd.DataFrame(csv_rows)
 
         st.download_button(
             "📥 Download as CSV",
             data=csv_df.to_csv(index=False),
-            file_name=f"robyn_config_{country}_{revision}_{time.strftime('%Y%m%d')}.csv",
+            file_name=f"robyn_config_{'-'.join([c[:2] for c in csv_countries])}_{revision}_{time.strftime('%Y%m%d')}.csv",
             mime="text/csv",
             width="stretch",
-            help="Download current settings as CSV and use for batch processing",
+            help=f"Download settings as CSV with {len(csv_countries)} row(s) - one per country. Use for batch processing.",
         )
 
         st.markdown("---")
@@ -2183,26 +2190,51 @@ with tab_single:
 
     # Get the config_countries list from Save Model Settings section
     # This is used for multi-country training
-    multi_country_list = st.session_state.get(
-        "run_models_available_countries", []
-    )
+    # If Save Model Settings is enabled and countries are selected, use those
+    # Otherwise, show a country selector above the training buttons
+    
+    # Check if save settings is enabled and has countries selected
+    save_settings_has_countries = save_settings_enabled and len(config_countries) > 0
+    
+    if not save_settings_has_countries:
+        # Show country selector above training buttons when Save Model Settings is not enabled
+        available_countries_for_training = st.session_state.get(
+            "run_models_available_countries", []
+        )
+        
+        if available_countries_for_training:
+            st.markdown("**Select Countries for Training**")
+            multi_country_list = st.multiselect(
+                "Countries to train",
+                options=available_countries_for_training,
+                default=available_countries_for_training,  # All countries preselected
+                help="Select which countries to train models for"
+            )
+        else:
+            multi_country_list = []
+    else:
+        # Use countries from Save Model Settings
+        multi_country_list = config_countries
 
     # Multi-country training button
     col_multi, col_single = st.columns(2)
 
     with col_multi:
+        # Make this button primary (red) and update text to reflect selected countries
         start_multi_training = st.button(
-            "🌍 Start Training for All Countries",
-            type="secondary",
+            f"🌍 Start Training for Selected Countries ({len(multi_country_list)})",
+            type="primary",  # Changed from "secondary" to make it red
             width="stretch",
             key="start_multi_training_job_btn",
-            help=f"Start training jobs in parallel for all {len(multi_country_list)} countries",
+            help=f"Start training jobs in parallel for {len(multi_country_list)} selected countries",
+            disabled=len(multi_country_list) == 0
         )
 
     with col_single:
+        # Make this button secondary (remove red) and update text
         start_single_training = st.button(
-            "🚀 Start Training Job",
-            type="primary",
+            "🚀 Start Training Job for This Country",  # Updated text
+            type="secondary",  # Changed from "primary" to remove red
             width="stretch",
             key="start_training_job_btn",
         )
