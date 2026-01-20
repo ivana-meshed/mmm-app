@@ -121,6 +121,8 @@ def _list_metadata_versions(bucket: str, country: str) -> List[str]:
 def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
     """Download parquet file from GCS with database-specific type handling."""
     import logging
+    import pyarrow.parquet as pq
+    import pyarrow as pa
 
     logger = logging.getLogger(__name__)
     client = storage.Client()
@@ -131,25 +133,47 @@ def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         blob.download_to_filename(tmp.name)
         try:
-            df = pd.read_parquet(tmp.name)
+            # Read parquet file using PyArrow first to handle database-specific types
+            table = pq.read_table(tmp.name)
+            
+            # Check for database-specific types and convert them
+            schema = table.schema
+            db_type_columns = []
+            for i, field in enumerate(schema):
+                field_type_str = str(field.type).lower()
+                # Check if the type string contains database-specific type indicators
+                if "db" in field_type_str and any(
+                    db_type in field_type_str
+                    for db_type in ["dbdate", "dbtime", "dbdecimal", "dbtimestamp"]
+                ):
+                    db_type_columns.append(field.name)
+                    logger.warning(
+                        f"Column '{field.name}' has database-specific type '{field.type}'"
+                    )
+            
+            # Convert to pandas with type mapping for database-specific types
+            if db_type_columns:
+                logger.info(
+                    f"Converting database-specific types in columns: {db_type_columns}"
+                )
+                # Create a types_mapper that converts unknown types to string
+                def types_mapper(pa_type):
+                    type_str = str(pa_type).lower()
+                    if "db" in type_str:
+                        # Map database types to string for safe conversion
+                        return pd.StringDtype()
+                    return None  # Use default mapping for other types
+                
+                df = table.to_pandas(types_mapper=types_mapper)
+            else:
+                # No database-specific types, use standard conversion
+                df = table.to_pandas()
 
             # Log data types for debugging
             logger.info(
                 f"Loaded parquet from gs://{gs_bucket}/{blob_path}: "
                 f"{len(df)} rows, {len(df.columns)} columns"
             )
-
-            # Check for database-specific types (dbdate, dbtime, etc.) - case-insensitive
-            db_types = [
-                col
-                for col in df.columns
-                if str(df[col].dtype).strip().lower().startswith("db")
-            ]
-            if db_types:
-                logger.warning(
-                    f"Found database-specific types in columns: {db_types}. "
-                    "These will be handled during date parsing."
-                )
 
             return df
         except Exception as e:
@@ -530,27 +554,10 @@ def _build_mapping_df(
     ).astype("object")
 
 
-def _initial_goals_from_columns(cols: list[str]) -> pd.DataFrame:
-    # Pick a few top candidates by name for convenience; user can delete/edit
-    candidates = [
-        c
-        for c in cols
-        if any(
-            k in c.lower()
-            for k in ("rev", "gmv", "sales", "conv", "lead", "purchase")
-        )
-    ]
-    # limit to a manageable number
-    candidates = candidates[:8] if candidates else []
-    return pd.DataFrame(
-        {
-            "var": pd.Series(candidates, dtype="object"),
-            "group": pd.Series(["primary"] * len(candidates), dtype="object"),
-            "type": pd.Series(
-                [_guess_goal_type(c) for c in candidates], dtype="object"
-            ),
-            "main": pd.Series([False] * len(candidates), dtype="object"),
-        }
+def _initial_goals_from_columns() -> pd.DataFrame:
+    # Return empty DataFrame - user must select goals manually
+    return pd.DataFrame(columns=["var", "group", "type", "main"]).astype(
+        "object"
     )
 
 
@@ -2081,8 +2088,8 @@ with st.expander(
 
         # Build goals source
         if st.session_state["goals_df"].empty:
-            # Only suggest goals on first load, don't merge with heuristics later
-            heur = _initial_goals_from_columns(all_cols)
+            # Return empty goals on first load - user must select manually
+            heur = _initial_goals_from_columns()
             goals_src = heur
         else:
             # Keep only what's in session - don't add heuristics if user has edited
