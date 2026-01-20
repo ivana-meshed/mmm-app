@@ -53,7 +53,6 @@ from app_shared import (  # Env / constants (already read from env in app_shared
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from google.cloud import storage
-
 from utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 __all__ = [
@@ -135,7 +134,7 @@ logger = logging.getLogger(__name__)
 # Session defaults - only initialize if session_state is available
 # ─────────────────────────────
 try:
-    if hasattr(st, 'session_state'):
+    if hasattr(st, "session_state"):
         st.session_state.setdefault("job_executions", [])
         st.session_state.setdefault("gcs_bucket", GCS_BUCKET)
         st.session_state.setdefault("last_timings", None)
@@ -692,19 +691,17 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
     # --- Queue jobs: Always force-refresh from GCS for reliability ---
     # This ensures Model Run Status always shows the latest state from GCS
     # even if queue_running flag is not set correctly
-    logger.debug(
-        f"[STATUS_MONITOR] Force-refreshing queue from GCS"
-    )
-    maybe_refresh_queue_from_gcs(force=True)  # Always force refresh for reliability
+    logger.debug(f"[STATUS_MONITOR] Force-refreshing queue from GCS")
+    maybe_refresh_queue_from_gcs(
+        force=True
+    )  # Always force refresh for reliability
     queue = st.session_state.get("job_queue", [])
-    
-    logger.info(
-        f"[STATUS_MONITOR] Queue has {len(queue)} total jobs"
-    )
-    
+
+    logger.info(f"[STATUS_MONITOR] Queue has {len(queue)} total jobs")
+
     # Track if we need to save queue changes
     queue_changed = False
-    
+
     for job in queue:
         logger.debug(
             f"[STATUS_MONITOR] Checking job {job.get('id')} with status {job.get('status')}"
@@ -714,38 +711,53 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
             exec_name = job.get("execution_name", "")
             # Start with queue status as the source of truth
             display_status = job.get("status", "UNKNOWN")
-            
+
             logger.info(
                 f"[STATUS_MONITOR] Job {job.get('id')} queue status: {display_status}, exec_name: {exec_name}"
             )
-            
+
             if exec_name:
                 try:
                     status_info = job_manager.get_execution_status(exec_name)
                     cloud_run_status = (
                         status_info.get("overall_status") or display_status
                     ).upper()
-                    
+
                     logger.info(
                         f"[STATUS_MONITOR] Cloud Run status for job {job.get('id')}: {cloud_run_status}"
                     )
-                    
+
                     # Only sync status FORWARD (never downgrade from RUNNING to PENDING)
                     # Status progression: PENDING → LAUNCHING → RUNNING → terminal states
                     # If Cloud Run reports a later stage, update the queue
                     should_update = False
-                    
-                    if cloud_run_status in ("SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED", "ERROR"):
+
+                    if cloud_run_status in (
+                        "SUCCEEDED",
+                        "FAILED",
+                        "CANCELLED",
+                        "COMPLETED",
+                        "ERROR",
+                    ):
                         # Always update to terminal state
                         should_update = True
-                        final_state = "SUCCEEDED" if cloud_run_status in ("SUCCEEDED", "COMPLETED") else cloud_run_status
+                        final_state = (
+                            "SUCCEEDED"
+                            if cloud_run_status in ("SUCCEEDED", "COMPLETED")
+                            else cloud_run_status
+                        )
                         logger.info(
                             f"[STATUS_MONITOR] Job {job.get('id')} reached terminal state: {final_state}"
                         )
                         job["status"] = final_state
-                        job["message"] = status_info.get("error", "") or final_state
+                        job["message"] = (
+                            status_info.get("error", "") or final_state
+                        )
                         display_status = final_state
-                    elif cloud_run_status == "LAUNCHING" and job.get("status") == "PENDING":
+                    elif (
+                        cloud_run_status == "LAUNCHING"
+                        and job.get("status") == "PENDING"
+                    ):
                         # Progress from PENDING to LAUNCHING
                         should_update = True
                         job["status"] = "LAUNCHING"
@@ -753,7 +765,9 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                         logger.info(
                             f"[STATUS_MONITOR] Job {job.get('id')} progressed from PENDING to LAUNCHING"
                         )
-                    elif cloud_run_status == "RUNNING" and job.get("status") in ("PENDING", "LAUNCHING"):
+                    elif cloud_run_status == "RUNNING" and job.get(
+                        "status"
+                    ) in ("PENDING", "LAUNCHING"):
                         # Progress from PENDING/LAUNCHING to RUNNING
                         should_update = True
                         job["status"] = "RUNNING"
@@ -778,16 +792,16 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                         logger.debug(
                             f"[STATUS_MONITOR] Job {job.get('id')} displaying Cloud Run status {display_status} (queue: {job.get('status')})"
                         )
-                    
+
                     if should_update:
                         queue_changed = True
-                    
+
                 except Exception as e:
                     # If we can't check status, use the queued status
                     logger.warning(
                         f"[STATUS_MONITOR] Failed to check Cloud Run status for job {job.get('id')}: {e}"
                     )
-            
+
             # Show all jobs that queue thinks are RUNNING/LAUNCHING
             # Keep showing them even if Cloud Run temporarily reports PENDING
             logger.info(
@@ -808,7 +822,7 @@ def render_job_status_monitor(key_prefix: str = "single") -> None:
                     "Execution Details": job.get("execution_name", ""),
                 }
             )
-    
+
     # Save queue to GCS if any jobs changed status
     if queue_changed:
         logger.info(f"[STATUS_MONITOR] Saving updated queue to GCS")
@@ -1352,7 +1366,7 @@ def _queue_tick():
     # Sweep finished jobs into history and remove them from queue
     q = st.session_state.job_queue or []
     logger.info(f"After tick: {len(q)} jobs in queue")
-    
+
     # If queue is empty and queue is running, stop it
     if not q and st.session_state.get("queue_running"):
         logger.info("Queue is now empty - stopping queue")
@@ -1364,7 +1378,7 @@ def _queue_tick():
             queue_running=False,
         )
         return
-    
+
     if not q:
         logger.info("Queue is empty")
         return
@@ -1456,12 +1470,12 @@ def _queue_tick():
             f"Moved {moved} finished job(s) to history, {len(remaining)} remaining in queue"
         )
         st.session_state.job_queue = remaining
-        
+
         # If no jobs remain and queue is running, stop it
         if not remaining and st.session_state.get("queue_running"):
             logger.info("All jobs completed - stopping queue")
             st.session_state.queue_running = False
-        
+
         st.session_state.queue_saved_at = save_queue_to_gcs(
             st.session_state.queue_name,
             st.session_state.job_queue,

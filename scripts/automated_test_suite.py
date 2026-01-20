@@ -2,6 +2,7 @@
 """
 Automated test suite for MMM Trainer optimizations
 """
+
 import argparse
 import json
 import logging

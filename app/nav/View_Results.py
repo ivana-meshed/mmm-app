@@ -14,7 +14,6 @@ from google.auth import default as google_auth_default
 from google.auth.iam import Signer as IAMSigner
 from google.auth.transport.requests import Request
 from google.cloud import storage
-
 from utils.gcs_utils import get_cet_now
 
 try:
@@ -802,8 +801,7 @@ def render_model_metrics_table(blobs, country, stamp):
 
     # Display threshold information in an expander
     with st.expander("View metric thresholds", expanded=False):
-        st.markdown(
-            f"""
+        st.markdown(f"""
         **Prediction Quality (R²):** How much the model captures the outcome  - Higher is better:
         - Good: ≥ {r2_thresholds['good']}
         - Acceptable: ≥ {r2_thresholds['acceptable']}
@@ -818,8 +816,7 @@ def render_model_metrics_table(blobs, country, stamp):
         - Good: ≤ {decomp_thresholds['good']}
         - Acceptable: ≤ {decomp_thresholds['acceptable']}
         - Poor: > {decomp_thresholds['acceptable']}
-        """
-        )
+        """)
 
     st.write("")
     st.write("")
