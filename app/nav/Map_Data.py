@@ -481,11 +481,11 @@ def _build_mapping_df(
     ).astype("object")
 
 
-def _initial_goals_from_columns(cols: list[str]) -> pd.DataFrame:
+def _initial_goals_from_columns() -> pd.DataFrame:
     # Return empty DataFrame - user must select goals manually
-    return pd.DataFrame(
-        columns=["var", "group", "type", "main"]
-    ).astype("object")
+    return pd.DataFrame(columns=["var", "group", "type", "main"]).astype(
+        "object"
+    )
 
 
 def _download_json_from_gcs(gs_bucket: str, blob_path: str) -> dict:
@@ -1970,8 +1970,8 @@ with st.expander(
 
         # Build goals source
         if st.session_state["goals_df"].empty:
-            # Only suggest goals on first load, don't merge with heuristics later
-            heur = _initial_goals_from_columns(all_cols)
+            # Return empty goals on first load - user must select manually
+            heur = _initial_goals_from_columns()
             goals_src = heur
         else:
             # Keep only what's in session - don't add heuristics if user has edited
