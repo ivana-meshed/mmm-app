@@ -131,19 +131,11 @@ with tab_load:
                 )
 
                 # Download
-                st.info(f"📥 Downloading data from: gs://{GCS_BUCKET}/{db}")
                 df = download_parquet_from_gcs_cached(GCS_BUCKET, db)
-                st.info(
-                    f"✓ Loaded {len(df):,} rows with {len(df.columns)} columns"
-                )
-
-                st.info(f"📥 Downloading metadata from: gs://{GCS_BUCKET}/{mb}")
                 meta = download_json_from_gcs_cached(GCS_BUCKET, mb)
 
                 # Parse dates using metadata
-                st.info("📅 Parsing date column...")
                 df, date_col = parse_date(df, meta)
-                st.info(f"✓ Successfully parsed date column: {date_col}")
 
                 # Persist in session
                 st.session_state["df"] = df
