@@ -987,92 +987,26 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
     # ═══════════════════════════════════════════════════════════
     st.subheader("1.1 Choose Data Source Type")
     
-    # Radio button for primary selection
+    # Radio button for primary selection (horizontal layout)
     data_source_mode = st.radio(
         "How would you like to load data?",
         options=["Load previously saved data from GCS", "Connect and load new dataset"],
         key="data_source_mode",
+        horizontal=True,
         help="Choose whether to load already saved data or connect to a new data source"
     )
     
     st.divider()
     
-    # ═══════════════════════════════════════════════════════════
-    # STEP 1.2: Country Selection
-    # ═══════════════════════════════════════════════════════════
-    st.subheader("1.2 Select Countries")
-    
-    # Country picker (ISO2, GCS-first) as multiselect
-    c1, c2, c3 = st.columns([3, 0.8, 0.8])
-
-    countries = _iso2_countries_gcs_first(BUCKET)
-
-    # Handle All/Clear button clicks before rendering multiselect
-    with c2:
-        # Select All button
-        if st.button("All", key="select_all_countries", width="stretch"):
-            st.session_state["selected_countries_widget"] = countries
-            st.rerun()
-    with c3:
-        # Clear button
-        if st.button("Clear", key="deselect_all_countries", width="stretch"):
-            st.session_state["selected_countries_widget"] = []
-            st.rerun()
-
-    with c1:
-        # Get previously selected countries or default to all countries with data
-        default_countries = st.session_state.get(
-            "selected_countries_widget", []
-        )
-        if (
-            not default_countries
-            and "selected_countries_widget" not in st.session_state
-        ):
-            # Default to all countries that have data in GCS
-            default_countries = [
-                c for c in countries if _list_country_versions_cached(BUCKET, c)
-            ][
-                :10
-            ]  # Limit to first 10 to avoid overwhelming
-            if not default_countries and countries:
-                default_countries = [countries[0]]
-
-        selected_countries = st.multiselect(
-            "Countries",
-            options=countries,
-            default=default_countries,
-            key="selected_countries_widget",
-            help="Select one or more countries to analyze. All selected countries will use the same mapping.",
-        )
-        # Update session state
-        st.session_state["selected_countries"] = selected_countries
-        # Keep backward compatibility with single country field
-        if selected_countries:
-            st.session_state["country"] = selected_countries[0]
-
-    st.caption(f"GCS Bucket: **{BUCKET}**")
-
     @_fragment()
     def step1_loader():
-        selected_countries = st.session_state.get("selected_countries", [])
-        if not selected_countries:
-            st.warning("Please select at least one country.")
-            return
-
-        # Show info about multi-country behavior
-        if len(selected_countries) > 1:
-            st.info(
-                f"📍 Loading data for **{len(selected_countries)} countries**: "
-                f"{', '.join([c.upper() for c in selected_countries])}. "
-                f"Each country's data will be loaded and saved separately."
-            )
-
-        # Use the first selected country for version checking (UI display)
-        first_country = selected_countries[0]
-
         # Get available GCS versions for the first country (for UI display)
+        # We need at least one country to get versions, so use a default if none selected yet
+        temp_country = st.session_state.get("country", "de")
+        
+        # Get available GCS versions for version checking (UI display)
         versions_raw = _list_country_versions_cached(
-            BUCKET, first_country
+            BUCKET, temp_country
         )  # e.g. ["20250107_101500", "20241231_235959", "latest"]
         # Normalize versions: canonicalize any 'latest' -> 'Latest' and de-duplicate, preserving order
         seen = set()
@@ -1084,10 +1018,10 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 seen.add(vv)
 
         # ═══════════════════════════════════════════════════════════
-        # STEP 1.3: Data Source Selection Based on Mode
+        # STEP 1.2: Data Source Selection Based on Mode
         # ═══════════════════════════════════════════════════════════
         st.divider()
-        st.subheader("1.3 Select Data Source")
+        st.subheader("1.2 Select Data Source")
         
         # Get data source mode from radio button
         data_source_mode = st.session_state.get("data_source_mode", "Load previously saved data from GCS")
@@ -1225,6 +1159,76 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 st.caption(
                     "Note: CSV data will be used as-is for all selected countries."
                 )
+
+        # ═══════════════════════════════════════════════════════════
+        # STEP 1.3: Country Selection
+        # ═══════════════════════════════════════════════════════════
+        st.divider()
+        st.subheader("1.3 Select Countries")
+        
+        # Country picker (ISO2, GCS-first) as multiselect
+        c1, c2, c3 = st.columns([3, 0.8, 0.8])
+
+        countries = _iso2_countries_gcs_first(BUCKET)
+
+        # Handle All/Clear button clicks before rendering multiselect
+        with c2:
+            # Select All button
+            if st.button("All", key="select_all_countries", width="stretch"):
+                st.session_state["selected_countries_widget"] = countries
+                st.rerun()
+        with c3:
+            # Clear button
+            if st.button("Clear", key="deselect_all_countries", width="stretch"):
+                st.session_state["selected_countries_widget"] = []
+                st.rerun()
+
+        with c1:
+            # Get previously selected countries or default to all countries with data
+            default_countries = st.session_state.get(
+                "selected_countries_widget", []
+            )
+            if (
+                not default_countries
+                and "selected_countries_widget" not in st.session_state
+            ):
+                # Default to all countries that have data in GCS
+                default_countries = [
+                    c for c in countries if _list_country_versions_cached(BUCKET, c)
+                ][
+                    :10
+                ]  # Limit to first 10 to avoid overwhelming
+                if not default_countries and countries:
+                    default_countries = [countries[0]]
+
+            selected_countries = st.multiselect(
+                "Countries",
+                options=countries,
+                default=default_countries,
+                key="selected_countries_widget",
+                help="Select one or more countries to analyze. All selected countries will use the same mapping.",
+            )
+            # Update session state
+            st.session_state["selected_countries"] = selected_countries
+            # Keep backward compatibility with single country field
+            if selected_countries:
+                st.session_state["country"] = selected_countries[0]
+
+        st.caption(f"GCS Bucket: **{BUCKET}**")
+        
+        # Check if countries are selected before proceeding
+        selected_countries = st.session_state.get("selected_countries", [])
+        if not selected_countries:
+            st.warning("Please select at least one country above.")
+            return
+
+        # Show info about multi-country behavior
+        if len(selected_countries) > 1:
+            st.info(
+                f"📍 Loading data for **{len(selected_countries)} countries**: "
+                f"{', '.join([c.upper() for c in selected_countries])}. "
+                f"Each country's data will be loaded and saved separately."
+            )
 
         # Use a FORM only for the action buttons
         with st.form("load_data_form", clear_on_submit=False):
