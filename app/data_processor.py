@@ -264,6 +264,9 @@ class DataProcessor:
         Returns:
             DataFrame loaded from Parquet file
         """
+        import pyarrow.parquet as pq
+        import pyarrow as pa
+
         bucket = self.storage_client.bucket(self.gcs_bucket)
         blob = bucket.blob(gcs_path)
 
@@ -272,12 +275,51 @@ class DataProcessor:
         blob.download_to_file(buffer)
         buffer.seek(0)
 
-        # Read Parquet from buffer
-        df = pd.read_parquet(buffer)
+        try:
+            # Read Parquet from buffer using PyArrow to handle database-specific types
+            table = pq.read_table(buffer)
+            
+            # Check for database-specific types and convert them
+            schema = table.schema
+            db_type_columns = []
+            for i, field in enumerate(schema):
+                field_type_str = str(field.type).lower()
+                # Check if the type string contains database-specific type indicators
+                if "db" in field_type_str and any(
+                    db_type in field_type_str
+                    for db_type in ["dbdate", "dbtime", "dbdecimal", "dbtimestamp"]
+                ):
+                    db_type_columns.append(field.name)
+                    logger.warning(
+                        f"Column '{field.name}' has database-specific type '{field.type}'"
+                    )
+            
+            # Convert to pandas with type mapping for database-specific types
+            if db_type_columns:
+                logger.info(
+                    f"Converting database-specific types in columns: {db_type_columns}"
+                )
+                # Create a types_mapper that converts unknown types to string
+                def types_mapper(pa_type):
+                    type_str = str(pa_type).lower()
+                    if "db" in type_str:
+                        # Map database types to string for safe conversion
+                        return pd.StringDtype()
+                    return None  # Use default mapping for other types
+                
+                df = table.to_pandas(types_mapper=types_mapper)
+            else:
+                # No database-specific types, use standard conversion
+                df = table.to_pandas()
 
-        logger.info(
-            f"Loaded Parquet file from GCS: {len(df):,} rows, "
-            f"{len(df.columns)} columns"
-        )
+            logger.info(
+                f"Loaded Parquet file from GCS: {len(df):,} rows, "
+                f"{len(df.columns)} columns"
+            )
 
-        return df
+            return df
+        except Exception as e:
+            logger.error(
+                f"Error reading parquet file from gs://{self.gcs_bucket}/{gcs_path}: {e}"
+            )
+            raise

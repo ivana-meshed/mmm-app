@@ -307,6 +307,9 @@ def read_parquet_from_gcs(bucket_name: str, blob_path: str) -> pd.DataFrame:
     Raises:
         FileNotFoundError: If blob doesn't exist
     """
+    import pyarrow.parquet as pq
+    import pyarrow as pa
+
     client = storage.Client()
     blob = client.bucket(bucket_name).blob(blob_path)
     if not blob.exists():
@@ -314,7 +317,47 @@ def read_parquet_from_gcs(bucket_name: str, blob_path: str) -> pd.DataFrame:
 
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         blob.download_to_filename(tmp.name)
-        return pd.read_parquet(tmp.name)
+        try:
+            # Read parquet file using PyArrow first to handle database-specific types
+            table = pq.read_table(tmp.name)
+            
+            # Check for database-specific types and convert them
+            schema = table.schema
+            db_type_columns = []
+            for i, field in enumerate(schema):
+                field_type_str = str(field.type).lower()
+                # Check if the type string contains database-specific type indicators
+                if "db" in field_type_str and any(
+                    db_type in field_type_str
+                    for db_type in ["dbdate", "dbtime", "dbdecimal", "dbtimestamp"]
+                ):
+                    db_type_columns.append(field.name)
+                    logger.warning(
+                        f"Column '{field.name}' has database-specific type '{field.type}'"
+                    )
+            
+            # Convert to pandas with type mapping for database-specific types
+            if db_type_columns:
+                logger.info(
+                    f"Converting database-specific types in columns: {db_type_columns}"
+                )
+                # Create a types_mapper that converts unknown types to string
+                def types_mapper(pa_type):
+                    type_str = str(pa_type).lower()
+                    if "db" in type_str:
+                        # Map database types to string for safe conversion
+                        return pd.StringDtype()
+                    return None  # Use default mapping for other types
+                
+                return table.to_pandas(types_mapper=types_mapper)
+            else:
+                # No database-specific types, use standard conversion
+                return table.to_pandas()
+        except Exception as e:
+            logger.error(
+                f"Error reading parquet file from gs://{bucket_name}/{blob_path}: {e}"
+            )
+            raise
 
 
 @cached(ttl_seconds=600)  # Cache for 10 minutes

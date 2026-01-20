@@ -70,6 +70,10 @@ def _read_from_gcs_cache(query_hash: str) -> Optional[pd.DataFrame]:
         return None
 
     try:
+        import io
+        import pyarrow.parquet as pq
+        import pyarrow as pa
+
         client = storage.Client()
         bucket = client.bucket(CACHE_BUCKET)
         blob_path = _get_gcs_cache_path(query_hash)
@@ -99,10 +103,45 @@ def _read_from_gcs_cache(query_hash: str) -> Optional[pd.DataFrame]:
         logger.info(
             f"GCS cache hit for query hash {query_hash[:8]} (age: {age:.1f}s)"
         )
-        import io
 
         data = blob.download_as_bytes()
-        return pd.read_parquet(io.BytesIO(data))
+        buffer = io.BytesIO(data)
+        
+        # Read using PyArrow to handle database-specific types
+        table = pq.read_table(buffer)
+        
+        # Check for database-specific types and convert them
+        schema = table.schema
+        db_type_columns = []
+        for i, field in enumerate(schema):
+            field_type_str = str(field.type).lower()
+            # Check if the type string contains database-specific type indicators
+            if "db" in field_type_str and any(
+                db_type in field_type_str
+                for db_type in ["dbdate", "dbtime", "dbdecimal", "dbtimestamp"]
+            ):
+                db_type_columns.append(field.name)
+                logger.warning(
+                    f"Column '{field.name}' has database-specific type '{field.type}'"
+                )
+        
+        # Convert to pandas with type mapping for database-specific types
+        if db_type_columns:
+            logger.info(
+                f"Converting database-specific types in columns: {db_type_columns}"
+            )
+            # Create a types_mapper that converts unknown types to string
+            def types_mapper(pa_type):
+                type_str = str(pa_type).lower()
+                if "db" in type_str:
+                    # Map database types to string for safe conversion
+                    return pd.StringDtype()
+                return None  # Use default mapping for other types
+            
+            return table.to_pandas(types_mapper=types_mapper)
+        else:
+            # No database-specific types, use standard conversion
+            return table.to_pandas()
 
     except Exception as e:
         logger.warning(f"Failed to read from GCS cache: {e}")
