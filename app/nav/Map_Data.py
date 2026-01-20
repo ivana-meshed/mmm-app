@@ -1169,14 +1169,8 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 st.rerun()
 
         with c1:
-            # Get previously selected countries or default to all countries with data
-            default_countries = st.session_state.get(
-                "selected_countries_widget", []
-            )
-            if (
-                not default_countries
-                and "selected_countries_widget" not in st.session_state
-            ):
+            # Initialize default countries if not already in session state
+            if "selected_countries_widget" not in st.session_state:
                 # Default to all countries that have data in GCS
                 default_countries = [
                     c for c in countries if _list_country_versions_cached(BUCKET, c)
@@ -1185,11 +1179,11 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 ]  # Limit to first 10 to avoid overwhelming
                 if not default_countries and countries:
                     default_countries = [countries[0]]
+                st.session_state["selected_countries_widget"] = default_countries
 
             selected_countries = st.multiselect(
                 "Countries",
                 options=countries,
-                default=default_countries,
                 key="selected_countries_widget",
                 help="Select one or more countries to analyze. All selected countries will use the same mapping.",
             )
