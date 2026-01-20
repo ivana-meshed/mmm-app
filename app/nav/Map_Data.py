@@ -981,6 +981,27 @@ st.session_state.setdefault("source_mode", "Latest (GCS)")
 st.header("1. Select Dataset")
 
 with st.expander("📊 Choose the data you want to analyze.", expanded=False):
+    
+    # ═══════════════════════════════════════════════════════════
+    # STEP 1.1: Data Source Type Selection (Radio Buttons)
+    # ═══════════════════════════════════════════════════════════
+    st.subheader("1.1 Choose Data Source Type")
+    
+    # Radio button for primary selection
+    data_source_mode = st.radio(
+        "How would you like to load data?",
+        options=["Load previously saved data from GCS", "Connect and load new dataset"],
+        key="data_source_mode",
+        help="Choose whether to load already saved data or connect to a new data source"
+    )
+    
+    st.divider()
+    
+    # ═══════════════════════════════════════════════════════════
+    # STEP 1.2: Country Selection
+    # ═══════════════════════════════════════════════════════════
+    st.subheader("1.2 Select Countries")
+    
     # Country picker (ISO2, GCS-first) as multiselect
     c1, c2, c3 = st.columns([3, 0.8, 0.8])
 
@@ -1062,89 +1083,101 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 versions.append(vv)
                 seen.add(vv)
 
+        # ═══════════════════════════════════════════════════════════
+        # STEP 1.3: Data Source Selection Based on Mode
+        # ═══════════════════════════════════════════════════════════
+        st.divider()
+        st.subheader("1.3 Select Data Source")
+        
+        # Get data source mode from radio button
+        data_source_mode = st.session_state.get("data_source_mode", "Load previously saved data from GCS")
+        
         # Split options into two categories
         # 1. Previously loaded data (GCS versions)
         saved_data_options = ["Latest"] + [v for v in versions if v != "Latest"]
 
         # 2. New data sources (Snowflake, BigQuery, CSV)
-        new_source_options = ["Snowflake"]
-
-        # Add CSV Upload option if CSV data is available in session
-        if (
-            st.session_state.get("csv_connected")
-            and st.session_state.get("csv_data") is not None
-        ):
-            new_source_options.append("CSV Upload")
-
-        # Add BigQuery option if BigQuery is connected
-        if (
-            st.session_state.get("bq_connected")
+        # Build new source options with connection status
+        new_source_options = []
+        
+        # Check Snowflake connection
+        sf_connected = st.session_state.get("sf_connected", False)
+        new_source_options.append(("Snowflake", sf_connected))
+        
+        # Check BigQuery connection
+        bq_connected = (
+            st.session_state.get("bq_connected", False)
             and st.session_state.get("bq_client") is not None
-        ):
-            new_source_options.append("BigQuery")
-
-        # Selectboxes OUTSIDE form for immediate reactivity
-        st.write("**1.1 Select previously loaded data:**")
+        )
+        new_source_options.append(("BigQuery", bq_connected))
         
-        # Get current selection from session state or default to first option
-        current_source = st.session_state.get("source_choice", "Latest")
+        # Check CSV upload
+        csv_connected = (
+            st.session_state.get("csv_connected", False)
+            and st.session_state.get("csv_data") is not None
+        )
+        new_source_options.append(("CSV Upload", csv_connected))
         
-        # Determine index for saved data dropdown
-        if current_source in saved_data_options:
-            saved_idx = saved_data_options.index(current_source)
+        # Show appropriate UI based on mode
+        if data_source_mode == "Load previously saved data from GCS":
+            # Show GCS version selector
+            st.info("📦 Loading from previously saved datasets in GCS")
+            
+            current_source = st.session_state.get("source_choice", "Latest")
+            if current_source not in saved_data_options:
+                current_source = "Latest"
+            
+            source_choice = st.selectbox(
+                "Select GCS version:",
+                options=saved_data_options,
+                index=saved_data_options.index(current_source),
+                key="gcs_version_choice",
+                help="Choose which saved dataset version to load"
+            )
+            
         else:
-            saved_idx = 0
-        
-        saved_data_choice = st.selectbox(
-            " ",
-            options=saved_data_options,
-            index=saved_idx,
-            key="saved_data_choice",
-            label_visibility="collapsed",
-        )
-        
-        st.write("**1.2 Alternatively: connect and load new dataset**")
-        
-        # Determine index for new source dropdown
-        if current_source in new_source_options:
-            new_idx = new_source_options.index(current_source)
-        else:
-            new_idx = 0
-        
-        new_source_choice = st.selectbox(
-            " ",
-            options=new_source_options,
-            index=new_idx,
-            key="new_source_choice",
-            label_visibility="collapsed",
-        )
-        
-        # Determine which source is selected (for immediate reactivity)
-        # Track which dropdown was last changed
-        prev_saved = st.session_state.get(
-            "_prev_saved_choice", saved_data_options[0]
-        )
-        prev_new = st.session_state.get(
-            "_prev_new_choice", new_source_options[0]
-        )
-        
-        # Determine active source based on which dropdown changed
-        if saved_data_choice != prev_saved:
-            source_choice = saved_data_choice
-            st.session_state["_last_changed"] = "saved"
-        elif new_source_choice != prev_new:
-            source_choice = new_source_choice
-            st.session_state["_last_changed"] = "new"
-        else:
-            # No change detected, use last changed or current choice
-            if st.session_state.get("_last_changed") == "new":
-                source_choice = new_source_choice
+            # Show new data source options with connection status
+            st.info("🔌 Connect to a new data source")
+            
+            # Display available options with connection status
+            for source_name, is_connected in new_source_options:
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"**{source_name}**")
+                with col2:
+                    if is_connected:
+                        st.success("✅ Connected")
+                    else:
+                        st.warning("⚠️ Not connected")
+            
+            st.caption("💡 Connect to data sources in the **Connect Data** page")
+            
+            # Filter to show only connected sources, or all if none connected
+            connected_sources = [name for name, connected in new_source_options if connected]
+            
+            if not connected_sources:
+                st.warning(
+                    "⚠️ No data sources are connected. Please go to **Connect Data** page to set up a connection."
+                )
+                # Still allow selection but show all options
+                available_sources = [name for name, _ in new_source_options]
             else:
-                source_choice = saved_data_choice
+                available_sources = connected_sources
+            
+            # Get current selection or default to first available
+            current_source = st.session_state.get("source_choice", None)
+            if current_source not in available_sources:
+                current_source = available_sources[0] if available_sources else "Snowflake"
+            
+            source_choice = st.selectbox(
+                "Select data source:",
+                options=available_sources,
+                index=available_sources.index(current_source) if current_source in available_sources else 0,
+                key="new_source_selection",
+                help="Choose which data source to load from"
+            )
         
-        # Update stored values
-        st.session_state["_prev_saved_choice"] = saved_data_choice
-        st.session_state["_prev_new_choice"] = new_source_choice
+        # Store the final choice
         st.session_state["source_choice"] = source_choice
 
         # Show appropriate inputs only for the selected new data source (OUTSIDE FORM)
