@@ -482,27 +482,10 @@ def _build_mapping_df(
 
 
 def _initial_goals_from_columns(cols: list[str]) -> pd.DataFrame:
-    # Pick a few top candidates by name for convenience; user can delete/edit
-    candidates = [
-        c
-        for c in cols
-        if any(
-            k in c.lower()
-            for k in ("rev", "gmv", "sales", "conv", "lead", "purchase")
-        )
-    ]
-    # limit to a manageable number
-    candidates = candidates[:8] if candidates else []
+    # Return empty DataFrame - user must select goals manually
     return pd.DataFrame(
-        {
-            "var": pd.Series(candidates, dtype="object"),
-            "group": pd.Series(["primary"] * len(candidates), dtype="object"),
-            "type": pd.Series(
-                [_guess_goal_type(c) for c in candidates], dtype="object"
-            ),
-            "main": pd.Series([False] * len(candidates), dtype="object"),
-        }
-    )
+        columns=["var", "group", "type", "main"]
+    ).astype("object")
 
 
 def _download_json_from_gcs(gs_bucket: str, blob_path: str) -> dict:
