@@ -1250,8 +1250,36 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 )
             return
 
+        # Validate required fields before loading
+        choice = st.session_state.get("source_choice", "Latest")
+        
+        # Validate country field for Snowflake/BigQuery/CSV when using table mode
+        if choice == "Snowflake":
+            # Check if using table mode (not custom SQL)
+            if not st.session_state.get("sf_sql", "").strip():
+                country_field = st.session_state.get("sf_country_field", "").strip()
+                if not country_field:
+                    st.error(
+                        "⚠️ **Country field is required for Snowflake table queries**\n\n"
+                        "Please fill in the 'Select country field:' input above. "
+                        "This should be the column name in your Snowflake table that contains country codes "
+                        "(e.g., 'COUNTRY', 'COUNTRY_CODE', 'ISO_CODE')."
+                    )
+                    return
+        elif choice == "BigQuery":
+            # Check if using table mode (not custom SQL)
+            if not st.session_state.get("bq_sql", "").strip():
+                country_field = st.session_state.get("bq_country_field", "").strip()
+                if not country_field:
+                    st.error(
+                        "⚠️ **Country field is required for BigQuery table queries**\n\n"
+                        "Please fill in the 'Country field name:' input above. "
+                        "This should be the column name in your BigQuery table that contains country codes "
+                        "(e.g., 'country', 'country_code', 'iso_code')."
+                    )
+                    return
+
         try:
-            choice = st.session_state.get("source_choice", "Latest")
             df_by_country = {}
             loaded_count = 0
             failed_countries = []
@@ -1278,7 +1306,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                 if not st.session_state["sf_sql"].strip():
                                     country_field = st.session_state.get(
                                         "sf_country_field", "COUNTRY"
-                                    )
+                                    ).strip()
                                     sql = f"{base_sql} WHERE {country_field} = '{country.upper()}'"
                                 else:
                                     # Custom SQL - user must include country filter themselves
@@ -1291,6 +1319,17 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                 st.write(f"DEBUG: Executing SQL for {country.upper()}: {sql}")
                                 
                                 df = _load_from_snowflake_cached(sql)
+                                
+                                # Validate that country field exists in the data
+                                if df is not None and not df.empty and not st.session_state["sf_sql"].strip():
+                                    country_field = st.session_state.get("sf_country_field", "COUNTRY").strip()
+                                    if country_field not in df.columns:
+                                        raise ValueError(
+                                            f"Country field '{country_field}' not found in Snowflake table. "
+                                            f"Available columns: {', '.join(df.columns.tolist())}. "
+                                            f"Please check the 'Select country field:' input and ensure it matches a column name in your table."
+                                        )
+                                
                                 load_method = f"Snowflake ({len(df) if df is not None else 0} rows)"
 
                         elif choice == "BigQuery":
@@ -1315,7 +1354,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                 # Use table with country filter
                                 country_field = st.session_state.get(
                                     "bq_country_field", "country"
-                                )
+                                ).strip()
                                 sql = f"SELECT * FROM `{bq_table}` WHERE {country_field} = '{country.upper()}'"
                             else:
                                 raise ValueError(
@@ -1325,6 +1364,17 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                             df = execute_query(
                                 bq_client, sql, fetch_pandas=True
                             )
+                            
+                            # Validate that country field exists in the data
+                            if df is not None and not df.empty and not bq_sql.strip():
+                                country_field = st.session_state.get("bq_country_field", "country").strip()
+                                if country_field not in df.columns:
+                                    raise ValueError(
+                                        f"Country field '{country_field}' not found in BigQuery table. "
+                                        f"Available columns: {', '.join(df.columns.tolist())}. "
+                                        f"Please check the 'Country field name:' input and ensure it matches a column name in your table."
+                                    )
+                            
                             load_method = f"BigQuery ({len(df) if df is not None else 0} rows)"
 
                         elif choice == "CSV Upload":
