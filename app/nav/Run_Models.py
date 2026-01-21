@@ -35,6 +35,9 @@ data_processor = get_data_processor()
 job_manager = get_job_manager()
 from app_split_helpers import *  # bring in all helper functions/constants
 
+# Configure logging
+logger = logging.getLogger(__name__)
+
 require_login_and_domain()
 ensure_session_defaults()
 
