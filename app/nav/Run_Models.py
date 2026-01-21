@@ -351,10 +351,19 @@ with tab_single:
         except Exception:
             training_data_options = ["None"]
 
+        # Check if we just exported from Prepare Training Data page
+        just_exported_timestamp = st.session_state.get("just_exported_training_timestamp")
+        default_training_index = 0
+        if just_exported_timestamp and just_exported_timestamp in training_data_options:
+            # Auto-select the just-exported timestamp
+            default_training_index = training_data_options.index(just_exported_timestamp)
+            # Clear the flag so it doesn't persist across page refreshes
+            del st.session_state["just_exported_training_timestamp"]
+        
         selected_training_data = st.selectbox(
             "Select Training Data Config",
             options=training_data_options,
-            index=0,
+            index=default_training_index,
             help="Load selected_columns.json from Prepare Training Data to prefill model inputs.",
         )
 
