@@ -2518,6 +2518,9 @@ with st.expander(
                     format_cet_timestamp(),
                 )
                 
+                # Add timestamp to export data for reference
+                export_data["timestamp"] = timestamp
+                
                 # Store the timestamp back to session state for consistency
                 if not st.session_state.get("shared_save_timestamp"):
                     st.session_state["shared_save_timestamp"] = timestamp

@@ -266,11 +266,39 @@ with tab_single:
         # Store available countries in session state for use in Save Model Settings
         st.session_state["run_models_available_countries"] = available_countries
 
+        # Check if we just exported from Prepare Training Data page and load that config first
+        training_data_config = st.session_state.get("training_data_config")
+        just_exported_timestamp = st.session_state.get("just_exported_training_timestamp")
+        
+        if just_exported_timestamp and not training_data_config:
+            # Try to load the just-exported training data config
+            try:
+                # Determine which country to use
+                export_country = st.session_state.get("country", available_countries[0] if available_countries else "de")
+                training_data_versions = _list_training_data_versions(gcs_bucket, export_country)
+                if training_data_versions and just_exported_timestamp in training_data_versions:
+                    loaded_config = _load_training_data_json(
+                        gcs_bucket, export_country, just_exported_timestamp
+                    )
+                    if loaded_config:
+                        training_data_config = loaded_config
+                        st.session_state["training_data_config"] = training_data_config
+                        st.info(f"🎯 **Auto-loaded training data config:** {just_exported_timestamp}")
+            except Exception as e:
+                st.warning(f"Could not auto-load training data config: {e}")
+        
+        # If training data config exists, use it to set default country
+        default_country_index = 0
+        if training_data_config and "country" in training_data_config:
+            config_country = training_data_config["country"]
+            if config_country in available_countries:
+                default_country_index = available_countries.index(config_country)
+
         # Allow selection of primary country
         selected_country = st.selectbox(
             "Primary Country",
             options=available_countries,
-            index=0,
+            index=default_country_index,
             help="Choose the country this model run will focus on",
         )
 
@@ -315,19 +343,37 @@ with tab_single:
             st.warning(f"Could not list mapped data versions: {e}")
             available_versions = ["Latest"]
 
+        # Determine default index for data version from training_data_config
+        default_version_index = 0
+        if training_data_config and "data_version" in training_data_config:
+            config_version = training_data_config["data_version"]
+            if config_version in available_versions:
+                default_version_index = available_versions.index(config_version)
+
         # Mapped Data version selection - uses same list as Prepare Training Data page
         selected_version = st.selectbox(
             "Mapped Data version",
             options=available_versions,
-            index=0,
+            index=default_version_index,
             help="Select mapped data version. Uses the same list as Prepare Training Data page.",
         )
+
+        # Determine default index for metadata from training_data_config
+        default_metadata_index = 0
+        if training_data_config and "meta_version" in training_data_config:
+            config_meta_version = training_data_config["meta_version"]
+            # Try to find matching metadata option
+            # Config stores like "Latest" or timestamp, options are like "Universal - Latest"
+            for i, option in enumerate(metadata_options):
+                if config_meta_version in option:
+                    default_metadata_index = i
+                    break
 
         # Metadata source selection
         selected_metadata = st.selectbox(
             "Metadata version",
             options=metadata_options,
-            index=0,
+            index=default_metadata_index,
             help="Select metadata configuration. Universal mappings work for all countries. Latest = most recently saved metadata.",
         )
 
@@ -351,14 +397,16 @@ with tab_single:
         except Exception:
             training_data_options = ["None"]
 
-        # Check if we just exported from Prepare Training Data page
-        just_exported_timestamp = st.session_state.get("just_exported_training_timestamp")
+        # Determine default index for training data dropdown
         default_training_index = 0
         if just_exported_timestamp and just_exported_timestamp in training_data_options:
             # Auto-select the just-exported timestamp
             default_training_index = training_data_options.index(just_exported_timestamp)
-            # Clear the flag so it doesn't persist across page refreshes
-            del st.session_state["just_exported_training_timestamp"]
+        elif training_data_config and "timestamp" in training_data_config:
+            # Or select based on loaded config timestamp
+            config_timestamp = training_data_config.get("timestamp")
+            if config_timestamp in training_data_options:
+                default_training_index = training_data_options.index(config_timestamp)
         
         selected_training_data = st.selectbox(
             "Select Training Data Config",
@@ -367,12 +415,16 @@ with tab_single:
             help="Load selected_columns.json from Prepare Training Data to prefill model inputs.",
         )
 
-        # Load and store training data config if selected
-        if selected_training_data != "None":
-            training_data_config = _load_training_data_json(
+        # Load and store training data config if selected (and not already loaded)
+        if selected_training_data != "None" and (
+            not training_data_config or 
+            training_data_config.get("timestamp") != selected_training_data
+        ):
+            loaded_config = _load_training_data_json(
                 gcs_bucket, selected_country, selected_training_data
             )
-            if training_data_config:
+            if loaded_config:
+                training_data_config = loaded_config
                 st.session_state["training_data_config"] = training_data_config
                 st.success(
                     f"✅ Loaded training data config: {selected_training_data}"
@@ -383,8 +435,16 @@ with tab_single:
                     st.json(training_data_config)
             else:
                 st.session_state["training_data_config"] = None
-        else:
+                training_data_config = None
+        elif selected_training_data == "None":
             st.session_state["training_data_config"] = None
+            training_data_config = None
+        elif training_data_config:
+            # Config already loaded, just show it
+            with st.expander(
+                "Preview Training Data Config", expanded=False
+            ):
+                st.json(training_data_config)
 
         # Show current loaded state (point 4 - UI representing actual state)
         if (
@@ -446,6 +506,10 @@ with tab_single:
                             f"✅ Loaded {len(df_prev)} rows, {len(df_prev.columns)} columns from **{selected_country.upper()}** - {selected_version}"
                         )
                         st.info(f"📋 Using metadata: **{selected_metadata}**")
+                        
+                        # Clear the just_exported flag after successful load
+                        if "just_exported_training_timestamp" in st.session_state:
+                            del st.session_state["just_exported_training_timestamp"]
 
                         # Display summary of loaded data (Issue #1 fix: show goals details)
                         with st.expander(
