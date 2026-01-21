@@ -1084,7 +1084,7 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         # This ensures sync happens immediately without delay
         if needs_rerun and title == "Paid Spend":
             paid_media_mapping = meta.get("paid_media_mapping", {}) or {}
-            for col_name, is_selected in use_overrides.items():
+            for col_name, is_selected in list(use_overrides.items()):
                 if col_name in paid_spend:
                     # Sync corresponding Paid Vars
                     corresponding_vars = paid_media_mapping.get(col_name, [])
