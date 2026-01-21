@@ -43,6 +43,12 @@ list_mapped_data_versions.clear()
 
 st.title("Run Marketing Mix Models")
 
+# DIAGNOSTIC: Log session state at page load
+just_exported_timestamp_check = st.session_state.get("just_exported_training_timestamp")
+just_exported_country_check = st.session_state.get("just_exported_training_country")
+logger.info(f"[TRAINING-DATA-DEBUG] Page load - Session state keys: {list(st.session_state.keys())[:20]}")
+logger.info(f"[TRAINING-DATA-DEBUG] Export flags check: timestamp={just_exported_timestamp_check}, country={just_exported_country_check}")
+
 tab_single, tab_queue, tab_status = st.tabs(
     ["Single Run", "Batch Run", "Queue Monitor"]
 )
