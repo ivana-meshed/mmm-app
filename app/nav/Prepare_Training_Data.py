@@ -1989,10 +1989,18 @@ with st.expander(
         )
 
         # Check if any selections changed and update session state
+        needs_rerun = False
         for _, row in edited.iterrows():
             var_name = str(row["Variable"])
             use_val = bool(row["Use"])
+            old_val = st.session_state["vif_selections"].get(var_name, True)
+            if old_val != use_val:
+                needs_rerun = True
             st.session_state["vif_selections"][var_name] = use_val
+        
+        # Trigger rerun only if selections actually changed
+        if needs_rerun:
+            st.rerun()
 
     def _get_selected_vars_from_session(var_list: List[str]) -> List[str]:
         """Get selected variables from session state for a given var list."""
