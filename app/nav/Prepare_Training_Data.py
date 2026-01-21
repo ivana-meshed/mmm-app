@@ -1908,7 +1908,6 @@ with st.expander(
 
         return identical_pairs
 
-    @st.fragment
     def _render_vif_table(
         title: str,
         var_list: List[str],
@@ -1986,9 +1985,9 @@ with st.expander(
                 needs_rerun = True
             st.session_state["vif_selections"][var_name] = use_val
 
-        # If selections changed, trigger a fragment rerun
+        # If selections changed, trigger a full page rerun to update quality indicators
         if needs_rerun:
-            st.rerun(scope="fragment")
+            st.rerun()
 
     def _get_selected_vars_from_session(var_list: List[str]) -> List[str]:
         """Get selected variables from session state for a given var list."""
