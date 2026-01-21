@@ -47,10 +47,18 @@ list_mapped_data_versions.clear()
 st.title("Run Marketing Mix Models")
 
 # DIAGNOSTIC: Log session state at page load
-just_exported_timestamp_check = st.session_state.get("just_exported_training_timestamp")
-just_exported_country_check = st.session_state.get("just_exported_training_country")
-logger.info(f"[TRAINING-DATA-DEBUG] Page load - Session state keys: {list(st.session_state.keys())[:20]}")
-logger.info(f"[TRAINING-DATA-DEBUG] Export flags check: timestamp={just_exported_timestamp_check}, country={just_exported_country_check}")
+just_exported_timestamp_check = st.session_state.get(
+    "just_exported_training_timestamp"
+)
+just_exported_country_check = st.session_state.get(
+    "just_exported_training_country"
+)
+logger.info(
+    f"[TRAINING-DATA-DEBUG] Page load - Session state keys: {list(st.session_state.keys())[:20]}"
+)
+logger.info(
+    f"[TRAINING-DATA-DEBUG] Export flags check: timestamp={just_exported_timestamp_check}, country={just_exported_country_check}"
+)
 
 tab_single, tab_queue, tab_status = st.tabs(
     ["Single Run", "Batch Run", "Queue Monitor"]
@@ -485,15 +493,21 @@ with tab_single:
 
         # CRITICAL: Use just_exported_country if available (not selected_country)
         # This ensures we look in the correct folder where the data was exported
-        lookup_country = st.session_state.get("just_exported_training_country", selected_country)
-        logger.info(f"[TRAINING-DATA-PREFILL] Training data lookup country: {lookup_country} (selected_country={selected_country})")
+        lookup_country = st.session_state.get(
+            "just_exported_training_country", selected_country
+        )
+        logger.info(
+            f"[TRAINING-DATA-PREFILL] Training data lookup country: {lookup_country} (selected_country={selected_country})"
+        )
 
         try:
             # First try to get configs for the lookup country
             training_data_versions = _list_training_data_versions(
                 gcs_bucket, lookup_country
             )
-            logger.info(f"[TRAINING-DATA-PREFILL] Found {len(training_data_versions)} training data versions for {lookup_country}")
+            logger.info(
+                f"[TRAINING-DATA-PREFILL] Found {len(training_data_versions)} training data versions for {lookup_country}"
+            )
 
             if training_data_versions:
                 # Found configs for selected country - show them with simple timestamps
@@ -532,12 +546,23 @@ with tab_single:
 
         # Auto-select exported timestamp if present
         default_training_data_index = 0
-        just_exported_timestamp = st.session_state.get("just_exported_training_timestamp")
-        if just_exported_timestamp and just_exported_timestamp in training_data_options:
-            default_training_data_index = training_data_options.index(just_exported_timestamp)
-            logger.info(f"[TRAINING-DATA-PREFILL] Auto-selecting exported timestamp: {just_exported_timestamp} at index {default_training_data_index}")
+        just_exported_timestamp = st.session_state.get(
+            "just_exported_training_timestamp"
+        )
+        if (
+            just_exported_timestamp
+            and just_exported_timestamp in training_data_options
+        ):
+            default_training_data_index = training_data_options.index(
+                just_exported_timestamp
+            )
+            logger.info(
+                f"[TRAINING-DATA-PREFILL] Auto-selecting exported timestamp: {just_exported_timestamp} at index {default_training_data_index}"
+            )
         else:
-            logger.info(f"[TRAINING-DATA-PREFILL] No auto-selection: timestamp={just_exported_timestamp}, available options={training_data_options[:5]}")
+            logger.info(
+                f"[TRAINING-DATA-PREFILL] No auto-selection: timestamp={just_exported_timestamp}, available options={training_data_options[:5]}"
+            )
 
         selected_training_data = st.selectbox(
             "Select Training Data Config",
@@ -563,10 +588,14 @@ with tab_single:
                     # Clear export flags after successful load
                     if "just_exported_training_timestamp" in st.session_state:
                         del st.session_state["just_exported_training_timestamp"]
-                        logger.info("[TRAINING-DATA-PREFILL] Cleared just_exported_training_timestamp flag after successful load")
+                        logger.info(
+                            "[TRAINING-DATA-PREFILL] Cleared just_exported_training_timestamp flag after successful load"
+                        )
                     if "just_exported_training_country" in st.session_state:
                         del st.session_state["just_exported_training_country"]
-                        logger.info("[TRAINING-DATA-PREFILL] Cleared just_exported_training_country flag after successful load")
+                        logger.info(
+                            "[TRAINING-DATA-PREFILL] Cleared just_exported_training_country flag after successful load"
+                        )
                     if config_country != selected_country:
                         st.success(
                             f"✅ Loaded training data config from {config_country.upper()}: {config_timestamp}"
@@ -967,6 +996,7 @@ with tab_single:
 
         # Goal variable from metadata
         metadata = st.session_state.get("loaded_metadata")
+        training_data_config = st.session_state.get("training_data_config")
         if metadata and "goals" in metadata:
             goal_options = [
                 g["var"]
@@ -975,8 +1005,19 @@ with tab_single:
             ]
             if goal_options:
                 # Find default index for loaded dep_var
+                # Priority: training_data_config.selected_goal > loaded_config.dep_var > 0
                 default_dep_var_index = 0
-                if loaded_config and "dep_var" in loaded_config:
+                if (
+                    training_data_config
+                    and "selected_goal" in training_data_config
+                ):
+                    try:
+                        default_dep_var_index = goal_options.index(
+                            training_data_config["selected_goal"]
+                        )
+                    except (ValueError, KeyError):
+                        pass
+                elif loaded_config and "dep_var" in loaded_config:
                     try:
                         default_dep_var_index = goal_options.index(
                             loaded_config["dep_var"]
@@ -1004,13 +1045,21 @@ with tab_single:
                     ),
                 )
             else:
+                # No goal options from metadata, use text input
+                # Priority: training_data_config.selected_goal > loaded_config.dep_var > "UPLOAD_VALUE"
+                default_dep_var_value = "UPLOAD_VALUE"
+                if training_data_config and training_data_config.get(
+                    "selected_goal"
+                ):
+                    default_dep_var_value = training_data_config[
+                        "selected_goal"
+                    ]
+                elif loaded_config and loaded_config.get("dep_var"):
+                    default_dep_var_value = loaded_config["dep_var"]
+
                 dep_var = st.text_input(
                     "Goal variable",
-                    value=(
-                        loaded_config.get("dep_var", "UPLOAD_VALUE")
-                        if loaded_config
-                        else "UPLOAD_VALUE"
-                    ),
+                    value=default_dep_var_value,
                 )
                 dep_var_type = (
                     loaded_config.get("dep_var_type", "revenue")
@@ -1018,13 +1067,19 @@ with tab_single:
                     else "revenue"
                 )
         else:
+            # No metadata available, use text input
+            # Priority: training_data_config.selected_goal > loaded_config.dep_var > "UPLOAD_VALUE"
+            default_dep_var_value = "UPLOAD_VALUE"
+            if training_data_config and training_data_config.get(
+                "selected_goal"
+            ):
+                default_dep_var_value = training_data_config["selected_goal"]
+            elif loaded_config and loaded_config.get("dep_var"):
+                default_dep_var_value = loaded_config["dep_var"]
+
             dep_var = st.text_input(
                 "Goal variable",
-                value=(
-                    loaded_config.get("dep_var", "UPLOAD_VALUE")
-                    if loaded_config
-                    else "UPLOAD_VALUE"
-                ),
+                value=default_dep_var_value,
                 help="Dependent variable column in your data",
             )
             dep_var_type = (
@@ -1162,9 +1217,7 @@ with tab_single:
             agg_summary = ", ".join(
                 [f"{count} {agg}" for agg, count in sorted(agg_counts.items())]
             )
-            st.info(
-                f"ℹ️ Using column aggregations from metadata: {agg_summary}"
-            )
+            st.info(f"ℹ️ Using column aggregations from metadata: {agg_summary}")
         elif resample_freq != "none" and not column_agg_strategies:
             st.warning(
                 "⚠️ No column aggregations found in metadata. Default 'sum' "
@@ -2241,9 +2294,7 @@ with tab_single:
             )
         else:
             combined_revision = ""
-            st.warning(
-                "⚠️ Please select or create a tag for the experiment run"
-            )
+            st.warning("⚠️ Please select or create a tag for the experiment run")
 
         # For backward compatibility, create a combined "revision" field
         revision = combined_revision
