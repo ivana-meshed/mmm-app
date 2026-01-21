@@ -267,10 +267,11 @@ with tab_single:
         st.session_state["run_models_available_countries"] = available_countries
 
         # Check if we just exported from Prepare Training Data page and load that config first
-        training_data_config = st.session_state.get("training_data_config")
+        # This must happen BEFORE creating dropdowns so we can prefill them properly
         just_exported_timestamp = st.session_state.get("just_exported_training_timestamp")
+        config_load_triggered = st.session_state.get("_training_data_config_load_triggered", False)
         
-        if just_exported_timestamp and not training_data_config:
+        if just_exported_timestamp and not config_load_triggered:
             # Try to load the just-exported training data config
             try:
                 # Determine which country to use
@@ -281,11 +282,17 @@ with tab_single:
                         gcs_bucket, export_country, just_exported_timestamp
                     )
                     if loaded_config:
-                        training_data_config = loaded_config
-                        st.session_state["training_data_config"] = training_data_config
-                        st.info(f"🎯 **Auto-loaded training data config:** {just_exported_timestamp}")
+                        st.session_state["training_data_config"] = loaded_config
+                        st.session_state["_training_data_config_load_triggered"] = True
+                        st.info(f"🎯 **Auto-loading training data config:** {just_exported_timestamp}")
+                        # Rerun so the dropdown defaults can be set properly in next render
+                        st.rerun()
             except Exception as e:
                 st.warning(f"Could not auto-load training data config: {e}")
+                st.session_state["_training_data_config_load_triggered"] = True
+        
+        # Get the loaded config (will be available after rerun above)
+        training_data_config = st.session_state.get("training_data_config")
         
         # If training data config exists, use it to set default country
         default_country_index = 0
@@ -507,9 +514,11 @@ with tab_single:
                         )
                         st.info(f"📋 Using metadata: **{selected_metadata}**")
                         
-                        # Clear the just_exported flag after successful load
+                        # Clear the flags after successful load
                         if "just_exported_training_timestamp" in st.session_state:
                             del st.session_state["just_exported_training_timestamp"]
+                        if "_training_data_config_load_triggered" in st.session_state:
+                            del st.session_state["_training_data_config_load_triggered"]
 
                         # Display summary of loaded data (Issue #1 fix: show goals details)
                         with st.expander(
