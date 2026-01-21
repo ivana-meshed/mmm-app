@@ -2076,7 +2076,7 @@ with st.expander(
             st.markdown("#### Model Quality Indicators")
             st.caption(
                 "Traffic light indicators based on Robyn MMM best practices. "
-                "Updates when you change driver selections below."
+                "Updates automatically when you change driver selections below."
             )
 
             # Add toggle for filtering leading zeros from media response vars
@@ -2185,14 +2185,6 @@ with st.expander(
 
         # Render Model Quality Indicators at the top
         _render_model_quality_indicators()
-
-        # Add Refresh button to update indicators after VIF selection changes
-        if st.button(
-            "🔄 Refresh Quality Indicators",
-            help="Click to recalculate indicators after changing driver selections in the VIF tables below",
-            key="refresh_quality_indicators",
-        ):
-            st.rerun()
 
         st.markdown("---")
 
