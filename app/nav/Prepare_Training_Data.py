@@ -2544,6 +2544,10 @@ with st.expander(
                 # Store timestamp AND country for auto-selection in Run Models page
                 st.session_state["just_exported_training_timestamp"] = timestamp
                 st.session_state["just_exported_training_country"] = country
+                
+                logger.info(f"[TRAINING-DATA-EXPORT] Successfully exported training data to {gcs_path}")
+                logger.info(f"[TRAINING-DATA-EXPORT] Stored in session state: timestamp={timestamp}, country={country}")
+                logger.info(f"[TRAINING-DATA-EXPORT] Export data contains: country={export_data.get('country')}, data_version={export_data.get('data_version')}, meta_version={export_data.get('meta_version')}, timestamp={export_data.get('timestamp')}")
 
                 st.success(
                     f"✅ Exported {len(final_vars)} selected drivers!\n\n"

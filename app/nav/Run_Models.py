@@ -272,10 +272,15 @@ with tab_single:
         just_exported_country = st.session_state.get("just_exported_training_country")
         config_load_triggered = st.session_state.get("_training_data_config_load_triggered", False)
         
+        logger.info(f"[TRAINING-DATA-PREFILL] Checking export flags: timestamp={just_exported_timestamp}, country={just_exported_country}, load_triggered={config_load_triggered}")
+        
         if just_exported_timestamp and just_exported_country and not config_load_triggered:
             # Try to load the just-exported training data config
             try:
+                logger.info(f"[TRAINING-DATA-PREFILL] Attempting to load config from {just_exported_country}/{just_exported_timestamp}")
                 training_data_versions = _list_training_data_versions(gcs_bucket, just_exported_country)
+                logger.info(f"[TRAINING-DATA-PREFILL] Found {len(training_data_versions) if training_data_versions else 0} versions in {just_exported_country}: {training_data_versions[:5] if training_data_versions else []}")
+                
                 if training_data_versions and just_exported_timestamp in training_data_versions:
                     loaded_config = _load_training_data_json(
                         gcs_bucket, just_exported_country, just_exported_timestamp
@@ -283,10 +288,14 @@ with tab_single:
                     if loaded_config:
                         st.session_state["training_data_config"] = loaded_config
                         st.session_state["_training_data_config_load_triggered"] = True
+                        logger.info(f"[TRAINING-DATA-PREFILL] Successfully loaded config. Country={loaded_config.get('country')}, data_version={loaded_config.get('data_version')}, meta_version={loaded_config.get('meta_version')}")
                         st.info(f"🎯 **Auto-loading training data config:** {just_exported_timestamp}")
                         # Rerun so the dropdown defaults can be set properly in next render
                         st.rerun()
+                else:
+                    logger.warning(f"[TRAINING-DATA-PREFILL] Timestamp {just_exported_timestamp} not found in versions list")
             except Exception as e:
+                logger.error(f"[TRAINING-DATA-PREFILL] Error loading config: {e}")
                 st.warning(f"Could not auto-load training data config: {e}")
                 st.session_state["_training_data_config_load_triggered"] = True
         
@@ -299,6 +308,11 @@ with tab_single:
             config_country = training_data_config["country"]
             if config_country in available_countries:
                 default_country_index = available_countries.index(config_country)
+                logger.info(f"[TRAINING-DATA-PREFILL] Setting country dropdown default to '{config_country}' (index {default_country_index})")
+            else:
+                logger.warning(f"[TRAINING-DATA-PREFILL] Config country '{config_country}' not in available countries: {available_countries}")
+        else:
+            logger.info(f"[TRAINING-DATA-PREFILL] No training_data_config or country in config, using default index 0")
 
         # Allow selection of primary country
         selected_country = st.selectbox(
@@ -307,6 +321,7 @@ with tab_single:
             index=default_country_index,
             help="Choose the country this model run will focus on",
         )
+        logger.info(f"[TRAINING-DATA-PREFILL] Country dropdown rendered with selected_country='{selected_country}'")
 
         # Get available metadata versions (including universal)
         try:
@@ -355,6 +370,11 @@ with tab_single:
             config_version = training_data_config["data_version"]
             if config_version in available_versions:
                 default_version_index = available_versions.index(config_version)
+                logger.info(f"[TRAINING-DATA-PREFILL] Setting data version dropdown default to '{config_version}' (index {default_version_index})")
+            else:
+                logger.warning(f"[TRAINING-DATA-PREFILL] Config data_version '{config_version}' not in available versions: {available_versions[:5]}")
+        else:
+            logger.info(f"[TRAINING-DATA-PREFILL] No training_data_config or data_version in config, using default index 0")
 
         # Mapped Data version selection - uses same list as Prepare Training Data page
         selected_version = st.selectbox(
@@ -363,6 +383,7 @@ with tab_single:
             index=default_version_index,
             help="Select mapped data version. Uses the same list as Prepare Training Data page.",
         )
+        logger.info(f"[TRAINING-DATA-PREFILL] Data version dropdown rendered with selected_version='{selected_version}'")
 
         # Determine default index for metadata from training_data_config
         default_metadata_index = 0
@@ -373,7 +394,12 @@ with tab_single:
             for i, option in enumerate(metadata_options):
                 if config_meta_version in option:
                     default_metadata_index = i
+                    logger.info(f"[TRAINING-DATA-PREFILL] Setting metadata dropdown default to '{option}' (index {i}) matching config '{config_meta_version}'")
                     break
+            else:
+                logger.warning(f"[TRAINING-DATA-PREFILL] Config meta_version '{config_meta_version}' not found in options: {metadata_options[:3]}")
+        else:
+            logger.info(f"[TRAINING-DATA-PREFILL] No training_data_config or meta_version in config, using default index 0")
 
         # Metadata source selection
         selected_metadata = st.selectbox(
@@ -382,6 +408,7 @@ with tab_single:
             index=default_metadata_index,
             help="Select metadata configuration. Universal mappings work for all countries. Latest = most recently saved metadata.",
         )
+        logger.info(f"[TRAINING-DATA-PREFILL] Metadata dropdown rendered with selected_metadata='{selected_metadata}'")
 
         # Training Data Config from Prepare Training Data page
         st.markdown("---")
@@ -393,14 +420,22 @@ with tab_single:
         )
 
         try:
+            # CRITICAL FIX: Use the ORIGINAL exported country if available, not the potentially changed selected_country
+            # This ensures we look for the training data in the correct country folder
+            country_for_training_data = just_exported_country if just_exported_country else selected_country
+            logger.info(f"[TRAINING-DATA-PREFILL] Fetching training data versions for country: {country_for_training_data} (selected_country={selected_country}, just_exported_country={just_exported_country})")
+            
             training_data_versions = _list_training_data_versions(
-                gcs_bucket, selected_country
+                gcs_bucket, country_for_training_data
             )
+            logger.info(f"[TRAINING-DATA-PREFILL] Found {len(training_data_versions) if training_data_versions else 0} training data versions: {training_data_versions[:5] if training_data_versions else []}")
+            
             if training_data_versions:
                 training_data_options = ["None"] + training_data_versions
             else:
                 training_data_options = ["None"]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[TRAINING-DATA-PREFILL] Error listing training data versions: {e}")
             training_data_options = ["None"]
 
         # Determine default index for training data dropdown
@@ -408,11 +443,17 @@ with tab_single:
         if just_exported_timestamp and just_exported_timestamp in training_data_options:
             # Auto-select the just-exported timestamp
             default_training_index = training_data_options.index(just_exported_timestamp)
+            logger.info(f"[TRAINING-DATA-PREFILL] Setting training data dropdown default to '{just_exported_timestamp}' (index {default_training_index})")
         elif training_data_config and "timestamp" in training_data_config:
             # Or select based on loaded config timestamp
             config_timestamp = training_data_config.get("timestamp")
             if config_timestamp in training_data_options:
                 default_training_index = training_data_options.index(config_timestamp)
+                logger.info(f"[TRAINING-DATA-PREFILL] Setting training data dropdown default to config timestamp '{config_timestamp}' (index {default_training_index})")
+            else:
+                logger.warning(f"[TRAINING-DATA-PREFILL] Config timestamp '{config_timestamp}' not in options: {training_data_options[:5]}")
+        else:
+            logger.info(f"[TRAINING-DATA-PREFILL] No timestamp to select, using default 'None'")
         
         selected_training_data = st.selectbox(
             "Select Training Data Config",
@@ -420,6 +461,7 @@ with tab_single:
             index=default_training_index,
             help="Load selected_columns.json from Prepare Training Data to prefill model inputs.",
         )
+        logger.info(f"[TRAINING-DATA-PREFILL] Training data dropdown rendered with selected_training_data='{selected_training_data}'")
 
         # Load and store training data config if selected (and not already loaded)
         if selected_training_data != "None" and (
