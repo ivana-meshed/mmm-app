@@ -1988,14 +1988,10 @@ with st.expander(
             key=editor_key,
         )
 
-        # Check if any selections changed and update session state
+        # Update session state with current selections
         for _, row in edited.iterrows():
             var_name = str(row["Variable"])
             use_val = bool(row["Use"])
-            old_val = st.session_state["vif_selections"].get(var_name, True)
-            if old_val != use_val:
-                # Mark that VIF needs recalculation and trigger immediate rerun
-                st.session_state["vif_needs_recalc"] = True
             st.session_state["vif_selections"][var_name] = use_val
 
     def _get_selected_vars_from_session(var_list: List[str]) -> List[str]:
@@ -2074,15 +2070,23 @@ with st.expander(
         st.info("Please select media response variables in Step 3 section 3.3.")
     else:
         # =====================================================
+        # Check if VIF needs recalculation BEFORE doing any rendering
+        # =====================================================
+        # Get current selections and compare with last calculation
+        current_selections = _get_all_selected_vars_step4()
+        current_selections_set = frozenset(current_selections)
+        last_vif_selections = st.session_state.get("last_vif_selections_set", frozenset())
+        
+        # If selections changed since last VIF calculation, rerun to recalculate
+        if current_selections_set != last_vif_selections:
+            st.session_state["last_vif_selections_set"] = current_selections_set
+            if last_vif_selections:  # Don't rerun on first render
+                st.rerun()
+        
+        # =====================================================
         # Model Quality Indicators Section (MOVED ABOVE VIF tables)
         # This section updates when VIF selections change (full page rerun)
         # =====================================================
-        
-        # Check if VIF needs recalculation from a previous interaction
-        if st.session_state.get("vif_needs_recalc", False):
-            st.session_state["vif_needs_recalc"] = False
-            st.rerun()
-        
         def _render_model_quality_indicators():
             """Render Model Quality Indicators - updates on VIF changes."""
             # Get all currently selected variables
