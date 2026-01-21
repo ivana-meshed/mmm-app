@@ -32,17 +32,26 @@ metrics_df = metrics_df.sort_values(
 ).reset_index(drop=True)
 ```
 
-### 2. Automatic Table Refresh (✅ Fixed)
+### 2. Automatic Table Refresh - Holistic Approach (✅ Fixed)
 
 **Issue**: Deselecting/interacting with a table does not automatically refresh the table, only at the next action.
 
 **Solution**: 
-- Added change detection in Section 3.2 (Paid Media Spends table)
-- Triggers `st.rerun()` when selection changes are detected
-- Ensures dependent sections (3.3 and 4) update immediately
+- Implemented **holistic approach** across all interactive sections for consistent behavior
+- **Section 2 (Data Quality Tables)**: Changed from fragment-only reruns to full page reruns
+  - Ensures aggregate selection state (`selected_columns_for_training` and `column_categories`) updates immediately
+  - Removed `@st.fragment` decorator from `_render_cat_table` function
+- **Section 3.2 (Paid Media Spends)**: Added change detection and triggers `st.rerun()` 
+  - Ensures dependent sections (3.3 and 4) update immediately
+- **Section 4 (VIF Tables)**: Removed fragment scope to enable instant dependent refreshes
+  - Removed `@st.fragment` decorator from `_render_vif_table` function
+  - Changed from `st.rerun(scope="fragment")` to `st.rerun()`
+  - Model Quality Indicators now update automatically without manual refresh button
+  - Fixed `StreamlitAPIException` caused by fragment scope calls outside fragment context
 
 **Code Changes**:
 ```python
+# Section 3.2 - Paid Media Spends
 selection_changed = False
 for _, row in edited_metrics.iterrows():
     spend_col = row["Paid Media Spend"]
@@ -54,7 +63,18 @@ for _, row in edited_metrics.iterrows():
 
 if selection_changed:
     st.rerun()
+
+# Section 2 & 4 - Data Quality and VIF Tables
+# Changed from: st.rerun(scope="fragment")
+# To: st.rerun()
+# Removed @st.fragment decorators for consistent full page reruns
 ```
+
+**Commits**:
+- Initial fix (Step 3.2): commit 4dbfefc
+- Step 2 data quality fix: commit 665a760
+- Step 4 VIF fragment bug fix: commit c100283
+- Removed manual refresh button: commit 3d84f13
 
 ### 3. Persistent Sort Order (✅ Fixed)
 
@@ -163,11 +183,18 @@ st.success(
    - Verify rows are sorted by Spearman's ρ descending (highest first)
    - Repeat verification for Step 3.3 and Step 4 tables
 
-2. **Automatic Refresh**:
-   - In Step 3.2, deselect a paid media spend checkbox
-   - Verify the table refreshes immediately
-   - Navigate to Step 3.3 and verify the dropdown options reflect the change
-   - Navigate to Step 4 and verify VIF tables reflect the change
+2. **Automatic Refresh - Holistic Approach**:
+   - **Step 2**: Toggle checkboxes in data quality tables
+     - Verify aggregate counts at bottom update immediately
+     - Verify `selected_columns_for_training` updates in session state
+   - **Step 3.2**: Deselect a paid media spend checkbox
+     - Verify the table refreshes immediately (no manual refresh needed)
+     - Navigate to Step 3.3 and verify dropdown options reflect the change
+     - Navigate to Step 4 and verify VIF tables reflect the change
+   - **Step 4**: Toggle checkboxes in VIF tables
+     - Verify Model Quality Indicators update automatically (Driver Ratio, Collinearity)
+     - Verify no manual "Refresh Quality Indicators" button is present
+     - Verify changes trigger immediate full page rerun without errors
 
 3. **Persistent Sort Order**:
    - Make changes to selections in any table
@@ -194,24 +221,33 @@ st.success(
 7. **Text Update**:
    - Complete export and verify success message says "Navigate to **Run Models** page"
 
+8. **No Fragment Scope Errors**:
+   - Interact with all tables in Steps 2, 3.2, and 4
+   - Verify no `StreamlitAPIException` errors about fragment scope
+   - Verify all sections rerun without console errors
+
 ## Impact Analysis
 
 ### User Experience Improvements
 - ✅ More intuitive column order prioritizing the most important metric (Spearman's ρ)
-- ✅ Immediate feedback when making selections (automatic refresh)
+- ✅ Immediate feedback when making selections (automatic refresh across all sections)
+- ✅ **Holistic approach**: Consistent instant dependent refresh behavior in Steps 2, 3.2, and 4
 - ✅ Consistent view and sorting across all tables
 - ✅ Cleaner sidebar with less clutter
 - ✅ Goal-specific workflows with automatic save/restore of selections
 - ✅ More reliable data transfer to Run Models page
+- ✅ Removed manual refresh buttons - all sections update automatically
 
 ### Backward Compatibility
 - ✅ All changes are additive or purely UI improvements
 - ✅ No breaking changes to data structures or GCS paths
 - ✅ Session state changes are backward compatible (uses `.get()` with defaults)
+- ✅ Fragment-to-full-page rerun changes are transparent to users
 
 ### Performance Considerations
 - Minimal performance impact: sorting and change detection are O(n) operations on small datasets
 - Goal-specific selection persistence uses shallow copies for efficiency
+- Full page reruns instead of fragment reruns: slightly more re-rendering but provides better consistency and user experience
 
 ## Related Files
 
@@ -219,9 +255,36 @@ st.success(
 - **Related Pages**: `app/nav/Run_Experiment.py` (receives prefilled data)
 - **Test File**: `tests/test_prepare_training_data.py`
 
+## Technical Details
+
+### Fragment to Full Page Rerun Migration
+
+**Problem**: Originally, data quality tables (Step 2) and VIF tables (Step 4) used `@st.fragment` decorators with `st.rerun(scope="fragment")` for partial page reruns. This caused:
+- Aggregate selection state not updating immediately in Step 2
+- Model Quality Indicators requiring manual refresh button in Step 4
+- `StreamlitAPIException` errors when fragment decorators were removed
+
+**Solution**: Migrated all interactive tables to use full page reruns (`st.rerun()`) without fragment decorators:
+- **Consistency**: All sections now behave the same way
+- **Simplicity**: No need to manage fragment scope boundaries
+- **Reliability**: Dependent sections always update automatically
+
+**Affected Functions**:
+- `_render_cat_table` (Step 2) - removed `@st.fragment`
+- `_render_vif_table` (Step 4) - removed `@st.fragment`
+
+### Dependent Section Updates
+
+| Source Section | Selection Changes | Dependent Sections Updated |
+|----------------|-------------------|----------------------------|
+| Step 2 (Data Quality) | Checkbox toggles | Aggregate counts, `selected_columns_for_training` |
+| Step 3.2 (Paid Spends) | Checkbox toggles | Section 3.3 dropdown options, Step 4 VIF tables |
+| Step 4 (VIF Tables) | Checkbox toggles | Model Quality Indicators (Driver Ratio, Collinearity) |
+
 ## Future Enhancements (Out of Scope)
 
 1. Add visual indicator (e.g., 🔄 icon) when a rerun is triggered by selection change
 2. Add confirmation dialog before switching goals to prevent accidental loss of work
 3. Add export history to view previous timestamp exports
 4. Add ability to compare goal-specific configurations side-by-side
+5. Consider optimizing full page reruns with targeted state updates if performance becomes an issue
