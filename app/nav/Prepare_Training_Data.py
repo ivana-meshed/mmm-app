@@ -1080,6 +1080,19 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
             st.session_state["dq_user_selections"][col_name] = use_val
             use_overrides[col_name] = use_val
 
+        # Apply Paid Spend -> Paid Vars sync BEFORE rerun
+        # This ensures sync happens immediately without delay
+        if needs_rerun and title == "Paid Spend":
+            paid_media_mapping = meta.get("paid_media_mapping", {}) or {}
+            for col_name, is_selected in use_overrides.items():
+                if col_name in paid_spend:
+                    # Sync corresponding Paid Vars
+                    corresponding_vars = paid_media_mapping.get(col_name, [])
+                    for var_col in corresponding_vars:
+                        if var_col in paid_vars:
+                            use_overrides[var_col] = is_selected
+                            st.session_state["dq_user_selections"][var_col] = is_selected
+
         # If selections changed, trigger a full page rerun to update aggregate state
         if needs_rerun:
             st.rerun()
