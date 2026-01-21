@@ -1989,18 +1989,14 @@ with st.expander(
         )
 
         # Check if any selections changed and update session state
-        needs_rerun = False
         for _, row in edited.iterrows():
             var_name = str(row["Variable"])
             use_val = bool(row["Use"])
             old_val = st.session_state["vif_selections"].get(var_name, True)
             if old_val != use_val:
-                needs_rerun = True
+                # Mark that VIF needs recalculation and trigger immediate rerun
+                st.session_state["vif_needs_recalc"] = True
             st.session_state["vif_selections"][var_name] = use_val
-        
-        # Trigger rerun only if selections actually changed
-        if needs_rerun:
-            st.rerun()
 
     def _get_selected_vars_from_session(var_list: List[str]) -> List[str]:
         """Get selected variables from session state for a given var list."""
@@ -2081,6 +2077,12 @@ with st.expander(
         # Model Quality Indicators Section (MOVED ABOVE VIF tables)
         # This section updates when VIF selections change (full page rerun)
         # =====================================================
+        
+        # Check if VIF needs recalculation from a previous interaction
+        if st.session_state.get("vif_needs_recalc", False):
+            st.session_state["vif_needs_recalc"] = False
+            st.rerun()
+        
         def _render_model_quality_indicators():
             """Render Model Quality Indicators - updates on VIF changes."""
             # Get all currently selected variables
