@@ -975,7 +975,6 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
         except Exception:
             return "–"
 
-    @st.fragment
     def _render_cat_table(title: str, cols: list[str], key_suffix: str):
         subset = prof_all[prof_all["Column"].isin(cols)].copy()
         st.markdown(f"### {title} ({len(subset)})")
@@ -1081,9 +1080,9 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
             st.session_state["dq_user_selections"][col_name] = use_val
             use_overrides[col_name] = use_val
 
-        # If selections changed, trigger a fragment rerun
+        # If selections changed, trigger a full page rerun to update aggregate state
         if needs_rerun:
-            st.rerun(scope="fragment")
+            st.rerun()
 
     # Render all categories
     for title, cols in categories:
