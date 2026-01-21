@@ -9,12 +9,20 @@ This page guides users through preparing training data in 4 steps:
 """
 
 import json
+import logging
 import math
 import os
 import tempfile
 import warnings
 from datetime import datetime, timezone
 from typing import List, Union
+
+# Configure logging for Cloud Run
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import pandas as pd
@@ -1999,6 +2007,7 @@ with st.expander(
         
         # If there are changes, store them for the next render
         if pending_updates:
+            logger.info(f"[VIF-UPDATE-DETECT] Detected {len(pending_updates)} VIF changes in '{title}': {pending_updates}")
             st.caption(f"🔍 DEBUG: Detected {len(pending_updates)} VIF changes in {title}: {pending_updates}")
             st.session_state["pending_vif_updates"] = pending_updates
 
@@ -2083,10 +2092,14 @@ with st.expander(
         # =====================================================
         # Check if there are pending updates from the previous render's data_editor
         if "pending_vif_updates" in st.session_state:
-            st.caption(f"🔄 DEBUG: Applying {len(st.session_state['pending_vif_updates'])} pending VIF updates: {list(st.session_state['pending_vif_updates'].keys())}")
+            pending_vars = list(st.session_state["pending_vif_updates"].keys())
+            logger.info(f"[VIF-UPDATE-APPLY] Applying {len(st.session_state['pending_vif_updates'])} pending VIF updates: {pending_vars}")
+            st.caption(f"🔄 DEBUG: Applying {len(st.session_state['pending_vif_updates'])} pending VIF updates: {pending_vars}")
             for var_name, use_val in st.session_state["pending_vif_updates"].items():
                 st.session_state["vif_selections"][var_name] = use_val
+                logger.info(f"[VIF-UPDATE-APPLY] Set vif_selections['{var_name}'] = {use_val}")
             del st.session_state["pending_vif_updates"]
+            logger.info("[VIF-UPDATE-APPLY] Triggering immediate rerun to recalculate VIF")
             # Trigger immediate rerun to recalculate VIF with updated selections
             st.rerun()
         
@@ -2220,13 +2233,16 @@ with st.expander(
         # Calculate VIF ONCE across ALL selected variables from ALL tables
         # This ensures VIF values are calculated globally, not per-table
         all_selected_for_global_vif = _get_all_selected_vars_step4()
+        logger.info(f"[VIF-CALC] Calculating VIF for {len(all_selected_for_global_vif)} selected variables: {all_selected_for_global_vif[:5]}{'...' if len(all_selected_for_global_vif) > 5 else ''}")
         global_vif_values = _calculate_vif_for_columns_step4(
             all_selected_for_global_vif
         )
+        logger.info(f"[VIF-CALC] VIF calculation complete. Sample results: {list(global_vif_values.items())[:3]}")
 
         # Check for identical columns and display warning
         identical_pairs = _find_identical_columns(all_selected_for_global_vif)
         if identical_pairs:
+            logger.info(f"[VIF-CALC] Identical columns detected: {identical_pairs}")
             pairs_text = ", ".join(
                 [f"**{p[0]}** ↔ **{p[1]}**" for p in identical_pairs]
             )
