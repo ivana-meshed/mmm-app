@@ -35,10 +35,22 @@ data_processor = get_data_processor()
 job_manager = get_job_manager()
 from app_split_helpers import *  # bring in all helper functions/constants
 
+# Configure logging
+logger = logging.getLogger(__name__)
+
 require_login_and_domain()
 ensure_session_defaults()
 
+# Clear mapped data cache to ensure we get fresh data
+list_mapped_data_versions.clear()
+
 st.title("Run Marketing Mix Models")
+
+# DIAGNOSTIC: Log session state at page load
+just_exported_timestamp_check = st.session_state.get("just_exported_training_timestamp")
+just_exported_country_check = st.session_state.get("just_exported_training_country")
+logger.info(f"[TRAINING-DATA-DEBUG] Page load - Session state keys: {list(st.session_state.keys())[:20]}")
+logger.info(f"[TRAINING-DATA-DEBUG] Export flags check: timestamp={just_exported_timestamp_check}, country={just_exported_country_check}")
 
 tab_single, tab_queue, tab_status = st.tabs(
     ["Single Run", "Batch Run", "Queue Monitor"]
@@ -471,18 +483,24 @@ with tab_single:
             "Optionally load a saved selected_columns.json to prefill model inputs."
         )
 
+        # CRITICAL: Use just_exported_country if available (not selected_country)
+        # This ensures we look in the correct folder where the data was exported
+        lookup_country = st.session_state.get("just_exported_training_country", selected_country)
+        logger.info(f"[TRAINING-DATA-PREFILL] Training data lookup country: {lookup_country} (selected_country={selected_country})")
+
         try:
-            # First try to get configs for selected country
+            # First try to get configs for the lookup country
             training_data_versions = _list_training_data_versions(
-                gcs_bucket, selected_country
+                gcs_bucket, lookup_country
             )
+            logger.info(f"[TRAINING-DATA-PREFILL] Found {len(training_data_versions)} training data versions for {lookup_country}")
 
             if training_data_versions:
                 # Found configs for selected country - show them with simple timestamps
                 training_data_options = ["None"] + training_data_versions
                 # Store mapping from display name to country/timestamp
                 config_mapping = {
-                    version: {"country": selected_country, "timestamp": version}
+                    version: {"country": lookup_country, "timestamp": version}
                     for version in training_data_versions
                 }
             else:
@@ -512,10 +530,19 @@ with tab_single:
             training_data_options = ["None"]
             config_mapping = {}
 
+        # Auto-select exported timestamp if present
+        default_training_data_index = 0
+        just_exported_timestamp = st.session_state.get("just_exported_training_timestamp")
+        if just_exported_timestamp and just_exported_timestamp in training_data_options:
+            default_training_data_index = training_data_options.index(just_exported_timestamp)
+            logger.info(f"[TRAINING-DATA-PREFILL] Auto-selecting exported timestamp: {just_exported_timestamp} at index {default_training_data_index}")
+        else:
+            logger.info(f"[TRAINING-DATA-PREFILL] No auto-selection: timestamp={just_exported_timestamp}, available options={training_data_options[:5]}")
+
         selected_training_data = st.selectbox(
             "Select Training Data Config",
             options=training_data_options,
-            index=0,
+            index=default_training_data_index,
             help="Load selected_columns.json from Prepare Training Data to prefill model inputs.",
         )
 
@@ -533,6 +560,13 @@ with tab_single:
                     st.session_state["training_data_config"] = (
                         training_data_config
                     )
+                    # Clear export flags after successful load
+                    if "just_exported_training_timestamp" in st.session_state:
+                        del st.session_state["just_exported_training_timestamp"]
+                        logger.info("[TRAINING-DATA-PREFILL] Cleared just_exported_training_timestamp flag after successful load")
+                    if "just_exported_training_country" in st.session_state:
+                        del st.session_state["just_exported_training_country"]
+                        logger.info("[TRAINING-DATA-PREFILL] Cleared just_exported_training_country flag after successful load")
                     if config_country != selected_country:
                         st.success(
                             f"✅ Loaded training data config from {config_country.upper()}: {config_timestamp}"
