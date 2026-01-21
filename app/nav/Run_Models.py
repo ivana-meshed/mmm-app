@@ -269,17 +269,16 @@ with tab_single:
         # Check if we just exported from Prepare Training Data page and load that config first
         # This must happen BEFORE creating dropdowns so we can prefill them properly
         just_exported_timestamp = st.session_state.get("just_exported_training_timestamp")
+        just_exported_country = st.session_state.get("just_exported_training_country")
         config_load_triggered = st.session_state.get("_training_data_config_load_triggered", False)
         
-        if just_exported_timestamp and not config_load_triggered:
+        if just_exported_timestamp and just_exported_country and not config_load_triggered:
             # Try to load the just-exported training data config
             try:
-                # Determine which country to use
-                export_country = st.session_state.get("country", available_countries[0] if available_countries else "de")
-                training_data_versions = _list_training_data_versions(gcs_bucket, export_country)
+                training_data_versions = _list_training_data_versions(gcs_bucket, just_exported_country)
                 if training_data_versions and just_exported_timestamp in training_data_versions:
                     loaded_config = _load_training_data_json(
-                        gcs_bucket, export_country, just_exported_timestamp
+                        gcs_bucket, just_exported_country, just_exported_timestamp
                     )
                     if loaded_config:
                         st.session_state["training_data_config"] = loaded_config
@@ -517,6 +516,8 @@ with tab_single:
                         # Clear the flags after successful load
                         if "just_exported_training_timestamp" in st.session_state:
                             del st.session_state["just_exported_training_timestamp"]
+                        if "just_exported_training_country" in st.session_state:
+                            del st.session_state["just_exported_training_country"]
                         if "_training_data_config_load_triggered" in st.session_state:
                             del st.session_state["_training_data_config_load_triggered"]
 

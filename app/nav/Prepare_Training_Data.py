@@ -2541,8 +2541,9 @@ with st.expander(
                 )
                 upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
                 st.session_state["last_exported_columns_path"] = gcs_path
-                # Store timestamp for auto-selection in Run Models page
+                # Store timestamp AND country for auto-selection in Run Models page
                 st.session_state["just_exported_training_timestamp"] = timestamp
+                st.session_state["just_exported_training_country"] = country
 
                 st.success(
                     f"✅ Exported {len(final_vars)} selected drivers!\n\n"
