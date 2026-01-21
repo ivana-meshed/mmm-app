@@ -1988,11 +1988,19 @@ with st.expander(
             key=editor_key,
         )
 
-        # Update session state with current selections
+        # Store updates for next render (to be applied before VIF calculation)
+        pending_updates = {}
         for _, row in edited.iterrows():
             var_name = str(row["Variable"])
             use_val = bool(row["Use"])
-            st.session_state["vif_selections"][var_name] = use_val
+            old_val = st.session_state["vif_selections"].get(var_name, True)
+            if old_val != use_val:
+                pending_updates[var_name] = use_val
+        
+        # If there are changes, store them for the next render
+        if pending_updates:
+            st.caption(f"🔍 DEBUG: Detected {len(pending_updates)} VIF changes in {title}: {pending_updates}")
+            st.session_state["pending_vif_updates"] = pending_updates
 
     def _get_selected_vars_from_session(var_list: List[str]) -> List[str]:
         """Get selected variables from session state for a given var list."""
@@ -2070,18 +2078,17 @@ with st.expander(
         st.info("Please select media response variables in Step 3 section 3.3.")
     else:
         # =====================================================
-        # Check if VIF needs recalculation BEFORE doing any rendering
+        # Pre-process any pending VIF selection updates from data_editor
+        # This must happen BEFORE we calculate VIF values
         # =====================================================
-        # Get current selections and compare with last calculation
-        current_selections = _get_all_selected_vars_step4()
-        current_selections_set = frozenset(current_selections)
-        last_vif_selections = st.session_state.get("last_vif_selections_set", frozenset())
-        
-        # If selections changed since last VIF calculation, rerun to recalculate
-        if current_selections_set != last_vif_selections:
-            st.session_state["last_vif_selections_set"] = current_selections_set
-            if last_vif_selections:  # Don't rerun on first render
-                st.rerun()
+        # Check if there are pending updates from the previous render's data_editor
+        if "pending_vif_updates" in st.session_state:
+            st.caption(f"🔄 DEBUG: Applying {len(st.session_state['pending_vif_updates'])} pending VIF updates: {list(st.session_state['pending_vif_updates'].keys())}")
+            for var_name, use_val in st.session_state["pending_vif_updates"].items():
+                st.session_state["vif_selections"][var_name] = use_val
+            del st.session_state["pending_vif_updates"]
+            # Trigger immediate rerun to recalculate VIF with updated selections
+            st.rerun()
         
         # =====================================================
         # Model Quality Indicators Section (MOVED ABOVE VIF tables)
