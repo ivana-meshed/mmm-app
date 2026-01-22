@@ -823,6 +823,21 @@ with tab_single:
                             selected_metadata
                         )
 
+                        # Sync with Prepare Training Data page session state keys
+                        # to maintain selections across pages
+                        st.session_state["country"] = selected_country
+                        st.session_state["picked_data_ts"] = selected_version
+                        # Parse metadata selection to get version
+                        meta_parts = selected_metadata.split(" - ")
+                        if len(meta_parts) > 1:
+                            st.session_state["picked_meta_ts"] = meta_parts[1]
+
+                        logger.info(
+                            f"[LOAD-DATA] Synced selections to Prepare Training Data keys: "
+                            f"country={selected_country}, picked_data_ts={selected_version}, "
+                            f"picked_meta_ts={meta_parts[1] if len(meta_parts) > 1 else 'N/A'}"
+                        )
+
                         logger.info(
                             f"[LOAD-DATA] Successfully loaded and saved to session state: "
                             f"country={selected_country}, version={selected_version}, "

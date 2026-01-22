@@ -20,7 +20,7 @@ from typing import List, Union
 # Configure logging for Cloud Run
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
@@ -326,6 +326,36 @@ with st.expander("Step 1) Select Data", expanded=False):
             st.session_state["meta"] = meta
             st.session_state["date_col"] = date_col
             st.session_state["channels_map"] = meta.get("channels", {}) or {}
+
+            # Sync with Run Models page session state keys
+            # to maintain selections across pages
+            st.session_state["selected_country"] = country
+            st.session_state["selected_version"] = data_ts
+            # Format metadata selection the way Run Models expects it
+            if meta_ts and meta_ts != "Latest":
+                # Check if meta_ts needs country prefix
+                if " - " not in meta_ts:
+                    # Determine if universal or country-specific based on blob path
+                    if "universal" in mb.lower():
+                        st.session_state["selected_metadata"] = (
+                            f"Universal - {meta_ts}"
+                        )
+                    else:
+                        st.session_state["selected_metadata"] = (
+                            f"{country.upper()} - {meta_ts}"
+                        )
+                else:
+                    st.session_state["selected_metadata"] = meta_ts
+            else:
+                st.session_state["selected_metadata"] = (
+                    f"{country.upper()} - Latest"
+                )
+
+            logger.info(
+                f"[PREPARE-DATA-LOAD] Synced selections to Run Models keys: "
+                f"selected_country={country}, selected_version={data_ts}, "
+                f"selected_metadata={st.session_state.get('selected_metadata')}"
+            )
 
             # Validate & notify
             report = validate_against_metadata(df, meta)
@@ -1099,7 +1129,9 @@ with st.expander("Step 2) Ensure good data quality", expanded=False):
                     for var_col in corresponding_vars:
                         if var_col in paid_vars:
                             use_overrides[var_col] = is_selected
-                            st.session_state["dq_user_selections"][var_col] = is_selected
+                            st.session_state["dq_user_selections"][
+                                var_col
+                            ] = is_selected
 
         # If selections changed, trigger a full page rerun to update aggregate state
         if needs_rerun:
@@ -1180,24 +1212,38 @@ with st.expander(
             index=default_idx if goal_vars else None,
             key="selected_goal_dropdown",
         )
-        
+
         # Detect goal change and save/restore selections per goal
         prev_goal = st.session_state.get("selected_goal")
         if prev_goal and prev_goal != selected_goal:
             # Save current selections for the previous goal
             st.session_state["goal_specific_selections"][prev_goal] = {
-                "paid_spend_selections": st.session_state.get("paid_spend_selections", {}).copy(),
-                "selected_paid_spends": st.session_state.get("selected_paid_spends", []).copy(),
-                "vif_selections": st.session_state.get("vif_selections", {}).copy(),
+                "paid_spend_selections": st.session_state.get(
+                    "paid_spend_selections", {}
+                ).copy(),
+                "selected_paid_spends": st.session_state.get(
+                    "selected_paid_spends", []
+                ).copy(),
+                "vif_selections": st.session_state.get(
+                    "vif_selections", {}
+                ).copy(),
             }
-            
+
             # Restore selections for the new goal if they exist
             if selected_goal in st.session_state["goal_specific_selections"]:
-                saved = st.session_state["goal_specific_selections"][selected_goal]
-                st.session_state["paid_spend_selections"] = saved.get("paid_spend_selections", {}).copy()
-                st.session_state["selected_paid_spends"] = saved.get("selected_paid_spends", []).copy()
-                st.session_state["vif_selections"] = saved.get("vif_selections", {}).copy()
-        
+                saved = st.session_state["goal_specific_selections"][
+                    selected_goal
+                ]
+                st.session_state["paid_spend_selections"] = saved.get(
+                    "paid_spend_selections", {}
+                ).copy()
+                st.session_state["selected_paid_spends"] = saved.get(
+                    "selected_paid_spends", []
+                ).copy()
+                st.session_state["vif_selections"] = saved.get(
+                    "vif_selections", {}
+                ).copy()
+
         st.session_state["selected_goal"] = selected_goal
 
     # 3.2 Select Paid Media Spends to optimize
@@ -1311,7 +1357,7 @@ with st.expander(
 
         if metrics_data:
             metrics_df = pd.DataFrame(metrics_data)
-            
+
             # Sort by Spearman's ρ descending (highest first)
             metrics_df = metrics_df.sort_values(
                 by="Spearman's ρ", ascending=False, na_position="last"
@@ -1331,7 +1377,9 @@ with st.expander(
                     "Spearman's ρ": st.column_config.NumberColumn(
                         "Spearman's ρ", format="%.4f", disabled=True
                     ),
-                    "R²": st.column_config.NumberColumn("R²", format="%.4f", disabled=True),
+                    "R²": st.column_config.NumberColumn(
+                        "R²", format="%.4f", disabled=True
+                    ),
                     "NMAE": st.column_config.NumberColumn(
                         "NMAE", format="%.4f", disabled=True
                     ),
@@ -1344,7 +1392,9 @@ with st.expander(
             for _, row in edited_metrics.iterrows():
                 spend_col = row["Paid Media Spend"]
                 is_selected = bool(row["Select"])
-                old_val = st.session_state["paid_spend_selections"].get(spend_col)
+                old_val = st.session_state["paid_spend_selections"].get(
+                    spend_col
+                )
                 if old_val != is_selected:
                     selection_changed = True
                 st.session_state["paid_spend_selections"][
@@ -1356,7 +1406,7 @@ with st.expander(
                 "Paid Media Spend"
             ].tolist()
             st.session_state["selected_paid_spends"] = selected_paid_spends
-            
+
             # Trigger rerun if selections changed to refresh dependent sections
             if selection_changed:
                 st.rerun()
@@ -1502,7 +1552,7 @@ with st.expander(
 
             if var_metrics_data:
                 var_metrics_df = pd.DataFrame(var_metrics_data)
-                
+
                 # Sort by Spearman's ρ descending (highest first)
                 var_metrics_df = var_metrics_df.sort_values(
                     by="Spearman's ρ", ascending=False, na_position="last"
@@ -1867,13 +1917,13 @@ with st.expander(
             )
 
         metrics_df = pd.DataFrame(metrics_data)
-        
+
         # Sort by Spearman's ρ descending (highest first) if there are rows
         if not metrics_df.empty:
             metrics_df = metrics_df.sort_values(
                 by="Spearman's ρ", ascending=False, na_position="last"
             ).reset_index(drop=True)
-        
+
         return metrics_df
 
     def _format_vif_value(vif: float) -> str:
@@ -2006,11 +2056,15 @@ with st.expander(
             if old_val != use_val:
                 st.session_state["vif_selections"][var_name] = use_val
                 changes_made = True
-                logger.info(f"[VIF-SYNC] Updated vif_selections['{var_name}'] = {use_val} in {title}")
-        
+                logger.info(
+                    f"[VIF-SYNC] Updated vif_selections['{var_name}'] = {use_val} in {title}"
+                )
+
         # If changes were made, trigger rerun to recalculate VIF
         if changes_made:
-            logger.info(f"[VIF-SYNC] Changes detected in {title}, triggering rerun")
+            logger.info(
+                f"[VIF-SYNC] Changes detected in {title}, triggering rerun"
+            )
             st.caption(f"🔄 DEBUG: Synced {title} selections, triggering rerun")
             st.rerun()
 
@@ -2219,16 +2273,22 @@ with st.expander(
         # Calculate VIF ONCE across ALL selected variables from ALL tables
         # This ensures VIF values are calculated globally, not per-table
         all_selected_for_global_vif = _get_all_selected_vars_step4()
-        logger.info(f"[VIF-CALC] Calculating VIF for {len(all_selected_for_global_vif)} selected variables: {all_selected_for_global_vif[:5]}{'...' if len(all_selected_for_global_vif) > 5 else ''}")
+        logger.info(
+            f"[VIF-CALC] Calculating VIF for {len(all_selected_for_global_vif)} selected variables: {all_selected_for_global_vif[:5]}{'...' if len(all_selected_for_global_vif) > 5 else ''}"
+        )
         global_vif_values = _calculate_vif_for_columns_step4(
             all_selected_for_global_vif
         )
-        logger.info(f"[VIF-CALC] VIF calculation complete. Sample results: {list(global_vif_values.items())[:3]}")
+        logger.info(
+            f"[VIF-CALC] VIF calculation complete. Sample results: {list(global_vif_values.items())[:3]}"
+        )
 
         # Check for identical columns and display warning
         identical_pairs = _find_identical_columns(all_selected_for_global_vif)
         if identical_pairs:
-            logger.info(f"[VIF-CALC] Identical columns detected: {identical_pairs}")
+            logger.info(
+                f"[VIF-CALC] Identical columns detected: {identical_pairs}"
+            )
             pairs_text = ", ".join(
                 [f"**{p[0]}** ↔ **{p[1]}**" for p in identical_pairs]
             )
@@ -2517,14 +2577,14 @@ with st.expander(
                     "shared_save_timestamp",
                     format_cet_timestamp(),
                 )
-                
+
                 # Add timestamp to export data for reference
                 export_data["timestamp"] = timestamp
-                
+
                 # Store the timestamp back to session state for consistency
                 if not st.session_state.get("shared_save_timestamp"):
                     st.session_state["shared_save_timestamp"] = timestamp
-                
+
                 # Add timestamp to export data for Run Models page to use
                 export_data["timestamp"] = timestamp
 
@@ -2544,10 +2604,52 @@ with st.expander(
                 # Store timestamp AND country for auto-selection in Run Models page
                 st.session_state["just_exported_training_timestamp"] = timestamp
                 st.session_state["just_exported_training_country"] = country
-                
-                logger.info(f"[TRAINING-DATA-EXPORT] Successfully exported training data to {gcs_path}")
-                logger.info(f"[TRAINING-DATA-EXPORT] Stored in session state: timestamp={timestamp}, country={country}")
-                logger.info(f"[TRAINING-DATA-EXPORT] Export data contains: country={export_data.get('country')}, data_version={export_data.get('data_version')}, meta_version={export_data.get('meta_version')}, timestamp={export_data.get('timestamp')}")
+
+                # Also sync current selections to Run Models page session state keys
+                # to maintain selections when navigating back to Run Models
+                current_data_ts = st.session_state.get(
+                    "picked_data_ts", "Latest"
+                )
+                current_meta_ts = st.session_state.get(
+                    "picked_meta_ts", "Latest"
+                )
+
+                # Store for Run Models page (without clearing on page navigation)
+                st.session_state["selected_country"] = country
+                st.session_state["selected_version"] = current_data_ts
+                # Format metadata selection the way Run Models expects it
+                # Run Models uses format like "Universal - 20251211_115528" or "DE - 20251211_115528"
+                if current_meta_ts and current_meta_ts != "Latest":
+                    # Check if it's already formatted
+                    if " - " not in current_meta_ts:
+                        # Need to determine if it's universal or country-specific
+                        # For now, use the export data's meta_version which is already formatted
+                        st.session_state["selected_metadata"] = export_data.get(
+                            "meta_version",
+                            f"{country.upper()} - {current_meta_ts}",
+                        )
+                    else:
+                        st.session_state["selected_metadata"] = current_meta_ts
+                else:
+                    st.session_state["selected_metadata"] = export_data.get(
+                        "meta_version", f"{country.upper()} - Latest"
+                    )
+
+                logger.info(
+                    f"[TRAINING-DATA-EXPORT] Synced selections to Run Models keys: "
+                    f"selected_country={country}, selected_version={current_data_ts}, "
+                    f"selected_metadata={st.session_state.get('selected_metadata')}"
+                )
+
+                logger.info(
+                    f"[TRAINING-DATA-EXPORT] Successfully exported training data to {gcs_path}"
+                )
+                logger.info(
+                    f"[TRAINING-DATA-EXPORT] Stored in session state: timestamp={timestamp}, country={country}"
+                )
+                logger.info(
+                    f"[TRAINING-DATA-EXPORT] Export data contains: country={export_data.get('country')}, data_version={export_data.get('data_version')}, meta_version={export_data.get('meta_version')}, timestamp={export_data.get('timestamp')}"
+                )
 
                 st.success(
                     f"✅ Exported {len(final_vars)} selected drivers!\n\n"
