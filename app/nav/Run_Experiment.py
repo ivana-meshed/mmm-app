@@ -661,17 +661,18 @@ with tab_single:
                         f"meta_version={training_data_config.get('meta_version')}, "
                         f"selected_goal={training_data_config.get('selected_goal')}"
                     )
-                    # Clear export flags after successful load
-                    if "just_exported_training_timestamp" in st.session_state:
-                        del st.session_state["just_exported_training_timestamp"]
-                        logger.info(
-                            "[TRAINING-DATA-PREFILL] Cleared just_exported_training_timestamp flag after successful load"
-                        )
-                    if "just_exported_training_country" in st.session_state:
-                        del st.session_state["just_exported_training_country"]
-                        logger.info(
-                            "[TRAINING-DATA-PREFILL] Cleared just_exported_training_country flag after successful load"
-                        )
+                    # Update export flags to remember this selection for future sessions
+                    # This allows auto-selection to work even after page refresh
+                    st.session_state["just_exported_training_timestamp"] = (
+                        config_timestamp
+                    )
+                    st.session_state["just_exported_training_country"] = (
+                        config_country
+                    )
+                    logger.info(
+                        f"[TRAINING-CONFIG-LOAD] Updated export flags to persist selection: "
+                        f"timestamp={config_timestamp}, country={config_country}"
+                    )
                     if config_country != selected_country:
                         st.success(
                             f"✅ Loaded training data config from {config_country.upper()}: {config_timestamp}"
@@ -697,7 +698,13 @@ with tab_single:
                     f"selected_training_data={selected_training_data}"
                 )
         else:
-            st.session_state["training_data_config"] = None
+            # User selected "None" - clear training_data_config but keep export flags
+            # for potential re-selection later
+            if st.session_state.get("training_data_config") is not None:
+                st.session_state["training_data_config"] = None
+                logger.info(
+                    "[TRAINING-CONFIG-LOAD] Cleared training_data_config (user selected None)"
+                )
 
         # ---- Show currently loaded state ----
         if (
@@ -1097,33 +1104,65 @@ with tab_single:
         # Goal variable from metadata
         metadata = st.session_state.get("loaded_metadata")
         training_data_config = st.session_state.get("training_data_config")
+
+        logger.info(
+            f"[GOAL-PREFILL] Starting goal selection - "
+            f"metadata exists: {metadata is not None}, "
+            f"training_data_config exists: {training_data_config is not None}, "
+            f"loaded_config exists: {loaded_config is not None}"
+        )
+
         if metadata and "goals" in metadata:
             goal_options = [
                 g["var"]
                 for g in metadata["goals"]
                 if g.get("group") == "primary"
             ]
+            logger.info(
+                f"[GOAL-PREFILL] Found {len(goal_options)} goal options from metadata: {goal_options}"
+            )
+
             if goal_options:
                 # Find default index for loaded dep_var
                 # Priority: training_data_config.selected_goal > loaded_config.dep_var > 0
                 default_dep_var_index = 0
+                selected_goal_from_config = None
+
                 if (
                     training_data_config
                     and "selected_goal" in training_data_config
                 ):
+                    selected_goal_from_config = training_data_config[
+                        "selected_goal"
+                    ]
                     try:
                         default_dep_var_index = goal_options.index(
-                            training_data_config["selected_goal"]
+                            selected_goal_from_config
                         )
-                    except (ValueError, KeyError):
-                        pass
+                        logger.info(
+                            f"[GOAL-PREFILL] Using training_data_config.selected_goal: "
+                            f"'{selected_goal_from_config}' (index {default_dep_var_index})"
+                        )
+                    except (ValueError, KeyError) as e:
+                        logger.warning(
+                            f"[GOAL-PREFILL] Could not find training_data_config.selected_goal "
+                            f"'{selected_goal_from_config}' in goal_options: {e}"
+                        )
                 elif loaded_config and "dep_var" in loaded_config:
                     try:
                         default_dep_var_index = goal_options.index(
                             loaded_config["dep_var"]
                         )
+                        logger.info(
+                            f"[GOAL-PREFILL] Using loaded_config.dep_var: "
+                            f"'{loaded_config['dep_var']}' (index {default_dep_var_index})"
+                        )
                     except (ValueError, KeyError):
                         pass
+                else:
+                    logger.info(
+                        f"[GOAL-PREFILL] Using default index 0 - no training_data_config or loaded_config"
+                    )
 
                 dep_var = st.selectbox(
                     "Select Goal",
@@ -1131,6 +1170,11 @@ with tab_single:
                     index=default_dep_var_index,
                     help="What business outcome do you want to optimize for?",
                 )
+
+                logger.info(
+                    f"[GOAL-PREFILL] Goal dropdown result: selected dep_var='{dep_var}'"
+                )
+
                 # Find the corresponding type
                 dep_var_type = next(
                     (
