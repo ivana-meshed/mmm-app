@@ -2914,63 +2914,82 @@ def sync_session_state_keys():
       - picked_meta_ts ↔ selected_metadata (needs parsing)
 
     Call this function at the start of each page to ensure consistency.
+
+    This function preserves the most recently set value across page navigation.
+    Note: For widget keys like picked_data_ts and picked_meta_ts, we sync TO
+    the other keys but don't sync FROM to avoid Streamlit warnings.
     """
     import streamlit as st
 
-    # Sync country between pages
-    if "country" in st.session_state and not st.session_state.get(
-        "selected_country"
-    ):
-        st.session_state["selected_country"] = st.session_state["country"]
-    elif "selected_country" in st.session_state and not st.session_state.get(
-        "country"
-    ):
-        st.session_state["country"] = st.session_state["selected_country"]
+    # Sync country between pages (simple bidirectional sync)
+    country_val = st.session_state.get("country")
+    selected_country_val = st.session_state.get("selected_country")
+
+    if country_val and not selected_country_val:
+        st.session_state["selected_country"] = country_val
+    elif selected_country_val and not country_val:
+        st.session_state["country"] = selected_country_val
 
     # Sync data version
-    if "picked_data_ts" in st.session_state and not st.session_state.get(
-        "selected_version"
-    ):
-        st.session_state["selected_version"] = st.session_state[
-            "picked_data_ts"
-        ]
-    elif "selected_version" in st.session_state and not st.session_state.get(
-        "picked_data_ts"
-    ):
-        st.session_state["picked_data_ts"] = st.session_state[
-            "selected_version"
-        ]
+    # picked_data_ts is a widget key, so we can READ from it but not WRITE to it
+    # to avoid Streamlit warning "widget was created with a default value but also had its value set"
+    picked_data_ts_val = st.session_state.get("picked_data_ts")
+    selected_version_val = st.session_state.get("selected_version")
+
+    if picked_data_ts_val:
+        # Always sync FROM widget key TO run models key (safe direction)
+        if picked_data_ts_val != selected_version_val:
+            st.session_state["selected_version"] = picked_data_ts_val
+    elif selected_version_val:
+        # Only set picked_data_ts if it doesn't exist yet (before widget is created)
+        if "picked_data_ts" not in st.session_state:
+            st.session_state["picked_data_ts"] = selected_version_val
 
     # Sync metadata version (more complex due to format differences)
-    if "picked_meta_ts" in st.session_state and not st.session_state.get(
-        "selected_metadata"
-    ):
-        # Format as Run Models expects: "Country - Version" or "Universal - Version"
-        meta_ts = st.session_state["picked_meta_ts"]
-        country = st.session_state.get(
-            "country", st.session_state.get("selected_country", "de")
-        )
+    # picked_meta_ts is also a widget key
+    picked_meta_ts_val = st.session_state.get("picked_meta_ts")
+    selected_metadata_val = st.session_state.get("selected_metadata")
+    country = st.session_state.get(
+        "country", st.session_state.get("selected_country", "de")
+    )
+
+    if picked_meta_ts_val:
+        # Sync FROM widget key TO run models key (safe direction)
+        meta_ts = picked_meta_ts_val
         if meta_ts and meta_ts != "Latest":
             if " - " not in meta_ts:
-                # Determine if universal or country-specific (simplified heuristic)
-                st.session_state["selected_metadata"] = (
-                    f"{country.upper()} - {meta_ts}"
-                )
+                formatted = f"{country.upper()} - {meta_ts}"
             else:
-                st.session_state["selected_metadata"] = meta_ts
+                formatted = meta_ts
         else:
-            st.session_state["selected_metadata"] = (
-                f"{country.upper()} - Latest"
-            )
-    elif "selected_metadata" in st.session_state and not st.session_state.get(
-        "picked_meta_ts"
-    ):
-        # Parse Run Models format to extract version
-        selected_meta = st.session_state["selected_metadata"]
-        if selected_meta and " - " in selected_meta:
-            parts = selected_meta.split(" - ")
-            if len(parts) > 1:
-                st.session_state["picked_meta_ts"] = parts[1]
+            formatted = f"{country.upper()} - Latest"
+
+        if formatted != selected_metadata_val:
+            st.session_state["selected_metadata"] = formatted
+    elif selected_metadata_val:
+        # Only set picked_meta_ts if it doesn't exist yet (before widget is created)
+        if "picked_meta_ts" not in st.session_state:
+            if selected_metadata_val and " - " in selected_metadata_val:
+                parts = selected_metadata_val.split(" - ")
+                if len(parts) > 1:
+                    st.session_state["picked_meta_ts"] = parts[1]
+
+
+def update_session_timestamp(key: str):
+    """
+    Update the timestamp for a session state key.
+    Call this whenever you explicitly set a session state value.
+
+    Args:
+        key: The session state key that was updated
+    """
+    import streamlit as st
+    import time
+
+    if "_sync_timestamps" not in st.session_state:
+        st.session_state["_sync_timestamps"] = {}
+
+    st.session_state["_sync_timestamps"][key] = time.time()
 
 
 def persist_page_selections(page_name: str, selections: dict):
