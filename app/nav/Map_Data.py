@@ -1095,6 +1095,10 @@ def _iso2_countries_gcs_first(bucket: str) -> list[str]:
 # ──────────────────────────────────────────────────────────────
 # Page header & helper image
 # ──────────────────────────────────────────────────────────────
+
+# Sync session state across all pages to maintain selections
+sync_session_state_keys()
+
 st.title("Map Data & Define Goals")
 
 # sensible defaults so we can read these anywhere

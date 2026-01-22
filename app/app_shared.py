@@ -2920,15 +2920,43 @@ def sync_session_state_keys():
     the other keys but don't sync FROM to avoid Streamlit warnings.
     """
     import streamlit as st
+    import logging
 
-    # Sync country between pages (simple bidirectional sync)
+    logger = logging.getLogger(__name__)
+
+    logger.info(
+        f"[SESSION-SYNC] Starting sync - country={st.session_state.get('country')}, "
+        f"selected_country={st.session_state.get('selected_country')}, "
+        f"picked_data_ts={st.session_state.get('picked_data_ts')}, "
+        f"selected_version={st.session_state.get('selected_version')}, "
+        f"picked_meta_ts={st.session_state.get('picked_meta_ts')}, "
+        f"selected_metadata={st.session_state.get('selected_metadata')}"
+    )
+
+    # Sync country between pages
     country_val = st.session_state.get("country")
     selected_country_val = st.session_state.get("selected_country")
 
-    if country_val and not selected_country_val:
+    if (
+        country_val
+        and selected_country_val
+        and country_val != selected_country_val
+    ):
+        # Both exist but differ - keep both as they may be set by different mechanisms
+        # Prioritize selected_country if it exists (from Run Models)
+        logger.info(
+            f"[SESSION-SYNC] Country mismatch: country={country_val}, selected_country={selected_country_val}"
+        )
+    elif country_val and not selected_country_val:
         st.session_state["selected_country"] = country_val
+        logger.info(
+            f"[SESSION-SYNC] Synced country -> selected_country: {country_val}"
+        )
     elif selected_country_val and not country_val:
         st.session_state["country"] = selected_country_val
+        logger.info(
+            f"[SESSION-SYNC] Synced selected_country -> country: {selected_country_val}"
+        )
 
     # Sync data version
     # picked_data_ts is a widget key, so we can READ from it but not WRITE to it
@@ -2940,10 +2968,16 @@ def sync_session_state_keys():
         # Always sync FROM widget key TO run models key (safe direction)
         if picked_data_ts_val != selected_version_val:
             st.session_state["selected_version"] = picked_data_ts_val
+            logger.info(
+                f"[SESSION-SYNC] Synced picked_data_ts -> selected_version: {picked_data_ts_val}"
+            )
     elif selected_version_val:
         # Only set picked_data_ts if it doesn't exist yet (before widget is created)
         if "picked_data_ts" not in st.session_state:
             st.session_state["picked_data_ts"] = selected_version_val
+            logger.info(
+                f"[SESSION-SYNC] Initialized picked_data_ts from selected_version: {selected_version_val}"
+            )
 
     # Sync metadata version (more complex due to format differences)
     # picked_meta_ts is also a widget key
@@ -2966,6 +3000,9 @@ def sync_session_state_keys():
 
         if formatted != selected_metadata_val:
             st.session_state["selected_metadata"] = formatted
+            logger.info(
+                f"[SESSION-SYNC] Synced picked_meta_ts -> selected_metadata: {meta_ts} -> {formatted}"
+            )
     elif selected_metadata_val:
         # Only set picked_meta_ts if it doesn't exist yet (before widget is created)
         if "picked_meta_ts" not in st.session_state:
@@ -2973,6 +3010,18 @@ def sync_session_state_keys():
                 parts = selected_metadata_val.split(" - ")
                 if len(parts) > 1:
                     st.session_state["picked_meta_ts"] = parts[1]
+                    logger.info(
+                        f"[SESSION-SYNC] Initialized picked_meta_ts from selected_metadata: {parts[1]}"
+                    )
+
+    logger.info(
+        f"[SESSION-SYNC] After sync - country={st.session_state.get('country')}, "
+        f"selected_country={st.session_state.get('selected_country')}, "
+        f"picked_data_ts={st.session_state.get('picked_data_ts')}, "
+        f"selected_version={st.session_state.get('selected_version')}, "
+        f"picked_meta_ts={st.session_state.get('picked_meta_ts')}, "
+        f"selected_metadata={st.session_state.get('selected_metadata')}"
+    )
 
 
 def update_session_timestamp(key: str):

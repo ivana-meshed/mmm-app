@@ -57,6 +57,9 @@ from utils.gcs_utils import get_cet_now
 require_login_and_domain()
 ensure_session_defaults()
 
+# Sync session state across all pages to maintain selections
+sync_session_state_keys()
+
 st.title("Validate Mapping")
 st.caption(
     "Make sure your data, channels, and goals are recognized as intended."
