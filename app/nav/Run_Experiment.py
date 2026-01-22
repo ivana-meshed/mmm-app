@@ -350,14 +350,38 @@ with tab_single:
     st.subheader("Setup an Experiment Run")
 
     # Check for prefill from Prepare Training Data page for country/data/metadata
+    # Priority: training_data_config (from loaded dropdown) > training_prefill (from export)
+    training_data_config = st.session_state.get("training_data_config")
     training_prefill = st.session_state.get("training_prefill")
     prefill_country = None
     prefill_data_version = None
     prefill_meta_version = None
-    if training_prefill and st.session_state.get("training_prefill_ready"):
+
+    # Log current state for debugging
+    logger.info(
+        f"[DATA-PREFILL] Page render - training_data_config exists: {training_data_config is not None}, "
+        f"training_prefill exists: {training_prefill is not None}, "
+        f"training_prefill_ready: {st.session_state.get('training_prefill_ready', False)}"
+    )
+
+    # Use training_data_config if available (from loaded dropdown)
+    if training_data_config:
+        prefill_country = training_data_config.get("country")
+        prefill_data_version = training_data_config.get("data_version")
+        prefill_meta_version = training_data_config.get("meta_version")
+        logger.info(
+            f"[DATA-PREFILL] Using training_data_config: country={prefill_country}, "
+            f"data_version={prefill_data_version}, meta_version={prefill_meta_version}"
+        )
+    # Fall back to training_prefill (from Prepare Training Data export)
+    elif training_prefill and st.session_state.get("training_prefill_ready"):
         prefill_country = training_prefill.get("country")
         prefill_data_version = training_prefill.get("data_version")
         prefill_meta_version = training_prefill.get("meta_version")
+        logger.info(
+            f"[DATA-PREFILL] Using training_prefill: country={prefill_country}, "
+            f"data_version={prefill_data_version}, meta_version={prefill_meta_version}"
+        )
 
     # Data selection
     with st.expander("📊 Select Data", expanded=False):
@@ -399,12 +423,25 @@ with tab_single:
             default_country_index = available_countries.index(
                 prefill_country.lower()
             )
+            logger.info(
+                f"[DATA-PREFILL] Setting country dropdown to prefilled value: "
+                f"{prefill_country} (index {default_country_index})"
+            )
+        else:
+            logger.info(
+                f"[DATA-PREFILL] Using default country index: {default_country_index}, "
+                f"prefill_country={prefill_country}, available={available_countries[:3]}"
+            )
 
         selected_country = st.selectbox(
             "Primary Country",
             options=available_countries,
             index=default_country_index,
             help="Choose the country this model run will focus on",
+        )
+
+        logger.info(
+            f"[DATA-PREFILL] Country dropdown result: selected_country={selected_country}"
         )
 
         # ---- Load available metadata + data versions for this country ----
@@ -454,7 +491,17 @@ with tab_single:
             for i, opt in enumerate(available_versions):
                 if prefill_data_version.lower() == opt.lower():
                     default_data_index = i
+                    logger.info(
+                        f"[DATA-PREFILL] Setting data version dropdown to prefilled value: "
+                        f"{prefill_data_version} (index {default_data_index})"
+                    )
                     break
+
+        if default_data_index == 0 and prefill_data_version:
+            logger.warning(
+                f"[DATA-PREFILL] Could not find prefill_data_version '{prefill_data_version}' "
+                f"in available_versions: {available_versions[:3]}"
+            )
 
         # Mapped Data version selection - uses same list as Prepare Training Data page
         selected_version = st.selectbox(
@@ -464,13 +511,27 @@ with tab_single:
             help="Select mapped data version. Uses the same list as Prepare Training Data page.",
         )
 
+        logger.info(
+            f"[DATA-PREFILL] Data version dropdown result: selected_version={selected_version}"
+        )
+
         # ---- Metadata version selection (with prefill) ----
         default_meta_index = 0
         if prefill_meta_version:
             for i, opt in enumerate(metadata_options):
                 if prefill_meta_version in opt:
                     default_meta_index = i
+                    logger.info(
+                        f"[DATA-PREFILL] Setting metadata dropdown to prefilled value: "
+                        f"{prefill_meta_version} in '{opt}' (index {default_meta_index})"
+                    )
                     break
+
+        if default_meta_index == 0 and prefill_meta_version:
+            logger.warning(
+                f"[DATA-PREFILL] Could not find prefill_meta_version '{prefill_meta_version}' "
+                f"in metadata_options: {metadata_options[:3]}"
+            )
 
         selected_metadata = st.selectbox(
             "Metadata version",
@@ -480,6 +541,10 @@ with tab_single:
                 "Select metadata version. Universal mappings work for all "
                 "countries. Latest = most recently saved metadata."
             ),
+        )
+
+        logger.info(
+            f"[DATA-PREFILL] Metadata dropdown result: selected_metadata={selected_metadata}"
         )
 
         # Training Data Config from Prepare Training Data page
@@ -578,12 +643,23 @@ with tab_single:
             if config_info:
                 config_country = config_info["country"]
                 config_timestamp = config_info["timestamp"]
+                logger.info(
+                    f"[TRAINING-CONFIG-LOAD] Loading config from: "
+                    f"country={config_country}, timestamp={config_timestamp}"
+                )
                 training_data_config = _load_training_data_json(
                     gcs_bucket, config_country, config_timestamp
                 )
                 if training_data_config:
                     st.session_state["training_data_config"] = (
                         training_data_config
+                    )
+                    logger.info(
+                        f"[TRAINING-CONFIG-LOAD] Loaded config with: "
+                        f"country={training_data_config.get('country')}, "
+                        f"data_version={training_data_config.get('data_version')}, "
+                        f"meta_version={training_data_config.get('meta_version')}, "
+                        f"selected_goal={training_data_config.get('selected_goal')}"
                     )
                     # Clear export flags after successful load
                     if "just_exported_training_timestamp" in st.session_state:
@@ -610,8 +686,16 @@ with tab_single:
                         st.json(training_data_config)
                 else:
                     st.session_state["training_data_config"] = None
+                    logger.warning(
+                        f"[TRAINING-CONFIG-LOAD] Failed to load config for "
+                        f"country={config_country}, timestamp={config_timestamp}"
+                    )
             else:
                 st.session_state["training_data_config"] = None
+                logger.warning(
+                    f"[TRAINING-CONFIG-LOAD] No config_info found for "
+                    f"selected_training_data={selected_training_data}"
+                )
         else:
             st.session_state["training_data_config"] = None
 
@@ -640,6 +724,16 @@ with tab_single:
             width="stretch",
             key="load_data_btn",
         ):
+            logger.info(
+                f"[LOAD-DATA] Button clicked - About to load: "
+                f"country={selected_country}, version={selected_version}, "
+                f"metadata={selected_metadata}"
+            )
+            logger.info(
+                f"[LOAD-DATA] Current session state - "
+                f"training_data_config exists: {st.session_state.get('training_data_config') is not None}, "
+                f"training_prefill exists: {st.session_state.get('training_prefill') is not None}"
+            )
             tmp_path: Optional[str] = None
             try:
                 with st.spinner("Loading data from GCS..."):
@@ -720,6 +814,12 @@ with tab_single:
                         st.session_state["loaded_metadata"] = metadata
                         st.session_state["selected_metadata"] = (
                             selected_metadata
+                        )
+
+                        logger.info(
+                            f"[LOAD-DATA] Successfully loaded and saved to session state: "
+                            f"country={selected_country}, version={selected_version}, "
+                            f"metadata={selected_metadata}, rows={len(df_prev)}"
                         )
 
                         st.success(
@@ -1217,7 +1317,9 @@ with tab_single:
             agg_summary = ", ".join(
                 [f"{count} {agg}" for agg, count in sorted(agg_counts.items())]
             )
-            st.info(f"ℹ️ Using column aggregations from metadata: {agg_summary}")
+            st.info(
+                f"ℹ️ Using column aggregations from metadata: {agg_summary}"
+            )
         elif resample_freq != "none" and not column_agg_strategies:
             st.warning(
                 "⚠️ No column aggregations found in metadata. Default 'sum' "
@@ -2294,7 +2396,9 @@ with tab_single:
             )
         else:
             combined_revision = ""
-            st.warning("⚠️ Please select or create a tag for the experiment run")
+            st.warning(
+                "⚠️ Please select or create a tag for the experiment run"
+            )
 
         # For backward compatibility, create a combined "revision" field
         revision = combined_revision
