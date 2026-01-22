@@ -25,6 +25,7 @@ from app_shared import (
     require_login_and_domain,
     run_sql,
     safe_read_parquet,
+    sync_session_state_keys,
     timed_step,
     upload_to_gcs,
 )
@@ -43,6 +44,9 @@ ensure_session_defaults()
 
 # Clear mapped data cache to ensure we get fresh data
 list_mapped_data_versions.clear()
+
+# Sync session state across all pages to maintain selections
+sync_session_state_keys()
 
 st.title("Run Marketing Mix Models")
 
@@ -2618,6 +2622,7 @@ with tab_single:
             file_name=f"robyn_config_{'-'.join([c[:2] for c in csv_countries])}_{revision}_{time.strftime('%Y%m%d')}.csv",
             mime="text/csv",
             width="stretch",
+            key=f"download_config_csv_{revision}_{len(csv_countries)}",
             help=f"Download settings as CSV with {len(csv_countries)} row(s) - one per country. Use for batch processing.",
         )
 
@@ -3972,6 +3977,7 @@ with tab_queue:
                     file_name="robyn_batch_example_consistent.csv",
                     mime="text/csv",
                     width="content",
+                    key="download_batch_template_single",
                     help="All rows have the same columns – recommended starting point.",
                 )
             with col_ex2:
@@ -3981,6 +3987,7 @@ with tab_queue:
                     file_name="robyn_batch_example_varied.csv",
                     mime="text/csv",
                     width="content",
+                    key="download_batch_template_mixed",
                     help="Rows can differ in columns – shows CSV flexibility.",
                 )
 

@@ -9,6 +9,7 @@ from app_shared import (
     _connect_snowflake,
     require_login_and_domain,
     run_sql,
+    sync_session_state_keys,
 )
 from app_split_helpers import *  # bring in all helper functions/constants
 from cryptography.hazmat.backends import default_backend
@@ -59,6 +60,9 @@ def save_persisted_key(pem: str) -> bool:
 
 
 st.title("Connect your Data Source")
+
+# Sync session state across all pages to maintain selections
+sync_session_state_keys()
 
 # Data source selector
 data_source_type = st.radio(

@@ -2125,7 +2125,7 @@ def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
         try:
             # Read parquet file using PyArrow first to handle database-specific types
             table = pq.read_table(tmp.name)
-            
+
             # Check for database-specific types and convert them
             schema = table.schema
             db_type_columns = []
@@ -2134,18 +2134,24 @@ def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
                 # Check if the type string contains database-specific type indicators
                 if "db" in field_type_str and any(
                     db_type in field_type_str
-                    for db_type in ["dbdate", "dbtime", "dbdecimal", "dbtimestamp"]
+                    for db_type in [
+                        "dbdate",
+                        "dbtime",
+                        "dbdecimal",
+                        "dbtimestamp",
+                    ]
                 ):
                     db_type_columns.append(field.name)
                     logger.warning(
                         f"Column '{field.name}' has database-specific type '{field.type}'"
                     )
-            
+
             # Convert to pandas with type mapping for database-specific types
             if db_type_columns:
                 logger.info(
                     f"Converting database-specific types in columns: {db_type_columns}"
                 )
+
                 # Create a types_mapper that converts unknown types to string
                 def types_mapper(pa_type):
                     type_str = str(pa_type).lower()
@@ -2153,7 +2159,7 @@ def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
                         # Map database types to string for safe conversion
                         return pd.StringDtype()
                     return None  # Use default mapping for other types
-                
+
                 df = table.to_pandas(types_mapper=types_mapper)
             else:
                 # No database-specific types, use standard conversion
@@ -2193,7 +2199,7 @@ def safe_read_parquet(file_path: str) -> pd.DataFrame:
     try:
         # Read parquet file using PyArrow first to handle database-specific types
         table = pq.read_table(file_path)
-        
+
         # Check for database-specific types and convert them
         schema = table.schema
         db_type_columns = []
@@ -2208,12 +2214,13 @@ def safe_read_parquet(file_path: str) -> pd.DataFrame:
                 logger.warning(
                     f"Column '{field.name}' has database-specific type '{field.type}'"
                 )
-        
+
         # Convert to pandas with type mapping for database-specific types
         if db_type_columns:
             logger.info(
                 f"Converting database-specific types in columns: {db_type_columns}"
             )
+
             # Create a types_mapper that converts unknown types to string
             def types_mapper(pa_type):
                 type_str = str(pa_type).lower()
@@ -2221,7 +2228,7 @@ def safe_read_parquet(file_path: str) -> pd.DataFrame:
                     # Map database types to string for safe conversion
                     return pd.StringDtype()
                 return None  # Use default mapping for other types
-            
+
             df = table.to_pandas(types_mapper=types_mapper)
         else:
             # No database-specific types, use standard conversion
@@ -2888,3 +2895,115 @@ def validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
         "type_mismatches": type_mismatches,
         "channels_map": channels_map,
     }
+
+
+# ============================================================================
+# Session State Synchronization Utilities
+# ============================================================================
+
+
+def sync_session_state_keys():
+    """
+    Synchronize session state keys across all pages in the application.
+    This ensures selections persist when navigating between pages.
+
+    Key mappings:
+    - Prepare Training Data ↔ Run Models:
+      - country ↔ selected_country
+      - picked_data_ts ↔ selected_version
+      - picked_meta_ts ↔ selected_metadata (needs parsing)
+
+    Call this function at the start of each page to ensure consistency.
+    """
+    import streamlit as st
+
+    # Sync country between pages
+    if "country" in st.session_state and not st.session_state.get(
+        "selected_country"
+    ):
+        st.session_state["selected_country"] = st.session_state["country"]
+    elif "selected_country" in st.session_state and not st.session_state.get(
+        "country"
+    ):
+        st.session_state["country"] = st.session_state["selected_country"]
+
+    # Sync data version
+    if "picked_data_ts" in st.session_state and not st.session_state.get(
+        "selected_version"
+    ):
+        st.session_state["selected_version"] = st.session_state[
+            "picked_data_ts"
+        ]
+    elif "selected_version" in st.session_state and not st.session_state.get(
+        "picked_data_ts"
+    ):
+        st.session_state["picked_data_ts"] = st.session_state[
+            "selected_version"
+        ]
+
+    # Sync metadata version (more complex due to format differences)
+    if "picked_meta_ts" in st.session_state and not st.session_state.get(
+        "selected_metadata"
+    ):
+        # Format as Run Models expects: "Country - Version" or "Universal - Version"
+        meta_ts = st.session_state["picked_meta_ts"]
+        country = st.session_state.get(
+            "country", st.session_state.get("selected_country", "de")
+        )
+        if meta_ts and meta_ts != "Latest":
+            if " - " not in meta_ts:
+                # Determine if universal or country-specific (simplified heuristic)
+                st.session_state["selected_metadata"] = (
+                    f"{country.upper()} - {meta_ts}"
+                )
+            else:
+                st.session_state["selected_metadata"] = meta_ts
+        else:
+            st.session_state["selected_metadata"] = (
+                f"{country.upper()} - Latest"
+            )
+    elif "selected_metadata" in st.session_state and not st.session_state.get(
+        "picked_meta_ts"
+    ):
+        # Parse Run Models format to extract version
+        selected_meta = st.session_state["selected_metadata"]
+        if selected_meta and " - " in selected_meta:
+            parts = selected_meta.split(" - ")
+            if len(parts) > 1:
+                st.session_state["picked_meta_ts"] = parts[1]
+
+
+def persist_page_selections(page_name: str, selections: dict):
+    """
+    Persist page selections to session state with a page-specific prefix.
+    This allows each page to maintain its own selections independently.
+
+    Args:
+        page_name: Name of the page (e.g., "map_data", "prepare_training")
+        selections: Dictionary of selection key-value pairs to persist
+    """
+    import streamlit as st
+
+    prefix = f"page_{page_name}_"
+    for key, value in selections.items():
+        st.session_state[f"{prefix}{key}"] = value
+
+
+def restore_page_selections(page_name: str, default_selections: dict) -> dict:
+    """
+    Restore page selections from session state.
+
+    Args:
+        page_name: Name of the page
+        default_selections: Default values if no saved selections exist
+
+    Returns:
+        Dictionary of restored selections
+    """
+    import streamlit as st
+
+    prefix = f"page_{page_name}_"
+    restored = {}
+    for key, default_value in default_selections.items():
+        restored[key] = st.session_state.get(f"{prefix}{key}", default_value)
+    return restored

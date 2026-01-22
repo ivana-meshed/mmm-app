@@ -50,6 +50,7 @@ from app_shared import (
     require_login_and_domain,
     resample_numeric,
     resolve_meta_blob_from_selection,
+    sync_session_state_keys,
     total_with_prev,
     upload_to_gcs,
     validate_against_metadata,
@@ -93,6 +94,9 @@ def _safe_float(value: Union[float, np.ndarray, None]) -> float:
 
 
 st.title("Prepare Training Data")
+
+# Sync session state across all pages to maintain selections
+sync_session_state_keys()
 
 # Constants
 TRAINING_DATA_PATH_TEMPLATE = (
