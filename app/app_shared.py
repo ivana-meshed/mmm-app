@@ -2981,6 +2981,8 @@ def sync_session_state_keys():
 
     # Sync metadata version (more complex due to format differences)
     # picked_meta_ts is also a widget key
+    # IMPORTANT: picked_meta_ts actually contains FORMATTED values like "Universal - 20251211_115528"
+    # because list_meta_versions returns formatted labels, not just timestamps
     picked_meta_ts_val = st.session_state.get("picked_meta_ts")
     selected_metadata_val = st.session_state.get("selected_metadata")
     country = st.session_state.get(
@@ -2988,31 +2990,21 @@ def sync_session_state_keys():
     )
 
     if picked_meta_ts_val:
-        # Sync FROM widget key TO run models key (safe direction)
-        meta_ts = picked_meta_ts_val
-        if meta_ts and meta_ts != "Latest":
-            if " - " not in meta_ts:
-                formatted = f"{country.upper()} - {meta_ts}"
-            else:
-                formatted = meta_ts
-        else:
-            formatted = f"{country.upper()} - Latest"
-
-        if formatted != selected_metadata_val:
-            st.session_state["selected_metadata"] = formatted
+        # picked_meta_ts already contains the formatted value (e.g., "Universal - 20251211_115528")
+        # Just copy it to selected_metadata if they differ
+        if picked_meta_ts_val != selected_metadata_val:
+            st.session_state["selected_metadata"] = picked_meta_ts_val
             logger.info(
-                f"[SESSION-SYNC] Synced picked_meta_ts -> selected_metadata: {meta_ts} -> {formatted}"
+                f"[SESSION-SYNC] Synced picked_meta_ts -> selected_metadata: {picked_meta_ts_val}"
             )
     elif selected_metadata_val:
         # Only set picked_meta_ts if it doesn't exist yet (before widget is created)
+        # selected_metadata is already formatted, so use it directly
         if "picked_meta_ts" not in st.session_state:
-            if selected_metadata_val and " - " in selected_metadata_val:
-                parts = selected_metadata_val.split(" - ")
-                if len(parts) > 1:
-                    st.session_state["picked_meta_ts"] = parts[1]
-                    logger.info(
-                        f"[SESSION-SYNC] Initialized picked_meta_ts from selected_metadata: {parts[1]}"
-                    )
+            st.session_state["picked_meta_ts"] = selected_metadata_val
+            logger.info(
+                f"[SESSION-SYNC] Initialized picked_meta_ts from selected_metadata: {selected_metadata_val}"
+            )
 
     logger.info(
         f"[SESSION-SYNC] After sync - country={st.session_state.get('country')}, "
