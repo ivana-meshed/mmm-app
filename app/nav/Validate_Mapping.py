@@ -41,6 +41,7 @@ from app_shared import (  # colors (if exported; otherwise define locally)
     resample_numeric,
     resolve_meta_blob_from_selection,
     safe_eff,
+    sync_session_state_keys,
     total_with_prev,
     validate_against_metadata,
 )
@@ -55,6 +56,9 @@ from utils.gcs_utils import get_cet_now
 
 require_login_and_domain()
 ensure_session_defaults()
+
+# Sync session state across all pages to maintain selections
+sync_session_state_keys()
 
 st.title("Validate Mapping")
 st.caption(
