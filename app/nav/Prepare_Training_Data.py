@@ -105,8 +105,14 @@ TRAINING_DATA_PATH_TEMPLATE = (
 
 # Session state defaults
 st.session_state.setdefault("country", "de")
-st.session_state.setdefault("picked_data_ts", "Latest")
-st.session_state.setdefault("picked_meta_ts", "Latest")
+# For widget keys, use synced values as defaults if available
+# This ensures values persist when navigating from other pages
+st.session_state.setdefault(
+    "picked_data_ts", st.session_state.get("selected_version", "Latest")
+)
+st.session_state.setdefault(
+    "picked_meta_ts", st.session_state.get("selected_metadata", "Latest")
+)
 st.session_state.setdefault("selected_columns_for_training", [])
 st.session_state.setdefault("selected_paid_spends", [])
 st.session_state.setdefault("selected_goal", None)
