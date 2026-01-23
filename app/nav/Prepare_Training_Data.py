@@ -274,7 +274,10 @@ with st.expander("Step 1) Select Data", expanded=False):
         )
 
     # Calculate correct index for data version selectbox based on session state
-    current_data_ts = st.session_state.get("picked_data_ts", "Latest")
+    # Check widget key first, then fall back to Run Models key (from sync or direct setting)
+    current_data_ts = st.session_state.get(
+        "picked_data_ts", st.session_state.get("selected_version", "Latest")
+    )
     data_ts_index = (
         data_versions.index(current_data_ts)
         if current_data_ts in data_versions
@@ -282,7 +285,10 @@ with st.expander("Step 1) Select Data", expanded=False):
     )
 
     # Calculate correct index for metadata version selectbox based on session state
-    current_meta_ts = st.session_state.get("picked_meta_ts", "Latest")
+    # Check widget key first, then fall back to Run Models key (from sync or direct setting)
+    current_meta_ts = st.session_state.get(
+        "picked_meta_ts", st.session_state.get("selected_metadata", "Latest")
+    )
     meta_ts_index = (
         meta_versions.index(current_meta_ts)
         if current_meta_ts in meta_versions

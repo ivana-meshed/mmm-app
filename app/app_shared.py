@@ -2959,51 +2959,35 @@ def sync_session_state_keys():
         )
 
     # Sync data version
-    # picked_data_ts is a widget key, so we can READ from it but not WRITE to it
+    # picked_data_ts is a widget key - we ONLY READ from it, NEVER WRITE to it
     # to avoid Streamlit warning "widget was created with a default value but also had its value set"
+    # The Prepare Training Data page handles using selected_version as fallback when creating the widget
     picked_data_ts_val = st.session_state.get("picked_data_ts")
     selected_version_val = st.session_state.get("selected_version")
 
     if picked_data_ts_val:
-        # Always sync FROM widget key TO run models key (safe direction)
+        # Always sync FROM widget key TO run models key (safe one-way direction)
         if picked_data_ts_val != selected_version_val:
             st.session_state["selected_version"] = picked_data_ts_val
             logger.info(
                 f"[SESSION-SYNC] Synced picked_data_ts -> selected_version: {picked_data_ts_val}"
             )
-    elif selected_version_val:
-        # Only set picked_data_ts if it doesn't exist yet (before widget is created)
-        if "picked_data_ts" not in st.session_state:
-            st.session_state["picked_data_ts"] = selected_version_val
-            logger.info(
-                f"[SESSION-SYNC] Initialized picked_data_ts from selected_version: {selected_version_val}"
-            )
 
-    # Sync metadata version (more complex due to format differences)
-    # picked_meta_ts is also a widget key
-    # IMPORTANT: picked_meta_ts actually contains FORMATTED values like "Universal - 20251211_115528"
+    # Sync metadata version
+    # picked_meta_ts is also a widget key - we ONLY READ from it, NEVER WRITE to it
+    # IMPORTANT: picked_meta_ts contains FORMATTED values like "Universal - 20251211_115528"
     # because list_meta_versions returns formatted labels, not just timestamps
+    # The Prepare Training Data page handles using selected_metadata as fallback when creating the widget
     picked_meta_ts_val = st.session_state.get("picked_meta_ts")
     selected_metadata_val = st.session_state.get("selected_metadata")
-    country = st.session_state.get(
-        "country", st.session_state.get("selected_country", "de")
-    )
 
     if picked_meta_ts_val:
         # picked_meta_ts already contains the formatted value (e.g., "Universal - 20251211_115528")
-        # Just copy it to selected_metadata if they differ
+        # Just copy it to selected_metadata if they differ (safe one-way direction)
         if picked_meta_ts_val != selected_metadata_val:
             st.session_state["selected_metadata"] = picked_meta_ts_val
             logger.info(
                 f"[SESSION-SYNC] Synced picked_meta_ts -> selected_metadata: {picked_meta_ts_val}"
-            )
-    elif selected_metadata_val:
-        # Only set picked_meta_ts if it doesn't exist yet (before widget is created)
-        # selected_metadata is already formatted, so use it directly
-        if "picked_meta_ts" not in st.session_state:
-            st.session_state["picked_meta_ts"] = selected_metadata_val
-            logger.info(
-                f"[SESSION-SYNC] Initialized picked_meta_ts from selected_metadata: {selected_metadata_val}"
             )
 
     logger.info(
