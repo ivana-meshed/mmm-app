@@ -2393,11 +2393,10 @@ with st.expander(
         )
         if rules_changed:
             st.session_state["auto_rules"] = new_rules
-            # seed mapping again only when rules change AND user hasn't started manual edits
-            if st.session_state["mapping_df"].empty:
-                st.session_state["mapping_df"] = _build_mapping_df(
-                    all_cols, df_raw, new_rules
-                )
+            # Rebuild mapping when rules change to apply new categorization
+            st.session_state["mapping_df"] = _build_mapping_df(
+                all_cols, df_raw, new_rules
+            )
 
         # Prefix configuration for aggregated variables
         st.divider()
