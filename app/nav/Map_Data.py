@@ -577,11 +577,41 @@ def _download_json_from_gcs(gs_bucket: str, blob_path: str) -> dict:
 
 
 def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
+    """
+    Infer category based on prefix or suffix matching.
+    Priority: context_vars and organic_vars take precedence over paid_media_* categories.
+    
+    Args:
+        col: Column name to categorize
+        rules: Dict mapping category names to list of prefix/suffix patterns
+    
+    Returns:
+        Category name or empty string if no match
+    """
     s = str(col).lower()
-    for cat, endings in rules.items():
-        for suf in endings:
-            if s.endswith(str(suf).lower()):
-                return cat
+    
+    # Define priority order: high priority categories first
+    high_priority = ["context_vars", "organic_vars"]
+    low_priority = ["paid_media_spends", "paid_media_vars", "factor_vars"]
+    
+    # Check high priority categories first
+    for cat in high_priority:
+        if cat in rules:
+            for pattern in rules[cat]:
+                pattern_lower = str(pattern).lower()
+                # Check both prefix and suffix
+                if s.startswith(pattern_lower) or s.endswith(pattern_lower):
+                    return cat
+    
+    # Then check low priority categories
+    for cat in low_priority:
+        if cat in rules:
+            for pattern in rules[cat]:
+                pattern_lower = str(pattern).lower()
+                # Check both prefix and suffix
+                if s.startswith(pattern_lower) or s.endswith(pattern_lower):
+                    return cat
+    
     return ""
 
 
@@ -2295,58 +2325,66 @@ with st.expander(
     # ---- Auto-tag rules ----
 
     with st.expander("🏷️ Automatically tag your variables", expanded=False):
-        st.write("**Use suffixes to tag columns.**")
+        st.write(
+            "**Use prefixes or suffixes to tag columns.**"
+        )
+        st.caption(
+            "Enter patterns that identify each variable type. "
+            "Use prefixes (e.g. 'crm_') if columns start with the pattern, "
+            "or suffixes (e.g. '_sessions') if they end with it. "
+            "Context and Organic variables have higher priority than Paid Media."
+        )
         rcol1, rcol2, rcol3 = st.columns(3)
 
-        def _parse_sfx(s: str) -> list[str]:
+        def _parse_patterns(s: str) -> list[str]:
             return [x.strip() for x in s.split(",") if x.strip()]
 
         new_rules = {
-            "paid_media_spends": _parse_sfx(
+            "paid_media_spends": _parse_patterns(
                 rcol1.text_input(
                     "Paid media spends:",
                     value=", ".join(
                         st.session_state["auto_rules"]["paid_media_spends"]
                     ),
-                    help="Suffixes that identify spend columns, e.g. '_spend', '_cost'",
+                    help="Prefix/suffix patterns for spend columns, e.g. '_spend', '_cost', 'paid_'",
                 )
             ),
-            "paid_media_vars": _parse_sfx(
+            "paid_media_vars": _parse_patterns(
                 rcol1.text_input(
                     "Paid media variables",
                     value=", ".join(
                         st.session_state["auto_rules"]["paid_media_vars"]
                     ),
                     key="paid_vars",
-                    help="Suffixes for media activity metrics, e.g. '_clicks', '_impressions', '_views'",
+                    help="Prefix/suffix patterns for media metrics, e.g. '_clicks', '_impressions', '_views'",
                 )
             ),
-            "context_vars": _parse_sfx(
+            "context_vars": _parse_patterns(
                 rcol2.text_input(
-                    "Context Variables",
+                    "Context Variables (Higher Priority)",
                     value=", ".join(
                         st.session_state["auto_rules"]["context_vars"]
                     ),
-                    help="Suffixes for non-media drivers, e.g. '_promo', '_weather'",
+                    help="Prefix/suffix patterns for non-media drivers, e.g. '_promo', '_weather', 'context_'",
                 )
             ),
-            "organic_vars": _parse_sfx(
+            "organic_vars": _parse_patterns(
                 rcol2.text_input(
-                    "Organic Variables",
+                    "Organic Variables (Higher Priority)",
                     value=", ".join(
                         st.session_state["auto_rules"]["organic_vars"]
                     ),
                     key="org_vars",
-                    help="Suffixes for organic traffic channels, e.g. '_organic', '_direct'. Similar to Paid Spends, they also receive response-curves.",
+                    help="Prefix/suffix patterns for organic channels, e.g. '_organic', '_direct', 'crm_'. These receive response-curves like Paid Spends.",
                 )
             ),
-            "factor_vars": _parse_sfx(
+            "factor_vars": _parse_patterns(
                 rcol3.text_input(
                     "Factor Variables (True/False)",
                     value=", ".join(
                         st.session_state["auto_rules"]["factor_vars"]
                     ),
-                    help="Suffixes for binary flags, e.g. 'is_big_promotion','is_holiday'",
+                    help="Prefix/suffix patterns for binary flags, e.g. 'is_', '_flag', '_on'",
                 )
             ),
         }
@@ -2355,15 +2393,14 @@ with st.expander(
         )
         if rules_changed:
             st.session_state["auto_rules"] = new_rules
-            # seed mapping again only when rules change AND user hasn't started manual edits
-            if st.session_state["mapping_df"].empty:
-                st.session_state["mapping_df"] = _build_mapping_df(
-                    all_cols, df_raw, new_rules
-                )
+            # Rebuild mapping when rules change to apply new categorization
+            st.session_state["mapping_df"] = _build_mapping_df(
+                all_cols, df_raw, new_rules
+            )
 
         # Prefix configuration for aggregated variables
         st.divider()
-        st.write("**Use prefixes to automate tagging instead:**")
+        st.write("**Prefixes for aggregated columns:**")
         st.caption(
             "Define prefixes to use when creating aggregated columns for these categories"
         )
