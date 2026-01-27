@@ -89,23 +89,31 @@ def _list_available_countries(bucket: str) -> List[str]:
         return []
 
 
-def _list_training_data_versions(bucket: str, country: str) -> List[str]:
+def _list_training_data_versions(
+    bucket: str, country: str, goal: str = None
+) -> List[str]:
     """List available selected_columns.json versions from Prepare Training Data.
 
     Returns list of timestamps for which selected_columns.json exists.
-    Path pattern: training_data/{country}/{timestamp}/selected_columns.json
+    Path pattern: training_data/{country}/{goal}/{timestamp}/selected_columns.json
+
+    If goal is provided, only list timestamps for that specific goal.
+    If goal is None, list all timestamps for all goals under the country.
     """
     try:
         client = storage.Client()
-        prefix = f"training_data/{country.lower().strip()}/"
+        if goal:
+            prefix = f"training_data/{country.lower().strip()}/{goal}/"
+        else:
+            prefix = f"training_data/{country.lower().strip()}/"
         blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
         versions = []
         for blob in blobs:
             if blob.name.endswith("selected_columns.json"):
                 parts = blob.name.split("/")
-                # training_data/<country>/<timestamp>/selected_columns.json
-                if len(parts) >= 4:
-                    versions.append(parts[2])
+                # training_data/<country>/<goal>/<timestamp>/selected_columns.json
+                if len(parts) >= 5:
+                    versions.append(parts[3])
         # Sort newest first
         return sorted(versions, reverse=True) if versions else []
     except Exception as e:
@@ -116,12 +124,12 @@ def _list_training_data_versions(bucket: str, country: str) -> List[str]:
 
 
 def _load_training_data_json(
-    bucket: str, country: str, version: str
+    bucket: str, country: str, goal: str, version: str
 ) -> Optional[Dict]:
     """Load selected_columns.json from Prepare Training Data page."""
     try:
         client = storage.Client()
-        blob_path = f"training_data/{country.lower().strip()}/{version}/selected_columns.json"
+        blob_path = f"training_data/{country.lower().strip()}/{goal}/{version}/selected_columns.json"
         blob = client.bucket(bucket).blob(blob_path)
         if not blob.exists():
             return None
@@ -134,8 +142,8 @@ def _load_training_data_json(
 def _list_all_training_data_configs(bucket: str) -> List[Dict[str, str]]:
     """List all available training data configs from all countries.
 
-    Returns list of dicts with keys: 'country', 'timestamp', 'display_name'
-    Path pattern: training_data/{country}/{timestamp}/selected_columns.json
+    Returns list of dicts with keys: 'country', 'goal', 'timestamp', 'display_name'
+    Path pattern: training_data/{country}/{goal}/{timestamp}/selected_columns.json
     """
     try:
         client = storage.Client()
@@ -145,23 +153,49 @@ def _list_all_training_data_configs(bucket: str) -> List[Dict[str, str]]:
         for blob in blobs:
             if blob.name.endswith("selected_columns.json"):
                 parts = blob.name.split("/")
-                # training_data/<country>/<timestamp>/selected_columns.json
-                if len(parts) >= 4:
+                # training_data/<country>/<goal>/<timestamp>/selected_columns.json
+                if len(parts) >= 5:
                     country = parts[1].strip()
-                    timestamp = parts[2].strip()
-                    # Validate that country and timestamp are non-empty
-                    if country and timestamp:
+                    goal = parts[2].strip()
+                    timestamp = parts[3].strip()
+                    # Validate that country, goal, and timestamp are non-empty
+                    if country and goal and timestamp:
                         configs.append(
                             {
                                 "country": country,
+                                "goal": goal,
                                 "timestamp": timestamp,
-                                "display_name": f"{country.upper()} - {timestamp}",
+                                "display_name": f"{country.upper()} - {goal} - {timestamp}",
                             }
                         )
         # Sort by timestamp descending (newest first)
         return sorted(configs, key=lambda x: x["timestamp"], reverse=True)
     except Exception as e:
         logging.warning(f"Could not list all training data configs: {e}")
+        return []
+
+
+def _list_available_goals(bucket: str, country: str) -> List[str]:
+    """List all available goals for a given country.
+
+    Returns list of goal names found in training_data/{country}/{goal}/ paths.
+    """
+    try:
+        client = storage.Client()
+        prefix = f"training_data/{country.lower().strip()}/"
+        blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+        goals = set()
+        for blob in blobs:
+            if blob.name.endswith("selected_columns.json"):
+                parts = blob.name.split("/")
+                # training_data/<country>/<goal>/<timestamp>/selected_columns.json
+                if len(parts) >= 5:
+                    goal = parts[2].strip()
+                    if goal:
+                        goals.add(goal)
+        return sorted(list(goals))
+    except Exception as e:
+        logging.warning(f"Could not list available goals for {country}: {e}")
         return []
 
 
@@ -569,91 +603,113 @@ with tab_single:
             f"[TRAINING-DATA-PREFILL] Training data lookup country: {lookup_country} (selected_country={selected_country})"
         )
 
+        # Three-column filter: Country (readonly), Goal (dropdown), Timestamp (dropdown)
+        col_country, col_goal, col_timestamp = st.columns(3)
+
+        with col_country:
+            st.text_input(
+                "Country",
+                value=lookup_country.upper(),
+                disabled=True,
+                help="Country for training data lookup",
+            )
+
+        # Get available goals
         try:
-            # First try to get configs for the lookup country
-            training_data_versions = _list_training_data_versions(
-                gcs_bucket, lookup_country
-            )
+            available_goals = _list_available_goals(gcs_bucket, lookup_country)
             logger.info(
-                f"[TRAINING-DATA-PREFILL] Found {len(training_data_versions)} training data versions for {lookup_country}"
+                f"[TRAINING-DATA-PREFILL] Found {len(available_goals)} goals for {lookup_country}"
             )
-
-            if training_data_versions:
-                # Found configs for selected country - show them with simple timestamps
-                training_data_options = ["None"] + training_data_versions
-                # Store mapping from display name to country/timestamp
-                config_mapping = {
-                    version: {"country": lookup_country, "timestamp": version}
-                    for version in training_data_versions
-                }
-            else:
-                # No configs for selected country - show configs from all countries
-                all_configs = _list_all_training_data_configs(gcs_bucket)
-                if all_configs:
-                    training_data_options = ["None"] + [
-                        cfg["display_name"] for cfg in all_configs
-                    ]
-                    # Store mapping from display name to country/timestamp
-                    config_mapping = {
-                        cfg["display_name"]: {
-                            "country": cfg["country"],
-                            "timestamp": cfg["timestamp"],
-                        }
-                        for cfg in all_configs
-                    }
-                    st.info(
-                        f"ℹ️ No training data configs found for {selected_country.upper()}. "
-                        "Showing configs from all countries."
-                    )
-                else:
-                    training_data_options = ["None"]
-                    config_mapping = {}
         except Exception as e:
-            logging.warning(f"Error listing training data configs: {e}")
-            training_data_options = ["None"]
-            config_mapping = {}
+            logging.warning(f"Error listing goals: {e}")
+            available_goals = []
 
-        # Auto-select exported timestamp if present
-        default_training_data_index = 0
-        just_exported_timestamp = st.session_state.get(
-            "just_exported_training_timestamp"
-        )
-        if (
-            just_exported_timestamp
-            and just_exported_timestamp in training_data_options
-        ):
-            default_training_data_index = training_data_options.index(
-                just_exported_timestamp
+        if not available_goals:
+            st.warning(
+                f"⚠️ No training data found for {lookup_country.upper()}"
             )
-            logger.info(
-                f"[TRAINING-DATA-PREFILL] Auto-selecting exported timestamp: {just_exported_timestamp} at index {default_training_data_index}"
-            )
+            st.session_state["training_data_config"] = None
+            selected_goal = None
+            selected_training_timestamp = None
         else:
-            logger.info(
-                f"[TRAINING-DATA-PREFILL] No auto-selection: timestamp={just_exported_timestamp}, available options={training_data_options[:5]}"
+            # Auto-select goal from session state
+            just_exported_goal = st.session_state.get(
+                "just_exported_training_goal"
             )
+            default_goal_index = 0
+            if just_exported_goal and just_exported_goal in available_goals:
+                default_goal_index = available_goals.index(just_exported_goal)
+                logger.info(
+                    f"[TRAINING-DATA-PREFILL] Auto-selecting exported goal: {just_exported_goal}"
+                )
 
-        selected_training_data = st.selectbox(
-            "Select Training Data Config",
-            options=training_data_options,
-            index=default_training_data_index,
-            help="Load selected_columns.json from Prepare Training Data to prefill model inputs.",
-        )
+            with col_goal:
+                selected_goal = st.selectbox(
+                    "Goal",
+                    options=available_goals,
+                    index=default_goal_index,
+                    help="Select the goal for this training data",
+                )
 
-        # Load and store training data config if selected
-        if selected_training_data != "None":
-            # Get country and timestamp from mapping
-            config_info = config_mapping.get(selected_training_data)
-            if config_info:
-                config_country = config_info["country"]
-                config_timestamp = config_info["timestamp"]
+            # Get timestamps for selected goal
+            try:
+                training_data_versions = _list_training_data_versions(
+                    gcs_bucket, lookup_country, selected_goal
+                )
+                logger.info(
+                    f"[TRAINING-DATA-PREFILL] Found {len(training_data_versions)} timestamps for {lookup_country}/{selected_goal}"
+                )
+            except Exception as e:
+                logging.warning(f"Error listing training data versions: {e}")
+                training_data_versions = []
+
+            if not training_data_versions:
+                with col_timestamp:
+                    st.selectbox(
+                        "Timestamp",
+                        options=["No data available"],
+                        disabled=True,
+                        help="No training data versions found",
+                    )
+                st.session_state["training_data_config"] = None
+                selected_training_timestamp = None
+            else:
+                # Auto-select timestamp from session state
+                just_exported_timestamp = st.session_state.get(
+                    "just_exported_training_timestamp"
+                )
+                default_timestamp_index = 0
+                if (
+                    just_exported_timestamp
+                    and just_exported_timestamp in training_data_versions
+                ):
+                    default_timestamp_index = training_data_versions.index(
+                        just_exported_timestamp
+                    )
+                    logger.info(
+                        f"[TRAINING-DATA-PREFILL] Auto-selecting exported timestamp: {just_exported_timestamp}"
+                    )
+
+                with col_timestamp:
+                    selected_training_timestamp = st.selectbox(
+                        "Timestamp",
+                        options=training_data_versions,
+                        index=default_timestamp_index,
+                        help="Select the training data version",
+                    )
+
+                # Load training data config
                 logger.info(
                     f"[TRAINING-CONFIG-LOAD] Loading config from: "
-                    f"country={config_country}, timestamp={config_timestamp}"
+                    f"country={lookup_country}, goal={selected_goal}, timestamp={selected_training_timestamp}"
                 )
                 training_data_config = _load_training_data_json(
-                    gcs_bucket, config_country, config_timestamp
+                    gcs_bucket,
+                    lookup_country,
+                    selected_goal,
+                    selected_training_timestamp,
                 )
+
                 if training_data_config:
                     st.session_state["training_data_config"] = (
                         training_data_config
@@ -666,25 +722,22 @@ with tab_single:
                         f"selected_goal={training_data_config.get('selected_goal')}"
                     )
                     # Update export flags to remember this selection for future sessions
-                    # This allows auto-selection to work even after page refresh
                     st.session_state["just_exported_training_timestamp"] = (
-                        config_timestamp
+                        selected_training_timestamp
                     )
                     st.session_state["just_exported_training_country"] = (
-                        config_country
+                        lookup_country
+                    )
+                    st.session_state["just_exported_training_goal"] = (
+                        selected_goal
                     )
                     logger.info(
                         f"[TRAINING-CONFIG-LOAD] Updated export flags to persist selection: "
-                        f"timestamp={config_timestamp}, country={config_country}"
+                        f"country={lookup_country}, goal={selected_goal}, timestamp={selected_training_timestamp}"
                     )
-                    if config_country != selected_country:
-                        st.success(
-                            f"✅ Loaded training data config from {config_country.upper()}: {config_timestamp}"
-                        )
-                    else:
-                        st.success(
-                            f"✅ Loaded training data config: {selected_training_data}"
-                        )
+                    st.success(
+                        f"✅ Loaded training data config: {lookup_country.upper()} - {selected_goal} - {selected_training_timestamp}"
+                    )
                     with st.expander(
                         "Preview Training Data Config", expanded=False
                     ):
@@ -693,22 +746,8 @@ with tab_single:
                     st.session_state["training_data_config"] = None
                     logger.warning(
                         f"[TRAINING-CONFIG-LOAD] Failed to load config for "
-                        f"country={config_country}, timestamp={config_timestamp}"
+                        f"country={lookup_country}, goal={selected_goal}, timestamp={selected_training_timestamp}"
                     )
-            else:
-                st.session_state["training_data_config"] = None
-                logger.warning(
-                    f"[TRAINING-CONFIG-LOAD] No config_info found for "
-                    f"selected_training_data={selected_training_data}"
-                )
-        else:
-            # User selected "None" - clear training_data_config but keep export flags
-            # for potential re-selection later
-            if st.session_state.get("training_data_config") is not None:
-                st.session_state["training_data_config"] = None
-                logger.info(
-                    "[TRAINING-CONFIG-LOAD] Cleared training_data_config (user selected None)"
-                )
 
         # ---- Show currently loaded state ----
         if (

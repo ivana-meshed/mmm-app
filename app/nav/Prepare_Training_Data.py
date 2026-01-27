@@ -100,7 +100,7 @@ sync_session_state_keys()
 
 # Constants
 TRAINING_DATA_PATH_TEMPLATE = (
-    "training_data/{country}/{timestamp}/selected_columns.json"
+    "training_data/{country}/{goal}/{timestamp}/selected_columns.json"
 )
 
 # Session state defaults
@@ -2588,6 +2588,7 @@ with st.expander(
 
                 # Save to GCS
                 country = st.session_state.get("country", "de")
+                goal = st.session_state.get("selected_goal")
                 # Use shared timestamp from Map Data if available, otherwise generate new one
                 timestamp = st.session_state.get(
                     "shared_save_timestamp",
@@ -2613,13 +2614,14 @@ with st.expander(
 
                 # Upload to GCS
                 gcs_path = TRAINING_DATA_PATH_TEMPLATE.format(
-                    country=country, timestamp=timestamp
+                    country=country, goal=goal, timestamp=timestamp
                 )
                 upload_to_gcs(GCS_BUCKET, tmp_path, gcs_path)
                 st.session_state["last_exported_columns_path"] = gcs_path
-                # Store timestamp AND country for auto-selection in Run Models page
+                # Store timestamp, country, AND goal for auto-selection in Run Models page
                 st.session_state["just_exported_training_timestamp"] = timestamp
                 st.session_state["just_exported_training_country"] = country
+                st.session_state["just_exported_training_goal"] = goal
 
                 # Also sync current selections to Run Models page session state keys
                 # to maintain selections when navigating back to Run Models
