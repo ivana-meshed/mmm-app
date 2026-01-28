@@ -560,9 +560,7 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                                                 from datetime import (
                                                     datetime as dt,
                                                 )
-                                                from datetime import (
-                                                    timedelta,
-                                                )
+                                                from datetime import timedelta
 
                                                 start_time = dt.fromisoformat(
                                                     str(start_time_str).replace(
@@ -1339,7 +1337,7 @@ def _hydrate_times_from_status(entry: dict) -> dict:
         return {}
 
 
-def _queue_tick():
+def _queue_tick(force: bool = False):
     # Advance the queue atomically (lease/launch OR update running)
     logger.info("Starting queue tick")
     try:
@@ -1347,6 +1345,7 @@ def _queue_tick():
             st.session_state.queue_name,
             st.session_state.get("gcs_bucket", GCS_BUCKET),
             launcher=prepare_and_launch_job,
+            force=force,
         )
         logger.info(f"Queue tick result: {res}")
 
