@@ -421,415 +421,402 @@ with tab_single:
             f"data_version={prefill_data_version}, meta_version={prefill_meta_version}"
         )
 
-    # Data selection - Single row with all filters
-    st.markdown("### 📊 Select Training Data")
-    st.caption(
-        "Select data version and training configuration. Data version and metadata version will auto-fill from the selected training config."
-    )
+    # Data selection
+    with st.expander("📊 Select Data", expanded=False):
 
-    gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
+        gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
 
-    # CRITICAL: Determine country from just_exported_training_country if available
-    # This ensures we look in the correct folder where the data was exported
-    lookup_country = st.session_state.get("just_exported_training_country")
-
-    if not lookup_country:
-        # Fallback: try to get country from prefill or Map Data session state
+        # ---- Country selection ----
+        # Get countries from Map Data session state if available,
+        # otherwise load from GCS mapped-datasets
         map_data_countries = st.session_state.get("selected_countries", [])
         prefill_countries_list = st.session_state.get("prefill_countries", [])
 
+        # Combine all available countries - priority: Map Data > prefill > GCS
         if map_data_countries:
-            lookup_country = map_data_countries[0]
-            logger.info(
-                f"[DATA-PREFILL] Using country from Map Data: {lookup_country}"
+            available_countries = map_data_countries
+            st.info(
+                f"Using countries from Map Data: **{', '.join([c.upper() for c in available_countries])}**"
             )
         elif prefill_countries_list:
-            lookup_country = prefill_countries_list[0]
-            logger.info(
-                f"[DATA-PREFILL] Using country from prefill: {lookup_country}"
-            )
-        elif prefill_country:
-            lookup_country = prefill_country.lower()
-            logger.info(
-                f"[DATA-PREFILL] Using country from prefill_country: {lookup_country}"
+            available_countries = prefill_countries_list
+            st.info(
+                f"Using countries from previous session: **{', '.join([c.upper() for c in available_countries])}**"
             )
         else:
-            # Load available countries from GCS and use first one
+            # Load available countries from GCS mapped-datasets
             available_countries = _list_available_countries(gcs_bucket)
-            if available_countries:
-                lookup_country = available_countries[0]
-                logger.info(
-                    f"[DATA-PREFILL] Using first available country from GCS: {lookup_country}"
+            if not available_countries:
+                st.warning(
+                    "No mapped datasets found in GCS. Please map and save data first using the Map Data page."
                 )
-            else:
-                lookup_country = "de"  # Default fallback
-                logger.warning(
-                    "[DATA-PREFILL] No countries found, using default: de"
-                )
+                available_countries = ["de"]  # Default fallback
 
-    logger.info(
-        f"[TRAINING-DATA-PREFILL] Training data lookup country: {lookup_country}"
-    )
+        # Store available countries in session state for use in Save Model Settings
+        st.session_state["run_models_available_countries"] = available_countries
 
-    # Get available goals
-    try:
-        available_goals = _list_available_goals(gcs_bucket, lookup_country)
-        logger.info(
-            f"[TRAINING-DATA-PREFILL] Found {len(available_goals)} goals for {lookup_country}"
-        )
-    except Exception as e:
-        logger.warning(f"Error listing goals: {e}")
-        available_goals = []
+        # Determine default index from prefill or default to 0
+        default_country_index = 0
+        if prefill_country and prefill_country.lower() in available_countries:
+            default_country_index = available_countries.index(
+                prefill_country.lower()
+            )
+            logger.info(
+                f"[DATA-PREFILL] Setting country dropdown to prefilled value: "
+                f"{prefill_country} (index {default_country_index})"
+            )
+        else:
+            logger.info(
+                f"[DATA-PREFILL] Using default country index: {default_country_index}, "
+                f"prefill_country={prefill_country}, available={available_countries[:3]}"
+            )
 
-    # Initialize variables
-    selected_goal = None
-    selected_training_timestamp = None
-    selected_version = None
-    selected_metadata = None
-    selected_country = lookup_country
-    training_data_config = None
-
-    if not available_goals:
-        st.warning(
-            f"⚠️ No training data found for **{lookup_country.upper()}**. Please prepare training data first using the Prepare Training Data page."
-        )
-        st.session_state["training_data_config"] = None
-
-        # Show disabled dropdowns
+        # Create 4-column layout for all filters in one row
         col1, col2, col3, col4 = st.columns(4)
+
+        # Column 1: Primary Country
         with col1:
-            st.selectbox(
-                "Data Version",
-                options=["No data available"],
-                disabled=True,
-                help="No training data found",
+            selected_country = st.selectbox(
+                "Primary Country",
+                options=available_countries,
+                index=default_country_index,
+                help="Choose the country this model run will focus on",
             )
-        with col2:
-            st.selectbox(
-                "Goal",
-                options=["No goals available"],
-                disabled=True,
-                help="No training goals found",
-            )
-        with col3:
-            st.selectbox(
-                "Timestamp",
-                options=["No timestamps available"],
-                disabled=True,
-                help="No training data versions found",
-            )
-        with col4:
-            st.selectbox(
-                "Metadata Version",
-                options=["No metadata available"],
-                disabled=True,
-                help="No metadata found",
-            )
-    else:
-        # Step 1: Select Goal and Timestamp to load training config
-        st.markdown("**Step 1:** Select training configuration")
-        st.caption(
-            "Choose goal and timestamp to load the training data config. Data version and metadata will be auto-filled."
+
+        logger.info(
+            f"[DATA-PREFILL] Country dropdown result: selected_country={selected_country}"
         )
 
-        col_goal, col_timestamp = st.columns(2)
+        # Column 2: Goal (from training data configs)
+        # Get available goals for selected country
+        try:
+            available_goals = _list_available_goals(gcs_bucket, selected_country)
+            logger.info(
+                f"[DATA-PREFILL] Found {len(available_goals)} goals for {selected_country}"
+            )
+        except Exception as e:
+            logger.warning(f"Error listing goals: {e}")
+            available_goals = []
 
-        # Auto-select goal from session state
-        just_exported_goal = st.session_state.get("just_exported_training_goal")
+        # Determine default goal index
         default_goal_index = 0
+        just_exported_goal = st.session_state.get("just_exported_training_goal")
         if just_exported_goal and just_exported_goal in available_goals:
             default_goal_index = available_goals.index(just_exported_goal)
             logger.info(
-                f"[TRAINING-DATA-PREFILL] Auto-selecting exported goal: {just_exported_goal}"
+                f"[DATA-PREFILL] Setting goal dropdown to exported value: {just_exported_goal}"
             )
 
-        with col_goal:
-            selected_goal = st.selectbox(
-                "Goal",
-                options=available_goals,
-                index=default_goal_index,
-                help="Select the goal for this training data",
-                key="temp_goal_selector",
-            )
+        with col2:
+            if available_goals:
+                selected_data_goal = st.selectbox(
+                    "Goal",
+                    options=available_goals,
+                    index=default_goal_index,
+                    help="Select the goal for training data filtering",
+                )
+            else:
+                st.selectbox(
+                    "Goal",
+                    options=["No goals available"],
+                    disabled=True,
+                    help="No training data found for this country",
+                )
+                selected_data_goal = None
 
-        # Get timestamps for selected goal
+        logger.info(
+            f"[DATA-PREFILL] Goal dropdown result: selected_data_goal={selected_data_goal}"
+        )
+
+        # ---- Load available metadata + data versions for this country ----
+        # Metadata versions (universal + country-specific)
         try:
-            training_data_versions = _list_training_data_versions(
-                gcs_bucket, lookup_country, selected_goal
+            country_meta_versions = _list_metadata_versions(
+                gcs_bucket, selected_country
+            )  # type: ignore
+            universal_meta_versions = _list_metadata_versions(
+                gcs_bucket, "universal"
+            )  # type: ignore
+
+            metadata_options: List[str] = []
+            if universal_meta_versions:
+                metadata_options.extend(
+                    [f"Universal - {v}" for v in universal_meta_versions]
+                )
+            if country_meta_versions:
+                metadata_options.extend(
+                    [
+                        f"{selected_country.upper()} - {v}"
+                        for v in country_meta_versions
+                    ]
+                )
+
+            if not metadata_options:
+                metadata_options = ["Universal - Latest"]
+        except Exception as e:
+            st.warning(f"Could not list metadata versions: {e}")
+            metadata_options = ["Universal - Latest"]
+
+        # Get available data versions for selected country
+        # Use the same function as Prepare Training Data page for consistency
+        try:
+            available_versions = list_mapped_data_versions(
+                gcs_bucket, selected_country, refresh_key=""
             )
+            if not available_versions:
+                available_versions = ["Latest"]
+        except Exception as e:
+            st.warning(f"Could not list mapped data versions: {e}")
+            available_versions = ["Latest"]
+
+        # ---- Data version selection (with prefill) ----
+        default_data_index = 0
+        if prefill_data_version:
+            for i, opt in enumerate(available_versions):
+                if prefill_data_version.lower() == opt.lower():
+                    default_data_index = i
+                    logger.info(
+                        f"[DATA-PREFILL] Setting data version dropdown to prefilled value: "
+                        f"{prefill_data_version} (index {default_data_index})"
+                    )
+                    break
+
+        if default_data_index == 0 and prefill_data_version:
+            logger.warning(
+                f"[DATA-PREFILL] Could not find prefill_data_version '{prefill_data_version}' "
+                f"in available_versions: {available_versions[:3]}"
+            )
+
+        # Column 3: Mapped Data version
+        with col3:
+            selected_version = st.selectbox(
+                "Mapped Data version",
+                options=available_versions,
+                index=default_data_index,
+                help="Select mapped data version. Uses the same list as Prepare Training Data page.",
+            )
+
+        logger.info(
+            f"[DATA-PREFILL] Data version dropdown result: selected_version={selected_version}"
+        )
+
+        # ---- Metadata version selection (with prefill) ----
+        default_meta_index = 0
+        if prefill_meta_version:
+            for i, opt in enumerate(metadata_options):
+                if prefill_meta_version in opt:
+                    default_meta_index = i
+                    logger.info(
+                        f"[DATA-PREFILL] Setting metadata dropdown to prefilled value: "
+                        f"{prefill_meta_version} in '{opt}' (index {default_meta_index})"
+                    )
+                    break
+
+        if default_meta_index == 0 and prefill_meta_version:
+            logger.warning(
+                f"[DATA-PREFILL] Could not find prefill_meta_version '{prefill_meta_version}' "
+                f"in metadata_options: {metadata_options[:3]}"
+            )
+
+        # Column 4: Metadata version
+        with col4:
+            selected_metadata = st.selectbox(
+                "Metadata version",
+                options=metadata_options,
+                index=default_meta_index,
+                help=(
+                    "Select metadata version. Universal mappings work for all "
+                    "countries. Latest = most recently saved metadata."
+                ),
+            )
+
+        logger.info(
+            f"[DATA-PREFILL] Metadata dropdown result: selected_metadata={selected_metadata}"
+        )
+
+        # Training Data Config from Prepare Training Data page
+        st.markdown("---")
+        st.markdown(
+            "**Training Data Configuration (from Prepare Training Data)**"
+        )
+        st.caption(
+            "Optionally load a saved selected_columns.json to prefill model inputs."
+        )
+
+        # CRITICAL: Use just_exported_country if available (not selected_country)
+        # This ensures we look in the correct folder where the data was exported
+        lookup_country = st.session_state.get(
+            "just_exported_training_country", selected_country
+        )
+        logger.info(
+            f"[TRAINING-DATA-PREFILL] Training data lookup country: {lookup_country} (selected_country={selected_country})"
+        )
+
+        # Three-column filter: Country (readonly), Goal (dropdown), Timestamp (dropdown)
+        col_country, col_goal, col_timestamp = st.columns(3)
+
+        with col_country:
+            st.text_input(
+                "Country",
+                value=lookup_country.upper(),
+                disabled=True,
+                help="Country for training data lookup",
+            )
+
+        # Get available goals
+        try:
+            available_goals = _list_available_goals(gcs_bucket, lookup_country)
             logger.info(
-                f"[TRAINING-DATA-PREFILL] Found {len(training_data_versions)} timestamps for {lookup_country}/{selected_goal}"
+                f"[TRAINING-DATA-PREFILL] Found {len(available_goals)} goals for {lookup_country}"
             )
         except Exception as e:
-            logger.warning(f"Error listing training data versions: {e}")
-            training_data_versions = []
+            logging.warning(f"Error listing goals: {e}")
+            available_goals = []
 
-        if not training_data_versions:
-            with col_timestamp:
-                st.selectbox(
-                    "Timestamp",
-                    options=["No data available"],
-                    disabled=True,
-                    help="No training data versions found for selected goal",
-                )
-
+        if not available_goals:
             st.warning(
-                f"⚠️ No training data versions found for **{selected_goal}**. Please export training data first using the Prepare Training Data page."
+                f"⚠️ No training data found for {lookup_country.upper()}"
             )
             st.session_state["training_data_config"] = None
+            selected_goal = None
+            selected_training_timestamp = None
         else:
-            # Auto-select timestamp from session state
-            just_exported_timestamp = st.session_state.get(
-                "just_exported_training_timestamp"
+            # Auto-select goal from session state
+            just_exported_goal = st.session_state.get(
+                "just_exported_training_goal"
             )
-            default_timestamp_index = 0
-            if (
-                just_exported_timestamp
-                and just_exported_timestamp in training_data_versions
-            ):
-                default_timestamp_index = training_data_versions.index(
+            default_goal_index = 0
+            if just_exported_goal and just_exported_goal in available_goals:
+                default_goal_index = available_goals.index(just_exported_goal)
+                logger.info(
+                    f"[TRAINING-DATA-PREFILL] Auto-selecting exported goal: {just_exported_goal}"
+                )
+
+            with col_goal:
+                selected_goal = st.selectbox(
+                    "Goal",
+                    options=available_goals,
+                    index=default_goal_index,
+                    help="Select the goal for this training data",
+                )
+
+            # Get timestamps for selected goal
+            try:
+                training_data_versions = _list_training_data_versions(
+                    gcs_bucket, lookup_country, selected_goal
+                )
+                logger.info(
+                    f"[TRAINING-DATA-PREFILL] Found {len(training_data_versions)} timestamps for {lookup_country}/{selected_goal}"
+                )
+            except Exception as e:
+                logging.warning(f"Error listing training data versions: {e}")
+                training_data_versions = []
+
+            if not training_data_versions:
+                with col_timestamp:
+                    st.selectbox(
+                        "Timestamp",
+                        options=["No data available"],
+                        disabled=True,
+                        help="No training data versions found",
+                    )
+                st.session_state["training_data_config"] = None
+                selected_training_timestamp = None
+            else:
+                # Auto-select timestamp from session state
+                just_exported_timestamp = st.session_state.get(
+                    "just_exported_training_timestamp"
+                )
+                default_timestamp_index = 0
+                if (
                     just_exported_timestamp
-                )
-                logger.info(
-                    f"[TRAINING-DATA-PREFILL] Auto-selecting exported timestamp: {just_exported_timestamp}"
-                )
-
-            with col_timestamp:
-                selected_training_timestamp = st.selectbox(
-                    "Timestamp",
-                    options=training_data_versions,
-                    index=default_timestamp_index,
-                    help="Training data version timestamp",
-                    key="temp_timestamp_selector",
-                )
-
-            # Load training data config
-            logger.info(
-                f"[TRAINING-CONFIG-LOAD] Loading config from: "
-                f"country={lookup_country}, goal={selected_goal}, timestamp={selected_training_timestamp}"
-            )
-            training_data_config = _load_training_data_json(
-                gcs_bucket,
-                lookup_country,
-                selected_goal,
-                selected_training_timestamp,
-            )
-
-            if training_data_config:
-                st.session_state["training_data_config"] = training_data_config
-
-                # Extract country from config (overrides lookup_country if different)
-                config_country = training_data_config.get(
-                    "country", lookup_country
-                )
-                selected_country = config_country.lower()
-
-                logger.info(
-                    f"[TRAINING-CONFIG-LOAD] Loaded config with: "
-                    f"country={config_country}, "
-                    f"data_version={training_data_config.get('data_version')}, "
-                    f"meta_version={training_data_config.get('meta_version')}, "
-                    f"selected_goal={training_data_config.get('selected_goal')}"
-                )
-
-                # Update export flags to remember this selection for future sessions
-                st.session_state["just_exported_training_timestamp"] = (
-                    selected_training_timestamp
-                )
-                st.session_state["just_exported_training_country"] = (
-                    selected_country
-                )
-                st.session_state["just_exported_training_goal"] = selected_goal
-
-                logger.info(
-                    f"[TRAINING-CONFIG-LOAD] Updated export flags to persist selection: "
-                    f"country={selected_country}, goal={selected_goal}, timestamp={selected_training_timestamp}"
-                )
-
-                # Get prefill values from config
-                config_data_version = training_data_config.get("data_version")
-                config_meta_version = training_data_config.get("meta_version")
-
-                # Load available data versions for the country
-                try:
-                    available_versions = list_mapped_data_versions(
-                        gcs_bucket, selected_country, refresh_key=""
-                    )
-                    if not available_versions:
-                        available_versions = ["Latest"]
-                except Exception as e:
-                    st.warning(f"Could not list mapped data versions: {e}")
-                    available_versions = ["Latest"]
-
-                # Load metadata versions (universal + country-specific)
-                try:
-                    country_meta_versions = _list_metadata_versions(
-                        gcs_bucket, selected_country
-                    )
-                    universal_meta_versions = _list_metadata_versions(
-                        gcs_bucket, "universal"
-                    )
-
-                    metadata_options: List[str] = []
-                    if universal_meta_versions:
-                        metadata_options.extend(
-                            [
-                                f"Universal - {v}"
-                                for v in universal_meta_versions
-                            ]
-                        )
-                    if country_meta_versions:
-                        metadata_options.extend(
-                            [
-                                f"{selected_country.upper()} - {v}"
-                                for v in country_meta_versions
-                            ]
-                        )
-
-                    if not metadata_options:
-                        metadata_options = ["Universal - Latest"]
-                except Exception as e:
-                    st.warning(f"Could not list metadata versions: {e}")
-                    metadata_options = ["Universal - Latest"]
-
-                # Determine default indices from config
-                default_data_index = 0
-                if config_data_version:
-                    for i, opt in enumerate(available_versions):
-                        if config_data_version.lower() == opt.lower():
-                            default_data_index = i
-                            logger.info(
-                                f"[DATA-PREFILL] Auto-filling data version from config: "
-                                f"{config_data_version} (index {default_data_index})"
-                            )
-                            break
-                elif prefill_data_version:
-                    for i, opt in enumerate(available_versions):
-                        if prefill_data_version.lower() == opt.lower():
-                            default_data_index = i
-                            logger.info(
-                                f"[DATA-PREFILL] Using prefill_data_version: "
-                                f"{prefill_data_version} (index {default_data_index})"
-                            )
-                            break
-
-                default_meta_index = 0
-                if config_meta_version:
-                    for i, opt in enumerate(metadata_options):
-                        if config_meta_version in opt:
-                            default_meta_index = i
-                            logger.info(
-                                f"[DATA-PREFILL] Auto-filling metadata version from config: "
-                                f"{config_meta_version} in '{opt}' (index {default_meta_index})"
-                            )
-                            break
-                elif prefill_meta_version:
-                    for i, opt in enumerate(metadata_options):
-                        if prefill_meta_version in opt:
-                            default_meta_index = i
-                            logger.info(
-                                f"[DATA-PREFILL] Using prefill_meta_version: "
-                                f"{prefill_meta_version} in '{opt}' (index {default_meta_index})"
-                            )
-                            break
-
-                # ---- SINGLE ROW WITH 4 COLUMNS ----
-                st.markdown("---")
-                st.markdown("**Step 2:** Confirm data selections")
-                st.caption(
-                    "Data version and metadata version are auto-filled from the config. You can change them if needed."
-                )
-
-                col1, col2, col3, col4 = st.columns(4)
-
-                with col1:
-                    selected_version = st.selectbox(
-                        "Data Version",
-                        options=available_versions,
-                        index=default_data_index,
-                        help="Mapped data version (auto-filled from config, can be changed)",
+                    and just_exported_timestamp in training_data_versions
+                ):
+                    default_timestamp_index = training_data_versions.index(
+                        just_exported_timestamp
                     )
                     logger.info(
-                        f"[DATA-PREFILL] Data version selected: {selected_version}"
+                        f"[TRAINING-DATA-PREFILL] Auto-selecting exported timestamp: {just_exported_timestamp}"
                     )
 
-                with col2:
-                    selected_goal = st.selectbox(
-                        "Goal",
-                        options=available_goals,
-                        index=available_goals.index(selected_goal),
-                        help="Training goal from config",
-                        disabled=True,
-                        key="final_goal_display",
-                    )
-
-                with col3:
+                with col_timestamp:
                     selected_training_timestamp = st.selectbox(
                         "Timestamp",
                         options=training_data_versions,
-                        index=training_data_versions.index(
-                            selected_training_timestamp
-                        ),
-                        help="Training data version from config",
-                        disabled=True,
-                        key="final_timestamp_display",
+                        index=default_timestamp_index,
+                        help="Select the training data version",
                     )
 
-                with col4:
-                    selected_metadata = st.selectbox(
-                        "Metadata Version",
-                        options=metadata_options,
-                        index=default_meta_index,
-                        help="Metadata version (auto-filled from config, can be changed)",
-                    )
-                    logger.info(
-                        f"[DATA-PREFILL] Metadata version selected: {selected_metadata}"
-                    )
-
-                # Show success message and config preview
-                st.success(
-                    f"✅ Loaded training data config: **{selected_country.upper()}** - {selected_goal} - {selected_training_timestamp}"
-                )
-                with st.expander(
-                    "Preview Training Data Config", expanded=False
-                ):
-                    st.json(training_data_config)
-
-            else:
-                st.session_state["training_data_config"] = None
-                st.error(
-                    f"❌ Failed to load config for {lookup_country.upper()} - {selected_goal} - {selected_training_timestamp}"
-                )
-                logger.warning(
-                    f"[TRAINING-CONFIG-LOAD] Failed to load config for "
+                # Load training data config
+                logger.info(
+                    f"[TRAINING-CONFIG-LOAD] Loading config from: "
                     f"country={lookup_country}, goal={selected_goal}, timestamp={selected_training_timestamp}"
                 )
+                training_data_config = _load_training_data_json(
+                    gcs_bucket,
+                    lookup_country,
+                    selected_goal,
+                    selected_training_timestamp,
+                )
 
-    # Store available countries in session state for use in Save Model Settings
-    # This is derived from the selected country
-    if selected_country:
-        st.session_state["run_models_available_countries"] = [selected_country]
+                if training_data_config:
+                    st.session_state["training_data_config"] = (
+                        training_data_config
+                    )
+                    logger.info(
+                        f"[TRAINING-CONFIG-LOAD] Loaded config with: "
+                        f"country={training_data_config.get('country')}, "
+                        f"data_version={training_data_config.get('data_version')}, "
+                        f"meta_version={training_data_config.get('meta_version')}, "
+                        f"selected_goal={training_data_config.get('selected_goal')}"
+                    )
+                    # Update export flags to remember this selection for future sessions
+                    st.session_state["just_exported_training_timestamp"] = (
+                        selected_training_timestamp
+                    )
+                    st.session_state["just_exported_training_country"] = (
+                        lookup_country
+                    )
+                    st.session_state["just_exported_training_goal"] = (
+                        selected_goal
+                    )
+                    logger.info(
+                        f"[TRAINING-CONFIG-LOAD] Updated export flags to persist selection: "
+                        f"country={lookup_country}, goal={selected_goal}, timestamp={selected_training_timestamp}"
+                    )
+                    st.success(
+                        f"✅ Loaded training data config: {lookup_country.upper()} - {selected_goal} - {selected_training_timestamp}"
+                    )
+                    with st.expander(
+                        "Preview Training Data Config", expanded=False
+                    ):
+                        st.json(training_data_config)
+                else:
+                    st.session_state["training_data_config"] = None
+                    logger.warning(
+                        f"[TRAINING-CONFIG-LOAD] Failed to load config for "
+                        f"country={lookup_country}, goal={selected_goal}, timestamp={selected_training_timestamp}"
+                    )
 
-    # ---- Show currently loaded state ----
-    if (
-        "preview_df" in st.session_state
-        and st.session_state["preview_df"] is not None
-    ):
-        loaded_country = st.session_state.get("selected_country", "N/A")
-        loaded_version = st.session_state.get("selected_version", "N/A")
-        loaded_metadata_source = st.session_state.get(
-            "selected_metadata", "N/A"
-        )
-        st.info(
-            f"🔵 **Currently Loaded:** "
-            f"Data: {loaded_country.upper()} - {loaded_version} | "
-            f"Metadata: {loaded_metadata_source}"
-        )
-    else:
-        st.warning("⚪ No data loaded yet")
+        # ---- Show currently loaded state ----
+        if (
+            "preview_df" in st.session_state
+            and st.session_state["preview_df"] is not None
+        ):
+            loaded_country = st.session_state.get("selected_country", "N/A")
+            loaded_version = st.session_state.get("selected_version", "N/A")
+            loaded_metadata_source = st.session_state.get(
+                "selected_metadata", "N/A"
+            )
+            st.info(
+                f"🔵 **Currently Loaded:** "
+                f"Data: {loaded_country.upper()} - {loaded_version} | "
+                f"Metadata: {loaded_metadata_source}"
+            )
+        else:
+            st.warning("⚪ No data loaded yet")
 
-    # ---- Load data button with automatic preview + metadata aggregation ----
-    if selected_country and selected_version and selected_metadata:
+        # ---- Load data button with automatic preview + metadata aggregation ----
         if st.button(
             "Load selected data",
             type="primary",
