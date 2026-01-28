@@ -286,11 +286,9 @@ def extract_goal_from_config(bucket_name: str, stamp: str, run_key=None):
                 # Extract dep_var from input_metadata
                 if "input_metadata" in summary and "dep_var" in summary["input_metadata"]:
                     return summary["input_metadata"]["dep_var"]
-        except Exception as e:
-            # Log for debugging but don't fail
-            import streamlit as st
-            with st.expander("Debug: Goal extraction error", expanded=False):
-                st.error(f"Error extracting goal from {model_summary_path}: {e}")
+        except Exception:
+            # Silently continue if fallback fails
+            pass
     
     return None
 
@@ -384,22 +382,46 @@ def download_link_for_blob(
 
 # ---------- Discovery helpers ----------
 def find_onepager_blob(blobs, best_id: str):
-    """Try canonical <best_id>.png/.pdf; else largest non-allocator PNG/PDF."""
+    """Try canonical <best_id>.png/.pdf with flexible matching for suffixes."""
     if not best_id:
         return None
 
+    # Try exact match first
     for ext in (".png", ".pdf"):
         target = f"{best_id}{ext}".lower()
         for b in blobs:
             if os.path.basename(b.name).lower() == target:
                 return b
 
+    # Try pattern matching with suffix (e.g., 1_202_13_365d.png)
+    # Match files that start with best_id and end with .png/.pdf
+    # but exclude response/saturation prefixes (keep allocator_ + best_id pattern)
+    for ext in (".png", ".pdf"):
+        for b in blobs:
+            fn = os.path.basename(b.name).lower()
+            # Skip if it has excluded prefixes (but allow allocator_ + best_id)
+            if fn.startswith(("response_", "saturation_")):
+                continue
+            # Check if filename contains best_id and ends with extension
+            # This handles patterns like:
+            # - 1_202_13_365d.png (direct match with suffix)
+            # - allocator_1_202_13_365d.png (allocator prefix + best_id + suffix)
+            if best_id.lower() in fn and fn.endswith(ext):
+                # Verify it's actually matching the best_id pattern, not just a substring
+                # Look for best_id followed by underscore, dash, dot, or extension
+                idx = fn.find(best_id.lower())
+                if idx >= 0:
+                    after_id = fn[idx + len(best_id.lower()):]
+                    if after_id.startswith(("_", "-", ".", ext)):
+                        return b
+
+    # Fallback: largest non-response/saturation PNG/PDF
     candidates = []
     for b in blobs:
         fn = os.path.basename(b.name).lower()
         if not (fn.endswith(".png") or fn.endswith(".pdf")):
             continue
-        if fn.startswith(("allocator", "response", "saturation")):
+        if fn.startswith(("response_", "saturation_")):
             continue
         if getattr(b, "size", 0) > 50_000:
             candidates.append(b)
@@ -1515,15 +1537,6 @@ def render_run_for_country(
         return
 
     blobs = runs[key]
-    
-    # Debug: Show blob count and sample filenames
-    if blobs:
-        st.info(f"Found {len(blobs)} files for this run")
-        with st.expander("Debug: Files in this run", expanded=False):
-            blob_names = [os.path.basename(b.name) for b in blobs[:20]]  # Show first 20
-            st.write("Sample files:", blob_names)
-            if len(blobs) > 20:
-                st.write(f"... and {len(blobs) - 20} more files")
     
     best_id, iters, trials = parse_best_meta(blobs)
 
