@@ -247,6 +247,71 @@ def latest_run_key(runs, rev_filter=None, country_filter=None):
     return keys[0]
 
 
+def extract_goal_from_config(bucket_name: str, stamp: str, run_key=None):
+    """Extract the goal (dep_var) from job_config.json or model_summary.json for a given timestamp.
+    
+    Args:
+        bucket_name: GCS bucket name
+        stamp: Timestamp string
+        run_key: Optional tuple of (rev, country, stamp) for fallback to robyn folder
+    
+    Returns:
+        str or None: The goal/dep_var if found
+    """
+    import json
+    
+    # First try: training-configs/{stamp}/job_config.json
+    try:
+        config_blob_path = f"training-configs/{stamp}/job_config.json"
+        blob = client.bucket(bucket_name).blob(config_blob_path)
+        if blob.exists():
+            config_data = blob.download_as_bytes()
+            config = json.loads(config_data.decode("utf-8"))
+            goal = config.get("dep_var")
+            if goal:
+                return goal
+    except Exception as e:
+        # Silently continue to fallback
+        pass
+    
+    # Second try: robyn/{rev}/{country}/{stamp}/model_summary.json
+    if run_key:
+        try:
+            rev, country, _ = run_key
+            model_summary_path = f"robyn/{rev}/{country}/{stamp}/model_summary.json"
+            blob = client.bucket(bucket_name).blob(model_summary_path)
+            if blob.exists():
+                summary_data = blob.download_as_bytes()
+                summary = json.loads(summary_data.decode("utf-8"))
+                # Extract dep_var from input_metadata
+                if "input_metadata" in summary and "dep_var" in summary["input_metadata"]:
+                    return summary["input_metadata"]["dep_var"]
+        except Exception:
+            # Silently continue if fallback fails
+            pass
+    
+    return None
+
+
+def get_goals_for_runs(bucket_name: str, run_keys):
+    """Extract goals for a set of runs. Returns dict mapping (rev, country, stamp) to goal.
+    
+    Tries two methods:
+    1. training-configs/{stamp}/job_config.json (for runs with training configs)
+    2. robyn/{rev}/{country}/{stamp}/model_summary.json (for runs without training configs)
+    """
+    goals_map = {}
+    
+    for key in run_keys:
+        rev, country, stamp = key
+        # Try to extract goal with fallback to model_summary.json
+        goal = extract_goal_from_config(bucket_name, stamp, run_key=key)
+        if goal:
+            goals_map[key] = goal
+    
+    return goals_map
+
+
 def download_bytes_safe(blob):
     try:
         data = blob.download_as_bytes()
@@ -317,22 +382,46 @@ def download_link_for_blob(
 
 # ---------- Discovery helpers ----------
 def find_onepager_blob(blobs, best_id: str):
-    """Try canonical <best_id>.png/.pdf; else largest non-allocator PNG/PDF."""
+    """Try canonical <best_id>.png/.pdf with flexible matching for suffixes."""
     if not best_id:
         return None
 
+    # Try exact match first
     for ext in (".png", ".pdf"):
         target = f"{best_id}{ext}".lower()
         for b in blobs:
             if os.path.basename(b.name).lower() == target:
                 return b
 
+    # Try pattern matching with suffix (e.g., 1_202_13_365d.png)
+    # Match files that start with best_id and end with .png/.pdf
+    # but exclude response/saturation prefixes (keep allocator_ + best_id pattern)
+    for ext in (".png", ".pdf"):
+        for b in blobs:
+            fn = os.path.basename(b.name).lower()
+            # Skip if it has excluded prefixes (but allow allocator_ + best_id)
+            if fn.startswith(("response_", "saturation_")):
+                continue
+            # Check if filename contains best_id and ends with extension
+            # This handles patterns like:
+            # - 1_202_13_365d.png (direct match with suffix)
+            # - allocator_1_202_13_365d.png (allocator prefix + best_id + suffix)
+            if best_id.lower() in fn and fn.endswith(ext):
+                # Verify it's actually matching the best_id pattern, not just a substring
+                # Look for best_id followed by underscore, dash, dot, or extension
+                idx = fn.find(best_id.lower())
+                if idx >= 0:
+                    after_id = fn[idx + len(best_id.lower()):]
+                    if after_id.startswith(("_", "-", ".", ext)):
+                        return b
+
+    # Fallback: largest non-response/saturation PNG/PDF
     candidates = []
     for b in blobs:
         fn = os.path.basename(b.name).lower()
         if not (fn.endswith(".png") or fn.endswith(".pdf")):
             continue
-        if fn.startswith(("allocator", "response", "saturation")):
+        if fn.startswith(("response_", "saturation_")):
             continue
         if getattr(b, "size", 0) > 50_000:
             candidates.append(b)
@@ -1246,11 +1335,17 @@ else:
         all_revs.index(default_rev) if default_rev in all_revs else 0
     )
 
-rev = st.selectbox(
-    "Experiment Name (tag & number, e.g. gmv001)",
-    all_revs,
-    index=default_rev_index,
-)
+# Create 4-column layout for filters
+col1, col2, col3, col4 = st.columns(4)
+
+# Column 1: Experiment Name
+with col1:
+    rev = st.selectbox(
+        "Experiment Name",
+        all_revs,
+        index=default_rev_index,
+        help="Tag & number, e.g. gmv001",
+    )
 
 # Store selection in persistent session state key (not widget key)
 if rev != st.session_state.get("view_results_revision_value"):
@@ -1270,43 +1365,114 @@ best_country_key = next(
 )
 default_country_in_rev = best_country_key[1]
 
-# Determine default countries for multiselect
+# Determine default country for selectbox
 # Use separate session state key that persists across navigation
-if "view_results_countries_value" in st.session_state:
-    # User has saved selections - validate and preserve
-    current_countries = st.session_state["view_results_countries_value"]
-    valid_countries = [c for c in current_countries if c in rev_countries]
-    if valid_countries:
-        # Has valid selections - use them
-        default_countries = valid_countries
+if "view_results_country_value" in st.session_state:
+    # User has saved selection - validate and preserve
+    current_country = st.session_state["view_results_country_value"]
+    if current_country in rev_countries:
+        # Has valid selection - use it
+        default_country = current_country
     else:
-        # All selections are invalid - use default
-        default_countries = (
-            [default_country_in_rev]
+        # Selection is invalid - use default
+        default_country = (
+            default_country_in_rev
             if default_country_in_rev in rev_countries
-            else []
+            else rev_countries[0] if rev_countries else None
         )
 else:
     # First time - use default
-    default_countries = [default_country_in_rev]
+    default_country = default_country_in_rev
 
-countries_sel = st.multiselect(
-    "Country",
-    rev_countries,
-    default=default_countries,
-)
+# Column 2: Country
+with col2:
+    country_index = rev_countries.index(default_country) if default_country in rev_countries else 0
+    countries_sel = st.selectbox(
+        "Country",
+        rev_countries,
+        index=country_index,
+    )
 
 # Store selection in persistent session state key (not widget key)
-if countries_sel != st.session_state.get("view_results_countries_value"):
-    st.session_state["view_results_countries_value"] = countries_sel
+if countries_sel != st.session_state.get("view_results_country_value"):
+    st.session_state["view_results_country_value"] = countries_sel
+
+# Check country selection before proceeding
 if not countries_sel:
-    st.info("Select at least one country.")
+    st.info("Select a country.")
     st.stop()
 
-# Timestamps available for selected revision and countries
+# Convert to list for compatibility with rest of code
+countries_sel = [countries_sel]
+
+# Goals available for selected revision and country
+# Extract goals from configs for the filtered runs
 rev_country_keys = [
     k for k in runs.keys() if k[0] == rev and k[1] in countries_sel
 ]
+
+# Get goals for all runs (cached in session state to avoid repeated GCS calls)
+cache_key = f"goals_cache_{rev}_{'_'.join(sorted(countries_sel))}"
+if cache_key not in st.session_state:
+    with st.spinner("Loading goal information..."):
+        goals_map = get_goals_for_runs(bucket_name, rev_country_keys)
+        st.session_state[cache_key] = goals_map
+else:
+    goals_map = st.session_state[cache_key]
+
+# Get unique goals for the filtered runs
+rev_country_goals = sorted(
+    {goals_map.get(k) for k in rev_country_keys if goals_map.get(k)}
+)
+
+# Determine default goal for selectbox
+if "view_results_goal_value" in st.session_state:
+    # User has saved selection - validate and preserve
+    current_goal = st.session_state["view_results_goal_value"]
+    if current_goal in rev_country_goals:
+        # Has valid selection - use it
+        default_goal = current_goal
+    else:
+        # Selection is invalid - use first available goal
+        default_goal = rev_country_goals[0] if rev_country_goals else None
+else:
+    # First time - use first available goal
+    default_goal = rev_country_goals[0] if rev_country_goals else None
+
+# Column 3: Goal (dep_var)
+with col3:
+    if rev_country_goals:
+        goal_index = rev_country_goals.index(default_goal) if default_goal in rev_country_goals else 0
+        goals_sel = st.selectbox(
+            "Goal (dep_var)",
+            rev_country_goals,
+            index=goal_index,
+            help="Filter by goal variable used in model training",
+        )
+
+        # Store selection in persistent session state key
+        if goals_sel != st.session_state.get("view_results_goal_value"):
+            st.session_state["view_results_goal_value"] = goals_sel
+
+        if not goals_sel:
+            st.info("Select a goal.")
+            st.stop()
+
+        # Convert to list for compatibility
+        goals_sel = [goals_sel]
+
+        # Filter runs by selected goal
+        rev_country_keys = [
+            k for k in rev_country_keys if goals_map.get(k) in goals_sel
+        ]
+    else:
+        # No goal information available - proceed without goal filtering
+        goals_sel = None
+        st.warning(
+            "Goal information not available for some runs. Showing all runs."
+        )
+
+# Timestamps available for selected revision and countries
 all_stamps = sorted(
     {k[2] for k in rev_country_keys}, key=parse_stamp, reverse=True
 )
@@ -1327,14 +1493,16 @@ else:
     # First time - use default (empty)
     default_stamp_index = 0
 
-stamp_sel = st.selectbox(
-    "Timestamp (optional)",
-    stamp_options,
-    index=default_stamp_index,
-    help=(
-        "Leave empty to use the latest run per tag number. Useful when you have multiple runs."
-    ),
-)
+# Column 4: Timestamp
+with col4:
+    stamp_sel = st.selectbox(
+        "Timestamp (optional)",
+        stamp_options,
+        index=default_stamp_index,
+        help=(
+            "Leave empty to use the latest run per tag number. Useful when you have multiple runs."
+        ),
+    )
 
 # Store selection in persistent session state key (not widget key)
 if stamp_sel != st.session_state.get("view_results_timestamp_value"):
@@ -1369,6 +1537,7 @@ def render_run_for_country(
         return
 
     blobs = runs[key]
+    
     best_id, iters, trials = parse_best_meta(blobs)
 
     # Try to use cached data

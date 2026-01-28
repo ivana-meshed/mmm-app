@@ -307,8 +307,8 @@ def read_parquet_from_gcs(bucket_name: str, blob_path: str) -> pd.DataFrame:
     Raises:
         FileNotFoundError: If blob doesn't exist
     """
-    import pyarrow.parquet as pq
     import pyarrow as pa
+    import pyarrow.parquet as pq
 
     client = storage.Client()
     blob = client.bucket(bucket_name).blob(blob_path)
@@ -320,7 +320,7 @@ def read_parquet_from_gcs(bucket_name: str, blob_path: str) -> pd.DataFrame:
         try:
             # Read parquet file using PyArrow first to handle database-specific types
             table = pq.read_table(tmp.name)
-            
+
             # Check for database-specific types and convert them
             schema = table.schema
             db_type_columns = []
@@ -329,18 +329,24 @@ def read_parquet_from_gcs(bucket_name: str, blob_path: str) -> pd.DataFrame:
                 # Check if the type string contains database-specific type indicators
                 if "db" in field_type_str and any(
                     db_type in field_type_str
-                    for db_type in ["dbdate", "dbtime", "dbdecimal", "dbtimestamp"]
+                    for db_type in [
+                        "dbdate",
+                        "dbtime",
+                        "dbdecimal",
+                        "dbtimestamp",
+                    ]
                 ):
                     db_type_columns.append(field.name)
                     logger.warning(
                         f"Column '{field.name}' has database-specific type '{field.type}'"
                     )
-            
+
             # Convert to pandas with type mapping for database-specific types
             if db_type_columns:
                 logger.info(
                     f"Converting database-specific types in columns: {db_type_columns}"
                 )
+
                 # Create a types_mapper that converts unknown types to string
                 def types_mapper(pa_type):
                     type_str = str(pa_type).lower()
@@ -348,7 +354,7 @@ def read_parquet_from_gcs(bucket_name: str, blob_path: str) -> pd.DataFrame:
                         # Map database types to string for safe conversion
                         return pd.StringDtype()
                     return None  # Use default mapping for other types
-                
+
                 return table.to_pandas(types_mapper=types_mapper)
             else:
                 # No database-specific types, use standard conversion

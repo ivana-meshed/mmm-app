@@ -264,8 +264,8 @@ class DataProcessor:
         Returns:
             DataFrame loaded from Parquet file
         """
-        import pyarrow.parquet as pq
         import pyarrow as pa
+        import pyarrow.parquet as pq
 
         bucket = self.storage_client.bucket(self.gcs_bucket)
         blob = bucket.blob(gcs_path)
@@ -278,7 +278,7 @@ class DataProcessor:
         try:
             # Read Parquet from buffer using PyArrow to handle database-specific types
             table = pq.read_table(buffer)
-            
+
             # Check for database-specific types and convert them
             schema = table.schema
             db_type_columns = []
@@ -287,18 +287,24 @@ class DataProcessor:
                 # Check if the type string contains database-specific type indicators
                 if "db" in field_type_str and any(
                     db_type in field_type_str
-                    for db_type in ["dbdate", "dbtime", "dbdecimal", "dbtimestamp"]
+                    for db_type in [
+                        "dbdate",
+                        "dbtime",
+                        "dbdecimal",
+                        "dbtimestamp",
+                    ]
                 ):
                     db_type_columns.append(field.name)
                     logger.warning(
                         f"Column '{field.name}' has database-specific type '{field.type}'"
                     )
-            
+
             # Convert to pandas with type mapping for database-specific types
             if db_type_columns:
                 logger.info(
                     f"Converting database-specific types in columns: {db_type_columns}"
                 )
+
                 # Create a types_mapper that converts unknown types to string
                 def types_mapper(pa_type):
                     type_str = str(pa_type).lower()
@@ -306,7 +312,7 @@ class DataProcessor:
                         # Map database types to string for safe conversion
                         return pd.StringDtype()
                     return None  # Use default mapping for other types
-                
+
                 df = table.to_pandas(types_mapper=types_mapper)
             else:
                 # No database-specific types, use standard conversion

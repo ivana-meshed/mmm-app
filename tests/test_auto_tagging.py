@@ -2,8 +2,8 @@
 Tests for automatic variable tagging with prefix/suffix matching and priority rules.
 """
 
-import unittest
 import sys
+import unittest
 from pathlib import Path
 
 # Add app directory to Python path
@@ -28,20 +28,20 @@ def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
     """
     Infer category based on prefix or suffix matching.
     Priority: context_vars and organic_vars take precedence over paid_media_* categories.
-    
+
     Args:
         col: Column name to categorize
         rules: Dict mapping category names to list of prefix/suffix patterns
-    
+
     Returns:
         Category name or empty string if no match
     """
     s = str(col).lower()
-    
+
     # Define priority order: high priority categories first
     high_priority = ["context_vars", "organic_vars"]
     low_priority = ["paid_media_spends", "paid_media_vars", "factor_vars"]
-    
+
     # Check high priority categories first
     for cat in high_priority:
         if cat in rules:
@@ -50,7 +50,7 @@ def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
                 # Check both prefix and suffix
                 if s.startswith(pattern_lower) or s.endswith(pattern_lower):
                     return cat
-    
+
     # Then check low priority categories
     for cat in low_priority:
         if cat in rules:
@@ -59,7 +59,7 @@ def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
                 # Check both prefix and suffix
                 if s.startswith(pattern_lower) or s.endswith(pattern_lower):
                     return cat
-    
+
     return ""
 
 
@@ -93,7 +93,9 @@ class TestAutoTagging(unittest.TestCase):
         self.assertEqual(
             _infer_category("CRM_VISITS", self.rules), "organic_vars"
         )
-        self.assertEqual(_infer_category("IS_HOLIDAY", self.rules), "factor_vars")
+        self.assertEqual(
+            _infer_category("IS_HOLIDAY", self.rules), "factor_vars"
+        )
         self.assertEqual(
             _infer_category("CONTEXT_TEMP", self.rules), "context_vars"
         )
@@ -173,7 +175,9 @@ class TestAutoTagging(unittest.TestCase):
 
     def test_factor_prefix_is(self):
         """Test is_ prefix for factor variables."""
-        self.assertEqual(_infer_category("IS_WEEKEND", self.rules), "factor_vars")
+        self.assertEqual(
+            _infer_category("IS_WEEKEND", self.rules), "factor_vars"
+        )
         self.assertEqual(
             _infer_category("IS_BIG_PROMOTION", self.rules), "factor_vars"
         )
