@@ -162,6 +162,38 @@ def parse_rev_key(rev: str):
     return (1, (rev or "").lower())
 
 
+def extract_goal_from_config(bucket_name: str, stamp: str):
+    """Extract the goal (dep_var) from job_config.json for a given timestamp."""
+    try:
+        config_blob_path = f"training-configs/{stamp}/job_config.json"
+        client_instance = gcs_client()
+        blob = client_instance.bucket(bucket_name).blob(config_blob_path)
+        if not blob.exists():
+            return None
+        config_data = blob.download_as_bytes()
+        import json
+        config = json.loads(config_data.decode("utf-8"))
+        return config.get("dep_var")
+    except Exception:
+        return None
+
+
+def get_goals_for_runs(bucket_name: str, run_keys):
+    """Extract goals for a set of runs. Returns dict mapping (rev, country, stamp) to goal."""
+    goals_map = {}
+    unique_stamps = {k[2] for k in run_keys}
+    
+    for stamp in unique_stamps:
+        goal = extract_goal_from_config(bucket_name, stamp)
+        if goal:
+            # Map all runs with this timestamp to this goal
+            for key in run_keys:
+                if key[2] == stamp:
+                    goals_map[key] = goal
+    
+    return goals_map
+
+
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
@@ -537,10 +569,72 @@ if not countries_sel:
     st.info("Select at least one country.")
     st.stop()
 
-# Timestamps available for selected revision and countries
+# Goals available for selected revision and countries
+# Extract goals from configs for the filtered runs
 rev_country_keys = [
     k for k in runs.keys() if k[0] == rev and k[1] in countries_sel
 ]
+
+# Get goals for all runs (cached in session state to avoid repeated GCS calls)
+cache_key = f"goals_cache_stability_{rev}_{'_'.join(sorted(countries_sel))}"
+if cache_key not in st.session_state:
+    with st.spinner("Loading goal information..."):
+        goals_map = get_goals_for_runs(GCS_BUCKET, rev_country_keys)
+        st.session_state[cache_key] = goals_map
+else:
+    goals_map = st.session_state[cache_key]
+
+# Get unique goals for the filtered runs
+rev_country_goals = sorted({goals_map.get(k) for k in rev_country_keys if goals_map.get(k)})
+
+# Determine default goals for multiselect
+if "model_stability_goals_value" in st.session_state:
+    # User has saved selections - validate and preserve
+    current_goals = st.session_state["model_stability_goals_value"]
+    valid_goals = [g for g in current_goals if g in rev_country_goals]
+    if valid_goals:
+        # Has valid selections - use them
+        default_goals = valid_goals
+    else:
+        # All selections are invalid - use all available goals
+        default_goals = rev_country_goals
+else:
+    # First time - use all available goals
+    default_goals = rev_country_goals
+
+if rev_country_goals:
+    goals_sel = st.multiselect(
+        "Goal (dep_var)",
+        rev_country_goals,
+        default=default_goals,
+        help="Filter by goal variable used in model training",
+        key="model_stability_goals",
+    )
+    
+    # Store selection
+    if goals_sel != st.session_state.get("model_stability_goals_value"):
+        st.session_state["model_stability_goals_value"] = goals_sel
+    
+    if not goals_sel:
+        st.info("Select at least one goal.")
+        st.stop()
+    
+    # Filter runs by selected goals
+    rev_country_keys = [k for k in rev_country_keys if goals_map.get(k) in goals_sel]
+    
+    # Filter countries_sel to only include countries that have runs with selected goals
+    countries_with_goals = sorted({k[1] for k in rev_country_keys})
+    countries_sel = [c for c in countries_sel if c in countries_with_goals]
+    
+    if not countries_sel:
+        st.info("No countries have runs with the selected goals.")
+        st.stop()
+else:
+    # No goal information available - proceed without goal filtering
+    goals_sel = None
+    st.warning("Goal information not available for some runs. Showing all runs.")
+
+# Timestamps available for selected revision and countries
 all_stamps = sorted(
     {k[2] for k in rev_country_keys}, key=parse_stamp, reverse=True
 )
