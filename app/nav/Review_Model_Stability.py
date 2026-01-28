@@ -162,36 +162,68 @@ def parse_rev_key(rev: str):
     return (1, (rev or "").lower())
 
 
-def extract_goal_from_config(bucket_name: str, stamp: str):
-    """Extract the goal (dep_var) from job_config.json for a given timestamp."""
+def extract_goal_from_config(bucket_name: str, stamp: str, run_key=None):
+    """Extract the goal (dep_var) from job_config.json or model_summary.json for a given timestamp.
+    
+    Args:
+        bucket_name: GCS bucket name
+        stamp: Timestamp string
+        run_key: Optional tuple of (rev, country, stamp) for fallback to robyn folder
+    
+    Returns:
+        str or None: The goal/dep_var if found
+    """
+    import json
+    
+    # First try: training-configs/{stamp}/job_config.json
     try:
         config_blob_path = f"training-configs/{stamp}/job_config.json"
         client_instance = gcs_client()
         blob = client_instance.bucket(bucket_name).blob(config_blob_path)
-        if not blob.exists():
-            return None
-        config_data = blob.download_as_bytes()
-        import json
-
-        config = json.loads(config_data.decode("utf-8"))
-        return config.get("dep_var")
+        if blob.exists():
+            config_data = blob.download_as_bytes()
+            config = json.loads(config_data.decode("utf-8"))
+            goal = config.get("dep_var")
+            if goal:
+                return goal
     except Exception:
-        return None
+        pass
+    
+    # Second try: robyn/{rev}/{country}/{stamp}/model_summary.json
+    if run_key:
+        try:
+            rev, country, _ = run_key
+            model_summary_path = f"robyn/{rev}/{country}/{stamp}/model_summary.json"
+            client_instance = gcs_client()
+            blob = client_instance.bucket(bucket_name).blob(model_summary_path)
+            if blob.exists():
+                summary_data = blob.download_as_bytes()
+                summary = json.loads(summary_data.decode("utf-8"))
+                # Extract dep_var from input_metadata
+                if "input_metadata" in summary and "dep_var" in summary["input_metadata"]:
+                    return summary["input_metadata"]["dep_var"]
+        except Exception:
+            pass
+    
+    return None
 
 
 def get_goals_for_runs(bucket_name: str, run_keys):
-    """Extract goals for a set of runs. Returns dict mapping (rev, country, stamp) to goal."""
+    """Extract goals for a set of runs. Returns dict mapping (rev, country, stamp) to goal.
+    
+    Tries two methods:
+    1. training-configs/{stamp}/job_config.json (for runs with training configs)
+    2. robyn/{rev}/{country}/{stamp}/model_summary.json (for runs without training configs)
+    """
     goals_map = {}
-    unique_stamps = {k[2] for k in run_keys}
-
-    for stamp in unique_stamps:
-        goal = extract_goal_from_config(bucket_name, stamp)
+    
+    for key in run_keys:
+        rev, country, stamp = key
+        # Try to extract goal with fallback to model_summary.json
+        goal = extract_goal_from_config(bucket_name, stamp, run_key=key)
         if goal:
-            # Map all runs with this timestamp to this goal
-            for key in run_keys:
-                if key[2] == stamp:
-                    goals_map[key] = goal
-
+            goals_map[key] = goal
+    
     return goals_map
 
 
