@@ -175,3 +175,115 @@ NEW: training_data/de/revenue/20240115_120000/selected_columns.json
 - ✅ Files with missing goal are skipped
 - ✅ Detailed logging and summary
 - ✅ Can rollback by keeping old files
+
+---
+
+## Result Pages - Goal Filtering
+
+### Before (No Goal Filtering)
+
+**View Results Page:**
+```
+┌─────────────────────────────────────────────────────┐
+│  View Model Results                                   │
+│                                                       │
+│  Experiment Name: [gmv001 ▼]                         │
+│  Country: [DE, FR, UK ☑]                             │
+│  Timestamp (optional): [20240115_120000 ▼]           │
+│                                                       │
+│  Shows all results regardless of goal variable       │
+└─────────────────────────────────────────────────────┘
+```
+
+**View Best Results Page:**
+```
+┌─────────────────────────────────────────────────────┐
+│  View Best Results                                    │
+│                                                       │
+│  Revision: [gmv001 ▼]                                │
+│  Countries: [DE, FR, UK ☑]                           │
+│                                                       │
+│  Compares results across different goals mixed       │
+└─────────────────────────────────────────────────────┘
+```
+
+**Review Model Stability Page:**
+```
+┌─────────────────────────────────────────────────────┐
+│  Review Model Stability                               │
+│                                                       │
+│  Experiment Name: [gmv001 ▼]                         │
+│  Country: [DE ☑]                                     │
+│  Timestamp (optional): [20240115_120000 ▼]           │
+│                                                       │
+│  Analyzes stability without goal filtering           │
+└─────────────────────────────────────────────────────┘
+```
+
+### After (With Goal Filtering)
+
+**View Results Page:**
+```
+┌─────────────────────────────────────────────────────┐
+│  View Model Results                                   │
+│                                                       │
+│  Experiment Name: [gmv001 ▼]                         │
+│  Country: [DE, FR, UK ☑]                             │
+│  Goal (dep_var): [revenue, conversions ☑] ← NEW!    │
+│  Timestamp (optional): [20240115_120000 ▼]           │
+│                                                       │
+│  Shows only results for selected goals               │
+└─────────────────────────────────────────────────────┘
+```
+
+**View Best Results Page:**
+```
+┌─────────────────────────────────────────────────────┐
+│  View Best Results                                    │
+│                                                       │
+│  Revision: [gmv001 ▼]                                │
+│  Countries: [DE, FR, UK ☑]                           │
+│  Goal (dep_var): [revenue ☑] ← NEW!                 │
+│                                                       │
+│  Compares best results for same goal variable        │
+└─────────────────────────────────────────────────────┘
+```
+
+**Review Model Stability Page:**
+```
+┌─────────────────────────────────────────────────────┐
+│  Review Model Stability                               │
+│                                                       │
+│  Experiment Name: [gmv001 ▼]                         │
+│  Country: [DE ☑]                                     │
+│  Goal (dep_var): [revenue ☑] ← NEW!                 │
+│  Timestamp (optional): [20240115_120000 ▼]           │
+│                                                       │
+│  Analyzes stability for selected goal variable       │
+└─────────────────────────────────────────────────────┘
+```
+
+### Key Improvements for Result Pages
+
+1. **Consistent Filtering**: All result pages now have goal filtering in the same location (between Country and Timestamp)
+
+2. **Goal Extraction**: 
+   - Goal (dep_var) extracted from `training-configs/{timestamp}/job_config.json`
+   - No need to read all model outputs to determine goal
+   - Cached in session state for performance
+
+3. **Session State Persistence**:
+   - `view_results_goals_value`: View Results page
+   - `view_best_results_goals_value`: View Best Results page
+   - `model_stability_goals_value`: Review Model Stability page
+
+4. **Performance Optimization**:
+   - Goal information cached per revision/country combination
+   - Cache keys: `goals_cache_{page}_{rev}_{countries}`
+   - Reduces repeated GCS API calls
+
+5. **User Experience**:
+   - Multiselect allows comparing multiple goals
+   - Countries automatically filter when goals selected
+   - Clear warning if goal information unavailable
+   - Selections persist across page navigation

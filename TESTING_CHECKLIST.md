@@ -200,6 +200,69 @@ Steps:
 
 ---
 
+### 5a. Result Pages Goal Filtering Tests
+
+**Test Case 9a: View Results Page - Goal Filter**
+
+Steps:
+1. Navigate to View Results page
+2. Select an experiment/revision
+3. Select country(ies)
+4. Observe goal multiselect filter
+
+**Expected Results:**
+- [ ] Goal filter appears between Country and Timestamp filters
+- [ ] Goal filter shows all unique goals for selected revision/countries
+- [ ] Selecting goals filters the displayed results
+- [ ] Session state persists goal selections across page navigation
+- [ ] Warning shown if goal information unavailable for some runs
+
+**Test Case 9b: View Best Results Page - Goal Filter**
+
+Steps:
+1. Navigate to View Best Results page
+2. Select an experiment/revision
+3. Select countries
+4. Observe goal multiselect filter
+5. Select specific goal(s)
+
+**Expected Results:**
+- [ ] Goal filter appears between Country and Timestamp filters
+- [ ] Countries automatically filter to show only those with selected goals
+- [ ] Best results compare models with same goal variable
+- [ ] Session state persists goal selections
+
+**Test Case 9c: Review Model Stability Page - Goal Filter**
+
+Steps:
+1. Navigate to Review Model Stability page
+2. Select an experiment/revision
+3. Select countries
+4. Observe goal multiselect filter
+5. Select specific goal(s)
+6. View stability analysis
+
+**Expected Results:**
+- [ ] Goal filter appears between Country and Timestamp filters
+- [ ] Stability analysis uses runs with selected goals
+- [ ] Session state persists goal selections
+- [ ] Metrics and charts reflect goal-filtered data
+
+**Test Case 9d: Goal Filter Performance**
+
+Steps:
+1. Navigate to any result page (View Results, View Best Results, or Review Model Stability)
+2. Select revision with 10+ runs across multiple goals
+3. Measure time to populate goal filter
+
+**Expected Results:**
+- [ ] Goal filter loads in < 3 seconds
+- [ ] Goal information cached in session state
+- [ ] Subsequent page loads use cached data (faster)
+- [ ] No noticeable UI lag
+
+---
+
 ### 6. Backward Compatibility Testing (After Migration)
 
 **Test Case 10: Old Format Files (If Not Deleted)**
@@ -259,13 +322,14 @@ Pages to check:
 - [ ] Connect Data - Still works
 - [ ] Map Data - Still works
 - [ ] Validate Mapping - Still works
-- [ ] View Results - Still works
-- [ ] View Best Results - Still works
-- [ ] Review Model Stability - Still works
+- [ ] View Results - Still works (with new goal filter)
+- [ ] View Best Results - Still works (with new goal filter)
+- [ ] Review Model Stability - Still works (with new goal filter)
 
 **Expected Results:**
 - [ ] No errors on any page
-- [ ] Functionality unchanged
+- [ ] New goal filtering functionality works correctly
+- [ ] Existing functionality unchanged
 
 ---
 
@@ -312,6 +376,7 @@ Mark each section as complete:
 - [ ] 3. Run Experiment - Load
 - [ ] 4. UI Visual Verification
 - [ ] 5. Integration Testing
+- [ ] 5a. Result Pages Goal Filtering Tests
 - [ ] 6. Backward Compatibility
 - [ ] 7. Error Handling
 - [ ] 8. Regression Testing

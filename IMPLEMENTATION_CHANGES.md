@@ -65,6 +65,63 @@ training_data/{country}/{goal}/{timestamp}/selected_columns.json
 - Users can filter by country, goal, and timestamp independently
 - Backward compatible with new path structure only (requires migration)
 
+#### C. `app/nav/View_Results.py`
+
+**Changes:**
+- Added `extract_goal_from_config()` function:
+  - Reads goal (dep_var) from `training-configs/{timestamp}/job_config.json`
+  - Returns None if config doesn't exist or goal not found
+
+- Added `get_goals_for_runs()` function:
+  - Extracts goals for a set of runs
+  - Returns mapping of (rev, country, stamp) tuples to goal strings
+  - Caches unique timestamps to minimize GCS calls
+
+- Added goal multiselect filter in UI:
+  - Displayed between Country and Timestamp filters
+  - Shows all unique goals for selected revision and countries
+  - Session state caching (`goals_cache_{rev}_{countries}`) for performance
+  - Persistent selection via `view_results_goals_value` session state key
+  - Filters displayed runs based on selected goals
+
+**Impact:**
+- Users can filter model results by goal variable
+- Goal information extracted from model configuration files
+- Session state persistence maintains selections across page navigation
+- Performance optimized through caching
+
+#### D. `app/nav/View_Best_Results.py`
+
+**Changes:**
+- Added `extract_goal_from_config()` function (same as View_Results.py)
+- Added `get_goals_for_runs()` function (same as View_Results.py)
+- Added goal multiselect filter in UI:
+  - Displayed between Country and Timestamp filters
+  - Session state caching (`goals_cache_best_{rev}_{countries}`)
+  - Persistent selection via `view_best_results_goals_value` session state key
+  - Filters countries to show only those with runs matching selected goals
+
+**Impact:**
+- Consistent goal filtering across all result pages
+- Users can compare best results filtered by specific goals
+- Countries are automatically filtered to those with selected goals
+
+#### E. `app/nav/Review_Model_Stability.py`
+
+**Changes:**
+- Added `extract_goal_from_config()` function (same as View_Results.py)
+- Added `get_goals_for_runs()` function (same as View_Results.py)
+- Added goal multiselect filter in UI:
+  - Displayed between Country and Timestamp filters
+  - Session state caching (`goals_cache_stability_{rev}_{countries}`)
+  - Persistent selection via `model_stability_goals_value` session state key
+  - Filters runs for stability analysis based on selected goals
+
+**Impact:**
+- Goal filtering integrated into stability analysis workflow
+- Users can analyze model stability for specific goal variables
+- Consistent filtering experience across all analysis pages
+
 ### 3. New Files Added
 
 #### A. `scripts/migrate_training_data_structure.py`
@@ -100,12 +157,20 @@ Comprehensive documentation for the migration process including:
 
 ### 4. Session State Changes
 
-New session state key added:
+**Training Data Export/Import:**
 - `just_exported_training_goal`: Stores the goal from the last export to enable auto-selection in Run Experiment page
-
-Existing session state keys updated:
 - `just_exported_training_timestamp`: Still used, now works with goal
 - `just_exported_training_country`: Still used, now works with goal
+
+**Result Pages Goal Filtering:**
+- `view_results_goals_value`: Stores selected goals in View Results page
+- `view_best_results_goals_value`: Stores selected goals in View Best Results page
+- `model_stability_goals_value`: Stores selected goals in Review Model Stability page
+
+**Goal Cache Keys (for performance):**
+- `goals_cache_{rev}_{countries}`: Caches goal mapping in View Results page
+- `goals_cache_best_{rev}_{countries}`: Caches goal mapping in View Best Results page
+- `goals_cache_stability_{rev}_{countries}`: Caches goal mapping in Review Model Stability page
 
 ### 5. UI Changes
 

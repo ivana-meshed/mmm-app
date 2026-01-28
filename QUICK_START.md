@@ -18,7 +18,9 @@ training_data/{country}/{goal}/{timestamp}/selected_columns.json
 
 **UI Before:** Single dropdown showing "COUNTRY - TIMESTAMP"
 
-**UI After:** Three side-by-side filters: Country | Goal | Timestamp
+**UI After:** 
+- Run Experiment: Three side-by-side filters: Country | Goal | Timestamp
+- Result Pages: Goal multiselect filter added between Country and Timestamp
 
 ## Quick Start - What To Do Next
 
@@ -66,7 +68,10 @@ Key tests:
 3. Navigate to Run Experiment page
 4. Verify three-column filter UI appears
 5. Test goal selection and timestamp loading
-6. Take screenshots of the new UI
+6. Navigate to View Results, View Best Results, and Review Model Stability pages
+7. Verify goal filter appears in each result page
+8. Test goal filtering functionality
+9. Take screenshots of the new UI
 
 ### 5. Deploy to Production
 
@@ -80,6 +85,9 @@ After successful testing in dev:
 ### Modified Files
 - `app/nav/Prepare_Training_Data.py` - Export logic
 - `app/nav/Run_Experiment.py` - Loading logic and UI
+- `app/nav/View_Results.py` - Added goal filtering
+- `app/nav/View_Best_Results.py` - Added goal filtering
+- `app/nav/Review_Model_Stability.py` - Added goal filtering
 
 ### New Files
 - `scripts/migrate_training_data_structure.py` - Migration tool
