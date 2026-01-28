@@ -478,7 +478,7 @@ with tab_single:
             f"[TRAINING-DATA-PREFILL] Found {len(available_goals)} goals for {lookup_country}"
         )
     except Exception as e:
-        logging.warning(f"Error listing goals: {e}")
+        logger.warning(f"Error listing goals: {e}")
         available_goals = []
 
     # Initialize variables
@@ -526,6 +526,14 @@ with tab_single:
                 help="No metadata found",
             )
     else:
+        # Step 1: Select Goal and Timestamp to load training config
+        st.markdown("**Step 1:** Select training configuration")
+        st.caption(
+            "Choose goal and timestamp to load the training data config. Data version and metadata will be auto-filled."
+        )
+
+        col_goal, col_timestamp = st.columns(2)
+
         # Auto-select goal from session state
         just_exported_goal = st.session_state.get("just_exported_training_goal")
         default_goal_index = 0
@@ -535,14 +543,14 @@ with tab_single:
                 f"[TRAINING-DATA-PREFILL] Auto-selecting exported goal: {just_exported_goal}"
             )
 
-        # First, let user select goal (to get timestamps)
-        selected_goal = st.selectbox(
-            "Select Goal (to load training configs)",
-            options=available_goals,
-            index=default_goal_index,
-            help="Select the goal for this training data. This determines available timestamps.",
-            key="temp_goal_selector",
-        )
+        with col_goal:
+            selected_goal = st.selectbox(
+                "Goal",
+                options=available_goals,
+                index=default_goal_index,
+                help="Select the goal for this training data",
+                key="temp_goal_selector",
+            )
 
         # Get timestamps for selected goal
         try:
@@ -553,45 +561,22 @@ with tab_single:
                 f"[TRAINING-DATA-PREFILL] Found {len(training_data_versions)} timestamps for {lookup_country}/{selected_goal}"
             )
         except Exception as e:
-            logging.warning(f"Error listing training data versions: {e}")
+            logger.warning(f"Error listing training data versions: {e}")
             training_data_versions = []
 
         if not training_data_versions:
-            st.warning(
-                f"⚠️ No training data versions found for **{selected_goal}**"
-            )
-            st.session_state["training_data_config"] = None
-
-            # Show partially disabled dropdowns
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.selectbox(
-                    "Data Version",
-                    options=["No data available"],
-                    disabled=True,
-                    help="No training data found",
-                )
-            with col2:
-                st.text_input(
-                    "Goal",
-                    value=selected_goal,
-                    disabled=True,
-                    help="Selected goal",
-                )
-            with col3:
+            with col_timestamp:
                 st.selectbox(
                     "Timestamp",
                     options=["No data available"],
                     disabled=True,
-                    help="No training data versions found",
+                    help="No training data versions found for selected goal",
                 )
-            with col4:
-                st.selectbox(
-                    "Metadata Version",
-                    options=["No metadata available"],
-                    disabled=True,
-                    help="No metadata found",
-                )
+
+            st.warning(
+                f"⚠️ No training data versions found for **{selected_goal}**. Please export training data first using the Prepare Training Data page."
+            )
+            st.session_state["training_data_config"] = None
         else:
             # Auto-select timestamp from session state
             just_exported_timestamp = st.session_state.get(
@@ -609,13 +594,14 @@ with tab_single:
                     f"[TRAINING-DATA-PREFILL] Auto-selecting exported timestamp: {just_exported_timestamp}"
                 )
 
-            selected_training_timestamp = st.selectbox(
-                "Select Timestamp (to load config)",
-                options=training_data_versions,
-                index=default_timestamp_index,
-                help="Select the training data version. This will load the associated config.",
-                key="temp_timestamp_selector",
-            )
+            with col_timestamp:
+                selected_training_timestamp = st.selectbox(
+                    "Timestamp",
+                    options=training_data_versions,
+                    index=default_timestamp_index,
+                    help="Training data version timestamp",
+                    key="temp_timestamp_selector",
+                )
 
             # Load training data config
             logger.info(
@@ -749,6 +735,11 @@ with tab_single:
 
                 # ---- SINGLE ROW WITH 4 COLUMNS ----
                 st.markdown("---")
+                st.markdown("**Step 2:** Confirm data selections")
+                st.caption(
+                    "Data version and metadata version are auto-filled from the config. You can change them if needed."
+                )
+
                 col1, col2, col3, col4 = st.columns(4)
 
                 with col1:
