@@ -524,10 +524,11 @@ col1, col2, col3, col4 = st.columns(4)
 # Column 1: Experiment Name
 with col1:
     rev = st.selectbox(
-        "Experiment Name (tag & number, e.g. gmv001)",
+        "Experiment Name",
         all_revs,
         index=default_rev_index,
         key="model_stability_revision",
+        help="Tag & number, e.g. gmv001",
     )
 
 # Store selection
