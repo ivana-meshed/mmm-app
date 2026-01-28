@@ -86,7 +86,7 @@ training_data/{country}/{goal}/{timestamp}/selected_columns.json
 
 - **Restructured filter UI to single-row layout**:
   - **All 4 filters in ONE ROW** using st.columns(4)
-  - Column 1: Experiment Name (selectbox)
+  - Column 1: Experiment Name (selectbox) - Label: "Experiment Name" with help text "Tag & number, e.g. gmv001"
   - Column 2: Country (multiselect)
   - Column 3: Goal (dep_var) (multiselect)
   - Column 4: Timestamp (selectbox, optional)
@@ -128,7 +128,7 @@ training_data/{country}/{goal}/{timestamp}/selected_columns.json
 - Added `get_goals_for_runs()` function (same as View_Results.py)
 - **Restructured filter UI to single-row layout**:
   - **All 4 filters in ONE ROW** using st.columns(4)
-  - Column 1: Experiment Name (selectbox)
+  - Column 1: Experiment Name (selectbox) - Label: "Experiment Name" with help text "Tag & number, e.g. gmv001"
   - Column 2: Country (multiselect)
   - Column 3: Goal (dep_var) (multiselect)
   - Column 4: Timestamp (selectbox, optional)
