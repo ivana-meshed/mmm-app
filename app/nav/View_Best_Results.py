@@ -268,7 +268,8 @@ def extract_goal_from_config(bucket_name: str, stamp: str, run_key=None):
             goal = config.get("dep_var")
             if goal:
                 return goal
-    except Exception:
+    except Exception as e:
+        # Silently continue to fallback
         pass
     
     # Second try: robyn/{rev}/{country}/{stamp}/model_summary.json
@@ -283,8 +284,11 @@ def extract_goal_from_config(bucket_name: str, stamp: str, run_key=None):
                 # Extract dep_var from input_metadata
                 if "input_metadata" in summary and "dep_var" in summary["input_metadata"]:
                     return summary["input_metadata"]["dep_var"]
-        except Exception:
-            pass
+        except Exception as e:
+            # Log for debugging but don't fail
+            import streamlit as st
+            with st.expander("Debug: Goal extraction error", expanded=False):
+                st.error(f"Error extracting goal from {model_summary_path}: {e}")
     
     return None
 
@@ -1280,6 +1284,16 @@ def render_run_for_country(bucket_name: str, rev: str, country: str):
 
     _, _, stamp = key
     blobs = runs[key]
+    
+    # Debug: Show blob count and sample filenames
+    if blobs:
+        st.info(f"Found {len(blobs)} files for this run")
+        with st.expander("Debug: Files in this run", expanded=False):
+            blob_names = [os.path.basename(b.name) for b in blobs[:20]]  # Show first 20
+            st.write("Sample files:", blob_names)
+            if len(blobs) > 20:
+                st.write(f"... and {len(blobs) - 20} more files")
+    
     best_id, iters, trials = parse_best_meta(blobs)
 
     # Render model metrics first
