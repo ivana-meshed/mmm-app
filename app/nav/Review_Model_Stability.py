@@ -546,39 +546,42 @@ rev_keys_sorted = sorted(
 default_country_in_rev = rev_keys_sorted[0][1] if rev_keys_sorted else ""
 
 # Restore previous selection if available
-if "model_stability_countries_value" in st.session_state:
-    current_countries = st.session_state["model_stability_countries_value"]
-    valid_countries = [c for c in current_countries if c in rev_countries]
-    default_countries = (
-        valid_countries
-        if valid_countries
+if "model_stability_country_value" in st.session_state:
+    current_country = st.session_state["model_stability_country_value"]
+    default_country = (
+        current_country
+        if current_country in rev_countries
         else (
-            [default_country_in_rev]
+            default_country_in_rev
             if default_country_in_rev in rev_countries
-            else []
+            else rev_countries[0] if rev_countries else None
         )
     )
 else:
-    default_countries = [default_country_in_rev]
+    default_country = default_country_in_rev
 
 # Column 2: Country
 with col2:
-    countries_sel = st.multiselect(
+    country_index = rev_countries.index(default_country) if default_country in rev_countries else 0
+    countries_sel = st.selectbox(
         "Country",
         rev_countries,
-        default=default_countries,
+        index=country_index,
         key="model_stability_countries",
     )
 
 # Store selection
-if countries_sel != st.session_state.get("model_stability_countries_value"):
-    st.session_state["model_stability_countries_value"] = countries_sel
+if countries_sel != st.session_state.get("model_stability_country_value"):
+    st.session_state["model_stability_country_value"] = countries_sel
 
 if not countries_sel:
-    st.info("Select at least one country.")
+    st.info("Select a country.")
     st.stop()
 
-# Goals available for selected revision and countries
+# Convert to list for compatibility
+countries_sel = [countries_sel]
+
+# Goals available for selected revision and country
 # Extract goals from configs for the filtered runs
 rev_country_keys = [
     k for k in runs.keys() if k[0] == rev and k[1] in countries_sel
@@ -598,41 +601,43 @@ rev_country_goals = sorted(
     {goals_map.get(k) for k in rev_country_keys if goals_map.get(k)}
 )
 
-# Determine default goals for multiselect
-if "model_stability_goals_value" in st.session_state:
-    # User has saved selections - validate and preserve
-    current_goals = st.session_state["model_stability_goals_value"]
-    valid_goals = [g for g in current_goals if g in rev_country_goals]
-    if valid_goals:
-        # Has valid selections - use them
-        default_goals = valid_goals
-    else:
-        # All selections are invalid - use all available goals
-        default_goals = rev_country_goals
+# Determine default goal for selectbox
+if "model_stability_goal_value" in st.session_state:
+    # User has saved selection - validate and preserve
+    current_goal = st.session_state["model_stability_goal_value"]
+    default_goal = (
+        current_goal
+        if current_goal in rev_country_goals
+        else (rev_country_goals[0] if rev_country_goals else None)
+    )
 else:
-    # First time - use all available goals
-    default_goals = rev_country_goals
+    # First time - use first available goal
+    default_goal = rev_country_goals[0] if rev_country_goals else None
 
 # Column 3: Goal
 if rev_country_goals:
     with col3:
-        goals_sel = st.multiselect(
+        goal_index = rev_country_goals.index(default_goal) if default_goal in rev_country_goals else 0
+        goals_sel = st.selectbox(
             "Goal (dep_var)",
             rev_country_goals,
-            default=default_goals,
+            index=goal_index,
             help="Filter by goal variable used in model training",
             key="model_stability_goals",
         )
 
     # Store selection
-    if goals_sel != st.session_state.get("model_stability_goals_value"):
-        st.session_state["model_stability_goals_value"] = goals_sel
+    if goals_sel != st.session_state.get("model_stability_goal_value"):
+        st.session_state["model_stability_goal_value"] = goals_sel
 
     if not goals_sel:
-        st.info("Select at least one goal.")
+        st.info("Select a goal.")
         st.stop()
 
-    # Filter runs by selected goals
+    # Convert to list for compatibility
+    goals_sel = [goals_sel]
+
+    # Filter runs by selected goal
     rev_country_keys = [
         k for k in rev_country_keys if goals_map.get(k) in goals_sel
     ]

@@ -2589,18 +2589,14 @@ with st.expander(
                 # Save to GCS
                 country = st.session_state.get("country", "de")
                 goal = st.session_state.get("selected_goal")
-                # Use shared timestamp from Map Data if available, otherwise generate new one
-                timestamp = st.session_state.get(
-                    "shared_save_timestamp",
-                    format_cet_timestamp(),
-                )
+                # Always generate a new timestamp for each export
+                timestamp = format_cet_timestamp()
 
                 # Add timestamp to export data for reference
                 export_data["timestamp"] = timestamp
 
-                # Store the timestamp back to session state for consistency
-                if not st.session_state.get("shared_save_timestamp"):
-                    st.session_state["shared_save_timestamp"] = timestamp
+                # Store the new timestamp to session state
+                st.session_state["shared_save_timestamp"] = timestamp
 
                 # Add timestamp to export data for Run Models page to use
                 export_data["timestamp"] = timestamp

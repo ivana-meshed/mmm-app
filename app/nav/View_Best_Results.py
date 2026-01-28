@@ -1363,27 +1363,42 @@ if not auto_best:
     # Create two-column layout for Countries and Goal filters
     col1, col2 = st.columns(2)
 
+    # Determine default country for selectbox
+    if "view_best_results_country_rev_value" in st.session_state:
+        current_country = st.session_state["view_best_results_country_rev_value"]
+        default_country = (
+            current_country
+            if current_country in rev_countries
+            else (rev_countries[0] if rev_countries else None)
+        )
+    else:
+        default_country = rev_countries[0] if rev_countries else None
+
     with col1:
-        countries_sel = st.multiselect(
-            "Countries",
+        country_index = rev_countries.index(default_country) if default_country in rev_countries else 0
+        countries_sel = st.selectbox(
+            "Country",
             rev_countries,
-            default=default_countries,
+            index=country_index,
         )
 
         # Store selection in persistent session state key (not widget key)
         if countries_sel != st.session_state.get(
-            "view_best_results_countries_rev_value"
+            "view_best_results_country_rev_value"
         ):
-            st.session_state["view_best_results_countries_rev_value"] = (
+            st.session_state["view_best_results_country_rev_value"] = (
                 countries_sel
             )
 
-    # Check countries selection before proceeding
+    # Check country selection before proceeding
     if not countries_sel:
-        st.info("Select at least one country.")
+        st.info("Select a country.")
         st.stop()
 
-    # Goals available for selected revision and countries
+    # Convert to list for compatibility
+    countries_sel = [countries_sel]
+
+    # Goals available for selected revision and country
     # Extract goals from configs for the filtered runs
     rev_country_keys = [
         k for k in runs.keys() if k[0] == rev and k[1] in countries_sel
@@ -1419,36 +1434,51 @@ if not auto_best:
         default_goals = rev_country_goals
 
     if rev_country_goals:
+        # Determine default goal for selectbox
+        if "view_best_results_goal_value" in st.session_state:
+            current_goal = st.session_state["view_best_results_goal_value"]
+            default_goal = (
+                current_goal
+                if current_goal in rev_country_goals
+                else (rev_country_goals[0] if rev_country_goals else None)
+            )
+        else:
+            default_goal = rev_country_goals[0] if rev_country_goals else None
+
         with col2:
-            goals_sel = st.multiselect(
+            goal_index = rev_country_goals.index(default_goal) if default_goal in rev_country_goals else 0
+            goals_sel = st.selectbox(
                 "Goal (dep_var)",
                 rev_country_goals,
-                default=default_goals,
+                index=goal_index,
                 help="Filter by goal variable used in model training",
             )
 
             # Store selection in persistent session state key
             if goals_sel != st.session_state.get(
-                "view_best_results_goals_value"
+                "view_best_results_goal_value"
             ):
-                st.session_state["view_best_results_goals_value"] = goals_sel
+                st.session_state["view_best_results_goal_value"] = goals_sel
 
-        # Check goals selection after both columns are defined
+        # Check goal selection after both columns are defined
         if not goals_sel:
-            st.info("Select at least one goal.")
+            st.info("Select a goal.")
             st.stop()
 
-        # Filter runs by selected goals - update rev_country_keys
+        # Convert to list for compatibility
+        goals_sel = [goals_sel]
+
+        # Filter runs by selected goal - update rev_country_keys
         rev_country_keys = [
             k for k in rev_country_keys if goals_map.get(k) in goals_sel
         ]
 
-        # Filter countries_sel to only include countries that have runs with selected goals
+        # Filter countries_sel to only include countries that have runs with selected goal
         countries_with_goals = sorted({k[1] for k in rev_country_keys})
         countries_sel = [c for c in countries_sel if c in countries_with_goals]
 
         if not countries_sel:
-            st.info("No countries have runs with the selected goals.")
+            st.info("No countries have runs with the selected goal.")
             st.stop()
     else:
         # No goal information available - proceed without goal filtering

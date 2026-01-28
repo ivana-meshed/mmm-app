@@ -1308,42 +1308,47 @@ best_country_key = next(
 )
 default_country_in_rev = best_country_key[1]
 
-# Determine default countries for multiselect
+# Determine default country for selectbox
 # Use separate session state key that persists across navigation
-if "view_results_countries_value" in st.session_state:
-    # User has saved selections - validate and preserve
-    current_countries = st.session_state["view_results_countries_value"]
-    valid_countries = [c for c in current_countries if c in rev_countries]
-    if valid_countries:
-        # Has valid selections - use them
-        default_countries = valid_countries
+if "view_results_country_value" in st.session_state:
+    # User has saved selection - validate and preserve
+    current_country = st.session_state["view_results_country_value"]
+    if current_country in rev_countries:
+        # Has valid selection - use it
+        default_country = current_country
     else:
-        # All selections are invalid - use default
-        default_countries = (
-            [default_country_in_rev]
+        # Selection is invalid - use default
+        default_country = (
+            default_country_in_rev
             if default_country_in_rev in rev_countries
-            else []
+            else rev_countries[0] if rev_countries else None
         )
 else:
     # First time - use default
-    default_countries = [default_country_in_rev]
+    default_country = default_country_in_rev
 
 # Column 2: Country
 with col2:
-    countries_sel = st.multiselect(
+    country_index = rev_countries.index(default_country) if default_country in rev_countries else 0
+    countries_sel = st.selectbox(
         "Country",
         rev_countries,
-        default=default_countries,
+        index=country_index,
     )
 
 # Store selection in persistent session state key (not widget key)
-if countries_sel != st.session_state.get("view_results_countries_value"):
-    st.session_state["view_results_countries_value"] = countries_sel
+if countries_sel != st.session_state.get("view_results_country_value"):
+    st.session_state["view_results_country_value"] = countries_sel
+
+# Check country selection before proceeding
 if not countries_sel:
-    st.info("Select at least one country.")
+    st.info("Select a country.")
     st.stop()
 
-# Goals available for selected revision and countries
+# Convert to list for compatibility with rest of code
+countries_sel = [countries_sel]
+
+# Goals available for selected revision and country
 # Extract goals from configs for the filtered runs
 rev_country_keys = [
     k for k in runs.keys() if k[0] == rev and k[1] in countries_sel
@@ -1363,40 +1368,43 @@ rev_country_goals = sorted(
     {goals_map.get(k) for k in rev_country_keys if goals_map.get(k)}
 )
 
-# Determine default goals for multiselect
-if "view_results_goals_value" in st.session_state:
-    # User has saved selections - validate and preserve
-    current_goals = st.session_state["view_results_goals_value"]
-    valid_goals = [g for g in current_goals if g in rev_country_goals]
-    if valid_goals:
-        # Has valid selections - use them
-        default_goals = valid_goals
+# Determine default goal for selectbox
+if "view_results_goal_value" in st.session_state:
+    # User has saved selection - validate and preserve
+    current_goal = st.session_state["view_results_goal_value"]
+    if current_goal in rev_country_goals:
+        # Has valid selection - use it
+        default_goal = current_goal
     else:
-        # All selections are invalid - use all available goals
-        default_goals = rev_country_goals
+        # Selection is invalid - use first available goal
+        default_goal = rev_country_goals[0] if rev_country_goals else None
 else:
-    # First time - use all available goals
-    default_goals = rev_country_goals
+    # First time - use first available goal
+    default_goal = rev_country_goals[0] if rev_country_goals else None
 
 # Column 3: Goal (dep_var)
 with col3:
     if rev_country_goals:
-        goals_sel = st.multiselect(
+        goal_index = rev_country_goals.index(default_goal) if default_goal in rev_country_goals else 0
+        goals_sel = st.selectbox(
             "Goal (dep_var)",
             rev_country_goals,
-            default=default_goals,
+            index=goal_index,
             help="Filter by goal variable used in model training",
         )
 
         # Store selection in persistent session state key
-        if goals_sel != st.session_state.get("view_results_goals_value"):
-            st.session_state["view_results_goals_value"] = goals_sel
+        if goals_sel != st.session_state.get("view_results_goal_value"):
+            st.session_state["view_results_goal_value"] = goals_sel
 
         if not goals_sel:
-            st.info("Select at least one goal.")
+            st.info("Select a goal.")
             st.stop()
 
-        # Filter runs by selected goals
+        # Convert to list for compatibility
+        goals_sel = [goals_sel]
+
+        # Filter runs by selected goal
         rev_country_keys = [
             k for k in rev_country_keys if goals_map.get(k) in goals_sel
         ]
