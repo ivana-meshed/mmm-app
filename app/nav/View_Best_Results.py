@@ -1360,19 +1360,25 @@ if not auto_best:
             else []
         )
 
-    countries_sel = st.multiselect(
-        "Countries",
-        rev_countries,
-        default=default_countries,
-    )
+    # Create two-column layout for Countries and Goal filters
+    col1, col2 = st.columns(2)
 
-    # Store selection in persistent session state key (not widget key)
-    if countries_sel != st.session_state.get(
-        "view_best_results_countries_rev_value"
-    ):
-        st.session_state["view_best_results_countries_rev_value"] = (
-            countries_sel
+    with col1:
+        countries_sel = st.multiselect(
+            "Countries",
+            rev_countries,
+            default=default_countries,
         )
+
+        # Store selection in persistent session state key (not widget key)
+        if countries_sel != st.session_state.get(
+            "view_best_results_countries_rev_value"
+        ):
+            st.session_state["view_best_results_countries_rev_value"] = (
+                countries_sel
+            )
+
+    # Check countries selection before proceeding
     if not countries_sel:
         st.info("Select at least one country.")
         st.stop()
@@ -1413,17 +1419,21 @@ if not auto_best:
         default_goals = rev_country_goals
 
     if rev_country_goals:
-        goals_sel = st.multiselect(
-            "Goal (dep_var)",
-            rev_country_goals,
-            default=default_goals,
-            help="Filter by goal variable used in model training",
-        )
+        with col2:
+            goals_sel = st.multiselect(
+                "Goal (dep_var)",
+                rev_country_goals,
+                default=default_goals,
+                help="Filter by goal variable used in model training",
+            )
 
-        # Store selection in persistent session state key
-        if goals_sel != st.session_state.get("view_best_results_goals_value"):
-            st.session_state["view_best_results_goals_value"] = goals_sel
+            # Store selection in persistent session state key
+            if goals_sel != st.session_state.get(
+                "view_best_results_goals_value"
+            ):
+                st.session_state["view_best_results_goals_value"] = goals_sel
 
+        # Check goals selection after both columns are defined
         if not goals_sel:
             st.info("Select at least one goal.")
             st.stop()

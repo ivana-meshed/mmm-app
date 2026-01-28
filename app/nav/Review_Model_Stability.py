@@ -502,7 +502,7 @@ keys_sorted = sorted(
 seed_key = keys_sorted[0]
 default_rev = seed_key[0]
 
-# UI: Experiment Name (revision) dropdown
+# UI: All filters in a single row
 all_revs = sorted({k[0] for k in runs.keys()}, key=parse_rev_key, reverse=True)
 
 # Restore previous selection if available
@@ -518,12 +518,17 @@ else:
         all_revs.index(default_rev) if default_rev in all_revs else 0
     )
 
-rev = st.selectbox(
-    "Experiment Name (tag & number, e.g. gmv001)",
-    all_revs,
-    index=default_rev_index,
-    key="model_stability_revision",
-)
+# Create 4 columns for filters
+col1, col2, col3, col4 = st.columns(4)
+
+# Column 1: Experiment Name
+with col1:
+    rev = st.selectbox(
+        "Experiment Name (tag & number, e.g. gmv001)",
+        all_revs,
+        index=default_rev_index,
+        key="model_stability_revision",
+    )
 
 # Store selection
 if rev != st.session_state.get("model_stability_revision_value"):
@@ -555,12 +560,14 @@ if "model_stability_countries_value" in st.session_state:
 else:
     default_countries = [default_country_in_rev]
 
-countries_sel = st.multiselect(
-    "Country",
-    rev_countries,
-    default=default_countries,
-    key="model_stability_countries",
-)
+# Column 2: Country
+with col2:
+    countries_sel = st.multiselect(
+        "Country",
+        rev_countries,
+        default=default_countries,
+        key="model_stability_countries",
+    )
 
 # Store selection
 if countries_sel != st.session_state.get("model_stability_countries_value"):
@@ -605,14 +612,16 @@ else:
     # First time - use all available goals
     default_goals = rev_country_goals
 
+# Column 3: Goal
 if rev_country_goals:
-    goals_sel = st.multiselect(
-        "Goal (dep_var)",
-        rev_country_goals,
-        default=default_goals,
-        help="Filter by goal variable used in model training",
-        key="model_stability_goals",
-    )
+    with col3:
+        goals_sel = st.multiselect(
+            "Goal (dep_var)",
+            rev_country_goals,
+            default=default_goals,
+            help="Filter by goal variable used in model training",
+            key="model_stability_goals",
+        )
 
     # Store selection
     if goals_sel != st.session_state.get("model_stability_goals_value"):
@@ -658,13 +667,15 @@ if "model_stability_timestamp_value" in st.session_state:
 else:
     default_stamp_index = 0
 
-stamp_sel = st.selectbox(
-    "Timestamp (optional)",
-    stamp_options,
-    index=default_stamp_index,
-    help="Leave empty to use the latest run. Select a specific timestamp if needed.",
-    key="model_stability_timestamp",
-)
+# Column 4: Timestamp
+with col4:
+    stamp_sel = st.selectbox(
+        "Timestamp (optional)",
+        stamp_options,
+        index=default_stamp_index,
+        help="Leave empty to use the latest run. Select a specific timestamp if needed.",
+        key="model_stability_timestamp",
+    )
 
 # Store selection
 if stamp_sel != st.session_state.get("model_stability_timestamp_value"):
