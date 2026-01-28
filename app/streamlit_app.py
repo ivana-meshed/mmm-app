@@ -66,7 +66,6 @@ model_stability_page = st.Page(
 )
 
 
-
 # Create navigation - this replaces the default sidebar navigation
 pg = st.navigation(
     [

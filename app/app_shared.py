@@ -299,8 +299,19 @@ def _safe_tick_once(
                         logger.info(
                             f"[QUEUE] Job {entry.get('id')} completed with status {final_state}"
                         )
+                elif s == "RUNNING" and entry.get("status") in (
+                    "PENDING",
+                    "LAUNCHING",
+                ):
+                    # Forward progression: PENDING/LAUNCHING → RUNNING
+                    entry["status"] = "RUNNING"
+                    message = "running"
+                    changed = True
+                    logger.info(
+                        f"[QUEUE_TICK] Job {entry.get('id')} progressed from {entry.get('status')} to RUNNING"
+                    )
                 elif entry.get("status") == "LAUNCHING":
-                    # Visible execution, promote to RUNNING
+                    # Visible execution, promote to RUNNING (fallback for when Cloud Run doesn't report status)
                     entry["status"] = "RUNNING"
                     message = "running"
                     changed = True
@@ -717,6 +728,9 @@ def timed_step(name: str, bucket: list):
         ph.success(f"✅ {name} – {_fmt_secs(dt)}")
         bucket.append({"Step": name, "Time (s)": round(dt, 2)})
         logger.info(f"Step '{name}' completed in {dt:.2f}s")
+        # Clear the success message after 2 seconds to prevent it from appearing in other tabs
+        time.sleep(2)
+        ph.empty()
 
 
 def parse_train_size(txt: str):
@@ -1815,12 +1829,50 @@ def parse_date(df: pd.DataFrame, meta: dict) -> Tuple[pd.DataFrame, str]:
         date_col = lower_map.get(wanted.lower(), wanted)
 
     if date_col in df.columns:
-        # Works for tz-aware and tz-naive inputs
-        s = pd.to_datetime(
-            df[date_col], errors="coerce", utc=True
-        ).dt.tz_convert(None)
-        df[date_col] = s
-        df = df.sort_values(date_col).reset_index(drop=True)
+        try:
+            # Get the current dtype for logging
+            original_dtype = df[date_col].dtype
+            logger.info(
+                f"Parsing date column '{date_col}' with dtype: {original_dtype}"
+            )
+
+            # Handle custom data types (dbdate, dbtime, etc.) by converting to string first
+            # These are common in BigQuery/Snowflake parquet exports
+            dtype_str = str(original_dtype).strip().lower()
+            if dtype_str.startswith("db"):
+                logger.info(
+                    f"Detected database-specific type '{original_dtype}', converting to string first"
+                )
+                df[date_col] = df[date_col].astype(str)
+
+            # Works for tz-aware and tz-naive inputs
+            s = pd.to_datetime(
+                df[date_col], errors="coerce", utc=True
+            ).dt.tz_convert(None)
+
+            # Check for conversion issues
+            null_count = s.isna().sum()
+            if null_count > 0:
+                logger.warning(
+                    f"Date parsing resulted in {null_count} null values out of {len(s)} total"
+                )
+
+            df[date_col] = s
+            df = df.sort_values(date_col).reset_index(drop=True)
+            logger.info(
+                f"Successfully parsed date column '{date_col}', final dtype: {df[date_col].dtype}"
+            )
+        except Exception as e:
+            logger.error(
+                f"Error parsing date column '{date_col}' (dtype: {df[date_col].dtype}): {e}"
+            )
+            raise ValueError(
+                f"Failed to parse date column '{date_col}' with data type '{df[date_col].dtype}'. "
+                f"Error: {str(e)}"
+            ) from e
+    else:
+        logger.warning(f"Date column '{date_col}' not found in DataFrame")
+
     return df, date_col
 
 
@@ -2061,13 +2113,131 @@ def resolve_meta_blob_from_selection(
 
 
 def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
     client = storage.Client()
     blob = client.bucket(bucket).blob(blob_path)
     if not blob.exists():
         raise FileNotFoundError(f"gs://{bucket}/{blob_path} not found")
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         blob.download_to_filename(tmp.name)
-        return pd.read_parquet(tmp.name)
+        try:
+            # Read parquet file using PyArrow first to handle database-specific types
+            table = pq.read_table(tmp.name)
+
+            # Check for database-specific types and convert them
+            schema = table.schema
+            db_type_columns = []
+            for i, field in enumerate(schema):
+                field_type_str = str(field.type).lower()
+                # Check if the type string contains database-specific type indicators
+                if "db" in field_type_str and any(
+                    db_type in field_type_str
+                    for db_type in [
+                        "dbdate",
+                        "dbtime",
+                        "dbdecimal",
+                        "dbtimestamp",
+                    ]
+                ):
+                    db_type_columns.append(field.name)
+                    logger.warning(
+                        f"Column '{field.name}' has database-specific type '{field.type}'"
+                    )
+
+            # Convert to pandas with type mapping for database-specific types
+            if db_type_columns:
+                logger.info(
+                    f"Converting database-specific types in columns: {db_type_columns}"
+                )
+
+                # Create a types_mapper that converts unknown types to string
+                def types_mapper(pa_type):
+                    type_str = str(pa_type).lower()
+                    if "db" in type_str:
+                        # Map database types to string for safe conversion
+                        return pd.StringDtype()
+                    return None  # Use default mapping for other types
+
+                df = table.to_pandas(types_mapper=types_mapper)
+            else:
+                # No database-specific types, use standard conversion
+                df = table.to_pandas()
+
+            # Log data types for debugging
+            logger.info(
+                f"Loaded parquet from gs://{bucket}/{blob_path}: "
+                f"{len(df)} rows, {len(df.columns)} columns"
+            )
+
+            return df
+        except Exception as e:
+            logger.error(
+                f"Error reading parquet file from gs://{bucket}/{blob_path}: {e}"
+            )
+            raise
+
+
+def safe_read_parquet(file_path: str) -> pd.DataFrame:
+    """
+    Safely read a parquet file with database-specific type handling.
+
+    Handles database-specific types (dbdate, dbtime, etc.) that may come from
+    BigQuery/Snowflake exports by logging warnings and allowing downstream
+    processing to handle them.
+
+    Args:
+        file_path: Path to the parquet file
+
+    Returns:
+        DataFrame with the parquet data
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    try:
+        # Read parquet file using PyArrow first to handle database-specific types
+        table = pq.read_table(file_path)
+
+        # Check for database-specific types and convert them
+        schema = table.schema
+        db_type_columns = []
+        for i, field in enumerate(schema):
+            field_type_str = str(field.type).lower()
+            # Check if the type string contains database-specific type indicators
+            if "db" in field_type_str and any(
+                db_type in field_type_str
+                for db_type in ["dbdate", "dbtime", "dbdecimal", "dbtimestamp"]
+            ):
+                db_type_columns.append(field.name)
+                logger.warning(
+                    f"Column '{field.name}' has database-specific type '{field.type}'"
+                )
+
+        # Convert to pandas with type mapping for database-specific types
+        if db_type_columns:
+            logger.info(
+                f"Converting database-specific types in columns: {db_type_columns}"
+            )
+
+            # Create a types_mapper that converts unknown types to string
+            def types_mapper(pa_type):
+                type_str = str(pa_type).lower()
+                if "db" in type_str:
+                    # Map database types to string for safe conversion
+                    return pd.StringDtype()
+                return None  # Use default mapping for other types
+
+            df = table.to_pandas(types_mapper=types_mapper)
+        else:
+            # No database-specific types, use standard conversion
+            df = table.to_pandas()
+
+        return df
+    except Exception as e:
+        logger.error(f"Error reading parquet file from {file_path}: {e}")
+        raise
 
 
 def _download_json_from_gcs(bucket: str, blob_path: str) -> dict:
@@ -2725,3 +2895,161 @@ def validate_against_metadata(df: pd.DataFrame, meta: dict) -> dict:
         "type_mismatches": type_mismatches,
         "channels_map": channels_map,
     }
+
+
+# ============================================================================
+# Session State Synchronization Utilities
+# ============================================================================
+
+
+def sync_session_state_keys():
+    """
+    Synchronize session state keys across all pages in the application.
+    This ensures selections persist when navigating between pages.
+
+    Key mappings:
+    - Prepare Training Data ↔ Run Models:
+      - country ↔ selected_country
+      - picked_data_ts ↔ selected_version
+      - picked_meta_ts ↔ selected_metadata (needs parsing)
+
+    Call this function at the start of each page to ensure consistency.
+
+    This function preserves the most recently set value across page navigation.
+    Note: For widget keys like picked_data_ts and picked_meta_ts, we sync TO
+    the other keys but don't sync FROM to avoid Streamlit warnings.
+    """
+    import logging
+
+    import streamlit as st
+
+    logger = logging.getLogger(__name__)
+
+    logger.info(
+        f"[SESSION-SYNC] Starting sync - country={st.session_state.get('country')}, "
+        f"selected_country={st.session_state.get('selected_country')}, "
+        f"picked_data_ts={st.session_state.get('picked_data_ts')}, "
+        f"selected_version={st.session_state.get('selected_version')}, "
+        f"picked_meta_ts={st.session_state.get('picked_meta_ts')}, "
+        f"selected_metadata={st.session_state.get('selected_metadata')}"
+    )
+
+    # Sync country between pages
+    country_val = st.session_state.get("country")
+    selected_country_val = st.session_state.get("selected_country")
+
+    if (
+        country_val
+        and selected_country_val
+        and country_val != selected_country_val
+    ):
+        # Both exist but differ - keep both as they may be set by different mechanisms
+        # Prioritize selected_country if it exists (from Run Models)
+        logger.info(
+            f"[SESSION-SYNC] Country mismatch: country={country_val}, selected_country={selected_country_val}"
+        )
+    elif country_val and not selected_country_val:
+        st.session_state["selected_country"] = country_val
+        logger.info(
+            f"[SESSION-SYNC] Synced country -> selected_country: {country_val}"
+        )
+    elif selected_country_val and not country_val:
+        st.session_state["country"] = selected_country_val
+        logger.info(
+            f"[SESSION-SYNC] Synced selected_country -> country: {selected_country_val}"
+        )
+
+    # Sync data version
+    # picked_data_ts is a widget key - we ONLY READ from it, NEVER WRITE to it
+    # to avoid Streamlit warning "widget was created with a default value but also had its value set"
+    # The Prepare Training Data page handles using selected_version as fallback when creating the widget
+    picked_data_ts_val = st.session_state.get("picked_data_ts")
+    selected_version_val = st.session_state.get("selected_version")
+
+    if picked_data_ts_val:
+        # Always sync FROM widget key TO run models key (safe one-way direction)
+        if picked_data_ts_val != selected_version_val:
+            st.session_state["selected_version"] = picked_data_ts_val
+            logger.info(
+                f"[SESSION-SYNC] Synced picked_data_ts -> selected_version: {picked_data_ts_val}"
+            )
+
+    # Sync metadata version
+    # picked_meta_ts is also a widget key - we ONLY READ from it, NEVER WRITE to it
+    # IMPORTANT: picked_meta_ts contains FORMATTED values like "Universal - 20251211_115528"
+    # because list_meta_versions returns formatted labels, not just timestamps
+    # The Prepare Training Data page handles using selected_metadata as fallback when creating the widget
+    picked_meta_ts_val = st.session_state.get("picked_meta_ts")
+    selected_metadata_val = st.session_state.get("selected_metadata")
+
+    if picked_meta_ts_val:
+        # picked_meta_ts already contains the formatted value (e.g., "Universal - 20251211_115528")
+        # Just copy it to selected_metadata if they differ (safe one-way direction)
+        if picked_meta_ts_val != selected_metadata_val:
+            st.session_state["selected_metadata"] = picked_meta_ts_val
+            logger.info(
+                f"[SESSION-SYNC] Synced picked_meta_ts -> selected_metadata: {picked_meta_ts_val}"
+            )
+
+    logger.info(
+        f"[SESSION-SYNC] After sync - country={st.session_state.get('country')}, "
+        f"selected_country={st.session_state.get('selected_country')}, "
+        f"picked_data_ts={st.session_state.get('picked_data_ts')}, "
+        f"selected_version={st.session_state.get('selected_version')}, "
+        f"picked_meta_ts={st.session_state.get('picked_meta_ts')}, "
+        f"selected_metadata={st.session_state.get('selected_metadata')}"
+    )
+
+
+def update_session_timestamp(key: str):
+    """
+    Update the timestamp for a session state key.
+    Call this whenever you explicitly set a session state value.
+
+    Args:
+        key: The session state key that was updated
+    """
+    import time
+
+    import streamlit as st
+
+    if "_sync_timestamps" not in st.session_state:
+        st.session_state["_sync_timestamps"] = {}
+
+    st.session_state["_sync_timestamps"][key] = time.time()
+
+
+def persist_page_selections(page_name: str, selections: dict):
+    """
+    Persist page selections to session state with a page-specific prefix.
+    This allows each page to maintain its own selections independently.
+
+    Args:
+        page_name: Name of the page (e.g., "map_data", "prepare_training")
+        selections: Dictionary of selection key-value pairs to persist
+    """
+    import streamlit as st
+
+    prefix = f"page_{page_name}_"
+    for key, value in selections.items():
+        st.session_state[f"{prefix}{key}"] = value
+
+
+def restore_page_selections(page_name: str, default_selections: dict) -> dict:
+    """
+    Restore page selections from session state.
+
+    Args:
+        page_name: Name of the page
+        default_selections: Default values if no saved selections exist
+
+    Returns:
+        Dictionary of restored selections
+    """
+    import streamlit as st
+
+    prefix = f"page_{page_name}_"
+    restored = {}
+    for key, default_value in default_selections.items():
+        restored[key] = st.session_state.get(f"{prefix}{key}", default_value)
+    return restored

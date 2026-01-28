@@ -2,9 +2,15 @@
 headless = true
 enableCORS = false
 enableXsrfProtection = false
+# Increase max message size for large datasets
+maxMessageSize = 500
+# Increase session timeout to 1 hour (3600 seconds)
+maxUploadSize = 500
 
 [browser]
 gatherUsageStats = false
+# Keep session alive for 1 hour
+serverAddress = "0.0.0.0"
 
 [logger]
 level = "info"
@@ -15,8 +21,15 @@ base = "light"
 [runner]
 # Disable automatic page discovery when using custom st.navigation()
 magicEnabled = true
+# Fast rerun to prevent session loss
+fastReruns = true
 
 [client]
 # Show error details for debugging
 showErrorDetails = true
 toolbarMode = "minimal"
+
+# Session configuration
+[server.sessionState]
+# Keep session alive for 1 hour (default is 10 minutes for inactive sessions)
+# Note: This is not a standard Streamlit config but documents our intent

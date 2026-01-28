@@ -2,6 +2,7 @@
 """
 Test script to validate optimization implementations
 """
+
 import json
 import os
 import subprocess

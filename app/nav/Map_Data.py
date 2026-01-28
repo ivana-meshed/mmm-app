@@ -21,11 +21,11 @@ from app_shared import (
     list_meta_versions,
     require_login_and_domain,
     run_sql,
+    sync_session_state_keys,
     upload_to_gcs,
 )
 from app_split_helpers import *  # bring in all helper functions/constants
 from google.cloud import storage
-
 from utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 # ──────────────────────────────────────────────────────────────
@@ -120,6 +120,13 @@ def _list_metadata_versions(bucket: str, country: str) -> List[str]:
 
 
 def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
+    """Download parquet file from GCS with database-specific type handling."""
+    import logging
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    logger = logging.getLogger(__name__)
     client = storage.Client()
     b = client.bucket(gs_bucket)
     blob = b.blob(blob_path)
@@ -127,8 +134,61 @@ def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
         raise FileNotFoundError(f"gs://{gs_bucket}/{blob_path} not found")
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         blob.download_to_filename(tmp.name)
-        df = pd.read_parquet(tmp.name)
-    return df
+        try:
+            # Read parquet file using PyArrow first to handle database-specific types
+            table = pq.read_table(tmp.name)
+
+            # Check for database-specific types and convert them
+            schema = table.schema
+            db_type_columns = []
+            for i, field in enumerate(schema):
+                field_type_str = str(field.type).lower()
+                # Check if the type string contains database-specific type indicators
+                if "db" in field_type_str and any(
+                    db_type in field_type_str
+                    for db_type in [
+                        "dbdate",
+                        "dbtime",
+                        "dbdecimal",
+                        "dbtimestamp",
+                    ]
+                ):
+                    db_type_columns.append(field.name)
+                    logger.warning(
+                        f"Column '{field.name}' has database-specific type '{field.type}'"
+                    )
+
+            # Convert to pandas with type mapping for database-specific types
+            if db_type_columns:
+                logger.info(
+                    f"Converting database-specific types in columns: {db_type_columns}"
+                )
+
+                # Create a types_mapper that converts unknown types to string
+                def types_mapper(pa_type):
+                    type_str = str(pa_type).lower()
+                    if "db" in type_str:
+                        # Map database types to string for safe conversion
+                        return pd.StringDtype()
+                    return None  # Use default mapping for other types
+
+                df = table.to_pandas(types_mapper=types_mapper)
+            else:
+                # No database-specific types, use standard conversion
+                df = table.to_pandas()
+
+            # Log data types for debugging
+            logger.info(
+                f"Loaded parquet from gs://{gs_bucket}/{blob_path}: "
+                f"{len(df)} rows, {len(df.columns)} columns"
+            )
+
+            return df
+        except Exception as e:
+            logger.error(
+                f"Error reading parquet file from gs://{gs_bucket}/{blob_path}: {e}"
+            )
+            raise
 
 
 def _save_raw_to_gcs(
@@ -188,6 +248,94 @@ def _download_parquet_from_gcs_cached(
 def _load_from_snowflake_cached(sql: str) -> pd.DataFrame:
     _require_sf_session()
     return run_sql(sql)
+
+
+def _simplify_error_message(
+    error_msg: str, data_source: str, country: str
+) -> str:
+    """
+    Convert technical database errors into user-friendly messages.
+
+    Args:
+        error_msg: The raw error message from the database
+        data_source: The data source type (Snowflake, BigQuery, CSV Upload)
+        country: The country code being processed
+
+    Returns:
+        A simplified, user-friendly error message
+    """
+    error_lower = error_msg.lower()
+
+    # Snowflake invalid identifier errors
+    if "invalid identifier" in error_lower and data_source == "Snowflake":
+        # Extract the invalid column name if present
+        import re
+
+        match = re.search(r"invalid identifier ['\"]?(\w+)['\"]?", error_lower)
+        if match:
+            col_name = match.group(1).upper()
+            return f"Column '{col_name}' not found in Snowflake table. Check your country field name or table structure."
+        return "Invalid column name in Snowflake query. Check your country field name."
+
+    # BigQuery table qualification errors
+    if (
+        "must be qualified with a dataset" in error_lower
+        and data_source == "BigQuery"
+    ):
+        # Extract table name if present
+        import re
+
+        match = re.search(
+            r'table ["\']?(\w+)["\']?', error_lower, re.IGNORECASE
+        )
+        if match:
+            table_name = match.group(1)
+            return f"Table '{table_name}' needs dataset qualification. Use format: project.dataset.table (e.g., 'my-project.my_dataset.{table_name}')"
+        return "Table name needs dataset qualification. Use format: project.dataset.table"
+
+    # BigQuery syntax errors
+    if "syntax error" in error_lower and data_source == "BigQuery":
+        return "SQL syntax error in BigQuery query. Check your table name and SQL syntax."
+
+    # Snowflake SQL compilation errors
+    if "sql compilation error" in error_lower and data_source == "Snowflake":
+        # Try to extract the specific error
+        import re
+
+        match = re.search(
+            r"error line \d+ at position \d+ (.+?)(?:\.|$)", error_lower
+        )
+        if match:
+            specific_error = match.group(1).strip()
+            return f"SQL error in Snowflake: {specific_error}. Check your query syntax and column names."
+        return "SQL compilation error in Snowflake. Check your table name, country field, and query syntax."
+
+    # Connection errors
+    if "connection" in error_lower or "timeout" in error_lower:
+        return f"Connection problem with {data_source}. Check your network and credentials."
+
+    # Permission errors
+    if (
+        "permission" in error_lower
+        or "access denied" in error_lower
+        or "forbidden" in error_lower
+    ):
+        return f"Permission denied for {data_source}. Check your access rights to the table."
+
+    # Table not found errors
+    if (
+        "does not exist" in error_lower
+        or "not found" in error_lower
+        or "unknown table" in error_lower
+    ):
+        return f"Table not found in {data_source}. Check that the table name is correct and you have access."
+
+    # If error is very long (> 200 chars), truncate but keep the beginning
+    if len(error_msg) > 200:
+        return error_msg[:197] + "..."
+
+    # Return original error if we can't simplify it
+    return error_msg
 
 
 # --- Session bootstrap (call once, early) ---
@@ -414,27 +562,10 @@ def _build_mapping_df(
     ).astype("object")
 
 
-def _initial_goals_from_columns(cols: list[str]) -> pd.DataFrame:
-    # Pick a few top candidates by name for convenience; user can delete/edit
-    candidates = [
-        c
-        for c in cols
-        if any(
-            k in c.lower()
-            for k in ("rev", "gmv", "sales", "conv", "lead", "purchase")
-        )
-    ]
-    # limit to a manageable number
-    candidates = candidates[:8] if candidates else []
-    return pd.DataFrame(
-        {
-            "var": pd.Series(candidates, dtype="object"),
-            "group": pd.Series(["primary"] * len(candidates), dtype="object"),
-            "type": pd.Series(
-                [_guess_goal_type(c) for c in candidates], dtype="object"
-            ),
-            "main": pd.Series([False] * len(candidates), dtype="object"),
-        }
+def _initial_goals_from_columns() -> pd.DataFrame:
+    # Return empty DataFrame - user must select goals manually
+    return pd.DataFrame(columns=["var", "group", "type", "main"]).astype(
+        "object"
     )
 
 
@@ -447,11 +578,41 @@ def _download_json_from_gcs(gs_bucket: str, blob_path: str) -> dict:
 
 
 def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
+    """
+    Infer category based on prefix or suffix matching.
+    Priority: context_vars and organic_vars take precedence over paid_media_* categories.
+
+    Args:
+        col: Column name to categorize
+        rules: Dict mapping category names to list of prefix/suffix patterns
+
+    Returns:
+        Category name or empty string if no match
+    """
     s = str(col).lower()
-    for cat, endings in rules.items():
-        for suf in endings:
-            if s.endswith(str(suf).lower()):
-                return cat
+
+    # Define priority order: high priority categories first
+    high_priority = ["context_vars", "organic_vars"]
+    low_priority = ["paid_media_spends", "paid_media_vars", "factor_vars"]
+
+    # Check high priority categories first
+    for cat in high_priority:
+        if cat in rules:
+            for pattern in rules[cat]:
+                pattern_lower = str(pattern).lower()
+                # Check both prefix and suffix
+                if s.startswith(pattern_lower) or s.endswith(pattern_lower):
+                    return cat
+
+    # Then check low priority categories
+    for cat in low_priority:
+        if cat in rules:
+            for pattern in rules[cat]:
+                pattern_lower = str(pattern).lower()
+                # Check both prefix and suffix
+                if s.startswith(pattern_lower) or s.endswith(pattern_lower):
+                    return cat
+
     return ""
 
 
@@ -965,12 +1126,19 @@ def _iso2_countries_gcs_first(bucket: str) -> list[str]:
 # ──────────────────────────────────────────────────────────────
 # Page header & helper image
 # ──────────────────────────────────────────────────────────────
+
+# Sync session state across all pages to maintain selections
+sync_session_state_keys()
+
 st.title("Map Data & Define Goals")
 
 # sensible defaults so we can read these anywhere
 st.session_state.setdefault("sf_table", "DB.SCHEMA.TABLE")
 st.session_state.setdefault("sf_sql", "")
 st.session_state.setdefault("sf_country_field", "COUNTRY")
+st.session_state.setdefault("bq_table", "")
+st.session_state.setdefault("bq_sql", "")
+st.session_state.setdefault("bq_country_field", "country")
 st.session_state.setdefault("source_mode", "Latest (GCS)")
 
 # ──────────────────────────────────────────────────────────────
@@ -979,77 +1147,35 @@ st.session_state.setdefault("source_mode", "Latest (GCS)")
 st.header("1. Select Dataset")
 
 with st.expander("📊 Choose the data you want to analyze.", expanded=False):
-    # Country picker (ISO2, GCS-first) as multiselect
-    c1, c2, c3 = st.columns([3, 0.8, 0.8])
 
-    countries = _iso2_countries_gcs_first(BUCKET)
+    # ═══════════════════════════════════════════════════════════
+    # STEP 1.1: Data Source Type Selection (Radio Buttons)
+    # ═══════════════════════════════════════════════════════════
+    st.markdown("#### 1.1 Choose Data Source Type")
 
-    # Handle All/Clear button clicks before rendering multiselect
-    with c2:
-        # Select All button
-        if st.button("All", key="select_all_countries", width="stretch"):
-            st.session_state["selected_countries_widget"] = countries
-            st.rerun()
-    with c3:
-        # Clear button
-        if st.button("Clear", key="deselect_all_countries", width="stretch"):
-            st.session_state["selected_countries_widget"] = []
-            st.rerun()
+    # Radio button for primary selection (horizontal layout)
+    data_source_mode = st.radio(
+        "How would you like to load data?",
+        options=[
+            "Load previously saved data from GCS",
+            "Connect and load new dataset",
+        ],
+        key="data_source_mode",
+        horizontal=True,
+        help="Choose whether to load already saved data or connect to a new data source",
+    )
 
-    with c1:
-        # Get previously selected countries or default to all countries with data
-        default_countries = st.session_state.get(
-            "selected_countries_widget", []
-        )
-        if (
-            not default_countries
-            and "selected_countries_widget" not in st.session_state
-        ):
-            # Default to all countries that have data in GCS
-            default_countries = [
-                c for c in countries if _list_country_versions_cached(BUCKET, c)
-            ][
-                :10
-            ]  # Limit to first 10 to avoid overwhelming
-            if not default_countries and countries:
-                default_countries = [countries[0]]
-
-        selected_countries = st.multiselect(
-            "Countries",
-            options=countries,
-            default=default_countries,
-            key="selected_countries_widget",
-            help="Select one or more countries to analyze. All selected countries will use the same mapping.",
-        )
-        # Update session state
-        st.session_state["selected_countries"] = selected_countries
-        # Keep backward compatibility with single country field
-        if selected_countries:
-            st.session_state["country"] = selected_countries[0]
-
-    st.caption(f"GCS Bucket: **{BUCKET}**")
+    st.divider()
 
     @_fragment()
     def step1_loader():
-        selected_countries = st.session_state.get("selected_countries", [])
-        if not selected_countries:
-            st.warning("Please select at least one country.")
-            return
-
-        # Show info about multi-country behavior
-        if len(selected_countries) > 1:
-            st.info(
-                f"📍 Loading data for **{len(selected_countries)} countries**: "
-                f"{', '.join([c.upper() for c in selected_countries])}. "
-                f"Each country's data will be loaded and saved separately."
-            )
-
-        # Use the first selected country for version checking (UI display)
-        first_country = selected_countries[0]
-
         # Get available GCS versions for the first country (for UI display)
+        # We need at least one country to get versions, so use a default if none selected yet
+        temp_country = st.session_state.get("country", "de")
+
+        # Get available GCS versions for version checking (UI display)
         versions_raw = _list_country_versions_cached(
-            BUCKET, first_country
+            BUCKET, temp_country
         )  # e.g. ["20250107_101500", "20241231_235959", "latest"]
         # Normalize versions: canonicalize any 'latest' -> 'Latest' and de-duplicate, preserving order
         seen = set()
@@ -1060,39 +1186,212 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 versions.append(vv)
                 seen.add(vv)
 
-        # Build source options with a single 'Latest' entry and no duplicate 'latest'
-        source_options = (
-            ["Latest"] + [v for v in versions if v != "Latest"] + ["Snowflake"]
+        # ═══════════════════════════════════════════════════════════
+        # STEP 1.2: Data Source Selection Based on Mode
+        # ═══════════════════════════════════════════════════════════
+        st.markdown("#### 1.2 Select Data Source")
+
+        # Get data source mode from radio button
+        data_source_mode = st.session_state.get(
+            "data_source_mode", "Load previously saved data from GCS"
         )
 
-        # Use a FORM so edits don’t commit on every keystroke
-        with st.form("load_data_form", clear_on_submit=False):
-            st.write("**Select previously loaded data:**")
-            src_idx = (
-                source_options.index(
-                    st.session_state.get("source_choice", "Latest")
-                )
-                if st.session_state.get("source_choice", "Latest")
-                in source_options
-                else 0
-            )
+        # Show appropriate UI based on mode
+        if data_source_mode == "Load previously saved data from GCS":
+            # Show GCS version selector
+            st.info("📦 Loading from previously saved datasets in GCS")
+
+            # Split options into two categories
+            # 1. Previously loaded data (GCS versions)
+            saved_data_options = ["Latest"] + [
+                v for v in versions if v != "Latest"
+            ]
+
+            current_source = st.session_state.get("source_choice", "Latest")
+            if current_source not in saved_data_options:
+                current_source = "Latest"
+
             source_choice = st.selectbox(
-                " ",
-                options=source_options,
-                index=src_idx,
-                key="source_choice",
-                label_visibility="collapsed",
+                "Select GCS version:",
+                options=saved_data_options,
+                index=saved_data_options.index(current_source),
+                key="gcs_version_choice",
+                help="Choose which saved dataset version to load",
             )
 
-            # Snowflake inputs (only relevant if Snowflake is chosen)
-            st.write("Alternatively: connect and load new dataset")
-            st.text_input(
-                "Select table",
-                key="sf_table",
+        else:
+            # Show new data source options with all 3 options in dropdown
+            # Build new source options with connection status
+            sf_connected = st.session_state.get("sf_connected", False)
+            bq_connected = (
+                st.session_state.get("bq_connected", False)
+                and st.session_state.get("bq_client") is not None
             )
-            st.text_area("Or: Write a custom SQL", key="sf_sql")
-            st.text_input("Select country field:", key="sf_country_field")
+            csv_connected = (
+                st.session_state.get("csv_connected", False)
+                and st.session_state.get("csv_data") is not None
+            )
 
+            # All data source options (always show all 3)
+            all_source_options = ["Snowflake", "BigQuery", "CSV Upload"]
+            connection_status = {
+                "Snowflake": sf_connected,
+                "BigQuery": bq_connected,
+                "CSV Upload": csv_connected,
+            }
+
+            # Get current selection or default to first option
+            current_source = st.session_state.get("source_choice", None)
+            if current_source not in all_source_options:
+                current_source = "Snowflake"
+
+            # Create columns for dropdown and connection status
+            col1, col2 = st.columns([3, 1])
+
+            with col1:
+                source_choice = st.selectbox(
+                    "Select data source:",
+                    options=all_source_options,
+                    index=all_source_options.index(current_source),
+                    key="new_source_selection",
+                    help="Choose which data source to load from",
+                )
+
+            with col2:
+                # Show connection status for the selected source
+                st.write("")  # Add spacing to align with selectbox
+                if connection_status.get(source_choice, False):
+                    st.success("✅ Connected")
+                else:
+                    st.warning("⚠️ Not connected")
+
+            # Show message if not connected
+            if not connection_status.get(source_choice, False):
+                st.caption(
+                    f"💡 Connect to {source_choice} in the **Connect Data** page"
+                )
+
+        # Store the final choice
+        st.session_state["source_choice"] = source_choice
+
+        # Show appropriate inputs only for the selected new data source (OUTSIDE FORM)
+        if source_choice == "Snowflake":
+            with st.expander("❄️ Snowflake Query", expanded=True):
+                st.text_input(
+                    "Select table",
+                    key="sf_table",
+                )
+                st.text_area("Or: Write a custom SQL", key="sf_sql")
+                st.text_input("Select country field:", key="sf_country_field")
+
+        elif source_choice == "BigQuery":
+            with st.expander("🔍 BigQuery Query", expanded=True):
+                st.text_input(
+                    "Table ID (project.dataset.table)",
+                    key="bq_table",
+                    value=st.session_state.get("bq_table", ""),
+                    help="Fully qualified table ID: project.dataset.table",
+                )
+                st.text_area(
+                    "Or: Write a custom SQL query",
+                    key="bq_sql",
+                    value=st.session_state.get("bq_sql", ""),
+                    help="Custom BigQuery SQL. Use {country} as placeholder for country filter.",
+                )
+                st.text_input(
+                    "Country field name:",
+                    key="bq_country_field",
+                    value=st.session_state.get("bq_country_field", "country"),
+                    help="Column name to filter by country",
+                )
+
+        elif source_choice == "CSV Upload":
+            with st.expander("📁 CSV Upload", expanded=True):
+                csv_filename = st.session_state.get("csv_filename", "unknown")
+                csv_shape = (
+                    st.session_state.get("csv_data").shape
+                    if st.session_state.get("csv_data") is not None
+                    else (0, 0)
+                )
+                st.info(
+                    f"**Loaded CSV**: {csv_filename}\n\n**Shape**: {csv_shape[0]:,} rows × {csv_shape[1]} columns"
+                )
+                st.caption(
+                    "Note: CSV data will be used as-is for all selected countries."
+                )
+
+        # ═══════════════════════════════════════════════════════════
+        # STEP 1.3: Country Selection
+        # ═══════════════════════════════════════════════════════════
+        st.divider()
+        st.markdown("#### 1.3 Select Countries")
+
+        # Country picker (ISO2, GCS-first) as multiselect
+        c1, c2, c3 = st.columns([3, 0.8, 0.8])
+
+        countries = _iso2_countries_gcs_first(BUCKET)
+
+        # Handle All/Clear button clicks before rendering multiselect
+        with c2:
+            # Select All button
+            if st.button("All", key="select_all_countries", width="stretch"):
+                st.session_state["selected_countries_widget"] = countries
+                st.rerun()
+        with c3:
+            # Clear button
+            if st.button(
+                "Clear", key="deselect_all_countries", width="stretch"
+            ):
+                st.session_state["selected_countries_widget"] = []
+                st.rerun()
+
+        with c1:
+            # Initialize default countries if not already in session state
+            if "selected_countries_widget" not in st.session_state:
+                # Default to all countries that have data in GCS
+                default_countries = [
+                    c
+                    for c in countries
+                    if _list_country_versions_cached(BUCKET, c)
+                ][
+                    :10
+                ]  # Limit to first 10 to avoid overwhelming
+                if not default_countries and countries:
+                    default_countries = [countries[0]]
+                st.session_state["selected_countries_widget"] = (
+                    default_countries
+                )
+
+            selected_countries = st.multiselect(
+                "Countries",
+                options=countries,
+                key="selected_countries_widget",
+                help="Select one or more countries to analyze. All selected countries will use the same mapping.",
+            )
+            # Update session state
+            st.session_state["selected_countries"] = selected_countries
+            # Keep backward compatibility with single country field
+            if selected_countries:
+                st.session_state["country"] = selected_countries[0]
+
+        st.caption(f"GCS Bucket: **{BUCKET}**")
+
+        # Check if countries are selected before proceeding
+        selected_countries = st.session_state.get("selected_countries", [])
+        if not selected_countries:
+            st.warning("Please select at least one country above.")
+            return
+
+        # Show info about multi-country behavior
+        if len(selected_countries) > 1:
+            st.info(
+                f"📍 Loading data for **{len(selected_countries)} countries**: "
+                f"{', '.join([c.upper() for c in selected_countries])}. "
+                f"Each country's data will be loaded and saved separately."
+            )
+
+        # Use a FORM only for the action buttons
+        with st.form("load_data_form", clear_on_submit=False):
             # Buttons row: Load + Refresh GCS list (side-by-side, wide)
             b1, b2 = st.columns([1, 1.2])
             with b1:
@@ -1132,8 +1431,40 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                 )
             return
 
+        # Validate required fields before loading
+        choice = st.session_state.get("source_choice", "Latest")
+
+        # Validate country field for Snowflake/BigQuery/CSV when using table mode
+        if choice == "Snowflake":
+            # Check if using table mode (not custom SQL)
+            if not st.session_state.get("sf_sql", "").strip():
+                country_field = st.session_state.get(
+                    "sf_country_field", ""
+                ).strip()
+                if not country_field:
+                    st.error(
+                        "⚠️ **Country field is required for Snowflake table queries**\n\n"
+                        "Please fill in the 'Select country field:' input above. "
+                        "This should be the column name in your Snowflake table that contains country codes "
+                        "(e.g., 'COUNTRY', 'COUNTRY_CODE', 'ISO_CODE')."
+                    )
+                    return
+        elif choice == "BigQuery":
+            # Check if using table mode (not custom SQL)
+            if not st.session_state.get("bq_sql", "").strip():
+                country_field = st.session_state.get(
+                    "bq_country_field", ""
+                ).strip()
+                if not country_field:
+                    st.error(
+                        "⚠️ **Country field is required for BigQuery table queries**\n\n"
+                        "Please fill in the 'Country field name:' input above. "
+                        "This should be the column name in your BigQuery table that contains country codes "
+                        "(e.g., 'country', 'country_code', 'iso_code')."
+                    )
+                    return
+
         try:
-            choice = st.session_state.get("source_choice", "Latest")
             df_by_country = {}
             loaded_count = 0
             failed_countries = []
@@ -1160,7 +1491,7 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                 if not st.session_state["sf_sql"].strip():
                                     country_field = st.session_state.get(
                                         "sf_country_field", "COUNTRY"
-                                    )
+                                    ).strip()
                                     sql = f"{base_sql} WHERE {country_field} = '{country.upper()}'"
                                 else:
                                     # Custom SQL - user must include country filter themselves
@@ -1168,8 +1499,109 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                     sql = st.session_state["sf_sql"].replace(
                                         "{country}", country.upper()
                                     )
+
+                                # Log the SQL for debugging
+                                st.write(
+                                    f"Executing SQL for {country.upper()}: {sql}"
+                                )
+
                                 df = _load_from_snowflake_cached(sql)
+
+                                # Validate that country field exists in the data (case-insensitive)
+                                if (
+                                    df is not None
+                                    and not df.empty
+                                    and not st.session_state["sf_sql"].strip()
+                                ):
+                                    country_field = st.session_state.get(
+                                        "sf_country_field", "COUNTRY"
+                                    ).strip()
+                                    # Case-insensitive column name matching
+                                    df_columns_lower = {
+                                        col.lower(): col for col in df.columns
+                                    }
+                                    if (
+                                        country_field.lower()
+                                        not in df_columns_lower
+                                    ):
+                                        raise ValueError(
+                                            f"Country field '{country_field}' not found in Snowflake table. "
+                                            f"Available columns: {', '.join(df.columns.tolist())}. "
+                                            f"Please check the 'Select country field:' input and ensure it matches a column name in your table."
+                                        )
+
                                 load_method = f"Snowflake ({len(df) if df is not None else 0} rows)"
+
+                        elif choice == "BigQuery":
+                            # Load from BigQuery with country-specific WHERE clause
+                            from utils.bigquery_connector import execute_query
+
+                            bq_client = st.session_state.get("bq_client")
+                            if not bq_client:
+                                raise ValueError(
+                                    "BigQuery client not found. Please reconnect in Connect Data page."
+                                )
+
+                            bq_table = st.session_state.get("bq_table", "")
+                            bq_sql = st.session_state.get("bq_sql", "")
+
+                            if bq_sql.strip():
+                                # Custom SQL - replace country placeholder
+                                sql = bq_sql.replace(
+                                    "{country}", country.upper()
+                                )
+                            elif bq_table.strip():
+                                # Use table with country filter
+                                country_field = st.session_state.get(
+                                    "bq_country_field", "country"
+                                ).strip()
+                                sql = f"SELECT * FROM `{bq_table}` WHERE {country_field} = '{country.upper()}'"
+                            else:
+                                raise ValueError(
+                                    "Please provide either a BigQuery table ID or custom SQL query."
+                                )
+
+                            df = execute_query(
+                                bq_client, sql, fetch_pandas=True
+                            )
+
+                            # Validate that country field exists in the data (case-insensitive)
+                            if (
+                                df is not None
+                                and not df.empty
+                                and not bq_sql.strip()
+                            ):
+                                country_field = st.session_state.get(
+                                    "bq_country_field", "country"
+                                ).strip()
+                                # Case-insensitive column name matching
+                                df_columns_lower = {
+                                    col.lower(): col for col in df.columns
+                                }
+                                if (
+                                    country_field.lower()
+                                    not in df_columns_lower
+                                ):
+                                    raise ValueError(
+                                        f"Country field '{country_field}' not found in BigQuery table. "
+                                        f"Available columns: {', '.join(df.columns.tolist())}. "
+                                        f"Please check the 'Country field name:' input and ensure it matches a column name in your table."
+                                    )
+
+                            load_method = f"BigQuery ({len(df) if df is not None else 0} rows)"
+
+                        elif choice == "CSV Upload":
+                            # Load from uploaded CSV (same data for all countries)
+                            csv_data = st.session_state.get("csv_data")
+                            if csv_data is None or csv_data.empty:
+                                raise ValueError(
+                                    "CSV data not found. Please upload a CSV in Connect Data page."
+                                )
+
+                            # For CSV, we use the same data for all countries
+                            # Users can filter by country column if they have one
+                            df = csv_data.copy()
+                            load_method = f"CSV Upload ({len(df)} rows)"
 
                         else:
                             # Load from GCS
@@ -1225,15 +1657,28 @@ with st.expander("📊 Choose the data you want to analyze.", expanded=False):
                                 f"✅ {country.upper()}: {load_method}"
                             )
                         else:
-                            failed_countries.append(country)
-                            load_details.append(
-                                f"❌ {country.upper()}: {load_method or 'No data'}"
-                            )
+                            # Country has no data (0 rows or None)
+                            if df is not None and df.empty:
+                                # Data source returned empty result
+                                load_details.append(
+                                    f"⚠️ {country.upper()}: Skipped - No data found (0 rows)"
+                                )
+                            else:
+                                # df is None - data source had no data
+                                failed_countries.append(country)
+                                load_details.append(
+                                    f"❌ {country.upper()}: {load_method or 'No data available'}"
+                                )
 
                     except Exception as e:
                         failed_countries.append(country)
+                        # Parse and simplify error message for business users
+                        error_msg = str(e)
+                        user_friendly_error = _simplify_error_message(
+                            error_msg, choice, country
+                        )
                         load_details.append(
-                            f"❌ {country.upper()}: Error - {str(e)[:50]}"
+                            f"❌ {country.upper()}: {user_friendly_error}"
                         )
 
             # Update session state
@@ -1685,8 +2130,8 @@ with st.expander(
 
         # Build goals source
         if st.session_state["goals_df"].empty:
-            # Only suggest goals on first load, don't merge with heuristics later
-            heur = _initial_goals_from_columns(all_cols)
+            # Return empty goals on first load - user must select manually
+            heur = _initial_goals_from_columns()
             goals_src = heur
         else:
             # Keep only what's in session - don't add heuristics if user has edited
@@ -1881,58 +2326,64 @@ with st.expander(
     # ---- Auto-tag rules ----
 
     with st.expander("🏷️ Automatically tag your variables", expanded=False):
-        st.write("**Use suffixes to tag columns.**")
+        st.write("**Use prefixes or suffixes to tag columns.**")
+        st.caption(
+            "Enter patterns that identify each variable type. "
+            "Use prefixes (e.g. 'crm_') if columns start with the pattern, "
+            "or suffixes (e.g. '_sessions') if they end with it. "
+            "Context and Organic variables have higher priority than Paid Media."
+        )
         rcol1, rcol2, rcol3 = st.columns(3)
 
-        def _parse_sfx(s: str) -> list[str]:
+        def _parse_patterns(s: str) -> list[str]:
             return [x.strip() for x in s.split(",") if x.strip()]
 
         new_rules = {
-            "paid_media_spends": _parse_sfx(
+            "paid_media_spends": _parse_patterns(
                 rcol1.text_input(
                     "Paid media spends:",
                     value=", ".join(
                         st.session_state["auto_rules"]["paid_media_spends"]
                     ),
-                    help="Suffixes that identify spend columns, e.g. '_spend', '_cost'",
+                    help="Prefix/suffix patterns for spend columns, e.g. '_spend', '_cost', 'paid_'",
                 )
             ),
-            "paid_media_vars": _parse_sfx(
+            "paid_media_vars": _parse_patterns(
                 rcol1.text_input(
                     "Paid media variables",
                     value=", ".join(
                         st.session_state["auto_rules"]["paid_media_vars"]
                     ),
                     key="paid_vars",
-                    help="Suffixes for media activity metrics, e.g. '_clicks', '_impressions', '_views'",
+                    help="Prefix/suffix patterns for media metrics, e.g. '_clicks', '_impressions', '_views'",
                 )
             ),
-            "context_vars": _parse_sfx(
+            "context_vars": _parse_patterns(
                 rcol2.text_input(
-                    "Context Variables",
+                    "Context Variables (Higher Priority)",
                     value=", ".join(
                         st.session_state["auto_rules"]["context_vars"]
                     ),
-                    help="Suffixes for non-media drivers, e.g. '_promo', '_weather'",
+                    help="Prefix/suffix patterns for non-media drivers, e.g. '_promo', '_weather', 'context_'",
                 )
             ),
-            "organic_vars": _parse_sfx(
+            "organic_vars": _parse_patterns(
                 rcol2.text_input(
-                    "Organic Variables",
+                    "Organic Variables (Higher Priority)",
                     value=", ".join(
                         st.session_state["auto_rules"]["organic_vars"]
                     ),
                     key="org_vars",
-                    help="Suffixes for organic traffic channels, e.g. '_organic', '_direct'. Similar to Paid Spends, they also receive response-curves.",
+                    help="Prefix/suffix patterns for organic channels, e.g. '_organic', '_direct', 'crm_'. These receive response-curves like Paid Spends.",
                 )
             ),
-            "factor_vars": _parse_sfx(
+            "factor_vars": _parse_patterns(
                 rcol3.text_input(
                     "Factor Variables (True/False)",
                     value=", ".join(
                         st.session_state["auto_rules"]["factor_vars"]
                     ),
-                    help="Suffixes for binary flags, e.g. 'is_big_promotion','is_holiday'",
+                    help="Prefix/suffix patterns for binary flags, e.g. 'is_', '_flag', '_on'",
                 )
             ),
         }
@@ -1941,15 +2392,14 @@ with st.expander(
         )
         if rules_changed:
             st.session_state["auto_rules"] = new_rules
-            # seed mapping again only when rules change AND user hasn't started manual edits
-            if st.session_state["mapping_df"].empty:
-                st.session_state["mapping_df"] = _build_mapping_df(
-                    all_cols, df_raw, new_rules
-                )
+            # Rebuild mapping when rules change to apply new categorization
+            st.session_state["mapping_df"] = _build_mapping_df(
+                all_cols, df_raw, new_rules
+            )
 
         # Prefix configuration for aggregated variables
         st.divider()
-        st.write("**Use prefixes to automate tagging instead:**")
+        st.write("**Prefixes for aggregated columns:**")
         st.caption(
             "Define prefixes to use when creating aggregated columns for these categories"
         )

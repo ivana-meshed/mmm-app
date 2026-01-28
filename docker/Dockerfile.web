@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir \
     "streamlit[auth]>=1.43" \
     snowflake-connector-python \
+    google-cloud-bigquery \
     google-cloud-storage \
     google-cloud-run \
     google-cloud-secret-manager \
@@ -25,7 +26,8 @@ RUN pip install --no-cache-dir \
     numpy==1.26.4 \
     plotly \
     scipy \
-    pytz
+    pytz \
+    db-dtypes
 
 WORKDIR /app
 

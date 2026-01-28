@@ -20,10 +20,11 @@ RUN echo 'export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}' >> /etc/environment && \
 
 # Python deps with performance libraries
 RUN pip3 install --no-cache-dir \
-    streamlit snowflake-connector-python google-cloud-storage google-cloud-secret-manager \
+    streamlit snowflake-connector-python google-cloud-bigquery \
+    google-cloud-storage google-cloud-secret-manager \
     pandas numpy scipy nevergrad \
     # NEW: Add performance libraries
-    numba pyarrow fastparquet joblib psutil
+    numba pyarrow fastparquet joblib psutil db-dtypes
 
 # Install uv so reticulate/Robyn can find it
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
