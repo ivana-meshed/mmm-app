@@ -51,19 +51,25 @@ training_data/{country}/{goal}/{timestamp}/selected_columns.json
   - Lists all available goals for a given country
   - Extracts goals from GCS path structure
 
-- **Completely restructured data selection UI**:
-  - **Removed redundant country selection** - country now derived from training data config path
-  - **Step 1**: Select training configuration (Goal | Timestamp) in 2-column layout
-  - **Step 2**: Confirm/override data selections (Data Version | Goal | Timestamp | Metadata Version) in 4-column layout
-  - Training data config auto-fills data_version and meta_version from loaded JSON
-  - Users can still manually override data/metadata versions if needed
-  - Cascading behavior: goal selection loads available timestamps
+- **"Select Data" expander updated**:
+  - **All 4 filters in ONE ROW** using `st.columns(4)`:
+    - Column 1: Primary Country (selectbox)
+    - Column 2: Goal (selectbox) - NEW! Added goal filtering
+    - Column 3: Mapped Data version (selectbox)
+    - Column 4: Metadata version (selectbox)
+  - Goal dropdown lists available goals from training data for selected country
   - Auto-selects from `just_exported_training_goal` session state
 
+- **"Training Data Configuration" section preserved**:
+  - Kept as separate section below Select Data
+  - Maintains 3-column layout: Country (readonly) | Goal | Timestamp
+  - Allows loading saved configurations from Prepare Training Data
+  - Cascading behavior: goal selection loads available timestamps
+
 **Impact:**
-- **All filters in single row** - compact, unified data selection interface
-- Country automatically determined from training data config
-- Users can filter by goal and timestamp, then optionally adjust data/metadata versions
+- **Goal filtering added to data selection** - Users can filter by goal when selecting data/metadata versions
+- **Clear workflow separation** - Data selection vs. Training configuration remain distinct
+- Compact single-row layout for all data selection filters
 - Backward compatible with new path structure only (requires migration)
 
 #### C. `app/nav/View_Results.py`
@@ -204,18 +210,25 @@ Timestamp: [20240115_120000 ▼]
 
 **After:**
 ```
-Step 1: Select Training Configuration
-┌──────────────────────┬──────────────────────┐
-│        Goal          │      Timestamp       │
-│    [revenue ▼]       │  [20240115_120000 ▼] │
-└──────────────────────┴──────────────────────┘
+Select Data (4-column row)
+┌──────────┬──────────┬──────────────┬──────────────┐
+│ Country  │   Goal   │  Data Version│   Metadata   │
+│  [DE ▼]  │[revenue ▼]│ [20240115 ▼] │ [Universal ▼]│
+└──────────┴──────────┴──────────────┴──────────────┘
 
-Step 2: Confirm Data Selections (4-column row)
-┌─────────────┬──────────┬──────────────┬──────────────┐
-│ Data Version│   Goal   │  Timestamp   │   Metadata   │
-│ [20240115 ▼]│ revenue  │ 20240115_... │ [Universal ▼]│
-└─────────────┴──────────┴──────────────┴──────────────┘
+---
+Training Data Configuration (from Prepare Training Data)
+┌─────────────┬──────────┬──────────────┐
+│  Country    │   Goal   │  Timestamp   │
+│     DE      │[revenue ▼]│ [20240115 ▼] │
+│ (readonly)  │          │              │
+└─────────────┴──────────┴──────────────┘
 ```
+
+**Key improvements:**
+- Added Goal filter to Select Data section
+- Two separate sections for different workflows
+- All Select Data filters in one compact row
 
 #### View Results Page
 
@@ -273,8 +286,10 @@ Revision: [gmv001 ▼]
 ```
 
 **Key Improvements:**
-- All filters in compact single-row layouts
-- Better space utilization
+- Goal filtering added to Run Experiment's Select Data section
+- All Select Data filters in compact single-row layout
+- Training Data Configuration preserved as separate section
+- Better space utilization across all result pages
 - Clearer visual hierarchy
 - Consistent UI patterns across all pages
 
