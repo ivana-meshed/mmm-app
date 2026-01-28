@@ -51,18 +51,19 @@ training_data/{country}/{goal}/{timestamp}/selected_columns.json
   - Lists all available goals for a given country
   - Extracts goals from GCS path structure
 
-- Completely refactored Training Data Config UI section (lines 590-747):
-  - Replaced single dropdown with 3-column layout
-  - Column 1: Country (readonly text input showing lookup_country)
-  - Column 2: Goal (dropdown with auto-selection from session state)
-  - Column 3: Timestamp (dropdown with auto-selection from session state)
-  - Cascading behavior: selecting goal loads available timestamps
+- **Completely restructured data selection UI**:
+  - **Removed redundant country selection** - country now derived from training data config path
+  - **Step 1**: Select training configuration (Goal | Timestamp) in 2-column layout
+  - **Step 2**: Confirm/override data selections (Data Version | Goal | Timestamp | Metadata Version) in 4-column layout
+  - Training data config auto-fills data_version and meta_version from loaded JSON
+  - Users can still manually override data/metadata versions if needed
+  - Cascading behavior: goal selection loads available timestamps
   - Auto-selects from `just_exported_training_goal` session state
-  - Updates all three session state keys: country, goal, and timestamp
 
 **Impact:**
-- UI now displays filters side-by-side as requested
-- Users can filter by country, goal, and timestamp independently
+- **All filters in single row** - compact, unified data selection interface
+- Country automatically determined from training data config
+- Users can filter by goal and timestamp, then optionally adjust data/metadata versions
 - Backward compatible with new path structure only (requires migration)
 
 #### C. `app/nav/View_Results.py`
@@ -77,14 +78,18 @@ training_data/{country}/{goal}/{timestamp}/selected_columns.json
   - Returns mapping of (rev, country, stamp) tuples to goal strings
   - Caches unique timestamps to minimize GCS calls
 
-- Added goal multiselect filter in UI:
-  - Displayed between Country and Timestamp filters
-  - Shows all unique goals for selected revision and countries
+- **Restructured filter UI to single-row layout**:
+  - **All 4 filters in ONE ROW** using st.columns(4)
+  - Column 1: Experiment Name (selectbox)
+  - Column 2: Country (multiselect)
+  - Column 3: Goal (dep_var) (multiselect)
+  - Column 4: Timestamp (selectbox, optional)
   - Session state caching (`goals_cache_{rev}_{countries}`) for performance
   - Persistent selection via `view_results_goals_value` session state key
   - Filters displayed runs based on selected goals
 
 **Impact:**
+- **Compact single-row filter layout** for better space utilization
 - Users can filter model results by goal variable
 - Goal information extracted from model configuration files
 - Session state persistence maintains selections across page navigation
@@ -95,13 +100,17 @@ training_data/{country}/{goal}/{timestamp}/selected_columns.json
 **Changes:**
 - Added `extract_goal_from_config()` function (same as View_Results.py)
 - Added `get_goals_for_runs()` function (same as View_Results.py)
-- Added goal multiselect filter in UI:
-  - Displayed between Country and Timestamp filters
+- **Restructured filter UI to single-row layout**:
+  - Revision filter remains separate (primary filter)
+  - **Countries and Goal in ONE ROW** using st.columns(2)
+  - Column 1: Countries (multiselect)
+  - Column 2: Goal (dep_var) (multiselect)
   - Session state caching (`goals_cache_best_{rev}_{countries}`)
   - Persistent selection via `view_best_results_goals_value` session state key
   - Filters countries to show only those with runs matching selected goals
 
 **Impact:**
+- **Compact two-column layout** for related filters
 - Consistent goal filtering across all result pages
 - Users can compare best results filtered by specific goals
 - Countries are automatically filtered to those with selected goals
@@ -111,13 +120,18 @@ training_data/{country}/{goal}/{timestamp}/selected_columns.json
 **Changes:**
 - Added `extract_goal_from_config()` function (same as View_Results.py)
 - Added `get_goals_for_runs()` function (same as View_Results.py)
-- Added goal multiselect filter in UI:
-  - Displayed between Country and Timestamp filters
+- **Restructured filter UI to single-row layout**:
+  - **All 4 filters in ONE ROW** using st.columns(4)
+  - Column 1: Experiment Name (selectbox)
+  - Column 2: Country (multiselect)
+  - Column 3: Goal (dep_var) (multiselect)
+  - Column 4: Timestamp (selectbox, optional)
   - Session state caching (`goals_cache_stability_{rev}_{countries}`)
   - Persistent selection via `model_stability_goals_value` session state key
   - Filters runs for stability analysis based on selected goals
 
 **Impact:**
+- **Compact single-row filter layout** matching View_Results page
 - Goal filtering integrated into stability analysis workflow
 - Users can analyze model stability for specific goal variables
 - Consistent filtering experience across all analysis pages
@@ -174,23 +188,95 @@ Comprehensive documentation for the migration process including:
 
 ### 5. UI Changes
 
-#### Before:
+#### Run Experiment Page
+
+**Before:**
 ```
+Country: [DE ▼]
+Mapped Data version: [20240115_120000 ▼]
+Metadata version: [Universal - 20240115_120000 ▼]
+---
 Training Data Configuration
-[Dropdown: Select Training Data Config]
+Country (readonly): DE
+Goal: [revenue ▼]
+Timestamp: [20240115_120000 ▼]
 ```
 
-#### After:
+**After:**
 ```
-Training Data Configuration
-┌─────────────┬──────────────┬─────────────────┐
-│   Country   │     Goal     │   Timestamp     │
-│  (readonly) │  (dropdown)  │   (dropdown)    │
-│     DE      │   revenue    │  20240115_...   │
-└─────────────┴──────────────┴─────────────────┘
+Step 1: Select Training Configuration
+┌──────────────────────┬──────────────────────┐
+│        Goal          │      Timestamp       │
+│    [revenue ▼]       │  [20240115_120000 ▼] │
+└──────────────────────┴──────────────────────┘
+
+Step 2: Confirm Data Selections (4-column row)
+┌─────────────┬──────────┬──────────────┬──────────────┐
+│ Data Version│   Goal   │  Timestamp   │   Metadata   │
+│ [20240115 ▼]│ revenue  │ 20240115_... │ [Universal ▼]│
+└─────────────┴──────────┴──────────────┴──────────────┘
 ```
 
-Filters are displayed side-by-side in columns as requested.
+#### View Results Page
+
+**Before:**
+```
+Experiment: [gmv001 ▼]
+Country: [DE, FR ☑]
+Goal (dep_var): [revenue ☑]
+Timestamp: [20240115_120000 ▼]
+```
+
+**After (All in ONE ROW):**
+```
+┌──────────────┬────────────┬───────────────┬──────────────┐
+│  Experiment  │  Country   │     Goal      │  Timestamp   │
+│  [gmv001 ▼]  │ [DE, FR ☑] │ [revenue ☑]   │ [20240115 ▼] │
+└──────────────┴────────────┴───────────────┴──────────────┘
+```
+
+#### Review Model Stability Page
+
+**Before:**
+```
+Experiment: [gmv001 ▼]
+Country: [DE ☑]
+Goal (dep_var): [revenue ☑]
+Timestamp: [20240115_120000 ▼]
+```
+
+**After (All in ONE ROW):**
+```
+┌──────────────┬──────────┬──────────────┬──────────────┐
+│  Experiment  │ Country  │     Goal     │  Timestamp   │
+│  [gmv001 ▼]  │ [DE ☑]   │ [revenue ☑]  │ [20240115 ▼] │
+└──────────────┴──────────┴──────────────┴──────────────┘
+```
+
+#### View Best Results Page
+
+**Before:**
+```
+Revision: [gmv001 ▼]
+Countries: [DE, FR ☑]
+Goal (dep_var): [revenue ☑]
+```
+
+**After:**
+```
+Revision: [gmv001 ▼]
+
+┌─────────────┬──────────────┐
+│  Countries  │     Goal     │
+│ [DE, FR ☑]  │ [revenue ☑]  │
+└─────────────┴──────────────┘
+```
+
+**Key Improvements:**
+- All filters in compact single-row layouts
+- Better space utilization
+- Clearer visual hierarchy
+- Consistent UI patterns across all pages
 
 ### 6. Backward Compatibility
 
