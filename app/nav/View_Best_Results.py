@@ -1557,41 +1557,99 @@ else:
         st.info("No countries found in the provided prefix.")
         st.stop()
 
-    # Determine default countries for multiselect
-    # Use separate session state key that persists across navigation
-    if "view_best_results_countries_all_value" in st.session_state:
-        # User has saved selections - validate and preserve
-        current_countries = st.session_state[
-            "view_best_results_countries_all_value"
-        ]
-        valid_countries = [c for c in current_countries if c in all_countries]
-        if valid_countries:
-            # Has valid selections - use them
-            default_countries = valid_countries
-        else:
-            # All selections are invalid - use default
-            default_countries = [all_countries[0]]
+    # Create 2-column layout for Country and Goal filters
+    col1, col2 = st.columns(2)
+
+    # Determine default country for selectbox
+    if "view_best_results_country_all_value" in st.session_state:
+        current_country = st.session_state["view_best_results_country_all_value"]
+        default_country = (
+            current_country
+            if current_country in all_countries
+            else (all_countries[0] if all_countries else None)
+        )
     else:
-        # First time - use default
-        default_countries = [all_countries[0]]
+        default_country = all_countries[0] if all_countries else None
 
-    countries_sel = st.multiselect(
-        "Countries",
-        all_countries,
-        default=default_countries,
-    )
-
-    # Store selection in persistent session state key (not widget key)
-    if countries_sel != st.session_state.get(
-        "view_best_results_countries_all_value"
-    ):
-        st.session_state["view_best_results_countries_all_value"] = (
-            countries_sel
+    with col1:
+        country_index = all_countries.index(default_country) if default_country in all_countries else 0
+        country_sel = st.selectbox(
+            "Country",
+            all_countries,
+            index=country_index,
         )
 
-    if not countries_sel:
-        st.info("Select at least one country.")
+        # Store selection in persistent session state key
+        if country_sel != st.session_state.get("view_best_results_country_all_value"):
+            st.session_state["view_best_results_country_all_value"] = country_sel
+
+    # Check country selection before proceeding
+    if not country_sel:
+        st.info("Select a country.")
         st.stop()
+
+    # Convert to list for compatibility with existing code
+    countries_sel = [country_sel]
+
+    # Goals available for selected country
+    # Extract goals from configs for the filtered runs
+    all_country_keys = [k for k in runs.keys() if k[1] == country_sel]
+
+    # Get goals for all runs (cached in session state to avoid repeated GCS calls)
+    cache_key = f"goals_cache_all_{country_sel}"
+    if cache_key not in st.session_state:
+        with st.spinner("Loading goal information..."):
+            goals_map = get_goals_for_runs(bucket_name, all_country_keys)
+            st.session_state[cache_key] = goals_map
+    else:
+        goals_map = st.session_state[cache_key]
+
+    # Get unique goals for the filtered runs
+    all_country_goals = sorted(
+        {goals_map.get(k) for k in all_country_keys if goals_map.get(k)}
+    )
+
+    if all_country_goals:
+        # Determine default goal for selectbox
+        if "view_best_results_goal_all_value" in st.session_state:
+            current_goal = st.session_state["view_best_results_goal_all_value"]
+            default_goal = (
+                current_goal
+                if current_goal in all_country_goals
+                else (all_country_goals[0] if all_country_goals else None)
+            )
+        else:
+            default_goal = all_country_goals[0] if all_country_goals else None
+
+        with col2:
+            goal_index = all_country_goals.index(default_goal) if default_goal in all_country_goals else 0
+            goal_sel = st.selectbox(
+                "Goal (dep_var)",
+                all_country_goals,
+                index=goal_index,
+                help="Filter by goal variable used in model training",
+            )
+
+            # Store selection in persistent session state key
+            if goal_sel != st.session_state.get("view_best_results_goal_all_value"):
+                st.session_state["view_best_results_goal_all_value"] = goal_sel
+
+        # Check goal selection
+        if not goal_sel:
+            st.info("Select a goal.")
+            st.stop()
+
+        # Filter runs by selected goal
+        goals_sel = [goal_sel]
+        all_country_keys = [
+            k for k in all_country_keys if goals_map.get(k) in goals_sel
+        ]
+    else:
+        # No goal information available - proceed without goal filtering
+        goals_sel = None
+        st.warning(
+            "Goal information not available for some runs. Showing all runs."
+        )
 
     for ctry in countries_sel:
         with st.spinner(f"Loading best results for {ctry.upper()}..."):
