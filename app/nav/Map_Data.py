@@ -122,8 +122,9 @@ def _list_metadata_versions(bucket: str, country: str) -> List[str]:
 def _download_parquet_from_gcs(gs_bucket: str, blob_path: str) -> pd.DataFrame:
     """Download parquet file from GCS with database-specific type handling."""
     import logging
-    import pyarrow.parquet as pq
+
     import pyarrow as pa
+    import pyarrow.parquet as pq
 
     logger = logging.getLogger(__name__)
     client = storage.Client()
@@ -580,20 +581,20 @@ def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
     """
     Infer category based on prefix or suffix matching.
     Priority: context_vars and organic_vars take precedence over paid_media_* categories.
-    
+
     Args:
         col: Column name to categorize
         rules: Dict mapping category names to list of prefix/suffix patterns
-    
+
     Returns:
         Category name or empty string if no match
     """
     s = str(col).lower()
-    
+
     # Define priority order: high priority categories first
     high_priority = ["context_vars", "organic_vars"]
     low_priority = ["paid_media_spends", "paid_media_vars", "factor_vars"]
-    
+
     # Check high priority categories first
     for cat in high_priority:
         if cat in rules:
@@ -602,7 +603,7 @@ def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
                 # Check both prefix and suffix
                 if s.startswith(pattern_lower) or s.endswith(pattern_lower):
                     return cat
-    
+
     # Then check low priority categories
     for cat in low_priority:
         if cat in rules:
@@ -611,7 +612,7 @@ def _infer_category(col: str, rules: dict[str, list[str]]) -> str:
                 # Check both prefix and suffix
                 if s.startswith(pattern_lower) or s.endswith(pattern_lower):
                     return cat
-    
+
     return ""
 
 
@@ -2325,9 +2326,7 @@ with st.expander(
     # ---- Auto-tag rules ----
 
     with st.expander("🏷️ Automatically tag your variables", expanded=False):
-        st.write(
-            "**Use prefixes or suffixes to tag columns.**"
-        )
+        st.write("**Use prefixes or suffixes to tag columns.**")
         st.caption(
             "Enter patterns that identify each variable type. "
             "Use prefixes (e.g. 'crm_') if columns start with the pattern, "

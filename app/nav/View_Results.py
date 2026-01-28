@@ -256,6 +256,7 @@ def extract_goal_from_config(bucket_name: str, stamp: str):
             return None
         config_data = blob.download_as_bytes()
         import json
+
         config = json.loads(config_data.decode("utf-8"))
         return config.get("dep_var")
     except Exception:
@@ -266,7 +267,7 @@ def get_goals_for_runs(bucket_name: str, run_keys):
     """Extract goals for a set of runs. Returns dict mapping (rev, country, stamp) to goal."""
     goals_map = {}
     unique_stamps = {k[2] for k in run_keys}
-    
+
     for stamp in unique_stamps:
         goal = extract_goal_from_config(bucket_name, stamp)
         if goal:
@@ -274,7 +275,7 @@ def get_goals_for_runs(bucket_name: str, run_keys):
             for key in run_keys:
                 if key[2] == stamp:
                     goals_map[key] = goal
-    
+
     return goals_map
 
 
@@ -1277,11 +1278,16 @@ else:
         all_revs.index(default_rev) if default_rev in all_revs else 0
     )
 
-rev = st.selectbox(
-    "Experiment Name (tag & number, e.g. gmv001)",
-    all_revs,
-    index=default_rev_index,
-)
+# Create 4-column layout for filters
+col1, col2, col3, col4 = st.columns(4)
+
+# Column 1: Experiment Name
+with col1:
+    rev = st.selectbox(
+        "Experiment Name (tag & number, e.g. gmv001)",
+        all_revs,
+        index=default_rev_index,
+    )
 
 # Store selection in persistent session state key (not widget key)
 if rev != st.session_state.get("view_results_revision_value"):
@@ -1321,11 +1327,13 @@ else:
     # First time - use default
     default_countries = [default_country_in_rev]
 
-countries_sel = st.multiselect(
-    "Country",
-    rev_countries,
-    default=default_countries,
-)
+# Column 2: Country
+with col2:
+    countries_sel = st.multiselect(
+        "Country",
+        rev_countries,
+        default=default_countries,
+    )
 
 # Store selection in persistent session state key (not widget key)
 if countries_sel != st.session_state.get("view_results_countries_value"):
@@ -1350,7 +1358,9 @@ else:
     goals_map = st.session_state[cache_key]
 
 # Get unique goals for the filtered runs
-rev_country_goals = sorted({goals_map.get(k) for k in rev_country_keys if goals_map.get(k)})
+rev_country_goals = sorted(
+    {goals_map.get(k) for k in rev_country_keys if goals_map.get(k)}
+)
 
 # Determine default goals for multiselect
 if "view_results_goals_value" in st.session_state:
@@ -1367,28 +1377,34 @@ else:
     # First time - use all available goals
     default_goals = rev_country_goals
 
-if rev_country_goals:
-    goals_sel = st.multiselect(
-        "Goal (dep_var)",
-        rev_country_goals,
-        default=default_goals,
-        help="Filter by goal variable used in model training",
-    )
-    
-    # Store selection in persistent session state key
-    if goals_sel != st.session_state.get("view_results_goals_value"):
-        st.session_state["view_results_goals_value"] = goals_sel
-    
-    if not goals_sel:
-        st.info("Select at least one goal.")
-        st.stop()
-    
-    # Filter runs by selected goals
-    rev_country_keys = [k for k in rev_country_keys if goals_map.get(k) in goals_sel]
-else:
-    # No goal information available - proceed without goal filtering
-    goals_sel = None
-    st.warning("Goal information not available for some runs. Showing all runs.")
+# Column 3: Goal (dep_var)
+with col3:
+    if rev_country_goals:
+        goals_sel = st.multiselect(
+            "Goal (dep_var)",
+            rev_country_goals,
+            default=default_goals,
+            help="Filter by goal variable used in model training",
+        )
+
+        # Store selection in persistent session state key
+        if goals_sel != st.session_state.get("view_results_goals_value"):
+            st.session_state["view_results_goals_value"] = goals_sel
+
+        if not goals_sel:
+            st.info("Select at least one goal.")
+            st.stop()
+
+        # Filter runs by selected goals
+        rev_country_keys = [
+            k for k in rev_country_keys if goals_map.get(k) in goals_sel
+        ]
+    else:
+        # No goal information available - proceed without goal filtering
+        goals_sel = None
+        st.warning(
+            "Goal information not available for some runs. Showing all runs."
+        )
 
 # Timestamps available for selected revision and countries
 all_stamps = sorted(
@@ -1411,14 +1427,16 @@ else:
     # First time - use default (empty)
     default_stamp_index = 0
 
-stamp_sel = st.selectbox(
-    "Timestamp (optional)",
-    stamp_options,
-    index=default_stamp_index,
-    help=(
-        "Leave empty to use the latest run per tag number. Useful when you have multiple runs."
-    ),
-)
+# Column 4: Timestamp
+with col4:
+    stamp_sel = st.selectbox(
+        "Timestamp (optional)",
+        stamp_options,
+        index=default_stamp_index,
+        help=(
+            "Leave empty to use the latest run per tag number. Useful when you have multiple runs."
+        ),
+    )
 
 # Store selection in persistent session state key (not widget key)
 if stamp_sel != st.session_state.get("view_results_timestamp_value"):

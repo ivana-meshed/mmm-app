@@ -71,8 +71,9 @@ def _read_from_gcs_cache(query_hash: str) -> Optional[pd.DataFrame]:
 
     try:
         import io
-        import pyarrow.parquet as pq
+
         import pyarrow as pa
+        import pyarrow.parquet as pq
 
         client = storage.Client()
         bucket = client.bucket(CACHE_BUCKET)
@@ -106,10 +107,10 @@ def _read_from_gcs_cache(query_hash: str) -> Optional[pd.DataFrame]:
 
         data = blob.download_as_bytes()
         buffer = io.BytesIO(data)
-        
+
         # Read using PyArrow to handle database-specific types
         table = pq.read_table(buffer)
-        
+
         # Check for database-specific types and convert them
         schema = table.schema
         db_type_columns = []
@@ -124,12 +125,13 @@ def _read_from_gcs_cache(query_hash: str) -> Optional[pd.DataFrame]:
                 logger.warning(
                     f"Column '{field.name}' has database-specific type '{field.type}'"
                 )
-        
+
         # Convert to pandas with type mapping for database-specific types
         if db_type_columns:
             logger.info(
                 f"Converting database-specific types in columns: {db_type_columns}"
             )
+
             # Create a types_mapper that converts unknown types to string
             def types_mapper(pa_type):
                 type_str = str(pa_type).lower()
@@ -137,7 +139,7 @@ def _read_from_gcs_cache(query_hash: str) -> Optional[pd.DataFrame]:
                     # Map database types to string for safe conversion
                     return pd.StringDtype()
                 return None  # Use default mapping for other types
-            
+
             return table.to_pandas(types_mapper=types_mapper)
         else:
             # No database-specific types, use standard conversion

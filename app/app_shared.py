@@ -2113,8 +2113,8 @@ def resolve_meta_blob_from_selection(
 
 
 def _download_parquet_from_gcs(bucket: str, blob_path: str) -> pd.DataFrame:
-    import pyarrow.parquet as pq
     import pyarrow as pa
+    import pyarrow.parquet as pq
 
     client = storage.Client()
     blob = client.bucket(bucket).blob(blob_path)
@@ -2193,8 +2193,8 @@ def safe_read_parquet(file_path: str) -> pd.DataFrame:
     Returns:
         DataFrame with the parquet data
     """
-    import pyarrow.parquet as pq
     import pyarrow as pa
+    import pyarrow.parquet as pq
 
     try:
         # Read parquet file using PyArrow first to handle database-specific types
@@ -2919,8 +2919,9 @@ def sync_session_state_keys():
     Note: For widget keys like picked_data_ts and picked_meta_ts, we sync TO
     the other keys but don't sync FROM to avoid Streamlit warnings.
     """
-    import streamlit as st
     import logging
+
+    import streamlit as st
 
     logger = logging.getLogger(__name__)
 
@@ -3008,8 +3009,9 @@ def update_session_timestamp(key: str):
     Args:
         key: The session state key that was updated
     """
-    import streamlit as st
     import time
+
+    import streamlit as st
 
     if "_sync_timestamps" not in st.session_state:
         st.session_state["_sync_timestamps"] = {}

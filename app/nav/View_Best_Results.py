@@ -254,6 +254,7 @@ def extract_goal_from_config(bucket_name: str, stamp: str):
             return None
         config_data = blob.download_as_bytes()
         import json
+
         config = json.loads(config_data.decode("utf-8"))
         return config.get("dep_var")
     except Exception:
@@ -264,7 +265,7 @@ def get_goals_for_runs(bucket_name: str, run_keys):
     """Extract goals for a set of runs. Returns dict mapping (rev, country, stamp) to goal."""
     goals_map = {}
     unique_stamps = {k[2] for k in run_keys}
-    
+
     for stamp in unique_stamps:
         goal = extract_goal_from_config(bucket_name, stamp)
         if goal:
@@ -272,7 +273,7 @@ def get_goals_for_runs(bucket_name: str, run_keys):
             for key in run_keys:
                 if key[2] == stamp:
                     goals_map[key] = goal
-    
+
     return goals_map
 
 
@@ -1392,7 +1393,9 @@ if not auto_best:
         goals_map = st.session_state[cache_key]
 
     # Get unique goals for the filtered runs
-    rev_country_goals = sorted({goals_map.get(k) for k in rev_country_keys if goals_map.get(k)})
+    rev_country_goals = sorted(
+        {goals_map.get(k) for k in rev_country_keys if goals_map.get(k)}
+    )
 
     # Determine default goals for multiselect
     if "view_best_results_goals_value" in st.session_state:
@@ -1416,29 +1419,33 @@ if not auto_best:
             default=default_goals,
             help="Filter by goal variable used in model training",
         )
-        
+
         # Store selection in persistent session state key
         if goals_sel != st.session_state.get("view_best_results_goals_value"):
             st.session_state["view_best_results_goals_value"] = goals_sel
-        
+
         if not goals_sel:
             st.info("Select at least one goal.")
             st.stop()
-        
+
         # Filter runs by selected goals - update rev_country_keys
-        rev_country_keys = [k for k in rev_country_keys if goals_map.get(k) in goals_sel]
-        
+        rev_country_keys = [
+            k for k in rev_country_keys if goals_map.get(k) in goals_sel
+        ]
+
         # Filter countries_sel to only include countries that have runs with selected goals
         countries_with_goals = sorted({k[1] for k in rev_country_keys})
         countries_sel = [c for c in countries_sel if c in countries_with_goals]
-        
+
         if not countries_sel:
             st.info("No countries have runs with the selected goals.")
             st.stop()
     else:
         # No goal information available - proceed without goal filtering
         goals_sel = None
-        st.warning("Goal information not available for some runs. Showing all runs.")
+        st.warning(
+            "Goal information not available for some runs. Showing all runs."
+        )
 
     for ctry in countries_sel:
         # Use expander if multiple countries
