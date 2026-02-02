@@ -333,7 +333,10 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 | [docs/8_VCPU_TEST_RESULTS.md](docs/8_VCPU_TEST_RESULTS.md) | Analysis of 8 vCPU upgrade testing |
 | [docs/google_auth_domain_configuration.md](docs/google_auth_domain_configuration.md) | OAuth domain configuration |
 | [docs/persistent_private_key.md](docs/persistent_private_key.md) | Snowflake key storage |
-| [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Cost optimization strategies |
+| [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Cost optimization strategies and verified production performance data |
+| [docs/COST_ANALYSIS_DEV_PROD.md](docs/COST_ANALYSIS_DEV_PROD.md) | **📊 Comprehensive cost analysis for dev and prod environments** |
+| [Cost estimate - Dev and Prod.csv](Cost%20estimate%20-%20Dev%20and%20Prod.csv) | Detailed cost spreadsheet with environment-specific estimates |
+| [scripts/collect_cost_data.sh](scripts/collect_cost_data.sh) | Script to collect actual usage data for cost analysis |
 
 ## License
 

@@ -4,6 +4,10 @@
 
 This document summarizes the cost optimization implementations for the MMM Trainer application.
 
+**📊 For comprehensive cost analysis including dev and prod environments, see:**
+- **[COST_ANALYSIS_DEV_PROD.md](COST_ANALYSIS_DEV_PROD.md)** - Complete cost breakdown for both environments
+- **[Cost estimate - Dev and Prod.csv](../Cost%20estimate%20-%20Dev%20and%20Prod.csv)** - Detailed cost spreadsheet with environment separation
+
 ## Current Cost Estimates (December 2025)
 
 | Scenario | Web Service | Training Jobs | Fixed Costs | **Total** |
