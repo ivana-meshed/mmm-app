@@ -335,8 +335,11 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 | [docs/persistent_private_key.md](docs/persistent_private_key.md) | Snowflake key storage |
 | [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Cost optimization strategies and verified production performance data |
 | [docs/COST_ANALYSIS_DEV_PROD.md](docs/COST_ANALYSIS_DEV_PROD.md) | **📊 Comprehensive cost analysis for dev and prod environments** |
+| [ACTUAL_COST_ANALYSIS.md](ACTUAL_COST_ANALYSIS.md) | **🚨 In-depth analysis based on actual usage data with critical findings** |
+| [COST_OPTIMIZATION_IMPLEMENTATION.md](COST_OPTIMIZATION_IMPLEMENTATION.md) | **📋 Step-by-step implementation guide for cost optimizations** |
 | [Cost estimate - Dev and Prod.csv](Cost%20estimate%20-%20Dev%20and%20Prod.csv) | Detailed cost spreadsheet with environment-specific estimates |
 | [scripts/collect_cost_data.sh](scripts/collect_cost_data.sh) | Script to collect actual usage data for cost analysis |
+| [scripts/cleanup_artifact_registry.sh](scripts/cleanup_artifact_registry.sh) | **💰 Script to clean up Artifact Registry and save $140/year** |
 
 ## License
 

@@ -1,0 +1,52 @@
+{
+  "lifecycle": {
+    "rule": [
+      {
+        "action": {
+          "type": "SetStorageClass",
+          "storageClass": "NEARLINE"
+        },
+        "condition": {
+          "age": 30,
+          "matchesPrefix": ["training_data/"]
+        },
+        "description": "Move training data to Nearline storage after 30 days"
+      },
+      {
+        "action": {
+          "type": "SetStorageClass",
+          "storageClass": "COLDLINE"
+        },
+        "condition": {
+          "age": 90,
+          "matchesPrefix": ["training_data/"]
+        },
+        "description": "Move training data to Coldline storage after 90 days"
+      },
+      {
+        "action": {
+          "type": "Delete"
+        },
+        "condition": {
+          "age": 180,
+          "matchesPrefix": [
+            "training_data/de/",
+            "training_data/fr/",
+            "training_data/es/"
+          ]
+        },
+        "description": "Delete training data older than 180 days"
+      },
+      {
+        "action": {
+          "type": "Delete"
+        },
+        "condition": {
+          "age": 7,
+          "matchesPrefix": ["training-configs/"]
+        },
+        "description": "Delete old training config files after 7 days"
+      }
+    ]
+  }
+}
