@@ -1,0 +1,112 @@
+=== GCS Storage Analysis ===
+
+Total bucket size:
+28.74 GiB    gs://mmm-app-output
+
+Storage by prefix (dev vs prod):
+Production (default queue):
+0 B          gs://mmm-app-output/training-configs/default
+Development (default-dev queue):
+0 B          gs://mmm-app-output/training-configs/default-dev
+
+Recent objects (last 100):
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_113035/:
+      1626  2026-01-28T11:08:25Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_113035/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_122647/:
+      2600  2026-01-28T11:08:26Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_122647/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_163410/:
+      1950  2026-01-28T11:08:27Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_163410/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_165521/:
+      3602  2026-01-28T11:08:28Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_165521/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_171640/:
+      3396  2026-01-28T11:08:29Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_171640/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_173531/:
+      3775  2026-01-28T11:08:30Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_173531/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_175339/:
+      3487  2026-01-28T11:08:31Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_175339/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_180848/:
+      3662  2026-01-28T11:08:32Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_180848/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_181430/:
+      3708  2026-01-28T11:08:33Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_181430/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_183049/:
+      3514  2026-01-28T11:08:34Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_183049/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_184504/:
+      3152  2026-01-28T11:08:35Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_184504/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_190312/:
+      3856  2026-01-28T11:08:36Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260121_190312/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260122_110719/:
+      1425  2026-01-28T11:08:38Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260122_110719/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260122_170234/:
+      3416  2026-01-28T11:08:42Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260122_170234/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260127_123325/:
+      3561  2026-01-28T11:08:47Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260127_123325/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260127_155836/:
+      3617  2026-01-28T11:08:48Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260127_155836/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260128_125622/:
+      3856  2026-01-28T12:00:31Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260128_125622/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260128_161340/:
+      3065  2026-01-28T15:13:40Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260128_161340/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260128_172925/:
+      3558  2026-01-28T16:31:19Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260128_172925/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260128_174811/:
+      3267  2026-01-28T16:48:11Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260128_174811/selected_columns.json
+
+gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260128_174836/:
+      3247  2026-01-28T16:48:36Z  gs://mmm-app-output/training_data/de/UPLOAD_VALUE/20260128_174836/selected_columns.json
+
+gs://mmm-app-output/training_data/es/:
+
+gs://mmm-app-output/training_data/es/20260116_143700/:
+      1618  2026-01-16T15:13:39Z  gs://mmm-app-output/training_data/es/20260116_143700/selected_columns.json
+
+gs://mmm-app-output/training_data/es/GMV_WEB/:
+
+gs://mmm-app-output/training_data/es/GMV_WEB/20260116_143700/:
+      1618  2026-01-28T11:08:49Z  gs://mmm-app-output/training_data/es/GMV_WEB/20260116_143700/selected_columns.json
+
+gs://mmm-app-output/training_data/fr/:
+      2116  2026-01-19T11:34:01Z  gs://mmm-app-output/training_data/fr/selected_columns.json
+
+gs://mmm-app-output/training_data/fr/20260116_143700/:
+      1762  2026-01-16T15:37:42Z  gs://mmm-app-output/training_data/fr/20260116_143700/selected_columns.json
+
+gs://mmm-app-output/training_data/fr/20260127_154922/:
+      3209  2026-01-27T14:49:22Z  gs://mmm-app-output/training_data/fr/20260127_154922/selected_columns.json
+
+gs://mmm-app-output/training_data/fr/20260127_155406/:
+      2511  2026-01-27T14:55:30Z  gs://mmm-app-output/training_data/fr/20260127_155406/selected_columns.json
+
+gs://mmm-app-output/training_data/fr/GMV/:
+
+gs://mmm-app-output/training_data/fr/GMV/20260116_143700/:
+      1762  2026-01-28T11:08:50Z  gs://mmm-app-output/training_data/fr/GMV/20260116_143700/selected_columns.json
+
+gs://mmm-app-output/training_data/fr/N_UPLOADS_WEB/:
+
+gs://mmm-app-output/training_data/fr/N_UPLOADS_WEB/20260127_155406/:
+      2511  2026-01-28T11:08:52Z  gs://mmm-app-output/training_data/fr/N_UPLOADS_WEB/20260127_155406/selected_columns.json
+
+gs://mmm-app-output/training_data/fr/UPLOAD_VALUE/:
+
+gs://mmm-app-output/training_data/fr/UPLOAD_VALUE/20260127_154922/:
+      3209  2026-01-28T11:08:51Z  gs://mmm-app-output/training_data/fr/UPLOAD_VALUE/20260127_154922/selected_columns.json
+TOTAL: 4524 objects, 30861511313 bytes (28.74 GiB)

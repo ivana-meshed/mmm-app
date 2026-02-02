@@ -1,0 +1,9 @@
+=== Cloud Run Job Executions ===
+
+Production training job (mmm-app-training) - Last 100 executions:
+ERROR: (gcloud.run.jobs.executions.list) Unknown transform function runningDuration [table(ready_symbol.color(red="[xX]",green="[✓✔]",yellow="[-!…]"):label="",job_name:label=JOB,name:label=EXECUTION,region:label=REGION,status.runningCount.yesno(no="0"):label=RUNNING,succeeded_status():label=COMPLETE,creation_timestamp.date("%Y-%m-%d %H:%M:%S %Z"):label=CREATED,author:label="RUN BY"):(metadata.labels.'run.googleapis.com/satisfiesPzs':alias='satisfiesPzs') table(name,createTime,completionTime,runningDuration( *HERE* ),status)].
+No prod job data
+
+Development training job (mmm-app-dev-training) - Last 100 executions:
+ERROR: (gcloud.run.jobs.executions.list) Unknown transform function runningDuration [table(ready_symbol.color(red="[xX]",green="[✓✔]",yellow="[-!…]"):label="",job_name:label=JOB,name:label=EXECUTION,region:label=REGION,status.runningCount.yesno(no="0"):label=RUNNING,succeeded_status():label=COMPLETE,creation_timestamp.date("%Y-%m-%d %H:%M:%S %Z"):label=CREATED,author:label="RUN BY"):(metadata.labels.'run.googleapis.com/satisfiesPzs':alias='satisfiesPzs') table(name,createTime,completionTime,runningDuration( *HERE* ),status)].
+No dev job data
