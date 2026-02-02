@@ -4,6 +4,22 @@ Dear User,
 
 I've completed a comprehensive cost analysis for both your development and production environments. The analysis is now ready, but to refine it with **actual usage data** instead of estimates, I need your help collecting some information.
 
+## ⚠️ Before You Start
+
+**Important:** These files were created on the `copilot/update-cost-estimate-docs` branch. If you're trying to run the script and getting "no such file or directory", you need to:
+
+```bash
+# Pull the latest changes from this branch
+git fetch origin
+git checkout copilot/update-cost-estimate-docs
+git pull origin copilot/update-cost-estimate-docs
+
+# Verify the script exists
+ls -la scripts/collect_cost_data.sh
+```
+
+See **[TROUBLESHOOTING_COST_SCRIPT.md](TROUBLESHOOTING_COST_SCRIPT.md)** if you have issues.
+
 ## 📁 What I've Created
 
 1. **[docs/COST_ANALYSIS_DEV_PROD.md](docs/COST_ANALYSIS_DEV_PROD.md)** (29,000+ words)
