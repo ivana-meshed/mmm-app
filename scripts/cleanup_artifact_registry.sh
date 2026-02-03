@@ -64,11 +64,12 @@ for IMAGE in "${IMAGES[@]}"; do
   echo "  Images to delete: $IMAGES_TO_DELETE"
   
   # Get oldest images (excluding last N)
+  # List images sorted by creation time (oldest first after skipping the newest N)
   IMAGES_LIST=$(gcloud artifacts docker images list \
     $LOCATION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE \
     --include-tags \
-    --sort-by=~CREATE_TIME \
-    --format="value(version)" 2>/dev/null | \
+    --sort-by=CREATE_TIME \
+    --format="value(package,version)" 2>/dev/null | \
     tail -n +$((KEEP_LAST_N + 1)))
   
   if [ -z "$IMAGES_LIST" ]; then
@@ -78,17 +79,20 @@ for IMAGE in "${IMAGES[@]}"; do
   fi
   
   COUNT=0
-  while IFS= read -r IMAGE_VERSION; do
+  while IFS=$'\t' read -r PACKAGE VERSION; do
     COUNT=$((COUNT + 1))
-    FULL_IMAGE="$LOCATION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE@$IMAGE_VERSION"
+    # Use the package name directly from the list output
+    FULL_IMAGE="$PACKAGE@$VERSION"
     
     if [ "$DRY_RUN" = "true" ]; then
-      echo "  [DRY RUN] Would delete: $IMAGE@$IMAGE_VERSION"
+      echo "  [DRY RUN] Would delete: $FULL_IMAGE"
     else
-      echo "  Deleting: $IMAGE@$IMAGE_VERSION"
-      gcloud artifacts docker images delete "$FULL_IMAGE" --quiet 2>/dev/null || {
-        echo -e "  ${RED}Failed to delete $IMAGE@$IMAGE_VERSION${NC}"
-      }
+      echo "  Deleting: $FULL_IMAGE"
+      if gcloud artifacts docker images delete "$FULL_IMAGE" --quiet 2>&1; then
+        echo -e "  ${GREEN}✓ Deleted successfully${NC}"
+      else
+        echo -e "  ${RED}✗ Failed to delete $FULL_IMAGE${NC}"
+      fi
     fi
   done <<< "$IMAGES_LIST"
   

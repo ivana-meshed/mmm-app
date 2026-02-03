@@ -1,55 +1,91 @@
 # GCS Bucket with lifecycle policies for cost optimization
 # This file implements cost reduction strategy #2 from Cost estimate.csv
 
-# Note: The bucket is managed outside Terraform, so we use a data source
-# to reference it and add lifecycle rules via google_storage_bucket_lifecycle_rule
-# If the bucket is created elsewhere, these lifecycle rules can be applied manually
-# via gcloud or the GCP console.
+# Note: If the bucket already exists and was created outside Terraform,
+# import it with: terraform import google_storage_bucket.mmm_output mmm-app-output
 
-# Lifecycle policy configuration for cost optimization
-# Archives old data to Nearline (30 days) and Coldline (90 days)
-# This can reduce storage costs by 50-80% for historical data
+resource "google_storage_bucket" "mmm_output" {
+  name     = var.bucket_name
+  location = var.region
+  project  = var.project_id
 
-# To apply these lifecycle rules manually to the existing bucket:
-# 1. Create a lifecycle.json file with the rules below
-# 2. Run: gcloud storage buckets update gs://mmm-app-output --lifecycle-file=lifecycle.json
+  # Uniform bucket-level access for better security and management
+  uniform_bucket_level_access {
+    enabled = true
+  }
 
-# Example lifecycle.json content:
-# {
-#   "lifecycle": {
-#     "rule": [
-#       {
-#         "action": {"type": "SetStorageClass", "storageClass": "NEARLINE"},
-#         "condition": {
-#           "age": 30,
-#           "matchesPrefix": ["robyn/", "datasets/", "training-data/"]
-#         }
-#       },
-#       {
-#         "action": {"type": "SetStorageClass", "storageClass": "COLDLINE"},
-#         "condition": {
-#           "age": 90,
-#           "matchesPrefix": ["robyn/", "datasets/", "training-data/"]
-#         }
-#       },
-#       {
-#         "action": {"type": "Delete"},
-#         "condition": {
-#           "age": 365,
-#           "matchesPrefix": ["robyn-queues/"]
-#         }
-#       }
-#     ]
-#   }
-# }
+  # Lifecycle rules for automatic cost optimization
+  lifecycle_rule {
+    action {
+      type          = "SetStorageClass"
+      storage_class = "NEARLINE"
+    }
+    condition {
+      age                   = 30
+      matches_prefix        = ["training_data/"]
+    }
+  }
+
+  lifecycle_rule {
+    action {
+      type          = "SetStorageClass"
+      storage_class = "COLDLINE"
+    }
+    condition {
+      age                   = 90
+      matches_prefix        = ["training_data/"]
+    }
+  }
+
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      age                   = 180
+      matches_prefix        = [
+        "training_data/de/",
+        "training_data/fr/",
+        "training_data/es/"
+      ]
+    }
+  }
+
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      age                   = 7
+      matches_prefix        = ["training-configs/"]
+    }
+  }
+
+  depends_on = [
+    google_project_service.storage
+  ]
+}
+
+# Enable Cloud Storage API if not already enabled
+resource "google_project_service" "storage" {
+  project            = var.project_id
+  service            = "storage-component.googleapis.com"
+  disable_on_destroy = false
+}
+
+# Output bucket name for reference
+output "gcs_bucket_name" {
+  value       = google_storage_bucket.mmm_output.name
+  description = "Name of the GCS bucket for MMM application data"
+}
 
 # Cost savings from lifecycle policies:
 # - Standard Storage: $0.020/GB/month
 # - Nearline Storage: $0.010/GB/month (30-89 days) - 50% savings
 # - Coldline Storage: $0.004/GB/month (90+ days) - 80% savings
 #
-# For 80GB baseline storage with minimal access to old data:
-# - Before: 80GB × $0.020 = $1.60/month
-# - After (assuming 20GB hot, 30GB nearline, 30GB coldline):
-#   20GB × $0.020 + 30GB × $0.010 + 30GB × $0.004 = $0.40 + $0.30 + $0.12 = $0.82/month
-# - Savings: $0.78/month (49% reduction)
+# For 28.74GB current storage with minimal access to old data:
+# - Before: 28.74GB × $0.020 = $0.57/month
+# - After (assuming 10GB hot, 10GB nearline, 8.74GB coldline):
+#   10GB × $0.020 + 10GB × $0.010 + 8.74GB × $0.004 = $0.20 + $0.10 + $0.03 = $0.33/month
+# - Savings: $0.24/month ($2.88/year)
