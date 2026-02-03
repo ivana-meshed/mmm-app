@@ -26,6 +26,11 @@ DRY_RUN=false KEEP_LAST_N=20 ./cleanup_artifact_registry.sh
 - `KEEP_LAST_N`: Number of most recent versions to keep per image type (default: 10)
 - `DRY_RUN`: Set to 'false' to actually delete images (default: true)
 
+**Technical Details:**
+- Uses `--delete-tags` flag to handle multi-arch manifests and parent references
+- This prevents "manifest is referenced by parent manifests" errors
+- Automatically deletes all associated tags and manifest lists
+
 **Automated Execution:**
 - Runs weekly via GitHub Actions (cost-optimization.yml)
 - Can be manually triggered from GitHub Actions UI
@@ -50,6 +55,11 @@ DRY_RUN=false KEEP_LAST_N=20 ./cleanup_artifact_registry.sh
 DAYS_BACK=7 ./get_training_costs.sh
 DAYS_BACK=60 ./get_training_costs.sh
 ```
+
+**Cross-Platform Compatibility:**
+- Works on both macOS (BSD date) and Linux (GNU date)
+- Automatically detects the operating system
+- Uses appropriate date command syntax for each platform
 
 **What it calculates:**
 - Total number of training jobs executed

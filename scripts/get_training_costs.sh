@@ -41,7 +41,14 @@ for JOB in "${JOBS[@]}"; do
   echo ""
   
   # Get executions from the last N days
-  START_DATE=$(date -u -d "$DAYS_BACK days ago" +"%Y-%m-%dT%H:%M:%SZ")
+  # Cross-platform date calculation (works on both macOS/BSD and Linux/GNU)
+  if date -v-1d > /dev/null 2>&1; then
+    # BSD date (macOS)
+    START_DATE=$(date -u -v-${DAYS_BACK}d +"%Y-%m-%dT%H:%M:%SZ")
+  else
+    # GNU date (Linux)
+    START_DATE=$(date -u -d "$DAYS_BACK days ago" +"%Y-%m-%dT%H:%M:%SZ")
+  fi
   
   # Get job executions
   EXECUTIONS=$(gcloud run jobs executions list \
@@ -91,9 +98,16 @@ for JOB in "${JOBS[@]}"; do
     STATUS=$(echo "$EXECUTION" | jq -r '.status.conditions[0].type // "Unknown"')
     
     if [ -n "$START_TIME" ] && [ -n "$COMPLETION_TIME" ]; then
-      # Calculate duration in seconds
-      START_SEC=$(date -d "$START_TIME" +%s 2>/dev/null || echo "0")
-      END_SEC=$(date -d "$COMPLETION_TIME" +%s 2>/dev/null || echo "0")
+      # Calculate duration in seconds - cross-platform
+      if date -v-1d > /dev/null 2>&1; then
+        # BSD date (macOS) - use -j to avoid setting system date
+        START_SEC=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$START_TIME" +%s 2>/dev/null || echo "0")
+        END_SEC=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$COMPLETION_TIME" +%s 2>/dev/null || echo "0")
+      else
+        # GNU date (Linux)
+        START_SEC=$(date -d "$START_TIME" +%s 2>/dev/null || echo "0")
+        END_SEC=$(date -d "$COMPLETION_TIME" +%s 2>/dev/null || echo "0")
+      fi
       
       if [ "$START_SEC" -gt 0 ] && [ "$END_SEC" -gt 0 ]; then
         DURATION=$((END_SEC - START_SEC))

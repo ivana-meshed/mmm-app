@@ -88,7 +88,8 @@ for IMAGE in "${IMAGES[@]}"; do
       echo "  [DRY RUN] Would delete: $FULL_IMAGE"
     else
       echo "  Deleting: $FULL_IMAGE"
-      if gcloud artifacts docker images delete "$FULL_IMAGE" --quiet 2>&1; then
+      # Use --delete-tags to handle manifest lists and parent references
+      if gcloud artifacts docker images delete "$FULL_IMAGE" --delete-tags --quiet 2>&1; then
         echo -e "  ${GREEN}✓ Deleted successfully${NC}"
       else
         echo -e "  ${RED}✗ Failed to delete $FULL_IMAGE${NC}"
