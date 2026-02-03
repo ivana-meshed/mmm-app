@@ -65,11 +65,12 @@ for IMAGE in "${IMAGES[@]}"; do
   
   # Get oldest images (excluding last N)
   # List images sorted by creation time (oldest first after skipping the newest N)
+  # Only get TAGGED images (filter out digest-only entries)
   IMAGES_LIST=$(gcloud artifacts docker images list \
     $LOCATION-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE \
     --include-tags \
     --sort-by=CREATE_TIME \
-    --format="value(package,version)" 2>/dev/null | \
+    --format="value(package,version,tags)" 2>/dev/null | \
     tail -n +$((KEEP_LAST_N + 1)))
   
   if [ -z "$IMAGES_LIST" ]; then
@@ -79,15 +80,21 @@ for IMAGE in "${IMAGES[@]}"; do
   fi
   
   COUNT=0
-  while IFS=$'\t' read -r PACKAGE VERSION; do
+  while IFS=$'\t' read -r PACKAGE VERSION TAGS; do
+    # Skip if no tags (digest-only entries)
+    # These are child layers/manifests that will be cleaned up automatically
+    if [ -z "$TAGS" ] || [ "$TAGS" = "" ]; then
+      continue
+    fi
+    
     COUNT=$((COUNT + 1))
     # Use the package name directly from the list output
     FULL_IMAGE="$PACKAGE@$VERSION"
     
     if [ "$DRY_RUN" = "true" ]; then
-      echo "  [DRY RUN] Would delete: $FULL_IMAGE"
+      echo "  [DRY RUN] Would delete: $FULL_IMAGE (tags: $TAGS)"
     else
-      echo "  Deleting: $FULL_IMAGE"
+      echo "  Deleting: $FULL_IMAGE (tags: $TAGS)"
       # Use --delete-tags to handle manifest lists and parent references
       if gcloud artifacts docker images delete "$FULL_IMAGE" --delete-tags --quiet 2>&1; then
         echo -e "  ${GREEN}✓ Deleted successfully${NC}"

@@ -99,14 +99,18 @@ for JOB in "${JOBS[@]}"; do
     
     if [ -n "$START_TIME" ] && [ -n "$COMPLETION_TIME" ]; then
       # Calculate duration in seconds - cross-platform
+      # Handle various ISO 8601 formats by stripping milliseconds and normalizing timezone
+      START_TIME_CLEAN=$(echo "$START_TIME" | sed 's/\.[0-9]*Z$/Z/' | sed 's/+00:00$/Z/')
+      COMPLETION_TIME_CLEAN=$(echo "$COMPLETION_TIME" | sed 's/\.[0-9]*Z$/Z/' | sed 's/+00:00$/Z/')
+      
       if date -v-1d > /dev/null 2>&1; then
         # BSD date (macOS) - use -j to avoid setting system date
-        START_SEC=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$START_TIME" +%s 2>/dev/null || echo "0")
-        END_SEC=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$COMPLETION_TIME" +%s 2>/dev/null || echo "0")
+        START_SEC=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$START_TIME_CLEAN" +%s 2>/dev/null || echo "0")
+        END_SEC=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$COMPLETION_TIME_CLEAN" +%s 2>/dev/null || echo "0")
       else
         # GNU date (Linux)
-        START_SEC=$(date -d "$START_TIME" +%s 2>/dev/null || echo "0")
-        END_SEC=$(date -d "$COMPLETION_TIME" +%s 2>/dev/null || echo "0")
+        START_SEC=$(date -d "$START_TIME_CLEAN" +%s 2>/dev/null || echo "0")
+        END_SEC=$(date -d "$COMPLETION_TIME_CLEAN" +%s 2>/dev/null || echo "0")
       fi
       
       if [ "$START_SEC" -gt 0 ] && [ "$END_SEC" -gt 0 ]; then

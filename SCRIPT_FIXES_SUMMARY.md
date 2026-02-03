@@ -1,13 +1,87 @@
 # Script Fixes Summary
 
 **Date:** 2026-02-03  
-**Status:** ✅ Both Issues Fixed
+**Status:** ✅ Both Issues Fixed (Updated with Critical Fixes)
 
-This document summarizes the fixes for the two critical script issues.
+This document summarizes the fixes for critical script issues, including the latest fixes for persistent problems.
 
 ---
 
-## Issue 1: Cleanup Script - Manifest Reference Errors ✅ FIXED
+## CRITICAL UPDATE: Additional Fixes Required ✅ FIXED
+
+### Issue 1A: Cleanup Script STILL Failing - Digest-Only Entries
+
+**New Problem Discovered:**
+Even with `--delete-tags`, the script was still failing because it was trying to delete digest-only entries (child layers) that are referenced by parent manifests.
+
+**Output Pattern:**
+```
+✓ Deleted successfully  # Tagged image deletes OK
+✗ Failed to delete ...@sha256:...  # Digest-only entry fails
+ERROR: manifest is referenced by parent manifests
+```
+
+**Root Cause:**
+`gcloud artifacts docker images list` returns TWO types of entries:
+1. **Tagged images**: `europe-west1-docker.pkg.dev/.../mmm-app:tag-name`
+2. **Digest-only**: `europe-west1-docker.pkg.dev/.../mmm-app@sha256:...`
+
+The digest-only entries are child layers/manifests that CANNOT be deleted while parent manifests exist. The script should ONLY delete tagged images.
+
+**Solution:**
+Modified script to filter out digest-only entries:
+
+```bash
+# Before: Only got package and version
+--format="value(package,version)"
+
+# After: Get package, version, AND tags
+--format="value(package,version,tags)"
+
+# Skip entries with no tags
+if [ -z "$TAGS" ] || [ "$TAGS" = "" ]; then
+  continue
+fi
+```
+
+**Why This Works:**
+- Tagged images can be deleted with `--delete-tags`
+- Digest-only child layers are automatically cleaned up when parent tags are removed
+- No need to explicitly delete digest-only entries
+
+### Issue 1B: Training Cost Script - Timestamp Format Issue
+
+**New Problem Discovered:**
+Script found executions (3 for prod, 125 for dev) but reported "Could not calculate duration (incomplete execution data)" and 0 total jobs.
+
+**Root Cause:**
+Cloud Run returns timestamps with milliseconds/nanoseconds:
+```
+Actual: 2026-02-03T12:00:00.123456Z
+Expected: 2026-02-03T12:00:00Z
+```
+
+The date parsing format `"%Y-%m-%dT%H:%M:%SZ"` doesn't handle the `.123456` part.
+
+**Solution:**
+Strip milliseconds and normalize timezone before parsing:
+
+```bash
+# Clean timestamps before parsing
+START_TIME_CLEAN=$(echo "$START_TIME" | sed 's/\.[0-9]*Z$/Z/' | sed 's/+00:00$/Z/')
+COMPLETION_TIME_CLEAN=$(echo "$COMPLETION_TIME" | sed 's/\.[0-9]*Z$/Z/' | sed 's/+00:00$/Z/')
+
+# Then parse the cleaned timestamps
+START_SEC=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$START_TIME_CLEAN" +%s)
+```
+
+**What the sed commands do:**
+1. `s/\.[0-9]*Z$/Z/` - Remove milliseconds: `2026-02-03T12:00:00.123456Z` → `2026-02-03T12:00:00Z`
+2. `s/+00:00$/Z/` - Normalize timezone: `2026-02-03T12:00:00+00:00` → `2026-02-03T12:00:00Z`
+
+---
+
+## Original Issue 1: Cleanup Script - Manifest Reference Errors ✅ FIXED
 
 ### Problem
 The cleanup script was failing to delete Docker images with this error:
