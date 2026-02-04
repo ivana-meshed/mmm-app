@@ -296,6 +296,89 @@ echo "  3. Group by 'SKU' to see actual breakdown"
 echo ""
 
 ##############################################################
+# PART 3: Cloud Scheduler Costs (new logic)
+##############################################################
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}PART 3: Cloud Scheduler Costs${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+TOTAL_SCHEDULER_COST=0
+
+# Get all scheduler jobs
+SCHEDULER_JOBS=$(gcloud scheduler jobs list \
+  --location="$REGION" \
+  --format="json" 2>/dev/null || echo "[]")
+
+if [ "$SCHEDULER_JOBS" = "[]" ] || [ -z "$SCHEDULER_JOBS" ]; then
+  echo "  No scheduler jobs found"
+  echo ""
+else
+  JOB_COUNT=$(echo "$SCHEDULER_JOBS" | jq 'length')
+  echo "  Total scheduler jobs: $JOB_COUNT"
+  echo ""
+  
+  # Cloud Scheduler pricing:
+  # - First 3 jobs: Free
+  # - Additional jobs: $0.10/job/month
+  
+  if [ "$JOB_COUNT" -le 3 ]; then
+    SCHEDULER_JOB_COST=0
+    echo -e "${GREEN}  All jobs within free tier (≤3 jobs)${NC}"
+  else
+    PAID_JOBS=$((JOB_COUNT - 3))
+    SCHEDULER_JOB_COST=$(echo "$PAID_JOBS * 0.10" | bc -l)
+    SCHEDULER_JOB_COST_FMT=$(printf "%.2f" "$SCHEDULER_JOB_COST")
+    echo -e "${YELLOW}  Paid jobs: $PAID_JOBS (beyond free tier)${NC}"
+    echo "  Job cost: \$$SCHEDULER_JOB_COST_FMT/month"
+  fi
+  
+  echo ""
+  echo "  Job Details:"
+  
+  # List each job with schedule
+  for i in $(seq 0 $((JOB_COUNT - 1))); do
+    JOB=$(echo "$SCHEDULER_JOBS" | jq -r ".[$i]")
+    JOB_NAME=$(echo "$JOB" | jq -r '.name' | sed 's|.*/||')
+    SCHEDULE=$(echo "$JOB" | jq -r '.schedule')
+    STATE=$(echo "$JOB" | jq -r '.state')
+    
+    # Calculate invocations per month based on schedule
+    # This is a rough estimate
+    case "$SCHEDULE" in
+      "*/1 * * * *")  # Every 1 minute
+        INVOCATIONS_PER_MONTH=43200  # 60 * 24 * 30
+        ;;
+      "*/5 * * * *")  # Every 5 minutes
+        INVOCATIONS_PER_MONTH=8640   # 12 * 24 * 30
+        ;;
+      *)
+        INVOCATIONS_PER_MONTH=0
+        ;;
+    esac
+    
+    echo "    • $JOB_NAME"
+    echo "      Schedule: $SCHEDULE"
+    echo "      State: $STATE"
+    if [ "$INVOCATIONS_PER_MONTH" -gt 0 ]; then
+      echo "      Est. invocations/month: ~$INVOCATIONS_PER_MONTH"
+    fi
+  done
+  
+  echo ""
+  
+  # Estimate request costs (when scheduler invokes Cloud Run)
+  # Each scheduler invocation is also a Cloud Run request
+  # But request costs are typically negligible ($0.0000004 per request)
+  
+  echo "  Note: Scheduler invokes Cloud Run services"
+  echo "  Request costs are negligible (~\$0.02/month total)"
+  echo ""
+  
+  TOTAL_SCHEDULER_COST=$SCHEDULER_JOB_COST
+fi
+
+##############################################################
 # SUMMARY
 ##############################################################
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -305,7 +388,8 @@ echo ""
 
 TOTAL_TRAINING_COST_FMT=$(printf "%.2f" "$TOTAL_TRAINING_COST")
 TOTAL_WEB_COST_FMT=$(printf "%.2f" "$TOTAL_WEB_COST")
-GRAND_TOTAL=$(echo "$TOTAL_TRAINING_COST + $TOTAL_WEB_COST" | bc -l)
+TOTAL_SCHEDULER_COST_FMT=$(printf "%.2f" "$TOTAL_SCHEDULER_COST")
+GRAND_TOTAL=$(echo "$TOTAL_TRAINING_COST + $TOTAL_WEB_COST + $TOTAL_SCHEDULER_COST" | bc -l)
 GRAND_TOTAL_FMT=$(printf "%.2f" "$GRAND_TOTAL")
 
 echo "Training Jobs:"
@@ -317,6 +401,10 @@ echo "Web Services:"
 echo "  Total cost:    \$$TOTAL_WEB_COST_FMT (estimated)"
 echo ""
 
+echo "Cloud Scheduler:"
+echo "  Total cost:    \$$TOTAL_SCHEDULER_COST_FMT"
+echo ""
+
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}Grand Total:   \$$GRAND_TOTAL_FMT${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -326,10 +414,12 @@ echo ""
 if [ "$(echo "$GRAND_TOTAL > 0" | bc -l)" -eq 1 ]; then
   TRAINING_PCT=$(echo "scale=1; $TOTAL_TRAINING_COST * 100 / $GRAND_TOTAL" | bc -l)
   WEB_PCT=$(echo "scale=1; $TOTAL_WEB_COST * 100 / $GRAND_TOTAL" | bc -l)
+  SCHEDULER_PCT=$(echo "scale=1; $TOTAL_SCHEDULER_COST * 100 / $GRAND_TOTAL" | bc -l)
   
   echo "Cost Breakdown:"
   echo "  Training jobs: ${TRAINING_PCT}%"
   echo "  Web services:  ${WEB_PCT}%"
+  echo "  Scheduler:     ${SCHEDULER_PCT}%"
   echo ""
 fi
 
@@ -339,14 +429,18 @@ if [ "$TOTAL_JOBS" -gt 0 ] || [ "$(echo "$GRAND_TOTAL > 0" | bc -l)" -eq 1 ]; th
   MONTHLY_TOTAL=$(echo "$GRAND_TOTAL * $DAYS_IN_MONTH / $DAYS_BACK" | bc -l)
   MONTHLY_TRAINING=$(echo "$TOTAL_TRAINING_COST * $DAYS_IN_MONTH / $DAYS_BACK" | bc -l)
   MONTHLY_WEB=$(echo "$TOTAL_WEB_COST * $DAYS_IN_MONTH / $DAYS_BACK" | bc -l)
+  # Scheduler cost is already monthly, no need to extrapolate
+  MONTHLY_SCHEDULER=$TOTAL_SCHEDULER_COST
   
   MONTHLY_TOTAL_FMT=$(printf "%.2f" "$MONTHLY_TOTAL")
   MONTHLY_TRAINING_FMT=$(printf "%.2f" "$MONTHLY_TRAINING")
   MONTHLY_WEB_FMT=$(printf "%.2f" "$MONTHLY_WEB")
+  MONTHLY_SCHEDULER_FMT=$(printf "%.2f" "$MONTHLY_SCHEDULER")
   
   echo "Projected Monthly (30 days):"
   echo "  Training:  \$$MONTHLY_TRAINING_FMT"
   echo "  Web:       \$$MONTHLY_WEB_FMT"
+  echo "  Scheduler: \$$MONTHLY_SCHEDULER_FMT"
   echo "  Total:     \$$MONTHLY_TOTAL_FMT"
   echo ""
 fi
@@ -358,4 +452,28 @@ echo "  - Artifact Registry: ~\$1-12/month (varies with cleanup)"
 echo "  - Cloud Logging: ~\$1-2/month"
 echo "  - Secret Manager: ~\$0.50/month"
 echo "=========================================="
+echo ""
+
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}Cost Optimization Opportunities${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo "To further reduce Cloud Run costs:"
+echo ""
+echo "1. Remove warmup scheduler job (if exists):"
+echo "   • Savings: ~\$0-60/year"
+echo "   • Trade-off: 2-3s cold start on first request"
+echo "   • Command: ./scripts/remove_warmup_job.sh"
+echo ""
+echo "2. Optimize web service resources (already done if using Terraform):"
+echo "   • CPU: 2 vCPU → 1 vCPU"
+echo "   • Memory: 4GB → 2GB"
+echo "   • Savings: ~\$60-80/month"
+echo ""
+echo "3. Clean Artifact Registry regularly:"
+echo "   • Command: ./scripts/cleanup_artifact_registry.sh"
+echo "   • Savings: ~\$10-12/month"
+echo ""
+echo "For detailed cost optimization guide:"
+echo "  See: COST_REDUCTION_IMPLEMENTATION.md"
 echo ""
