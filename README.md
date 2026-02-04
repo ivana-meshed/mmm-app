@@ -339,10 +339,14 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 | [COST_OPTIMIZATION_IMPLEMENTATION.md](COST_OPTIMIZATION_IMPLEMENTATION.md) | **📋 Step-by-step implementation guide for cost optimizations** |
 | [COST_REDUCTION_IMPLEMENTATION.md](COST_REDUCTION_IMPLEMENTATION.md) | **💰 Cost reduction implementation - 40% savings ($720/year)** |
 | [WARMUP_JOB_ANALYSIS.md](WARMUP_JOB_ANALYSIS.md) | **🔥 Warmup job analysis and removal guide - additional $25/year savings** |
+| [DEPLOYMENT_COST_ANALYSIS.md](DEPLOYMENT_COST_ANALYSIS.md) | **🚨 CRITICAL: Deployment churn costs €72-90/month - Complete analysis** |
+| [DEPLOYMENT_OPTIMIZATION_GUIDE.md](DEPLOYMENT_OPTIMIZATION_GUIDE.md) | **🚀 Reduce deployment frequency and save €120/month (€1,440/year)** |
 | [IMPLEMENTATION_GUIDE_AUTOMATION.md](IMPLEMENTATION_GUIDE_AUTOMATION.md) | **🤖 Guide for deploying automated cost optimization** |
 | [Cost estimate - Dev and Prod.csv](Cost%20estimate%20-%20Dev%20and%20Prod.csv) | Detailed cost spreadsheet with environment-specific estimates |
 | [scripts/cleanup_artifact_registry.sh](scripts/cleanup_artifact_registry.sh) | **💰 Script to clean up Artifact Registry (FIXED - now works correctly)** |
 | [scripts/get_cloud_run_costs.sh](scripts/get_cloud_run_costs.sh) | **📊 Complete Cloud Run cost calculator (training + web + scheduler)** |
+| [scripts/track_deployment_frequency.sh](scripts/track_deployment_frequency.sh) | **📈 Track deployment frequency and identify cost spikes** |
+| [scripts/cleanup_cloud_run_revisions.sh](scripts/cleanup_cloud_run_revisions.sh) | **🧹 Clean up old Cloud Run revisions to reduce clutter** |
 | [scripts/remove_warmup_job.sh](scripts/remove_warmup_job.sh) | **🔥 Remove warmup scheduler job to save ~$25/year** |
 | [scripts/get_training_costs.sh](scripts/get_training_costs.sh) | **📈 Training job cost calculation (legacy - use get_cloud_run_costs.sh)** |
 | [scripts/collect_cost_data.sh](scripts/collect_cost_data.sh) | Script to collect actual usage data for cost analysis |
