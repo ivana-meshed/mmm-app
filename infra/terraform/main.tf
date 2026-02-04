@@ -322,7 +322,7 @@ resource "google_cloud_run_service" "web_service" {
     metadata {
       annotations = {
         "run.googleapis.com/cpu-throttling" = "false"
-        "run.googleapis.com/min-instances"  = var.min_instances
+        "run.googleapis.com/min-instances"  = "0"  # Always scale to zero to save costs
         "run.googleapis.com/max-instances"  = var.max_instances
         "run.googleapis.com/timeout"        = "300s"
         #"deploy.kubernetes.io/revision-sha" = substr(var.web_image, length(var.web_image) - 40, 40)
@@ -331,7 +331,7 @@ resource "google_cloud_run_service" "web_service" {
 
     spec {
       service_account_name  = google_service_account.web_service_sa.email
-      container_concurrency = 10
+      container_concurrency = 5  # Reduced from 10 for better resource efficiency
       timeout_seconds       = 300
 
       containers {
@@ -339,12 +339,12 @@ resource "google_cloud_run_service" "web_service" {
 
         resources {
           limits = {
-            cpu    = "2.0"
-            memory = "4Gi"
+            cpu    = "1.0"  # Reduced from 2.0 - Streamlit doesn't need 2 vCPU
+            memory = "2Gi"  # Reduced from 4Gi - sufficient for typical usage
           }
           requests = {
-            cpu    = "1.0"
-            memory = "2Gi"
+            cpu    = "0.5"  # Reduced from 1.0
+            memory = "1Gi"  # Reduced from 2Gi
           }
         }
 
