@@ -57,12 +57,13 @@ User reported that web service costs (€115/month) seemed disproportionately hi
 
 | Component | Daily | Monthly | % Total | Explanation |
 |-----------|-------|---------|---------|-------------|
+| **Scheduler keepalive** | **€1.50-1.60** | **€45-50** | **33-37%** | **95,040 invocations/month** |
+| Deployment churn | €1.60-2.00 | €50-60 | 37-44% | 150 deployments/month |
 | Training jobs | €0.70 | €21.60 | 16% | 125 jobs, 23.6 hours runtime |
-| Web baseline | €1.50 | €45.00 | 33% | Normal usage, ~6h/day |
-| **Deployment churn** | **€2.40-3.00** | **€72-90** | **53-66%** | **150 deployments/month** |
-| Warmup job | €0.13 | €4.00 | 3% | Every 5 min keepalive |
-| Other | €0.33-0.50 | €10-15 | 7-11% | Scheduler, logs, network |
+| Web baseline | €0.50-0.65 | €15-20 | 11-15% | User traffic only |
 | **Total** | **~€4.50** | **€136.58** | **100%** | Matches actual billing |
+
+**⚠️ CRITICAL CORRECTION:** Scheduler costs were initially estimated at €4/month. Actual cost is **€45-50/month** because queue tick jobs run every 1 minute (10x more frequent than warmup). See `SCHEDULER_COST_CORRECTION.md` for details.
 
 ---
 
@@ -100,24 +101,30 @@ Cost per vCPU-hour: €0.157
 
 ## All Cost Factors Analyzed
 
-### 1. Deployment Churn (53% of costs) ⚠️ PRIMARY ISSUE
-- Current: 150/month
-- Cost impact: €72-90/month
-- Solution: Reduce to 30/month
-- **Savings: €60-70/month**
+### 1. Scheduler Keepalive (33-37% of costs) 🔥 **CORRECTED - NEW #1**
+- Current: 95,040 invocations/month (queue ticks + warmup)
+- Cost impact: €45-50/month
+- **Was incorrectly estimated at €4/month**
+- Solution: Reduce queue tick frequency (1 min → 5 min)
+- **Savings: €35-40/month**
 
-### 2. Web Service Baseline (33% of costs) ✅ EXPECTED
-- Always-available architecture
-- Actual usage ~6h/day
-- Cost impact: €45/month
-- Solution: Resource optimization (1 vCPU, 2GB)
-- **Savings: €30-35/month**
+### 2. Deployment Churn (37-44% of costs) ⚠️ HIGH PRIORITY
+- Current: 150/month
+- Cost impact: €50-60/month
+- Solution: Reduce to 30/month
+- **Savings: €30-40/month**
 
 ### 3. Training Jobs (16% of costs) ✅ WELL-OPTIMIZED
 - Appropriate resources for ML workload
 - Only runs when needed
 - Cost impact: €21.60/month
 - Solution: None needed
+
+### 4. Web Service Baseline (11-15% of costs) ✅ EXPECTED
+- Actual user traffic only
+- Cost impact: €15-20/month
+- Solution: Resource optimization (1 vCPU, 2GB)
+- **Savings: €5-8/month**
 
 ### 4. Warmup Job (3% of costs) ⚠️ MINOR ISSUE
 - Keeps services warm

@@ -17,12 +17,16 @@
 | Component | Expected | Actual | Variance |
 |-----------|----------|--------|----------|
 | Training jobs | €21 | €21.60 | ✅ Matches |
-| Web services | **€50-70** | **€114.98** | ❌ 2x higher! |
-| **Total** | **€71-91** | **€136.58** | **+50-92%** |
+| Web baseline | €20 | €15-20 | ✅ Close |
+| Scheduler keepalive | €4 | **€45-50** | ❌ **10x higher!** |
+| Deployment overhead | €30 | **€50-60** | ❌ 2x higher! |
+| **Total** | **€75** | **€136.58** | **+82%** |
 
-### The €45-60 Mystery
+### The Cost Mystery Solved
 
-Where is the extra €45-60/month going?
+**Primary drivers:**
+1. **Scheduler jobs (€45-50/month):** 95,040 invocations/month keeping containers alive
+2. **Deployment churn (€50-60/month):** 150 deployments/month with dual-revision periods
 
 ---
 

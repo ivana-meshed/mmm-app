@@ -37,20 +37,23 @@ This document summarizes the additional cost optimizations beyond the initial we
   - `robyn-queue-tick` (*/1 * * * *)
   - `robyn-queue-tick-dev` (*/1 * * * *)
 
-**Cost Analysis:**
+**Cost Analysis (CORRECTED):**
 ```
 Direct Costs:
 - Scheduler: $0 (within free tier, 3 jobs ≤ 3)
 - Requests: $0.003/month (negligible)
 
 Indirect Costs (Container Instance Time):
-- Warmup pings: 8,640/month
-- Container alive time: 36 hours/month
-- For 1 vCPU, 2GB service: $1.04/month
-- For both services: $2.08/month
+- All scheduler jobs: 95,040 invocations/month (warmup + queue ticks)
+- Container alive time: 792 hours/month (both services)
+- For 2 vCPU, 4GB (current): $45.94/month
+- For 1 vCPU, 2GB (optimized): $22.97/month
 
-Total Monthly Cost: $2.08
-Total Annual Cost: $25
+Total Current Cost: €45-50/month
+Total After Optimization: €23/month
+
+⚠️ MAJOR CORRECTION: Previous estimate of $2.08/month was significantly wrong.
+Queue tick jobs (every 1 min) run 10x more frequently than warmup job (every 5 min).
 ```
 
 ---
@@ -59,18 +62,24 @@ Total Annual Cost: $25
 
 | Strategy | Implementation | Savings/Year | Status |
 |----------|----------------|--------------|--------|
-| **1. Web Service Resources** | Terraform | **$720** | ✅ Implemented |
-| CPU: 2→1 vCPU | `infra/terraform/main.tf` | $312 | ✅ Done |
-| Memory: 4GB→2GB | `infra/terraform/main.tf` | $65 | ✅ Done |
-| Scale to zero | `min_instances=0` | $240 | ✅ Done |
-| Container concurrency | 10→5 | $96 | ✅ Done |
-| **2. Artifact Registry** | Script | **$132** | 🔧 Available |
-| Cleanup old images | `cleanup_artifact_registry.sh` | $132 | Run script |
-| **3. Warmup Job Removal** | Script | **$25** | 🆕 New Option |
-| Remove mmm-warmup-job | `remove_warmup_job.sh` | $25 | Optional |
-| **4. GCS Lifecycle** | Terraform/gcloud | **$3** | 🔧 Available |
-| Tiered storage | Apply lifecycle policy | $3 | In Terraform |
-| **Total Potential Savings** | - | **$880** | - |
+| **1. Reduce Queue Tick Frequency** | Terraform | **€420-480** | 🆕 **NEW #1 PRIORITY** |
+| Change schedule: 1 min → 5 min | `infra/terraform/main.tf` | €420-480 | High impact! |
+| **2. Deployment Optimization** | CI/CD | **€600-720** | 🔧 Available |
+| Reduce deployments: 150→30/mo | `.github/workflows/` | €600-720 | Process change |
+| **3. Web Service Resources** | Terraform | **€720** | ✅ Implemented |
+| CPU: 2→1 vCPU | `infra/terraform/main.tf` | €312 | ✅ Done |
+| Memory: 4GB→2GB | `infra/terraform/main.tf` | €65 | ✅ Done |
+| Scale to zero | `min_instances=0` | €240 | ✅ Done |
+| Container concurrency | 10→5 | €96 | ✅ Done |
+| **4. Artifact Registry** | Script | **€132** | 🔧 Available |
+| Cleanup old images | `cleanup_artifact_registry.sh` | €132 | Run script |
+| **5. Remove Warmup Job** | Script | **€48-60** | 🆕 Optional |
+| Remove mmm-warmup-job | `remove_warmup_job.sh` | €48-60 | After queue fix |
+| **6. GCS Lifecycle** | Terraform/gcloud | **€3** | 🔧 Available |
+| Tiered storage | Apply lifecycle policy | €3 | In Terraform |
+| **Total Potential Savings** | - | **€1,923-2,115** | - |
+
+**Note:** After queue tick optimization (€420/year), web optimization will also save proportionally more due to lower container costs.
 
 ---
 
