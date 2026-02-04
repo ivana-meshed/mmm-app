@@ -333,7 +333,24 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 | [docs/8_VCPU_TEST_RESULTS.md](docs/8_VCPU_TEST_RESULTS.md) | Analysis of 8 vCPU upgrade testing |
 | [docs/google_auth_domain_configuration.md](docs/google_auth_domain_configuration.md) | OAuth domain configuration |
 | [docs/persistent_private_key.md](docs/persistent_private_key.md) | Snowflake key storage |
-| [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Cost optimization strategies |
+| [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Cost optimization strategies and verified production performance data |
+| [docs/COST_ANALYSIS_DEV_PROD.md](docs/COST_ANALYSIS_DEV_PROD.md) | **📊 Comprehensive cost analysis for dev and prod environments** |
+| [ACTUAL_COST_ANALYSIS.md](ACTUAL_COST_ANALYSIS.md) | **🚨 In-depth analysis based on actual usage data with critical findings** |
+| [COST_OPTIMIZATION_IMPLEMENTATION.md](COST_OPTIMIZATION_IMPLEMENTATION.md) | **📋 Step-by-step implementation guide for cost optimizations** |
+| [COST_REDUCTION_IMPLEMENTATION.md](COST_REDUCTION_IMPLEMENTATION.md) | **💰 Cost reduction implementation - 40% savings ($720/year)** |
+| [WARMUP_JOB_ANALYSIS.md](WARMUP_JOB_ANALYSIS.md) | **🔥 Warmup job analysis and removal guide - additional $25/year savings** |
+| [DEPLOYMENT_COST_ANALYSIS.md](DEPLOYMENT_COST_ANALYSIS.md) | **🚨 CRITICAL: Deployment churn costs €72-90/month - Complete analysis** |
+| [DEPLOYMENT_OPTIMIZATION_GUIDE.md](DEPLOYMENT_OPTIMIZATION_GUIDE.md) | **🚀 Reduce deployment frequency and save €120/month (€1,440/year)** |
+| [IMPLEMENTATION_GUIDE_AUTOMATION.md](IMPLEMENTATION_GUIDE_AUTOMATION.md) | **🤖 Guide for deploying automated cost optimization** |
+| [Cost estimate - Dev and Prod.csv](Cost%20estimate%20-%20Dev%20and%20Prod.csv) | Detailed cost spreadsheet with environment-specific estimates |
+| [scripts/cleanup_artifact_registry.sh](scripts/cleanup_artifact_registry.sh) | **💰 Script to clean up Artifact Registry (FIXED - now works correctly)** |
+| [scripts/get_cloud_run_costs.sh](scripts/get_cloud_run_costs.sh) | **📊 Complete Cloud Run cost calculator (training + web + scheduler)** |
+| [scripts/track_deployment_frequency.sh](scripts/track_deployment_frequency.sh) | **📈 Track deployment frequency and identify cost spikes** |
+| [scripts/cleanup_cloud_run_revisions.sh](scripts/cleanup_cloud_run_revisions.sh) | **🧹 Clean up old Cloud Run revisions to reduce clutter** |
+| [scripts/remove_warmup_job.sh](scripts/remove_warmup_job.sh) | **🔥 Remove warmup scheduler job to save ~$25/year** |
+| [scripts/get_training_costs.sh](scripts/get_training_costs.sh) | **📈 Training job cost calculation (legacy - use get_cloud_run_costs.sh)** |
+| [scripts/collect_cost_data.sh](scripts/collect_cost_data.sh) | Script to collect actual usage data for cost analysis |
+| [scripts/COST_AUTOMATION_README.md](scripts/COST_AUTOMATION_README.md) | **📖 Complete guide to cost automation scripts and workflows** |
 
 ## License
 

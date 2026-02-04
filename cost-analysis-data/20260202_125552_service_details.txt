@@ -1,0 +1,9 @@
+=== Cloud Run Service Details ===
+
+Production web service (mmm-app-web):
+URL                                          TRAFFIC                                                                              ANNOTATIONS
+https://mmm-app-web-wuepn6nq5a-ew.a.run.app  [{'latestRevision': True, 'percent': 100, 'revisionName': 'mmm-app-web-00184-nbk'}]  {'run.googleapis.com/ingress': 'all', 'run.googleapis.com/ingress-status': 'all', 'run.googleapis.com/operation-id': 'a69c643b-3714-442d-9fab-ddda857f62e6', 'run.googleapis.com/urls': '["https://mmm-app-web-321233323695.europe-west1.run.app","https://mmm-app-web-wuepn6nq5a-ew.a.run.app"]', 'serving.knative.dev/creator': 'github-deployer@datawarehouse-422511.iam.gserviceaccount.com', 'serving.knative.dev/lastModifier': 'github-deployer@datawarehouse-422511.iam.gserviceaccount.com'}
+
+Development web service (mmm-app-dev-web):
+URL                                              TRAFFIC                                                                                  ANNOTATIONS
+https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app  [{'latestRevision': True, 'percent': 100, 'revisionName': 'mmm-app-dev-web-00738-fzm'}]  {'run.googleapis.com/ingress': 'all', 'run.googleapis.com/ingress-status': 'all', 'run.googleapis.com/operation-id': '1e44a695-ce15-4a7c-b021-5d358126b290', 'run.googleapis.com/urls': '["https://mmm-app-dev-web-321233323695.europe-west1.run.app","https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app"]', 'serving.knative.dev/creator': 'github-deployer@datawarehouse-422511.iam.gserviceaccount.com', 'serving.knative.dev/lastModifier': 'github-deployer@datawarehouse-422511.iam.gserviceaccount.com'}

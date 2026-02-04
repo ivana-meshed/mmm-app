@@ -2,6 +2,10 @@
 
 This document provides actual cost data for the MMM Trainer application based on verified production workloads running on Cloud Run with 8 vCPU configuration.
 
+**📊 For comprehensive cost analysis including dev and prod environments, see:**
+- **[COST_ANALYSIS_DEV_PROD.md](docs/COST_ANALYSIS_DEV_PROD.md)** - Complete cost breakdown for both environments
+- **[Cost estimate - Dev and Prod.csv](Cost%20estimate%20-%20Dev%20and%20Prod.csv)** - Detailed cost spreadsheet with environment separation
+
 **Pricing References:**
 - [Cloud Run Pricing](https://cloud.google.com/run/pricing)
 - [Cloud Storage Pricing](https://cloud.google.com/storage/pricing)
@@ -38,6 +42,8 @@ Actual production runs take 80-120 minutes due to non-linear scaling and overhea
 - Production (high): 7,200 sec × 8 vCPU × $0.000024 + 7,200 sec × 32 GiB × $0.0000025 = $1.382 + $0.576 = $1.958 ≈ $2.00
 
 ### Monthly Cost Estimates by Usage Volume
+
+**Note:** These estimates are for a **single environment** (either dev or prod). For costs running both dev and prod simultaneously, see [COST_ANALYSIS_DEV_PROD.md](docs/COST_ANALYSIS_DEV_PROD.md).
 
 Based on verified benchmark (12 min, $0.20) and actual production (80-120 min, $1.33-$2.00) for 10K×5 workload:
 

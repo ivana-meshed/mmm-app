@@ -1,0 +1,15 @@
+=== Cloud Logging Volume Analysis ===
+
+Production web service logs (last 1000 entries, last 30 days):
+Log entry count (sample):        0
+
+Development web service logs (last 1000 entries, last 30 days):
+Log entry count (sample):        0
+
+Production training job logs (last 1000 entries, last 30 days):
+Log entry count (sample):     1000
+
+Development training job logs (last 1000 entries, last 30 days):
+Log entry count (sample):     1000
+
+Note: Log volume in GB needs to be calculated from actual log size, not just entry count.
