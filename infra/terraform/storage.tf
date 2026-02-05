@@ -1,55 +1,62 @@
-# GCS Bucket with lifecycle policies for cost optimization
-# This file implements cost reduction strategy #2 from Cost estimate.csv
+# GCS Bucket with AUTOMATED lifecycle policies for cost optimization
+# Implements cost reduction via Terraform-managed lifecycle rules
 
-# Note: The bucket is managed outside Terraform, so we use a data source
-# to reference it and add lifecycle rules via google_storage_bucket_lifecycle_rule
-# If the bucket is created elsewhere, these lifecycle rules can be applied manually
-# via gcloud or the GCP console.
+# Reference existing bucket (managed outside Terraform)
+data "google_storage_bucket" "mmm_output" {
+  name = var.bucket_name
+}
 
-# Lifecycle policy configuration for cost optimization
-# Archives old data to Nearline (30 days) and Coldline (90 days)
-# This can reduce storage costs by 50-80% for historical data
+# Lifecycle rule 1: Move old training data to Nearline storage after 30 days
+resource "google_storage_bucket_lifecycle_rule" "archive_to_nearline" {
+  bucket = data.google_storage_bucket.mmm_output.name
 
-# To apply these lifecycle rules manually to the existing bucket:
-# 1. Create a lifecycle.json file with the rules below
-# 2. Run: gcloud storage buckets update gs://mmm-app-output --lifecycle-file=lifecycle.json
+  condition {
+    age                   = 30
+    matches_prefix        = ["robyn/", "datasets/", "training-data/"]
+    with_state            = "LIVE"
+  }
 
-# Example lifecycle.json content:
-# {
-#   "lifecycle": {
-#     "rule": [
-#       {
-#         "action": {"type": "SetStorageClass", "storageClass": "NEARLINE"},
-#         "condition": {
-#           "age": 30,
-#           "matchesPrefix": ["robyn/", "datasets/", "training-data/"]
-#         }
-#       },
-#       {
-#         "action": {"type": "SetStorageClass", "storageClass": "COLDLINE"},
-#         "condition": {
-#           "age": 90,
-#           "matchesPrefix": ["robyn/", "datasets/", "training-data/"]
-#         }
-#       },
-#       {
-#         "action": {"type": "Delete"},
-#         "condition": {
-#           "age": 365,
-#           "matchesPrefix": ["robyn-queues/"]
-#         }
-#       }
-#     ]
-#   }
-# }
+  action {
+    type          = "SetStorageClass"
+    storage_class = "NEARLINE"
+  }
+}
 
-# Cost savings from lifecycle policies:
+# Lifecycle rule 2: Move old training data to Coldline storage after 90 days
+resource "google_storage_bucket_lifecycle_rule" "archive_to_coldline" {
+  bucket = data.google_storage_bucket.mmm_output.name
+
+  condition {
+    age                   = 90
+    matches_prefix        = ["robyn/", "datasets/", "training-data/"]
+    with_state            = "LIVE"
+  }
+
+  action {
+    type          = "SetStorageClass"
+    storage_class = "COLDLINE"
+  }
+}
+
+# Lifecycle rule 3: Delete old queue data after 365 days
+resource "google_storage_bucket_lifecycle_rule" "delete_old_queues" {
+  bucket = data.google_storage_bucket.mmm_output.name
+
+  condition {
+    age                   = 365
+    matches_prefix        = ["robyn-queues/"]
+    with_state            = "LIVE"
+  }
+
+  action {
+    type = "Delete"
+  }
+}
+
+# Cost savings from lifecycle policies (AUTOMATED):
 # - Standard Storage: $0.020/GB/month
 # - Nearline Storage: $0.010/GB/month (30-89 days) - 50% savings
 # - Coldline Storage: $0.004/GB/month (90+ days) - 80% savings
 #
-# For 80GB baseline storage with minimal access to old data:
-# - Before: 80GB × $0.020 = $1.60/month
-# - After (assuming 20GB hot, 30GB nearline, 30GB coldline):
-#   20GB × $0.020 + 30GB × $0.010 + 30GB × $0.004 = $0.40 + $0.30 + $0.12 = $0.82/month
-# - Savings: $0.78/month (49% reduction)
+# Expected savings: $0.78/month (49% reduction on storage costs)
+# These rules are automatically applied when Terraform runs
