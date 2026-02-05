@@ -477,6 +477,164 @@ Revert via Terraform (edit main.tf and tfvars, then terraform apply)
 
 ---
 
+## 8. Testing the Cost Optimization Workflow
+
+The `cost-optimization.yml` workflow can be manually triggered for testing before merging to production.
+
+### Method 1: GitHub UI (Recommended)
+
+**Step-by-step:**
+
+1. **Navigate to Actions tab**
+   - Go to: https://github.com/ivana-meshed/mmm-app/actions
+
+2. **Select the workflow**
+   - Click on "Cost Optimization - Artifact Registry Cleanup" in the left sidebar
+
+3. **Trigger manually**
+   - Click the "Run workflow" button (top right)
+   - Select your branch (e.g., `copilot/implement-cost-reduction-measures`)
+   - Configure optional inputs (see below)
+   - Click green "Run workflow" button
+
+4. **Monitor execution**
+   - Watch the workflow run in real-time
+   - Check logs for detailed output
+   - Review summary at the end
+
+### Method 2: GitHub CLI
+
+**Install GitHub CLI (if needed):**
+```bash
+# macOS
+brew install gh
+
+# Linux
+sudo apt install gh
+
+# Authenticate
+gh auth login
+```
+
+**Trigger workflow:**
+```bash
+# Test with dry run (recommended first)
+gh workflow run cost-optimization.yml \
+  --ref copilot/implement-cost-reduction-measures \
+  -f dry_run=true \
+  -f keep_last_n=10
+
+# Check status
+gh run list --workflow=cost-optimization.yml --limit 5
+
+# View logs
+gh run view --log
+```
+
+### Input Parameters
+
+**keep_last_n** (optional, default: 10)
+- Number of recent tags to keep per image
+- Recommended: 10-20 for testing
+- Example: `-f keep_last_n=15`
+
+**dry_run** (optional, default: false)
+- `true`: Shows what would be deleted **without actually deleting**
+- `false`: Actually performs the deletion
+- **Always start with dry_run=true when testing**
+
+### Testing Recommendations
+
+**1. First Test - Dry Run (Safe)**
+```bash
+gh workflow run cost-optimization.yml \
+  --ref your-branch-name \
+  -f dry_run=true \
+  -f keep_last_n=10
+```
+
+- Review the output to verify the logic
+- Check which images would be deleted
+- Ensure protected tags (latest, stable) are skipped
+- Verify expected cost savings
+
+**2. Second Test - Actual Cleanup (If Needed)**
+
+Only run this if dry run results look correct:
+```bash
+gh workflow run cost-optimization.yml \
+  --ref your-branch-name \
+  -f dry_run=false \
+  -f keep_last_n=10
+```
+
+**3. Verify Results**
+```bash
+# List remaining images
+gcloud artifacts docker images list \
+  europe-west1-docker.pkg.dev/datawarehouse-422511/mmm-repo \
+  --include-tags
+
+# Check specific image tags
+gcloud artifacts docker images list \
+  europe-west1-docker.pkg.dev/datawarehouse-422511/mmm-repo/mmm-app-web \
+  --include-tags
+```
+
+### Expected Workflow Output
+
+The workflow will:
+1. Authenticate to GCP via Workload Identity
+2. List all packages in the Artifact Registry
+3. For each package:
+   - List all tags sorted by creation time
+   - Keep the N most recent tags
+   - Delete older tags (respecting protected tags)
+4. Report total images deleted and estimated savings
+
+**Example output:**
+```
+==========================================
+Artifact Registry Cleanup
+==========================================
+Project: datawarehouse-422511
+Repository: mmm-repo
+Region: europe-west1
+Keep last: 10 tags
+Dry run: true
+
+Processing: europe-west1-docker.pkg.dev/.../mmm-app-web
+  Total tags: 25
+  Tags to delete: 15
+    [DRY RUN] Would delete: sha256:abc123... (size: 1.2GB)
+    [DRY RUN] Would delete: sha256:def456... (size: 1.1GB)
+    ...
+
+==========================================
+Summary
+==========================================
+DRY RUN MODE - No images were actually deleted
+Total images that would be deleted: 15
+Total size that would be freed: 18.5 GB
+Estimated monthly savings: $1.85
+```
+
+### Troubleshooting
+
+**Workflow fails to authenticate:**
+- Check Workload Identity Federation is configured
+- Verify service account has required permissions
+
+**No images found:**
+- Verify repository name and region are correct
+- Check if any images exist in the registry
+
+**Images not being deleted:**
+- Check if they have protected tags (latest, stable)
+- Verify they're older than the most recent N tags
+
+---
+
 ## 9. Summary
 
 ✅ **All optimizations automated** via Terraform & CI/CD
@@ -484,5 +642,6 @@ Revert via Terraform (edit main.tf and tfvars, then terraform apply)
 ✅ **€97-113/month savings** (66-73% reduction)
 ✅ **ACTUAL cost tracking** via BigQuery billing export
 ✅ **Single documentation file** (this one)
+✅ **Manual testing enabled** for cost-optimization workflow
 
 **Status:** Ready for deployment. All PR #167 recommendations implemented and automated.
