@@ -9,6 +9,10 @@ deployer_sa = "github-deployer@datawarehouse-422511.iam.gserviceaccount.com"
 scheduler_job_name = "robyn-queue-tick-dev"
 queue_name         = "default-dev"
 
+# Cost optimization: Scale-to-zero configuration
+min_instances = 0 # Eliminates idle costs, adds 1-3s cold start
+max_instances = 10
+
 # Snowflake (you can reuse prod or set dev values)
 sf_user      = "IPENC"
 sf_account   = "AMXUZTH-AWS_BRIDGE"
