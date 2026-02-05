@@ -1,55 +1,53 @@
 # GCS Bucket with AUTOMATED lifecycle policies for cost optimization
 # Implements cost reduction via Terraform-managed lifecycle rules
+#
+# NOTE: This manages an existing bucket. To import:
+#   terraform import google_storage_bucket.mmm_output mmm-app-output
 
-# Reference existing bucket (managed outside Terraform)
-data "google_storage_bucket" "mmm_output" {
-  name = var.bucket_name
-}
-
-# Lifecycle rule 1: Move old training data to Nearline storage after 30 days
-resource "google_storage_bucket_lifecycle_rule" "archive_to_nearline" {
-  bucket = data.google_storage_bucket.mmm_output.name
-
-  condition {
-    age                   = 30
-    matches_prefix        = ["robyn/", "datasets/", "training-data/"]
-    with_state            = "LIVE"
+resource "google_storage_bucket" "mmm_output" {
+  name     = var.bucket_name
+  location = var.region
+  
+  # Preserve existing bucket settings
+  force_destroy               = false
+  uniform_bucket_level_access = true
+  
+  # Lifecycle rule 1: Move old training data to Nearline storage after 30 days
+  lifecycle_rule {
+    condition {
+      age                   = 30
+      matches_prefix        = ["robyn/", "datasets/", "training-data/"]
+      with_state            = "LIVE"
+    }
+    action {
+      type          = "SetStorageClass"
+      storage_class = "NEARLINE"
+    }
   }
-
-  action {
-    type          = "SetStorageClass"
-    storage_class = "NEARLINE"
+  
+  # Lifecycle rule 2: Move old training data to Coldline storage after 90 days
+  lifecycle_rule {
+    condition {
+      age                   = 90
+      matches_prefix        = ["robyn/", "datasets/", "training-data/"]
+      with_state            = "LIVE"
+    }
+    action {
+      type          = "SetStorageClass"
+      storage_class = "COLDLINE"
+    }
   }
-}
-
-# Lifecycle rule 2: Move old training data to Coldline storage after 90 days
-resource "google_storage_bucket_lifecycle_rule" "archive_to_coldline" {
-  bucket = data.google_storage_bucket.mmm_output.name
-
-  condition {
-    age                   = 90
-    matches_prefix        = ["robyn/", "datasets/", "training-data/"]
-    with_state            = "LIVE"
-  }
-
-  action {
-    type          = "SetStorageClass"
-    storage_class = "COLDLINE"
-  }
-}
-
-# Lifecycle rule 3: Delete old queue data after 365 days
-resource "google_storage_bucket_lifecycle_rule" "delete_old_queues" {
-  bucket = data.google_storage_bucket.mmm_output.name
-
-  condition {
-    age                   = 365
-    matches_prefix        = ["robyn-queues/"]
-    with_state            = "LIVE"
-  }
-
-  action {
-    type = "Delete"
+  
+  # Lifecycle rule 3: Delete old queue data after 365 days
+  lifecycle_rule {
+    condition {
+      age                   = 365
+      matches_prefix        = ["robyn-queues/"]
+      with_state            = "LIVE"
+    }
+    action {
+      type = "Delete"
+    }
   }
 }
 

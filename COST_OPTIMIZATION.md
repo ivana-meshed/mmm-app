@@ -2,7 +2,10 @@
 
 **Last Updated:** February 5, 2026  
 **Status:** Fully Automated via Terraform & CI/CD  
-**Monthly Savings:** €85-101/month (57-68% reduction from €148 to €47-63)
+**Monthly Cost Range:** €2-55/month (depending on usage)
+- **Minimum (idle, no training):** €1-2/month (fixed costs only)
+- **Typical (moderate usage):** €25-35/month
+- **Maximum (heavy training):** €50-55/month + variable training costs
 
 ---
 
@@ -14,7 +17,7 @@ This document consolidates all cost optimization work for the MMM Trainer applic
 
 Original cost tracking showed $23/month (training jobs only), but actual billing revealed **€148/month**. The gap of €125/month (84% of costs) was caused by:
 
-1. **Web Services (€15-20/month)** - Always-on service not tracked
+1. **Web Services (€15-20/month)** - Always-on service not tracked (min_instances=2)
 2. **Deployment Churn (€50-60/month)** - 150 deployments/month create 2-8 hour overlaps
 3. **Scheduler Costs (€45-50/month)** - Queue tick running every minute (10× underestimated)
 4. **Training Jobs (€21.60/month)** - Accurately tracked ✓
@@ -30,7 +33,70 @@ Original cost tracking showed $23/month (training jobs only), but actual billing
 | Queue tick (1→10 minutes) | €40-45/month | ✅ Automated |
 | GCS lifecycle policies | €0.78/month | ✅ Automated |
 | Artifact Registry cleanup | €11/month | ✅ Automated (CI/CD) |
-| **TOTAL** | **€97-113/month** | **✅ Complete** |
+| **TOTAL SAVINGS** | **€97-113/month** | **✅ Complete** |
+
+### Cost Breakdown After Optimization
+
+**Fixed Costs (Always Incurred):**
+- Scheduler (queue ticks): €0.73/month
+- Artifact Registry: €1-2/month
+- GCS Storage: €0.50-1/month
+- **Fixed Total: €2.23-3.73/month**
+
+**Variable Costs (Usage-Dependent):**
+- Training jobs: €0-50+/month (depends on number of jobs)
+- Web service requests: €0.50-2/month (user interactions + scheduler)
+- Deployment churn: €6-31/month (depends on deployment frequency)
+  - Target (30 deploys): €6-10/month
+  - Current (150 deploys): €31/month
+- **Variable Total: €6.50-83+/month**
+
+**Total Range: €8.73-87/month** (down from €148/month = 41-94% reduction)
+
+---
+
+## Cost Breakdown: Before vs After
+
+### Before Optimization (€148/month)
+| Category | Cost | Details |
+|----------|------|---------|
+| Training Jobs | €21.60 | Variable (based on usage) |
+| **Web Service (idle)** | **€15-20** | **min_instances=2, always running** |
+| **Scheduler** | **€45-50** | **Every 1 minute = 43,200 invocations/month** |
+| Deployment Churn | €50-60 | 150 deployments × 4h overlap × (2 vCPU, 4 GB) |
+| Artifact Registry | €12 | No cleanup, many old versions |
+| GCS Storage | €1.50 | No lifecycle policies |
+| **TOTAL** | **€148/month** | **High fixed costs** |
+
+### After Optimization (€9-87/month typical range)
+| Category | Cost | Details |
+|----------|------|---------|
+| **Scheduler** | **€0.73** | **Every 10 minutes = 4,320 invocations/month** ✅ |
+| **Web Service (idle)** | **€0** | **min_instances=0, scale-to-zero** ✅ |
+| Web Service (requests) | €0.50-2 | Only when processing requests |
+| Artifact Registry | €1-2 | Weekly cleanup, keeps last 10 ✅ |
+| GCS Storage | €0.50-1 | Lifecycle policies (Nearline/Coldline) ✅ |
+| Deployment Churn | €6-31 | 30-150 deployments × 4h × (1 vCPU, 2 GB) ✅ |
+| Training Jobs | €0-50+ | Variable (usage-dependent) |
+| **FIXED COSTS** | **€2.23-3.73** | **Minimal baseline** |
+| **TOTAL (with minimal training)** | **€9-12/month** | **94% reduction** |
+| **TOTAL (with moderate training)** | **€25-35/month** | **76-83% reduction** |
+| **TOTAL (with heavy training)** | **€50-87/month** | **41-66% reduction** |
+
+### Key Insight: Scale-to-Zero Impact
+
+With **min_instances=0** (scale-to-zero enabled):
+- **Idle cost: €0** (vs €15-20/month before)
+- **Cold start trade-off:** 1-3 seconds on first request
+- **Cost only when active:** Charges only during actual request processing
+- **Scheduler still works:** Queue ticks wake up the service automatically
+
+This means the web service now costs practically **nothing when idle**, and only incurs costs during:
+1. Scheduler invocations (4,320/month × 5 seconds = 6 hours/month = €0.50)
+2. User interactions (variable, typically 1-2 hours/month = €0.50-1.50)
+3. Training job triggers (included in scheduler time)
+
+**Total web service cost after optimization: €1-2.50/month** (down from €15-20/month)
 
 ---
 
