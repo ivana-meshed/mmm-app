@@ -84,6 +84,7 @@ echo "(If this fails, billing export may not be configured)"
 echo ""
 
 # Build BigQuery query
+# Note: BigQuery returns newline-delimited JSON (NDJSON), not a JSON array
 read -r -d '' QUERY << 'EOF' || true
 SELECT
   service.description as service,
@@ -113,33 +114,53 @@ QUERY="${QUERY//END_DATE/$END_DATE}"
 
 # Try to run BigQuery query
 if command -v bq >/dev/null 2>&1; then
-    BILLING_DATA=$(bq query --format=json --use_legacy_sql=false "$QUERY" 2>/dev/null || echo "[]")
+    # BigQuery outputs newline-delimited JSON (NDJSON), not a JSON array
+    # Use jq -s to slurp it into an array
+    BILLING_DATA_RAW=$(bq query --format=json --use_legacy_sql=false "$QUERY" 2>/dev/null || echo "")
     
-    if [ "$BILLING_DATA" != "[]" ] && [ -n "$BILLING_DATA" ]; then
-        echo -e "${GREEN}✓ Successfully retrieved billing data from BigQuery${NC}"
-        echo ""
-        
-        # Parse and display results
+    # Check if we got any data
+    if [ -n "$BILLING_DATA_RAW" ] && [ "$BILLING_DATA_RAW" != "[]" ]; then
+        # Try to parse as NDJSON and convert to array
         if command -v jq >/dev/null 2>&1; then
-            echo "==================================="
-            echo "ACTUAL COSTS BY SERVICE"
-            echo "==================================="
-            echo ""
+            # Use jq -s (slurp) to combine newline-delimited JSON into an array
+            BILLING_DATA=$(echo "$BILLING_DATA_RAW" | jq -s '.' 2>/dev/null || echo "[]")
             
-            echo "$BILLING_DATA" | jq -r '
-                .[] | 
-                "\(.service) - \(.sku): $\(.total_cost | tonumber | . * 100 | round / 100) (\(.usage_amount) \(.usage_unit))"
-            '
-            
-            echo ""
-            echo "==================================="
-            echo "TOTAL COST"
-            echo "==================================="
-            TOTAL=$(echo "$BILLING_DATA" | jq '[.[].total_cost | tonumber] | add')
-            printf "Total actual cost: $%.2f\n" "$TOTAL"
-            echo ""
+            if [ "$BILLING_DATA" != "[]" ] && [ -n "$BILLING_DATA" ]; then
+                echo -e "${GREEN}✓ Successfully retrieved billing data from BigQuery${NC}"
+                echo ""
+                
+                # Parse and display results
+                echo "==================================="
+                echo "ACTUAL COSTS BY SERVICE"
+                echo "==================================="
+                echo ""
+                
+                # Check if data is valid before processing
+                if echo "$BILLING_DATA" | jq -e '.[0]' >/dev/null 2>&1; then
+                    echo "$BILLING_DATA" | jq -r '
+                        .[] | 
+                        "\(.service) - \(.sku): $\(.total_cost | tonumber | . * 100 | round / 100) (\(.usage_amount) \(.usage_unit))"
+                    '
+                    
+                    echo ""
+                    echo "==================================="
+                    echo "TOTAL COST"
+                    echo "==================================="
+                    TOTAL=$(echo "$BILLING_DATA" | jq '[.[].total_cost | tonumber] | add // 0')
+                    printf "Total actual cost: $%.2f\n" "$TOTAL"
+                    echo ""
+                else
+                    echo -e "${YELLOW}Warning: Billing data format unexpected${NC}"
+                    echo ""
+                    USE_ALTERNATIVE=true
+                fi
+            else
+                echo -e "${YELLOW}Warning: BigQuery billing export not configured or no data available${NC}"
+                echo ""
+                USE_ALTERNATIVE=true
+            fi
         else
-            echo "$BILLING_DATA"
+            echo "$BILLING_DATA_RAW"
         fi
     else
         echo -e "${YELLOW}Warning: BigQuery billing export not configured or no data available${NC}"
