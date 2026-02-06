@@ -203,6 +203,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          
+          # Import GCS bucket if exists and not already managed
+          if gsutil ls -b gs://${{ env.BUCKET }} >/dev/null 2>&1; then
+            echo "Checking if GCS bucket is already managed..."
+            if ! terraform state show google_storage_bucket.mmm_output >/dev/null 2>&1; then
+              echo "Importing GCS bucket ${{ env.BUCKET }}..."
+              terraform import -lock-timeout=5m google_storage_bucket.mmm_output ${{ env.BUCKET }} || true
+            else
+              echo "GCS bucket already managed in Terraform state—skipping import."
+            fi
+          else
+            echo "GCS bucket does not exist yet—will create on apply."
+          fi
+          
           # Import sf-private-key if exists and not already managed
           if gcloud secrets describe sf-private-key --project=$PROJECT_ID >/dev/null 2>&1; then
             echo "Checking if sf-private-key is already managed..."
