@@ -12,9 +12,16 @@
 #   ./scripts/get_actual_costs.sh        # Last 30 days (default)
 #   DAYS_BACK=7 ./scripts/get_actual_costs.sh  # Last 7 days
 #
+# Configuration (via environment variables):
+#   PROJECT_ID - GCP project ID (default: datawarehouse-422511)
+#   DAYS_BACK - Number of days to look back (default: 30)
+#   BILLING_DATASET - BigQuery dataset for billing export (default: mmm_billing)
+#   BILLING_ACCOUNT_NUM - Billing account number (default: 01B2F0_BCBFB7_2051C5)
+#
 # Requirements:
 #   - gcloud CLI configured with appropriate permissions
 #   - Billing Account Reader role
+#   - BigQuery billing export enabled
 #   - jq for JSON parsing
 #
 
@@ -76,11 +83,16 @@ echo -e "${BOLD}Step 2: Querying actual costs...${NC}"
 echo ""
 
 # Check if BigQuery billing export is configured
-DATASET_ID="billing_export"
-TABLE_PATTERN="gcp_billing_export_v1_*"
+# Actual billing export structure for this project:
+# Dataset: mmm_billing
+# Table: gcp_billing_export_resource_v1_01B2F0_BCBFB7_2051C5
+DATASET_ID="${BILLING_DATASET:-mmm_billing}"
+BILLING_ACCOUNT_NUM="${BILLING_ACCOUNT_NUM:-01B2F0_BCBFB7_2051C5}"
+TABLE_NAME="gcp_billing_export_resource_v1_${BILLING_ACCOUNT_NUM}"
 
 echo "Attempting to query billing data from BigQuery export..."
-echo "(If this fails, billing export may not be configured)"
+echo "Dataset: $DATASET_ID"
+echo "Table: $TABLE_NAME"
 echo ""
 
 # Build BigQuery query
@@ -92,7 +104,7 @@ SELECT
   SUM(cost) as total_cost,
   SUM(usage.amount) as usage_amount,
   usage.unit as usage_unit
-FROM `PROJECT_ID.billing_export.gcp_billing_export_v1_*`
+FROM `PROJECT_ID.DATASET_ID.TABLE_NAME`
 WHERE
   DATE(_PARTITIONTIME) >= 'START_DATE'
   AND DATE(_PARTITIONTIME) <= 'END_DATE'
@@ -109,6 +121,8 @@ EOF
 
 # Replace placeholders
 QUERY="${QUERY//PROJECT_ID/$PROJECT_ID}"
+QUERY="${QUERY//DATASET_ID/$DATASET_ID}"
+QUERY="${QUERY//TABLE_NAME/$TABLE_NAME}"
 QUERY="${QUERY//START_DATE/$START_DATE}"
 QUERY="${QUERY//END_DATE/$END_DATE}"
 
@@ -270,16 +284,23 @@ echo "==========================================="
 echo "RECOMMENDATION"
 echo "==========================================="
 echo ""
-echo "For ACTUAL billing costs, enable BigQuery billing export:"
+echo "For ACTUAL billing costs, ensure BigQuery billing export is enabled:"
+echo ""
+echo "Current configuration:"
+echo "  Dataset: $DATASET_ID"
+echo "  Table: $TABLE_NAME"
+echo "  Project: $PROJECT_ID"
+echo ""
+echo "If you need to change the billing export configuration:"
 echo ""
 echo "1. Go to: https://console.cloud.google.com/billing"
 echo "2. Select your billing account"
 echo "3. Go to 'Billing export' → 'BigQuery export'"
-echo "4. Click 'EDIT SETTINGS'"
-echo "5. Select dataset: 'billing_export' (create if needed)"
-echo "6. Click 'SAVE'"
+echo "4. Verify dataset and table are configured correctly"
 echo ""
-echo "After 24 hours, run this script again for actual costs."
+echo "You can override defaults with environment variables:"
+echo "  BILLING_DATASET=your_dataset ./scripts/get_actual_costs.sh"
+echo "  BILLING_ACCOUNT_NUM=your_account_id ./scripts/get_actual_costs.sh"
 echo ""
 echo "Alternatively, view actual costs in:"
 echo "GCP Console → Billing → Reports → Filter by project: $PROJECT_ID"
