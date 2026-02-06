@@ -143,6 +143,14 @@ if command -v bq >/dev/null 2>&1; then
                 echo -e "${GREEN}✓ Successfully retrieved billing data from BigQuery${NC}"
                 echo ""
                 
+                # Debug mode - show raw data if DEBUG=1
+                if [ "${DEBUG:-0}" = "1" ]; then
+                    echo "=== DEBUG: Raw BigQuery Output ==="
+                    echo "$BILLING_DATA_RAW"
+                    echo "==================================="
+                    echo ""
+                fi
+                
                 # Parse and display results
                 echo "==================================="
                 echo "ACTUAL COSTS BY SERVICE"
@@ -151,20 +159,42 @@ if command -v bq >/dev/null 2>&1; then
                 
                 # Check if data is valid before processing
                 if echo "$BILLING_DATA" | jq -e '.[0]' >/dev/null 2>&1; then
-                    echo "$BILLING_DATA" | jq -r '
+                    # Parse with safe field access and error capture
+                    JQ_OUTPUT=$(echo "$BILLING_DATA" | jq -r '
                         .[] | 
-                        "\(.service) - \(.sku): $\(.total_cost | tonumber | . * 100 | round / 100) (\(.usage_amount) \(.usage_unit))"
-                    '
+                        "\(.service // "Unknown") - \(.sku // "Unknown"): $\(.total_cost | tonumber // 0 | . * 100 | round / 100) (\(.usage_amount // 0) \(.usage_unit // "units"))"
+                    ' 2>&1)
                     
-                    echo ""
-                    echo "==================================="
-                    echo "TOTAL COST"
-                    echo "==================================="
-                    TOTAL=$(echo "$BILLING_DATA" | jq '[.[].total_cost | tonumber] | add // 0')
-                    printf "Total actual cost: $%.2f\n" "$TOTAL"
-                    echo ""
+                    # Check if jq succeeded
+                    if [ $? -eq 0 ] && [ -n "$JQ_OUTPUT" ]; then
+                        echo "$JQ_OUTPUT"
+                        
+                        echo ""
+                        echo "==================================="
+                        echo "TOTAL COST"
+                        echo "==================================="
+                        TOTAL=$(echo "$BILLING_DATA" | jq '[.[].total_cost | tonumber // 0] | add // 0' 2>/dev/null || echo "0")
+                        printf "Total actual cost: $%.2f\n" "$TOTAL"
+                        echo ""
+                    else
+                        echo -e "${YELLOW}Warning: Failed to parse billing data${NC}"
+                        echo "Error output: $JQ_OUTPUT"
+                        echo ""
+                        echo "First 500 chars of raw data:"
+                        echo "$BILLING_DATA_RAW" | head -c 500
+                        echo "..."
+                        echo ""
+                        echo "Run with DEBUG=1 to see full output:"
+                        echo "  DEBUG=1 $0"
+                        echo ""
+                        USE_ALTERNATIVE=true
+                    fi
                 else
-                    echo -e "${YELLOW}Warning: Billing data format unexpected${NC}"
+                    echo -e "${YELLOW}Warning: Billing data format unexpected (empty or invalid)${NC}"
+                    echo ""
+                    echo "First 500 chars of raw data:"
+                    echo "$BILLING_DATA_RAW" | head -c 500
+                    echo "..."
                     echo ""
                     USE_ALTERNATIVE=true
                 fi
