@@ -391,7 +391,18 @@ All optimizations from PR #167 are now AUTOMATED via Terraform and CI/CD:
 ./scripts/get_actual_costs.sh  # Last 30 days actual costs
 ```
 
-**Requires:** BigQuery billing export enabled (setup once)
+**Requires:** BigQuery billing export enabled (already configured for this project)
+
+**Configuration:**
+- Dataset: `mmm_billing`
+- Table: `gcp_billing_export_resource_v1_01B2F0_BCBFB7_2051C5`
+- Partition: By date (`_PARTITIONTIME`)
+
+**Override defaults (if needed):**
+```bash
+BILLING_DATASET=custom_dataset ./scripts/get_actual_costs.sh
+BILLING_ACCOUNT_NUM=custom_account ./scripts/get_actual_costs.sh
+```
 
 **Alternative:** View actual costs in GCP Console → Billing → Reports
 
