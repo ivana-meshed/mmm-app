@@ -59,6 +59,7 @@ docker/
 scripts/                    # Utility scripts for data management and monitoring
   download_test_data.py     # Download test data from GCS
   track_daily_costs.py      # Daily cost tracking with service/category breakdowns
+  analyze_idle_costs.py     # Deep-dive idle cost analysis and optimization
   get_actual_costs.sh       # Historical actual costs from BigQuery billing
   get_comprehensive_costs.sh # Estimated costs with detailed breakdowns
   upload_test_data.py       # Upload test data to GCS
@@ -66,6 +67,8 @@ scripts/                    # Utility scripts for data management and monitoring
   README_GCS_SCRIPTS.md     # Documentation for GCS scripts
 tests/                      # Unit and integration tests
 docs/                       # Additional documentation
+  IDLE_COST_ANALYSIS.md     # Technical analysis of idle costs and optimization
+  IDLE_COST_EXECUTIVE_SUMMARY.md  # Executive summary of cost optimization
 ```
 
 For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -95,6 +98,49 @@ For step-by-step instructions on deploying this application to a new Google Clou
 - GitHub repository secrets setup
 - Terraform configuration and deployment
 - Post-deployment verification and troubleshooting
+
+## Cost Monitoring and Optimization
+
+This repository includes comprehensive cost monitoring and optimization tools. See detailed documentation:
+
+- **[IDLE_COST_EXECUTIVE_SUMMARY.md](docs/IDLE_COST_EXECUTIVE_SUMMARY.md)** - Executive summary of cost optimization opportunities
+- **[IDLE_COST_ANALYSIS.md](docs/IDLE_COST_ANALYSIS.md)** - Technical deep-dive on idle cost analysis
+
+### Quick Cost Analysis
+
+Track your daily Google Cloud costs broken down by service:
+
+```bash
+# Daily cost tracking (last 7 days)
+python scripts/track_daily_costs.py --days 7 --use-user-credentials
+
+# Deep-dive idle cost analysis
+python scripts/analyze_idle_costs.py --days 7 --use-user-credentials
+
+# Export to CSV for spreadsheet analysis
+python scripts/track_daily_costs.py --days 30 --output costs.csv
+```
+
+### Cost Optimization Recommendations
+
+The analysis tools have identified significant cost optimization opportunities:
+
+**Current Issue**: Despite `min_instances=0` configuration, idle costs remain at ~$137/month due to:
+1. CPU throttling disabled (`cpu-throttling=false` in main.tf)
+2. Aggressive scheduler frequency (every 10 minutes)
+
+**Recommended Changes** (in `infra/terraform/main.tf`):
+```terraform
+# Line 324: Enable CPU throttling (saves ~$50-70/month)
+"run.googleapis.com/cpu-throttling" = "true"  # was: false
+
+# Line 597: Reduce scheduler frequency (saves ~$20-30/month)
+schedule = "*/30 * * * *"  # was: */10 * * * *
+```
+
+**Expected Savings**: ~$92-112/month (~$1,100-1,300/year) with zero user impact
+
+For full analysis and implementation details, see the cost optimization documentation above.
 
 ## Prerequisites
 
