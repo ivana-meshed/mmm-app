@@ -166,6 +166,16 @@ if command -v bq >/dev/null 2>&1; then
                 echo "=============================="
                 echo ""
                 
+                # Debug: Check if array access works
+                FIRST_CHECK=$(echo "$BILLING_DATA" | jq -e '.[0]' 2>/dev/null)
+                if [ $? -eq 0 ]; then
+                    echo "✓ Array access works, proceeding with parsing..."
+                    echo ""
+                else
+                    echo "✗ Array access failed, data structure might be unexpected"
+                    echo ""
+                fi
+                
                 # Parse and display results
                 echo "==================================="
                 echo "ACTUAL COSTS BY SERVICE"
@@ -175,20 +185,26 @@ if command -v bq >/dev/null 2>&1; then
                 # Check if data is valid before processing
                 if echo "$BILLING_DATA" | jq -e '.[0]' >/dev/null 2>&1; then
                     # Parse with safe field access and error capture
+                    # Note: BigQuery returns numbers as strings, need to convert
+                    echo "Parsing billing data..."
                     JQ_OUTPUT=$(echo "$BILLING_DATA" | jq -r '
                         .[] | 
-                        "\(.service // "Unknown") - \(.sku // "Unknown"): $\(.total_cost | tonumber // 0 | . * 100 | round / 100) (\(.usage_amount // 0) \(.usage_unit // "units"))"
+                        . as $item |
+                        ($item.total_cost | tonumber // 0) as $cost |
+                        ($item.usage_amount | tonumber // 0) as $usage |
+                        "\($item.service // "Unknown") - \($item.sku // "Unknown"): $\($cost | . * 100 | round / 100) (\($usage) \($item.usage_unit // "units"))"
                     ' 2>&1)
                     
                     # Check if jq succeeded
                     if [ $? -eq 0 ] && [ -n "$JQ_OUTPUT" ]; then
                         echo "$JQ_OUTPUT"
-                        
                         echo ""
+                        
                         echo "==================================="
                         echo "TOTAL COST"
                         echo "==================================="
-                        TOTAL=$(echo "$BILLING_DATA" | jq '[.[].total_cost | tonumber // 0] | add // 0' 2>/dev/null || echo "0")
+                        # Sum up all costs, converting strings to numbers
+                        TOTAL=$(echo "$BILLING_DATA" | jq '[.[] | .total_cost | tonumber // 0] | add // 0' 2>/dev/null || echo "0")
                         printf "Total actual cost: $%.2f\n" "$TOTAL"
                         echo ""
                     else
