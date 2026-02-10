@@ -143,13 +143,28 @@ if command -v bq >/dev/null 2>&1; then
                 echo -e "${GREEN}✓ Successfully retrieved billing data from BigQuery${NC}"
                 echo ""
                 
+                # Show data count
+                DATA_COUNT=$(echo "$BILLING_DATA" | jq 'length' 2>/dev/null || echo "0")
+                echo "Retrieved $DATA_COUNT record(s)"
+                echo ""
+                
                 # Debug mode - show raw data if DEBUG=1
                 if [ "${DEBUG:-0}" = "1" ]; then
                     echo "=== DEBUG: Raw BigQuery Output ==="
                     echo "$BILLING_DATA_RAW"
                     echo "==================================="
                     echo ""
+                    echo "=== DEBUG: Parsed BILLING_DATA ==="
+                    echo "$BILLING_DATA"
+                    echo "==================================="
+                    echo ""
                 fi
+                
+                # Always show first record structure for debugging
+                echo "=== First Record Structure ==="
+                echo "$BILLING_DATA" | jq '.[0]' 2>/dev/null || echo "Unable to parse first record"
+                echo "=============================="
+                echo ""
                 
                 # Parse and display results
                 echo "==================================="
@@ -191,10 +206,22 @@ if command -v bq >/dev/null 2>&1; then
                     fi
                 else
                     echo -e "${YELLOW}Warning: Billing data format unexpected (empty or invalid)${NC}"
+                    echo "The data was retrieved but the first record check failed."
                     echo ""
-                    echo "First 500 chars of raw data:"
+                    echo "BILLING_DATA content:"
+                    echo "$BILLING_DATA"
+                    echo ""
+                    echo "First 500 chars of raw NDJSON data:"
                     echo "$BILLING_DATA_RAW" | head -c 500
                     echo "..."
+                    echo ""
+                    echo "This usually means:"
+                    echo "  1. BigQuery returned data in unexpected format"
+                    echo "  2. Field names don't match (check query aliases)"
+                    echo "  3. Data structure is nested differently"
+                    echo ""
+                    echo "Try running with DEBUG=1 to see full output:"
+                    echo "  DEBUG=1 $0"
                     echo ""
                     USE_ALTERNATIVE=true
                 fi
