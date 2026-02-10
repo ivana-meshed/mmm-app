@@ -75,7 +75,7 @@ variable "training_max_cores" {
 }
 
 variable "min_instances" {
-  description = "Minimum number of instances for pre-warming. Set to 0 to eliminate idle costs (adds cold start latency)"
+  description = "Minimum number of instances for pre-warming. Set to 0 to eliminate idle costs (adds cold start latency). Default: 0 for cost optimization."
   type        = number
   default     = 0
 }
