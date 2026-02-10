@@ -136,8 +136,15 @@ if command -v bq >/dev/null 2>&1; then
     if [ -n "$BILLING_DATA_RAW" ] && [ "$BILLING_DATA_RAW" != "[]" ]; then
         # Try to parse as NDJSON and convert to array
         if command -v jq >/dev/null 2>&1; then
-            # Use jq -s (slurp) to combine newline-delimited JSON into an array
-            BILLING_DATA=$(echo "$BILLING_DATA_RAW" | jq -s '.' 2>/dev/null || echo "[]")
+            # Check if already a valid JSON array before using jq -s
+            # BigQuery --format=json returns a JSON array, but jq -s wraps it again
+            if echo "$BILLING_DATA_RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
+                # Already an array, use as-is to avoid double-nesting
+                BILLING_DATA="$BILLING_DATA_RAW"
+            else
+                # NDJSON or other format, convert to array with jq -s (slurp)
+                BILLING_DATA=$(echo "$BILLING_DATA_RAW" | jq -s '.' 2>/dev/null || echo "[]")
+            fi
             
             if [ "$BILLING_DATA" != "[]" ] && [ -n "$BILLING_DATA" ]; then
                 echo -e "${GREEN}✓ Successfully retrieved billing data from BigQuery${NC}"
