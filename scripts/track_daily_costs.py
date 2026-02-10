@@ -82,7 +82,7 @@ SERVICE_MAPPING = {
 
 def get_date_range(days_back: int) -> Tuple[str, str]:
     """Calculate date range for cost query."""
-    end_date = datetime.utcnow().date()
+    end_date = datetime.now().date()
     start_date = end_date - timedelta(days=days_back)
     return start_date.isoformat(), end_date.isoformat()
 
