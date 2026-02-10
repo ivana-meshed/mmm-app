@@ -455,29 +455,64 @@ def main():
         print("  - bigquery.jobs.create (to run queries)")
         print("  - bigquery.tables.getData (to read billing data)")
         print()
-        print("To fix this issue:")
+
+        # Check if user might have just granted permissions
+        print("=" * 70)
+        print("TROUBLESHOOTING STEPS:")
+        print("=" * 70)
         print()
-        print("Option 1: Grant yourself the BigQuery User role")
+
+        print("Step 1: Verify your current permissions")
+        print("  Run this to check your roles:")
+        print(f"    gcloud projects get-iam-policy {args.project} \\")
+        print('      --flatten="bindings[].members" \\')
+        print('      --filter="bindings.members:user:YOUR_EMAIL@example.com"')
+        print()
+
+        print("Step 2: If you just granted permissions, WAIT 2-5 MINUTES")
+        print("  IAM permissions can take time to propagate.")
+        print("  After waiting, try the script again.")
+        print()
+
+        print("Step 3: Grant dataset-level permissions (if not already done)")
+        print("  Project-level permissions may not be enough. Try:")
+        print(
+            f"    bq show --format=prettyjson {args.project}:{BILLING_DATASET}"
+        )
+        print("  If that fails, grant dataset access via Console:")
+        print(
+            f"    https://console.cloud.google.com/bigquery?"
+            f"project={args.project}&ws=!1m4!1m3!3m2!1s{args.project}!2s{BILLING_DATASET}"
+        )
+        print()
+
+        print("Step 4: Clear cached credentials and re-authenticate")
+        print("  gcloud auth application-default revoke")
+        print("  gcloud auth application-default login")
+        print("  (Then wait 1-2 minutes before trying again)")
+        print()
+
+        print("Step 5: If still not working, grant these specific roles:")
+        print("  Option A - Project level (BigQuery User role):")
         print("  gcloud projects add-iam-policy-binding " f"{args.project} \\")
         print('    --member="user:YOUR_EMAIL@example.com" \\')
         print('    --role="roles/bigquery.user"')
         print()
-        print("Option 2: Grant access to the billing dataset")
-        print(
-            f"  1. Go to: https://console.cloud.google.com/bigquery?"
-            f"project={args.project}"
-        )
-        print(f"  2. Navigate to dataset: {BILLING_DATASET}")
-        print('  3. Click "Share" → "Permissions"')
-        print('  4. Add your user with "BigQuery Data Viewer" role')
+        print("  Option B - Dataset level (via Console):")
+        print(f"    1. Go to BigQuery Console")
+        print(f"    2. Find dataset: {BILLING_DATASET}")
+        print('    3. Click "Share" → "Permissions"')
+        print('    4. Add your user with "BigQuery Data Viewer" role')
         print()
-        print("Option 3: Use a service account with appropriate permissions")
-        print(
-            "  export GOOGLE_APPLICATION_CREDENTIALS="
-            '"/path/to/service-account-key.json"'
-        )
+
+        print("Step 6: Check for organization policies")
+        print("  Your organization may have policies blocking access.")
+        print("  Contact your GCP administrator if above steps don't work.")
         print()
+
+        print("=" * 70)
         print(f"Original error: {e}")
+        print("=" * 70)
         sys.exit(1)
     except gcp_exceptions.PermissionDenied as e:
         print(f"Error: Permission denied when accessing BigQuery")

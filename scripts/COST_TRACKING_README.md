@@ -370,7 +370,7 @@ Add to GitHub Actions for cost tracking on deployments:
 
 ## Troubleshooting
 
-### Error: "Permission denied" or "Access Denied"
+### Error: "Permission denied" or "Access Denied" (MOST COMMON)
 
 **Problem**: You don't have the required BigQuery permissions.
 
@@ -380,41 +380,79 @@ Error: Permission denied when accessing BigQuery
 Access Denied: Project datawarehouse-422511: User does not have bigquery.jobs.create permission
 ```
 
-**Solution**:
+**⚠️ CRITICAL: If You Just Granted Permissions**
 
-1. **Check your current authentication**:
+**IAM permissions take 2-5 minutes to propagate!** This is the #1 cause of "I granted permissions but it still doesn't work."
+
+**If you just ran the grant command:**
+1. ✅ **WAIT 2-5 MINUTES** (seriously, set a timer)
+2. Clear credential cache:
    ```bash
-   gcloud auth list
-   gcloud config get-value project
-   ```
-
-2. **Grant yourself BigQuery User role**:
-   ```bash
-   gcloud projects add-iam-policy-binding datawarehouse-422511 \
-     --member="user:your-email@example.com" \
-     --role="roles/bigquery.user"
-   ```
-
-3. **OR request access from your administrator**:
-   - Share the error message with your GCP admin
-   - Request access to the `mmm_billing` dataset
-   - Ask for **BigQuery User** or **BigQuery Data Viewer** role
-
-4. **Verify permissions after granting**:
-   ```bash
-   # List datasets (should succeed if permissions are correct)
-   bq ls --project_id=datawarehouse-422511
-   
-   # Check specific dataset
-   bq show mmm_billing
-   ```
-
-5. **Re-authenticate if needed**:
-   ```bash
-   gcloud auth application-default login
    gcloud auth application-default revoke
    gcloud auth application-default login
    ```
+3. Wait 1-2 more minutes
+4. Try the script again
+
+**Solutions**:
+
+#### Step 1: Check your current authentication
+
+```bash
+gcloud auth list
+gcloud config get-value project
+```
+
+Make sure you're using the correct Google account.
+
+#### Step 2: Grant BigQuery User role (if you're an admin)
+
+```bash
+gcloud projects add-iam-policy-binding datawarehouse-422511 \
+  --member="user:your-email@example.com" \
+  --role="roles/bigquery.user"
+```
+
+**THEN WAIT 2-5 MINUTES** for IAM propagation.
+
+#### Step 3: Verify permissions are active
+
+```bash
+# Check your roles (should show bigquery.user)
+gcloud projects get-iam-policy datawarehouse-422511 \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:user:your-email@example.com"
+
+# Test BigQuery access
+bq ls --project_id=datawarehouse-422511
+bq show mmm_billing
+```
+
+#### Step 4: Clear credentials and re-authenticate
+
+```bash
+gcloud auth application-default revoke
+gcloud auth application-default login
+```
+
+**WAIT 1-2 MINUTES** after re-authenticating before trying the script.
+
+#### Step 5: Try dataset-level permissions (if project-level doesn't work)
+
+Sometimes project-level permissions aren't enough:
+
+1. Go to [BigQuery Console](https://console.cloud.google.com/bigquery?project=datawarehouse-422511)
+2. Navigate to dataset: `mmm_billing`
+3. Click **Share** → **Permissions**
+4. Add your user with **BigQuery Data Viewer** role
+5. **WAIT 2-5 MINUTES** then try again
+
+#### Step 6: Request access from your administrator (if not an admin)
+
+Share this with your GCP admin:
+- Need role: `roles/bigquery.user` on project `datawarehouse-422511`
+- OR: `roles/bigquery.dataViewer` on dataset `mmm_billing`
+- Note: IAM changes take 2-5 minutes to propagate
 
 ### Error: "Billing export table not found"
 
