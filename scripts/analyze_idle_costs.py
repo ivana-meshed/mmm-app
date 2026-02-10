@@ -21,8 +21,8 @@ import sys
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from google.api_core import exceptions as gcp_exceptions
 from google.cloud import bigquery
-from google.cloud.exceptions import Forbidden, PermissionDenied
 
 # Configuration
 PROJECT_ID = os.getenv("PROJECT_ID", "datawarehouse-422511")
@@ -589,10 +589,10 @@ def main():
         # Print analysis
         print_analysis(analysis, args)
 
-    except Forbidden as e:
+    except gcp_exceptions.Forbidden as e:
         print("\nError: Permission denied when accessing BigQuery")
         print(str(e))
-    except PermissionDenied as e:
+    except gcp_exceptions.PermissionDenied as e:
         print("\nError: Permission denied")
         print(str(e))
     except Exception as e:
