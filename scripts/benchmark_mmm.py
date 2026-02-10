@@ -32,7 +32,11 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
 
 from google.cloud import storage
-import pandas as pd
+
+try:
+    import pandas as pd
+except ImportError:
+    pd = None  # Optional for basic functionality
 
 # Configure logging
 logging.basicConfig(
@@ -336,6 +340,160 @@ class BenchmarkRunner:
             f"gs://{self.bucket_name}/{blob_path}"
         )
 
+    def submit_variants_to_queue(
+        self,
+        benchmark_id: str,
+        variants: List[Dict[str, Any]],
+        queue_name: str = "default",
+    ) -> int:
+        """
+        Submit benchmark variants to the training job queue.
+
+        Args:
+            benchmark_id: Unique benchmark identifier
+            variants: List of configuration variants to queue
+            queue_name: Queue name (default: "default")
+
+        Returns:
+            Number of jobs submitted
+        """
+        # Load current queue
+        queue_doc = self._load_queue(queue_name)
+        entries = queue_doc.get("entries", [])
+
+        # Find next ID
+        next_id = max([e.get("id", 0) for e in entries], default=0) + 1
+
+        # Create queue entries for each variant
+        new_entries = []
+        for i, variant in enumerate(variants):
+            # Build params dict compatible with existing queue format
+            params = self._variant_to_queue_params(variant, benchmark_id)
+
+            entry = {
+                "id": next_id + i,
+                "params": params,
+                "status": "PENDING",
+                "timestamp": None,
+                "execution_name": None,
+                "gcs_prefix": None,
+                "message": "",
+            }
+            new_entries.append(entry)
+
+        # Add to queue
+        entries.extend(new_entries)
+        queue_doc["entries"] = entries
+
+        # Save queue back to GCS
+        self._save_queue(queue_name, queue_doc)
+
+        logger.info(
+            f"Submitted {len(new_entries)} benchmark jobs to queue "
+            f"'{queue_name}'"
+        )
+
+        return len(new_entries)
+
+    def _variant_to_queue_params(
+        self, variant: Dict[str, Any], benchmark_id: str
+    ) -> Dict[str, Any]:
+        """Convert benchmark variant to queue params format."""
+        # Extract required fields
+        country = variant.get("country", "")
+        revision = variant.get("revision", "default")
+
+        # Build params compatible with existing training format
+        params = {
+            "country": country,
+            "revision": revision,
+            "date_input": variant.get("date_input", ""),
+            "iterations": variant.get("iterations", 2000),
+            "trials": variant.get("trials", 5),
+            "train_size": variant.get("train_size", [0.7, 0.9]),
+            "start_date": variant.get("start_date", ""),
+            "end_date": variant.get("end_date", ""),
+            "paid_media_spends": variant.get("paid_media_spends", []),
+            "paid_media_vars": variant.get("paid_media_vars", []),
+            "context_vars": variant.get("context_vars", []),
+            "factor_vars": variant.get("factor_vars", []),
+            "organic_vars": variant.get("organic_vars", []),
+            "dep_var": variant.get("dep_var", "UPLOAD_VALUE"),
+            "dep_var_type": variant.get("dep_var_type", "revenue"),
+            "date_var": variant.get("date_var", "date"),
+            "adstock": variant.get("adstock", "geometric"),
+            "hyperparameter_preset": variant.get(
+                "hyperparameter_preset", "Meshed recommend"
+            ),
+            "resample_freq": variant.get("resample_freq", "none"),
+            "gcs_bucket": self.bucket_name,
+            # Add benchmark metadata
+            "benchmark_id": benchmark_id,
+            "benchmark_test": variant.get("benchmark_test", ""),
+            "benchmark_variant": variant.get("benchmark_variant", ""),
+        }
+
+        # Add optional fields if present
+        if "custom_hyperparameters" in variant:
+            params["custom_hyperparameters"] = variant[
+                "custom_hyperparameters"
+            ]
+        if "column_agg_strategies" in variant:
+            params["column_agg_strategies"] = variant[
+                "column_agg_strategies"
+            ]
+
+        return params
+
+    def _load_queue(self, queue_name: str) -> Dict[str, Any]:
+        """Load queue document from GCS."""
+        queue_root = os.getenv("QUEUE_ROOT", "robyn-queues")
+        blob_path = f"{queue_root}/{queue_name}/queue.json"
+        blob = self.bucket.blob(blob_path)
+
+        if not blob.exists():
+            return {
+                "version": 1,
+                "saved_at": datetime.utcnow().isoformat(),
+                "entries": [],
+                "queue_running": True,
+            }
+
+        try:
+            doc = json.loads(blob.download_as_text())
+            if isinstance(doc, list):
+                # Back-compat: wrap list as document
+                doc = {
+                    "version": 1,
+                    "saved_at": datetime.utcnow().isoformat(),
+                    "entries": doc,
+                    "queue_running": True,
+                }
+            return doc
+        except Exception as e:
+            logger.warning(f"Failed to load queue: {e}")
+            return {
+                "version": 1,
+                "saved_at": datetime.utcnow().isoformat(),
+                "entries": [],
+                "queue_running": True,
+            }
+
+    def _save_queue(self, queue_name: str, queue_doc: Dict[str, Any]):
+        """Save queue document to GCS."""
+        queue_root = os.getenv("QUEUE_ROOT", "robyn-queues")
+        blob_path = f"{queue_root}/{queue_name}/queue.json"
+        blob = self.bucket.blob(blob_path)
+
+        queue_doc["saved_at"] = datetime.utcnow().isoformat()
+
+        blob.upload_from_string(
+            json.dumps(queue_doc, indent=2),
+            content_type="application/json",
+        )
+
+        logger.info(f"Saved queue: gs://{self.bucket_name}/{blob_path}")
+
     def list_benchmarks(self) -> List[Dict[str, Any]]:
         """List all benchmark runs."""
         blobs = self.client.list_blobs(
@@ -465,6 +623,17 @@ def main():
         action="store_true",
         help="Generate variants but don't submit jobs",
     )
+    parser.add_argument(
+        "--queue-name",
+        type=str,
+        default="default",
+        help="Queue name for job submission (default: default)",
+    )
+    parser.add_argument(
+        "--no-submit",
+        action="store_true",
+        help="Generate and save plan but don't submit to queue",
+    )
 
     args = parser.parse_args()
 
@@ -488,6 +657,10 @@ def main():
         return
 
     if args.collect_results:
+        if pd is None:
+            logger.error("pandas is required for results collection")
+            sys.exit(1)
+
         collector = ResultsCollector()
         logger.info(f"Collecting results for {args.collect_results}")
         df = collector.collect_results(args.collect_results)
@@ -528,12 +701,19 @@ def main():
         f"Loaded base config: {base_cfg['country']}/{base_cfg['goal']}"
     )
 
+    # Override iterations/trials in base config
+    base_config["iterations"] = benchmark_config.iterations
+    base_config["trials"] = benchmark_config.trials
+
     # Generate variants
     variants = runner.generate_variants(base_config, benchmark_config)
     logger.info(f"Generated {len(variants)} test variants")
 
     # Generate benchmark ID
-    benchmark_id = f"{benchmark_config.name}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    benchmark_id = (
+        f"{benchmark_config.name}_"
+        f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    )
 
     # Save benchmark plan
     runner.save_benchmark_plan(benchmark_id, benchmark_config, variants)
@@ -545,19 +725,50 @@ def main():
             test = variant.get("benchmark_test", "unknown")
             name = variant.get("benchmark_variant", "unnamed")
             print(f"{i}. {test}: {name}")
+        print(f"\nBenchmark ID: {benchmark_id}")
+        print(
+            f"Plan saved: gs://{runner.bucket_name}/"
+            f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
+        )
         return
 
-    # TODO: Submit variants to job queue
-    logger.warning(
-        "Job submission not yet implemented - "
-        "variants saved to GCS"
-    )
-    print(f"\nBenchmark ID: {benchmark_id}")
-    print(f"Variants saved: {len(variants)}")
-    print(
-        f"Plan: gs://{runner.bucket_name}/"
-        f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
-    )
+    if args.no_submit:
+        logger.info("--no-submit flag set - variants saved but not queued")
+        print(f"\nBenchmark ID: {benchmark_id}")
+        print(f"Variants saved: {len(variants)}")
+        print(
+            f"Plan: gs://{runner.bucket_name}/"
+            f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
+        )
+        return
+
+    # Submit variants to queue
+    try:
+        submitted_count = runner.submit_variants_to_queue(
+            benchmark_id, variants, queue_name=args.queue_name
+        )
+
+        print(f"\n✅ Benchmark submitted successfully!")
+        print(f"Benchmark ID: {benchmark_id}")
+        print(f"Variants queued: {submitted_count}")
+        print(f"Queue: {args.queue_name}")
+        print(
+            f"Plan: gs://{runner.bucket_name}/"
+            f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
+        )
+        print(
+            f"\nMonitor progress in the Streamlit app "
+            f"(Run Experiment → Queue Monitor)"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to submit jobs: {e}")
+        print(f"\n❌ Error submitting jobs: {e}")
+        print(
+            f"Benchmark plan saved but jobs not queued: "
+            f"{benchmark_id}"
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":
