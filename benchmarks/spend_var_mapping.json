@@ -1,0 +1,42 @@
+{
+  "name": "spend_var_mapping_test",
+  "description": "Test different spend→var mapping strategies to determine optimal configuration",
+  "base_config": {
+    "country": "de",
+    "goal": "UPLOAD_VALUE",
+    "version": "20251211_115528"
+  },
+  "iterations": 2000,
+  "trials": 5,
+  "max_combinations": 20,
+  "variants": {
+    "spend_var_mapping": [
+      {
+        "name": "all_spend_to_spend",
+        "description": "All channels: spend → spend (direct mapping)",
+        "type": "spend_to_spend"
+      },
+      {
+        "name": "all_spend_to_proxy",
+        "description": "All channels: spend → proxy metrics (sessions/clicks/impressions)",
+        "type": "spend_to_proxy",
+        "proxy_mapping": {
+          "SPEND_FACEBOOK": "FB_IMPRESSIONS",
+          "SPEND_GOOGLE": "GOOGLE_CLICKS",
+          "SPEND_TIKTOK": "TIKTOK_SESSIONS"
+        }
+      },
+      {
+        "name": "mixed_by_funnel",
+        "description": "Upper funnel → proxy, lower funnel → spend",
+        "type": "mixed_by_funnel",
+        "upper_funnel_channels": ["SPEND_FACEBOOK", "SPEND_TIKTOK"],
+        "lower_funnel_channels": ["SPEND_GOOGLE"],
+        "proxy_mapping": {
+          "SPEND_FACEBOOK": "FB_IMPRESSIONS",
+          "SPEND_TIKTOK": "TIKTOK_SESSIONS"
+        }
+      }
+    ]
+  }
+}

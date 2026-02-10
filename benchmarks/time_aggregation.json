@@ -1,0 +1,26 @@
+{
+  "name": "time_aggregation",
+  "description": "Compare daily vs weekly time aggregation for model fit and stability",
+  "base_config": {
+    "country": "de",
+    "goal": "UPLOAD_VALUE",
+    "version": "20251211_115528"
+  },
+  "iterations": 2000,
+  "trials": 5,
+  "max_combinations": 5,
+  "variants": {
+    "time_aggregation": [
+      {
+        "name": "daily",
+        "description": "Daily time aggregation (no resampling)",
+        "frequency": "none"
+      },
+      {
+        "name": "weekly",
+        "description": "Weekly time aggregation",
+        "frequency": "W"
+      }
+    ]
+  }
+}

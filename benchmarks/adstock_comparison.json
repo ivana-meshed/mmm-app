@@ -1,0 +1,34 @@
+{
+  "name": "adstock_comparison",
+  "description": "Compare different adstock transformation types to find best fit per channel",
+  "base_config": {
+    "country": "de",
+    "goal": "UPLOAD_VALUE",
+    "version": "20251211_115528"
+  },
+  "iterations": 2000,
+  "trials": 5,
+  "max_combinations": 10,
+  "variants": {
+    "adstock": [
+      {
+        "name": "geometric",
+        "description": "Geometric adstock (Robyn default)",
+        "type": "geometric",
+        "hyperparameter_preset": "Meshed recommend"
+      },
+      {
+        "name": "weibull_cdf",
+        "description": "Weibull CDF adstock",
+        "type": "weibull_cdf",
+        "hyperparameter_preset": "Meta default"
+      },
+      {
+        "name": "weibull_pdf",
+        "description": "Weibull PDF adstock",
+        "type": "weibull_pdf",
+        "hyperparameter_preset": "Meta default"
+      }
+    ]
+  }
+}
