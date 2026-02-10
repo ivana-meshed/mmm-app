@@ -255,11 +255,21 @@ def identify_service(
 
 
 def process_costs(
-    query_results: List[Dict[str, Any]]
+    query_results: List[Dict[str, Any]], debug: bool = False
 ) -> Dict[str, Dict[str, Dict[str, float]]]:
     """Process query results into structured cost breakdown."""
     # Structure: {date: {service: {category: cost}}}
     costs_by_date: Dict[str, Dict[str, Dict[str, float]]] = {}
+
+    # Debug: Track what we're seeing
+    if debug:
+        debug_info = {
+            "service_names": set(),
+            "sku_descriptions": set(),
+            "resource_names": set(),
+            "unidentified_count": 0,
+            "identified_services": {},
+        }
 
     for row in query_results:
         usage_date = str(row.get("usage_date", ""))
@@ -268,12 +278,35 @@ def process_costs(
         resource_name = row.get("resource_name")
         total_cost = float(row.get("total_cost", 0))
 
+        # Debug output
+        if debug:
+            debug_info["service_names"].add(service_name)
+            debug_info["sku_descriptions"].add(sku_description)
+            if resource_name:
+                debug_info["resource_names"].add(resource_name)
+
         # Skip zero or negative costs
         if total_cost <= 0:
             continue
 
         # Identify which MMM service this belongs to
         mmm_service = identify_service(resource_name, sku_description)
+
+        # Debug: Track identification results
+        if debug:
+            if mmm_service:
+                if mmm_service not in debug_info["identified_services"]:
+                    debug_info["identified_services"][mmm_service] = []
+                debug_info["identified_services"][mmm_service].append(
+                    {
+                        "service_name": service_name,
+                        "sku": sku_description,
+                        "resource": resource_name,
+                        "cost": total_cost,
+                    }
+                )
+            else:
+                debug_info["unidentified_count"] += 1
 
         # Categorize the cost
         cost_category = categorize_cost(sku_description, resource_name)
@@ -305,6 +338,52 @@ def process_costs(
                 costs_by_date[usage_date][mmm_service][cost_category] = 0.0
 
             costs_by_date[usage_date][mmm_service][cost_category] += total_cost
+
+    # Print debug information
+    if debug:
+        print("\n" + "=" * 80)
+        print("DEBUG: Billing Data Analysis")
+        print("=" * 80)
+        print(
+            f"\nUnique Service Names Found ({len(debug_info['service_names'])}):"
+        )
+        for svc in sorted(debug_info["service_names"]):
+            print(f"  - {svc}")
+
+        print(
+            f"\nUnique SKU Descriptions Found ({len(debug_info['sku_descriptions'])}):"
+        )
+        for sku in sorted(debug_info["sku_descriptions"])[
+            :20
+        ]:  # Limit to first 20
+            print(f"  - {sku}")
+        if len(debug_info["sku_descriptions"]) > 20:
+            print(f"  ... and {len(debug_info['sku_descriptions']) - 20} more")
+
+        print(
+            f"\nUnique Resource Names Found ({len(debug_info['resource_names'])}):"
+        )
+        for res in sorted(debug_info["resource_names"])[
+            :20
+        ]:  # Limit to first 20
+            print(f"  - {res}")
+        if len(debug_info["resource_names"]) > 20:
+            print(f"  ... and {len(debug_info['resource_names']) - 20} more")
+
+        print(f"\nService Identification Results:")
+        print(
+            f"  - Successfully identified: {len(debug_info['identified_services'])} service types"
+        )
+        for service, records in debug_info["identified_services"].items():
+            print(f"  - {service}: {len(records)} records")
+            # Show first few examples
+            for i, rec in enumerate(records[:3]):
+                print(
+                    f"      Example {i+1}: {rec['service_name']} | {rec['sku'][:60]}... | ${rec['cost']:.4f}"
+                )
+
+        print(f"  - Unidentified records: {debug_info['unidentified_count']}")
+        print("=" * 80 + "\n")
 
     return costs_by_date
 
@@ -444,6 +523,11 @@ def main():
         "--use-user-credentials",
         action="store_true",
         help="Use user credentials from 'gcloud auth' instead of GOOGLE_APPLICATION_CREDENTIALS",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug output to diagnose cost categorization issues",
     )
     args = parser.parse_args()
 
@@ -669,8 +753,11 @@ def main():
     # Convert results to list of dicts
     results_list = [dict(row) for row in results]
 
-    # Process costs
-    costs_by_date = process_costs(results_list)
+    print(f"Retrieved {len(results_list)} billing records")
+    print()
+
+    # Process the results into structured costs
+    costs_by_date = process_costs(results_list, debug=args.debug)
 
     # Output results
     if args.json:
