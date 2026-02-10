@@ -56,8 +56,11 @@ docker/
 .github/workflows/
   ci.yml                    # Production CI/CD (main branch)
   ci-dev.yml                # Development CI/CD (feat-*, dev branches)
-scripts/                    # Utility scripts for data management
+scripts/                    # Utility scripts for data management and monitoring
   download_test_data.py     # Download test data from GCS
+  track_daily_costs.py      # Daily cost tracking with service/category breakdowns
+  get_actual_costs.sh       # Historical actual costs from BigQuery billing
+  get_comprehensive_costs.sh # Estimated costs with detailed breakdowns
   upload_test_data.py       # Upload test data to GCS
   delete_bucket_data.py     # Clean GCS bucket (with protections)
   README_GCS_SCRIPTS.md     # Documentation for GCS scripts
@@ -292,6 +295,29 @@ All API responses follow a standardized format:
   "message": "Optional message"
 }
 ```
+
+## Cost Tracking
+
+Track daily Google Cloud costs with detailed breakdowns by service and cost category:
+
+```bash
+# View last 30 days of costs (default)
+python scripts/track_daily_costs.py
+
+# Export to CSV for analysis
+python scripts/track_daily_costs.py --days 7 --output costs.csv
+
+# JSON output for automation
+python scripts/track_daily_costs.py --days 30 --json
+```
+
+The script breaks down costs by:
+- **Services**: mmm-app-web, mmm-app-dev-web, mmm-app-training, mmm-app-dev-training
+- **Categories**: user requests, scheduler requests, compute (CPU/memory), storage, registry
+
+See [scripts/COST_TRACKING_README.md](scripts/COST_TRACKING_README.md) for detailed documentation.
+
+**Note**: Requires BigQuery billing export to be enabled. See the documentation for setup instructions.
 
 ## Troubleshooting
 
