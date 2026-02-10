@@ -413,6 +413,30 @@ def main():
     print(f"Date range: Last {args.days} days")
     print()
 
+    # Check for GOOGLE_APPLICATION_CREDENTIALS environment variable
+    gac_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if gac_path:
+        print("=" * 70)
+        print("⚠️  WARNING: GOOGLE_APPLICATION_CREDENTIALS is set")
+        print("=" * 70)
+        print(f"Path: {gac_path}")
+        print()
+        print("This environment variable takes priority over user credentials.")
+        print("The script will use the service account in this file,")
+        print("NOT your user credentials from 'gcloud auth'.")
+        print()
+        print("If you're getting permission errors:")
+        print("1. Unset this variable:")
+        print("   unset GOOGLE_APPLICATION_CREDENTIALS")
+        print()
+        print("2. Then run the script again")
+        print()
+        print("Or verify the service account has these permissions:")
+        print("  - roles/bigquery.user (project level)")
+        print("  - roles/bigquery.dataViewer (dataset level)")
+        print("=" * 70)
+        print()
+
     # Get date range
     start_date, end_date = get_date_range(args.days)
 
@@ -456,7 +480,40 @@ def main():
         print("  - bigquery.tables.getData (to read billing data)")
         print()
 
-        # Check if user might have just granted permissions
+        # Check if GOOGLE_APPLICATION_CREDENTIALS is set
+        gac_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if gac_path:
+            print("=" * 70)
+            print("🔍 DETECTED ISSUE: GOOGLE_APPLICATION_CREDENTIALS is set")
+            print("=" * 70)
+            print(f"Path: {gac_path}")
+            print()
+            print("This is likely causing your permission error!")
+            print()
+            print("The script is using the SERVICE ACCOUNT in this file,")
+            print("NOT your user credentials from 'gcloud auth'.")
+            print()
+            print("SOLUTION:")
+            print("1. Unset the environment variable:")
+            print("   unset GOOGLE_APPLICATION_CREDENTIALS")
+            print()
+            print("2. Run the script again:")
+            print(f"   python scripts/track_daily_costs.py --days {args.days}")
+            print()
+            print("The script will then use your user credentials which have")
+            print("the correct permissions.")
+            print()
+            print("Alternative: If you want to use the service account,")
+            print("grant it these roles:")
+            print(
+                "  gcloud projects add-iam-policy-binding " f"{args.project} \\"
+            )
+            print(f'    --member="serviceAccount:{{SA_EMAIL}}" \\')
+            print('    --role="roles/bigquery.user"')
+            print("=" * 70)
+            print()
+
+        # Regular troubleshooting steps
         print("=" * 70)
         print("TROUBLESHOOTING STEPS:")
         print("=" * 70)

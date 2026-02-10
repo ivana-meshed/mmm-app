@@ -7,6 +7,40 @@ Error: Permission denied when accessing BigQuery
 Access Denied: Project datawarehouse-422511: User does not have bigquery.jobs.create permission
 ```
 
+## 🚨 MOST COMMON ISSUE: GOOGLE_APPLICATION_CREDENTIALS Set
+
+**Before doing anything else, check this:**
+
+```bash
+echo $GOOGLE_APPLICATION_CREDENTIALS
+```
+
+If this returns a path (e.g., `/Users/you/project/service-account.json`):
+
+### This is your problem! ✅
+
+The script is using the **service account** in that file, NOT your user credentials.
+
+**SOLUTION:**
+
+```bash
+# Unset the environment variable
+unset GOOGLE_APPLICATION_CREDENTIALS
+
+# Now run the script again
+python scripts/track_daily_costs.py --days 7
+```
+
+That's it! The script will now use your user credentials which have the correct permissions.
+
+**Why this happens:**
+- `GOOGLE_APPLICATION_CREDENTIALS` takes priority over user credentials
+- When you run `gcloud auth application-default login`, it creates user credentials
+- But the Python libraries still use the service account file first
+- The service account may not have the required permissions
+
+---
+
 ## ⚠️ IMPORTANT: If You Just Granted Permissions
 
 **IAM permissions can take 2-5 minutes to propagate!**

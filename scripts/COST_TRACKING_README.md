@@ -370,6 +370,44 @@ Add to GitHub Actions for cost tracking on deployments:
 
 ## Troubleshooting
 
+### Error: "Permission denied" - GOOGLE_APPLICATION_CREDENTIALS Conflict (VERY COMMON)
+
+**Problem**: You have `GOOGLE_APPLICATION_CREDENTIALS` environment variable set, but are trying to use user credentials.
+
+**Symptoms**:
+- You granted yourself permissions and waited
+- You ran `gcloud auth application-default login`
+- You see a warning about `GOOGLE_APPLICATION_CREDENTIALS` being set
+- You still get 403 permission denied
+
+**Check**:
+```bash
+echo $GOOGLE_APPLICATION_CREDENTIALS
+```
+
+If this shows a path to a JSON file, **this is your issue!**
+
+**Solution**:
+```bash
+# Option 1: Unset the variable (recommended for user credentials)
+unset GOOGLE_APPLICATION_CREDENTIALS
+python scripts/track_daily_costs.py --days 7
+
+# Option 2: Grant the service account permissions (if you want to use it)
+# Get the service account email from the JSON file, then:
+gcloud projects add-iam-policy-binding datawarehouse-422511 \
+  --member="serviceAccount:SA_EMAIL@PROJECT.iam.gserviceaccount.com" \
+  --role="roles/bigquery.user"
+```
+
+**Why this happens**:
+- Google Cloud libraries check `GOOGLE_APPLICATION_CREDENTIALS` first
+- If set, they use that service account, ignoring user credentials
+- The service account may not have the required permissions
+- Your `gcloud auth` credentials are created but not used
+
+---
+
 ### Error: "Permission denied" or "Access Denied" (MOST COMMON)
 
 **Problem**: You don't have the required BigQuery permissions.
