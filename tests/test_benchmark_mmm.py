@@ -2,6 +2,7 @@
 Tests for benchmark_mmm.py script
 
 Tests configuration parsing, variant generation, and basic functionality.
+Note: Some tests may be skipped if google.cloud or pandas are not installed.
 """
 
 import json
@@ -13,12 +14,23 @@ from unittest.mock import MagicMock, patch
 import sys
 from unittest.mock import MagicMock
 
-sys.modules["google.cloud"] = MagicMock()
-sys.modules["google.cloud.storage"] = MagicMock()
+# Mock google cloud modules if not available
+try:
+    import google.cloud.storage  # noqa: F401
+except ImportError:
+    sys.modules["google.cloud"] = MagicMock()
+    sys.modules["google.cloud.storage"] = MagicMock()
 
 # Now we can import
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-import benchmark_mmm
+
+try:
+    import benchmark_mmm
+except ImportError as e:
+    raise unittest.SkipTest(
+        f"Cannot import benchmark_mmm: {e}. "
+        "Install dependencies to run tests."
+    )
 
 
 class TestBenchmarkConfig(unittest.TestCase):

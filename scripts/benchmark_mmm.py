@@ -525,8 +525,12 @@ class ResultsCollector:
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
 
-    def collect_results(self, benchmark_id: str) -> pd.DataFrame:
-        """Collect results from all benchmark variants."""
+    def collect_results(self, benchmark_id: str):
+        """
+        Collect results from all benchmark variants.
+
+        Returns DataFrame (if pandas available) or dict of results.
+        """
         # Load benchmark plan
         plan_blob = self.bucket.blob(
             f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
@@ -539,31 +543,161 @@ class ResultsCollector:
         plan = json.loads(plan_blob.download_as_bytes())
         variants = plan["variants"]
 
+        logger.info(
+            f"Collecting results for {len(variants)} variants..."
+        )
+
         results = []
-        for variant in variants:
-            result = self._collect_variant_result(variant)
+        for i, variant in enumerate(variants, 1):
+            logger.info(
+                f"  Processing variant {i}/{len(variants)}: "
+                f"{variant.get('benchmark_variant', 'unknown')}"
+            )
+            result = self._collect_variant_result(variant, benchmark_id)
             if result:
                 results.append(result)
 
+        logger.info(f"Collected {len(results)} results")
+
         if not results:
             logger.warning(f"No results found for benchmark {benchmark_id}")
-            return pd.DataFrame()
+            if pd is not None:
+                return pd.DataFrame()
+            return []
 
-        df = pd.DataFrame(results)
-        return df
+        if pd is not None:
+            return pd.DataFrame(results)
+        return results
 
     def _collect_variant_result(
-        self, variant: Dict[str, Any]
+        self, variant: Dict[str, Any], benchmark_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Collect results for a single variant."""
-        # Find the GCS path for this variant's results
-        # This would be based on the job execution
-        # For now, return None as placeholder
-        logger.warning("Result collection not yet fully implemented")
+        """
+        Collect results for a single variant.
+
+        Searches for model_summary.json in GCS based on benchmark metadata.
+        """
+        # Build search pattern for this variant's results
+        # Results are stored at: robyn/<revision>/<country>/<timestamp>/
+        country = variant.get("country", "")
+        revision = variant.get("revision", "default")
+
+        # Search for results matching this variant
+        # We need to find the GCS path by matching benchmark metadata
+        prefix = f"robyn/{revision}/{country}/"
+
+        try:
+            blobs = self.client.list_blobs(
+                self.bucket_name, prefix=prefix
+            )
+
+            # Look for model_summary.json files and check metadata
+            for blob in blobs:
+                if "model_summary.json" in blob.name:
+                    # Check if this summary matches our variant
+                    summary = self._load_summary(blob.name)
+                    if summary and self._matches_variant(
+                        summary, variant, benchmark_id
+                    ):
+                        return self._extract_metrics(summary, variant)
+
+        except Exception as e:
+            logger.warning(
+                f"Error collecting results for variant "
+                f"{variant.get('benchmark_variant')}: {e}"
+            )
+
         return None
 
+    def _load_summary(self, blob_path: str) -> Optional[Dict[str, Any]]:
+        """Load model_summary.json from GCS."""
+        try:
+            blob = self.bucket.blob(blob_path)
+            if blob.exists():
+                return json.loads(blob.download_as_bytes())
+        except Exception as e:
+            logger.debug(f"Failed to load summary {blob_path}: {e}")
+        return None
+
+    def _matches_variant(
+        self,
+        summary: Dict[str, Any],
+        variant: Dict[str, Any],
+        benchmark_id: str,
+    ) -> bool:
+        """
+        Check if a model summary matches a benchmark variant.
+
+        Matches based on benchmark metadata or other identifying fields.
+        """
+        # Check if summary has benchmark metadata
+        # (Added to job params when submitting)
+        # This would need to be passed through to the summary
+
+        # For now, match on key parameters
+        summary_meta = summary.get("input_metadata", {})
+
+        # Match on country
+        if (
+            summary.get("country", "").lower()
+            != variant.get("country", "").lower()
+        ):
+            return False
+
+        # Match on adstock if specified
+        if "adstock" in variant:
+            if summary_meta.get("adstock") != variant.get("adstock"):
+                return False
+
+        # Match on other key fields as needed
+        # This is a simplified matching - in production you'd want
+        # more robust matching or include benchmark_id in the job config
+
+        return True
+
+    def _extract_metrics(
+        self, summary: Dict[str, Any], variant: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Extract benchmark metrics from model summary."""
+        best_model = summary.get("best_model", {})
+
+        result = {
+            # Benchmark metadata
+            "benchmark_test": variant.get("benchmark_test", ""),
+            "benchmark_variant": variant.get("benchmark_variant", ""),
+            "country": variant.get("country", ""),
+            "revision": variant.get("revision", ""),
+            # Configuration
+            "adstock": variant.get("adstock", ""),
+            "train_size": str(variant.get("train_size", "")),
+            "iterations": variant.get("iterations", ""),
+            "trials": variant.get("trials", ""),
+            "resample_freq": variant.get("resample_freq", "none"),
+            # Model fit metrics
+            "rsq_train": best_model.get("rsq_train"),
+            "rsq_val": best_model.get("rsq_val"),
+            "rsq_test": best_model.get("rsq_test"),
+            "nrmse_train": best_model.get("nrmse_train"),
+            "nrmse_val": best_model.get("nrmse_val"),
+            "nrmse_test": best_model.get("nrmse_test"),
+            "decomp_rssd": best_model.get("decomp_rssd"),
+            "mape": best_model.get("mape"),
+            # Model metadata
+            "model_id": best_model.get("model_id"),
+            "pareto_model_count": summary.get("pareto_model_count", 0),
+            "candidate_model_count": summary.get(
+                "candidate_model_count", 0
+            ),
+            # Execution metadata
+            "training_time_mins": summary.get("training_time_mins"),
+            "timestamp": summary.get("timestamp", ""),
+            "created_at": summary.get("created_at", ""),
+        }
+
+        return result
+
     def export_results(
-        self, benchmark_id: str, df: pd.DataFrame, format: str = "csv"
+        self, benchmark_id: str, results, format: str = "csv"
     ):
         """Export results to GCS."""
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -573,23 +707,44 @@ class ResultsCollector:
                 f"{BENCHMARK_ROOT}/{benchmark_id}/"
                 f"results_{timestamp}.csv"
             )
-            csv_data = df.to_csv(index=False)
+
+            if pd is not None and isinstance(results, pd.DataFrame):
+                csv_data = results.to_csv(index=False)
+            else:
+                # Manual CSV generation
+                if not results:
+                    logger.warning("No results to export")
+                    return
+
+                # Get all keys from first result
+                keys = list(results[0].keys())
+                lines = [",".join(keys)]
+
+                for result in results:
+                    values = [str(result.get(k, "")) for k in keys]
+                    lines.append(",".join(values))
+
+                csv_data = "\n".join(lines)
+
             blob = self.bucket.blob(output_path)
-            blob.upload_from_string(
-                csv_data, content_type="text/csv"
+            blob.upload_from_string(csv_data, content_type="text/csv")
+
+            logger.info(
+                f"Exported results: gs://{self.bucket_name}/{output_path}"
             )
+
         elif format == "parquet":
+            if pd is None:
+                logger.error("pandas required for parquet export")
+                return
+
             output_path = (
                 f"{BENCHMARK_ROOT}/{benchmark_id}/"
                 f"results_{timestamp}.parquet"
             )
             # Would need pyarrow for this
-            logger.warning("Parquet export not yet implemented")
+            logger.warning("Parquet export requires pyarrow")
             return
-
-        logger.info(
-            f"Exported results: gs://{self.bucket_name}/{output_path}"
-        )
 
 
 def main():
