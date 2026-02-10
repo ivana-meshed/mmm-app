@@ -94,87 +94,82 @@ def build_analysis_query(
     """Build BigQuery query for detailed cost analysis."""
     service_condition = ""
     if service_filter:
-        service_condition = f"AND labels.value LIKE '%{service_filter}%'"
+        service_condition = (
+            f"AND ARRAY_TO_STRING(all_labels, ',') LIKE '%{service_filter}%'"
+        )
 
     query = f"""
-    WITH billing_data AS (
-      SELECT
-        DATE(_PARTITIONTIME) as usage_date,
-        TIMESTAMP_TRUNC(_PARTITIONTIME, HOUR) as usage_hour,
-        service.description as service_name,
-        sku.description as sku_description,
-        resource.name as resource_full_name,
-        labels.key as label_key,
-        labels.value as label_value,
-        SUM(cost) as cost,
-        SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) as credits,
-        SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) as total_cost,
-        SUM(usage.amount) as usage_amount,
-        usage.unit as usage_unit
-      FROM `{PROJECT_ID}.{BILLING_DATASET}.{TABLE_NAME}`
-      LEFT JOIN UNNEST(labels) as labels
-      WHERE
-        DATE(_PARTITIONTIME) >= '{start_date}'
-        AND DATE(_PARTITIONTIME) <= '{end_date}'
-        AND project.id = '{PROJECT_ID}'
-        AND (
-          service.description LIKE '%Cloud Run%'
-          OR sku.description LIKE '%Cloud Run%'
-        )
-        {service_condition}
-      GROUP BY 
-        usage_date,
-        usage_hour,
-        service_name,
-        sku_description,
-        resource_full_name,
-        label_key,
-        label_value,
-        usage_unit
-    )
     SELECT
-      usage_date,
-      usage_hour,
-      service_name,
-      sku_description,
-      resource_full_name,
-      label_key,
-      label_value,
+      DATE(_PARTITIONTIME) as usage_date,
+      TIMESTAMP_TRUNC(_PARTITIONTIME, HOUR) as usage_hour,
+      service.description as service_name,
+      sku.description as sku_description,
+      resource.name as resource_full_name,
+      ARRAY_AGG(DISTINCT CONCAT(labels.key, ':', labels.value) IGNORE NULLS) as all_labels,
       SUM(cost) as cost,
-      SUM(credits) as credits,
-      SUM(total_cost) as total_cost,
-      SUM(usage_amount) as usage_amount,
-      ANY_VALUE(usage_unit) as usage_unit
-    FROM billing_data
+      SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) as credits,
+      SUM(cost) + SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) as total_cost,
+      SUM(usage.amount) as usage_amount,
+      ANY_VALUE(usage.unit) as usage_unit
+    FROM `{PROJECT_ID}.{BILLING_DATASET}.{TABLE_NAME}`
+    LEFT JOIN UNNEST(labels) as labels
+    WHERE
+      DATE(_PARTITIONTIME) >= '{start_date}'
+      AND DATE(_PARTITIONTIME) <= '{end_date}'
+      AND project.id = '{PROJECT_ID}'
+      AND (
+        service.description LIKE '%Cloud Run%'
+        OR sku.description LIKE '%Cloud Run%'
+        OR service.description LIKE '%Artifact Registry%'
+        OR service.description LIKE '%Cloud Storage%'
+        OR service.description LIKE '%Scheduler%'
+      )
+      {service_condition}
     GROUP BY 
       usage_date,
       usage_hour,
       service_name,
       sku_description,
-      resource_full_name,
-      label_key,
-      label_value
+      resource_full_name
     ORDER BY usage_date DESC, usage_hour DESC, total_cost DESC
     """
     return query
 
 
-def identify_service_from_label(
-    label_key: Optional[str], label_value: Optional[str]
+def identify_service_from_labels(
+    all_labels: List[str], resource_full_name: Optional[str] = None
 ) -> Optional[str]:
-    """Identify MMM service from label."""
-    if not label_key or not label_value:
-        return None
-
-    label_value_lower = label_value.lower()
-    if "mmm-app-dev-web" in label_value_lower:
+    """Identify MMM service from labels and resource name."""
+    # Check all labels for service names
+    labels_str = " ".join(all_labels).lower() if all_labels else ""
+    
+    # Order matters - check dev services before prod to avoid matching "mmm-app" in "mmm-app-dev"
+    if "mmm-app-dev-web" in labels_str:
         return "mmm-app-dev-web"
-    if "mmm-app-web" in label_value_lower:
-        return "mmm-app-web"
-    if "mmm-app-dev-training" in label_value_lower:
+    if "mmm-app-dev-training" in labels_str:
         return "mmm-app-dev-training"
-    if "mmm-app-training" in label_value_lower:
+    if "mmm-app-web" in labels_str:
+        return "mmm-app-web"
+    if "mmm-app-training" in labels_str:
         return "mmm-app-training"
+    
+    # Fallback to resource name if labels don't match
+    if resource_full_name:
+        resource_lower = resource_full_name.lower()
+        if "mmm-app-dev-web" in resource_lower or "mmm_app_dev_web" in resource_lower:
+            return "mmm-app-dev-web"
+        if "mmm-app-dev-training" in resource_lower or "mmm_app_dev_training" in resource_lower:
+            return "mmm-app-dev-training"
+        if "mmm-app-web" in resource_lower or "mmm_app_web" in resource_lower:
+            return "mmm-app-web"
+        if "mmm-app-training" in resource_lower or "mmm_app_training" in resource_lower:
+            return "mmm-app-training"
+    
+    # For shared resources (storage, registry), distribute equally
+    if labels_str or resource_full_name:
+        # Check if it's a shared cost (artifact registry, storage)
+        return "shared"
+    
     return None
 
 
@@ -216,6 +211,7 @@ def analyze_costs(
         "by_date": {},
         "by_hour": {},
         "total_days": days,
+        "shared_costs": 0,  # Track shared costs for distribution
     }
 
     for row in query_results:
@@ -223,8 +219,8 @@ def analyze_costs(
         usage_hour = row.get("usage_hour")
         service_name = row.get("service_name", "")
         sku_description = row.get("sku_description", "")
-        label_key = row.get("label_key")
-        label_value = row.get("label_value")
+        all_labels = row.get("all_labels", [])
+        resource_full_name = row.get("resource_full_name")
         total_cost = float(row.get("total_cost", 0))
         usage_amount = float(row.get("usage_amount", 0))
         usage_unit = row.get("usage_unit", "")
@@ -233,8 +229,13 @@ def analyze_costs(
             continue
 
         # Identify service
-        mmm_service = identify_service_from_label(label_key, label_value)
+        mmm_service = identify_service_from_labels(all_labels, resource_full_name)
         if not mmm_service:
+            continue
+        
+        # Handle shared costs
+        if mmm_service == "shared":
+            analysis["shared_costs"] += total_cost
             continue
 
         # Categorize cost
@@ -287,6 +288,16 @@ def analyze_costs(
             analysis["by_date"][usage_date][mmm_service] = 0
 
         analysis["by_date"][usage_date][mmm_service] += total_cost
+
+    # Distribute shared costs equally across services
+    if analysis["shared_costs"] > 0 and analysis["by_service"]:
+        num_services = len(analysis["by_service"])
+        shared_per_service = analysis["shared_costs"] / num_services
+        for service in analysis["by_service"]:
+            analysis["by_service"][service]["total"] += shared_per_service
+            if "shared" not in analysis["by_service"][service]["by_category"]:
+                analysis["by_service"][service]["by_category"]["shared"] = 0
+            analysis["by_service"][service]["by_category"]["shared"] += shared_per_service
 
     # Convert sets to counts
     for service, data in analysis["by_service"].items():
