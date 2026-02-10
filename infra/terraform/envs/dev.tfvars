@@ -9,6 +9,11 @@ deployer_sa = "github-deployer@datawarehouse-422511.iam.gserviceaccount.com"
 scheduler_job_name = "robyn-queue-tick-dev"
 queue_name         = "default-dev"
 
+# Scheduler control: Set to false to pause scheduler for cost monitoring
+# When paused, training jobs won't auto-process from queue (manual trigger required)
+# scheduler_enabled = false  # Uncomment to pause scheduler
+scheduler_enabled = true
+
 # Cost optimization: Scale-to-zero configuration
 min_instances = 0 # Eliminates idle costs, adds 1-3s cold start
 max_instances = 10

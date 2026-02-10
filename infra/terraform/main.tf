@@ -592,6 +592,7 @@ resource "google_cloud_run_v2_job_iam_member" "training_job_runner" {
 ###############################################################
 
 resource "google_cloud_scheduler_job" "robyn_queue_tick" {
+  count            = var.scheduler_enabled ? 1 : 0
   name             = var.scheduler_job_name
   description      = "Advance Robyn training queue (headless)"
   schedule         = "*/10 * * * *" # every 10 minutes (reduced from 1 minute for cost optimization)

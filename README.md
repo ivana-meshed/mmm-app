@@ -140,6 +140,16 @@ schedule = "*/30 * * * *"  # was: */10 * * * *
 
 **Expected Savings**: ~$92-112/month (~$1,100-1,300/year) with zero user impact
 
+**NEW**: You can now pause the Cloud Scheduler temporarily for cost monitoring:
+```bash
+# Edit infra/terraform/envs/prod.tfvars
+scheduler_enabled = false  # Pause scheduler
+
+# Or via command line
+terraform apply -var-file=envs/prod.tfvars -var="scheduler_enabled=false"
+```
+See [Scheduler Pause Guide](docs/SCHEDULER_PAUSE_GUIDE.md) for A/B testing and cost isolation.
+
 For full analysis and implementation details, see the cost optimization documentation above.
 
 ## Prerequisites

@@ -306,7 +306,14 @@ A: No. CPU throttling only affects idle time. When requests arrive, CPU is alloc
 A: Cold starts are ~1-3 seconds. With scheduler pinging every 30 minutes, instances stay warm most of the time. User traffic further keeps them warm. Cold starts are rare.
 
 **Q: Should we disable the scheduler entirely?**  
-A: No. It provides important queue processing functionality. 30-minute intervals are a good balance between cost and responsiveness.
+A: For extended idle periods (weekends, holidays), you can now pause it! Use `scheduler_enabled = false` in tfvars. See [Scheduler Pause Guide](./SCHEDULER_PAUSE_GUIDE.md). For normal operations, 30-minute intervals are a good balance.
+
+**Q: Can I pause the scheduler temporarily to test costs?**  
+A: Yes! NEW FEATURE: Set `scheduler_enabled = false` in your tfvars file. This lets you:
+- Isolate cost factors (CPU throttling vs. scheduler)
+- Run A/B tests to measure impact
+- Reduce costs during known idle periods
+- See [Scheduler Pause Guide](./SCHEDULER_PAUSE_GUIDE.md) for details
 
 **Q: What if 30 minutes is too long for our use case?**  
 A: Try 20 minutes first, then adjust based on actual queue processing needs. Even 20 minutes would save significantly compared to 10 minutes.

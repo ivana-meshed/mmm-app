@@ -188,18 +188,59 @@ Consider these alternatives for queue management:
 - Only executes when messages published
 - More granular control
 
+#### Option C: Pause Scheduler Temporarily (NEW)
+- **NEW FEATURE**: Use `scheduler_enabled = false` in tfvars
+- Pause scheduler for cost monitoring or extended idle periods
+- See [Scheduler Pause Guide](./SCHEDULER_PAUSE_GUIDE.md) for details
+- Useful for A/B testing and isolating cost factors
+
 **Expected Impact**:
 - Could reduce idle costs to near-zero
 - **Estimated savings**: ~$40-60/month
 
 **Trade-offs**:
-- Requires architectural changes
+- Requires architectural changes (Options A & B)
 - More complex to implement and test
 - Additional services to manage
+- Manual job triggering required when paused (Option C)
 
-**Recommended**: ⚠️ **LATER** - Implement quick wins first
+**Recommended**: ⚠️ **LATER** - Implement quick wins first (or use Option C for testing)
 
 ## Implementation Plan
+
+### Phase 0: A/B Testing with Scheduler Pause (Optional)
+
+**NEW**: Before making permanent changes, you can pause the scheduler to isolate cost impacts:
+
+1. **Baseline measurement** (24-48 hours)
+   ```bash
+   python scripts/track_daily_costs.py --days 2 --use-user-credentials
+   ```
+
+2. **Pause scheduler** (recommended for dev first)
+   ```bash
+   cd infra/terraform
+   # Edit envs/dev.tfvars: set scheduler_enabled = false
+   terraform apply -var-file=envs/dev.tfvars
+   ```
+
+3. **Monitor without scheduler** (24-48 hours)
+   ```bash
+   python scripts/track_daily_costs.py --days 2 --use-user-credentials
+   ```
+
+4. **Compare results**
+   ```bash
+   python scripts/analyze_idle_costs.py --days 7 --use-user-credentials
+   ```
+
+5. **Resume scheduler** (after testing)
+   ```bash
+   # Edit envs/dev.tfvars: set scheduler_enabled = true
+   terraform apply -var-file=envs/dev.tfvars
+   ```
+
+**See**: [Scheduler Pause Guide](./SCHEDULER_PAUSE_GUIDE.md) for detailed instructions
 
 ### Phase 1: Quick Wins (Immediate)
 
