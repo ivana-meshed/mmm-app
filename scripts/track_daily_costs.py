@@ -95,6 +95,7 @@ def build_cost_query(start_date: str, end_date: str, project_id: str) -> str:
         DATE(_PARTITIONTIME) as usage_date,
         service.description as service_name,
         sku.description as sku_description,
+        resource.name as resource_full_name,
         REGEXP_EXTRACT(resource.name, r'/([^/]+)$') as resource_name,
         labels.value as label_value,
         labels.key as label_key,
@@ -138,7 +139,8 @@ def build_cost_query(start_date: str, end_date: str, project_id: str) -> str:
       GROUP BY 
         usage_date, 
         service_name, 
-        sku_description, 
+        sku_description,
+        resource_full_name,
         resource_name,
         label_key,
         label_value,
@@ -149,6 +151,7 @@ def build_cost_query(start_date: str, end_date: str, project_id: str) -> str:
       usage_date,
       service_name,
       sku_description,
+      resource_full_name,
       resource_name,
       label_key,
       label_value,
@@ -162,6 +165,7 @@ def build_cost_query(start_date: str, end_date: str, project_id: str) -> str:
       usage_date,
       service_name,
       sku_description,
+      resource_full_name,
       resource_name,
       label_key,
       label_value
@@ -222,34 +226,87 @@ def categorize_cost(sku_description: str, resource_name: Optional[str]) -> str:
 
 
 def identify_service(
-    resource_name: Optional[str], sku_description: str
+    resource_name: Optional[str],
+    sku_description: str,
+    label_key: Optional[str] = None,
+    label_value: Optional[str] = None,
+    resource_full_name: Optional[str] = None,
 ) -> Optional[str]:
     """Identify which MMM service this cost belongs to."""
-    if not resource_name:
-        # For registry and storage, check SKU description
+
+    # Check labels first (Cloud Run services often have service name in labels)
+    if label_key and label_value:
+        label_key_lower = label_key.lower()
+        label_value_lower = label_value.lower()
+
+        # Check for service name in labels
+        if "service" in label_key_lower or "service_name" in label_key_lower:
+            if "mmm-app-dev-web" in label_value_lower:
+                return "mmm-app-dev-web"
+            if "mmm-app-web" in label_value_lower:
+                return "mmm-app-web"
+            if "mmm-app-dev-training" in label_value_lower:
+                return "mmm-app-dev-training"
+            if "mmm-app-training" in label_value_lower:
+                return "mmm-app-training"
+
+        # Check label value directly for service names
+        if "mmm-app-dev-web" in label_value_lower:
+            return "mmm-app-dev-web"
+        if "mmm-app-web" in label_value_lower:
+            return "mmm-app-web"
+        if "mmm-app-dev-training" in label_value_lower:
+            return "mmm-app-dev-training"
+        if "mmm-app-training" in label_value_lower:
+            return "mmm-app-training"
+
+        # Check for scheduler in labels
+        if "robyn-queue-tick-dev" in label_value_lower:
+            return "mmm-app-dev-web"
+        if (
+            "robyn-queue-tick" in label_value_lower
+            and "dev" not in label_value_lower
+        ):
+            return "mmm-app-web"
+
+    # Check full resource name (before extraction)
+    if resource_full_name:
+        resource_full_lower = resource_full_name.lower()
+        if "mmm-app-dev-web" in resource_full_lower:
+            return "mmm-app-dev-web"
+        if "mmm-app-web" in resource_full_lower:
+            return "mmm-app-web"
+        if "mmm-app-dev-training" in resource_full_lower:
+            return "mmm-app-dev-training"
+        if "mmm-app-training" in resource_full_lower:
+            return "mmm-app-training"
+        if "robyn-queue-tick-dev" in resource_full_lower:
+            return "mmm-app-dev-web"
+        if "robyn-queue-tick" in resource_full_lower:
+            return "mmm-app-web"
+
+    # Check extracted resource name (last segment of path)
+    if resource_name:
+        resource_lower = resource_name.lower()
+        if "mmm-app-dev-web" in resource_lower:
+            return "mmm-app-dev-web"
+        if "mmm-app-web" in resource_lower:
+            return "mmm-app-web"
+        if "mmm-app-dev-training" in resource_lower:
+            return "mmm-app-dev-training"
+        if "mmm-app-training" in resource_lower:
+            return "mmm-app-training"
+        if "robyn-queue-tick-dev" in resource_lower:
+            return "mmm-app-dev-web"
+        if "robyn-queue-tick" in resource_lower:
+            return "mmm-app-web"
+
+    # For registry and storage, return as shared costs
+    if not resource_name and not resource_full_name:
         if "artifact" in sku_description.lower():
             return "registry"
         if "storage" in sku_description.lower():
             return "storage"
-        return None
-
-    resource_lower = resource_name.lower()
-
-    # Check for exact matches first
-    if "mmm-app-dev-web" in resource_lower:
-        return "mmm-app-dev-web"
-    if "mmm-app-web" in resource_lower:
-        return "mmm-app-web"
-    if "mmm-app-dev-training" in resource_lower:
-        return "mmm-app-dev-training"
-    if "mmm-app-training" in resource_lower:
-        return "mmm-app-training"
-
-    # Check for scheduler names
-    if "robyn-queue-tick-dev" in resource_lower:
-        return "mmm-app-dev-web"  # Dev scheduler costs go to dev web
-    if "robyn-queue-tick" in resource_lower:
-        return "mmm-app-web"  # Prod scheduler costs go to prod web
 
     return None
 
@@ -276,6 +333,9 @@ def process_costs(
         service_name = row.get("service_name", "")
         sku_description = row.get("sku_description", "")
         resource_name = row.get("resource_name")
+        resource_full_name = row.get("resource_full_name")
+        label_key = row.get("label_key")
+        label_value = row.get("label_value")
         total_cost = float(row.get("total_cost", 0))
 
         # Debug output
@@ -284,13 +344,27 @@ def process_costs(
             debug_info["sku_descriptions"].add(sku_description)
             if resource_name:
                 debug_info["resource_names"].add(resource_name)
+            if resource_full_name:
+                if "resource_full_names" not in debug_info:
+                    debug_info["resource_full_names"] = set()
+                debug_info["resource_full_names"].add(resource_full_name)
+            if label_key and label_value:
+                if "labels" not in debug_info:
+                    debug_info["labels"] = set()
+                debug_info["labels"].add(f"{label_key}={label_value}")
 
         # Skip zero or negative costs
         if total_cost <= 0:
             continue
 
         # Identify which MMM service this belongs to
-        mmm_service = identify_service(resource_name, sku_description)
+        mmm_service = identify_service(
+            resource_name,
+            sku_description,
+            label_key,
+            label_value,
+            resource_full_name,
+        )
 
         # Debug: Track identification results
         if debug:
@@ -369,6 +443,31 @@ def process_costs(
             print(f"  - {res}")
         if len(debug_info["resource_names"]) > 20:
             print(f"  ... and {len(debug_info['resource_names']) - 20} more")
+
+        # Show full resource names if available
+        if (
+            "resource_full_names" in debug_info
+            and debug_info["resource_full_names"]
+        ):
+            print(
+                f"\nFull Resource Names Found ({len(debug_info['resource_full_names'])}):"
+            )
+            for res in sorted(debug_info["resource_full_names"])[
+                :10
+            ]:  # Limit to first 10
+                print(f"  - {res}")
+            if len(debug_info["resource_full_names"]) > 10:
+                print(
+                    f"  ... and {len(debug_info['resource_full_names']) - 10} more"
+                )
+
+        # Show labels if available
+        if "labels" in debug_info and debug_info["labels"]:
+            print(f"\nLabels Found ({len(debug_info['labels'])}):")
+            for label in sorted(debug_info["labels"])[:20]:  # Limit to first 20
+                print(f"  - {label}")
+            if len(debug_info["labels"]) > 20:
+                print(f"  ... and {len(debug_info['labels']) - 20} more")
 
         print(f"\nService Identification Results:")
         print(
