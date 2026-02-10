@@ -116,8 +116,24 @@ def build_cost_query(start_date: str, end_date: str, project_id: str) -> str:
         AND DATE(_PARTITIONTIME) <= '{end_date}'
         AND project.id = '{project_id}'
         AND (
-          service.description IN ('Cloud Run', 'Artifact Registry', 'Cloud Storage', 'Cloud Scheduler')
+          -- Cloud Run services (multiple possible descriptions)
+          service.description LIKE '%Cloud Run%'
+          -- Artifact Registry
+          OR service.description LIKE '%Artifact Registry%'
+          -- Cloud Storage
+          OR service.description LIKE '%Storage%'
+          OR service.description LIKE '%Cloud Storage%'
+          -- Cloud Scheduler
+          OR service.description LIKE '%Scheduler%'
+          OR service.description LIKE '%Cloud Scheduler%'
+          -- Also catch by SKU description
           OR sku.description LIKE '%Cloud Run%'
+          OR sku.description LIKE '%Artifact Registry%'
+          OR sku.description LIKE '%Cloud Storage%'
+          OR sku.description LIKE '%Cloud Scheduler%'
+          -- Catch resources that match our service names
+          OR resource.name LIKE '%mmm-app%'
+          OR resource.name LIKE '%robyn-queue%'
         )
       GROUP BY 
         usage_date, 
@@ -158,23 +174,17 @@ def categorize_cost(sku_description: str, resource_name: Optional[str]) -> str:
     """Categorize costs by type (user requests, scheduler, registry, etc)."""
     sku_lower = sku_description.lower()
 
-    # Artifact Registry costs
-    if "artifact" in sku_lower or "registry" in sku_lower:
-        return "registry"
-
-    # Cloud Storage costs
-    if "storage" in sku_lower or "gcs" in sku_lower:
-        return "storage"
-
-    # Cloud Scheduler costs
-    if "scheduler" in sku_lower or "cron" in sku_lower:
-        return "scheduler_service"
-
-    # Cloud Run request costs
+    # Cloud Run request costs (check first for specificity)
     if "request" in sku_lower or "invocation" in sku_lower:
         # Try to determine if scheduler or user based on patterns
-        if resource_name and "queue" in resource_name.lower():
-            return "scheduler_requests"
+        if resource_name:
+            resource_lower = resource_name.lower()
+            if (
+                "queue" in resource_lower
+                or "scheduler" in resource_lower
+                or "tick" in resource_lower
+            ):
+                return "scheduler_requests"
         return "user_requests"
 
     # Cloud Run CPU/Memory costs
@@ -183,6 +193,29 @@ def categorize_cost(sku_description: str, resource_name: Optional[str]) -> str:
 
     if "memory" in sku_lower or "ram" in sku_lower:
         return "compute_memory"
+
+    # Artifact Registry costs
+    if "artifact" in sku_lower or "registry" in sku_lower:
+        return "registry"
+
+    # Cloud Storage costs
+    if "storage" in sku_lower and "artifact" not in sku_lower:
+        return "storage"
+
+    if "gcs" in sku_lower or "bucket" in sku_lower:
+        return "storage"
+
+    # Cloud Scheduler costs (the service itself, not the invocations)
+    if "scheduler" in sku_lower or "cron" in sku_lower:
+        return "scheduler_service"
+
+    # Networking costs
+    if (
+        "network" in sku_lower
+        or "egress" in sku_lower
+        or "ingress" in sku_lower
+    ):
+        return "networking"
 
     # Default category
     return "other"
