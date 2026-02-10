@@ -24,29 +24,45 @@ from app_shared import (
     parse_train_size,
     require_login_and_domain,
     run_sql,
+    safe_read_parquet,
+    sync_session_state_keys,
     timed_step,
     upload_to_gcs,
 )
 from google.cloud import storage
-
 from utils.gcs_utils import format_cet_timestamp, get_cet_now
 
 data_processor = get_data_processor()
 job_manager = get_job_manager()
 from app_split_helpers import *  # bring in all helper functions/constants
 
+# Configure logging
+logger = logging.getLogger(__name__)
+
 require_login_and_domain()
 ensure_session_defaults()
 
+# Clear mapped data cache to ensure we get fresh data
+list_mapped_data_versions.clear()
+
+# Sync session state across all pages to maintain selections
+sync_session_state_keys()
+
 st.title("Run Marketing Mix Models")
 
-# Check if we should show a message to switch to Queue tab (Requirement 8)
-if st.session_state.get("switch_to_queue_tab", False):
-    st.success("✅ **Configuration added to queue successfully!**")
-    st.info(
-        "👉 **Please click on the 'Queue' tab above** to monitor your job's progress."
-    )
-    st.session_state["switch_to_queue_tab"] = False
+# DIAGNOSTIC: Log session state at page load
+just_exported_timestamp_check = st.session_state.get(
+    "just_exported_training_timestamp"
+)
+just_exported_country_check = st.session_state.get(
+    "just_exported_training_country"
+)
+logger.info(
+    f"[TRAINING-DATA-DEBUG] Page load - Session state keys: {list(st.session_state.keys())[:20]}"
+)
+logger.info(
+    f"[TRAINING-DATA-DEBUG] Export flags check: timestamp={just_exported_timestamp_check}, country={just_exported_country_check}"
+)
 
 tab_single, tab_queue, tab_status = st.tabs(
     ["Single Run", "Batch Run", "Queue Monitor"]
@@ -73,23 +89,31 @@ def _list_available_countries(bucket: str) -> List[str]:
         return []
 
 
-def _list_training_data_versions(bucket: str, country: str) -> List[str]:
+def _list_training_data_versions(
+    bucket: str, country: str, goal: str = None
+) -> List[str]:
     """List available selected_columns.json versions from Prepare Training Data.
 
     Returns list of timestamps for which selected_columns.json exists.
-    Path pattern: training_data/{country}/{timestamp}/selected_columns.json
+    Path pattern: training_data/{country}/{goal}/{timestamp}/selected_columns.json
+
+    If goal is provided, only list timestamps for that specific goal.
+    If goal is None, list all timestamps for all goals under the country.
     """
     try:
         client = storage.Client()
-        prefix = f"training_data/{country.lower().strip()}/"
+        if goal:
+            prefix = f"training_data/{country.lower().strip()}/{goal}/"
+        else:
+            prefix = f"training_data/{country.lower().strip()}/"
         blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
         versions = []
         for blob in blobs:
             if blob.name.endswith("selected_columns.json"):
                 parts = blob.name.split("/")
-                # training_data/<country>/<timestamp>/selected_columns.json
-                if len(parts) >= 4:
-                    versions.append(parts[2])
+                # training_data/<country>/<goal>/<timestamp>/selected_columns.json
+                if len(parts) >= 5:
+                    versions.append(parts[3])
         # Sort newest first
         return sorted(versions, reverse=True) if versions else []
     except Exception as e:
@@ -100,12 +124,12 @@ def _list_training_data_versions(bucket: str, country: str) -> List[str]:
 
 
 def _load_training_data_json(
-    bucket: str, country: str, version: str
+    bucket: str, country: str, goal: str, version: str
 ) -> Optional[Dict]:
     """Load selected_columns.json from Prepare Training Data page."""
     try:
         client = storage.Client()
-        blob_path = f"training_data/{country.lower().strip()}/{version}/selected_columns.json"
+        blob_path = f"training_data/{country.lower().strip()}/{goal}/{version}/selected_columns.json"
         blob = client.bucket(bucket).blob(blob_path)
         if not blob.exists():
             return None
@@ -118,8 +142,8 @@ def _load_training_data_json(
 def _list_all_training_data_configs(bucket: str) -> List[Dict[str, str]]:
     """List all available training data configs from all countries.
 
-    Returns list of dicts with keys: 'country', 'timestamp', 'display_name'
-    Path pattern: training_data/{country}/{timestamp}/selected_columns.json
+    Returns list of dicts with keys: 'country', 'goal', 'timestamp', 'display_name'
+    Path pattern: training_data/{country}/{goal}/{timestamp}/selected_columns.json
     """
     try:
         client = storage.Client()
@@ -129,23 +153,49 @@ def _list_all_training_data_configs(bucket: str) -> List[Dict[str, str]]:
         for blob in blobs:
             if blob.name.endswith("selected_columns.json"):
                 parts = blob.name.split("/")
-                # training_data/<country>/<timestamp>/selected_columns.json
-                if len(parts) >= 4:
+                # training_data/<country>/<goal>/<timestamp>/selected_columns.json
+                if len(parts) >= 5:
                     country = parts[1].strip()
-                    timestamp = parts[2].strip()
-                    # Validate that country and timestamp are non-empty
-                    if country and timestamp:
+                    goal = parts[2].strip()
+                    timestamp = parts[3].strip()
+                    # Validate that country, goal, and timestamp are non-empty
+                    if country and goal and timestamp:
                         configs.append(
                             {
                                 "country": country,
+                                "goal": goal,
                                 "timestamp": timestamp,
-                                "display_name": f"{country.upper()} - {timestamp}",
+                                "display_name": f"{country.upper()} - {goal} - {timestamp}",
                             }
                         )
         # Sort by timestamp descending (newest first)
         return sorted(configs, key=lambda x: x["timestamp"], reverse=True)
     except Exception as e:
         logging.warning(f"Could not list all training data configs: {e}")
+        return []
+
+
+def _list_available_goals(bucket: str, country: str) -> List[str]:
+    """List all available goals for a given country.
+
+    Returns list of goal names found in training_data/{country}/{goal}/ paths.
+    """
+    try:
+        client = storage.Client()
+        prefix = f"training_data/{country.lower().strip()}/"
+        blobs = client.list_blobs(bucket, prefix=prefix, delimiter=None)
+        goals = set()
+        for blob in blobs:
+            if blob.name.endswith("selected_columns.json"):
+                parts = blob.name.split("/")
+                # training_data/<country>/<goal>/<timestamp>/selected_columns.json
+                if len(parts) >= 5:
+                    goal = parts[2].strip()
+                    if goal:
+                        goals.add(goal)
+        return sorted(list(goals))
+    except Exception as e:
+        logging.warning(f"Could not list available goals for {country}: {e}")
         return []
 
 
@@ -338,14 +388,38 @@ with tab_single:
     st.subheader("Setup an Experiment Run")
 
     # Check for prefill from Prepare Training Data page for country/data/metadata
+    # Priority: training_data_config (from loaded dropdown) > training_prefill (from export)
+    training_data_config = st.session_state.get("training_data_config")
     training_prefill = st.session_state.get("training_prefill")
     prefill_country = None
     prefill_data_version = None
     prefill_meta_version = None
-    if training_prefill and st.session_state.get("training_prefill_ready"):
+
+    # Log current state for debugging
+    logger.info(
+        f"[DATA-PREFILL] Page render - training_data_config exists: {training_data_config is not None}, "
+        f"training_prefill exists: {training_prefill is not None}, "
+        f"training_prefill_ready: {st.session_state.get('training_prefill_ready', False)}"
+    )
+
+    # Use training_data_config if available (from loaded dropdown)
+    if training_data_config:
+        prefill_country = training_data_config.get("country")
+        prefill_data_version = training_data_config.get("data_version")
+        prefill_meta_version = training_data_config.get("meta_version")
+        logger.info(
+            f"[DATA-PREFILL] Using training_data_config: country={prefill_country}, "
+            f"data_version={prefill_data_version}, meta_version={prefill_meta_version}"
+        )
+    # Fall back to training_prefill (from Prepare Training Data export)
+    elif training_prefill and st.session_state.get("training_prefill_ready"):
         prefill_country = training_prefill.get("country")
         prefill_data_version = training_prefill.get("data_version")
         prefill_meta_version = training_prefill.get("meta_version")
+        logger.info(
+            f"[DATA-PREFILL] Using training_prefill: country={prefill_country}, "
+            f"data_version={prefill_data_version}, meta_version={prefill_meta_version}"
+        )
 
     # Data selection
     with st.expander("📊 Select Data", expanded=False):
@@ -387,12 +461,71 @@ with tab_single:
             default_country_index = available_countries.index(
                 prefill_country.lower()
             )
+            logger.info(
+                f"[DATA-PREFILL] Setting country dropdown to prefilled value: "
+                f"{prefill_country} (index {default_country_index})"
+            )
+        else:
+            logger.info(
+                f"[DATA-PREFILL] Using default country index: {default_country_index}, "
+                f"prefill_country={prefill_country}, available={available_countries[:3]}"
+            )
 
-        selected_country = st.selectbox(
-            "Primary Country",
-            options=available_countries,
-            index=default_country_index,
-            help="Choose the country this model run will focus on",
+        # Create 4-column layout for all filters in one row
+        col1, col2, col3, col4 = st.columns(4)
+
+        # Column 1: Primary Country
+        with col1:
+            selected_country = st.selectbox(
+                "Primary Country",
+                options=available_countries,
+                index=default_country_index,
+                help="Choose the country this model run will focus on",
+            )
+
+        logger.info(
+            f"[DATA-PREFILL] Country dropdown result: selected_country={selected_country}"
+        )
+
+        # Column 2: Goal (from training data configs)
+        # Get available goals for selected country
+        try:
+            available_goals = _list_available_goals(gcs_bucket, selected_country)
+            logger.info(
+                f"[DATA-PREFILL] Found {len(available_goals)} goals for {selected_country}"
+            )
+        except Exception as e:
+            logger.warning(f"Error listing goals: {e}")
+            available_goals = []
+
+        # Determine default goal index
+        default_goal_index = 0
+        just_exported_goal = st.session_state.get("just_exported_training_goal")
+        if just_exported_goal and just_exported_goal in available_goals:
+            default_goal_index = available_goals.index(just_exported_goal)
+            logger.info(
+                f"[DATA-PREFILL] Setting goal dropdown to exported value: {just_exported_goal}"
+            )
+
+        with col2:
+            if available_goals:
+                selected_data_goal = st.selectbox(
+                    "Goal",
+                    options=available_goals,
+                    index=default_goal_index,
+                    help="Select the goal for training data filtering",
+                )
+            else:
+                st.selectbox(
+                    "Goal",
+                    options=["No goals available"],
+                    disabled=True,
+                    help="No training data found for this country",
+                )
+                selected_data_goal = None
+
+        logger.info(
+            f"[DATA-PREFILL] Goal dropdown result: selected_data_goal={selected_data_goal}"
         )
 
         # ---- Load available metadata + data versions for this country ----
@@ -442,14 +575,29 @@ with tab_single:
             for i, opt in enumerate(available_versions):
                 if prefill_data_version.lower() == opt.lower():
                     default_data_index = i
+                    logger.info(
+                        f"[DATA-PREFILL] Setting data version dropdown to prefilled value: "
+                        f"{prefill_data_version} (index {default_data_index})"
+                    )
                     break
 
-        # Mapped Data version selection - uses same list as Prepare Training Data page
-        selected_version = st.selectbox(
-            "Mapped Data version",
-            options=available_versions,
-            index=default_data_index,
-            help="Select mapped data version. Uses the same list as Prepare Training Data page.",
+        if default_data_index == 0 and prefill_data_version:
+            logger.warning(
+                f"[DATA-PREFILL] Could not find prefill_data_version '{prefill_data_version}' "
+                f"in available_versions: {available_versions[:3]}"
+            )
+
+        # Column 3: Mapped Data version
+        with col3:
+            selected_version = st.selectbox(
+                "Mapped Data version",
+                options=available_versions,
+                index=default_data_index,
+                help="Select mapped data version. Uses the same list as Prepare Training Data page.",
+            )
+
+        logger.info(
+            f"[DATA-PREFILL] Data version dropdown result: selected_version={selected_version}"
         )
 
         # ---- Metadata version selection (with prefill) ----
@@ -458,16 +606,32 @@ with tab_single:
             for i, opt in enumerate(metadata_options):
                 if prefill_meta_version in opt:
                     default_meta_index = i
+                    logger.info(
+                        f"[DATA-PREFILL] Setting metadata dropdown to prefilled value: "
+                        f"{prefill_meta_version} in '{opt}' (index {default_meta_index})"
+                    )
                     break
 
-        selected_metadata = st.selectbox(
-            "Metadata version",
-            options=metadata_options,
-            index=default_meta_index,
-            help=(
-                "Select metadata version. Universal mappings work for all "
-                "countries. Latest = most recently saved metadata."
-            ),
+        if default_meta_index == 0 and prefill_meta_version:
+            logger.warning(
+                f"[DATA-PREFILL] Could not find prefill_meta_version '{prefill_meta_version}' "
+                f"in metadata_options: {metadata_options[:3]}"
+            )
+
+        # Column 4: Metadata version
+        with col4:
+            selected_metadata = st.selectbox(
+                "Metadata version",
+                options=metadata_options,
+                index=default_meta_index,
+                help=(
+                    "Select metadata version. Universal mappings work for all "
+                    "countries. Latest = most recently saved metadata."
+                ),
+            )
+
+        logger.info(
+            f"[DATA-PREFILL] Metadata dropdown result: selected_metadata={selected_metadata}"
         )
 
         # Training Data Config from Prepare Training Data page
@@ -479,86 +643,160 @@ with tab_single:
             "Optionally load a saved selected_columns.json to prefill model inputs."
         )
 
-        try:
-            # First try to get configs for selected country
-            training_data_versions = _list_training_data_versions(
-                gcs_bucket, selected_country
-            )
-
-            if training_data_versions:
-                # Found configs for selected country - show them with simple timestamps
-                training_data_options = ["None"] + training_data_versions
-                # Store mapping from display name to country/timestamp
-                config_mapping = {
-                    version: {"country": selected_country, "timestamp": version}
-                    for version in training_data_versions
-                }
-            else:
-                # No configs for selected country - show configs from all countries
-                all_configs = _list_all_training_data_configs(gcs_bucket)
-                if all_configs:
-                    training_data_options = ["None"] + [
-                        cfg["display_name"] for cfg in all_configs
-                    ]
-                    # Store mapping from display name to country/timestamp
-                    config_mapping = {
-                        cfg["display_name"]: {
-                            "country": cfg["country"],
-                            "timestamp": cfg["timestamp"],
-                        }
-                        for cfg in all_configs
-                    }
-                    st.info(
-                        f"ℹ️ No training data configs found for {selected_country.upper()}. "
-                        "Showing configs from all countries."
-                    )
-                else:
-                    training_data_options = ["None"]
-                    config_mapping = {}
-        except Exception as e:
-            logging.warning(f"Error listing training data configs: {e}")
-            training_data_options = ["None"]
-            config_mapping = {}
-
-        selected_training_data = st.selectbox(
-            "Select Training Data Config",
-            options=training_data_options,
-            index=0,
-            help="Load selected_columns.json from Prepare Training Data to prefill model inputs.",
+        # CRITICAL: Use just_exported_country if available (not selected_country)
+        # This ensures we look in the correct folder where the data was exported
+        lookup_country = st.session_state.get(
+            "just_exported_training_country", selected_country
+        )
+        logger.info(
+            f"[TRAINING-DATA-PREFILL] Training data lookup country: {lookup_country} (selected_country={selected_country})"
         )
 
-        # Load and store training data config if selected
-        if selected_training_data != "None":
-            # Get country and timestamp from mapping
-            config_info = config_mapping.get(selected_training_data)
-            if config_info:
-                config_country = config_info["country"]
-                config_timestamp = config_info["timestamp"]
-                training_data_config = _load_training_data_json(
-                    gcs_bucket, config_country, config_timestamp
+        # Three-column filter: Country (readonly), Goal (dropdown), Timestamp (dropdown)
+        col_country, col_goal, col_timestamp = st.columns(3)
+
+        with col_country:
+            st.text_input(
+                "Country",
+                value=lookup_country.upper(),
+                disabled=True,
+                help="Country for training data lookup",
+            )
+
+        # Get available goals
+        try:
+            available_goals = _list_available_goals(gcs_bucket, lookup_country)
+            logger.info(
+                f"[TRAINING-DATA-PREFILL] Found {len(available_goals)} goals for {lookup_country}"
+            )
+        except Exception as e:
+            logging.warning(f"Error listing goals: {e}")
+            available_goals = []
+
+        if not available_goals:
+            st.warning(
+                f"⚠️ No training data found for {lookup_country.upper()}"
+            )
+            st.session_state["training_data_config"] = None
+            selected_goal = None
+            selected_training_timestamp = None
+        else:
+            # Auto-select goal from session state
+            just_exported_goal = st.session_state.get(
+                "just_exported_training_goal"
+            )
+            default_goal_index = 0
+            if just_exported_goal and just_exported_goal in available_goals:
+                default_goal_index = available_goals.index(just_exported_goal)
+                logger.info(
+                    f"[TRAINING-DATA-PREFILL] Auto-selecting exported goal: {just_exported_goal}"
                 )
+
+            with col_goal:
+                selected_goal = st.selectbox(
+                    "Goal",
+                    options=available_goals,
+                    index=default_goal_index,
+                    help="Select the goal for this training data",
+                )
+
+            # Get timestamps for selected goal
+            try:
+                training_data_versions = _list_training_data_versions(
+                    gcs_bucket, lookup_country, selected_goal
+                )
+                logger.info(
+                    f"[TRAINING-DATA-PREFILL] Found {len(training_data_versions)} timestamps for {lookup_country}/{selected_goal}"
+                )
+            except Exception as e:
+                logging.warning(f"Error listing training data versions: {e}")
+                training_data_versions = []
+
+            if not training_data_versions:
+                with col_timestamp:
+                    st.selectbox(
+                        "Timestamp",
+                        options=["No data available"],
+                        disabled=True,
+                        help="No training data versions found",
+                    )
+                st.session_state["training_data_config"] = None
+                selected_training_timestamp = None
+            else:
+                # Auto-select timestamp from session state
+                just_exported_timestamp = st.session_state.get(
+                    "just_exported_training_timestamp"
+                )
+                default_timestamp_index = 0
+                if (
+                    just_exported_timestamp
+                    and just_exported_timestamp in training_data_versions
+                ):
+                    default_timestamp_index = training_data_versions.index(
+                        just_exported_timestamp
+                    )
+                    logger.info(
+                        f"[TRAINING-DATA-PREFILL] Auto-selecting exported timestamp: {just_exported_timestamp}"
+                    )
+
+                with col_timestamp:
+                    selected_training_timestamp = st.selectbox(
+                        "Timestamp",
+                        options=training_data_versions,
+                        index=default_timestamp_index,
+                        help="Select the training data version",
+                    )
+
+                # Load training data config
+                logger.info(
+                    f"[TRAINING-CONFIG-LOAD] Loading config from: "
+                    f"country={lookup_country}, goal={selected_goal}, timestamp={selected_training_timestamp}"
+                )
+                training_data_config = _load_training_data_json(
+                    gcs_bucket,
+                    lookup_country,
+                    selected_goal,
+                    selected_training_timestamp,
+                )
+
                 if training_data_config:
                     st.session_state["training_data_config"] = (
                         training_data_config
                     )
-                    if config_country != selected_country:
-                        st.success(
-                            f"✅ Loaded training data config from {config_country.upper()}: {config_timestamp}"
-                        )
-                    else:
-                        st.success(
-                            f"✅ Loaded training data config: {selected_training_data}"
-                        )
+                    logger.info(
+                        f"[TRAINING-CONFIG-LOAD] Loaded config with: "
+                        f"country={training_data_config.get('country')}, "
+                        f"data_version={training_data_config.get('data_version')}, "
+                        f"meta_version={training_data_config.get('meta_version')}, "
+                        f"selected_goal={training_data_config.get('selected_goal')}"
+                    )
+                    # Update export flags to remember this selection for future sessions
+                    st.session_state["just_exported_training_timestamp"] = (
+                        selected_training_timestamp
+                    )
+                    st.session_state["just_exported_training_country"] = (
+                        lookup_country
+                    )
+                    st.session_state["just_exported_training_goal"] = (
+                        selected_goal
+                    )
+                    logger.info(
+                        f"[TRAINING-CONFIG-LOAD] Updated export flags to persist selection: "
+                        f"country={lookup_country}, goal={selected_goal}, timestamp={selected_training_timestamp}"
+                    )
+                    st.success(
+                        f"✅ Loaded training data config: {lookup_country.upper()} - {selected_goal} - {selected_training_timestamp}"
+                    )
                     with st.expander(
                         "Preview Training Data Config", expanded=False
                     ):
                         st.json(training_data_config)
                 else:
                     st.session_state["training_data_config"] = None
-            else:
-                st.session_state["training_data_config"] = None
-        else:
-            st.session_state["training_data_config"] = None
+                    logger.warning(
+                        f"[TRAINING-CONFIG-LOAD] Failed to load config for "
+                        f"country={lookup_country}, goal={selected_goal}, timestamp={selected_training_timestamp}"
+                    )
 
         # ---- Show currently loaded state ----
         if (
@@ -585,6 +823,16 @@ with tab_single:
             width="stretch",
             key="load_data_btn",
         ):
+            logger.info(
+                f"[LOAD-DATA] Button clicked - About to load: "
+                f"country={selected_country}, version={selected_version}, "
+                f"metadata={selected_metadata}"
+            )
+            logger.info(
+                f"[LOAD-DATA] Current session state - "
+                f"training_data_config exists: {st.session_state.get('training_data_config') is not None}, "
+                f"training_prefill exists: {st.session_state.get('training_prefill') is not None}"
+            )
             tmp_path: Optional[str] = None
             try:
                 with st.spinner("Loading data from GCS..."):
@@ -596,7 +844,7 @@ with tab_single:
                     ) as tmp:
                         tmp_path = tmp.name
                         _download_from_gcs(gcs_bucket, blob_path, tmp_path)
-                        df_prev = pd.read_parquet(tmp_path)
+                        df_prev = safe_read_parquet(tmp_path)
 
                         # Parse metadata selection to get country and version
                         meta_parts = selected_metadata.split(" - ")
@@ -665,6 +913,22 @@ with tab_single:
                         st.session_state["loaded_metadata"] = metadata
                         st.session_state["selected_metadata"] = (
                             selected_metadata
+                        )
+
+                        # Also sync to Prepare Training Data keys (non-widget keys)
+                        # DON'T set picked_data_ts or picked_meta_ts directly as they are widget keys
+                        st.session_state["country"] = selected_country
+
+                        logger.info(
+                            f"[LOAD-DATA] Synced selections: "
+                            f"country={selected_country}, selected_version={selected_version}, "
+                            f"selected_metadata={selected_metadata}"
+                        )
+
+                        logger.info(
+                            f"[LOAD-DATA] Successfully loaded and saved to session state: "
+                            f"country={selected_country}, version={selected_version}, "
+                            f"metadata={selected_metadata}, rows={len(df_prev)}"
                         )
 
                         st.success(
@@ -941,22 +1205,66 @@ with tab_single:
 
         # Goal variable from metadata
         metadata = st.session_state.get("loaded_metadata")
+        training_data_config = st.session_state.get("training_data_config")
+
+        logger.info(
+            f"[GOAL-PREFILL] Starting goal selection - "
+            f"metadata exists: {metadata is not None}, "
+            f"training_data_config exists: {training_data_config is not None}, "
+            f"loaded_config exists: {loaded_config is not None}"
+        )
+
         if metadata and "goals" in metadata:
             goal_options = [
                 g["var"]
                 for g in metadata["goals"]
                 if g.get("group") == "primary"
             ]
+            logger.info(
+                f"[GOAL-PREFILL] Found {len(goal_options)} goal options from metadata: {goal_options}"
+            )
+
             if goal_options:
                 # Find default index for loaded dep_var
+                # Priority: training_data_config.selected_goal > loaded_config.dep_var > 0
                 default_dep_var_index = 0
-                if loaded_config and "dep_var" in loaded_config:
+                selected_goal_from_config = None
+
+                if (
+                    training_data_config
+                    and "selected_goal" in training_data_config
+                ):
+                    selected_goal_from_config = training_data_config[
+                        "selected_goal"
+                    ]
+                    try:
+                        default_dep_var_index = goal_options.index(
+                            selected_goal_from_config
+                        )
+                        logger.info(
+                            f"[GOAL-PREFILL] Using training_data_config.selected_goal: "
+                            f"'{selected_goal_from_config}' (index {default_dep_var_index})"
+                        )
+                    except (ValueError, KeyError) as e:
+                        logger.warning(
+                            f"[GOAL-PREFILL] Could not find training_data_config.selected_goal "
+                            f"'{selected_goal_from_config}' in goal_options: {e}"
+                        )
+                elif loaded_config and "dep_var" in loaded_config:
                     try:
                         default_dep_var_index = goal_options.index(
                             loaded_config["dep_var"]
                         )
+                        logger.info(
+                            f"[GOAL-PREFILL] Using loaded_config.dep_var: "
+                            f"'{loaded_config['dep_var']}' (index {default_dep_var_index})"
+                        )
                     except (ValueError, KeyError):
                         pass
+                else:
+                    logger.info(
+                        f"[GOAL-PREFILL] Using default index 0 - no training_data_config or loaded_config"
+                    )
 
                 dep_var = st.selectbox(
                     "Select Goal",
@@ -964,6 +1272,11 @@ with tab_single:
                     index=default_dep_var_index,
                     help="What business outcome do you want to optimize for?",
                 )
+
+                logger.info(
+                    f"[GOAL-PREFILL] Goal dropdown result: selected dep_var='{dep_var}'"
+                )
+
                 # Find the corresponding type
                 dep_var_type = next(
                     (
@@ -978,13 +1291,21 @@ with tab_single:
                     ),
                 )
             else:
+                # No goal options from metadata, use text input
+                # Priority: training_data_config.selected_goal > loaded_config.dep_var > "UPLOAD_VALUE"
+                default_dep_var_value = "UPLOAD_VALUE"
+                if training_data_config and training_data_config.get(
+                    "selected_goal"
+                ):
+                    default_dep_var_value = training_data_config[
+                        "selected_goal"
+                    ]
+                elif loaded_config and loaded_config.get("dep_var"):
+                    default_dep_var_value = loaded_config["dep_var"]
+
                 dep_var = st.text_input(
                     "Goal variable",
-                    value=(
-                        loaded_config.get("dep_var", "UPLOAD_VALUE")
-                        if loaded_config
-                        else "UPLOAD_VALUE"
-                    ),
+                    value=default_dep_var_value,
                 )
                 dep_var_type = (
                     loaded_config.get("dep_var_type", "revenue")
@@ -992,13 +1313,19 @@ with tab_single:
                     else "revenue"
                 )
         else:
+            # No metadata available, use text input
+            # Priority: training_data_config.selected_goal > loaded_config.dep_var > "UPLOAD_VALUE"
+            default_dep_var_value = "UPLOAD_VALUE"
+            if training_data_config and training_data_config.get(
+                "selected_goal"
+            ):
+                default_dep_var_value = training_data_config["selected_goal"]
+            elif loaded_config and loaded_config.get("dep_var"):
+                default_dep_var_value = loaded_config["dep_var"]
+
             dep_var = st.text_input(
                 "Goal variable",
-                value=(
-                    loaded_config.get("dep_var", "UPLOAD_VALUE")
-                    if loaded_config
-                    else "UPLOAD_VALUE"
-                ),
+                value=default_dep_var_value,
                 help="Dependent variable column in your data",
             )
             dep_var_type = (
@@ -1136,7 +1463,9 @@ with tab_single:
             agg_summary = ", ".join(
                 [f"{count} {agg}" for agg, count in sorted(agg_counts.items())]
             )
-            st.info(f"ℹ️ Using column aggregations from metadata: {agg_summary}")
+            st.info(
+                f"ℹ️ Using column aggregations from metadata: {agg_summary}"
+            )
         elif resample_freq != "none" and not column_agg_strategies:
             st.warning(
                 "⚠️ No column aggregations found in metadata. Default 'sum' "
@@ -2213,7 +2542,9 @@ with tab_single:
             )
         else:
             combined_revision = ""
-            st.warning("⚠️ Please select or create a tag for the experiment run")
+            st.warning(
+                "⚠️ Please select or create a tag for the experiment run"
+            )
 
         # For backward compatibility, create a combined "revision" field
         revision = combined_revision
@@ -2224,69 +2555,69 @@ with tab_single:
             "Save the current model settings so you can reuse them later."
         )
 
-        gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
+        # Add checkbox to toggle visibility of save settings fields
+        save_settings_enabled = st.checkbox(
+            "Save Model Settings",
+            value=False,
+            help="Enable this to save model settings for reuse later",
+        )
 
-        col1, col2 = st.columns([3, 1])
-        with col1:
+        # Only show fields if checkbox is checked
+        if save_settings_enabled:
+            gcs_bucket = st.session_state.get("gcs_bucket", GCS_BUCKET)
+
             config_name = st.text_input(
                 "Settings name",
                 placeholder="e.g., gmv_model_v1",
                 help="Name for this training configuration",
             )
-        with col2:
-            # Pre-check "Multi-country" if loaded config has multiple countries
-            loaded_countries = st.session_state.get(
-                "loaded_config_countries", []
-            )
-            default_multi = len(loaded_countries) > 1
-            save_for_multi = st.checkbox(
-                "Apply to multiple countries",
-                value=default_multi,
-            )
 
-        if save_for_multi:
-            # Use loaded countries if available, otherwise default to selected_country
-            loaded_countries = st.session_state.get(
-                "loaded_config_countries", []
-            )
-            default_countries = (
-                loaded_countries
-                if loaded_countries
-                else [st.session_state.get("selected_country", "de")]
-            )
-            # Use available countries from Select Data section instead of hardcoded list
+            # Use available countries from Select Data section
             available_countries_for_multi = st.session_state.get(
                 "run_models_available_countries", ["de"]
             )
+
+            # Default to ALL available countries
             config_countries = st.multiselect(
                 "Select countries",
                 options=available_countries_for_multi,
-                default=default_countries,
+                default=available_countries_for_multi,  # All countries selected by default
+                help="Model settings will be saved for all selected countries",
             )
+
+            # Add action buttons - removed "Save settings & Add to Queue", renamed last button
+            col_btn1, col_btn2 = st.columns(2)
+
+            save_config_clicked = col_btn1.button(
+                "💾 Save Settings",
+                width="stretch",
+                key="save_config_btn",
+            )
+            add_and_start_clicked = col_btn2.button(
+                "▶️ Save Settings & Run Now",
+                width="stretch",
+                key="add_and_start_btn",
+                type="primary",
+            )
+
+            # Set flag for removed button to False
+            add_to_queue_clicked = False
         else:
-            config_countries = [st.session_state.get("selected_country", "de")]
-
-        # Add action buttons (Issue #5 fix: add queue options)
-        col_btn1, col_btn2, col_btn3 = st.columns(3)
-
-        save_config_clicked = col_btn1.button(
-            "💾 Save Settings",
-            width="stretch",
-            key="save_config_btn",
-        )
-        add_to_queue_clicked = col_btn2.button(
-            "➕ Save Settings & Add to Queue",
-            width="stretch",
-            key="add_to_queue_btn",
-        )
-        add_and_start_clicked = col_btn3.button(
-            "▶️ Save Settings, Add to Queue and Run Now",
-            width="stretch",
-            key="add_and_start_btn",
-        )
+            # When checkbox is not enabled, set defaults
+            save_config_clicked = False
+            add_to_queue_clicked = False
+            add_and_start_clicked = False
+            config_countries = []
 
         # Add Download as CSV button
         st.markdown("---")
+
+        # Info box explaining CSV usage for batch run
+        st.info(
+            "💡 **Download as CSV Template**: Download current model settings as a CSV file. "
+            "This can be used as a template for batch runs in the 'Batch Run' tab. "
+            "The CSV will contain one row for each selected country."
+        )
 
         # Helper function to convert custom_hyperparameters to CSV format
         def convert_hyperparams_to_csv_format(custom_hp, adstock_type):
@@ -2299,69 +2630,83 @@ with tab_single:
                         csv_cols[key] = str(value)
             return csv_cols
 
-        # Build CSV row for current configuration
-        csv_row = {
-            "country": country,
-            "revision": revision,
-            "revision_tag": (
-                revision_tag if revision_tag != "-- Create New Tag --" else ""
-            ),
-            "revision_number": (
-                revision_number
-                if revision_tag != "-- Create New Tag --"
-                else ""
-            ),
-            "start_date": start_date_str,
-            "end_date": end_date_str,
-            "iterations": int(iterations),
-            "trials": int(trials),
-            "train_size": train_size,
-            "paid_media_spends": paid_media_spends,
-            "paid_media_vars": paid_media_vars,
-            "context_vars": context_vars,
-            "factor_vars": factor_vars,
-            "organic_vars": organic_vars,
-            "gcs_bucket": gcs_bucket,
-            "data_gcs_path": f"gs://{gcs_bucket}/mapped-datasets/{country}/latest/raw.parquet",
-            "table": "",
-            "query": "",
-            "dep_var": dep_var,
-            "dep_var_type": dep_var_type,
-            "date_var": date_var,
-            "adstock": adstock,
-            "hyperparameter_preset": hyperparameter_preset,
-            "resample_freq": resample_freq,
-            "column_agg_strategies": (
-                json.dumps(column_agg_strategies)
-                if column_agg_strategies
-                else ""
-            ),
-            "annotations_gcs_path": "",
-            "budget_scenario": budget_scenario,
-            "expected_spend": expected_spend if expected_spend else "",
-        }
+        # Build CSV rows for ALL selected countries (not just current one)
+        # Get countries to include in CSV based on whether save settings is enabled
+        csv_countries = (
+            config_countries
+            if save_settings_enabled and config_countries
+            else [country]
+        )
 
-        # Add per-channel budgets to CSV row
-        for channel, budget in channel_budgets.items():
-            csv_row[f"{channel}_budget"] = budget
+        csv_rows = []
+        for ctry in csv_countries:
+            csv_row = {
+                "country": ctry,
+                "revision": revision,
+                "revision_tag": (
+                    revision_tag
+                    if revision_tag != "-- Create New Tag --"
+                    else ""
+                ),
+                "revision_number": (
+                    revision_number
+                    if revision_tag != "-- Create New Tag --"
+                    else ""
+                ),
+                "start_date": start_date_str,
+                "end_date": end_date_str,
+                "iterations": int(iterations),
+                "trials": int(trials),
+                "train_size": train_size,
+                "paid_media_spends": paid_media_spends,
+                "paid_media_vars": paid_media_vars,
+                "context_vars": context_vars,
+                "factor_vars": factor_vars,
+                "organic_vars": organic_vars,
+                "gcs_bucket": gcs_bucket,
+                "data_gcs_path": f"gs://{gcs_bucket}/mapped-datasets/{ctry}/latest/raw.parquet",
+                "table": "",
+                "query": "",
+                "dep_var": dep_var,
+                "dep_var_type": dep_var_type,
+                "date_var": date_var,
+                "adstock": adstock,
+                "hyperparameter_preset": hyperparameter_preset,
+                "resample_freq": resample_freq,
+                "column_agg_strategies": (
+                    json.dumps(column_agg_strategies)
+                    if column_agg_strategies
+                    else ""
+                ),
+                "annotations_gcs_path": "",
+                "budget_scenario": budget_scenario,
+                "expected_spend": expected_spend if expected_spend else "",
+            }
 
-        # Add custom hyperparameters to CSV row
-        if hyperparameter_preset == "Custom" and custom_hyperparameters:
-            csv_row.update(
-                convert_hyperparams_to_csv_format(
-                    custom_hyperparameters, adstock
+            # Add per-channel budgets to CSV row
+            for channel, budget in channel_budgets.items():
+                csv_row[f"{channel}_budget"] = budget
+
+            # Add custom hyperparameters to CSV row
+            if hyperparameter_preset == "Custom" and custom_hyperparameters:
+                csv_row.update(
+                    convert_hyperparams_to_csv_format(
+                        custom_hyperparameters, adstock
+                    )
                 )
-            )
 
-        csv_df = pd.DataFrame([csv_row])
+            csv_rows.append(csv_row)
+
+        csv_df = pd.DataFrame(csv_rows)
 
         st.download_button(
             "📥 Download as CSV",
             data=csv_df.to_csv(index=False),
-            file_name=f"robyn_config_{country}_{revision}_{time.strftime('%Y%m%d')}.csv",
+            file_name=f"robyn_config_{'-'.join([c[:2] for c in csv_countries])}_{revision}_{time.strftime('%Y%m%d')}.csv",
             mime="text/csv",
             width="stretch",
-            help="Download current settings as CSV and use for batch processing",
+            key=f"download_config_csv_{revision}_{len(csv_countries)}",
+            help=f"Download settings as CSV with {len(csv_countries)} row(s) - one per country. Use for batch processing.",
         )
 
         st.markdown("---")
@@ -2666,26 +3011,53 @@ with tab_single:
 
     # Get the config_countries list from Save Model Settings section
     # This is used for multi-country training
-    multi_country_list = st.session_state.get(
-        "run_models_available_countries", []
+    # If Save Model Settings is enabled and countries are selected, use those
+    # Otherwise, show a country selector above the training buttons
+
+    # Check if save settings is enabled and has countries selected
+    save_settings_has_countries = (
+        save_settings_enabled and len(config_countries) > 0
     )
+
+    if not save_settings_has_countries:
+        # Show country selector above training buttons when Save Model Settings is not enabled
+        available_countries_for_training = st.session_state.get(
+            "run_models_available_countries", []
+        )
+
+        if available_countries_for_training:
+            st.markdown("**Select Countries for Training**")
+            multi_country_list = st.multiselect(
+                "Countries to train",
+                options=available_countries_for_training,
+                default=available_countries_for_training,  # All countries preselected
+                help="Select which countries to train models for",
+            )
+        else:
+            multi_country_list = []
+    else:
+        # Use countries from Save Model Settings
+        multi_country_list = config_countries
 
     # Multi-country training button
     col_multi, col_single = st.columns(2)
 
     with col_multi:
+        # Make this button primary (red) and update text to reflect selected countries
         start_multi_training = st.button(
-            "🌍 Start Training for All Countries",
-            type="secondary",
+            f"🌍 Start Training for Selected Countries ({len(multi_country_list)})",
+            type="primary",  # Changed from "secondary" to make it red
             width="stretch",
             key="start_multi_training_job_btn",
-            help=f"Start training jobs in parallel for all {len(multi_country_list)} countries",
+            help=f"Start training jobs in parallel for {len(multi_country_list)} selected countries",
+            disabled=len(multi_country_list) == 0,
         )
 
     with col_single:
+        # Make this button secondary (remove red) and update text
         start_single_training = st.button(
-            "🚀 Start Training Job",
-            type="primary",
+            "🚀 Start Training Job for This Country",  # Updated text
+            type="secondary",  # Changed from "primary" to remove red
             width="stretch",
             key="start_training_job_btn",
         )
@@ -3088,6 +3460,14 @@ with tab_single:
 
 # Extracted from streamlit_app.py tab_queue (Batch/Queue run):
 with tab_queue:
+    # Check if we should show a message to switch to Queue Monitor tab
+    if st.session_state.get("switch_to_queue_tab", False):
+        st.success("✅ **Configuration added to queue successfully!**")
+        st.info(
+            "👉 **Please click on the 'Queue Monitor' tab above** to monitor your job's progress."
+        )
+        st.session_state["switch_to_queue_tab"] = False
+
     if st.session_state.get("queue_running") and not (
         st.session_state.get("job_queue") or []
     ):
@@ -3680,6 +4060,7 @@ with tab_queue:
                     file_name="robyn_batch_example_consistent.csv",
                     mime="text/csv",
                     width="content",
+                    key="download_batch_template_single",
                     help="All rows have the same columns – recommended starting point.",
                 )
             with col_ex2:
@@ -3689,6 +4070,7 @@ with tab_queue:
                     file_name="robyn_batch_example_varied.csv",
                     mime="text/csv",
                     width="content",
+                    key="download_batch_template_mixed",
                     help="Rows can differ in columns – shows CSV flexibility.",
                 )
 
@@ -3698,7 +4080,11 @@ with tab_queue:
 # ===================== STATUS TAB =====================
 with tab_status:
 
-    # Job Status Monitor
+    # Auto-refresh and tick mechanism (runs even when expander is collapsed)
+    # This advances the queue by checking job statuses and launching pending jobs
+    _auto_refresh_and_tick(interval_ms=2000)
+
+    # Job Status Monitor (auto-refreshes every 5s via fragment)
     render_job_status_monitor(key_prefix="status")
 
     with st.expander("📋 Current Queue", expanded=False):
@@ -3750,10 +4136,11 @@ with tab_status:
             maybe_refresh_queue_from_gcs(force=True)
             st.success("Refreshed from GCS.")
             st.rerun()
-        _auto_refresh_and_tick(interval_ms=2000)
 
-        # Queue table
-        maybe_refresh_queue_from_gcs()
+        # Queue table (refresh to show latest from GCS)
+        maybe_refresh_queue_from_gcs(
+            force=True
+        )  # Always force refresh for Current Queue
         st.caption(
             f"GCS saved_at: {st.session_state.get('queue_saved_at') or '—'} · "
             f"{sum(e['status']=='PENDING' for e in st.session_state.job_queue)} pending · "
@@ -3762,11 +4149,12 @@ with tab_status:
         )
 
         if st.session_state.job_queue:
+            # Display status from queue (Model Run Status/queue tick already update it)
             df_queue = pd.DataFrame(
                 [
                     {
                         "ID": e["id"],
-                        "Status": e["status"],
+                        "Status": e.get("status", "PENDING").upper(),
                         "Country": e["params"].get("country", ""),
                         "Revision": e["params"].get(
                             "revision", e["params"].get("version", "")

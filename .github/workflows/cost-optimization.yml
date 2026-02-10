@@ -1,0 +1,170 @@
+name: Cost Optimization - Artifact Registry Cleanup
+
+on:
+  # Run weekly on Sundays at 2 AM UTC
+  schedule:
+    - cron: '0 2 * * 0'
+  
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      keep_last_n:
+        description: 'Number of recent tags to keep per image'
+        required: false
+        default: '10'
+      dry_run:
+        description: 'Dry run mode (true/false)'
+        required: false
+        default: 'false'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  cleanup-artifacts:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: datawarehouse-422511
+      REGION: europe-west1
+      REPOSITORY: mmm-repo
+      KEEP_LAST_N: ${{ github.event.inputs.keep_last_n || '10' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Auth to Google (OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/321233323695/locations/global/workloadIdentityPools/github-pool/providers/github-oidc
+          service_account: github-deployer@datawarehouse-422511.iam.gserviceaccount.com
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Cleanup Artifact Registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          
+          echo "=========================================="
+          echo "Artifact Registry Cleanup"
+          echo "=========================================="
+          echo "Project: $PROJECT_ID"
+          echo "Repository: $REPOSITORY"
+          echo "Region: $REGION"
+          echo "Keep last: $KEEP_LAST_N tags"
+          echo "Dry run: $DRY_RUN"
+          echo ""
+          
+          # List all packages in the repository
+          PACKAGES=$(gcloud artifacts docker images list \
+            "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}" \
+            --format="value(package)" \
+            --include-tags 2>/dev/null | sort -u || echo "")
+          
+          if [ -z "$PACKAGES" ]; then
+            echo "No packages found in repository"
+            exit 0
+          fi
+          
+          TOTAL_DELETED=0
+          TOTAL_SIZE_DELETED=0
+          
+          # Process each package
+          for PACKAGE in $PACKAGES; do
+            echo "Processing: $PACKAGE"
+            
+            # Get all tags with timestamps, sorted by creation time (newest first)
+            TAGS=$(gcloud artifacts docker images list "$PACKAGE" \
+              --format="csv[no-heading](version,createTime,tags,IMAGE_SIZE)" \
+              --sort-by="~createTime" \
+              --include-tags 2>/dev/null || echo "")
+            
+            if [ -z "$TAGS" ]; then
+              echo "  No tags found"
+              continue
+            fi
+            
+            # Count total tags
+            TOTAL_TAGS=$(echo "$TAGS" | wc -l | tr -d ' ')
+            echo "  Total tags: $TOTAL_TAGS"
+            
+            if [ "$TOTAL_TAGS" -le "$KEEP_LAST_N" ]; then
+              echo "  Keeping all tags (under threshold)"
+              continue
+            fi
+            
+            # Skip the first N tags (keep recent)
+            TAGS_TO_DELETE=$(echo "$TAGS" | tail -n +$((KEEP_LAST_N + 1)))
+            DELETE_COUNT=$(echo "$TAGS_TO_DELETE" | wc -l | tr -d ' ')
+            
+            echo "  Tags to delete: $DELETE_COUNT"
+            
+            # Delete old tags
+            while IFS=, read -r VERSION CREATE_TIME TAG_LIST IMAGE_SIZE; do
+              # Skip if no version
+              if [ -z "$VERSION" ]; then
+                continue
+              fi
+              
+              # Skip if tagged as 'latest' or 'stable'
+              if echo "$TAG_LIST" | grep -qE "(latest|stable)"; then
+                echo "    Skipping $VERSION (has protected tag: $TAG_LIST)"
+                continue
+              fi
+              
+              # Build image reference
+              IMAGE_REF="${PACKAGE}@${VERSION}"
+              
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "    [DRY RUN] Would delete: $IMAGE_REF (size: ${IMAGE_SIZE:-unknown})"
+              else
+                echo "    Deleting: $IMAGE_REF"
+                if gcloud artifacts docker images delete "$IMAGE_REF" --quiet 2>/dev/null; then
+                  TOTAL_DELETED=$((TOTAL_DELETED + 1))
+                  # Extract size in bytes if available
+                  if [ -n "$IMAGE_SIZE" ]; then
+                    SIZE_BYTES=$(echo "$IMAGE_SIZE" | sed 's/[^0-9]//g')
+                    if [ -n "$SIZE_BYTES" ]; then
+                      TOTAL_SIZE_DELETED=$((TOTAL_SIZE_DELETED + SIZE_BYTES))
+                    fi
+                  fi
+                  echo "      ✓ Deleted"
+                else
+                  echo "      ✗ Failed to delete"
+                fi
+              fi
+            done <<< "$TAGS_TO_DELETE"
+            
+            echo ""
+          done
+          
+          echo "=========================================="
+          echo "Summary"
+          echo "=========================================="
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "DRY RUN MODE - No images were actually deleted"
+          else
+            echo "Total images deleted: $TOTAL_DELETED"
+            if [ "$TOTAL_SIZE_DELETED" -gt 0 ]; then
+              SIZE_GB=$(echo "scale=2; $TOTAL_SIZE_DELETED / 1024 / 1024 / 1024" | bc)
+              MONTHLY_SAVINGS=$(echo "scale=2; $SIZE_GB * 0.10" | bc)
+              echo "Total size freed: ${SIZE_GB} GB"
+              echo "Estimated monthly savings: \$${MONTHLY_SAVINGS}"
+            fi
+          fi
+          echo ""
+          
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## Artifact Registry Cleanup Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ${REPOSITORY}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Keep last N tags:** ${KEEP_LAST_N}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry run:** ${DRY_RUN}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check job logs for detailed results." >> $GITHUB_STEP_SUMMARY

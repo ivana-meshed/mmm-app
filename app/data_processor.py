@@ -99,6 +99,7 @@ class DataProcessor:
         - Integers: Use smallest type that fits the data range (int8, int16, etc.)
         - Floats: Downcast float64 to float32 where precision is maintained
         - Categorical: Convert strings with <50% unique values to category type
+        - Database types: Convert db* types to standard types first
 
         Args:
             df: Input DataFrame to optimize
@@ -108,6 +109,51 @@ class DataProcessor:
         """
         df_opt = df.copy()
 
+        # FIRST: Handle database-specific types (dbdate, dbtime, etc.)
+        # These need to be converted to standard types before PyArrow processing
+        for col in df_opt.columns:
+            col_dtype = df_opt[col].dtype
+            dtype_str = str(col_dtype).strip().lower()
+
+            # Convert database-specific types to appropriate standard types
+            if dtype_str.startswith("db"):
+                logger.warning(
+                    f"Column '{col}' has database-specific type '{col_dtype}', converting to standard type"
+                )
+
+                # Try to determine the appropriate conversion
+                if "date" in dtype_str or "time" in dtype_str:
+                    # Convert to string first, then to datetime
+                    try:
+                        df_opt[col] = pd.to_datetime(
+                            df_opt[col].astype(str), errors="coerce"
+                        )
+                        logger.info(
+                            f"Converted '{col}' from {col_dtype} to datetime"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to convert '{col}' to datetime, converting to string: {e}"
+                        )
+                        df_opt[col] = df_opt[col].astype(str)
+                elif "decimal" in dtype_str or "numeric" in dtype_str:
+                    # Convert to float
+                    try:
+                        df_opt[col] = df_opt[col].astype(float)
+                        logger.info(
+                            f"Converted '{col}' from {col_dtype} to float"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to convert '{col}' to float, converting to string: {e}"
+                        )
+                        df_opt[col] = df_opt[col].astype(str)
+                else:
+                    # Default: convert to string
+                    df_opt[col] = df_opt[col].astype(str)
+                    logger.info(f"Converted '{col}' from {col_dtype} to string")
+
+        # SECOND: Continue with normal optimization
         for col in df_opt.columns:
             col_data = df_opt[col]
 
@@ -122,36 +168,51 @@ class DataProcessor:
             if pd.api.types.is_numeric_dtype(col_data):
                 # Check if it's actually integers
                 if col_data.dtype in ["float64", "float32"]:
-                    # Check if all values are integers (no decimal part)
-                    if col_data.notna().all() and (col_data % 1 == 0).all():
+                    # Check if all non-null values are integers (no decimal part)
+                    non_null_data = col_data.dropna()
+                    if (
+                        len(non_null_data) > 0
+                        and (non_null_data % 1 == 0).all()
+                    ):
                         # Convert to smallest possible integer type
-                        col_min, col_max = col_data.min(), col_data.max()
+                        col_min, col_max = (
+                            non_null_data.min(),
+                            non_null_data.max(),
+                        )
                         if col_min >= 0:
                             if col_max <= 255:
-                                df_opt[col] = col_data.astype("uint8")
+                                df_opt[col] = col_data.astype(
+                                    "Int8"
+                                )  # Nullable integer
                             elif col_max <= 65535:
-                                df_opt[col] = col_data.astype("uint16")
+                                df_opt[col] = col_data.astype("Int16")
                             elif col_max <= 4294967295:
-                                df_opt[col] = col_data.astype("uint32")
+                                df_opt[col] = col_data.astype("Int32")
                             else:
-                                df_opt[col] = col_data.astype("uint64")
+                                df_opt[col] = col_data.astype("Int64")
                         else:
                             if col_min >= -128 and col_max <= 127:
-                                df_opt[col] = col_data.astype("int8")
+                                df_opt[col] = col_data.astype("Int8")
                             elif col_min >= -32768 and col_max <= 32767:
-                                df_opt[col] = col_data.astype("int16")
+                                df_opt[col] = col_data.astype("Int16")
                             elif (
                                 col_min >= -2147483648 and col_max <= 2147483647
                             ):
-                                df_opt[col] = col_data.astype("int32")
+                                df_opt[col] = col_data.astype("Int32")
                             else:
-                                df_opt[col] = col_data.astype("int64")
+                                df_opt[col] = col_data.astype("Int64")
                     else:
                         # Keep as float but optimize precision
                         if col_data.dtype == "float64":
                             # Check if float32 is sufficient
-                            if (col_data.astype("float32") == col_data).all():
-                                df_opt[col] = col_data.astype("float32")
+                            non_null_data = col_data.dropna()
+                            if len(non_null_data) > 0:
+                                try:
+                                    converted = non_null_data.astype("float32")
+                                    if (converted == non_null_data).all():
+                                        df_opt[col] = col_data.astype("float32")
+                                except:
+                                    pass  # Keep as float64
 
             # Optimize string/categorical columns
             elif pd.api.types.is_object_dtype(col_data):
@@ -203,6 +264,9 @@ class DataProcessor:
         Returns:
             DataFrame loaded from Parquet file
         """
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
         bucket = self.storage_client.bucket(self.gcs_bucket)
         blob = bucket.blob(gcs_path)
 
@@ -211,12 +275,57 @@ class DataProcessor:
         blob.download_to_file(buffer)
         buffer.seek(0)
 
-        # Read Parquet from buffer
-        df = pd.read_parquet(buffer)
+        try:
+            # Read Parquet from buffer using PyArrow to handle database-specific types
+            table = pq.read_table(buffer)
 
-        logger.info(
-            f"Loaded Parquet file from GCS: {len(df):,} rows, "
-            f"{len(df.columns)} columns"
-        )
+            # Check for database-specific types and convert them
+            schema = table.schema
+            db_type_columns = []
+            for i, field in enumerate(schema):
+                field_type_str = str(field.type).lower()
+                # Check if the type string contains database-specific type indicators
+                if "db" in field_type_str and any(
+                    db_type in field_type_str
+                    for db_type in [
+                        "dbdate",
+                        "dbtime",
+                        "dbdecimal",
+                        "dbtimestamp",
+                    ]
+                ):
+                    db_type_columns.append(field.name)
+                    logger.warning(
+                        f"Column '{field.name}' has database-specific type '{field.type}'"
+                    )
 
-        return df
+            # Convert to pandas with type mapping for database-specific types
+            if db_type_columns:
+                logger.info(
+                    f"Converting database-specific types in columns: {db_type_columns}"
+                )
+
+                # Create a types_mapper that converts unknown types to string
+                def types_mapper(pa_type):
+                    type_str = str(pa_type).lower()
+                    if "db" in type_str:
+                        # Map database types to string for safe conversion
+                        return pd.StringDtype()
+                    return None  # Use default mapping for other types
+
+                df = table.to_pandas(types_mapper=types_mapper)
+            else:
+                # No database-specific types, use standard conversion
+                df = table.to_pandas()
+
+            logger.info(
+                f"Loaded Parquet file from GCS: {len(df):,} rows, "
+                f"{len(df.columns)} columns"
+            )
+
+            return df
+        except Exception as e:
+            logger.error(
+                f"Error reading parquet file from gs://{self.gcs_bucket}/{gcs_path}: {e}"
+            )
+            raise
