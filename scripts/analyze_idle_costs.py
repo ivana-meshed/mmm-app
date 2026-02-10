@@ -26,8 +26,11 @@ from google.cloud import bigquery
 
 # Configuration
 PROJECT_ID = os.getenv("PROJECT_ID", "datawarehouse-422511")
-BILLING_DATASET = "mmm_billing"
-TABLE_NAME = "gcp_billing_export_v1_01AEDD_B37C1F_E9677C"
+BILLING_DATASET = os.environ.get("BILLING_DATASET", "mmm_billing")
+BILLING_ACCOUNT_NUM = os.environ.get(
+    "BILLING_ACCOUNT_NUM", "01B2F0_BCBFB7_2051C5"
+)
+TABLE_NAME = f"gcp_billing_export_resource_v1_{BILLING_ACCOUNT_NUM}"
 
 # Cloud Run pricing (europe-west1, as of 2026)
 # Source: https://cloud.google.com/run/pricing
@@ -546,7 +549,7 @@ def main():
     args = parser.parse_args()
 
     # Calculate date range
-    end_date = datetime.utcnow().date()
+    end_date = datetime.now().date()
     start_date = end_date - timedelta(days=args.days - 1)
     args.start_date = start_date.strftime("%Y-%m-%d")
     args.end_date = end_date.strftime("%Y-%m-%d")
