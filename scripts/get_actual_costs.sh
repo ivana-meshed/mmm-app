@@ -198,8 +198,8 @@ if command -v bq >/dev/null 2>&1; then
                     TOTAL_COST=0
                     
                     while true; do
-                        # Get one record at a time
-                        RECORD=$(echo "$BILLING_DATA" | jq -r ".[$RECORD_NUM] // empty" 2>/dev/null)
+                        # Get one record at a time (don't use -r here, we need JSON not string)
+                        RECORD=$(echo "$BILLING_DATA" | jq ".[$RECORD_NUM] // empty" 2>/dev/null)
                         
                         # Break if no more records
                         if [ -z "$RECORD" ] || [ "$RECORD" = "null" ]; then
@@ -234,40 +234,6 @@ if command -v bq >/dev/null 2>&1; then
                     echo "Total actual cost: \$$TOTAL_FORMATTED"
                     echo ""
                 else
-                    echo -e "${YELLOW}Warning: Billing data format unexpected (empty or invalid)${NC}"
-                    echo "The data was retrieved but the first record check failed."
-                    echo ""
-                    echo "BILLING_DATA content:"
-                    echo "$BILLING_DATA"
-                    echo ""
-                    echo "First 500 chars of raw data:"
-                    echo "$BILLING_DATA_RAW" | head -c 500
-                    echo "..."
-                    echo ""
-                    echo "Run with DEBUG=1 to see full output:"
-                    echo "  DEBUG=1 $0"
-                    echo ""
-                        USE_ALTERNATIVE=true
-                    fi
-                else
-                    echo -e "${YELLOW}Warning: Billing data format unexpected (empty or invalid)${NC}"
-                    echo "The data was retrieved but the first record check failed."
-                    echo ""
-                    echo "BILLING_DATA content:"
-                    echo "$BILLING_DATA"
-                    echo ""
-                    echo "First 500 chars of raw NDJSON data:"
-                    echo "$BILLING_DATA_RAW" | head -c 500
-                    echo "..."
-                    echo ""
-                    echo "This usually means:"
-                    echo "  1. BigQuery returned data in unexpected format"
-                    echo "  2. Field names don't match (check query aliases)"
-                    echo "  3. Data structure is nested differently"
-                    echo ""
-                    echo "Try running with DEBUG=1 to see full output:"
-                    echo "  DEBUG=1 $0"
-                    echo ""
                     USE_ALTERNATIVE=true
                 fi
             else
@@ -276,7 +242,8 @@ if command -v bq >/dev/null 2>&1; then
                 USE_ALTERNATIVE=true
             fi
         else
-            echo "$BILLING_DATA_RAW"
+            echo -e "${YELLOW}Warning: jq command not found${NC}"
+            USE_ALTERNATIVE=true
         fi
     else
         echo -e "${YELLOW}Warning: BigQuery billing export not configured or no data available${NC}"
