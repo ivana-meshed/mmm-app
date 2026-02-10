@@ -110,3 +110,9 @@ variable "allowed_domains" {
   default     = "mesheddata.com, buycycle.com"
   description = "Comma-separated list of allowed email domains for Google OAuth authentication"
 }
+
+variable "scheduler_enabled" {
+  description = "Enable Cloud Scheduler for queue ticks. Set to false to pause scheduler for cost monitoring or when not needed."
+  type        = bool
+  default     = true
+}
