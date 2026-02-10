@@ -43,7 +43,58 @@ The script requires BigQuery billing export to be enabled. To check or enable:
 You need the following IAM permissions:
 - `bigquery.jobs.create` (to run queries)
 - `bigquery.tables.getData` (to read billing data)
-- Role: **BigQuery Data Viewer** on the billing dataset
+
+#### Option A: BigQuery User Role (Recommended)
+
+Grant yourself the **BigQuery User** role on the project:
+
+```bash
+gcloud projects add-iam-policy-binding datawarehouse-422511 \
+  --member="user:your-email@example.com" \
+  --role="roles/bigquery.user"
+```
+
+#### Option B: Dataset-Level Access
+
+Grant access to the billing dataset specifically:
+
+1. Go to [BigQuery Console](https://console.cloud.google.com/bigquery?project=datawarehouse-422511)
+2. Navigate to dataset: `mmm_billing`
+3. Click **Share** → **Permissions**
+4. Add your user with **BigQuery Data Viewer** role
+
+#### Option C: Service Account
+
+Use a service account with appropriate permissions:
+
+```bash
+# Create service account (if needed)
+gcloud iam service-accounts create cost-tracker \
+  --display-name="Cost Tracking Script"
+
+# Grant permissions
+gcloud projects add-iam-policy-binding datawarehouse-422511 \
+  --member="serviceAccount:cost-tracker@datawarehouse-422511.iam.gserviceaccount.com" \
+  --role="roles/bigquery.user"
+
+# Download key and use it
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account-key.json"
+```
+
+#### Verify Permissions
+
+Check if you have the required permissions:
+
+```bash
+# Check project-level access
+gcloud projects describe datawarehouse-422511
+
+# Check BigQuery access
+bq show mmm_billing
+
+# List tables in billing dataset
+bq ls mmm_billing
+```
 
 ### 3. Authentication
 
@@ -318,6 +369,52 @@ Add to GitHub Actions for cost tracking on deployments:
 ```
 
 ## Troubleshooting
+
+### Error: "Permission denied" or "Access Denied"
+
+**Problem**: You don't have the required BigQuery permissions.
+
+**Full Error Message**:
+```
+Error: Permission denied when accessing BigQuery
+Access Denied: Project datawarehouse-422511: User does not have bigquery.jobs.create permission
+```
+
+**Solution**:
+
+1. **Check your current authentication**:
+   ```bash
+   gcloud auth list
+   gcloud config get-value project
+   ```
+
+2. **Grant yourself BigQuery User role**:
+   ```bash
+   gcloud projects add-iam-policy-binding datawarehouse-422511 \
+     --member="user:your-email@example.com" \
+     --role="roles/bigquery.user"
+   ```
+
+3. **OR request access from your administrator**:
+   - Share the error message with your GCP admin
+   - Request access to the `mmm_billing` dataset
+   - Ask for **BigQuery User** or **BigQuery Data Viewer** role
+
+4. **Verify permissions after granting**:
+   ```bash
+   # List datasets (should succeed if permissions are correct)
+   bq ls --project_id=datawarehouse-422511
+   
+   # Check specific dataset
+   bq show mmm_billing
+   ```
+
+5. **Re-authenticate if needed**:
+   ```bash
+   gcloud auth application-default login
+   gcloud auth application-default revoke
+   gcloud auth application-default login
+   ```
 
 ### Error: "Billing export table not found"
 

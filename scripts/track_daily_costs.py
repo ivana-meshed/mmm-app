@@ -448,8 +448,61 @@ def main():
         print("4. Configure dataset and table")
         print("5. Wait 24 hours for data to populate")
         sys.exit(1)
+    except gcp_exceptions.Forbidden as e:
+        print(f"Error: Permission denied when accessing BigQuery")
+        print()
+        print("You need the following IAM permissions:")
+        print("  - bigquery.jobs.create (to run queries)")
+        print("  - bigquery.tables.getData (to read billing data)")
+        print()
+        print("To fix this issue:")
+        print()
+        print("Option 1: Grant yourself the BigQuery User role")
+        print("  gcloud projects add-iam-policy-binding " f"{args.project} \\")
+        print('    --member="user:YOUR_EMAIL@example.com" \\')
+        print('    --role="roles/bigquery.user"')
+        print()
+        print("Option 2: Grant access to the billing dataset")
+        print(
+            f"  1. Go to: https://console.cloud.google.com/bigquery?"
+            f"project={args.project}"
+        )
+        print(f"  2. Navigate to dataset: {BILLING_DATASET}")
+        print('  3. Click "Share" → "Permissions"')
+        print('  4. Add your user with "BigQuery Data Viewer" role')
+        print()
+        print("Option 3: Use a service account with appropriate permissions")
+        print(
+            "  export GOOGLE_APPLICATION_CREDENTIALS="
+            '"/path/to/service-account-key.json"'
+        )
+        print()
+        print(f"Original error: {e}")
+        sys.exit(1)
+    except gcp_exceptions.PermissionDenied as e:
+        print(f"Error: Permission denied when accessing BigQuery")
+        print()
+        print("You need the following IAM permissions:")
+        print("  - bigquery.jobs.create (to run queries)")
+        print("  - bigquery.tables.getData (to read billing data)")
+        print()
+        print("Please ask your GCP administrator to grant you access")
+        print(f"to the billing dataset: {BILLING_DATASET}")
+        print()
+        print(f"Original error: {e}")
+        sys.exit(1)
     except Exception as e:
         print(f"Error querying BigQuery: {e}")
+        print()
+        print("Troubleshooting steps:")
+        print("1. Verify authentication:")
+        print("   gcloud auth application-default login")
+        print()
+        print("2. Check project access:")
+        print(f"   gcloud projects describe {args.project}")
+        print()
+        print("3. Verify billing export table exists:")
+        print(f"   bq show {args.project}:{BILLING_DATASET}.{TABLE_NAME}")
         sys.exit(1)
 
     if not results:
