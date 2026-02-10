@@ -321,7 +321,7 @@ resource "google_cloud_run_service" "web_service" {
   template {
     metadata {
       annotations = {
-        "run.googleapis.com/cpu-throttling" = "false"
+        "run.googleapis.com/cpu-throttling" = "true"
         "run.googleapis.com/min-instances"  = "0"
         "run.googleapis.com/max-instances"  = var.max_instances
         "run.googleapis.com/timeout"        = "300s"
