@@ -21,7 +21,21 @@ If this returns a path (e.g., `/Users/you/project/service-account.json`):
 
 The script is using the **service account** in that file, NOT your user credentials.
 
-**SOLUTION:**
+**SOLUTION (choose one):**
+
+### Option 1: Use --use-user-credentials flag (RECOMMENDED)
+
+This lets you keep `GOOGLE_APPLICATION_CREDENTIALS` set for other tools:
+
+```bash
+python scripts/track_daily_costs.py --days 7 --use-user-credentials
+```
+
+The script will temporarily ignore the service account and use your user credentials instead.
+
+### Option 2: Temporarily unset the variable
+
+Only do this if you don't need `GOOGLE_APPLICATION_CREDENTIALS` for other tools:
 
 ```bash
 # Unset the environment variable
@@ -30,8 +44,6 @@ unset GOOGLE_APPLICATION_CREDENTIALS
 # Now run the script again
 python scripts/track_daily_costs.py --days 7
 ```
-
-That's it! The script will now use your user credentials which have the correct permissions.
 
 **Why this happens:**
 - `GOOGLE_APPLICATION_CREDENTIALS` takes priority over user credentials

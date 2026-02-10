@@ -128,6 +128,19 @@ Track costs for the last 30 days (default):
 python scripts/track_daily_costs.py
 ```
 
+### Using User Credentials (when GOOGLE_APPLICATION_CREDENTIALS is set)
+
+If you have `GOOGLE_APPLICATION_CREDENTIALS` set but want to use your user credentials:
+
+```bash
+python scripts/track_daily_costs.py --use-user-credentials
+```
+
+This is useful when:
+- You need to keep `GOOGLE_APPLICATION_CREDENTIALS` set for other tools
+- The service account doesn't have the required permissions
+- You want to use your own user credentials instead
+
 ### Custom Time Range
 
 Track costs for a specific number of days:
@@ -138,6 +151,9 @@ python scripts/track_daily_costs.py --days 7
 
 # Last 90 days
 python scripts/track_daily_costs.py --days 90
+
+# With user credentials
+python scripts/track_daily_costs.py --days 7 --use-user-credentials
 ```
 
 ### Export to CSV
@@ -387,13 +403,32 @@ echo $GOOGLE_APPLICATION_CREDENTIALS
 
 If this shows a path to a JSON file, **this is your issue!**
 
-**Solution**:
+**Solution (choose one)**:
+
+#### Option 1: Use --use-user-credentials flag (RECOMMENDED)
+
+This is the best option if you need to keep `GOOGLE_APPLICATION_CREDENTIALS` set for other tools:
+
 ```bash
-# Option 1: Unset the variable (recommended for user credentials)
+python scripts/track_daily_costs.py --days 7 --use-user-credentials
+```
+
+The script will temporarily ignore the service account file and use your user credentials instead. Your environment remains unchanged for other tools.
+
+#### Option 2: Temporarily unset the variable
+
+Only use this if you don't need `GOOGLE_APPLICATION_CREDENTIALS` for other tools:
+
+```bash
 unset GOOGLE_APPLICATION_CREDENTIALS
 python scripts/track_daily_costs.py --days 7
+```
 
-# Option 2: Grant the service account permissions (if you want to use it)
+#### Option 3: Grant the service account permissions
+
+If you want to use the service account, grant it permissions:
+
+```bash
 # Get the service account email from the JSON file, then:
 gcloud projects add-iam-policy-binding datawarehouse-422511 \
   --member="serviceAccount:SA_EMAIL@PROJECT.iam.gserviceaccount.com" \

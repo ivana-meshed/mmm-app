@@ -407,6 +407,11 @@ def main():
         default=PROJECT_ID,
         help=f"GCP Project ID (default: {PROJECT_ID})",
     )
+    parser.add_argument(
+        "--use-user-credentials",
+        action="store_true",
+        help="Use user credentials from 'gcloud auth' instead of GOOGLE_APPLICATION_CREDENTIALS",
+    )
     args = parser.parse_args()
 
     print(f"Fetching cost data for project: {args.project}")
@@ -415,7 +420,7 @@ def main():
 
     # Check for GOOGLE_APPLICATION_CREDENTIALS environment variable
     gac_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if gac_path:
+    if gac_path and not args.use_user_credentials:
         print("=" * 70)
         print("⚠️  WARNING: GOOGLE_APPLICATION_CREDENTIALS is set")
         print("=" * 70)
@@ -426,12 +431,15 @@ def main():
         print("NOT your user credentials from 'gcloud auth'.")
         print()
         print("If you're getting permission errors:")
-        print("1. Unset this variable:")
+        print("1. Use the --use-user-credentials flag:")
+        print(
+            f"   python scripts/track_daily_costs.py --days {args.days} --use-user-credentials"
+        )
+        print()
+        print("2. Or unset this variable:")
         print("   unset GOOGLE_APPLICATION_CREDENTIALS")
         print()
-        print("2. Then run the script again")
-        print()
-        print("Or verify the service account has these permissions:")
+        print("3. Or verify the service account has these permissions:")
         print("  - roles/bigquery.user (project level)")
         print("  - roles/bigquery.dataViewer (dataset level)")
         print("=" * 70)
@@ -442,7 +450,22 @@ def main():
 
     # Initialize BigQuery client
     try:
-        client = bigquery.Client(project=args.project)
+        # If user wants to use their credentials, temporarily unset GAC
+        if args.use_user_credentials and gac_path:
+            print(
+                "Using user credentials (ignoring GOOGLE_APPLICATION_CREDENTIALS)"
+            )
+            print()
+            # Temporarily remove the environment variable for this process
+            saved_gac = os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+            try:
+                client = bigquery.Client(project=args.project)
+            finally:
+                # Restore it so other code in the process isn't affected
+                if saved_gac:
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = saved_gac
+        else:
+            client = bigquery.Client(project=args.project)
     except Exception as e:
         print(f"Error: Failed to initialize BigQuery client: {e}")
         print(
@@ -493,18 +516,21 @@ def main():
             print("The script is using the SERVICE ACCOUNT in this file,")
             print("NOT your user credentials from 'gcloud auth'.")
             print()
-            print("SOLUTION:")
-            print("1. Unset the environment variable:")
-            print("   unset GOOGLE_APPLICATION_CREDENTIALS")
+            print("SOLUTION - Choose one:")
             print()
-            print("2. Run the script again:")
+            print("Option 1: Use the --use-user-credentials flag (recommended)")
+            print(
+                f"   python scripts/track_daily_costs.py --days {args.days} --use-user-credentials"
+            )
+            print(
+                "   (This keeps GOOGLE_APPLICATION_CREDENTIALS set for other tools)"
+            )
+            print()
+            print("Option 2: Temporarily unset the environment variable")
+            print("   unset GOOGLE_APPLICATION_CREDENTIALS")
             print(f"   python scripts/track_daily_costs.py --days {args.days}")
             print()
-            print("The script will then use your user credentials which have")
-            print("the correct permissions.")
-            print()
-            print("Alternative: If you want to use the service account,")
-            print("grant it these roles:")
+            print("Option 3: Grant the service account permissions")
             print(
                 "  gcloud projects add-iam-policy-binding " f"{args.project} \\"
             )
