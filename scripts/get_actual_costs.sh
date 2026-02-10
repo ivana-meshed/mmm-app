@@ -184,40 +184,69 @@ if command -v bq >/dev/null 2>&1; then
                 
                 # Check if data is valid before processing
                 if echo "$BILLING_DATA" | jq -e '.[0]' >/dev/null 2>&1; then
-                    # Parse with safe field access and error capture
+                    # Parse with safe field access - process iteratively for reliability
                     # Note: BigQuery returns numbers as strings, need to convert
                     echo "Parsing billing data..."
-                    JQ_OUTPUT=$(echo "$BILLING_DATA" | jq -r '
-                        .[] | 
-                        . as $item |
-                        ($item.total_cost | tonumber // 0) as $cost |
-                        ($item.usage_amount | tonumber // 0) as $usage |
-                        "\($item.service // "Unknown") - \($item.sku // "Unknown"): $\($cost | . * 100 | round / 100) (\($usage) \($item.usage_unit // "units"))"
-                    ' 2>&1)
                     
-                    # Check if jq succeeded
-                    if [ $? -eq 0 ] && [ -n "$JQ_OUTPUT" ]; then
-                        echo "$JQ_OUTPUT"
-                        echo ""
+                    # Get record count for progress
+                    RECORD_COUNT=$(echo "$BILLING_DATA" | jq 'length' 2>/dev/null || echo "0")
+                    echo "Processing $RECORD_COUNT records..."
+                    echo ""
+                    
+                    # Process each record individually to avoid hanging on large datasets
+                    RECORD_NUM=0
+                    TOTAL_COST=0
+                    
+                    while true; do
+                        # Get one record at a time
+                        RECORD=$(echo "$BILLING_DATA" | jq -r ".[$RECORD_NUM] // empty" 2>/dev/null)
                         
-                        echo "==================================="
-                        echo "TOTAL COST"
-                        echo "==================================="
-                        # Sum up all costs, converting strings to numbers
-                        TOTAL=$(echo "$BILLING_DATA" | jq '[.[] | .total_cost | tonumber // 0] | add // 0' 2>/dev/null || echo "0")
-                        printf "Total actual cost: $%.2f\n" "$TOTAL"
-                        echo ""
-                    else
-                        echo -e "${YELLOW}Warning: Failed to parse billing data${NC}"
-                        echo "Error output: $JQ_OUTPUT"
-                        echo ""
-                        echo "First 500 chars of raw data:"
-                        echo "$BILLING_DATA_RAW" | head -c 500
-                        echo "..."
-                        echo ""
-                        echo "Run with DEBUG=1 to see full output:"
-                        echo "  DEBUG=1 $0"
-                        echo ""
+                        # Break if no more records
+                        if [ -z "$RECORD" ] || [ "$RECORD" = "null" ]; then
+                            break
+                        fi
+                        
+                        # Extract fields safely
+                        SERVICE=$(echo "$RECORD" | jq -r '.service // "Unknown"' 2>/dev/null || echo "Unknown")
+                        SKU=$(echo "$RECORD" | jq -r '.sku // "Unknown"' 2>/dev/null || echo "Unknown")
+                        COST=$(echo "$RECORD" | jq -r '.total_cost // "0"' 2>/dev/null || echo "0")
+                        USAGE=$(echo "$RECORD" | jq -r '.usage_amount // "0"' 2>/dev/null || echo "0")
+                        UNIT=$(echo "$RECORD" | jq -r '.usage_unit // "units"' 2>/dev/null || echo "units")
+                        
+                        # Convert cost to number and format
+                        COST_NUM=$(echo "$COST" | awk '{printf "%.2f", $1}' 2>/dev/null || echo "0.00")
+                        
+                        # Display the record
+                        echo "$SERVICE - $SKU: \$$COST_NUM ($USAGE $UNIT)"
+                        
+                        # Add to total (use bc for floating point)
+                        TOTAL_COST=$(echo "$TOTAL_COST + $COST" | bc -l 2>/dev/null || echo "$TOTAL_COST")
+                        
+                        RECORD_NUM=$((RECORD_NUM + 1))
+                    done
+                    
+                    echo ""
+                    echo "==================================="
+                    echo "TOTAL COST"
+                    echo "==================================="
+                    # Format total
+                    TOTAL_FORMATTED=$(echo "$TOTAL_COST" | awk '{printf "%.2f", $1}' 2>/dev/null || echo "0.00")
+                    echo "Total actual cost: \$$TOTAL_FORMATTED"
+                    echo ""
+                else
+                    echo -e "${YELLOW}Warning: Billing data format unexpected (empty or invalid)${NC}"
+                    echo "The data was retrieved but the first record check failed."
+                    echo ""
+                    echo "BILLING_DATA content:"
+                    echo "$BILLING_DATA"
+                    echo ""
+                    echo "First 500 chars of raw data:"
+                    echo "$BILLING_DATA_RAW" | head -c 500
+                    echo "..."
+                    echo ""
+                    echo "Run with DEBUG=1 to see full output:"
+                    echo "  DEBUG=1 $0"
+                    echo ""
                         USE_ALTERNATIVE=true
                     fi
                 else
