@@ -240,6 +240,73 @@ if command -v bq >/dev/null 2>&1; then
                     TOTAL_FORMATTED=$(echo "$TOTAL_COST" | awk '{printf "%.2f", $1}' 2>/dev/null || echo "0.00")
                     echo "Total actual cost: \$$TOTAL_FORMATTED"
                     echo ""
+                    
+                    # Add cost breakdown summary
+                    echo "==================================="
+                    echo "COST BREAKDOWN BY SERVICE"
+                    echo "==================================="
+                    echo ""
+                    
+                    # Calculate breakdown from BILLING_DATA
+                    if command -v jq >/dev/null 2>&1; then
+                        # Cloud Run costs
+                        CLOUD_RUN_COST=$(echo "$BILLING_DATA" | jq -r '[.[] | select(.service == "Cloud Run") | .total_cost | tonumber] | add // 0' 2>/dev/null || echo "0")
+                        CLOUD_RUN_FORMATTED=$(echo "$CLOUD_RUN_COST" | awk '{printf "%.2f", $1}')
+                        CLOUD_RUN_PCT=$(echo "scale=1; ($CLOUD_RUN_COST / $TOTAL_COST) * 100" | bc -l 2>/dev/null || echo "0")
+                        
+                        # Cloud Storage costs
+                        STORAGE_COST=$(echo "$BILLING_DATA" | jq -r '[.[] | select(.service == "Cloud Storage") | .total_cost | tonumber] | add // 0' 2>/dev/null || echo "0")
+                        STORAGE_FORMATTED=$(echo "$STORAGE_COST" | awk '{printf "%.2f", $1}')
+                        STORAGE_PCT=$(echo "scale=1; ($STORAGE_COST / $TOTAL_COST) * 100" | bc -l 2>/dev/null || echo "0")
+                        
+                        # Artifact Registry costs
+                        REGISTRY_COST=$(echo "$BILLING_DATA" | jq -r '[.[] | select(.service == "Artifact Registry") | .total_cost | tonumber] | add // 0' 2>/dev/null || echo "0")
+                        REGISTRY_FORMATTED=$(echo "$REGISTRY_COST" | awk '{printf "%.2f", $1}')
+                        REGISTRY_PCT=$(echo "scale=1; ($REGISTRY_COST / $TOTAL_COST) * 100" | bc -l 2>/dev/null || echo "0")
+                        
+                        # Cloud Scheduler costs
+                        SCHEDULER_COST=$(echo "$BILLING_DATA" | jq -r '[.[] | select(.service == "Cloud Scheduler") | .total_cost | tonumber] | add // 0' 2>/dev/null || echo "0")
+                        SCHEDULER_FORMATTED=$(echo "$SCHEDULER_COST" | awk '{printf "%.2f", $1}')
+                        
+                        echo "Cloud Run:          \$$CLOUD_RUN_FORMATTED ($CLOUD_RUN_PCT%)"
+                        echo "Cloud Storage:      \$$STORAGE_FORMATTED ($STORAGE_PCT%)"
+                        echo "Artifact Registry:  \$$REGISTRY_FORMATTED ($REGISTRY_PCT%)"
+                        echo "Cloud Scheduler:    \$$SCHEDULER_FORMATTED"
+                        echo ""
+                        
+                        # Add optimization insights
+                        echo "==================================="
+                        echo "OPTIMIZATION INSIGHTS"
+                        echo "==================================="
+                        echo ""
+                        
+                        # Check if Cloud Run is the main cost driver
+                        if [ "$(echo "$CLOUD_RUN_COST > ($TOTAL_COST * 0.5)" | bc -l 2>/dev/null)" = "1" ]; then
+                            echo "💡 Cloud Run accounts for ${CLOUD_RUN_PCT}% of costs"
+                            echo "   Consider: Scale-to-zero, reduce min instances, optimize job duration"
+                            echo ""
+                        fi
+                        
+                        # Check storage costs
+                        if [ "$(echo "$STORAGE_COST > 2" | bc -l 2>/dev/null)" = "1" ]; then
+                            echo "💡 Storage costs: \$$STORAGE_FORMATTED"
+                            echo "   Consider: Lifecycle policies, delete unused data, use cheaper storage classes"
+                            echo ""
+                        fi
+                        
+                        # Check registry costs
+                        if [ "$(echo "$REGISTRY_COST > 5" | bc -l 2>/dev/null)" = "1" ]; then
+                            echo "💡 Artifact Registry costs: \$$REGISTRY_FORMATTED"
+                            echo "   Consider: Clean up old images, keep only recent versions"
+                            echo ""
+                        fi
+                        
+                        # Monthly projection
+                        MONTHLY_PROJECTION=$(echo "$TOTAL_COST * 30 / $DAYS_BACK" | bc -l 2>/dev/null || echo "0")
+                        MONTHLY_FORMATTED=$(echo "$MONTHLY_PROJECTION" | awk '{printf "%.2f", $1}')
+                        echo "📊 Monthly projection (based on last $DAYS_BACK days): \$$MONTHLY_FORMATTED"
+                        echo ""
+                    fi
                 else
                     USE_ALTERNATIVE=true
                 fi
@@ -285,12 +352,12 @@ fi
 #############################################
 # Fallback: Show actual usage with pricing
 #############################################
-echo -e "${BOLD}Step 4: Actual Usage Statistics${NC}"
+echo -e "${BOLD}Step 4: Training Job Activity${NC}"
 echo ""
 
 # Get actual Cloud Run execution statistics
-echo "Cloud Run Jobs (Actual Executions):"
-echo "-----------------------------------"
+echo "Cloud Run Training Jobs (Period: $START_DATE to $END_DATE):"
+echo "-----------------------------------------------------------"
 
 for job_name in "mmm-app-training" "mmm-app-dev-training"; do
     echo ""
@@ -351,33 +418,60 @@ for job_name in "mmm-app-training" "mmm-app-dev-training"; do
             fi
         fi
     else
-        echo "  No executions found"
+        echo "  No training runs in the last $DAYS_BACK days"
+        echo "  (This is normal if no MMM experiments were conducted)"
     fi
 done
 
 echo ""
+echo "Note: Training costs are included in the Cloud Run costs above."
+echo ""
 echo "==========================================="
-echo "RECOMMENDATION"
+echo "SUMMARY & NEXT STEPS"
 echo "==========================================="
 echo ""
-echo "For ACTUAL billing costs, ensure BigQuery billing export is enabled:"
-echo ""
-echo "Current configuration:"
-echo "  Dataset: $DATASET_ID"
-echo "  Table: $TABLE_NAME"
-echo "  Project: $PROJECT_ID"
-echo ""
-echo "If you need to change the billing export configuration:"
-echo ""
-echo "1. Go to: https://console.cloud.google.com/billing"
-echo "2. Select your billing account"
-echo "3. Go to 'Billing export' → 'BigQuery export'"
-echo "4. Verify dataset and table are configured correctly"
-echo ""
-echo "You can override defaults with environment variables:"
-echo "  BILLING_DATASET=your_dataset ./scripts/get_actual_costs.sh"
-echo "  BILLING_ACCOUNT_NUM=your_account_id ./scripts/get_actual_costs.sh"
-echo ""
-echo "Alternatively, view actual costs in:"
-echo "GCP Console → Billing → Reports → Filter by project: $PROJECT_ID"
+
+# Check if BigQuery data was successfully retrieved
+if [ "${USE_ALTERNATIVE:-false}" != "true" ] && [ -n "$BILLING_DATA" ] && [ "$BILLING_DATA" != "[]" ]; then
+    echo "✅ Successfully retrieved actual billing data from BigQuery"
+    echo ""
+    echo "Period analyzed: $START_DATE to $END_DATE ($DAYS_BACK days)"
+    echo "Total cost: \$$TOTAL_FORMATTED"
+    echo ""
+    echo "💰 Cost Optimization Opportunities:"
+    echo ""
+    echo "1. Review the cost breakdown above to identify top drivers"
+    echo "2. Check COST_OPTIMIZATION.md for detailed optimization strategies"
+    echo "3. Compare actual costs with projected costs from infrastructure changes"
+    echo "4. Run this script monthly to track cost trends"
+    echo ""
+    echo "📊 To analyze different time periods:"
+    echo "  DAYS_BACK=7 ./scripts/get_actual_costs.sh   # Last 7 days"
+    echo "  DAYS_BACK=90 ./scripts/get_actual_costs.sh  # Last 90 days"
+    echo ""
+    echo "📈 View detailed billing reports in GCP Console:"
+    echo "  https://console.cloud.google.com/billing/reports"
+    echo "  Filter by Project: $PROJECT_ID"
+else
+    echo "⚠️  BigQuery billing export needs to be configured"
+    echo ""
+    echo "Current configuration:"
+    echo "  Dataset: $DATASET_ID"
+    echo "  Table: $TABLE_NAME"
+    echo "  Project: $PROJECT_ID"
+    echo ""
+    echo "To enable BigQuery billing export:"
+    echo ""
+    echo "1. Go to: https://console.cloud.google.com/billing"
+    echo "2. Select your billing account"
+    echo "3. Go to 'Billing export' → 'BigQuery export'"
+    echo "4. Verify dataset and table are configured correctly"
+    echo "5. Wait 24 hours for data to populate"
+    echo ""
+    echo "You can override defaults with environment variables:"
+    echo "  BILLING_DATASET=your_dataset ./scripts/get_actual_costs.sh"
+    echo "  BILLING_ACCOUNT_NUM=your_account_id ./scripts/get_actual_costs.sh"
+    echo ""
+    echo "View costs in GCP Console → Billing → Reports"
+fi
 echo ""
