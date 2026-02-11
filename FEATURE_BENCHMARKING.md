@@ -8,6 +8,10 @@ The MMM benchmarking system enables systematic evaluation of different Robyn/MMM
 
 **Solution**: Automated benchmarking script that generates and queues MMM variants, then collects and compares results across key metrics.
 
+## Important Note
+
+⚠️ **Queue Processing Fix Applied**: If you submitted a benchmark before commit `f569e61` and jobs aren't processing, see [`FIXING_STUCK_BENCHMARK_QUEUE.md`](FIXING_STUCK_BENCHMARK_QUEUE.md) for how to fix it. The script now correctly includes the `data_gcs_path` field required for queue processing.
+
 ## Quick Start
 
 ```bash
