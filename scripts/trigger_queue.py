@@ -63,6 +63,18 @@ except ImportError:
     )
     sys.exit(1)
 
+try:
+    from google.auth import default
+    from google.auth.transport.requests import Request as AuthRequest
+    GOOGLE_AUTH_AVAILABLE = True
+except ImportError:
+    GOOGLE_AUTH_AVAILABLE = False
+    logger.error(
+        "google-auth library not installed. "
+        "Install with: pip install google-auth"
+    )
+    sys.exit(1)
+
 
 def check_queue_status(bucket_name: str, queue_name: str) -> dict:
     """
@@ -187,12 +199,9 @@ def trigger_queue_via_http(service_url: str, queue_name: str) -> dict:
     Returns:
         Response dict with ok, message, changed fields
     """
-    from google.auth import default
-    from google.auth.transport.requests import Request
-
-    # Get credentials for service account
+    # Get credentials for service account (imports are at module level)
     credentials, project = default()
-    credentials.refresh(Request())
+    credentials.refresh(AuthRequest())
 
     url = f"{service_url}?queue_tick=1&name={queue_name}"
 
@@ -431,4 +440,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"Fatal error: {e}", exc_info=True)
+        sys.exit(1)
