@@ -58,6 +58,12 @@ This document summarizes ALL the fixes applied to make the benchmark execution f
 **Fix**: Changed to use `id_token.fetch_id_token()` with service URL as audience
 **Status**: ✅ Fixed
 
+### Issue 10: Queue Name Mismatch (Commit 0df86e3)
+**Problem**: Jobs submitted successfully but never executed (stayed in PENDING)
+**Cause**: Jobs submitted to "default" queue, but dev environment monitors "default-dev" queue
+**Fix**: Changed script to auto-detect queue name from `DEFAULT_QUEUE_NAME` environment variable
+**Status**: ✅ Fixed
+
 ## Complete Solution
 
 ### Prerequisites
@@ -67,7 +73,9 @@ This document summarizes ALL the fixes applied to make the benchmark execution f
    pip install -r requirements.txt
    ```
 
-2. **Set environment variable** (one of these methods):
+2. **Set environment variables**:
+   
+   **WEB_SERVICE_URL** (one of these methods):
    
    **Option A**: Set for current session
    ```bash
@@ -86,6 +94,12 @@ This document summarizes ALL the fixes applied to make the benchmark execution f
    ```bash
    echo 'export WEB_SERVICE_URL=https://mmm-app-dev-web-xxx.run.app' >> ~/.zshrc
    source ~/.zshrc
+   ```
+
+   **DEFAULT_QUEUE_NAME** (for dev environment):
+   ```bash
+   export DEFAULT_QUEUE_NAME=default-dev
+   # Or add to ~/.zshrc for permanence
    ```
 
 3. **Configure authentication** (for ID token generation):
@@ -242,7 +256,8 @@ Detailed guides for each fix:
 - `QUEUE_PROCESSING_GUIDE.md` - Manual queue operations
 - `MISSING_REQUESTS_FIX.md` - requests dependency
 - `MISSING_GOOGLE_AUTH_FIX.md` - google-auth dependency
-- `OAUTH_SCOPE_FIX.md` - ID token authentication (NEW)
+- `OAUTH_SCOPE_FIX.md` - ID token authentication
+- `QUEUE_NAME_MISMATCH_FIX.md` - Queue name auto-detection (NEW)
 
 ## Success Criteria
 
