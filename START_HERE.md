@@ -4,6 +4,12 @@
 
 ### THE FIX (One Command)
 
+**Option 1 - Easiest:**
+```bash
+./RUN_ME.sh
+```
+
+**Option 2 - Direct:**
 ```bash
 python scripts/process_queue_simple.py --loop
 ```
@@ -19,12 +25,17 @@ git pull origin copilot/build-benchmarking-script
 # 2. Make sure you're authenticated
 gcloud auth application-default login
 
-# 3. Run the processor (USE THE SIMPLE ONE!)
+# 3a. EASIEST - Run the wrapper script
+./RUN_ME.sh
+
+# OR
+
+# 3b. Run the Python script directly
 python scripts/process_queue_simple.py --loop
 ```
 
 ⚠️  **DO NOT RUN `process_queue_standalone.py` - it has import errors!**
-✅  **USE `process_queue_simple.py` - it works!**
+✅  **USE `process_queue_simple.py` OR just `./RUN_ME.sh` - they work!**
 
 ### What Will Happen
 
