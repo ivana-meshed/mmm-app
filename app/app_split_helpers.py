@@ -193,26 +193,42 @@ def prepare_and_launch_job(params: dict) -> dict:
     NOTE: This function must work in headless mode (HTTP queue tick), so it cannot rely on st.session_state.
     All required data must be in the params dict.
     """
+    logger.info("=" * 80)
+    logger.info("[LAUNCHER_ENTRY] ========== prepare_and_launch_job() CALLED ==========")
+    logger.info(f"[LAUNCHER_ENTRY] Params keys: {list(params.keys())}")
+    logger.info(f"[LAUNCHER_ENTRY] Country: {params.get('country')}")
+    logger.info(f"[LAUNCHER_ENTRY] Revision: {params.get('revision')}")
+    logger.info(f"[LAUNCHER_ENTRY] Iterations: {params.get('iterations')}")
+    logger.info(f"[LAUNCHER_ENTRY] Has data_gcs_path: {bool(params.get('data_gcs_path'))}")
+    logger.info("=" * 80)
+    
     # Get GCS bucket from params first, then session state (if available), then env var
     gcs_bucket = params.get("gcs_bucket")
+    logger.info(f"[LAUNCHER_BUCKET] Step 1 - From params: {gcs_bucket}")
+    
     if not gcs_bucket:
         try:
             gcs_bucket = st.session_state.get("gcs_bucket")
-        except (AttributeError, RuntimeError):
+            logger.info(f"[LAUNCHER_BUCKET] Step 2 - From session state: {gcs_bucket}")
+        except (AttributeError, RuntimeError) as e:
             # No session state (headless mode)
+            logger.info(f"[LAUNCHER_BUCKET] Step 2 - Session state not available: {type(e).__name__}")
             pass
-    if not gcs_bucket:
-        gcs_bucket = GCS_BUCKET  # Use environment variable as fallback
     
     if not gcs_bucket:
+        gcs_bucket = GCS_BUCKET  # Use environment variable as fallback
+        logger.info(f"[LAUNCHER_BUCKET] Step 3 - From environment: {gcs_bucket}")
+    
+    if not gcs_bucket:
+        logger.error("[LAUNCHER_ERROR] GCS bucket not available from any source!")
         raise ValueError(
             "GCS bucket not specified in params, session state, or environment. "
             "Headless mode requires gcs_bucket in params dict."
         )
     
-    logger.info(f"[LAUNCHER] Using GCS bucket: {gcs_bucket}")
-    logger.info(f"[LAUNCHER] Job params: country={params.get('country')}, revision={params.get('revision')}")
-    logger.info(f"[LAUNCHER] Data GCS path: {params.get('data_gcs_path', 'Not set - will query Snowflake')}")
+    logger.info(f"[LAUNCHER_BUCKET] Final bucket: {gcs_bucket}")
+    logger.info(f"[LAUNCHER_DATA] data_gcs_path: {params.get('data_gcs_path', 'NOT SET - will query Snowflake')}")
+    logger.info(f"[LAUNCHER_DATA] annotations_gcs_path: {params.get('annotations_gcs_path', 'NOT SET')}")
     
     timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
     # Support both 'revision' and 'version' keys for backward compatibility

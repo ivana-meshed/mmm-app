@@ -141,6 +141,12 @@ def _safe_tick_once(
       then launch outside the critical section, and persist the RUNNING/ERROR result with another guarded write.
     Returns {ok, message, changed}.
     """
+    logger.info("=" * 80)
+    logger.info(f"[QUEUE_TICK_START] _safe_tick_once called for queue: {queue_name}")
+    logger.info(f"[QUEUE_TICK_START] Bucket: {bucket_name or GCS_BUCKET}")
+    logger.info(f"[QUEUE_TICK_START] Launcher provided: {launcher is not None}")
+    logger.info("=" * 80)
+    
     bucket_name = bucket_name or GCS_BUCKET
     client = storage.Client()
     bucket = client.bucket(bucket_name)
@@ -154,37 +160,57 @@ def _safe_tick_once(
             "queue_running": True,
         }
 
-    for _ in range(max_retries):
+    for attempt in range(max_retries):
+        logger.info(f"[QUEUE_TICK] Attempt {attempt + 1}/{max_retries}")
+        
         # Ensure the blob exists, then load doc + current generation
         if not blob.exists():
+            logger.info(f"[QUEUE_TICK] Queue blob does not exist, creating...")
             try:
                 blob.upload_from_string(
                     json.dumps(_init_doc(), indent=2),
                     content_type="application/json",
                     if_generation_match=0,  # create-if-not-exists
                 )
+                logger.info(f"[QUEUE_TICK] Queue blob created")
             except PreconditionFailed:
                 # Someone created it concurrently; continue to normal path
+                logger.info(f"[QUEUE_TICK] Queue blob created concurrently")
                 pass
 
         # After creation attempt, verify blob exists before reloading
         if not blob.exists():
             # Blob still doesn't exist, retry
+            logger.warning(f"[QUEUE_TICK] Blob still doesn't exist after create attempt, retrying...")
             continue
 
         blob.reload()  # get current generation
         gen = int(blob.generation)  # type: ignore
         try:
             doc = json.loads(blob.download_as_text())
-        except Exception:
+            logger.info(f"[QUEUE_TICK] Loaded queue document, generation: {gen}")
+        except Exception as e:
+            logger.warning(f"[QUEUE_TICK] Failed to parse queue document: {e}, using init doc")
             doc = _init_doc()
 
         q = doc.get("entries", [])
         running_flag = doc.get("queue_running", True)
+        
+        logger.info(f"[QUEUE_TICK] Queue has {len(q)} entries")
+        logger.info(f"[QUEUE_TICK] Queue running flag: {running_flag}")
+        
+        # Count by status
+        status_counts = {}
+        for e in q:
+            status = e.get("status", "UNKNOWN")
+            status_counts[status] = status_counts.get(status, 0) + 1
+        logger.info(f"[QUEUE_TICK] Status counts: {status_counts}")
 
         if not q:
+            logger.info(f"[QUEUE_TICK] Queue is empty, nothing to do")
             return {"ok": True, "message": "empty queue", "changed": False}
         if not running_flag:
+            logger.warning(f"[QUEUE_TICK] Queue is paused, skipping")
             return {"ok": True, "message": "queue is paused", "changed": False}
 
         jm = CloudRunJobManager(PROJECT_ID, REGION)  # type: ignore
@@ -346,9 +372,17 @@ def _safe_tick_once(
         pend_idx = next(
             (i for i, e in enumerate(q) if e.get("status") == "PENDING"), None
         )
+        logger.info(f"[QUEUE_TICK] Looking for PENDING jobs...")
         if pend_idx is None:
+            logger.info(f"[QUEUE_TICK] No PENDING jobs found")
             return {"ok": True, "message": "no pending", "changed": False}
+        
+        logger.info(f"[QUEUE_TICK_FOUND] Found PENDING job at index {pend_idx}")
+        logger.info(f"[QUEUE_TICK_FOUND] Job ID: {q[pend_idx].get('id')}")
+        logger.info(f"[QUEUE_TICK_FOUND] Country: {q[pend_idx].get('params', {}).get('country')}")
+        
         if not launcher:
+            logger.error(f"[QUEUE_TICK_ERROR] No launcher function provided!")
             return {
                 "ok": False,
                 "message": "launcher not provided",
@@ -358,6 +392,7 @@ def _safe_tick_once(
         entry = q[pend_idx]
 
         # --- Critical section: lease it (LAUNCHING) guarded by generation match ---
+        logger.info(f"[QUEUE_TICK] Leasing job {entry.get('id')} (setting status to LAUNCHING)")
         entry["status"] = "LAUNCHING"
         entry["message"] = "Launching..."
         doc["saved_at"] = get_cet_now().isoformat()
@@ -367,8 +402,10 @@ def _safe_tick_once(
                 content_type="application/json",
                 if_generation_match=gen,  # only one process can acquire the lease
             )
+            logger.info(f"[QUEUE_TICK] Successfully leased job {entry.get('id')}")
         except PreconditionFailed:
             # Another process leased it; retry from the top
+            logger.info(f"[QUEUE_TICK] Lost lease race for job {entry.get('id')}, retrying...")
             continue
 
         # --- Outside critical section: perform the actual launch ---
@@ -379,8 +416,14 @@ def _safe_tick_once(
             f"revision={entry.get('params', {}).get('revision')}, "
             f"iterations={entry.get('params', {}).get('iterations')}"
         )
+        logger.info(f"[QUEUE_BEFORE_LAUNCHER] About to call launcher function...")
+        logger.info(f"[QUEUE_BEFORE_LAUNCHER] Launcher type: {type(launcher)}")
+        logger.info(f"[QUEUE_BEFORE_LAUNCHER] Params keys: {list(entry.get('params', {}).keys())}")
         try:
+            logger.info(f"[QUEUE_LAUNCHER_CALL] Calling launcher NOW...")
             exec_info = launcher(entry["params"])
+            logger.info(f"[QUEUE_LAUNCHER_RETURNED] Launcher returned successfully!")
+            logger.info(f"[QUEUE_LAUNCHER_RETURNED] Exec info keys: {list(exec_info.keys() if exec_info else [])}")
             time.sleep(SAFE_LAG_SECONDS_AFTER_RUNNING)
             entry["execution_name"] = exec_info.get("execution_name")
             entry["timestamp"] = exec_info.get("timestamp")
@@ -1537,16 +1580,27 @@ def handle_queue_tick_from_query_params(
     # Log that queue tick endpoint was called (helpful for debugging Cloud Scheduler)
     qname = qp.get("name") or DEFAULT_QUEUE_NAME
     bkt = bucket_name or GCS_BUCKET
-    logger.info(
-        f"[QUEUE_TICK] Endpoint called for queue '{qname}' in bucket '{bkt}'"
-    )
+    logger.info("=" * 80)
+    logger.info(f"[QUEUE_TICK_ENTRY] ========== QUEUE TICK ENDPOINT CALLED ==========")
+    logger.info(f"[QUEUE_TICK_ENTRY] Queue name: {qname}")
+    logger.info(f"[QUEUE_TICK_ENTRY] Bucket: {bkt}")
+    logger.info(f"[QUEUE_TICK_ENTRY] Launcher provided: {launcher is not None}")
+    logger.info(f"[QUEUE_TICK_ENTRY] Launcher type: {type(launcher) if launcher else None}")
+    logger.info("=" * 80)
 
     try:
+        logger.info(f"[QUEUE_TICK_ENTRY] Calling queue_tick_once_headless...")
         result = queue_tick_once_headless(qname, bkt, launcher=launcher)
-        logger.info(f"[QUEUE_TICK] Completed successfully: {result}")
+        logger.info(f"[QUEUE_TICK_COMPLETE] Completed successfully")
+        logger.info(f"[QUEUE_TICK_COMPLETE] Result: {result}")
         return result
     except Exception as e:
-        logger.exception("[QUEUE_TICK] Handler failed: %s", e)
+        logger.error("=" * 80)
+        logger.error(f"[QUEUE_TICK_ERROR] ========== QUEUE TICK HANDLER FAILED ==========")
+        logger.error(f"[QUEUE_TICK_ERROR] Exception type: {type(e).__name__}")
+        logger.error(f"[QUEUE_TICK_ERROR] Exception message: {str(e)}")
+        logger.error("=" * 80)
+        logger.exception(f"[QUEUE_TICK_ERROR] Full traceback:")
         return {"ok": False, "error": str(e)}
 
 
