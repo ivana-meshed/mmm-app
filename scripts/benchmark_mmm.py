@@ -1020,13 +1020,37 @@ def main():
         return
 
     if args.list_results:
-        collector = ResultsCollector()
-        collector.list_results(args.list_results)
+        try:
+            collector = ResultsCollector()
+            collector.list_results(args.list_results)
+        except Exception as e:
+            print(f"\n❌ Error: Could not access Google Cloud Storage")
+            print(f"   {str(e)}")
+            print("\nThis command requires Google Cloud credentials.")
+            print("\nPlease set up credentials using ONE of these methods:")
+            print("\n1. Set environment variable:")
+            print("   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json")
+            print("\n2. Use gcloud auth:")
+            print("   gcloud auth application-default login")
+            print("\nThen retry the command.")
+            sys.exit(1)
         return
 
     if args.show_results_location:
-        collector = ResultsCollector()
-        collector.show_results_location(args.show_results_location)
+        try:
+            collector = ResultsCollector()
+            collector.show_results_location(args.show_results_location)
+        except Exception as e:
+            print(f"\n❌ Error: Could not access Google Cloud Storage")
+            print(f"   {str(e)}")
+            print("\nThis command requires Google Cloud credentials.")
+            print("\nPlease set up credentials using ONE of these methods:")
+            print("\n1. Set environment variable:")
+            print("   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json")
+            print("\n2. Use gcloud auth:")
+            print("   gcloud auth application-default login")
+            print("\nThen retry the command.")
+            sys.exit(1)
         return
 
     if args.collect_results:
