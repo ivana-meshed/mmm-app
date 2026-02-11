@@ -121,6 +121,48 @@ def check_queue_status(bucket_name: str, queue_name: str) -> dict:
         }
 
 
+def resume_queue(bucket_name: str, queue_name: str) -> bool:
+    """
+    Resume a paused queue by setting queue_running to true.
+
+    Args:
+        bucket_name: GCS bucket name
+        queue_name: Queue name
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob_path = f"{QUEUE_ROOT}/{queue_name}/queue.json"
+        blob = bucket.blob(blob_path)
+
+        if not blob.exists():
+            logger.error(f"Queue does not exist: {queue_name}")
+            return False
+
+        # Load current queue
+        doc = json.loads(blob.download_as_text())
+
+        # Set queue_running to true
+        doc["queue_running"] = True
+        doc["saved_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+        # Save back to GCS
+        blob.upload_from_string(
+            json.dumps(doc, indent=2),
+            content_type="application/json",
+        )
+
+        logger.info(f"✅ Resumed queue '{queue_name}'")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to resume queue: {e}")
+        return False
+
+
 def trigger_queue_via_http(service_url: str, queue_name: str) -> dict:
     """
     Trigger queue processing by calling the web service endpoint.
@@ -227,6 +269,11 @@ def main():
         action="store_true",
         help="Only check queue status, don't trigger processing",
     )
+    parser.add_argument(
+        "--resume-queue",
+        action="store_true",
+        help="Automatically resume queue if it is paused",
+    )
 
     args = parser.parse_args()
 
@@ -260,10 +307,29 @@ def main():
         logger.info("No pending jobs to process")
         return
 
+    # Handle paused queue
     if not status["queue_running"]:
-        logger.warning("Queue is paused (queue_running=false)")
-        logger.warning("Jobs will not be processed until queue is resumed")
-        return
+        logger.warning("⚠️  Queue is paused (queue_running=false)")
+
+        if args.resume_queue:
+            print("\n🔄 Resuming queue...")
+            if resume_queue(GCS_BUCKET, args.queue_name):
+                print("✅ Queue resumed successfully")
+                # Refresh status
+                time.sleep(1)
+                status = check_queue_status(GCS_BUCKET, args.queue_name)
+            else:
+                logger.error("Failed to resume queue")
+                sys.exit(1)
+        else:
+            logger.error("Jobs will not be processed until queue is resumed")
+            logger.error(
+                f"Run with --resume-queue flag to automatically resume, or:"
+            )
+            logger.error(
+                f"  python scripts/trigger_queue.py --queue-name {args.queue_name} --resume-queue --until-empty"
+            )
+            sys.exit(1)
 
     # Get service URL
     logger.info("Getting Cloud Run service URL...")

@@ -2,18 +2,38 @@
 
 ## Problem
 
-Benchmark jobs are submitted to the queue but never execute because the Cloud Scheduler is disabled in the development environment.
+Benchmark jobs are submitted to the queue but never execute because:
+1. The Cloud Scheduler is disabled in the development environment, OR
+2. The queue is paused (queue_running: false)
 
 ## How Queue Processing Works
 
 ```
 1. Submit Jobs → Queue (PENDING status)
-2. Cloud Scheduler triggers queue tick every 10 minutes
-3. Queue tick processes one job: PENDING → LAUNCHING → RUNNING → SUCCEEDED
-4. Repeat step 3 for remaining jobs
+2. Cloud Scheduler triggers queue tick every 10 minutes (or manual trigger)
+3. Queue tick checks: Is queue_running = true?
+4. If yes: Process one job: PENDING → LAUNCHING → RUNNING → SUCCEEDED
+5. If no: Exit without processing
+6. Repeat for remaining jobs
 ```
 
-**Issue**: Step 2 doesn't happen when scheduler is disabled!
+**Issues**: 
+- Step 2 doesn't happen when scheduler is disabled
+- Step 4 fails when queue is paused
+
+## Quick Fix for Both Issues
+
+```bash
+# This handles both scheduler disabled AND paused queue
+python scripts/benchmark_mmm.py \
+  --config benchmarks/your_config.json \
+  --trigger-queue
+```
+
+The `--trigger-queue` flag now:
+- ✅ Manually triggers queue processing (bypasses scheduler)
+- ✅ **Auto-resumes paused queue** (NEW!)
+- ✅ Processes all submitted jobs
 
 ## Solutions
 
@@ -248,11 +268,40 @@ gcloud logging read "resource.type=cloud_run_revision AND textPayload=~QUEUE" --
 python scripts/benchmark_mmm.py --config benchmarks/your_config.json
 ```
 
-### "Queue is paused (queue_running=false)"
+### "Queue is paused (queue_running=false)" ⚠️ COMMON ISSUE
 
-**Problem**: Queue has been manually paused.
+**Problem**: Queue has `queue_running: false` in queue.json, preventing all processing.
 
-**Solution**: Resume queue via Streamlit UI or manually edit queue JSON in GCS.
+**Symptoms**:
+```
+📊 Queue Status: default
+  Pending: 12
+  Queue running: False  ← This is the problem!
+```
+
+**Solutions**:
+
+1. **Auto-resume with trigger** (Easiest):
+   ```bash
+   python scripts/trigger_queue.py --resume-queue --until-empty
+   ```
+
+2. **Auto-resume with benchmark**:
+   ```bash
+   python scripts/benchmark_mmm.py --config your_config.json --trigger-queue
+   # The --trigger-queue flag now auto-resumes paused queues!
+   ```
+
+3. **Manual resume via Streamlit**: Navigate to Run Experiment → Queue Monitor
+
+**Why does queue get paused?**
+- Manual pause in Streamlit UI
+- Queue created with paused state
+- Error handling that pauses queue
+
+**Permanent fix**: Always use `--trigger-queue` flag which auto-resumes.
+
+See [QUEUE_PAUSED_FIX.md](QUEUE_PAUSED_FIX.md) for detailed explanation.
 
 ### "Failed to get service URL"
 

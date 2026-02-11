@@ -966,6 +966,7 @@ def main():
                     str(trigger_count),
                     "--delay",
                     "10",  # 10 second delay between ticks
+                    "--resume-queue",  # Auto-resume if paused
                 ]
 
                 result = subprocess.run(
@@ -983,7 +984,7 @@ def main():
                         "You can manually trigger queue processing with:"
                     )
                     print(
-                        f"  python scripts/trigger_queue.py --queue-name {args.queue_name}"
+                        f"  python scripts/trigger_queue.py --queue-name {args.queue_name} --resume-queue"
                     )
 
             except Exception as e:
@@ -993,7 +994,7 @@ def main():
                 )
                 print("You can manually trigger queue processing with:")
                 print(
-                    f"  python scripts/trigger_queue.py --queue-name {args.queue_name}"
+                    f"  python scripts/trigger_queue.py --queue-name {args.queue_name} --resume-queue"
                 )
         else:
             print(
@@ -1004,7 +1005,7 @@ def main():
                 f"\nOr manually trigger queue processing with:"
             )
             print(
-                f"  python scripts/trigger_queue.py --queue-name {args.queue_name} --until-empty"
+                f"  python scripts/trigger_queue.py --queue-name {args.queue_name} --resume-queue --until-empty"
             )
 
     except Exception as e:
