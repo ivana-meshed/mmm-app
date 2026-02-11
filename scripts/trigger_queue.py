@@ -223,7 +223,8 @@ def get_service_url() -> str:
     logger.info("WEB_SERVICE_URL not set, attempting to query Cloud Run API...")
     try:
         client = run_v2.ServicesClient()
-        service_name = f"projects/{PROJECT_ID}/locations/{REGION}/services/mmm-app-dev"
+        # Note: The actual service name has "-web" suffix (e.g., mmm-app-dev-web)
+        service_name = f"projects/{PROJECT_ID}/locations/{REGION}/services/mmm-app-dev-web"
 
         try:
             service = client.get_service(name=service_name)
@@ -231,7 +232,7 @@ def get_service_url() -> str:
         except Exception as e:
             # Try production name
             logger.debug(f"Dev service not found: {e}")
-            service_name = f"projects/{PROJECT_ID}/locations/{REGION}/services/mmm-app"
+            service_name = f"projects/{PROJECT_ID}/locations/{REGION}/services/mmm-app-web"
             service = client.get_service(name=service_name)
             return service.uri
 
@@ -248,13 +249,16 @@ def get_service_url() -> str:
             logger.error("To fix, run one of these commands:")
             logger.error("")
             logger.error("Option 1 - Get URL and set environment variable:")
-            logger.error(f"  gcloud run services describe mmm-app-dev --region={REGION} --format='value(status.url)'")
+            logger.error(f"  gcloud run services describe mmm-app-dev-web --region={REGION} --format='value(status.url)'")
             logger.error("  # or for production:")
-            logger.error(f"  gcloud run services describe mmm-app --region={REGION} --format='value(status.url)'")
+            logger.error(f"  gcloud run services describe mmm-app-web --region={REGION} --format='value(status.url)'")
             logger.error("  # Then set it:")
             logger.error("  export WEB_SERVICE_URL=<the-url-from-above>")
             logger.error("")
-            logger.error("Option 2 - Get URL from Cloud Console:")
+            logger.error("Option 2 - List all services to find the correct name:")
+            logger.error(f"  gcloud run services list --region={REGION}")
+            logger.error("")
+            logger.error("Option 3 - Get URL from Cloud Console:")
             logger.error(f"  https://console.cloud.google.com/run?project={PROJECT_ID}")
             logger.error("  Copy the URL and run: export WEB_SERVICE_URL=<url>")
             logger.error("")

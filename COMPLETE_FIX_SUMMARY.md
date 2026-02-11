@@ -230,11 +230,18 @@ If jobs still don't run:
 
 1. **Permission Error?** 
    If you see `403 Permission 'run.services.get' denied`:
+   
+   **Important**: The service name has a `-web` suffix!
    ```bash
-   # Get service URL
-   gcloud run services describe mmm-app-dev --region=europe-west1 --format='value(status.url)'
+   # Get service URL (note the -web suffix!)
+   gcloud run services describe mmm-app-dev-web --region=europe-west1 --format='value(status.url)'
+   
+   # Or list services if unsure
+   gcloud run services list --region=europe-west1
+   
    # Set it
    export WEB_SERVICE_URL=<url-from-above>
+   
    # Try again
    python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --trigger-queue
    ```

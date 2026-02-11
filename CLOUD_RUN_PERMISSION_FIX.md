@@ -15,28 +15,34 @@ The trigger script tries to automatically discover the Cloud Run service URL by 
 
 Set the `WEB_SERVICE_URL` environment variable to bypass the API query.
 
+### Important: Correct Service Names
+
+The Cloud Run service has a `-web` suffix:
+- **Dev service**: `mmm-app-dev-web` (NOT `mmm-app-dev`)
+- **Prod service**: `mmm-app-web` (NOT `mmm-app`)
+
 ### Option 1: Get URL via gcloud (Recommended)
 
 If you have gcloud access with proper permissions:
 
 ```bash
 # For development service
-gcloud run services describe mmm-app-dev \
+gcloud run services describe mmm-app-dev-web \
   --region=europe-west1 \
   --format='value(status.url)'
 
 # OR for production service
-gcloud run services describe mmm-app \
+gcloud run services describe mmm-app-web \
   --region=europe-west1 \
   --format='value(status.url)'
 
 # This will output something like:
-# https://mmm-app-dev-abc123-ew.a.run.app
+# https://mmm-app-dev-web-abc123-ew.a.run.app
 ```
 
 Then set it:
 ```bash
-export WEB_SERVICE_URL=https://mmm-app-dev-abc123-ew.a.run.app
+export WEB_SERVICE_URL=https://mmm-app-dev-web-abc123-ew.a.run.app
 
 # Now run your benchmark
 python scripts/benchmark_mmm.py \
@@ -44,10 +50,21 @@ python scripts/benchmark_mmm.py \
   --trigger-queue
 ```
 
+### Option 1b: List services if unsure
+
+If the above commands fail, list all Cloud Run services:
+
+```bash
+gcloud run services list --region=europe-west1
+
+# Look for services with "mmm" in the name
+# The web service will have "-web" in its name
+```
+
 ### Option 2: Get URL from Cloud Console
 
 1. Go to Cloud Console: https://console.cloud.google.com/run?project=datawarehouse-422511
-2. Find the service: `mmm-app-dev` or `mmm-app`
+2. Find the service with "-web" suffix: `mmm-app-dev-web` or `mmm-app-web`
 3. Click on it to see details
 4. Copy the URL from the top of the page
 5. Set the environment variable:
@@ -64,6 +81,8 @@ python scripts/benchmark_mmm.py \
 ### Option 3: Ask Someone with Access
 
 If you don't have access to gcloud or Cloud Console, ask a team member who has the `run.services.get` permission to get the URL for you.
+
+**Important**: Make sure they get the URL for the service with the `-web` suffix!
 
 ## Making it Permanent
 

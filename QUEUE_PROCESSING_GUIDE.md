@@ -314,18 +314,25 @@ See [QUEUE_PAUSED_FIX.md](QUEUE_PAUSED_FIX.md) for detailed explanation.
 
 **Solution**: Set `WEB_SERVICE_URL` environment variable.
 
+**IMPORTANT**: The service name has a `-web` suffix!
+- Dev: `mmm-app-dev-web` (NOT `mmm-app-dev`)
+- Prod: `mmm-app-web` (NOT `mmm-app`)
+
 1. **Get the service URL**:
    ```bash
-   # For dev:
-   gcloud run services describe mmm-app-dev --region=europe-west1 --format='value(status.url)'
+   # For dev (note the -web suffix):
+   gcloud run services describe mmm-app-dev-web --region=europe-west1 --format='value(status.url)'
    
    # For prod:
-   gcloud run services describe mmm-app --region=europe-west1 --format='value(status.url)'
+   gcloud run services describe mmm-app-web --region=europe-west1 --format='value(status.url)'
+   
+   # Or list all services if unsure:
+   gcloud run services list --region=europe-west1
    ```
 
 2. **Set environment variable**:
    ```bash
-   export WEB_SERVICE_URL=https://mmm-app-dev-abc123-ew.a.run.app
+   export WEB_SERVICE_URL=https://mmm-app-dev-web-abc123-ew.a.run.app
    ```
 
 3. **Run again**:
