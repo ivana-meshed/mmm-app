@@ -41,6 +41,24 @@ def get_impersonated_credentials():
     This allows the script to use the service account's permissions
     regardless of GOOGLE_APPLICATION_CREDENTIALS environment variable.
     """
+    # First, check if GOOGLE_APPLICATION_CREDENTIALS points to the right service account key
+    creds_file = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if creds_file and os.path.exists(creds_file):
+        try:
+            with open(creds_file, 'r') as f:
+                key_data = json.load(f)
+                if key_data.get("client_email") == SERVICE_ACCOUNT:
+                    logger.info(f"Using service account key file for: {SERVICE_ACCOUNT}")
+                    from google.oauth2 import service_account
+                    credentials = service_account.Credentials.from_service_account_file(
+                        creds_file,
+                        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                    )
+                    return credentials
+        except Exception as e:
+            logger.debug(f"Could not use key file: {e}")
+    
+    # Try to impersonate the service account
     try:
         # Get source credentials (user's credentials)
         source_credentials, project = google.auth.default()
@@ -56,12 +74,29 @@ def get_impersonated_credentials():
         logger.info(f"Using impersonated credentials for: {SERVICE_ACCOUNT}")
         return credentials
     except Exception as e:
-        logger.error(f"Failed to create impersonated credentials: {e}")
-        logger.error("")
-        logger.error("Make sure you have run:")
-        logger.error(f"  gcloud auth application-default login --impersonate-service-account={SERVICE_ACCOUNT}")
-        logger.error("")
-        logger.error("Or that your user has permission to impersonate the service account.")
+        error_msg = str(e)
+        logger.error("=" * 80)
+        logger.error("❌ Cannot authenticate as service account!")
+        logger.error("=" * 80)
+        
+        if "iam.serviceAccounts.getAccessToken" in error_msg or "PERMISSION_DENIED" in error_msg:
+            logger.error(f"You don't have permission to impersonate: {SERVICE_ACCOUNT}")
+            logger.error("")
+            logger.error("To fix this, run:")
+            logger.error("")
+            logger.error("  gcloud iam service-accounts add-iam-policy-binding \\")
+            logger.error(f"    {SERVICE_ACCOUNT} \\")
+            logger.error(f"    --member=\"user:$(gcloud config get-value account)\" \\")
+            logger.error("    --role=\"roles/iam.serviceAccountTokenCreator\"")
+            logger.error("")
+            logger.error("Or ask your admin to run this command for you.")
+        else:
+            logger.error(f"Failed to create impersonated credentials: {e}")
+            logger.error("")
+            logger.error("Make sure you have run:")
+            logger.error("  gcloud auth application-default login")
+        
+        logger.error("=" * 80)
         sys.exit(1)
 
 
