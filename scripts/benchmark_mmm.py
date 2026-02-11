@@ -24,7 +24,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -323,7 +323,7 @@ class BenchmarkRunner:
             "benchmark_id": benchmark_id,
             "name": benchmark_config.name,
             "description": benchmark_config.description,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "status": "planned",
             "variant_count": len(variants),
             "variants": variants,
@@ -476,7 +476,7 @@ class BenchmarkRunner:
         if not blob.exists():
             return {
                 "version": 1,
-                "saved_at": datetime.utcnow().isoformat(),
+                "saved_at": datetime.now(timezone.utc).isoformat(),
                 "entries": [],
                 "queue_running": True,
             }
@@ -487,7 +487,7 @@ class BenchmarkRunner:
                 # Back-compat: wrap list as document
                 doc = {
                     "version": 1,
-                    "saved_at": datetime.utcnow().isoformat(),
+                    "saved_at": datetime.now(timezone.utc).isoformat(),
                     "entries": doc,
                     "queue_running": True,
                 }
@@ -496,7 +496,7 @@ class BenchmarkRunner:
             logger.warning(f"Failed to load queue: {e}")
             return {
                 "version": 1,
-                "saved_at": datetime.utcnow().isoformat(),
+                "saved_at": datetime.now(timezone.utc).isoformat(),
                 "entries": [],
                 "queue_running": True,
             }
@@ -507,7 +507,7 @@ class BenchmarkRunner:
         blob_path = f"{queue_root}/{queue_name}/queue.json"
         blob = self.bucket.blob(blob_path)
 
-        queue_doc["saved_at"] = datetime.utcnow().isoformat()
+        queue_doc["saved_at"] = datetime.now(timezone.utc).isoformat()
 
         blob.upload_from_string(
             json.dumps(queue_doc, indent=2),
@@ -722,7 +722,7 @@ class ResultsCollector:
         self, benchmark_id: str, results, format: str = "csv"
     ):
         """Export results to GCS."""
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         if format == "csv":
             output_path = (
@@ -900,7 +900,7 @@ def main():
     # Generate benchmark ID
     benchmark_id = (
         f"{benchmark_config.name}_"
-        f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     )
 
     # Save benchmark plan
@@ -979,9 +979,15 @@ def main():
                         f"\n✅ Queue processing triggered for {trigger_count} job(s)"
                     )
                 else:
-                    print(f"\n⚠️  Queue trigger failed: {result.stderr}")
+                    # Show both stdout and stderr for better debugging
+                    if result.stdout:
+                        print(f"\n⚠️  Queue trigger output:")
+                        print(result.stdout)
+                    if result.stderr:
+                        print(f"\n⚠️  Queue trigger failed:")
+                        print(result.stderr)
                     print(
-                        "You can manually trigger queue processing with:"
+                        "\nYou can manually trigger queue processing with:"
                     )
                     print(
                         f"  python scripts/trigger_queue.py --queue-name {args.queue_name} --resume-queue"

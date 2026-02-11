@@ -8,3 +8,4 @@ google-cloud-run
 protobuf<5
 pytz
 db-dtypes
+requests

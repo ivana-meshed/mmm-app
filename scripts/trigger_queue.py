@@ -43,10 +43,23 @@ QUEUE_ROOT = os.getenv("QUEUE_ROOT", "robyn-queues")
 try:
     from google.cloud import storage
     from google.cloud import run_v2
+    GOOGLE_CLOUD_AVAILABLE = True
 except ImportError:
+    GOOGLE_CLOUD_AVAILABLE = False
     logger.error(
         "Google Cloud libraries not installed. "
         "Install with: pip install google-cloud-storage google-cloud-run"
+    )
+    sys.exit(1)
+
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+    logger.error(
+        "requests library not installed. "
+        "Install with: pip install requests"
     )
     sys.exit(1)
 
@@ -174,7 +187,6 @@ def trigger_queue_via_http(service_url: str, queue_name: str) -> dict:
     Returns:
         Response dict with ok, message, changed fields
     """
-    import requests
     from google.auth import default
     from google.auth.transport.requests import Request
 
