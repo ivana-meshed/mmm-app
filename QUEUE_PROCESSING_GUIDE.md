@@ -303,7 +303,39 @@ python scripts/benchmark_mmm.py --config benchmarks/your_config.json
 
 See [QUEUE_PAUSED_FIX.md](QUEUE_PAUSED_FIX.md) for detailed explanation.
 
-### "Failed to get service URL"
+### "Failed to get service URL" / Permission Denied ⚠️ COMMON ISSUE
+
+**Problem**: Permission error when querying Cloud Run API.
+
+**Symptoms**:
+```
+403 Permission 'run.services.get' denied on resource '.../services/mmm-app'
+```
+
+**Solution**: Set `WEB_SERVICE_URL` environment variable.
+
+1. **Get the service URL**:
+   ```bash
+   # For dev:
+   gcloud run services describe mmm-app-dev --region=europe-west1 --format='value(status.url)'
+   
+   # For prod:
+   gcloud run services describe mmm-app --region=europe-west1 --format='value(status.url)'
+   ```
+
+2. **Set environment variable**:
+   ```bash
+   export WEB_SERVICE_URL=https://mmm-app-dev-abc123-ew.a.run.app
+   ```
+
+3. **Run again**:
+   ```bash
+   python scripts/benchmark_mmm.py --config your_config.json --trigger-queue
+   ```
+
+**Alternative**: Ask your admin for the `roles/run.viewer` IAM role.
+
+See [CLOUD_RUN_PERMISSION_FIX.md](CLOUD_RUN_PERMISSION_FIX.md) for detailed instructions.
 
 **Problem**: Can't find Cloud Run service.
 

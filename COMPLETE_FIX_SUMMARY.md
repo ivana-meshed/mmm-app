@@ -227,9 +227,22 @@ You should see jobs running in the Google Cloud Console within 1-2 minutes!
 ## Need Help?
 
 If jobs still don't run:
-1. Check Cloud Run logs for errors
-2. Verify Cloud Run service is deployed
-3. Ensure service account has proper permissions
-4. Check that training data exists at the GCS path
 
-But with all three fixes applied, it should work! 🎉
+1. **Permission Error?** 
+   If you see `403 Permission 'run.services.get' denied`:
+   ```bash
+   # Get service URL
+   gcloud run services describe mmm-app-dev --region=europe-west1 --format='value(status.url)'
+   # Set it
+   export WEB_SERVICE_URL=<url-from-above>
+   # Try again
+   python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --trigger-queue
+   ```
+   See [CLOUD_RUN_PERMISSION_FIX.md](CLOUD_RUN_PERMISSION_FIX.md) for details.
+
+2. Check Cloud Run logs for errors
+3. Verify Cloud Run service is deployed
+4. Ensure service account has proper permissions
+5. Check that training data exists at the GCS path
+
+But with all fixes applied, it should work! 🎉

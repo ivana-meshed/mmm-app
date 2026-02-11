@@ -213,28 +213,56 @@ def trigger_queue_via_http(service_url: str, queue_name: str) -> dict:
 
 def get_service_url() -> str:
     """Get the Cloud Run service URL."""
-    try:
-        # Try to get from environment first
-        service_url = os.getenv("WEB_SERVICE_URL")
-        if service_url:
-            return service_url
+    # Try to get from environment first
+    service_url = os.getenv("WEB_SERVICE_URL")
+    if service_url:
+        logger.info("Using WEB_SERVICE_URL from environment")
+        return service_url
 
-        # Otherwise, query Cloud Run API
+    # Otherwise, try to query Cloud Run API
+    logger.info("WEB_SERVICE_URL not set, attempting to query Cloud Run API...")
+    try:
         client = run_v2.ServicesClient()
         service_name = f"projects/{PROJECT_ID}/locations/{REGION}/services/mmm-app-dev"
 
         try:
             service = client.get_service(name=service_name)
             return service.uri
-        except:
+        except Exception as e:
             # Try production name
+            logger.debug(f"Dev service not found: {e}")
             service_name = f"projects/{PROJECT_ID}/locations/{REGION}/services/mmm-app"
             service = client.get_service(name=service_name)
             return service.uri
 
     except Exception as e:
-        logger.error(f"Failed to get service URL: {e}")
-        raise
+        error_msg = str(e)
+        logger.error(f"Failed to get service URL: {error_msg}")
+        
+        # Check if it's a permission error
+        if "403" in error_msg or "Permission" in error_msg or "denied" in error_msg:
+            logger.error("")
+            logger.error("⚠️  Permission denied when querying Cloud Run API")
+            logger.error("You need 'run.services.get' permission OR set WEB_SERVICE_URL environment variable.")
+            logger.error("")
+            logger.error("To fix, run one of these commands:")
+            logger.error("")
+            logger.error("Option 1 - Get URL and set environment variable:")
+            logger.error(f"  gcloud run services describe mmm-app-dev --region={REGION} --format='value(status.url)'")
+            logger.error("  # or for production:")
+            logger.error(f"  gcloud run services describe mmm-app --region={REGION} --format='value(status.url)'")
+            logger.error("  # Then set it:")
+            logger.error("  export WEB_SERVICE_URL=<the-url-from-above>")
+            logger.error("")
+            logger.error("Option 2 - Get URL from Cloud Console:")
+            logger.error(f"  https://console.cloud.google.com/run?project={PROJECT_ID}")
+            logger.error("  Copy the URL and run: export WEB_SERVICE_URL=<url>")
+            logger.error("")
+        
+        raise RuntimeError(
+            "Cannot get Cloud Run service URL. "
+            "Set WEB_SERVICE_URL environment variable or ensure you have Cloud Run permissions."
+        ) from e
 
 
 def main():
@@ -335,13 +363,9 @@ def main():
     logger.info("Getting Cloud Run service URL...")
     try:
         service_url = get_service_url()
-        logger.info(f"Service URL: {service_url}")
+        logger.info(f"✅ Service URL: {service_url}")
     except Exception as e:
-        logger.error(f"Failed to get service URL: {e}")
-        logger.error(
-            "Set WEB_SERVICE_URL environment variable or ensure "
-            "Cloud Run service is accessible"
-        )
+        # Error already logged in get_service_url with helpful instructions
         sys.exit(1)
 
     # Determine how many ticks to trigger
