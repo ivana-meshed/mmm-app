@@ -21,6 +21,8 @@ from typing import Optional, Dict, List
 
 from google.cloud import storage
 from google.cloud import run_v2
+from google.auth import impersonated_credentials
+import google.auth
 
 # Configure logging
 logging.basicConfig(
@@ -29,29 +31,44 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Service account to impersonate for job execution
+SERVICE_ACCOUNT = "mmm-web-service-sa@datawarehouse-422511.iam.gserviceaccount.com"
 
-def check_credentials():
-    """Check for conflicting credential configurations."""
-    if "GOOGLE_APPLICATION_CREDENTIALS" in os.environ:
-        logger.error("=" * 80)
-        logger.error("❌ ERROR: GOOGLE_APPLICATION_CREDENTIALS is set!")
+
+def get_impersonated_credentials():
+    """Get credentials for the impersonated service account.
+    
+    This allows the script to use the service account's permissions
+    regardless of GOOGLE_APPLICATION_CREDENTIALS environment variable.
+    """
+    try:
+        # Get source credentials (user's credentials)
+        source_credentials, project = google.auth.default()
+        
+        # Create impersonated credentials
+        target_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+        credentials = impersonated_credentials.Credentials(
+            source_credentials=source_credentials,
+            target_principal=SERVICE_ACCOUNT,
+            target_scopes=target_scopes,
+        )
+        
+        logger.info(f"Using impersonated credentials for: {SERVICE_ACCOUNT}")
+        return credentials
+    except Exception as e:
+        logger.error(f"Failed to create impersonated credentials: {e}")
         logger.error("")
-        logger.error(f"Currently set to: {os.environ['GOOGLE_APPLICATION_CREDENTIALS']}")
+        logger.error("Make sure you have run:")
+        logger.error(f"  gcloud auth application-default login --impersonate-service-account={SERVICE_ACCOUNT}")
         logger.error("")
-        logger.error("This environment variable takes precedence over impersonation.")
-        logger.error("You need to unset it before running this script:")
-        logger.error("")
-        logger.error("  unset GOOGLE_APPLICATION_CREDENTIALS")
-        logger.error("")
-        logger.error("Then run the script again.")
-        logger.error("=" * 80)
+        logger.error("Or that your user has permission to impersonate the service account.")
         sys.exit(1)
 
 
-def load_queue_from_gcs(bucket_name: str, queue_name: str) -> Dict:
+def load_queue_from_gcs(bucket_name: str, queue_name: str, credentials=None) -> Dict:
     """Load queue document from GCS."""
     try:
-        client = storage.Client()
+        client = storage.Client(credentials=credentials)
         bucket = client.bucket(bucket_name)
         blob_path = f"robyn-queues/{queue_name}/queue.json"
         blob = bucket.blob(blob_path)
@@ -69,10 +86,10 @@ def load_queue_from_gcs(bucket_name: str, queue_name: str) -> Dict:
         return None
 
 
-def save_queue_to_gcs(bucket_name: str, queue_name: str, queue_doc: Dict) -> bool:
+def save_queue_to_gcs(bucket_name: str, queue_name: str, queue_doc: Dict, credentials=None) -> bool:
     """Save queue document to GCS."""
     try:
-        client = storage.Client()
+        client = storage.Client(credentials=credentials)
         bucket = client.bucket(bucket_name)
         blob_path = f"robyn-queues/{queue_name}/queue.json"
         blob = bucket.blob(blob_path)
@@ -94,10 +111,11 @@ def launch_cloud_run_job(
     job_name: str,
     config: Dict,
     params: Dict,
+    credentials=None,
 ) -> Optional[str]:
     """Launch a Cloud Run training job."""
     try:
-        client = run_v2.JobsClient()
+        client = run_v2.JobsClient(credentials=credentials)
         job_path = f"projects/{project_id}/locations/{region}/jobs/{job_name}"
         
         # Create environment variables from config
@@ -145,6 +163,7 @@ def process_one_job(
     project_id: str,
     region: str,
     training_job_name: str,
+    credentials=None,
 ) -> bool:
     """Process one PENDING job from the queue."""
     
@@ -176,7 +195,7 @@ def process_one_job(
     entries[pending_idx]["launched_at"] = datetime.now(timezone.utc).isoformat()
     
     # Save queue
-    if not save_queue_to_gcs(bucket_name, queue_name, queue_doc):
+    if not save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials):
         logger.error("Failed to save queue")
         return False
     
@@ -195,19 +214,20 @@ def process_one_job(
         job_name=training_job_name,
         config=config,
         params=params,
+        credentials=credentials,
     )
     
     if execution_name:
         entries[pending_idx]["status"] = "RUNNING"
         entries[pending_idx]["execution_name"] = execution_name
-        save_queue_to_gcs(bucket_name, queue_name, queue_doc)
+        save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials)
         logger.info("✅ Job launched successfully")
         return True
     else:
         # Mark as FAILED
         entries[pending_idx]["status"] = "FAILED"
         entries[pending_idx]["error"] = "Failed to launch Cloud Run job"
-        save_queue_to_gcs(bucket_name, queue_name, queue_doc)
+        save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials)
         logger.error("❌ Job launch failed")
         return False
 
@@ -220,6 +240,7 @@ def process_queue(
     project_id: Optional[str] = None,
     region: str = "europe-west1",
     training_job_name: str = "mmm-app-training",
+    credentials=None,
 ) -> int:
     """
     Process jobs from the queue.
@@ -234,7 +255,7 @@ def process_queue(
     
     while True:
         # Load queue
-        queue_doc = load_queue_from_gcs(bucket_name, queue_name)
+        queue_doc = load_queue_from_gcs(bucket_name, queue_name, credentials=credentials)
         if not queue_doc:
             logger.error("Failed to load queue")
             break
@@ -243,7 +264,7 @@ def process_queue(
         if not queue_doc.get("queue_running", True):
             logger.info("Queue is paused - resuming...")
             queue_doc["queue_running"] = True
-            if not save_queue_to_gcs(bucket_name, queue_name, queue_doc):
+            if not save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials):
                 logger.error("Failed to resume queue")
                 break
         
@@ -269,6 +290,7 @@ def process_queue(
             project_id=project_id,
             region=region,
             training_job_name=training_job_name,
+            credentials=credentials,
         )
         
         if success:
@@ -330,8 +352,8 @@ def main():
     
     args = parser.parse_args()
     
-    # Check for credential conflicts BEFORE doing anything
-    check_credentials()
+    # Get impersonated credentials
+    credentials = get_impersonated_credentials()
     
     logger.info("=" * 60)
     logger.info("MMM Queue Processor (Standalone)")
@@ -353,6 +375,7 @@ def main():
             project_id=args.project_id,
             region=args.region,
             training_job_name=args.training_job_name,
+            credentials=credentials,
         )
         
         logger.info("=" * 60)
