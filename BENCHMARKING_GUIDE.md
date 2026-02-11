@@ -519,6 +519,143 @@ gcloud run jobs executions describe EXECUTION_ID \
   --region=europe-west1
 ```
 
+### Results Not Found
+
+If `--collect-results` finds 0 results even though jobs completed successfully:
+
+**Check where results are saved:**
+
+```bash
+# Show expected locations
+python scripts/benchmark_mmm.py --show-results-location BENCHMARK_ID
+
+# List available results
+python scripts/benchmark_mmm.py --list-results BENCHMARK_ID
+```
+
+Results are saved at:
+```
+gs://mmm-app-output/robyn/{revision}/{country}/{timestamp}/
+```
+
+For example:
+```
+gs://mmm-app-output/robyn/default/de/20260211_182030/
+├── model_summary.json       # Metrics and metadata
+├── best_model_plots.png     # Visualizations
+├── model_params.json        # Configuration
+└── ...
+```
+
+**Manual access:**
+
+```bash
+# List all results for a country
+gsutil ls gs://mmm-app-output/robyn/default/de/
+
+# View a specific model summary
+gsutil cat gs://mmm-app-output/robyn/default/de/20260211_182030/model_summary.json | jq .
+
+# Download all results
+gsutil -m cp -r gs://mmm-app-output/robyn/default/de/20260211_*/ ./results/
+```
+
+**Why collection might not work:**
+
+The R training scripts don't currently save benchmark metadata (benchmark_id, benchmark_test, benchmark_variant) to model_summary.json. This makes automatic matching unreliable. Use the manual access methods above to retrieve your results.
+
+## Where Results Are Saved
+
+### Result Structure
+
+Each training job saves its results to GCS:
+
+```
+gs://mmm-app-output/robyn/{revision}/{country}/{timestamp}/
+```
+
+**Path components:**
+- `revision`: Model revision (usually "default")
+- `country`: Country code (e.g., "de", "uk", "us")
+- `timestamp`: Job execution timestamp (YYYYMMDD_HHMMSS)
+
+### Finding Your Results
+
+**Option 1: Use --list-results**
+
+```bash
+python scripts/benchmark_mmm.py --list-results adstock_comparison_20260211_181644
+```
+
+Shows all model results that might match your benchmark.
+
+**Option 2: Use --show-results-location**
+
+```bash
+python scripts/benchmark_mmm.py --show-results-location adstock_comparison_20260211_181644
+```
+
+Shows expected paths and provides gsutil commands.
+
+**Option 3: Manual search**
+
+```bash
+# List all results for a country
+gsutil ls gs://mmm-app-output/robyn/default/de/
+
+# Results are timestamped directories
+# Look for timestamps around when you submitted the benchmark
+gsutil ls gs://mmm-app-output/robyn/default/de/20260211_18*/
+```
+
+### What's in Each Result
+
+Each result directory contains:
+
+- `model_summary.json` - Model metrics (rsq_val, nrmse_val, ROAS, etc.)
+- `best_model_plots.png` - Visualizations of best model
+- `model_params.json` - Configuration used for training
+- `pareto_models.json` - All Pareto-optimal models
+- Other Robyn output files
+
+### Accessing Results
+
+**View model summary:**
+
+```bash
+gsutil cat gs://mmm-app-output/robyn/default/de/20260211_182030/model_summary.json
+```
+
+**Download everything:**
+
+```bash
+# Download a specific result
+gsutil -m cp -r gs://mmm-app-output/robyn/default/de/20260211_182030/ ./my_results/
+
+# Download all results from a time range
+gsutil -m cp -r gs://mmm-app-output/robyn/default/de/20260211_*/ ./all_results/
+```
+
+**Analyze in Python:**
+
+```python
+import json
+from google.cloud import storage
+
+client = storage.Client()
+bucket = client.bucket('mmm-app-output')
+
+# Load model summary
+blob = bucket.blob('robyn/default/de/20260211_182030/model_summary.json')
+summary = json.loads(blob.download_as_text())
+
+# Print key metrics
+best_model = summary['best_model']
+print(f"R² (val): {best_model['rsq_val']:.3f}")
+print(f"NRMSE (val): {best_model['nrmse_val']:.3f}")
+print(f"MAPE: {best_model['mape']:.3f}")
+```
+
 ## Next Steps
 
 - Review example benchmarks in `benchmarks/` directory

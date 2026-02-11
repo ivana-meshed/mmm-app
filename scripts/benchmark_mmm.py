@@ -803,6 +803,132 @@ class ResultsCollector:
             logger.warning("Parquet export requires pyarrow")
             return
 
+    def list_results(self, benchmark_id: str):
+        """
+        List all available results that might match a benchmark.
+        
+        Shows model results with metadata to help user identify their benchmark results.
+        """
+        print(f"\nSearching for results matching benchmark: {benchmark_id}")
+        print("=" * 80)
+        
+        # Load benchmark plan to get variants
+        plan = self._load_benchmark_plan(benchmark_id)
+        if not plan:
+            print(f"⚠️  Could not load benchmark plan for {benchmark_id}")
+            print("Searching for all recent results instead...\n")
+            variants = []
+        else:
+            variants = plan.get("variants", [])
+            print(f"Benchmark has {len(variants)} variants")
+            print(f"Created: {plan.get('created_at', 'unknown')}\n")
+        
+        # Search for results
+        results_found = 0
+        
+        for variant in variants:
+            country = variant.get("country", "")
+            revision = variant.get("revision", "default")
+            adstock = variant.get("adstock", "")
+            variant_name = variant.get("benchmark_variant", "")
+            
+            print(f"Variant: {variant_name} (adstock: {adstock})")
+            print(f"Looking in: robyn/{revision}/{country}/")
+            
+            # List recent results
+            prefix = f"robyn/{revision}/{country}/"
+            try:
+                blobs = list(self.bucket.list_blobs(prefix=prefix))
+                summaries = [b for b in blobs if "model_summary.json" in b.name]
+                
+                if summaries:
+                    print(f"  Found {len(summaries)} model result(s)")
+                    for blob in summaries[:5]:  # Show first 5
+                        print(f"    - {blob.name}")
+                        print(f"      Created: {blob.time_created}")
+                    results_found += len(summaries)
+                else:
+                    print(f"  ⚠️  No results found")
+            except Exception as e:
+                print(f"  Error searching: {e}")
+            
+            print()
+        
+        if results_found == 0:
+            print("❌ No results found for any variants")
+            print("\nPossible reasons:")
+            print("  1. Jobs haven't completed yet")
+            print("  2. Jobs failed during execution")
+            print("  3. Results saved to different location")
+            print(f"\n💡 Use --show-results-location {benchmark_id} to see expected paths")
+        else:
+            print(f"✅ Found {results_found} result file(s)")
+            print("\n💡 To access results manually:")
+            print(f"  gsutil ls gs://{self.bucket_name}/robyn/")
+    
+    def show_results_location(self, benchmark_id: str):
+        """
+        Show where results should be located for a benchmark.
+        
+        Provides GCS paths and manual access instructions.
+        """
+        print(f"\nResults Location Information")
+        print("=" * 80)
+        
+        # Load benchmark plan
+        plan = self._load_benchmark_plan(benchmark_id)
+        if not plan:
+            print(f"⚠️  Could not load benchmark plan for {benchmark_id}")
+            print(f"Expected location: gs://{self.bucket_name}/{BENCHMARK_ROOT}/{benchmark_id}/plan.json")
+            return
+        
+        print(f"Benchmark: {plan.get('name', 'unknown')}")
+        print(f"Description: {plan.get('description', '')}")
+        print(f"Created: {plan.get('created_at', 'unknown')}")
+        print(f"Variants: {plan.get('variant_count', 0)}")
+        print()
+        
+        variants = plan.get("variants", [])
+        
+        print("Expected Results Locations:")
+        print("-" * 80)
+        
+        for i, variant in enumerate(variants, 1):
+            country = variant.get("country", "")
+            revision = variant.get("revision", "default")
+            variant_name = variant.get("benchmark_variant", "")
+            
+            print(f"\n{i}. Variant: {variant_name}")
+            print(f"   Country: {country}")
+            print(f"   Revision: {revision}")
+            print(f"   Path: gs://{self.bucket_name}/robyn/{revision}/{country}/YYYYMMDD_HHMMSS/")
+            print(f"   Contains:")
+            print(f"     - model_summary.json  (metrics and metadata)")
+            print(f"     - best_model_plots.png (visualizations)")
+            print(f"     - model_params.json   (configuration)")
+        
+        print("\n" + "=" * 80)
+        print("Manual Access Commands:")
+        print("-" * 80)
+        
+        # Provide gsutil commands
+        for variant in variants[:1]:  # Show example for first variant
+            country = variant.get("country", "")
+            revision = variant.get("revision", "default")
+            
+            print(f"\n# List all results for {country}:")
+            print(f"gsutil ls gs://{self.bucket_name}/robyn/{revision}/{country}/")
+            
+            print(f"\n# View a specific model summary:")
+            print(f"gsutil cat gs://{self.bucket_name}/robyn/{revision}/{country}/YYYYMMDD_HHMMSS/model_summary.json | jq .")
+            
+            print(f"\n# Download all results:")
+            print(f"gsutil -m cp -r gs://{self.bucket_name}/robyn/{revision}/{country}/YYYYMMDD_*/ ./results/")
+        
+        print("\n" + "=" * 80)
+        print(f"\n💡 To list available results:")
+        print(f"  python scripts/benchmark_mmm.py --list-results {benchmark_id}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -857,6 +983,16 @@ def main():
         default=None,
         help="Number of queue ticks to trigger (default: number of variants submitted)",
     )
+    parser.add_argument(
+        "--list-results",
+        type=str,
+        help="List all available results for a benchmark ID",
+    )
+    parser.add_argument(
+        "--show-results-location",
+        type=str,
+        help="Show where results are located for a benchmark ID",
+    )
 
     args = parser.parse_args()
 
@@ -881,6 +1017,16 @@ def main():
         print(f"\nTotal: {len(configs)} configuration(s)")
         print("\nTo run a benchmark:")
         print(f"  python scripts/benchmark_mmm.py --config benchmarks/<filename>")
+        return
+
+    if args.list_results:
+        collector = ResultsCollector()
+        collector.list_results(args.list_results)
+        return
+
+    if args.show_results_location:
+        collector = ResultsCollector()
+        collector.show_results_location(args.show_results_location)
         return
 
     if args.collect_results:
