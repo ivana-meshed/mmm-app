@@ -52,6 +52,12 @@ This document summarizes ALL the fixes applied to make the benchmark execution f
 **Fix**: Added `google-auth` to requirements.txt, moved import to module level
 **Status**: ✅ Fixed
 
+### Issue 9: OAuth Scope Error (Commit a467abb)
+**Problem**: "invalid_scope: Invalid OAuth scope or ID token audience provided"
+**Cause**: Using OAuth access token instead of ID token for Cloud Run authentication
+**Fix**: Changed to use `id_token.fetch_id_token()` with service URL as audience
+**Status**: ✅ Fixed
+
 ## Complete Solution
 
 ### Prerequisites
@@ -81,6 +87,13 @@ This document summarizes ALL the fixes applied to make the benchmark execution f
    echo 'export WEB_SERVICE_URL=https://mmm-app-dev-web-xxx.run.app' >> ~/.zshrc
    source ~/.zshrc
    ```
+
+3. **Configure authentication** (for ID token generation):
+   ```bash
+   gcloud auth application-default login
+   ```
+   
+   This is required for the script to generate ID tokens for Cloud Run authentication.
 
 ### Running Benchmarks
 
@@ -229,6 +242,7 @@ Detailed guides for each fix:
 - `QUEUE_PROCESSING_GUIDE.md` - Manual queue operations
 - `MISSING_REQUESTS_FIX.md` - requests dependency
 - `MISSING_GOOGLE_AUTH_FIX.md` - google-auth dependency
+- `OAUTH_SCOPE_FIX.md` - ID token authentication (NEW)
 
 ## Success Criteria
 
