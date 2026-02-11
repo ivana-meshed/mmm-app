@@ -21,13 +21,15 @@ export DEFAULT_QUEUE_NAME=default-dev
 export GCS_BUCKET=mmm-app-output
 
 # 3. Process ALL pending jobs
-python scripts/process_queue_standalone.py --loop
+python scripts/process_queue_simple.py --loop
 ```
+
+**Note:** Use `process_queue_simple.py` (not `process_queue_standalone.py`) - the simple version has no dependencies and works immediately!
 
 That's it! This will:
 - ✅ Load queue from GCS
 - ✅ Auto-resume if paused
-- ✅ Process ALL 12 pending jobs
+- ✅ Process ALL pending jobs
 - ✅ Launch them as Cloud Run Jobs
 - ✅ Update statuses
 
