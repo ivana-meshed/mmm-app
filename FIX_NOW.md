@@ -2,14 +2,27 @@
 
 ## The Issue
 
-You need permission to impersonate the service account.
+Script fails with impersonation even after granting permission.
 
 Error: `Permission 'iam.serviceAccounts.getAccessToken' denied`
 
-## The Fix
+## The Best Fix: Use Service Account Key File
 
-Run this command to grant yourself permission:
+If you have access to the service account key file, use it directly:
 
+```bash
+# Point to the service account key file  
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/mmm-web-service-sa-key.json
+
+# Run the script
+python scripts/process_queue_simple.py --loop
+```
+
+The script will automatically detect and use the key file. **Jobs will launch immediately!**
+
+## Alternative: Wait for IAM Propagation
+
+If you already ran:
 ```bash
 gcloud iam service-accounts add-iam-policy-binding \
   mmm-web-service-sa@datawarehouse-422511.iam.gserviceaccount.com \
@@ -17,25 +30,17 @@ gcloud iam service-accounts add-iam-policy-binding \
   --role="roles/iam.serviceAccountTokenCreator"
 ```
 
-This grants you the `iam.serviceAccountTokenCreator` role, which allows impersonation.
-
-## Then Run the Script
+**IAM changes can take 2-3 minutes to propagate.** Wait a bit, then retry:
 
 ```bash
 python scripts/process_queue_simple.py --loop
 ```
 
-All 21 jobs will launch!
+## Why Service Account Key is Better
 
-## Why This is Needed
+- Works immediately (no IAM propagation delay)
+- No impersonation complexity
+- Direct authentication
+- Simpler and more reliable
 
-The script uses impersonated credentials to authenticate as `mmm-web-service-sa`, which has all the necessary permissions to:
-- Execute Cloud Run jobs
-- Read/write GCS queues  
-- Pull container images
-
-Your user account needs permission to impersonate this service account.
-
-## Note
-
-You can keep your `GOOGLE_APPLICATION_CREDENTIALS` environment variable set - the script handles this automatically.
+The script is designed to use either method - it will automatically use a key file if `GOOGLE_APPLICATION_CREDENTIALS` points to the right service account.
