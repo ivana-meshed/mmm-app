@@ -1564,7 +1564,14 @@ def handle_queue_tick_from_query_params(
     If ?queue_tick=1 is present, process one headless queue tick and return the result.
     Otherwise return None. Safe to call early in a Streamlit page.
     """
+    # DEBUG: Log function entry
+    logger.info(f"[QUEUE_HANDLER] handle_queue_tick_from_query_params() called")
+    logger.info(f"[QUEUE_HANDLER] query_params type: {type(query_params)}")
+    logger.info(f"[QUEUE_HANDLER] query_params value: {query_params}")
+    logger.info(f"[QUEUE_HANDLER] query_params bool: {bool(query_params)}")
+    
     if not query_params:
+        logger.info(f"[QUEUE_HANDLER] No query params - returning None")
         return None
     try:
         qp = {

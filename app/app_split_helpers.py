@@ -388,6 +388,17 @@ def handle_queue_tick_if_requested():
     Call this explicitly in your main app or pages that need it.
     Returns True if tick was handled (and st.stop() was called), False otherwise.
     """
+    # DEBUG: Log query params to diagnose why endpoint isn't being called
+    logger.info("=" * 80)
+    logger.info(f"[QUEUE_CHECK] handle_queue_tick_if_requested() called")
+    logger.info(f"[QUEUE_CHECK] st.query_params type: {type(st.query_params)}")
+    logger.info(f"[QUEUE_CHECK] st.query_params value: {dict(st.query_params) if st.query_params else None}")
+    logger.info(f"[QUEUE_CHECK] st.query_params bool: {bool(st.query_params)}")
+    if st.query_params:
+        logger.info(f"[QUEUE_CHECK] queue_tick param: {st.query_params.get('queue_tick')}")
+        logger.info(f"[QUEUE_CHECK] name param: {st.query_params.get('name')}")
+    logger.info("=" * 80)
+    
     res = handle_queue_tick_from_query_params(
         st.query_params,  # type: ignore
         st.session_state.get("gcs_bucket", GCS_BUCKET),
