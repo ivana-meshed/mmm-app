@@ -1,22 +1,39 @@
 #!/usr/bin/env python3
 """
-Standalone queue processor for MMM training jobs.
+⚠️  DEPRECATED - DO NOT USE THIS SCRIPT ⚠️
 
-This script processes the queue directly without relying on Streamlit.
-It can be run:
-1. Manually from command line
-2. As a Cloud Run Job triggered by Cloud Scheduler
-3. As a cron job
+This script has Streamlit import dependencies and will not work.
 
-Usage:
-    python scripts/process_queue_standalone.py --queue-name default-dev --count 5
+USE THIS INSTEAD:
+    python scripts/process_queue_simple.py --loop
+
+The process_queue_simple.py script is self-contained and works immediately.
 """
+
+import sys
+
+print("=" * 80)
+print("⚠️  ERROR: WRONG SCRIPT!")
+print("=" * 80)
+print()
+print("You are trying to run: process_queue_standalone.py")
+print("This script is DEPRECATED and has import errors.")
+print()
+print("✅ USE THIS INSTEAD:")
+print()
+print("    python scripts/process_queue_simple.py --loop")
+print()
+print("The 'simple' processor is self-contained and actually works!")
+print("=" * 80)
+sys.exit(1)
+
+# Old code below - DO NOT USE
+# =============================
 
 import argparse
 import json
 import logging
 import os
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
