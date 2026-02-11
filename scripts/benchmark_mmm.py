@@ -402,6 +402,26 @@ class BenchmarkRunner:
         # Extract required fields
         country = variant.get("country", "")
         revision = variant.get("revision", "default")
+        
+        # CRITICAL: Construct data_gcs_path from data_version
+        # This is required for queue processing to work
+        data_version = variant.get("data_version", "")
+        if data_version:
+            # Path format: gs://{bucket}/mapped-datasets/{country}/{version}/raw.parquet
+            data_gcs_path = (
+                f"gs://{self.bucket_name}/mapped-datasets/"
+                f"{country.lower()}/{data_version}/raw.parquet"
+            )
+        else:
+            # Fallback: try to infer from meta_version or fail
+            logger.warning(
+                f"No data_version in variant {variant.get('benchmark_variant')}, "
+                f"job may fail"
+            )
+            data_gcs_path = None
+
+        # Get dep_var from either dep_var or selected_goal
+        dep_var = variant.get("dep_var") or variant.get("selected_goal", "UPLOAD_VALUE")
 
         # Build params compatible with existing training format
         params = {
@@ -418,7 +438,7 @@ class BenchmarkRunner:
             "context_vars": variant.get("context_vars", []),
             "factor_vars": variant.get("factor_vars", []),
             "organic_vars": variant.get("organic_vars", []),
-            "dep_var": variant.get("dep_var", "UPLOAD_VALUE"),
+            "dep_var": dep_var,
             "dep_var_type": variant.get("dep_var_type", "revenue"),
             "date_var": variant.get("date_var", "date"),
             "adstock": variant.get("adstock", "geometric"),
@@ -427,6 +447,8 @@ class BenchmarkRunner:
             ),
             "resample_freq": variant.get("resample_freq", "none"),
             "gcs_bucket": self.bucket_name,
+            # CRITICAL: Add data_gcs_path for GCS-based workflow
+            "data_gcs_path": data_gcs_path,
             # Add benchmark metadata
             "benchmark_id": benchmark_id,
             "benchmark_test": variant.get("benchmark_test", ""),

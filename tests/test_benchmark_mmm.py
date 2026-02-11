@@ -146,7 +146,45 @@ class TestBenchmarkRunner(unittest.TestCase):
         self.assertEqual(variants[0]["train_size"], [0.7, 0.9])
         self.assertEqual(variants[1]["train_size"], [0.75, 0.9])
 
-    def test_generate_spend_var_variants_spend_to_spend(self):
+    def test_variant_to_queue_params_includes_data_gcs_path(self):
+        """Test that data_gcs_path is constructed from data_version."""
+        variant = {
+            "country": "de",
+            "revision": "test-rev",
+            "data_version": "20251211_115528",
+            "selected_goal": "UPLOAD_VALUE",
+            "paid_media_spends": ["SPEND_FB"],
+            "paid_media_vars": ["FB_IMPRESSIONS"],
+            "benchmark_test": "adstock",
+            "benchmark_variant": "geometric",
+        }
+
+        params = self.runner._variant_to_queue_params(variant, "test_benchmark")
+
+        # Verify data_gcs_path is constructed correctly
+        self.assertIn("data_gcs_path", params)
+        self.assertIn("mapped-datasets/de/20251211_115528/raw.parquet", params["data_gcs_path"])
+        
+        # Verify dep_var is set from selected_goal
+        self.assertEqual(params["dep_var"], "UPLOAD_VALUE")
+        
+        # Verify benchmark metadata is preserved
+        self.assertEqual(params["benchmark_id"], "test_benchmark")
+        self.assertEqual(params["benchmark_test"], "adstock")
+        self.assertEqual(params["benchmark_variant"], "geometric")
+
+    def test_variant_to_queue_params_without_data_version(self):
+        """Test handling when data_version is missing."""
+        variant = {
+            "country": "de",
+            "paid_media_spends": [],
+        }
+
+        params = self.runner._variant_to_queue_params(variant, "test_benchmark")
+
+        # Should still create params but data_gcs_path will be None
+        self.assertIn("data_gcs_path", params)
+        self.assertIsNone(params["data_gcs_path"])
         """Test spend→spend mapping variant generation."""
         base_config = {
             "country": "de",
