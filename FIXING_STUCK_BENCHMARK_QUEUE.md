@@ -3,15 +3,70 @@
 ## Problem
 Your benchmark was submitted but the queue isn't processing the jobs.
 
-## Root Cause
-The benchmark script was missing a critical field (`data_gcs_path`) that the queue processor needs to execute jobs.
+## Root Causes (Both Fixed Now!)
 
-## Fix Applied
-The script has been updated to include the `data_gcs_path` field. The fix is in commit `f569e61`.
+### 1. Missing data_gcs_path (FIXED in commit f569e61)
+The benchmark script was missing the `data_gcs_path` field required by the queue processor.
 
-## How to Fix Your Stuck Benchmark
+### 2. Cloud Scheduler Disabled (FIXED with manual trigger option)
+The Cloud Scheduler that triggers queue processing is disabled in the dev environment, so jobs never get processed automatically.
 
-You have two options:
+## Quick Fix for Stuck Jobs
+
+If you already have jobs stuck in the queue, use the new manual trigger script:
+
+```bash
+# Process all pending jobs immediately
+python scripts/trigger_queue.py --until-empty
+```
+
+That's it! Your jobs will start processing immediately.
+
+## For New Benchmarks
+
+### Option 1: Auto-trigger (Recommended for Dev)
+
+```bash
+python scripts/benchmark_mmm.py \
+  --config benchmarks/your_config.json \
+  --trigger-queue
+```
+
+This submits the benchmark AND immediately starts processing the jobs.
+
+### Option 2: Manual Trigger After Submission
+
+```bash
+# 1. Submit benchmark
+python scripts/benchmark_mmm.py --config benchmarks/your_config.json
+
+# 2. Trigger queue processing
+python scripts/trigger_queue.py --until-empty
+```
+
+### Option 3: Enable Cloud Scheduler (Production)
+
+For production environments or if you want automatic processing:
+
+```terraform
+# infra/terraform/envs/prod.tfvars
+scheduler_enabled = true
+```
+
+Then apply:
+```bash
+cd infra/terraform
+terraform apply -var-file=envs/prod.tfvars
+```
+
+Cost: ~$0.10/day for automatic processing every 10 minutes.
+
+## Detailed Guide
+
+For complete documentation on queue processing options, see:
+- [QUEUE_PROCESSING_GUIDE.md](QUEUE_PROCESSING_GUIDE.md) - Comprehensive guide with all options
+
+## What Was Wrong (Technical Details)
 
 ### Option 1: Resubmit (Recommended)
 

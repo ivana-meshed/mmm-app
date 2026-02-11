@@ -811,6 +811,17 @@ def main():
         action="store_true",
         help="Generate and save plan but don't submit to queue",
     )
+    parser.add_argument(
+        "--trigger-queue",
+        action="store_true",
+        help="Trigger queue processing after submitting (useful when scheduler is disabled)",
+    )
+    parser.add_argument(
+        "--trigger-count",
+        type=int,
+        default=None,
+        help="Number of queue ticks to trigger (default: number of variants submitted)",
+    )
 
     args = parser.parse_args()
 
@@ -933,10 +944,68 @@ def main():
             f"Plan: gs://{runner.bucket_name}/"
             f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
         )
-        print(
-            f"\nMonitor progress in the Streamlit app "
-            f"(Run Experiment → Queue Monitor)"
-        )
+
+        # Trigger queue processing if requested
+        if args.trigger_queue:
+            print(f"\n🔄 Triggering queue processing...")
+            trigger_count = args.trigger_count or submitted_count
+
+            try:
+                # Call the trigger_queue script
+                import subprocess
+
+                trigger_script = (
+                    Path(__file__).parent / "trigger_queue.py"
+                )
+                cmd = [
+                    sys.executable,
+                    str(trigger_script),
+                    "--queue-name",
+                    args.queue_name,
+                    "--count",
+                    str(trigger_count),
+                    "--delay",
+                    "10",  # 10 second delay between ticks
+                ]
+
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=600
+                )
+
+                if result.returncode == 0:
+                    print(result.stdout)
+                    print(
+                        f"\n✅ Queue processing triggered for {trigger_count} job(s)"
+                    )
+                else:
+                    print(f"\n⚠️  Queue trigger failed: {result.stderr}")
+                    print(
+                        "You can manually trigger queue processing with:"
+                    )
+                    print(
+                        f"  python scripts/trigger_queue.py --queue-name {args.queue_name}"
+                    )
+
+            except Exception as e:
+                logger.error(f"Failed to trigger queue: {e}")
+                print(
+                    f"\n⚠️  Could not automatically trigger queue: {e}"
+                )
+                print("You can manually trigger queue processing with:")
+                print(
+                    f"  python scripts/trigger_queue.py --queue-name {args.queue_name}"
+                )
+        else:
+            print(
+                f"\n💡 Monitor progress in the Streamlit app "
+                f"(Run Experiment → Queue Monitor)"
+            )
+            print(
+                f"\nOr manually trigger queue processing with:"
+            )
+            print(
+                f"  python scripts/trigger_queue.py --queue-name {args.queue_name} --until-empty"
+            )
 
     except Exception as e:
         logger.error(f"Failed to submit jobs: {e}")
