@@ -538,6 +538,30 @@ class BenchmarkRunner:
 
         return benchmarks
 
+    def list_config_files(self) -> List[Dict[str, Any]]:
+        """List available benchmark configuration files."""
+        benchmarks_dir = Path(__file__).parent.parent / "benchmarks"
+        
+        if not benchmarks_dir.exists():
+            return []
+        
+        configs = []
+        for config_file in benchmarks_dir.glob("*.json"):
+            try:
+                with open(config_file) as f:
+                    config_data = json.load(f)
+                    configs.append({
+                        "file": config_file.name,
+                        "path": str(config_file),
+                        "name": config_data.get("name", ""),
+                        "description": config_data.get("description", ""),
+                        "variant_count": len(config_data.get("variants", {})),
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to load {config_file}: {e}")
+        
+        return configs
+
 
 class ResultsCollector:
     """Collects and analyzes benchmark results."""
@@ -563,7 +587,13 @@ class ResultsCollector:
             )
 
         plan = json.loads(plan_blob.download_as_bytes())
-        variants = plan["variants"]
+        variants = plan.get("variants", [])
+        
+        if not variants:
+            logger.warning(f"No variants found in benchmark plan")
+            if pd is not None:
+                return pd.DataFrame()
+            return []
 
         logger.info(
             f"Collecting results for {len(variants)} variants..."
@@ -575,9 +605,14 @@ class ResultsCollector:
                 f"  Processing variant {i}/{len(variants)}: "
                 f"{variant.get('benchmark_variant', 'unknown')}"
             )
-            result = self._collect_variant_result(variant, benchmark_id)
-            if result:
-                results.append(result)
+            try:
+                result = self._collect_variant_result(variant, benchmark_id)
+                if result:
+                    results.append(result)
+            except Exception as e:
+                logger.error(
+                    f"Error collecting variant {i}: {e}"
+                )
 
         logger.info(f"Collected {len(results)} results")
 
@@ -828,20 +863,24 @@ def main():
     runner = BenchmarkRunner()
 
     if args.list_configs:
-        benchmarks = runner.list_benchmarks()
-        if not benchmarks:
-            print("No benchmarks found")
+        configs = runner.list_config_files()
+        if not configs:
+            print("No benchmark configuration files found in benchmarks/ directory")
             return
 
-        print("\nAvailable Benchmarks:")
-        print("-" * 80)
-        for bm in benchmarks:
-            print(f"ID: {bm['benchmark_id']}")
-            print(f"Name: {bm['name']}")
-            print(f"Created: {bm['created_at']}")
-            print(f"Status: {bm['status']}")
-            print(f"Variants: {bm['variant_count']}")
+        print("\nAvailable Benchmark Configurations:")
+        print("=" * 80)
+        for cfg in configs:
+            print(f"\nFile: {cfg['file']}")
+            print(f"Name: {cfg['name']}")
+            print(f"Description: {cfg['description']}")
+            print(f"Estimated variants: {cfg['variant_count']}")
+            print(f"Path: {cfg['path']}")
             print("-" * 80)
+        
+        print(f"\nTotal: {len(configs)} configuration(s)")
+        print("\nTo run a benchmark:")
+        print(f"  python scripts/benchmark_mmm.py --config benchmarks/<filename>")
         return
 
     if args.collect_results:
