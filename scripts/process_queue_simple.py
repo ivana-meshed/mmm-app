@@ -134,12 +134,12 @@ def process_one_job(
         logger.warning("Queue is paused (queue_running=false)")
         return False
     
-    jobs = queue_doc.get("jobs", [])
+    entries = queue_doc.get("entries", [])
     
     # Find first PENDING job
     pending_job = None
     pending_idx = None
-    for idx, job in enumerate(jobs):
+    for idx, job in enumerate(entries):
         if job.get("status") == "PENDING":
             pending_job = job
             pending_idx = idx
@@ -149,13 +149,13 @@ def process_one_job(
         logger.info("No PENDING jobs found")
         return False
     
-    logger.info(f"Processing job {pending_idx + 1}/{len(jobs)}")
+    logger.info(f"Processing job {pending_idx + 1}/{len(entries)}")
     logger.info(f"  Country: {pending_job.get('params', {}).get('country', 'unknown')}")
     logger.info(f"  Revision: {pending_job.get('params', {}).get('revision', 'unknown')}")
     
     # Mark as LAUNCHING
-    jobs[pending_idx]["status"] = "LAUNCHING"
-    jobs[pending_idx]["launched_at"] = datetime.now(timezone.utc).isoformat()
+    entries[pending_idx]["status"] = "LAUNCHING"
+    entries[pending_idx]["launched_at"] = datetime.now(timezone.utc).isoformat()
     
     # Save queue
     if not save_queue_to_gcs(bucket_name, queue_name, queue_doc):
@@ -180,15 +180,15 @@ def process_one_job(
     )
     
     if execution_name:
-        jobs[pending_idx]["status"] = "RUNNING"
-        jobs[pending_idx]["execution_name"] = execution_name
+        entries[pending_idx]["status"] = "RUNNING"
+        entries[pending_idx]["execution_name"] = execution_name
         save_queue_to_gcs(bucket_name, queue_name, queue_doc)
         logger.info("✅ Job launched successfully")
         return True
     else:
         # Mark as FAILED
-        jobs[pending_idx]["status"] = "FAILED"
-        jobs[pending_idx]["error"] = "Failed to launch Cloud Run job"
+        entries[pending_idx]["status"] = "FAILED"
+        entries[pending_idx]["error"] = "Failed to launch Cloud Run job"
         save_queue_to_gcs(bucket_name, queue_name, queue_doc)
         logger.error("❌ Job launch failed")
         return False
@@ -230,12 +230,12 @@ def process_queue(
                 break
         
         # Show status
-        jobs = queue_doc.get("jobs", [])
-        pending_count = sum(1 for j in jobs if j.get("status") == "PENDING")
-        running_count = sum(1 for j in jobs if j.get("status") == "RUNNING")
+        entries = queue_doc.get("entries", [])
+        pending_count = sum(1 for j in entries if j.get("status") == "PENDING")
+        running_count = sum(1 for j in entries if j.get("status") == "RUNNING")
         
         logger.info(f"📊 Queue Status: {queue_name}")
-        logger.info(f"  Total: {len(jobs)}")
+        logger.info(f"  Total: {len(entries)}")
         logger.info(f"  Pending: {pending_count}")
         logger.info(f"  Running: {running_count}")
         
