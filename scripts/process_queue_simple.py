@@ -30,6 +30,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def check_credentials():
+    """Check for conflicting credential configurations."""
+    if "GOOGLE_APPLICATION_CREDENTIALS" in os.environ:
+        logger.error("=" * 80)
+        logger.error("❌ ERROR: GOOGLE_APPLICATION_CREDENTIALS is set!")
+        logger.error("")
+        logger.error(f"Currently set to: {os.environ['GOOGLE_APPLICATION_CREDENTIALS']}")
+        logger.error("")
+        logger.error("This environment variable takes precedence over impersonation.")
+        logger.error("You need to unset it before running this script:")
+        logger.error("")
+        logger.error("  unset GOOGLE_APPLICATION_CREDENTIALS")
+        logger.error("")
+        logger.error("Then run the script again.")
+        logger.error("=" * 80)
+        sys.exit(1)
+
+
 def load_queue_from_gcs(bucket_name: str, queue_name: str) -> Dict:
     """Load queue document from GCS."""
     try:
@@ -311,6 +329,9 @@ def main():
     )
     
     args = parser.parse_args()
+    
+    # Check for credential conflicts BEFORE doing anything
+    check_credentials()
     
     logger.info("=" * 60)
     logger.info("MMM Queue Processor (Standalone)")
