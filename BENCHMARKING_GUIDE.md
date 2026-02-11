@@ -13,7 +13,26 @@ Set up your Google Cloud credentials:
 export GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json
 ```
 
+⚠️ **Important:** Keep the entire command on **ONE LINE** (no line breaks)! A line break after the `=` sign will cause a confusing "permission denied" error.
+
 This uses the impersonated credentials file created by `gcloud auth application-default login`.
+
+### Common Mistakes
+
+**❌ WRONG - Line break causes "permission denied" error:**
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=
+/path/to/file.json
+```
+
+The shell interprets this as two separate commands:
+1. `export GOOGLE_APPLICATION_CREDENTIALS=` (sets variable to empty)
+2. `/path/to/file.json` (tries to execute the file → permission denied!)
+
+**✅ CORRECT - All on one line:**
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/file.json
+```
 
 ### Verify Setup
 
