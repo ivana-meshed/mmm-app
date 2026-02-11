@@ -2,39 +2,40 @@
 
 ## The Issue
 
-Script was getting 403 error even with impersonation.
+You need permission to impersonate the service account.
 
-## The Fix - UPDATED!
+Error: `Permission 'iam.serviceAccounts.getAccessToken' denied`
 
-**Good news:** You don't need to unset `GOOGLE_APPLICATION_CREDENTIALS`!
+## The Fix
 
-Just run:
+Run this command to grant yourself permission:
+
+```bash
+gcloud iam service-accounts add-iam-policy-binding \
+  mmm-web-service-sa@datawarehouse-422511.iam.gserviceaccount.com \
+  --member="user:$(gcloud config get-value account)" \
+  --role="roles/iam.serviceAccountTokenCreator"
+```
+
+This grants you the `iam.serviceAccountTokenCreator` role, which allows impersonation.
+
+## Then Run the Script
+
 ```bash
 python scripts/process_queue_simple.py --loop
 ```
 
-## What Changed
+All 21 jobs will launch!
 
-The script now uses impersonated credentials **explicitly**:
-- Creates impersonated credentials for `mmm-web-service-sa`
-- Passes these credentials to all GCS and Cloud Run clients
-- Ignores `GOOGLE_APPLICATION_CREDENTIALS` environment variable
+## Why This is Needed
 
-## User Action
+The script uses impersonated credentials to authenticate as `mmm-web-service-sa`, which has all the necessary permissions to:
+- Execute Cloud Run jobs
+- Read/write GCS queues  
+- Pull container images
 
-```bash
-# Pull latest code
-git pull origin copilot/build-benchmarking-script
+Your user account needs permission to impersonate this service account.
 
-# Run script - keeps your environment as-is
-python scripts/process_queue_simple.py --loop
-```
+## Note
 
-Jobs will launch successfully!
-
-## Why This Works
-
-- Script explicitly uses impersonated service account credentials
-- Service account has all necessary permissions
-- Your `GOOGLE_APPLICATION_CREDENTIALS` can stay set for other work
-- No conflicts!
+You can keep your `GOOGLE_APPLICATION_CREDENTIALS` environment variable set - the script handles this automatically.
