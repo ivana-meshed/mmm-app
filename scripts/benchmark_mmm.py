@@ -803,8 +803,8 @@ def main():
     parser.add_argument(
         "--queue-name",
         type=str,
-        default="default",
-        help="Queue name for job submission (default: default)",
+        default=os.getenv("DEFAULT_QUEUE_NAME", "default"),
+        help="Queue name for job submission (default: from DEFAULT_QUEUE_NAME env var or 'default')",
     )
     parser.add_argument(
         "--no-submit",
