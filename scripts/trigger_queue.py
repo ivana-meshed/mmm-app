@@ -66,6 +66,8 @@ except ImportError:
 try:
     from google.auth import default
     from google.auth.transport.requests import Request as AuthRequest
+    from google.oauth2 import id_token
+    from google.auth.transport import requests as google_requests
     GOOGLE_AUTH_AVAILABLE = True
 except ImportError:
     GOOGLE_AUTH_AVAILABLE = False
@@ -199,16 +201,26 @@ def trigger_queue_via_http(service_url: str, queue_name: str) -> dict:
     Returns:
         Response dict with ok, message, changed fields
     """
-    # Get credentials for service account (imports are at module level)
-    credentials, project = default()
-    credentials.refresh(AuthRequest())
+    # Cloud Run requires ID token authentication with the service URL as audience
+    # See: https://cloud.google.com/run/docs/authenticating/service-to-service
+    auth_req = google_requests.Request()
+    
+    try:
+        # Fetch ID token with service URL as audience
+        id_token_value = id_token.fetch_id_token(auth_req, service_url)
+    except Exception as e:
+        logger.error(f"Failed to fetch ID token: {e}")
+        logger.error("Make sure you have proper authentication configured:")
+        logger.error("  - For local: gcloud auth application-default login")
+        logger.error("  - For Cloud: Service account with proper roles")
+        raise
 
     url = f"{service_url}?queue_tick=1&name={queue_name}"
 
     try:
         response = requests.get(
             url,
-            headers={"Authorization": f"Bearer {credentials.token}"},
+            headers={"Authorization": f"Bearer {id_token_value}"},
             timeout=300,  # 5 minute timeout for queue tick
         )
 
