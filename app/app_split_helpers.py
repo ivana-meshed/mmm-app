@@ -189,8 +189,31 @@ def prepare_and_launch_job(params: dict) -> dict:
     One complete job: query SF -> parquet -> upload -> write config (timestamped + latest) -> run Cloud Run Job.
     For GCS-based workflows, if data_gcs_path is provided, skip Snowflake query and use existing data.
     Returns exec_info dict with execution_name, timestamp, gcs_prefix, etc.
+    
+    NOTE: This function must work in headless mode (HTTP queue tick), so it cannot rely on st.session_state.
+    All required data must be in the params dict.
     """
-    gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
+    # Get GCS bucket from params first, then session state (if available), then env var
+    gcs_bucket = params.get("gcs_bucket")
+    if not gcs_bucket:
+        try:
+            gcs_bucket = st.session_state.get("gcs_bucket")
+        except (AttributeError, RuntimeError):
+            # No session state (headless mode)
+            pass
+    if not gcs_bucket:
+        gcs_bucket = GCS_BUCKET  # Use environment variable as fallback
+    
+    if not gcs_bucket:
+        raise ValueError(
+            "GCS bucket not specified in params, session state, or environment. "
+            "Headless mode requires gcs_bucket in params dict."
+        )
+    
+    logger.info(f"[LAUNCHER] Using GCS bucket: {gcs_bucket}")
+    logger.info(f"[LAUNCHER] Job params: country={params.get('country')}, revision={params.get('revision')}")
+    logger.info(f"[LAUNCHER] Data GCS path: {params.get('data_gcs_path', 'Not set - will query Snowflake')}")
+    
     timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
     # Support both 'revision' and 'version' keys for backward compatibility
     revision = params.get("revision") or params.get("version") or ""
