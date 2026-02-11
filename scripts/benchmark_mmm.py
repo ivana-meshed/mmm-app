@@ -571,6 +571,29 @@ class ResultsCollector:
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
 
+    def _load_benchmark_plan(
+        self, benchmark_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Load benchmark plan from GCS.
+        
+        Args:
+            benchmark_id: The benchmark ID
+            
+        Returns:
+            Plan dict if found, None otherwise
+        """
+        try:
+            plan_blob = self.bucket.blob(
+                f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
+            )
+            if not plan_blob.exists():
+                return None
+            return json.loads(plan_blob.download_as_bytes())
+        except Exception as e:
+            logger.error(f"Error loading benchmark plan: {e}")
+            return None
+
     def collect_results(self, benchmark_id: str):
         """
         Collect results from all benchmark variants.
@@ -578,15 +601,12 @@ class ResultsCollector:
         Returns DataFrame (if pandas available) or dict of results.
         """
         # Load benchmark plan
-        plan_blob = self.bucket.blob(
-            f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
-        )
-        if not plan_blob.exists():
+        plan = self._load_benchmark_plan(benchmark_id)
+        if not plan:
             raise FileNotFoundError(
                 f"Benchmark plan not found: {benchmark_id}"
             )
 
-        plan = json.loads(plan_blob.download_as_bytes())
         variants = plan.get("variants", [])
         
         if not variants:
