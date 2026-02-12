@@ -17,12 +17,11 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
-from typing import Optional, Dict, List
+from typing import Dict, List, Optional
 
-from google.cloud import storage
-from google.cloud import run_v2
-from google.auth import impersonated_credentials
 import google.auth
+from google.auth import impersonated_credentials
+from google.cloud import run_v2, storage
 
 # Configure logging
 logging.basicConfig(
@@ -32,12 +31,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Service account to impersonate for job execution
-SERVICE_ACCOUNT = "mmm-web-service-sa@datawarehouse-422511.iam.gserviceaccount.com"
+SERVICE_ACCOUNT = (
+    "mmm-web-service-sa@datawarehouse-422511.iam.gserviceaccount.com"
+)
 
 
 def get_impersonated_credentials():
     """Get credentials for the impersonated service account.
-    
+
     This allows the script to use the service account's permissions
     regardless of GOOGLE_APPLICATION_CREDENTIALS environment variable.
     """
@@ -45,24 +46,31 @@ def get_impersonated_credentials():
     creds_file = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if creds_file and os.path.exists(creds_file):
         try:
-            with open(creds_file, 'r') as f:
+            with open(creds_file, "r") as f:
                 key_data = json.load(f)
                 if key_data.get("client_email") == SERVICE_ACCOUNT:
-                    logger.info(f"Using service account key file for: {SERVICE_ACCOUNT}")
+                    logger.info(
+                        f"Using service account key file for: {SERVICE_ACCOUNT}"
+                    )
                     from google.oauth2 import service_account
-                    credentials = service_account.Credentials.from_service_account_file(
-                        creds_file,
-                        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+
+                    credentials = (
+                        service_account.Credentials.from_service_account_file(
+                            creds_file,
+                            scopes=[
+                                "https://www.googleapis.com/auth/cloud-platform"
+                            ],
+                        )
                     )
                     return credentials
         except Exception as e:
             logger.debug(f"Could not use key file: {e}")
-    
+
     # Try to impersonate the service account
     try:
         # Get source credentials (user's credentials)
         source_credentials, project = google.auth.default()
-        
+
         # Create impersonated credentials
         target_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
         credentials = impersonated_credentials.Credentials(
@@ -70,7 +78,7 @@ def get_impersonated_credentials():
             target_principal=SERVICE_ACCOUNT,
             target_scopes=target_scopes,
         )
-        
+
         logger.info(f"Using impersonated credentials for: {SERVICE_ACCOUNT}")
         return credentials
     except Exception as e:
@@ -78,44 +86,61 @@ def get_impersonated_credentials():
         logger.error("=" * 80)
         logger.error("❌ Cannot authenticate as service account!")
         logger.error("=" * 80)
-        
-        if "iam.serviceAccounts.getAccessToken" in error_msg or "PERMISSION_DENIED" in error_msg:
+
+        if (
+            "iam.serviceAccounts.getAccessToken" in error_msg
+            or "PERMISSION_DENIED" in error_msg
+        ):
             logger.error(f"Impersonation failed for: {SERVICE_ACCOUNT}")
             logger.error("")
             logger.error("This could be due to:")
-            logger.error("1. IAM propagation delay (wait 2-3 minutes after granting permission)")
-            logger.error("2. Source credentials don't have required OAuth scopes")
+            logger.error(
+                "1. IAM propagation delay (wait 2-3 minutes after granting permission)"
+            )
+            logger.error(
+                "2. Source credentials don't have required OAuth scopes"
+            )
             logger.error("")
-            logger.error("BEST SOLUTION: Use the service account key file directly!")
+            logger.error(
+                "BEST SOLUTION: Use the service account key file directly!"
+            )
             logger.error("")
             logger.error("If you have access to the key file, point to it:")
-            logger.error(f"  export GOOGLE_APPLICATION_CREDENTIALS=/path/to/mmm-web-service-sa-key.json")
+            logger.error(
+                f"  export GOOGLE_APPLICATION_CREDENTIALS=/path/to/mmm-web-service-sa-key.json"
+            )
             logger.error("")
-            logger.error("Then run this script again. It will use the key file directly.")
+            logger.error(
+                "Then run this script again. It will use the key file directly."
+            )
             logger.error("")
-            logger.error("Alternatively, wait 2-3 minutes for IAM to propagate, then retry.")
+            logger.error(
+                "Alternatively, wait 2-3 minutes for IAM to propagate, then retry."
+            )
         else:
             logger.error(f"Failed to create impersonated credentials: {e}")
             logger.error("")
             logger.error("Make sure you have run:")
             logger.error("  gcloud auth application-default login")
-        
+
         logger.error("=" * 80)
         sys.exit(1)
 
 
-def load_queue_from_gcs(bucket_name: str, queue_name: str, credentials=None) -> Dict:
+def load_queue_from_gcs(
+    bucket_name: str, queue_name: str, credentials=None
+) -> Dict:
     """Load queue document from GCS."""
     try:
         client = storage.Client(credentials=credentials)
         bucket = client.bucket(bucket_name)
         blob_path = f"robyn-queues/{queue_name}/queue.json"
         blob = bucket.blob(blob_path)
-        
+
         if not blob.exists():
             logger.error(f"Queue not found: gs://{bucket_name}/{blob_path}")
             return None
-        
+
         content = blob.download_as_text()
         queue_doc = json.loads(content)
         logger.info(f"Loaded queue '{queue_name}' from GCS")
@@ -125,18 +150,20 @@ def load_queue_from_gcs(bucket_name: str, queue_name: str, credentials=None) -> 
         return None
 
 
-def save_queue_to_gcs(bucket_name: str, queue_name: str, queue_doc: Dict, credentials=None) -> bool:
+def save_queue_to_gcs(
+    bucket_name: str, queue_name: str, queue_doc: Dict, credentials=None
+) -> bool:
     """Save queue document to GCS."""
     try:
         client = storage.Client(credentials=credentials)
         bucket = client.bucket(bucket_name)
         blob_path = f"robyn-queues/{queue_name}/queue.json"
         blob = bucket.blob(blob_path)
-        
+
         queue_doc["saved_at"] = datetime.now(timezone.utc).isoformat()
         content = json.dumps(queue_doc, indent=2, default=str)
         blob.upload_from_string(content, content_type="application/json")
-        
+
         logger.info(f"Saved queue to GCS: gs://{bucket_name}/{blob_path}")
         return True
     except Exception as e:
@@ -156,7 +183,7 @@ def launch_cloud_run_job(
     try:
         client = run_v2.JobsClient(credentials=credentials)
         job_path = f"projects/{project_id}/locations/{region}/jobs/{job_name}"
-        
+
         # Create environment variables from config
         env_vars = []
         for key, value in config.items():
@@ -164,12 +191,12 @@ def launch_cloud_run_job(
                 env_vars.append(
                     run_v2.EnvVar(name=str(key).upper(), value=str(value))
                 )
-        
+
         # Add params as JSON env var
         env_vars.append(
             run_v2.EnvVar(name="JOB_PARAMS", value=json.dumps(params))
         )
-        
+
         # Create execution request
         request = run_v2.RunJobRequest(
             name=job_path,
@@ -181,15 +208,19 @@ def launch_cloud_run_job(
                 ],
             ),
         )
-        
+
         # Execute job
         operation = client.run_job(request=request)
-        execution_name = operation.metadata.name if hasattr(operation, 'metadata') else 'unknown'
-        
+        execution_name = (
+            operation.metadata.name
+            if hasattr(operation, "metadata")
+            else "unknown"
+        )
+
         logger.info(f"✅ Launched job: {job_name}")
         logger.info(f"   Execution: {execution_name}")
         return execution_name
-        
+
     except Exception as e:
         logger.error(f"❌ Failed to launch job: {e}")
         return None
@@ -205,13 +236,13 @@ def process_one_job(
     credentials=None,
 ) -> bool:
     """Process one PENDING job from the queue."""
-    
+
     if not queue_doc.get("queue_running", True):
         logger.warning("Queue is paused (queue_running=false)")
         return False
-    
+
     entries = queue_doc.get("entries", [])
-    
+
     # Find first PENDING job
     pending_job = None
     pending_idx = None
@@ -220,40 +251,46 @@ def process_one_job(
             pending_job = job
             pending_idx = idx
             break
-    
+
     if not pending_job:
         logger.info("No PENDING jobs found")
         return False
-    
+
     params = pending_job.get("params", {})
     country = params.get("country", "unknown")
     revision = params.get("revision", "unknown")
-    
+
     # Generate unique timestamp for this job
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")[:19]  # YYYYMMDD_HHMMSS_mmm
-    
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")[
+        :19
+    ]  # YYYYMMDD_HHMMSS_mmm
+
     logger.info(f"Processing job {pending_idx + 1}/{len(entries)}")
     logger.info(f"  Country: {country}")
     logger.info(f"  Revision: {revision}")
     logger.info(f"  Job ID: {pending_job.get('job_id', 'N/A')}")
-    
+
     # Log expected result location
     result_path = f"gs://{bucket_name}/robyn/{revision}/{country}/{timestamp}/"
     logger.info(f"📂 Results will be saved to:")
     logger.info(f"   {result_path}")
-    logger.info(f"   Key files: model_summary.json, best_model_plots.png, console.log")
-    
+    logger.info(
+        f"   Key files: model_summary.json, best_model_plots.png, console.log"
+    )
+
     # Mark as LAUNCHING
     entries[pending_idx]["status"] = "LAUNCHING"
     entries[pending_idx]["launched_at"] = datetime.now(timezone.utc).isoformat()
     entries[pending_idx]["timestamp"] = timestamp
     entries[pending_idx]["expected_result_path"] = result_path
-    
+
     # Save queue
-    if not save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials):
+    if not save_queue_to_gcs(
+        bucket_name, queue_name, queue_doc, credentials=credentials
+    ):
         logger.error("Failed to save queue")
         return False
-    
+
     # Launch job with explicit timestamp
     config = {
         "country": params.get("country"),
@@ -263,7 +300,7 @@ def process_one_job(
         "timestamp": timestamp,  # Pass explicit timestamp to R script
         "output_timestamp": timestamp,  # Pass for consistent result paths
     }
-    
+
     execution_name = launch_cloud_run_job(
         project_id=project_id,
         region=region,
@@ -272,11 +309,13 @@ def process_one_job(
         params=params,
         credentials=credentials,
     )
-    
+
     if execution_name:
         entries[pending_idx]["status"] = "RUNNING"
         entries[pending_idx]["execution_name"] = execution_name
-        save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials)
+        save_queue_to_gcs(
+            bucket_name, queue_name, queue_doc, credentials=credentials
+        )
         logger.info("✅ Job launched successfully")
         logger.info(f"   Execution ID: {execution_name}")
         logger.info(f"")
@@ -288,7 +327,9 @@ def process_one_job(
         # Mark as FAILED
         entries[pending_idx]["status"] = "FAILED"
         entries[pending_idx]["error"] = "Failed to launch Cloud Run job"
-        save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials)
+        save_queue_to_gcs(
+            bucket_name, queue_name, queue_doc, credentials=credentials
+        )
         logger.error("❌ Job launch failed")
         return False
 
@@ -301,7 +342,7 @@ def check_job_completion(
 ) -> Optional[str]:
     """
     Check if a Cloud Run job execution has completed.
-    
+
     Returns:
         "SUCCEEDED" if completed successfully
         "FAILED" if failed
@@ -311,19 +352,22 @@ def check_job_completion(
     try:
         client = run_v2.ExecutionsClient(credentials=credentials)
         execution_path = execution_name
-        
+
         execution = client.get_execution(name=execution_path)
-        
+
         # Check completion condition
-        if hasattr(execution, 'completion_time') and execution.completion_time:
+        if hasattr(execution, "completion_time") and execution.completion_time:
             # Job has completed
-            if hasattr(execution, 'succeeded_count') and execution.succeeded_count > 0:
+            if (
+                hasattr(execution, "succeeded_count")
+                and execution.succeeded_count > 0
+            ):
                 return "SUCCEEDED"
             else:
                 return "FAILED"
         else:
             return "RUNNING"
-            
+
     except Exception as e:
         logger.debug(f"Could not check execution status: {e}")
         return None
@@ -340,31 +384,42 @@ def cleanup_completed_jobs(
 ) -> int:
     """
     Remove old completed/failed jobs from queue, keeping most recent ones.
-    
+
     Returns:
         Number of jobs removed
     """
     entries = queue_doc.get("entries", [])
-    
+
     # Separate by status
-    completed = [e for e in entries if e.get("status") in ("COMPLETED", "FAILED")]
-    other = [e for e in entries if e.get("status") not in ("COMPLETED", "FAILED")]
-    
+    completed = [
+        e for e in entries if e.get("status") in ("COMPLETED", "FAILED")
+    ]
+    other = [
+        e for e in entries if e.get("status") not in ("COMPLETED", "FAILED")
+    ]
+
     if len(completed) <= keep_count:
-        logger.info(f"No cleanup needed: {len(completed)} completed jobs (keep_count={keep_count})")
+        logger.info(
+            f"No cleanup needed: {len(completed)} completed jobs (keep_count={keep_count})"
+        )
         return 0
-    
+
     # Sort completed by completion time (newest first)
-    completed.sort(key=lambda x: x.get("completed_at", x.get("launched_at", "")), reverse=True)
-    
+    completed.sort(
+        key=lambda x: x.get("completed_at", x.get("launched_at", "")),
+        reverse=True,
+    )
+
     # Keep only recent completed jobs
     to_keep = completed[:keep_count]
     to_remove = completed[keep_count:]
-    
+
     # Update queue
     queue_doc["entries"] = other + to_keep
-    
-    if save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials):
+
+    if save_queue_to_gcs(
+        bucket_name, queue_name, queue_doc, credentials=credentials
+    ):
         logger.info(f"🧹 Cleaned up {len(to_remove)} old completed jobs")
         return len(to_remove)
     else:
@@ -382,48 +437,58 @@ def update_running_jobs_status(
 ) -> int:
     """
     Check status of RUNNING jobs and update to COMPLETED/FAILED if done.
-    
+
     Returns:
         Number of jobs updated
     """
     entries = queue_doc.get("entries", [])
     updated = 0
-    
+
     for idx, job in enumerate(entries):
         if job.get("status") != "RUNNING":
             continue
-        
+
         execution_name = job.get("execution_name")
         if not execution_name:
             continue
-        
-        status = check_job_completion(execution_name, project_id, region, credentials)
-        
+
+        status = check_job_completion(
+            execution_name, project_id, region, credentials
+        )
+
         # Get job name for logging
         job_name = (
-            job.get("benchmark_variant") or
-            job.get("job_id") or
-            job.get("country", "unknown")
+            job.get("benchmark_variant")
+            or job.get("job_id")
+            or job.get("country", "unknown")
         )
-        
+
         if status == "SUCCEEDED":
             entries[idx]["status"] = "COMPLETED"
-            entries[idx]["completed_at"] = datetime.now(timezone.utc).isoformat()
+            entries[idx]["completed_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
             logger.info(f"✅ Job completed: {job_name}")
             if "expected_result_path" in entries[idx]:
-                logger.info(f"   Results at: {entries[idx]['expected_result_path']}")
+                logger.info(
+                    f"   Results at: {entries[idx]['expected_result_path']}"
+                )
             updated += 1
         elif status == "FAILED":
             entries[idx]["status"] = "FAILED"
-            entries[idx]["completed_at"] = datetime.now(timezone.utc).isoformat()
+            entries[idx]["completed_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
             entries[idx]["error"] = "Cloud Run job execution failed"
             logger.warning(f"❌ Job failed: {job_name}")
             updated += 1
-    
+
     if updated > 0:
-        save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials)
+        save_queue_to_gcs(
+            bucket_name, queue_name, queue_doc, credentials=credentials
+        )
         logger.info(f"Updated {updated} job status(es)")
-    
+
     return updated
 
 
@@ -439,44 +504,50 @@ def process_queue(
 ) -> int:
     """
     Process jobs from the queue.
-    
+
     Returns:
         Number of jobs processed
     """
     if not project_id:
         project_id = os.getenv("PROJECT_ID", "datawarehouse-422511")
-    
+
     processed = 0
-    
+
     while True:
         # Load queue
-        queue_doc = load_queue_from_gcs(bucket_name, queue_name, credentials=credentials)
+        queue_doc = load_queue_from_gcs(
+            bucket_name, queue_name, credentials=credentials
+        )
         if not queue_doc:
             logger.error("Failed to load queue")
             break
-        
+
         # Resume queue if paused
         if not queue_doc.get("queue_running", True):
             logger.info("Queue is paused - resuming...")
             queue_doc["queue_running"] = True
-            if not save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials):
+            if not save_queue_to_gcs(
+                bucket_name, queue_name, queue_doc, credentials=credentials
+            ):
                 logger.error("Failed to resume queue")
                 break
-        
+
         # Show status
         entries = queue_doc.get("entries", [])
         pending_count = sum(1 for j in entries if j.get("status") == "PENDING")
         running_count = sum(1 for j in entries if j.get("status") == "RUNNING")
-        completed_count = sum(1 for j in entries if j.get("status") == "COMPLETED")
+        completed_count = sum(
+            1 for j in entries if j.get("status") == "COMPLETED"
+        )
         failed_count = sum(1 for j in entries if j.get("status") == "FAILED")
-        
+
         logger.info(f"📊 Queue Status: {queue_name}")
         logger.info(f"  Total: {len(entries)}")
         logger.info(f"  Pending: {pending_count}")
         logger.info(f"  Running: {running_count}")
         logger.info(f"  Completed: {completed_count}")
         logger.info(f"  Failed: {failed_count}")
-        
+
         # Update status of running jobs before proceeding
         if running_count > 0:
             logger.info("🔍 Checking status of running jobs...")
@@ -489,14 +560,18 @@ def process_queue(
                 credentials=credentials,
             )
             # Reload queue after updates
-            queue_doc = load_queue_from_gcs(bucket_name, queue_name, credentials=credentials)
+            queue_doc = load_queue_from_gcs(
+                bucket_name, queue_name, credentials=credentials
+            )
             entries = queue_doc.get("entries", [])
-            pending_count = sum(1 for j in entries if j.get("status") == "PENDING")
-        
+            pending_count = sum(
+                1 for j in entries if j.get("status") == "PENDING"
+            )
+
         if pending_count == 0:
             logger.info("✅ No more pending jobs")
             break
-        
+
         # Process one job
         success = process_one_job(
             queue_doc=queue_doc,
@@ -507,20 +582,20 @@ def process_queue(
             training_job_name=training_job_name,
             credentials=credentials,
         )
-        
+
         if success:
             processed += 1
-        
+
         # Check if should continue
         if not loop_until_empty:
             if processed >= max_jobs:
                 logger.info(f"Processed {processed} jobs (max: {max_jobs})")
                 break
-        
+
         if not success:
             logger.warning("Failed to process job, stopping")
             break
-    
+
     return processed
 
 
@@ -575,12 +650,12 @@ def main():
         default=10,
         help="Number of completed jobs to keep when cleaning up (default: 10)",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Get impersonated credentials
     credentials = get_impersonated_credentials()
-    
+
     logger.info("=" * 60)
     logger.info("MMM Queue Processor (Standalone)")
     logger.info("=" * 60)
@@ -589,16 +664,22 @@ def main():
     logger.info(f"Project: {args.project_id}")
     logger.info(f"Region: {args.region}")
     logger.info(f"Training Job: {args.training_job_name}")
-    logger.info(f"Mode: {'loop until empty' if args.loop else f'process {args.count} job(s)'}")
+    logger.info(
+        f"Mode: {'loop until empty' if args.loop else f'process {args.count} job(s)'}"
+    )
     if args.cleanup:
-        logger.info(f"Cleanup: Yes (keep {args.keep_completed} recent completed jobs)")
+        logger.info(
+            f"Cleanup: Yes (keep {args.keep_completed} recent completed jobs)"
+        )
     logger.info("=" * 60)
-    
+
     try:
         # Perform cleanup if requested
         if args.cleanup:
             logger.info("🧹 Performing cleanup...")
-            queue_doc = load_queue_from_gcs(args.bucket, args.queue_name, credentials=credentials)
+            queue_doc = load_queue_from_gcs(
+                args.bucket, args.queue_name, credentials=credentials
+            )
             if queue_doc:
                 cleanup_completed_jobs(
                     queue_doc=queue_doc,
@@ -610,7 +691,7 @@ def main():
                     keep_count=args.keep_completed,
                 )
             logger.info("")
-        
+
         processed = process_queue(
             bucket_name=args.bucket,
             queue_name=args.queue_name,
@@ -621,11 +702,11 @@ def main():
             training_job_name=args.training_job_name,
             credentials=credentials,
         )
-        
+
         logger.info("=" * 60)
         logger.info(f"✅ Processed {processed} job(s)")
         logger.info("=" * 60)
-        
+
     except KeyboardInterrupt:
         logger.info("\n⚠️  Interrupted by user")
         sys.exit(1)

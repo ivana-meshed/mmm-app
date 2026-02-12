@@ -249,17 +249,17 @@ def latest_run_key(runs, rev_filter=None, country_filter=None):
 
 def extract_goal_from_config(bucket_name: str, stamp: str, run_key=None):
     """Extract the goal (dep_var) from job_config.json or model_summary.json for a given timestamp.
-    
+
     Args:
         bucket_name: GCS bucket name
         stamp: Timestamp string
         run_key: Optional tuple of (rev, country, stamp) for fallback to robyn folder
-    
+
     Returns:
         str or None: The goal/dep_var if found
     """
     import json
-    
+
     # First try: training-configs/{stamp}/job_config.json
     try:
         config_blob_path = f"training-configs/{stamp}/job_config.json"
@@ -273,42 +273,47 @@ def extract_goal_from_config(bucket_name: str, stamp: str, run_key=None):
     except Exception as e:
         # Silently continue to fallback
         pass
-    
+
     # Second try: robyn/{rev}/{country}/{stamp}/model_summary.json
     if run_key:
         try:
             rev, country, _ = run_key
-            model_summary_path = f"robyn/{rev}/{country}/{stamp}/model_summary.json"
+            model_summary_path = (
+                f"robyn/{rev}/{country}/{stamp}/model_summary.json"
+            )
             blob = client.bucket(bucket_name).blob(model_summary_path)
             if blob.exists():
                 summary_data = blob.download_as_bytes()
                 summary = json.loads(summary_data.decode("utf-8"))
                 # Extract dep_var from input_metadata
-                if "input_metadata" in summary and "dep_var" in summary["input_metadata"]:
+                if (
+                    "input_metadata" in summary
+                    and "dep_var" in summary["input_metadata"]
+                ):
                     return summary["input_metadata"]["dep_var"]
         except Exception:
             # Silently continue if fallback fails
             pass
-    
+
     return None
 
 
 def get_goals_for_runs(bucket_name: str, run_keys):
     """Extract goals for a set of runs. Returns dict mapping (rev, country, stamp) to goal.
-    
+
     Tries two methods:
     1. training-configs/{stamp}/job_config.json (for runs with training configs)
     2. robyn/{rev}/{country}/{stamp}/model_summary.json (for runs without training configs)
     """
     goals_map = {}
-    
+
     for key in run_keys:
         rev, country, stamp = key
         # Try to extract goal with fallback to model_summary.json
         goal = extract_goal_from_config(bucket_name, stamp, run_key=key)
         if goal:
             goals_map[key] = goal
-    
+
     return goals_map
 
 
@@ -411,7 +416,7 @@ def find_onepager_blob(blobs, best_id: str):
                 # Look for best_id followed by underscore, dash, dot, or extension
                 idx = fn.find(best_id.lower())
                 if idx >= 0:
-                    after_id = fn[idx + len(best_id.lower()):]
+                    after_id = fn[idx + len(best_id.lower()) :]
                     if after_id.startswith(("_", "-", ".", ext)):
                         return b
 
@@ -890,7 +895,8 @@ def render_model_metrics_table(blobs, country, stamp):
 
     # Display threshold information in an expander
     with st.expander("View metric thresholds", expanded=False):
-        st.markdown(f"""
+        st.markdown(
+            f"""
         **Prediction Quality (R²):** How much the model captures the outcome  - Higher is better:
         - Good: ≥ {r2_thresholds['good']}
         - Acceptable: ≥ {r2_thresholds['acceptable']}
@@ -905,7 +911,8 @@ def render_model_metrics_table(blobs, country, stamp):
         - Good: ≤ {decomp_thresholds['good']}
         - Acceptable: ≤ {decomp_thresholds['acceptable']}
         - Poor: > {decomp_thresholds['acceptable']}
-        """)
+        """
+        )
 
     st.write("")
     st.write("")
@@ -1386,7 +1393,11 @@ else:
 
 # Column 2: Country
 with col2:
-    country_index = rev_countries.index(default_country) if default_country in rev_countries else 0
+    country_index = (
+        rev_countries.index(default_country)
+        if default_country in rev_countries
+        else 0
+    )
     countries_sel = st.selectbox(
         "Country",
         rev_countries,
@@ -1442,7 +1453,11 @@ else:
 # Column 3: Goal (dep_var)
 with col3:
     if rev_country_goals:
-        goal_index = rev_country_goals.index(default_goal) if default_goal in rev_country_goals else 0
+        goal_index = (
+            rev_country_goals.index(default_goal)
+            if default_goal in rev_country_goals
+            else 0
+        )
         goals_sel = st.selectbox(
             "Goal (dep_var)",
             rev_country_goals,
@@ -1537,7 +1552,7 @@ def render_run_for_country(
         return
 
     blobs = runs[key]
-    
+
     best_id, iters, trials = parse_best_meta(blobs)
 
     # Try to use cached data

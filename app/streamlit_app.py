@@ -14,10 +14,10 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 # Log startup - this should ALWAYS appear if app runs
-logger.info("="*80)
+logger.info("=" * 80)
 logger.info("[APP_STARTUP] Streamlit app starting...")
 logger.info(f"[APP_STARTUP] Python version: {sys.version}")
-logger.info("="*80)
+logger.info("=" * 80)
 
 import streamlit as st
 
@@ -40,9 +40,13 @@ try:
     logger.info(f"[APP_STARTUP] st.query_params value: {query_params_obj}")
     logger.info(f"[APP_STARTUP] st.query_params bool: {bool(query_params_obj)}")
     if query_params_obj:
-        logger.info(f"[APP_STARTUP] st.query_params keys: {list(query_params_obj.keys())}")
+        logger.info(
+            f"[APP_STARTUP] st.query_params keys: {list(query_params_obj.keys())}"
+        )
 except Exception as e:
-    logger.error(f"[APP_STARTUP] Error accessing query_params: {e}", exc_info=True)
+    logger.error(
+        f"[APP_STARTUP] Error accessing query_params: {e}", exc_info=True
+    )
 
 logger.info("[APP_STARTUP] About to import app_split_helpers...")
 

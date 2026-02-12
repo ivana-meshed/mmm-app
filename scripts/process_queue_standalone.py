@@ -41,13 +41,13 @@ from pathlib import Path
 app_dir = Path(__file__).parent.parent / "app"
 sys.path.insert(0, str(app_dir))
 
-from google.cloud import storage, run_v2
 from app_shared import (
     _safe_tick_once,
     build_job_config_from_params,
     execute_job_from_config,
 )
 from app_split_helpers import prepare_and_launch_job
+from google.cloud import run_v2, storage
 
 # Configure logging
 logging.basicConfig(
@@ -132,7 +132,9 @@ def process_queue(
                 break
 
         except Exception as e:
-            logger.error(f"[STANDALONE] Error processing job: {e}", exc_info=True)
+            logger.error(
+                f"[STANDALONE] Error processing job: {e}", exc_info=True
+            )
             failed += 1
             break
 

@@ -131,15 +131,19 @@ class BenchmarkRunner:
     ) -> List[Dict[str, Any]]:
         """Generate test configuration variants."""
         variant_specs = benchmark_config.variants
-        combination_mode = benchmark_config.config.get("combination_mode", "single")
-        
+        combination_mode = benchmark_config.config.get(
+            "combination_mode", "single"
+        )
+
         if combination_mode == "cartesian":
             # Generate cartesian product of all dimensions
-            return self._generate_cartesian_variants(base_config, benchmark_config)
+            return self._generate_cartesian_variants(
+                base_config, benchmark_config
+            )
         else:
             # Generate variants for each dimension separately (default)
             return self._generate_single_variants(base_config, benchmark_config)
-    
+
     def _generate_single_variants(
         self, base_config: Dict[str, Any], benchmark_config: BenchmarkConfig
     ) -> List[Dict[str, Any]]:
@@ -197,66 +201,76 @@ class BenchmarkRunner:
             variants = variants[:max_combos]
 
         return variants
-    
+
     def _generate_cartesian_variants(
         self, base_config: Dict[str, Any], benchmark_config: BenchmarkConfig
     ) -> List[Dict[str, Any]]:
         """Generate cartesian product of all variant dimensions."""
         variant_specs = benchmark_config.variants
-        
+
         # Generate variants for each dimension
         dimension_variants = {}
-        
+
         if "adstock" in variant_specs:
             dimension_variants["adstock"] = self._generate_adstock_variants(
                 base_config, variant_specs["adstock"]
             )
-        
+
         if "train_splits" in variant_specs:
             dimension_variants["train_splits"] = self._generate_split_variants(
                 base_config, variant_specs["train_splits"]
             )
-        
+
         if "time_aggregation" in variant_specs:
-            dimension_variants["time_aggregation"] = self._generate_time_agg_variants(
-                base_config, variant_specs["time_aggregation"]
+            dimension_variants["time_aggregation"] = (
+                self._generate_time_agg_variants(
+                    base_config, variant_specs["time_aggregation"]
+                )
             )
-        
+
         if "spend_var_mapping" in variant_specs:
-            dimension_variants["spend_var_mapping"] = self._generate_spend_var_variants(
-                base_config, variant_specs["spend_var_mapping"]
+            dimension_variants["spend_var_mapping"] = (
+                self._generate_spend_var_variants(
+                    base_config, variant_specs["spend_var_mapping"]
+                )
             )
-        
+
         if "seasonality_window" in variant_specs:
-            dimension_variants["seasonality_window"] = self._generate_seasonality_variants(
-                base_config, variant_specs["seasonality_window"]
+            dimension_variants["seasonality_window"] = (
+                self._generate_seasonality_variants(
+                    base_config, variant_specs["seasonality_window"]
+                )
             )
-        
+
         # Generate cartesian product
         if not dimension_variants:
             return []
-        
+
         # Create combinations
         dimension_names = list(dimension_variants.keys())
         dimension_lists = [dimension_variants[name] for name in dimension_names]
-        
+
         combined_variants = []
         for combo in product(*dimension_lists):
             # Merge all configs in this combination
             merged = base_config.copy()
             variant_name_parts = []
-            
+
             for variant_config in combo:
                 merged.update(variant_config)
-                variant_name_parts.append(variant_config.get("benchmark_variant", ""))
-            
+                variant_name_parts.append(
+                    variant_config.get("benchmark_variant", "")
+                )
+
             # Create combined name
             merged["benchmark_variant"] = "_".join(variant_name_parts)
             merged["benchmark_test"] = "combination"
-            merged["benchmark_description"] = f"Combination: {', '.join(variant_name_parts)}"
-            
+            merged["benchmark_description"] = (
+                f"Combination: {', '.join(variant_name_parts)}"
+            )
+
             combined_variants.append(merged)
-        
+
         # Limit combinations if needed
         max_combos = benchmark_config.max_combinations
         if len(combined_variants) > max_combos:
@@ -265,7 +279,7 @@ class BenchmarkRunner:
                 f"limiting to {max_combos}"
             )
             combined_variants = combined_variants[:max_combos]
-        
+
         return combined_variants
 
     def _generate_spend_var_variants(
@@ -286,8 +300,7 @@ class BenchmarkRunner:
                 # All channels: spend → spend
                 variant["paid_media_vars"] = variant["paid_media_spends"]
                 variant["var_to_spend_mapping"] = {
-                    spend: spend
-                    for spend in variant["paid_media_spends"]
+                    spend: spend for spend in variant["paid_media_spends"]
                 }
 
             elif mapping_type == "spend_to_proxy":
@@ -333,9 +346,7 @@ class BenchmarkRunner:
 
             # Optional: specify hyperparameter preset
             if "hyperparameter_preset" in spec:
-                variant["hyperparameter_preset"] = spec[
-                    "hyperparameter_preset"
-                ]
+                variant["hyperparameter_preset"] = spec["hyperparameter_preset"]
 
             variants.append(variant)
 
@@ -421,8 +432,7 @@ class BenchmarkRunner:
         )
 
         logger.info(
-            f"Saved benchmark plan: "
-            f"gs://{self.bucket_name}/{blob_path}"
+            f"Saved benchmark plan: " f"gs://{self.bucket_name}/{blob_path}"
         )
 
     def submit_variants_to_queue(
@@ -487,7 +497,7 @@ class BenchmarkRunner:
         # Extract required fields
         country = variant.get("country", "")
         revision = variant.get("revision", "default")
-        
+
         # CRITICAL: Construct data_gcs_path from data_version
         # This is required for queue processing to work
         data_version = variant.get("data_version", "")
@@ -506,7 +516,9 @@ class BenchmarkRunner:
             data_gcs_path = None
 
         # Get dep_var from either dep_var or selected_goal
-        dep_var = variant.get("dep_var") or variant.get("selected_goal", "UPLOAD_VALUE")
+        dep_var = variant.get("dep_var") or variant.get(
+            "selected_goal", "UPLOAD_VALUE"
+        )
 
         # Build params compatible with existing training format
         params = {
@@ -542,13 +554,9 @@ class BenchmarkRunner:
 
         # Add optional fields if present
         if "custom_hyperparameters" in variant:
-            params["custom_hyperparameters"] = variant[
-                "custom_hyperparameters"
-            ]
+            params["custom_hyperparameters"] = variant["custom_hyperparameters"]
         if "column_agg_strategies" in variant:
-            params["column_agg_strategies"] = variant[
-                "column_agg_strategies"
-            ]
+            params["column_agg_strategies"] = variant["column_agg_strategies"]
 
         return params
 
@@ -628,9 +636,9 @@ class BenchmarkRunner:
         variants_dict = config_data.get("variants", {})
         if not variants_dict:
             return 0
-        
+
         combination_mode = config_data.get("combination_mode", "single")
-        
+
         if combination_mode == "cartesian":
             # Cartesian product - multiply counts
             total = 1
@@ -645,30 +653,36 @@ class BenchmarkRunner:
                 if isinstance(variant_list, list):
                     total += len(variant_list)
             return total
-    
+
     def list_config_files(self) -> List[Dict[str, Any]]:
         """List available benchmark configuration files."""
         benchmarks_dir = Path(__file__).parent.parent / "benchmarks"
-        
+
         if not benchmarks_dir.exists():
             return []
-        
+
         configs = []
         for config_file in benchmarks_dir.glob("*.json"):
             try:
                 with open(config_file) as f:
                     config_data = json.load(f)
-                    configs.append({
-                        "file": config_file.name,
-                        "path": str(config_file),
-                        "name": config_data.get("name", ""),
-                        "description": config_data.get("description", ""),
-                        "variant_count": self._count_config_variants(config_data),
-                        "combination_mode": config_data.get("combination_mode", "single"),
-                    })
+                    configs.append(
+                        {
+                            "file": config_file.name,
+                            "path": str(config_file),
+                            "name": config_data.get("name", ""),
+                            "description": config_data.get("description", ""),
+                            "variant_count": self._count_config_variants(
+                                config_data
+                            ),
+                            "combination_mode": config_data.get(
+                                "combination_mode", "single"
+                            ),
+                        }
+                    )
             except Exception as e:
                 logger.warning(f"Failed to load {config_file}: {e}")
-        
+
         return configs
 
 
@@ -685,10 +699,10 @@ class ResultsCollector:
     ) -> Optional[Dict[str, Any]]:
         """
         Load benchmark plan from GCS.
-        
+
         Args:
             benchmark_id: The benchmark ID
-            
+
         Returns:
             Plan dict if found, None otherwise
         """
@@ -712,21 +726,17 @@ class ResultsCollector:
         # Load benchmark plan
         plan = self._load_benchmark_plan(benchmark_id)
         if not plan:
-            raise FileNotFoundError(
-                f"Benchmark plan not found: {benchmark_id}"
-            )
+            raise FileNotFoundError(f"Benchmark plan not found: {benchmark_id}")
 
         variants = plan.get("variants", [])
-        
+
         if not variants:
             logger.warning(f"No variants found in benchmark plan")
             if pd is not None:
                 return pd.DataFrame()
             return []
 
-        logger.info(
-            f"Collecting results for {len(variants)} variants..."
-        )
+        logger.info(f"Collecting results for {len(variants)} variants...")
 
         results = []
         for i, variant in enumerate(variants, 1):
@@ -739,9 +749,7 @@ class ResultsCollector:
                 if result:
                     results.append(result)
             except Exception as e:
-                logger.error(
-                    f"Error collecting variant {i}: {e}"
-                )
+                logger.error(f"Error collecting variant {i}: {e}")
 
         logger.info(f"Collected {len(results)} results")
 
@@ -773,9 +781,7 @@ class ResultsCollector:
         prefix = f"robyn/{revision}/{country}/"
 
         try:
-            blobs = self.client.list_blobs(
-                self.bucket_name, prefix=prefix
-            )
+            blobs = self.client.list_blobs(self.bucket_name, prefix=prefix)
 
             # Look for model_summary.json files and check metadata
             for blob in blobs:
@@ -871,9 +877,7 @@ class ResultsCollector:
             # Model metadata
             "model_id": best_model.get("model_id"),
             "pareto_model_count": summary.get("pareto_model_count", 0),
-            "candidate_model_count": summary.get(
-                "candidate_model_count", 0
-            ),
+            "candidate_model_count": summary.get("candidate_model_count", 0),
             # Execution metadata
             "training_time_mins": summary.get("training_time_mins"),
             "timestamp": summary.get("timestamp", ""),
@@ -882,16 +886,13 @@ class ResultsCollector:
 
         return result
 
-    def export_results(
-        self, benchmark_id: str, results, format: str = "csv"
-    ):
+    def export_results(self, benchmark_id: str, results, format: str = "csv"):
         """Export results to GCS."""
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         if format == "csv":
             output_path = (
-                f"{BENCHMARK_ROOT}/{benchmark_id}/"
-                f"results_{timestamp}.csv"
+                f"{BENCHMARK_ROOT}/{benchmark_id}/" f"results_{timestamp}.csv"
             )
 
             if pd is not None and isinstance(results, pd.DataFrame):
@@ -935,12 +936,12 @@ class ResultsCollector:
     def list_results(self, benchmark_id: str):
         """
         List all available results that might match a benchmark.
-        
+
         Shows model results with metadata to help user identify their benchmark results.
         """
         print(f"\nSearching for results matching benchmark: {benchmark_id}")
         print("=" * 80)
-        
+
         # Load benchmark plan to get variants
         plan = self._load_benchmark_plan(benchmark_id)
         if not plan:
@@ -951,25 +952,25 @@ class ResultsCollector:
             variants = plan.get("variants", [])
             print(f"Benchmark has {len(variants)} variants")
             print(f"Created: {plan.get('created_at', 'unknown')}\n")
-        
+
         # Search for results
         results_found = 0
-        
+
         for variant in variants:
             country = variant.get("country", "")
             revision = variant.get("revision", "default")
             adstock = variant.get("adstock", "")
             variant_name = variant.get("benchmark_variant", "")
-            
+
             print(f"Variant: {variant_name} (adstock: {adstock})")
             print(f"Looking in: robyn/{revision}/{country}/")
-            
+
             # List recent results
             prefix = f"robyn/{revision}/{country}/"
             try:
                 blobs = list(self.bucket.list_blobs(prefix=prefix))
                 summaries = [b for b in blobs if "model_summary.json" in b.name]
-                
+
                 if summaries:
                     print(f"  Found {len(summaries)} model result(s)")
                     for blob in summaries[:5]:  # Show first 5
@@ -980,89 +981,101 @@ class ResultsCollector:
                     print(f"  ⚠️  No results found")
             except Exception as e:
                 print(f"  Error searching: {e}")
-            
+
             print()
-        
+
         if results_found == 0:
             print("❌ No results found for any variants")
             print("\nPossible reasons:")
             print("  1. Jobs haven't completed yet")
             print("  2. Jobs failed during execution")
             print("  3. Results saved to different location")
-            print(f"\n💡 Use --show-results-location {benchmark_id} to see expected paths")
+            print(
+                f"\n💡 Use --show-results-location {benchmark_id} to see expected paths"
+            )
         else:
             print(f"✅ Found {results_found} result file(s)")
             print("\n💡 To access results manually:")
             print(f"  gsutil ls gs://{self.bucket_name}/robyn/")
-    
+
     def show_results_location(self, benchmark_id: str):
         """
         Show where results should be located for a benchmark.
-        
+
         Provides GCS paths and manual access instructions.
         """
         print(f"\nResults Location Information")
         print("=" * 80)
-        
+
         # Load benchmark plan
         plan = self._load_benchmark_plan(benchmark_id)
         if not plan:
             print(f"⚠️  Could not load benchmark plan for {benchmark_id}")
-            print(f"Expected location: gs://{self.bucket_name}/{BENCHMARK_ROOT}/{benchmark_id}/plan.json")
+            print(
+                f"Expected location: gs://{self.bucket_name}/{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
+            )
             return
-        
+
         print(f"Benchmark: {plan.get('name', 'unknown')}")
         print(f"Description: {plan.get('description', '')}")
         print(f"Created: {plan.get('created_at', 'unknown')}")
         print(f"Variants: {plan.get('variant_count', 0)}")
         print()
-        
+
         variants = plan.get("variants", [])
-        
+
         print("Expected Results Locations:")
         print("-" * 80)
-        
+
         for i, variant in enumerate(variants, 1):
             country = variant.get("country", "")
             revision = variant.get("revision", "default")
             variant_name = variant.get("benchmark_variant", "")
-            
+
             print(f"\n{i}. Variant: {variant_name}")
             print(f"   Country: {country}")
             print(f"   Revision: {revision}")
-            print(f"   Path: gs://{self.bucket_name}/robyn/{revision}/{country}/YYYYMMDD_HHMMSS/")
+            print(
+                f"   Path: gs://{self.bucket_name}/robyn/{revision}/{country}/YYYYMMDD_HHMMSS/"
+            )
             print(f"   Contains:")
             print(f"     - model_summary.json  (metrics and metadata)")
             print(f"     - best_model_plots.png (visualizations)")
             print(f"     - model_params.json   (configuration)")
-        
+
         print("\n" + "=" * 80)
         print("Manual Access Commands:")
         print("-" * 80)
-        
+
         # Provide gsutil commands
         for variant in variants[:1]:  # Show example for first variant
             country = variant.get("country", "")
             revision = variant.get("revision", "default")
-            
+
             print(f"\n# List all results for {country}:")
-            print(f"gsutil ls gs://{self.bucket_name}/robyn/{revision}/{country}/")
-            
+            print(
+                f"gsutil ls gs://{self.bucket_name}/robyn/{revision}/{country}/"
+            )
+
             print(f"\n# View a specific model summary:")
-            print(f"gsutil cat gs://{self.bucket_name}/robyn/{revision}/{country}/YYYYMMDD_HHMMSS/model_summary.json | jq .")
-            
+            print(
+                f"gsutil cat gs://{self.bucket_name}/robyn/{revision}/{country}/YYYYMMDD_HHMMSS/model_summary.json | jq ."
+            )
+
             print(f"\n# Download all results:")
-            print(f"gsutil -m cp -r gs://{self.bucket_name}/robyn/{revision}/{country}/YYYYMMDD_*/ ./results/")
-        
+            print(
+                f"gsutil -m cp -r gs://{self.bucket_name}/robyn/{revision}/{country}/YYYYMMDD_*/ ./results/"
+            )
+
         print("\n" + "=" * 80)
         print(f"\n💡 To list available results:")
-        print(f"  python scripts/benchmark_mmm.py --list-results {benchmark_id}")
+        print(
+            f"  python scripts/benchmark_mmm.py --list-results {benchmark_id}"
+        )
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Run MMM benchmarking tests"
-    )
+    parser = argparse.ArgumentParser(description="Run MMM benchmarking tests")
     parser.add_argument(
         "--config",
         type=Path,
@@ -1135,7 +1148,9 @@ def main():
     if args.list_configs:
         configs = runner.list_config_files()
         if not configs:
-            print("No benchmark configuration files found in benchmarks/ directory")
+            print(
+                "No benchmark configuration files found in benchmarks/ directory"
+            )
             return
 
         print("\nAvailable Benchmark Configurations:")
@@ -1147,10 +1162,12 @@ def main():
             print(f"Estimated variants: {cfg['variant_count']}")
             print(f"Path: {cfg['path']}")
             print("-" * 80)
-        
+
         print(f"\nTotal: {len(configs)} configuration(s)")
         print("\nTo run a benchmark:")
-        print(f"  python scripts/benchmark_mmm.py --config benchmarks/<filename>")
+        print(
+            f"  python scripts/benchmark_mmm.py --config benchmarks/<filename>"
+        )
         return
 
     if args.list_results:
@@ -1163,7 +1180,9 @@ def main():
             print("\nThis command requires Google Cloud credentials.")
             print("\nPlease set up credentials using ONE of these methods:")
             print("\n1. Set environment variable:")
-            print("   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json")
+            print(
+                "   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json"
+            )
             print("\n2. Use gcloud auth:")
             print("   gcloud auth application-default login")
             print("\nThen retry the command.")
@@ -1180,7 +1199,9 @@ def main():
             print("\nThis command requires Google Cloud credentials.")
             print("\nPlease set up credentials using ONE of these methods:")
             print("\n1. Set environment variable:")
-            print("   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json")
+            print(
+                "   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json"
+            )
             print("\n2. Use gcloud auth:")
             print("   gcloud auth application-default login")
             print("\nThen retry the command.")
@@ -1228,9 +1249,7 @@ def main():
         goal=base_cfg["goal"],
         version=base_cfg["version"],
     )
-    logger.info(
-        f"Loaded base config: {base_cfg['country']}/{base_cfg['goal']}"
-    )
+    logger.info(f"Loaded base config: {base_cfg['country']}/{base_cfg['goal']}")
 
     # Override iterations/trials in base config
     base_config["iterations"] = benchmark_config.iterations
@@ -1250,7 +1269,7 @@ def main():
         print("  - Variant specifications are valid")
         print("  - Base config exists and is accessible")
         sys.exit(1)
-    
+
     # Validate variants were generated
     if not variants:
         logger.error("No variants generated! Check your configuration.")
@@ -1283,25 +1302,29 @@ def main():
             f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
         )
         return
-    
+
     if args.test_run:
         if not variants:
             logger.error("Cannot run test - no variants generated")
             print("\n❌ Error: Cannot run test with empty variants list")
             sys.exit(1)
-            
-        logger.info("🧪 TEST RUN MODE - Running first variant with minimal settings")
+
+        logger.info(
+            "🧪 TEST RUN MODE - Running first variant with minimal settings"
+        )
         print("\n🧪 TEST RUN MODE")
         print(f"Iterations: 10 (reduced from {benchmark_config.iterations})")
         print(f"Trials: 1 (reduced from {benchmark_config.trials})")
-        print(f"Testing variant: {variants[0].get('benchmark_variant', 'first')}")
-        
+        print(
+            f"Testing variant: {variants[0].get('benchmark_variant', 'first')}"
+        )
+
         # Modify first variant for test
         test_variants = [variants[0].copy()]
         test_variants[0]["iterations"] = 10
         test_variants[0]["trials"] = 1
         variants = test_variants
-        
+
         # Update benchmark_id to indicate test
         benchmark_id = f"{benchmark_id}_test"
 
@@ -1339,9 +1362,7 @@ def main():
                 # Call the trigger_queue script
                 import subprocess
 
-                trigger_script = (
-                    Path(__file__).parent / "trigger_queue.py"
-                )
+                trigger_script = Path(__file__).parent / "trigger_queue.py"
                 cmd = [
                     sys.executable,
                     str(trigger_script),
@@ -1371,18 +1392,14 @@ def main():
                     if result.stderr:
                         print(f"\n⚠️  Queue trigger failed:")
                         print(result.stderr)
-                    print(
-                        "\nYou can manually trigger queue processing with:"
-                    )
+                    print("\nYou can manually trigger queue processing with:")
                     print(
                         f"  python scripts/trigger_queue.py --queue-name {args.queue_name} --resume-queue"
                     )
 
             except Exception as e:
                 logger.error(f"Failed to trigger queue: {e}")
-                print(
-                    f"\n⚠️  Could not automatically trigger queue: {e}"
-                )
+                print(f"\n⚠️  Could not automatically trigger queue: {e}")
                 print("You can manually trigger queue processing with:")
                 print(
                     f"  python scripts/trigger_queue.py --queue-name {args.queue_name} --resume-queue"
@@ -1392,9 +1409,7 @@ def main():
                 f"\n💡 Monitor progress in the Streamlit app "
                 f"(Run Experiment → Queue Monitor)"
             )
-            print(
-                f"\nOr manually trigger queue processing with:"
-            )
+            print(f"\nOr manually trigger queue processing with:")
             print(
                 f"  python scripts/trigger_queue.py --queue-name {args.queue_name} --resume-queue --until-empty"
             )
@@ -1402,10 +1417,7 @@ def main():
     except Exception as e:
         logger.error(f"Failed to submit jobs: {e}")
         print(f"\n❌ Error submitting jobs: {e}")
-        print(
-            f"Benchmark plan saved but jobs not queued: "
-            f"{benchmark_id}"
-        )
+        print(f"Benchmark plan saved but jobs not queued: " f"{benchmark_id}")
         sys.exit(1)
 
 

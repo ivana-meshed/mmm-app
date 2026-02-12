@@ -189,47 +189,63 @@ def prepare_and_launch_job(params: dict) -> dict:
     One complete job: query SF -> parquet -> upload -> write config (timestamped + latest) -> run Cloud Run Job.
     For GCS-based workflows, if data_gcs_path is provided, skip Snowflake query and use existing data.
     Returns exec_info dict with execution_name, timestamp, gcs_prefix, etc.
-    
+
     NOTE: This function must work in headless mode (HTTP queue tick), so it cannot rely on st.session_state.
     All required data must be in the params dict.
     """
     logger.info("=" * 80)
-    logger.info("[LAUNCHER_ENTRY] ========== prepare_and_launch_job() CALLED ==========")
+    logger.info(
+        "[LAUNCHER_ENTRY] ========== prepare_and_launch_job() CALLED =========="
+    )
     logger.info(f"[LAUNCHER_ENTRY] Params keys: {list(params.keys())}")
     logger.info(f"[LAUNCHER_ENTRY] Country: {params.get('country')}")
     logger.info(f"[LAUNCHER_ENTRY] Revision: {params.get('revision')}")
     logger.info(f"[LAUNCHER_ENTRY] Iterations: {params.get('iterations')}")
-    logger.info(f"[LAUNCHER_ENTRY] Has data_gcs_path: {bool(params.get('data_gcs_path'))}")
+    logger.info(
+        f"[LAUNCHER_ENTRY] Has data_gcs_path: {bool(params.get('data_gcs_path'))}"
+    )
     logger.info("=" * 80)
-    
+
     # Get GCS bucket from params first, then session state (if available), then env var
     gcs_bucket = params.get("gcs_bucket")
     logger.info(f"[LAUNCHER_BUCKET] Step 1 - From params: {gcs_bucket}")
-    
+
     if not gcs_bucket:
         try:
             gcs_bucket = st.session_state.get("gcs_bucket")
-            logger.info(f"[LAUNCHER_BUCKET] Step 2 - From session state: {gcs_bucket}")
+            logger.info(
+                f"[LAUNCHER_BUCKET] Step 2 - From session state: {gcs_bucket}"
+            )
         except (AttributeError, RuntimeError) as e:
             # No session state (headless mode)
-            logger.info(f"[LAUNCHER_BUCKET] Step 2 - Session state not available: {type(e).__name__}")
+            logger.info(
+                f"[LAUNCHER_BUCKET] Step 2 - Session state not available: {type(e).__name__}"
+            )
             pass
-    
+
     if not gcs_bucket:
         gcs_bucket = GCS_BUCKET  # Use environment variable as fallback
-        logger.info(f"[LAUNCHER_BUCKET] Step 3 - From environment: {gcs_bucket}")
-    
+        logger.info(
+            f"[LAUNCHER_BUCKET] Step 3 - From environment: {gcs_bucket}"
+        )
+
     if not gcs_bucket:
-        logger.error("[LAUNCHER_ERROR] GCS bucket not available from any source!")
+        logger.error(
+            "[LAUNCHER_ERROR] GCS bucket not available from any source!"
+        )
         raise ValueError(
             "GCS bucket not specified in params, session state, or environment. "
             "Headless mode requires gcs_bucket in params dict."
         )
-    
+
     logger.info(f"[LAUNCHER_BUCKET] Final bucket: {gcs_bucket}")
-    logger.info(f"[LAUNCHER_DATA] data_gcs_path: {params.get('data_gcs_path', 'NOT SET - will query Snowflake')}")
-    logger.info(f"[LAUNCHER_DATA] annotations_gcs_path: {params.get('annotations_gcs_path', 'NOT SET')}")
-    
+    logger.info(
+        f"[LAUNCHER_DATA] data_gcs_path: {params.get('data_gcs_path', 'NOT SET - will query Snowflake')}"
+    )
+    logger.info(
+        f"[LAUNCHER_DATA] annotations_gcs_path: {params.get('annotations_gcs_path', 'NOT SET')}"
+    )
+
     timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
     # Support both 'revision' and 'version' keys for backward compatibility
     revision = params.get("revision") or params.get("version") or ""
@@ -392,13 +408,17 @@ def handle_queue_tick_if_requested():
     logger.info("=" * 80)
     logger.info(f"[QUEUE_CHECK] handle_queue_tick_if_requested() called")
     logger.info(f"[QUEUE_CHECK] st.query_params type: {type(st.query_params)}")
-    logger.info(f"[QUEUE_CHECK] st.query_params value: {dict(st.query_params) if st.query_params else None}")
+    logger.info(
+        f"[QUEUE_CHECK] st.query_params value: {dict(st.query_params) if st.query_params else None}"
+    )
     logger.info(f"[QUEUE_CHECK] st.query_params bool: {bool(st.query_params)}")
     if st.query_params:
-        logger.info(f"[QUEUE_CHECK] queue_tick param: {st.query_params.get('queue_tick')}")
+        logger.info(
+            f"[QUEUE_CHECK] queue_tick param: {st.query_params.get('queue_tick')}"
+        )
         logger.info(f"[QUEUE_CHECK] name param: {st.query_params.get('name')}")
     logger.info("=" * 80)
-    
+
     res = handle_queue_tick_from_query_params(
         st.query_params,  # type: ignore
         st.session_state.get("gcs_bucket", GCS_BUCKET),
@@ -610,9 +630,7 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                                                 from datetime import (
                                                     datetime as dt,
                                                 )
-                                                from datetime import (
-                                                    timedelta,
-                                                )
+                                                from datetime import timedelta
 
                                                 start_time = dt.fromisoformat(
                                                     str(start_time_str).replace(

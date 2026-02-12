@@ -6,13 +6,12 @@ Note: Some tests may be skipped if google.cloud or pandas are not installed.
 """
 
 import json
-import unittest
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 # Mock google.cloud before importing benchmark_mmm
 import sys
-from unittest.mock import MagicMock
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Mock google cloud modules if not available
 try:
@@ -163,11 +162,14 @@ class TestBenchmarkRunner(unittest.TestCase):
 
         # Verify data_gcs_path is constructed correctly
         self.assertIn("data_gcs_path", params)
-        self.assertIn("mapped-datasets/de/20251211_115528/raw.parquet", params["data_gcs_path"])
-        
+        self.assertIn(
+            "mapped-datasets/de/20251211_115528/raw.parquet",
+            params["data_gcs_path"],
+        )
+
         # Verify dep_var is set from selected_goal
         self.assertEqual(params["dep_var"], "UPLOAD_VALUE")
-        
+
         # Verify benchmark metadata is preserved
         self.assertEqual(params["benchmark_id"], "test_benchmark")
         self.assertEqual(params["benchmark_test"], "adstock")
@@ -199,9 +201,7 @@ class TestBenchmarkRunner(unittest.TestCase):
             }
         ]
 
-        variants = self.runner._generate_spend_var_variants(
-            base_config, specs
-        )
+        variants = self.runner._generate_spend_var_variants(base_config, specs)
 
         self.assertEqual(len(variants), 1)
         self.assertEqual(
@@ -230,9 +230,7 @@ class TestBenchmarkRunner(unittest.TestCase):
             },
         ]
 
-        variants = self.runner._generate_time_agg_variants(
-            base_config, specs
-        )
+        variants = self.runner._generate_time_agg_variants(base_config, specs)
 
         self.assertEqual(len(variants), 2)
         self.assertEqual(variants[0]["resample_freq"], "none")
@@ -260,12 +258,8 @@ class TestBenchmarkRunner(unittest.TestCase):
             },
         }
 
-        benchmark_config = benchmark_mmm.BenchmarkConfig(
-            benchmark_config_dict
-        )
-        variants = self.runner.generate_variants(
-            base_config, benchmark_config
-        )
+        benchmark_config = benchmark_mmm.BenchmarkConfig(benchmark_config_dict)
+        variants = self.runner.generate_variants(base_config, benchmark_config)
 
         # Should be limited to 2 even though we defined 3
         self.assertEqual(len(variants), 2)
@@ -283,9 +277,7 @@ class TestBenchmarkConfigFiles(unittest.TestCase):
 
         json_files = list(benchmark_dir.glob("*.json"))
 
-        self.assertGreater(
-            len(json_files), 0, "No example configs found"
-        )
+        self.assertGreater(len(json_files), 0, "No example configs found")
 
         for config_file in json_files:
             with self.subTest(config=config_file.name):

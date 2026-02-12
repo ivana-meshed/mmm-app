@@ -41,8 +41,8 @@ GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 QUEUE_ROOT = os.getenv("QUEUE_ROOT", "robyn-queues")
 
 try:
-    from google.cloud import storage
-    from google.cloud import run_v2
+    from google.cloud import run_v2, storage
+
     GOOGLE_CLOUD_AVAILABLE = True
 except ImportError:
     GOOGLE_CLOUD_AVAILABLE = False
@@ -54,20 +54,21 @@ except ImportError:
 
 try:
     import requests
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
     logger.error(
-        "requests library not installed. "
-        "Install with: pip install requests"
+        "requests library not installed. " "Install with: pip install requests"
     )
     sys.exit(1)
 
 try:
     from google.auth import default
+    from google.auth.transport import requests as google_requests
     from google.auth.transport.requests import Request as AuthRequest
     from google.oauth2 import id_token
-    from google.auth.transport import requests as google_requests
+
     GOOGLE_AUTH_AVAILABLE = True
 except ImportError:
     GOOGLE_AUTH_AVAILABLE = False
@@ -204,7 +205,7 @@ def trigger_queue_via_http(service_url: str, queue_name: str) -> dict:
     # Cloud Run requires ID token authentication with the service URL as audience
     # See: https://cloud.google.com/run/docs/authenticating/service-to-service
     auth_req = google_requests.Request()
-    
+
     try:
         # Fetch ID token with service URL as audience
         id_token_value = id_token.fetch_id_token(auth_req, service_url)
@@ -241,7 +242,11 @@ def trigger_queue_via_http(service_url: str, queue_name: str) -> dict:
                 "changed": False,
             }
     except Exception as e:
-        return {"ok": False, "message": f"Request failed: {e}", "changed": False}
+        return {
+            "ok": False,
+            "message": f"Request failed: {e}",
+            "changed": False,
+        }
 
 
 def get_service_url() -> str:
@@ -257,7 +262,9 @@ def get_service_url() -> str:
     try:
         client = run_v2.ServicesClient()
         # Note: The actual service name has "-web" suffix (e.g., mmm-app-dev-web)
-        service_name = f"projects/{PROJECT_ID}/locations/{REGION}/services/mmm-app-dev-web"
+        service_name = (
+            f"projects/{PROJECT_ID}/locations/{REGION}/services/mmm-app-dev-web"
+        )
 
         try:
             service = client.get_service(name=service_name)
@@ -265,37 +272,53 @@ def get_service_url() -> str:
         except Exception as e:
             # Try production name
             logger.debug(f"Dev service not found: {e}")
-            service_name = f"projects/{PROJECT_ID}/locations/{REGION}/services/mmm-app-web"
+            service_name = (
+                f"projects/{PROJECT_ID}/locations/{REGION}/services/mmm-app-web"
+            )
             service = client.get_service(name=service_name)
             return service.uri
 
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Failed to get service URL: {error_msg}")
-        
+
         # Check if it's a permission error
-        if "403" in error_msg or "Permission" in error_msg or "denied" in error_msg:
+        if (
+            "403" in error_msg
+            or "Permission" in error_msg
+            or "denied" in error_msg
+        ):
             logger.error("")
             logger.error("⚠️  Permission denied when querying Cloud Run API")
-            logger.error("You need 'run.services.get' permission OR set WEB_SERVICE_URL environment variable.")
+            logger.error(
+                "You need 'run.services.get' permission OR set WEB_SERVICE_URL environment variable."
+            )
             logger.error("")
             logger.error("To fix, run one of these commands:")
             logger.error("")
             logger.error("Option 1 - Get URL and set environment variable:")
-            logger.error(f"  gcloud run services describe mmm-app-dev-web --region={REGION} --format='value(status.url)'")
+            logger.error(
+                f"  gcloud run services describe mmm-app-dev-web --region={REGION} --format='value(status.url)'"
+            )
             logger.error("  # or for production:")
-            logger.error(f"  gcloud run services describe mmm-app-web --region={REGION} --format='value(status.url)'")
+            logger.error(
+                f"  gcloud run services describe mmm-app-web --region={REGION} --format='value(status.url)'"
+            )
             logger.error("  # Then set it:")
             logger.error("  export WEB_SERVICE_URL=<the-url-from-above>")
             logger.error("")
-            logger.error("Option 2 - List all services to find the correct name:")
+            logger.error(
+                "Option 2 - List all services to find the correct name:"
+            )
             logger.error(f"  gcloud run services list --region={REGION}")
             logger.error("")
             logger.error("Option 3 - Get URL from Cloud Console:")
-            logger.error(f"  https://console.cloud.google.com/run?project={PROJECT_ID}")
+            logger.error(
+                f"  https://console.cloud.google.com/run?project={PROJECT_ID}"
+            )
             logger.error("  Copy the URL and run: export WEB_SERVICE_URL=<url>")
             logger.error("")
-        
+
         raise RuntimeError(
             "Cannot get Cloud Run service URL. "
             "Set WEB_SERVICE_URL environment variable or ensure you have Cloud Run permissions."
