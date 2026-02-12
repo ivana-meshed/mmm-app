@@ -1313,11 +1313,13 @@ def main():
             "🧪 TEST RUN MODE - Running first variant with minimal settings"
         )
         print("\n🧪 TEST RUN MODE")
+        print(f"Generated {len(variants)} total variants, but TEST MODE only runs the first one")
         print(f"Iterations: 10 (reduced from {benchmark_config.iterations})")
         print(f"Trials: 1 (reduced from {benchmark_config.trials})")
         print(
             f"Testing variant: {variants[0].get('benchmark_variant', 'first')}"
         )
+        print(f"\n💡 To run all {len(variants)} variants, use --config without --test-run")
 
         # Modify first variant for test
         test_variants = [variants[0].copy()]

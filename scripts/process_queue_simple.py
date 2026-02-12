@@ -226,6 +226,70 @@ def launch_cloud_run_job(
         return None
 
 
+def verify_results_exist(
+    result_path: str, credentials=None, timeout_seconds: int = 30
+) -> dict:
+    """
+    Verify that results exist at the expected GCS path.
+    
+    Args:
+        result_path: GCS path like gs://bucket/path/to/results/
+        credentials: GCP credentials
+        timeout_seconds: How long to wait for results to appear
+        
+    Returns:
+        dict with keys:
+            - exists: bool
+            - files_found: list of filenames
+            - message: str
+    """
+    import time
+    from google.cloud import storage
+    
+    if not result_path.startswith("gs://"):
+        return {"exists": False, "files_found": [], "message": "Invalid GCS path"}
+    
+    try:
+        # Extract bucket and path
+        path_parts = result_path[5:].split("/", 1)
+        if len(path_parts) != 2:
+            return {"exists": False, "files_found": [], "message": "Invalid path format"}
+        
+        bucket_name, gcs_path = path_parts
+        # Ensure path ends with / for prefix search
+        if not gcs_path.endswith("/"):
+            gcs_path += "/"
+        
+        client = storage.Client(credentials=credentials)
+        bucket = client.bucket(bucket_name)
+        
+        # Wait for results to appear (with timeout)
+        start_time = time.time()
+        while time.time() - start_time < timeout_seconds:
+            blobs = list(bucket.list_blobs(prefix=gcs_path, max_results=100))
+            if blobs:
+                filenames = [blob.name.split("/")[-1] for blob in blobs if blob.name.split("/")[-1]]
+                return {
+                    "exists": True,
+                    "files_found": filenames,
+                    "message": f"Found {len(filenames)} files"
+                }
+            time.sleep(2)  # Wait 2 seconds before retry
+        
+        return {
+            "exists": False,
+            "files_found": [],
+            "message": f"No files found after {timeout_seconds}s timeout"
+        }
+    
+    except Exception as e:
+        return {
+            "exists": False,
+            "files_found": [],
+            "message": f"Error checking GCS: {str(e)}"
+        }
+
+
 def process_one_job(
     queue_doc: Dict,
     bucket_name: str,
@@ -259,6 +323,8 @@ def process_one_job(
     params = pending_job.get("params", {})
     country = params.get("country", "unknown")
     revision = params.get("revision", "unknown")
+    benchmark_variant = params.get("benchmark_variant", "")
+    benchmark_test = params.get("benchmark_test", "")
 
     # Generate unique timestamp for this job
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")[
@@ -268,6 +334,10 @@ def process_one_job(
     logger.info(f"Processing job {pending_idx + 1}/{len(entries)}")
     logger.info(f"  Country: {country}")
     logger.info(f"  Revision: {revision}")
+    if benchmark_variant:
+        logger.info(f"  Benchmark variant: {benchmark_variant}")
+    if benchmark_test:
+        logger.info(f"  Benchmark test: {benchmark_test}")
     logger.info(f"  Job ID: {pending_job.get('job_id', 'N/A')}")
 
     # Log expected result location
@@ -277,6 +347,12 @@ def process_one_job(
     logger.info(
         f"   Key files: model_summary.json, best_model_plots.png, console.log"
     )
+    
+    # Store benchmark info in job entry for better tracking
+    if benchmark_variant:
+        pending_job["benchmark_variant"] = benchmark_variant
+    if benchmark_test:
+        pending_job["benchmark_test"] = benchmark_test
 
     # Mark as LAUNCHING
     entries[pending_idx]["status"] = "LAUNCHING"
@@ -300,6 +376,15 @@ def process_one_job(
         "timestamp": timestamp,  # Pass explicit timestamp to R script
         "output_timestamp": timestamp,  # Pass for consistent result paths
     }
+    
+    # Log what we're passing to the job
+    logger.info(f"📋 Job configuration:")
+    logger.info(f"   country: {config['country']}")
+    logger.info(f"   revision: {config['revision']}")
+    logger.info(f"   timestamp: {timestamp}")
+    logger.info(f"   data_gcs_path: {config['data_gcs_path']}")
+    if benchmark_variant:
+        logger.info(f"   benchmark_variant: {benchmark_variant}")
 
     execution_name = launch_cloud_run_job(
         project_id=project_id,
@@ -456,11 +541,14 @@ def update_running_jobs_status(
             execution_name, project_id, region, credentials
         )
 
-        # Get job name for logging
+        # Get job name for logging - check params for benchmark info
+        params = job.get("params", {})
         job_name = (
-            job.get("benchmark_variant")
+            params.get("benchmark_variant")
+            or job.get("benchmark_variant")
+            or params.get("job_id")
             or job.get("job_id")
-            or job.get("country", "unknown")
+            or f"{params.get('country', 'unknown')}_{params.get('revision', 'unknown')}"
         )
 
         if status == "SUCCEEDED":
@@ -470,9 +558,32 @@ def update_running_jobs_status(
             ).isoformat()
             logger.info(f"✅ Job completed: {job_name}")
             if "expected_result_path" in entries[idx]:
-                logger.info(
-                    f"   Results at: {entries[idx]['expected_result_path']}"
+                result_path = entries[idx]['expected_result_path']
+                logger.info(f"   Results at: {result_path}")
+                
+                # Verify results exist
+                logger.info(f"   Verifying results in GCS...")
+                verification = verify_results_exist(
+                    result_path, 
+                    credentials=credentials,
+                    timeout_seconds=10  # Quick check
                 )
+                
+                if verification["exists"]:
+                    logger.info(f"   ✓ Results verified: {verification['message']}")
+                    key_files = ["model_summary.json", "best_model_plots.png", "console.log"]
+                    found_key_files = [f for f in verification["files_found"] if f in key_files]
+                    if found_key_files:
+                        logger.info(f"   ✓ Key files found: {', '.join(found_key_files)}")
+                    missing_key_files = [f for f in key_files if f not in verification["files_found"]]
+                    if missing_key_files:
+                        logger.warning(f"   ⚠️  Expected files missing: {', '.join(missing_key_files)}")
+                else:
+                    logger.warning(f"   ⚠️  {verification['message']}")
+                    logger.warning(f"   ⚠️  Results may still be uploading or job may have failed")
+                    logger.info(f"   💡 Manually check: gsutil ls {result_path}")
+            else:
+                logger.warning(f"   ⚠️  No expected_result_path recorded for this job")
             updated += 1
         elif status == "FAILED":
             entries[idx]["status"] = "FAILED"
