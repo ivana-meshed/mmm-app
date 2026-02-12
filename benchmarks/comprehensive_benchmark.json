@@ -1,0 +1,57 @@
+{
+  "name": "comprehensive_benchmark",
+  "description": "Comprehensive test combining multiple configuration dimensions (use with caution - generates many combinations)",
+  "combination_mode": "cartesian",
+  "base_config": {
+    "country": "de",
+    "goal": "UPLOAD_VALUE",
+    "version": "20260113_160850"
+  },
+  "iterations": 1500,
+  "trials": 3,
+  "max_combinations": 30,
+  "variants": {
+    "adstock": [
+      {
+        "name": "geometric",
+        "description": "Geometric adstock",
+        "type": "geometric"
+      },
+      {
+        "name": "weibull_cdf",
+        "description": "Weibull CDF adstock",
+        "type": "weibull_cdf"
+      }
+    ],
+    "train_splits": [
+      {
+        "name": "70_90",
+        "description": "Standard split: 70-90-100",
+        "train_size": [
+          0.7,
+          0.9
+        ]
+      },
+      {
+        "name": "75_90",
+        "description": "More training: 75-90-100",
+        "train_size": [
+          0.75,
+          0.9
+        ]
+      }
+    ],
+    "time_aggregation": [
+      {
+        "name": "daily",
+        "description": "Daily granularity",
+        "frequency": "none"
+      },
+      {
+        "name": "weekly",
+        "description": "Weekly granularity",
+        "frequency": "W"
+      }
+    ]
+  }
+}

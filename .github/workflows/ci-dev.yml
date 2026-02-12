@@ -9,7 +9,7 @@ concurrency:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 jobs:
   ci:
@@ -145,6 +145,7 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git add -A
           git diff --staged --quiet || git commit -m "Auto-format code with black and isort [skip ci]"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git push || echo "No changes to push"
 
       - name: Run unit tests
@@ -203,7 +204,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          
+
           # Import GCS bucket if exists and not already managed
           if gsutil ls -b gs://${{ env.BUCKET }} >/dev/null 2>&1; then
             echo "Checking if GCS bucket is already managed..."
@@ -216,7 +217,7 @@ jobs:
           else
             echo "GCS bucket does not exist yet—will create on apply."
           fi
-          
+
           # Import sf-private-key if exists and not already managed
           if gcloud secrets describe sf-private-key --project=$PROJECT_ID >/dev/null 2>&1; then
             echo "Checking if sf-private-key is already managed..."
