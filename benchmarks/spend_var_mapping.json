@@ -4,7 +4,7 @@
   "base_config": {
     "country": "de",
     "goal": "UPLOAD_VALUE",
-    "version": "20251211_115528"
+    "version": "20260113_160850"
   },
   "iterations": 2000,
   "trials": 5,
@@ -30,8 +30,13 @@
         "name": "mixed_by_funnel",
         "description": "Upper funnel → proxy, lower funnel → spend",
         "type": "mixed_by_funnel",
-        "upper_funnel_channels": ["SPEND_FACEBOOK", "SPEND_TIKTOK"],
-        "lower_funnel_channels": ["SPEND_GOOGLE"],
+        "upper_funnel_channels": [
+          "SPEND_FACEBOOK",
+          "SPEND_TIKTOK"
+        ],
+        "lower_funnel_channels": [
+          "SPEND_GOOGLE"
+        ],
         "proxy_mapping": {
           "SPEND_FACEBOOK": "FB_IMPRESSIONS",
           "SPEND_TIKTOK": "TIKTOK_SESSIONS"

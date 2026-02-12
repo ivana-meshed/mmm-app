@@ -4,7 +4,7 @@
   "base_config": {
     "country": "de",
     "goal": "UPLOAD_VALUE",
-    "version": "20251211_115528"
+    "version": "20260113_160850"
   },
   "iterations": 2000,
   "trials": 5,

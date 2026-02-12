@@ -4,7 +4,7 @@
   "base_config": {
     "country": "de",
     "goal": "UPLOAD_VALUE",
-    "version": "20251211_115528"
+    "version": "20260113_160850"
   },
   "iterations": 1500,
   "trials": 3,
@@ -26,12 +26,18 @@
       {
         "name": "70_90",
         "description": "Standard split: 70-90-100",
-        "train_size": [0.7, 0.9]
+        "train_size": [
+          0.7,
+          0.9
+        ]
       },
       {
         "name": "75_90",
         "description": "More training: 75-90-100",
-        "train_size": [0.75, 0.9]
+        "train_size": [
+          0.75,
+          0.9
+        ]
       }
     ],
     "time_aggregation": [
