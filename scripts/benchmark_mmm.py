@@ -1239,6 +1239,16 @@ def main():
     # Generate variants
     variants = runner.generate_variants(base_config, benchmark_config)
     logger.info(f"Generated {len(variants)} test variants")
+    
+    # Validate variants were generated
+    if not variants:
+        logger.error("No variants generated! Check your configuration.")
+        print("\n❌ Error: No variants were generated")
+        print("\nPossible issues:")
+        print("  - Check that your config has valid variant specifications")
+        print("  - Verify the base config exists")
+        print(f"  - Config file: {args.config}")
+        sys.exit(1)
 
     # Generate benchmark ID
     benchmark_id = (
@@ -1264,6 +1274,11 @@ def main():
         return
     
     if args.test_run:
+        if not variants:
+            logger.error("Cannot run test - no variants generated")
+            print("\n❌ Error: Cannot run test with empty variants list")
+            sys.exit(1)
+            
         logger.info("🧪 TEST RUN MODE - Running first variant with minimal settings")
         print("\n🧪 TEST RUN MODE")
         print(f"Iterations: 10 (reduced from {benchmark_config.iterations})")
