@@ -261,6 +261,7 @@ def process_one_job(
         "data_gcs_path": params.get("data_gcs_path"),
         "gcs_bucket": bucket_name,
         "timestamp": timestamp,  # Pass explicit timestamp to R script
+        "output_timestamp": timestamp,  # Pass for consistent result paths
     }
     
     execution_name = launch_cloud_run_job(
