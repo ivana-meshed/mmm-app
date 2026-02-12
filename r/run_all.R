@@ -654,10 +654,19 @@ date_var_name <- cfg$date_var %||% "date" # This is the column name to look for
 iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
-timestamp <- cfg$timestamp %||% {
+
+# Use output_timestamp if provided (for consistent result paths)
+# Otherwise fall back to timestamp or generate one
+timestamp <- cfg$output_timestamp %||% cfg$timestamp %||% {
     # Use CET (Central European Time) timezone to match Google Cloud Storage
     cet_time <- as.POSIXlt(Sys.time(), tz = "Europe/Paris")
     format(cet_time, "%m%d_%H%M%S")
+}
+
+if (!is.null(cfg$output_timestamp)) {
+    cat("Using provided output timestamp:", timestamp, "\n")
+} else {
+    cat("Generated timestamp:", timestamp, "\n")
 }
 
 # NEW: Training date range
