@@ -1,0 +1,56 @@
+{
+  "name": "train_val_test_splits",
+  "description": "Compare different train/validation/test split ratios for model stability",
+  "base_config": {
+    "country": "de",
+    "goal": "UPLOAD_VALUE",
+    "version": "20260113_160850"
+  },
+  "iterations": 2000,
+  "trials": 5,
+  "max_combinations": 15,
+  "variants": {
+    "train_splits": [
+      {
+        "name": "70_90",
+        "description": "Train: 70%, Val: 70-90%, Test: 90-100%",
+        "train_size": [
+          0.7,
+          0.9
+        ]
+      },
+      {
+        "name": "70_95",
+        "description": "Train: 70%, Val: 70-95%, Test: 95-100%",
+        "train_size": [
+          0.7,
+          0.95
+        ]
+      },
+      {
+        "name": "65_80",
+        "description": "Train: 65%, Val: 65-80%, Test: 80-100%",
+        "train_size": [
+          0.65,
+          0.8
+        ]
+      },
+      {
+        "name": "75_90",
+        "description": "Train: 75%, Val: 75-90%, Test: 90-100%",
+        "train_size": [
+          0.75,
+          0.9
+        ]
+      },
+      {
+        "name": "60_85",
+        "description": "Train: 60%, Val: 60-85%, Test: 85-100%",
+        "train_size": [
+          0.6,
+          0.85
+        ]
+      }
+    ]
+  }
+}
