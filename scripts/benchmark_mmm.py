@@ -131,7 +131,7 @@ class BenchmarkRunner:
     ) -> List[Dict[str, Any]]:
         """Generate test configuration variants."""
         variant_specs = benchmark_config.variants
-        combination_mode = benchmark_config.config_dict.get("combination_mode", "single")
+        combination_mode = benchmark_config.config.get("combination_mode", "single")
         
         if combination_mode == "cartesian":
             # Generate cartesian product of all dimensions
