@@ -1236,9 +1236,20 @@ def main():
     base_config["iterations"] = benchmark_config.iterations
     base_config["trials"] = benchmark_config.trials
 
-    # Generate variants
-    variants = runner.generate_variants(base_config, benchmark_config)
-    logger.info(f"Generated {len(variants)} test variants")
+    # Generate variants with error handling
+    try:
+        variants = runner.generate_variants(base_config, benchmark_config)
+        logger.info(f"Generated {len(variants)} test variants")
+    except Exception as e:
+        logger.error(f"Error generating variants: {e}", exc_info=True)
+        print(f"\n❌ Error generating variants: {e}")
+        print(f"\nConfig file: {args.config}")
+        print(f"Base config: {benchmark_config.base_config}")
+        print("\nPlease check:")
+        print("  - Benchmark configuration syntax")
+        print("  - Variant specifications are valid")
+        print("  - Base config exists and is accessible")
+        sys.exit(1)
     
     # Validate variants were generated
     if not variants:
