@@ -52,9 +52,21 @@ gcloud run jobs list --region=europe-west1
 python scripts/benchmark_mmm.py --list-configs
 ```
 
-This shows all pre-configured benchmarks in the `benchmarks/` directory.
+This shows all pre-configured benchmarks in the `benchmarks/` directory with correct variant counts.
 
-### 2. Run a Benchmark
+### 2. Validate Configuration (Recommended)
+
+Before running expensive jobs, validate your configuration:
+
+```bash
+# Preview what would be generated (no jobs submitted)
+python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --dry-run
+
+# Quick test with minimal resources (10 iterations, 1 trial)
+python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --test-run
+```
+
+### 3. Run a Benchmark
 
 ```bash
 # Run adstock comparison benchmark
@@ -63,14 +75,14 @@ python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json
 
 This creates job configurations and adds them to the queue.
 
-### 3. Process the Queue
+### 4. Process the Queue
 
 ```bash
-# Process all pending jobs
-python scripts/process_queue_simple.py --loop
+# Process all pending jobs with automatic cleanup
+python scripts/process_queue_simple.py --loop --cleanup
 ```
 
-This launches the jobs on Cloud Run and processes them until the queue is empty.
+This launches the jobs on Cloud Run and processes them until the queue is empty. The `--cleanup` flag removes old completed jobs to keep the queue manageable.
 
 ## Complete Workflow Example
 
@@ -182,6 +194,68 @@ fig = px.scatter(df, x='nrmse_val', y='decomp_rssd',
 fig.show()
 ```
 
+## Validating Configurations
+
+Before running expensive benchmarks, validate your configuration.
+
+### Dry Run Mode
+
+Preview what would be generated without submitting jobs:
+
+```bash
+python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --dry-run
+```
+
+Output shows:
+```
+🔍 DRY RUN MODE - No jobs will be submitted
+
+Benchmark: adstock_comparison
+Description: Compare different adstock transformation types...
+
+Would generate 3 variants:
+
+Variant 1/3: geometric
+  Test: adstock
+  Adstock: geometric
+  Hyperparameter preset: Meshed recommend
+  Iterations: 2000
+  Trials: 5
+
+Variant 2/3: weibull_cdf
+  ...
+```
+
+### Test Run Mode
+
+Run a quick test with minimal resources to verify everything works:
+
+```bash
+python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --test-run
+```
+
+This:
+- Reduces iterations to 10 (from 2000)
+- Reduces trials to 1 (from 5)
+- Submits only the first variant
+- Allows quick validation before full run
+
+Output shows:
+```
+🧪 TEST RUN MODE - Running first variant with minimal settings
+
+Iterations: 10 (reduced from 2000)
+Trials: 1 (reduced from 5)
+
+Testing variant: geometric
+✅ Test job submitted to queue: default-dev
+```
+
+Then process the test job:
+```bash
+python scripts/process_queue_simple.py --count 1
+```
+
 ## Benchmark Configuration
 
 ### JSON Structure
@@ -228,7 +302,50 @@ Create a benchmark configuration file:
 - **iterations**: Robyn iterations per variant (default: 2000)
 - **trials**: Robyn trials per variant (default: 5)
 - **max_combinations**: Limit total variants generated
+- **combination_mode**: How to generate variants (see below)
 - **variants**: Test specifications (see below)
+
+### Combination Mode
+
+Control how variants are generated when you have multiple variant types:
+
+**"single" mode (default):**
+- Generates variants for each dimension separately
+- Example: 3 adstock types + 5 train splits = 8 total variants
+- Use when testing one dimension at a time
+
+**"cartesian" mode:**
+- Generates all combinations of all dimensions
+- Example: 3 adstock types × 5 train splits = 15 total variants  
+- Use when testing interactions between dimensions
+
+Example configuration:
+
+```json
+{
+  "name": "comprehensive_test",
+  "description": "Test all combinations",
+  "combination_mode": "cartesian",
+  "variants": {
+    "adstock": [
+      {"name": "geometric", "type": "geometric"},
+      {"name": "weibull_cdf", "type": "weibull_cdf"}
+    ],
+    "train_splits": [
+      {"name": "70_90", "train_size": [0.7, 0.9]},
+      {"name": "75_90", "train_size": [0.75, 0.9]}
+    ]
+  }
+}
+```
+
+This generates 4 combinations:
+- geometric + 70_90 split
+- geometric + 75_90 split
+- weibull_cdf + 70_90 split
+- weibull_cdf + 75_90 split
+
+Use `--dry-run` to preview combinations before running!
 
 ## Test Types
 
@@ -313,6 +430,73 @@ Test different mapping strategies:
 - R² and NRMSE comparison
 - ROAS by channel
 - Coefficient stability
+
+## Queue Processing
+
+### Basic Usage
+
+Process pending jobs in the queue:
+
+```bash
+# Process all pending jobs
+python scripts/process_queue_simple.py --loop
+
+# Process specific number of jobs
+python scripts/process_queue_simple.py --count 3
+```
+
+### Queue Cleanup
+
+The queue automatically tracks job completion status (PENDING → RUNNING → COMPLETED/FAILED). Use cleanup to remove old jobs:
+
+```bash
+# Process with automatic cleanup
+python scripts/process_queue_simple.py --loop --cleanup
+
+# Keep only 10 most recent completed jobs
+python scripts/process_queue_simple.py --loop --cleanup --keep-completed 10
+```
+
+Without cleanup, the queue accumulates old completed jobs. The `--cleanup` flag removes them while keeping a configurable number of recent ones for reference.
+
+### Result Path Logging
+
+When jobs are launched, the script logs where results will be saved:
+
+```
+Processing job 1/3
+  Country: de
+  Revision: default
+  Job ID: abc123
+
+📂 Results will be saved to:
+   gs://mmm-app-output/robyn/default/de/20260212_093045_123/
+   Key files: model_summary.json, best_model_plots.png, console.log
+
+✅ Job launched successfully
+   Execution ID: projects/.../executions/...
+
+💡 To check results when job completes:
+   gsutil ls gs://mmm-app-output/robyn/default/de/20260212_093045_123/
+   gsutil cat gs://mmm-app-output/robyn/default/de/20260212_093045_123/model_summary.json
+```
+
+Each job gets a unique timestamp (with milliseconds) to prevent result overwrites.
+
+### Queue Status
+
+Monitor queue status:
+
+```bash
+📊 Queue Status: default-dev
+  Total: 25
+  Pending: 3
+  Running: 2
+  Completed: 18
+  Failed: 2
+```
+
+The script automatically updates job statuses by checking Cloud Run execution status.
 
 ## Results Analysis
 
@@ -456,31 +640,66 @@ for _, row in df.iterrows():
 
 ## Best Practices
 
-### 1. Start Small
+### 1. Always Validate First
+
+- Use `--dry-run` to preview what will be generated
+- Use `--test-run` for quick validation before full runs
+- Check variant counts match expectations
+
+```bash
+# Recommended workflow
+python scripts/benchmark_mmm.py --config FILE --dry-run    # Preview
+python scripts/benchmark_mmm.py --config FILE --test-run   # Test
+python scripts/benchmark_mmm.py --config FILE              # Full run
+```
+
+### 2. Start Small
 
 - Test with 2-3 variants first
 - Use lower iterations (1000) for initial exploration
 - Set reasonable `max_combinations` limits
 
-### 2. Incremental Testing
+### 3. Use Queue Cleanup
 
-- Test one dimension at a time
+- Always use `--cleanup` flag to manage queue
+- Old completed jobs clutter the queue
+- Keep 10-20 recent completed jobs for reference
+
+```bash
+python scripts/process_queue_simple.py --loop --cleanup --keep-completed 10
+```
+
+### 4. Monitor Result Paths
+
+- Check logged result paths when jobs launch
+- Note the unique timestamp for each job
+- Results are logged as: `gs://bucket/robyn/revision/country/timestamp/`
+
+### 5. Incremental Testing
+
+- Test one dimension at a time (use "single" mode)
 - Use results to inform next tests
 - Build up knowledge systematically
 
-### 3. Monitor Resources
+### 6. Use Combinations Wisely
+
+- Use `combination_mode: "cartesian"` only when needed
+- Combinations grow multiplicatively (2 × 3 × 4 = 24 variants)
+- Always preview with `--dry-run` first
+
+### 7. Monitor Resources
 
 - Each variant = full training job (15-30 min)
 - 10 variants × 20 min = 3+ hours compute
 - Plan accordingly for costs
 
-### 4. Interpret Carefully
+### 8. Interpret Carefully
 
 - Look for consistent patterns, not single "best" results
 - Consider multiple metrics (fit + stability + business)
 - Validate on multiple datasets if possible
 
-### 5. Document Findings
+### 9. Document Findings
 
 - Save configurations and results
 - Note which patterns generalize
