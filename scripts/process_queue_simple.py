@@ -181,11 +181,82 @@ def launch_cloud_run_job(
 ) -> Optional[str]:
     """Launch a Cloud Run training job."""
     try:
+        from google.cloud import storage
+        
+        # Build complete job config JSON like Streamlit app does
+        timestamp = config.get("timestamp", "")
+        bucket_name = config.get("gcs_bucket", "mmm-app-output")
+        
+        # Build job config from params (similar to app_shared.py)
+        job_config = {
+            "country": params.get("country", ""),
+            "iterations": int(params.get("iterations", 2000)),
+            "trials": int(params.get("trials", 5)),
+            "train_size": params.get("train_size", [0.7, 0.9]),
+            "revision": params.get("revision", "default"),
+            "date_input": params.get("date_input", ""),
+            "start_date": params.get("start_date", "2024-01-01"),
+            "end_date": params.get("end_date", ""),
+            "gcs_bucket": bucket_name,
+            "data_gcs_path": params.get("data_gcs_path", ""),
+            "annotations_gcs_path": "",
+            "paid_media_spends": params.get("paid_media_spends", []),
+            "paid_media_vars": params.get("paid_media_vars", []),
+            "context_vars": params.get("context_vars", []),
+            "factor_vars": params.get("factor_vars", []),
+            "organic_vars": params.get("organic_vars", []),
+            "timestamp": timestamp,
+            "output_timestamp": timestamp,  # For consistent result paths
+            "dep_var": params.get("dep_var", "UPLOAD_VALUE"),
+            "dep_var_type": params.get("dep_var_type", "revenue"),
+            "date_var": params.get("date_var", "date"),
+            "adstock": params.get("adstock", "geometric"),
+            "hyperparameter_preset": params.get("hyperparameter_preset", "Meshed recommend"),
+            "resample_freq": params.get("resample_freq", "none"),
+            "use_parquet": True,
+            "parallel_processing": True,
+        }
+        
+        # Add optional fields
+        if "custom_hyperparameters" in params:
+            job_config["custom_hyperparameters"] = params["custom_hyperparameters"]
+        if "column_agg_strategies" in params:
+            job_config["column_agg_strategies"] = params["column_agg_strategies"]
+        
+        # Upload job config to GCS
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+            json.dump(job_config, tmp, indent=2)
+            tmp_path = tmp.name
+        
+        try:
+            client_storage = storage.Client(credentials=credentials)
+            bucket = client_storage.bucket(bucket_name)
+            
+            # Upload to timestamped location
+            config_blob_path = f"training-configs/{timestamp}/job_config.json"
+            blob = bucket.blob(config_blob_path)
+            blob.upload_from_filename(tmp_path, content_type="application/json")
+            config_gcs_path = f"gs://{bucket_name}/{config_blob_path}"
+            
+            # Also upload to "latest" for fallback
+            latest_blob = bucket.blob("training-configs/latest/job_config.json")
+            latest_blob.upload_from_filename(tmp_path, content_type="application/json")
+            
+            logger.info(f"   Uploaded job config to: {config_gcs_path}")
+        finally:
+            import os
+            os.unlink(tmp_path)
+        
         client = run_v2.JobsClient(credentials=credentials)
         job_path = f"projects/{project_id}/locations/{region}/jobs/{job_name}"
 
-        # Create environment variables from config
-        env_vars = []
+        # Set JOB_CONFIG_GCS_PATH environment variable (this is what R script reads!)
+        env_vars = [
+            run_v2.EnvVar(name="JOB_CONFIG_GCS_PATH", value=config_gcs_path)
+        ]
+        
+        # Also set individual vars for backward compatibility (but R script ignores these)
         for key, value in config.items():
             if value is not None:
                 env_vars.append(
@@ -223,6 +294,7 @@ def launch_cloud_run_job(
 
     except Exception as e:
         logger.error(f"❌ Failed to launch job: {e}")
+        logger.error(f"   Error details: {str(e)}", exc_info=True)
         return None
 
 
