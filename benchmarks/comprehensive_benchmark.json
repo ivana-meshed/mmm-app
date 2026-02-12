@@ -1,6 +1,7 @@
 {
   "name": "comprehensive_benchmark",
   "description": "Comprehensive test combining multiple configuration dimensions (use with caution - generates many combinations)",
+  "combination_mode": "cartesian",
   "base_config": {
     "country": "de",
     "goal": "UPLOAD_VALUE",
