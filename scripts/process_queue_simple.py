@@ -225,26 +225,42 @@ def process_one_job(
         logger.info("No PENDING jobs found")
         return False
     
+    params = pending_job.get("params", {})
+    country = params.get("country", "unknown")
+    revision = params.get("revision", "unknown")
+    
+    # Generate unique timestamp for this job
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")[:19]  # YYYYMMDD_HHMMSS_mmm
+    
     logger.info(f"Processing job {pending_idx + 1}/{len(entries)}")
-    logger.info(f"  Country: {pending_job.get('params', {}).get('country', 'unknown')}")
-    logger.info(f"  Revision: {pending_job.get('params', {}).get('revision', 'unknown')}")
+    logger.info(f"  Country: {country}")
+    logger.info(f"  Revision: {revision}")
+    logger.info(f"  Job ID: {pending_job.get('job_id', 'N/A')}")
+    
+    # Log expected result location
+    result_path = f"gs://{bucket_name}/robyn/{revision}/{country}/{timestamp}/"
+    logger.info(f"📂 Results will be saved to:")
+    logger.info(f"   {result_path}")
+    logger.info(f"   Key files: model_summary.json, best_model_plots.png, console.log")
     
     # Mark as LAUNCHING
     entries[pending_idx]["status"] = "LAUNCHING"
     entries[pending_idx]["launched_at"] = datetime.now(timezone.utc).isoformat()
+    entries[pending_idx]["timestamp"] = timestamp
+    entries[pending_idx]["expected_result_path"] = result_path
     
     # Save queue
     if not save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials):
         logger.error("Failed to save queue")
         return False
     
-    # Launch job
-    params = pending_job.get("params", {})
+    # Launch job with explicit timestamp
     config = {
         "country": params.get("country"),
         "revision": params.get("revision"),
         "data_gcs_path": params.get("data_gcs_path"),
         "gcs_bucket": bucket_name,
+        "timestamp": timestamp,  # Pass explicit timestamp to R script
     }
     
     execution_name = launch_cloud_run_job(
@@ -261,6 +277,11 @@ def process_one_job(
         entries[pending_idx]["execution_name"] = execution_name
         save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials)
         logger.info("✅ Job launched successfully")
+        logger.info(f"   Execution ID: {execution_name}")
+        logger.info(f"")
+        logger.info(f"💡 To check results when job completes:")
+        logger.info(f"   gsutil ls {result_path}")
+        logger.info(f"   gsutil cat {result_path}model_summary.json")
         return True
     else:
         # Mark as FAILED
@@ -269,6 +290,133 @@ def process_one_job(
         save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials)
         logger.error("❌ Job launch failed")
         return False
+
+
+def check_job_completion(
+    execution_name: str,
+    project_id: str,
+    region: str,
+    credentials=None,
+) -> Optional[str]:
+    """
+    Check if a Cloud Run job execution has completed.
+    
+    Returns:
+        "SUCCEEDED" if completed successfully
+        "FAILED" if failed
+        "RUNNING" if still running
+        None if status cannot be determined
+    """
+    try:
+        client = run_v2.ExecutionsClient(credentials=credentials)
+        execution_path = execution_name
+        
+        execution = client.get_execution(name=execution_path)
+        
+        # Check completion condition
+        if hasattr(execution, 'completion_time') and execution.completion_time:
+            # Job has completed
+            if hasattr(execution, 'succeeded_count') and execution.succeeded_count > 0:
+                return "SUCCEEDED"
+            else:
+                return "FAILED"
+        else:
+            return "RUNNING"
+            
+    except Exception as e:
+        logger.debug(f"Could not check execution status: {e}")
+        return None
+
+
+def cleanup_completed_jobs(
+    queue_doc: Dict,
+    bucket_name: str,
+    queue_name: str,
+    project_id: str,
+    region: str,
+    credentials=None,
+    keep_count: int = 10,
+) -> int:
+    """
+    Remove old completed/failed jobs from queue, keeping most recent ones.
+    
+    Returns:
+        Number of jobs removed
+    """
+    entries = queue_doc.get("entries", [])
+    
+    # Separate by status
+    completed = [e for e in entries if e.get("status") in ("COMPLETED", "FAILED")]
+    other = [e for e in entries if e.get("status") not in ("COMPLETED", "FAILED")]
+    
+    if len(completed) <= keep_count:
+        logger.info(f"No cleanup needed: {len(completed)} completed jobs (keep_count={keep_count})")
+        return 0
+    
+    # Sort completed by completion time (newest first)
+    completed.sort(key=lambda x: x.get("completed_at", x.get("launched_at", "")), reverse=True)
+    
+    # Keep only recent completed jobs
+    to_keep = completed[:keep_count]
+    to_remove = completed[keep_count:]
+    
+    # Update queue
+    queue_doc["entries"] = other + to_keep
+    
+    if save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials):
+        logger.info(f"🧹 Cleaned up {len(to_remove)} old completed jobs")
+        return len(to_remove)
+    else:
+        logger.error("Failed to save queue after cleanup")
+        return 0
+
+
+def update_running_jobs_status(
+    queue_doc: Dict,
+    bucket_name: str,
+    queue_name: str,
+    project_id: str,
+    region: str,
+    credentials=None,
+) -> int:
+    """
+    Check status of RUNNING jobs and update to COMPLETED/FAILED if done.
+    
+    Returns:
+        Number of jobs updated
+    """
+    entries = queue_doc.get("entries", [])
+    updated = 0
+    
+    for idx, job in enumerate(entries):
+        if job.get("status") != "RUNNING":
+            continue
+        
+        execution_name = job.get("execution_name")
+        if not execution_name:
+            continue
+        
+        status = check_job_completion(execution_name, project_id, region, credentials)
+        
+        if status == "SUCCEEDED":
+            entries[idx]["status"] = "COMPLETED"
+            entries[idx]["completed_at"] = datetime.now(timezone.utc).isoformat()
+            logger.info(f"✅ Job completed: {job.get('job_id', 'unknown')}")
+            if "expected_result_path" in entries[idx]:
+                logger.info(f"   Results at: {entries[idx]['expected_result_path']}")
+            updated += 1
+        elif status == "FAILED":
+            entries[idx]["status"] = "FAILED"
+            entries[idx]["completed_at"] = datetime.now(timezone.utc).isoformat()
+            entries[idx]["error"] = "Cloud Run job execution failed"
+            logger.warning(f"❌ Job failed: {job.get('job_id', 'unknown')}")
+            updated += 1
+    
+    if updated > 0:
+        save_queue_to_gcs(bucket_name, queue_name, queue_doc, credentials=credentials)
+        logger.info(f"Updated {updated} job status(es)")
+    
+    return updated
 
 
 def process_queue(
@@ -311,11 +459,31 @@ def process_queue(
         entries = queue_doc.get("entries", [])
         pending_count = sum(1 for j in entries if j.get("status") == "PENDING")
         running_count = sum(1 for j in entries if j.get("status") == "RUNNING")
+        completed_count = sum(1 for j in entries if j.get("status") == "COMPLETED")
+        failed_count = sum(1 for j in entries if j.get("status") == "FAILED")
         
         logger.info(f"📊 Queue Status: {queue_name}")
         logger.info(f"  Total: {len(entries)}")
         logger.info(f"  Pending: {pending_count}")
         logger.info(f"  Running: {running_count}")
+        logger.info(f"  Completed: {completed_count}")
+        logger.info(f"  Failed: {failed_count}")
+        
+        # Update status of running jobs before proceeding
+        if running_count > 0:
+            logger.info("🔍 Checking status of running jobs...")
+            update_running_jobs_status(
+                queue_doc=queue_doc,
+                bucket_name=bucket_name,
+                queue_name=queue_name,
+                project_id=project_id,
+                region=region,
+                credentials=credentials,
+            )
+            # Reload queue after updates
+            queue_doc = load_queue_from_gcs(bucket_name, queue_name, credentials=credentials)
+            entries = queue_doc.get("entries", [])
+            pending_count = sum(1 for j in entries if j.get("status") == "PENDING")
         
         if pending_count == 0:
             logger.info("✅ No more pending jobs")
@@ -388,6 +556,17 @@ def main():
         default="mmm-app-dev-training",
         help="Cloud Run training job name (default: mmm-app-dev-training)",
     )
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Clean up old completed/failed jobs from queue",
+    )
+    parser.add_argument(
+        "--keep-completed",
+        type=int,
+        default=10,
+        help="Number of completed jobs to keep when cleaning up (default: 10)",
+    )
     
     args = parser.parse_args()
     
@@ -403,9 +582,27 @@ def main():
     logger.info(f"Region: {args.region}")
     logger.info(f"Training Job: {args.training_job_name}")
     logger.info(f"Mode: {'loop until empty' if args.loop else f'process {args.count} job(s)'}")
+    if args.cleanup:
+        logger.info(f"Cleanup: Yes (keep {args.keep_completed} recent completed jobs)")
     logger.info("=" * 60)
     
     try:
+        # Perform cleanup if requested
+        if args.cleanup:
+            logger.info("🧹 Performing cleanup...")
+            queue_doc = load_queue_from_gcs(args.bucket, args.queue_name, credentials=credentials)
+            if queue_doc:
+                cleanup_completed_jobs(
+                    queue_doc=queue_doc,
+                    bucket_name=args.bucket,
+                    queue_name=args.queue_name,
+                    project_id=args.project_id,
+                    region=args.region,
+                    credentials=credentials,
+                    keep_count=args.keep_completed,
+                )
+            logger.info("")
+        
         processed = process_queue(
             bucket_name=args.bucket,
             queue_name=args.queue_name,
