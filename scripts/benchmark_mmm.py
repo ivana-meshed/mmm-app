@@ -25,6 +25,7 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
+from itertools import product
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -129,6 +130,20 @@ class BenchmarkRunner:
         self, base_config: Dict[str, Any], benchmark_config: BenchmarkConfig
     ) -> List[Dict[str, Any]]:
         """Generate test configuration variants."""
+        variant_specs = benchmark_config.variants
+        combination_mode = benchmark_config.config_dict.get("combination_mode", "single")
+        
+        if combination_mode == "cartesian":
+            # Generate cartesian product of all dimensions
+            return self._generate_cartesian_variants(base_config, benchmark_config)
+        else:
+            # Generate variants for each dimension separately (default)
+            return self._generate_single_variants(base_config, benchmark_config)
+    
+    def _generate_single_variants(
+        self, base_config: Dict[str, Any], benchmark_config: BenchmarkConfig
+    ) -> List[Dict[str, Any]]:
+        """Generate variants for each dimension separately."""
         variants = []
         variant_specs = benchmark_config.variants
 
@@ -182,6 +197,76 @@ class BenchmarkRunner:
             variants = variants[:max_combos]
 
         return variants
+    
+    def _generate_cartesian_variants(
+        self, base_config: Dict[str, Any], benchmark_config: BenchmarkConfig
+    ) -> List[Dict[str, Any]]:
+        """Generate cartesian product of all variant dimensions."""
+        variant_specs = benchmark_config.variants
+        
+        # Generate variants for each dimension
+        dimension_variants = {}
+        
+        if "adstock" in variant_specs:
+            dimension_variants["adstock"] = self._generate_adstock_variants(
+                base_config, variant_specs["adstock"]
+            )
+        
+        if "train_splits" in variant_specs:
+            dimension_variants["train_splits"] = self._generate_split_variants(
+                base_config, variant_specs["train_splits"]
+            )
+        
+        if "time_aggregation" in variant_specs:
+            dimension_variants["time_aggregation"] = self._generate_time_agg_variants(
+                base_config, variant_specs["time_aggregation"]
+            )
+        
+        if "spend_var_mapping" in variant_specs:
+            dimension_variants["spend_var_mapping"] = self._generate_spend_var_variants(
+                base_config, variant_specs["spend_var_mapping"]
+            )
+        
+        if "seasonality_window" in variant_specs:
+            dimension_variants["seasonality_window"] = self._generate_seasonality_variants(
+                base_config, variant_specs["seasonality_window"]
+            )
+        
+        # Generate cartesian product
+        if not dimension_variants:
+            return []
+        
+        # Create combinations
+        dimension_names = list(dimension_variants.keys())
+        dimension_lists = [dimension_variants[name] for name in dimension_names]
+        
+        combined_variants = []
+        for combo in product(*dimension_lists):
+            # Merge all configs in this combination
+            merged = base_config.copy()
+            variant_name_parts = []
+            
+            for variant_config in combo:
+                merged.update(variant_config)
+                variant_name_parts.append(variant_config.get("benchmark_variant", ""))
+            
+            # Create combined name
+            merged["benchmark_variant"] = "_".join(variant_name_parts)
+            merged["benchmark_test"] = "combination"
+            merged["benchmark_description"] = f"Combination: {', '.join(variant_name_parts)}"
+            
+            combined_variants.append(merged)
+        
+        # Limit combinations if needed
+        max_combos = benchmark_config.max_combinations
+        if len(combined_variants) > max_combos:
+            logger.warning(
+                f"Generated {len(combined_variants)} cartesian combinations, "
+                f"limiting to {max_combos}"
+            )
+            combined_variants = combined_variants[:max_combos]
+        
+        return combined_variants
 
     def _generate_spend_var_variants(
         self, base_config: Dict[str, Any], specs: List[Dict]
@@ -538,6 +623,29 @@ class BenchmarkRunner:
 
         return benchmarks
 
+    def _count_config_variants(self, config_data: Dict[str, Any]) -> int:
+        """Count actual variants in a config."""
+        variants_dict = config_data.get("variants", {})
+        if not variants_dict:
+            return 0
+        
+        combination_mode = config_data.get("combination_mode", "single")
+        
+        if combination_mode == "cartesian":
+            # Cartesian product - multiply counts
+            total = 1
+            for variant_list in variants_dict.values():
+                if isinstance(variant_list, list):
+                    total *= len(variant_list)
+            return total
+        else:
+            # Single dimension - sum counts
+            total = 0
+            for variant_list in variants_dict.values():
+                if isinstance(variant_list, list):
+                    total += len(variant_list)
+            return total
+    
     def list_config_files(self) -> List[Dict[str, Any]]:
         """List available benchmark configuration files."""
         benchmarks_dir = Path(__file__).parent.parent / "benchmarks"
@@ -555,7 +663,8 @@ class BenchmarkRunner:
                         "path": str(config_file),
                         "name": config_data.get("name", ""),
                         "description": config_data.get("description", ""),
-                        "variant_count": len(config_data.get("variants", {})),
+                        "variant_count": self._count_config_variants(config_data),
+                        "combination_mode": config_data.get("combination_mode", "single"),
                     })
             except Exception as e:
                 logger.warning(f"Failed to load {config_file}: {e}")
@@ -1013,6 +1122,11 @@ def main():
         type=str,
         help="Show where results are located for a benchmark ID",
     )
+    parser.add_argument(
+        "--test-run",
+        action="store_true",
+        help="Run quick test with minimal iterations (10) and trials (1), first variant only",
+    )
 
     args = parser.parse_args()
 
@@ -1148,6 +1262,22 @@ def main():
             f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
         )
         return
+    
+    if args.test_run:
+        logger.info("🧪 TEST RUN MODE - Running first variant with minimal settings")
+        print("\n🧪 TEST RUN MODE")
+        print(f"Iterations: 10 (reduced from {benchmark_config.iterations})")
+        print(f"Trials: 1 (reduced from {benchmark_config.trials})")
+        print(f"Testing variant: {variants[0].get('benchmark_variant', 'first')}")
+        
+        # Modify first variant for test
+        test_variants = [variants[0].copy()]
+        test_variants[0]["iterations"] = 10
+        test_variants[0]["trials"] = 1
+        variants = test_variants
+        
+        # Update benchmark_id to indicate test
+        benchmark_id = f"{benchmark_id}_test"
 
     if args.no_submit:
         logger.info("--no-submit flag set - variants saved but not queued")

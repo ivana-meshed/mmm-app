@@ -398,10 +398,17 @@ def update_running_jobs_status(
         
         status = check_job_completion(execution_name, project_id, region, credentials)
         
+        # Get job name for logging
+        job_name = (
+            job.get("benchmark_variant") or
+            job.get("job_id") or
+            job.get("country", "unknown")
+        )
+        
         if status == "SUCCEEDED":
             entries[idx]["status"] = "COMPLETED"
             entries[idx]["completed_at"] = datetime.now(timezone.utc).isoformat()
-            logger.info(f"✅ Job completed: {job.get('job_id', 'unknown')}")
+            logger.info(f"✅ Job completed: {job_name}")
             if "expected_result_path" in entries[idx]:
                 logger.info(f"   Results at: {entries[idx]['expected_result_path']}")
             updated += 1
@@ -409,7 +416,7 @@ def update_running_jobs_status(
             entries[idx]["status"] = "FAILED"
             entries[idx]["completed_at"] = datetime.now(timezone.utc).isoformat()
             entries[idx]["error"] = "Cloud Run job execution failed"
-            logger.warning(f"❌ Job failed: {job.get('job_id', 'unknown')}")
+            logger.warning(f"❌ Job failed: {job_name}")
             updated += 1
     
     if updated > 0:
