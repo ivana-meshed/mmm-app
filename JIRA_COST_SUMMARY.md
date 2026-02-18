@@ -16,10 +16,10 @@
 | Scenario | Training Jobs/Month | Monthly Cost | Notes |
 |----------|-------------------|--------------|-------|
 | **Idle** | 0-2 jobs | **~$10** | Minimal activity, scheduler enabled |
-| **10 Jobs** | 10 production jobs | **~$12** | Light usage |
-| **100 Jobs** | 100 production jobs | **~$30** | Moderate usage |
-| **500 Jobs** | 500 production jobs | **~$110** | Heavy usage |
-| **Benchmark** | 1 benchmark job | **~$0.20** | 12-minute benchmark run |
+| **10 Jobs** | 10 production jobs | **~$15** | Light production usage (medium jobs) |
+| **100 Jobs** | 100 production jobs | **~$60** | Moderate production usage |
+| **500 Jobs** | 500 production jobs | **~$260** | Heavy production usage |
+| **Benchmark** | 1 small test job | **~$0.20** | 12-minute optimized benchmark |
 
 ---
 
@@ -34,8 +34,10 @@
 - **Total Fixed:** ~$10/month
 
 ### Variable Costs (Training Jobs)
-- **Per Job Cost:** ~$0.20/job (12-minute benchmark with 8 vCPU, 32GB RAM)
-- **Per Hour Cost:** ~$0.98/hour (compute: CPU + memory)
+- **Benchmark Job (small, optimized):** ~$0.20/job (12 minutes)
+- **Production Job (medium, typical):** ~$0.50/job (30 minutes)
+- **Production Job (large):** ~$1.10/job (67 minutes)
+- **Per Hour Cost:** ~$0.98/hour (8 vCPU, 32GB RAM compute)
 
 ---
 
@@ -47,26 +49,41 @@
 - Development testing only
 - **Current state** ✅
 
-### Scenario 2: 10 Jobs/Month (~$12/month)
-- **Training Jobs:** 10 × $0.20 = $2.00
+### Scenario 2: 10 Production Jobs/Month (~$15/month)
+- **Training Jobs:** 10 × $0.50 = $5.00 (medium jobs)
 - **Base Infrastructure:** $10
-- **Total:** ~$12/month
+- **Total:** ~$15/month
 
-### Scenario 3: 100 Jobs/Month (~$30/month)
-- **Training Jobs:** 100 × $0.20 = $20.00
+### Scenario 3: 100 Production Jobs/Month (~$60/month)
+- **Training Jobs:** 100 × $0.50 = $50.00 (medium jobs)
 - **Base Infrastructure:** $10
-- **Total:** ~$30/month
+- **Total:** ~$60/month
 
-### Scenario 4: 500 Jobs/Month (~$110/month)
-- **Training Jobs:** 500 × $0.20 = $100.00
+### Scenario 4: 500 Production Jobs/Month (~$260/month)
+- **Training Jobs:** 500 × $0.50 = $250.00 (medium jobs)
 - **Base Infrastructure:** $10
-- **Total:** ~$110/month
+- **Total:** ~$260/month
 
-### Benchmark Job Details
-- **Duration:** ~12 minutes (optimized from 30 min)
-- **Resources:** 8 vCPU, 32GB RAM
-- **Cost per job:** ~$0.20
-- **Performance:** 2.5× faster than original baseline
+### Job Type Details
+
+**Benchmark Job (Small, Optimized):**
+- **Duration:** 12 minutes (10-15 min range)
+- **Use case:** Testing, development, quick validation
+- **Cost:** ~$0.20/job
+
+**Production Job (Medium, Typical):**
+- **Duration:** 30 minutes (25-35 min range)
+- **Use case:** Standard MMM training, typical datasets
+- **Cost:** ~$0.50/job
+- **Performance:** 40% faster than pre-optimization (45-60 min baseline)
+
+**Production Job (Large):**
+- **Duration:** 67 minutes (60-75 min range)
+- **Use case:** Complex models, large datasets, high iterations
+- **Cost:** ~$1.10/job
+- **Performance:** 30% faster than pre-optimization (90-120 min baseline)
+
+**All jobs use:** 8 vCPU, 32GB RAM at $0.98/hour compute rate
 
 ---
 
@@ -104,8 +121,9 @@ python scripts/analyze_idle_costs.py --days 30 --use-user-credentials
 | Metric | Before | After | Savings |
 |--------|--------|-------|---------|
 | Idle Cost | $160/month | $10/month | $150/month (94%) |
-| Per Job | $2.92 (30 min) | $0.20 (12 min) | $2.72/job (93%) |
-| Performance | 30 min/job | 12 min/job | 2.5× faster |
+| Benchmark Job | N/A (not tracked) | $0.20 (12 min) | Optimized test |
+| Production Job (medium) | $2.92 (30 min) | $0.50 (30 min) | $2.42/job (83%) |
+| Performance | 30 min/job (baseline) | 12-67 min (optimized) | 40-50% faster |
 
 ---
 

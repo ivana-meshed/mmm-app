@@ -14,10 +14,10 @@ h3. Monthly Cost by Usage Level
 
 || Scenario || Training Jobs/Month || Monthly Cost || Notes ||
 | Idle | 0-2 jobs | ~$10 | Minimal activity, scheduler enabled |
-| Light Usage | 10 jobs | ~$12 | +$2 for training |
-| Moderate Usage | 100 jobs | ~$30 | +$20 for training |
-| Heavy Usage | 500 jobs | ~$110 | +$100 for training |
-| Benchmark Job | 1 job | ~$0.20 | 12-minute run |
+| Light Usage | 10 production jobs | ~$15 | Medium jobs (~30 min each) |
+| Moderate Usage | 100 production jobs | ~$60 | Medium jobs |
+| Heavy Usage | 500 production jobs | ~$260 | Medium jobs |
+| Benchmark Job | 1 small test job | ~$0.20 | 12-minute optimized test |
 
 h3. Cost Breakdown
 
@@ -29,16 +29,19 @@ h3. Cost Breakdown
 * Base Infrastructure: $3.63 (networking, secrets)
 
 *Variable Costs:*
-* Per Training Job: ~$0.20 (12-min benchmark, 8 vCPU, 32GB RAM)
-* Per Hour: ~$0.98 (compute)
+* Benchmark Job (small): ~$0.20/job (12 minutes, testing/dev)
+* Production Job (medium): ~$0.50/job (30 minutes, typical use)
+* Production Job (large): ~$1.10/job (67 minutes, complex models)
+* Per Hour: ~$0.98 (8 vCPU, 32GB RAM compute)
 
 h3. Key Metrics
 
 * *Baseline (before optimization):* $160/month
 * *Current (idle):* $10/month
-* *Savings:* $150/month (94%)
-* *Job performance:* 2.5× faster (30 min → 12 min)
-* *Cost per job:* 93% reduction ($2.92 → $0.20)
+* *Savings:* $150/month (94% reduction)
+* *Benchmark job:* $0.20 (12 min, testing)
+* *Production job (typical):* $0.50 (30 min, medium)
+* *Job performance:* 40-50% faster than baseline
 
 h3. Optimizations Applied
 
@@ -75,10 +78,10 @@ Detailed Documentation: https://github.com/ivana-meshed/mmm-app/blob/main/COST_S
 
 MONTHLY COST BY USAGE LEVEL:
 - Idle (0-2 jobs): ~$10/month - Minimal activity, scheduler enabled
-- Light (10 jobs): ~$12/month - +$2 for training
-- Moderate (100 jobs): ~$30/month - +$20 for training
-- Heavy (500 jobs): ~$110/month - +$100 for training
-- Benchmark (1 job): ~$0.20/job - 12-minute run
+- Light (10 production jobs): ~$15/month - Medium jobs (~30 min each)
+- Moderate (100 production jobs): ~$60/month - Medium jobs
+- Heavy (500 production jobs): ~$260/month - Medium jobs
+- Benchmark (1 small test): ~$0.20/job - 12-minute optimized test
 
 COST BREAKDOWN:
 
@@ -90,15 +93,18 @@ Fixed Monthly Costs (Idle): ~$10/month
 - Base Infrastructure: $3.63 (networking, secrets)
 
 Variable Costs:
-- Per Training Job: ~$0.20 (12-min benchmark, 8 vCPU, 32GB RAM)
-- Per Hour: ~$0.98 (compute)
+- Benchmark Job (small): ~$0.20/job (12 minutes, testing/development)
+- Production Job (medium): ~$0.50/job (30 minutes, typical use)
+- Production Job (large): ~$1.10/job (67 minutes, complex models)
+- Per Hour: ~$0.98 (8 vCPU, 32GB RAM compute)
 
 KEY METRICS:
 - Baseline (before optimization): $160/month
 - Current (idle): $10/month
 - Savings: $150/month (94% reduction)
-- Job performance: 2.5× faster (30 min → 12 min)
-- Cost per job: 93% reduction ($2.92 → $0.20)
+- Benchmark job: $0.20 (12 min, for testing)
+- Production job (typical): $0.50 (30 min, medium size)
+- Job performance: 40-50% faster than baseline
 
 OPTIMIZATIONS APPLIED:
 ✓ Scale-to-zero (no idle compute costs)
