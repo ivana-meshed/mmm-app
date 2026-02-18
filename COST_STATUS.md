@@ -24,7 +24,7 @@ This document consolidates all cost optimization information for the MMM Trainer
 
 1. **Scale-to-Zero Enabled** (min_instances=0) - Eliminates idle costs
 2. **CPU Throttling Enabled** - Reduces CPU allocation when idle
-3. **Scheduler Optimized** (10-minute intervals) - Reduced from 1-minute
+3. **Scheduler Optimized** (10-minute intervals) - Balanced for cost/responsiveness
 4. **Resource Optimization** (1 vCPU, 2 GB) - Reduced from 2 vCPU, 4 GB
 5. **GCS Lifecycle Policies** - Automatic storage class transitions
 6. **Artifact Registry Cleanup** - Weekly cleanup of old images
@@ -183,18 +183,20 @@ Current Cost: ~$0.06/day ($1.80/month)
 
 ## Cost Comparison: Before vs After Optimization
 
-### Before Optimization (€148/month ≈ $160/month)
+### Before Optimization (€148/month ≈ $160/month - Historical Baseline)
 
 | Component | Monthly Cost | Issue |
 |-----------|-------------|-------|
 | Web Services (idle) | €15-20 | min_instances=2, always running |
-| Scheduler | €45-50 | Running every 1 minute (43,200/month) |
+| Scheduler | €45-50 | Frequent invocations causing high costs |
 | Deployment Churn | €50-60 | 150 deployments × 4-hour overlap |
 | Training Jobs | €21.60 | Variable (usage-dependent) ✓ |
 | Artifact Registry | €12 | No cleanup, many old versions |
 | GCS Storage | €1.50 | No lifecycle policies |
 
 **Total:** €145-214/month depending on usage
+
+**Note:** This baseline represents documented historical costs from initial deployment analysis. Current optimized configuration uses 10-minute scheduler intervals.
 
 ### After Optimization ($8.87/month actual)
 
@@ -210,7 +212,12 @@ Current Cost: ~$0.06/day ($1.80/month)
 
 **Total:** $8.87/month (current), $15-45/month with moderate training
 
-**Cost Reduction:** 94% (from $160 to $9)
+**Cost Reduction:** 94% (from $160 baseline to $9 actual)
+
+**Notes on Scheduler:**
+- Current configuration: 10-minute intervals (4,320 invocations/month)
+- This provides good balance between cost and responsiveness
+- Could be increased to 30-minute intervals for further savings if 10-minute job latency is acceptable
 
 ---
 

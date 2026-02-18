@@ -101,10 +101,13 @@ For step-by-step instructions on deploying this application to a new Google Clou
 
 ## Cost Monitoring and Optimization
 
-This repository includes comprehensive cost monitoring and optimization tools. See detailed documentation:
+This repository includes comprehensive cost monitoring and optimization tools. **Current costs: $8.87/month** (94% reduction from baseline).
 
-- **[IDLE_COST_EXECUTIVE_SUMMARY.md](docs/IDLE_COST_EXECUTIVE_SUMMARY.md)** - Executive summary of cost optimization opportunities
-- **[IDLE_COST_ANALYSIS.md](docs/IDLE_COST_ANALYSIS.md)** - Technical deep-dive on idle cost analysis
+See detailed documentation:
+
+- **[COST_STATUS.md](COST_STATUS.md)** - **PRIMARY** cost documentation with current status, actual costs, and monitoring guide
+- **[COST_OPTIMIZATION.md](COST_OPTIMIZATION.md)** - Detailed optimization analysis and implementation guide
+- **[docs/IDLE_COST_ANALYSIS.md](docs/IDLE_COST_ANALYSIS.md)** - Technical deep-dive on idle cost analysis
 
 ### Quick Cost Analysis
 
@@ -121,36 +124,20 @@ python scripts/analyze_idle_costs.py --days 7 --use-user-credentials
 python scripts/track_daily_costs.py --days 30 --output costs.csv
 ```
 
-### Cost Optimization Recommendations
+### Cost Optimization Status
 
-The analysis tools have identified significant cost optimization opportunities:
+All major cost optimizations have been applied:
 
-**Current Issue**: Despite `min_instances=0` configuration, idle costs remain at ~$137/month due to:
-1. CPU throttling disabled (`cpu-throttling=false` in main.tf)
-2. Aggressive scheduler frequency (every 10 minutes)
+- ✅ **Scale-to-zero enabled** (min_instances=0) - Eliminates idle costs
+- ✅ **CPU throttling enabled** - Reduces CPU allocation when idle
+- ✅ **Scheduler optimized** (10-minute intervals) - Balanced for cost/responsiveness
+- ✅ **Resource optimization** (1 vCPU, 2 GB) - Reduced from 2 vCPU, 4 GB
+- ✅ **GCS lifecycle policies** - Automatic storage class transitions
+- ✅ **Artifact Registry cleanup** - Weekly cleanup of old images
 
-**Recommended Changes** (in `infra/terraform/main.tf`):
-```terraform
-# Line 324: Enable CPU throttling (saves ~$50-70/month)
-"run.googleapis.com/cpu-throttling" = "true"  # was: false
+**Result:** $8.87/month actual costs (94% reduction from baseline)
 
-# Line 597: Reduce scheduler frequency (saves ~$20-30/month)
-schedule = "*/30 * * * *"  # was: */10 * * * *
-```
-
-**Expected Savings**: ~$92-112/month (~$1,100-1,300/year) with zero user impact
-
-**NEW**: You can now pause the Cloud Scheduler temporarily for cost monitoring:
-```bash
-# Edit infra/terraform/envs/prod.tfvars
-scheduler_enabled = false  # Pause scheduler
-
-# Or via command line
-terraform apply -var-file=envs/prod.tfvars -var="scheduler_enabled=false"
-```
-See [Scheduler Pause Guide](docs/SCHEDULER_PAUSE_GUIDE.md) for A/B testing and cost isolation.
-
-For full analysis and implementation details, see the cost optimization documentation above.
+For full analysis, cost scenarios, and monitoring guidelines, see [COST_STATUS.md](COST_STATUS.md).
 
 ## Prerequisites
 
