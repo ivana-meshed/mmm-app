@@ -51,14 +51,14 @@ SERVICE_CONFIGS = {
         "memory": 2.0,  # GB allocated
         "throttling": True,  # CPU throttling enabled (as of Feb 2026)
         "min_instances": 0,
-        "scheduler_interval": None,  # Scheduler currently disabled
+        "scheduler_interval": 10,  # Scheduler re-enabled (Option 2 - Feb 2026)
     },
     "mmm-app-dev-web": {
         "cpu": 1.0,
         "memory": 2.0,
         "throttling": True,  # CPU throttling enabled (as of Feb 2026)
         "min_instances": 0,
-        "scheduler_interval": None,  # Scheduler currently disabled
+        "scheduler_interval": 10,  # Scheduler re-enabled (Option 2 - Feb 2026)
     },
     "mmm-app-training": {
         "cpu": 8.0,

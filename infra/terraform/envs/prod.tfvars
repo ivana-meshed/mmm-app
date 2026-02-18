@@ -12,7 +12,7 @@ queue_name         = "default"
 # Scheduler control: Set to false to pause scheduler for cost monitoring
 # When paused, training jobs won't auto-process from queue (manual trigger required)
 # scheduler_enabled = false  # Uncomment to pause scheduler
-scheduler_enabled = false
+scheduler_enabled = true  # Enabled for automated job processing (Option 2)
 
 # Cost optimization: Scale-to-zero configuration
 min_instances = 0 # Eliminates idle costs, adds 1-3s cold start
