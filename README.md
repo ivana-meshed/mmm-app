@@ -415,7 +415,8 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 | [docs/8_VCPU_TEST_RESULTS.md](docs/8_VCPU_TEST_RESULTS.md) | Analysis of 8 vCPU upgrade testing |
 | [docs/google_auth_domain_configuration.md](docs/google_auth_domain_configuration.md) | OAuth domain configuration |
 | [docs/persistent_private_key.md](docs/persistent_private_key.md) | Snowflake key storage |
-| [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Cost optimization strategies |
+| [COST_STATUS.md](COST_STATUS.md) | **PRIMARY cost documentation** - Current costs ($8.87/month), optimization status, monitoring guide |
+| [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Detailed cost optimization analysis and implementation guide |
 
 ## License
 
