@@ -135,14 +135,18 @@ All major cost optimizations have been applied:
 
 - ✅ **Scale-to-zero enabled** (min_instances=0) - Eliminates idle costs
 - ✅ **CPU throttling enabled** - Reduces CPU allocation when idle
-- ✅ **Scheduler optimized** (10-minute intervals) - Balanced for cost/responsiveness
-- ✅ **Resource optimization** (1 vCPU, 2 GB) - Reduced from 2 vCPU, 4 GB
+- ✅ **Scheduler enabled** (10-minute intervals) - Automated job processing
+- ✅ **Resource optimization** (1 vCPU, 2 GB for web; 8 vCPU, 32 GB for training)
 - ✅ **GCS lifecycle policies** - Automatic storage class transitions
 - ✅ **Artifact Registry cleanup** - Weekly cleanup of old images
 
-**Result:** $8.87/month actual costs (94% reduction from baseline)
+**Result:** $10/month idle costs, $0.50 per production job (94% reduction from $160 baseline)
 
-For full analysis, cost scenarios, and monitoring guidelines, see [COST_STATUS.md](COST_STATUS.md).
+**Documentation:**
+- 📋 [COST_DOCUMENTATION_FINAL.md](COST_DOCUMENTATION_FINAL.md) - **START HERE** - Comprehensive summary
+- 📊 [COST_STATUS.md](COST_STATUS.md) - Technical deep-dive and monitoring
+- 📈 [COST_ESTIMATES_UPDATED.md](COST_ESTIMATES_UPDATED.md) - Detailed cost tables for planning
+- 🎫 [JIRA_COST_SUMMARY.md](JIRA_COST_SUMMARY.md) - JIRA-ready summaries
 
 ## Prerequisites
 
