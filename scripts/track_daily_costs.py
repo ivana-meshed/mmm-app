@@ -10,9 +10,14 @@ This script tracks daily costs for the MMM Trainer application, broken down by:
 
 Within each service, costs are further broken down by:
 - User requests costs
-- Scheduler requests costs
-- Registry costs
-- Storage costs
+- Scheduler requests costs (invocations)
+- Compute CPU costs
+- Compute memory costs
+- Registry costs (Artifact Registry)
+- Storage costs (Cloud Storage)
+- Scheduler service costs (base service fee)
+- Secret Manager costs
+- Networking costs
 - Other relevant costs
 
 Usage:
@@ -127,14 +132,18 @@ def build_cost_query(start_date: str, end_date: str, project_id: str) -> str:
           -- Cloud Scheduler
           OR service.description LIKE '%Scheduler%'
           OR service.description LIKE '%Cloud Scheduler%'
+          -- Secret Manager
+          OR service.description LIKE '%Secret Manager%'
           -- Also catch by SKU description
           OR sku.description LIKE '%Cloud Run%'
           OR sku.description LIKE '%Artifact Registry%'
           OR sku.description LIKE '%Cloud Storage%'
           OR sku.description LIKE '%Cloud Scheduler%'
+          OR sku.description LIKE '%Secret Manager%'
           -- Catch resources that match our service names
           OR resource.name LIKE '%mmm-app%'
           OR resource.name LIKE '%robyn-queue%'
+          OR resource.name LIKE '%sf-private-key%'
         )
       GROUP BY 
         usage_date, 
@@ -210,7 +219,11 @@ def categorize_cost(sku_description: str, resource_name: Optional[str]) -> str:
         return "storage"
 
     # Cloud Scheduler costs (the service itself, not the invocations)
-    if "scheduler" in sku_lower or "cron" in sku_lower:
+    # Note: Cloud Scheduler base service fee is $0.10/month per job
+    # This is separate from invocation costs which are categorized as requests
+    if "scheduler" in sku_lower and "job" in sku_lower:
+        return "scheduler_service"
+    if "cron" in sku_lower:
         return "scheduler_service"
 
     # Networking costs
@@ -220,6 +233,10 @@ def categorize_cost(sku_description: str, resource_name: Optional[str]) -> str:
         or "ingress" in sku_lower
     ):
         return "networking"
+
+    # Secret Manager costs
+    if "secret" in sku_lower or "secret manager" in sku_lower:
+        return "secrets"
 
     # Default category
     return "other"

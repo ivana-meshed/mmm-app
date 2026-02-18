@@ -123,6 +123,12 @@ def build_analysis_query(
         OR service.description LIKE '%Artifact Registry%'
         OR service.description LIKE '%Cloud Storage%'
         OR service.description LIKE '%Scheduler%'
+        OR service.description LIKE '%Secret Manager%'
+        OR sku.description LIKE '%Scheduler%'
+        OR sku.description LIKE '%Secret Manager%'
+        OR resource.name LIKE '%mmm-app%'
+        OR resource.name LIKE '%robyn-queue%'
+        OR resource.name LIKE '%sf-private-key%'
       )
       {service_condition}
     GROUP BY 
