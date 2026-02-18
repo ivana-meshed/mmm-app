@@ -10,6 +10,11 @@ This script investigates why Cloud Run services incur costs even when idle
 4. Cost breakdown by service configuration
 5. Recommendations for cost optimization
 
+Includes analysis of:
+- Scheduler costs (service fees and invocations)
+- GitHub Actions costs (CI/CD and weekly cleanup)
+- Artifact Registry cleanup automation
+
 Usage:
     python scripts/analyze_idle_costs.py --days 7
     python scripts/analyze_idle_costs.py --days 30 --service mmm-app-web
@@ -124,11 +129,14 @@ def build_analysis_query(
         OR service.description LIKE '%Cloud Storage%'
         OR service.description LIKE '%Scheduler%'
         OR service.description LIKE '%Secret Manager%'
+        OR service.description LIKE '%Cloud Build%'
         OR sku.description LIKE '%Scheduler%'
         OR sku.description LIKE '%Secret Manager%'
+        OR sku.description LIKE '%Cloud Build%'
         OR resource.name LIKE '%mmm-app%'
         OR resource.name LIKE '%robyn-queue%'
         OR resource.name LIKE '%sf-private-key%'
+        OR resource.name LIKE '%github%'
       )
       {service_condition}
     GROUP BY 

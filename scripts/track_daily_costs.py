@@ -18,7 +18,14 @@ Within each service, costs are further broken down by:
 - Scheduler service costs (base service fee)
 - Secret Manager costs
 - Networking costs
+- GitHub Actions costs (CI/CD automation, including registry cleanup)
 - Other relevant costs
+
+Special Features:
+- Dedicated "Scheduler & Automation Costs" section showing:
+  * Cloud Scheduler service fees
+  * Scheduler invocation costs (queue processing)
+  * GitHub Actions costs (weekly cleanup and CI/CD)
 
 Usage:
     python scripts/track_daily_costs.py [--days DAYS] [--output OUTPUT]
@@ -134,16 +141,20 @@ def build_cost_query(start_date: str, end_date: str, project_id: str) -> str:
           OR service.description LIKE '%Cloud Scheduler%'
           -- Secret Manager
           OR service.description LIKE '%Secret Manager%'
+          -- Cloud Build (for GitHub Actions)
+          OR service.description LIKE '%Cloud Build%'
           -- Also catch by SKU description
           OR sku.description LIKE '%Cloud Run%'
           OR sku.description LIKE '%Artifact Registry%'
           OR sku.description LIKE '%Cloud Storage%'
           OR sku.description LIKE '%Cloud Scheduler%'
           OR sku.description LIKE '%Secret Manager%'
+          OR sku.description LIKE '%Cloud Build%'
           -- Catch resources that match our service names
           OR resource.name LIKE '%mmm-app%'
           OR resource.name LIKE '%robyn-queue%'
           OR resource.name LIKE '%sf-private-key%'
+          OR resource.name LIKE '%github%'
         )
       GROUP BY 
         usage_date, 
@@ -237,6 +248,10 @@ def categorize_cost(sku_description: str, resource_name: Optional[str]) -> str:
     # Secret Manager costs
     if "secret" in sku_lower or "secret manager" in sku_lower:
         return "secrets"
+
+    # Cloud Build costs (GitHub Actions workflows)
+    if "build" in sku_lower or "cloud build" in sku_lower:
+        return "github_actions"
 
     # Default category
     return "other"
@@ -656,6 +671,48 @@ def print_cost_summary(
     print()
     print(f"Combined Total (GCP + GitHub Actions): {format_currency(grand_total + github_costs['total'])}")
     print(f"Combined Monthly Projection: {format_currency(monthly_gcp + monthly_github)}")
+    print("=" * 80)
+    
+    # Special section for scheduler and automation costs
+    print()
+    print("=" * 80)
+    print("Scheduler & Automation Costs Breakdown")
+    print("=" * 80)
+    print()
+    
+    scheduler_costs = {
+        "scheduler_service": 0.0,
+        "scheduler_requests": 0.0,
+        "github_actions": 0.0
+    }
+    
+    for service, categories in service_totals.items():
+        for category, cost in categories.items():
+            if category in scheduler_costs:
+                scheduler_costs[category] += cost
+    
+    total_automation = sum(scheduler_costs.values())
+    
+    if total_automation > 0:
+        print(f"Total Scheduler & Automation Costs: {format_currency(total_automation)}")
+        print(f"Monthly Projection: {format_currency(total_automation * 30 / days_back)}")
+        print()
+        print("Breakdown:")
+        print(f"  - Scheduler Service Fee: {format_currency(scheduler_costs['scheduler_service'])}")
+        print(f"    (Base Cloud Scheduler service charge, ~$0.10/month per job)")
+        print(f"  - Scheduler Invocations: {format_currency(scheduler_costs['scheduler_requests'])}")
+        print(f"    (Cloud Run container time for queue processing)")
+        print(f"  - GitHub Actions (CI/CD): {format_currency(scheduler_costs['github_actions'])}")
+        print(f"    (Artifact Registry cleanup and other automation)")
+        print()
+        print("Notes:")
+        print("  - Scheduler runs every 10 minutes (4,320 invocations/month)")
+        print("  - Artifact cleanup runs weekly via GitHub Actions")
+        print("  - These are automated operational costs")
+    else:
+        print("No scheduler or automation costs found in this period.")
+        print("(May not appear in short time periods)")
+    
     print("=" * 80)
 
 
