@@ -10,56 +10,85 @@
 
 This document consolidates all cost optimization information for the MMM Trainer application into a single source of truth. It replaces multiple scattered cost documents with one comprehensive status report.
 
-### Current Cost Status
+### Current Cost Status (Updated February 18, 2026)
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| **Current Monthly Cost** | $8.87/month | Based on actual billing data (4-day average) |
+| **Current Monthly Cost** | $9.09/month | Based on actual billing data (4-day average Feb 14-18, 2026) |
+| **GCP Infrastructure** | $8.88/month | Cloud Run, Storage, Registry, etc. |
+| **GitHub Actions** | $0.21/month | Estimated weekly cleanup workflow |
 | **Baseline (Pre-Optimization)** | €148/month (~$160/month) | Historical costs before optimizations |
 | **Cost Reduction** | ~94% | Optimizations successfully applied |
-| **Target Cost Range** | $8-15/month (idle) | Minimal activity baseline |
+| **Target Cost Range** | $8-15/month (idle) | Minimal activity baseline ✅ **Currently achieving** |
 | | $25-45/month (moderate) | With regular training jobs |
 
 ### Key Optimizations Applied ✅
 
 1. **Scale-to-Zero Enabled** (min_instances=0) - Eliminates idle costs
-2. **CPU Throttling Enabled** - Reduces CPU allocation when idle
-3. **Scheduler Optimized** (10-minute intervals) - Balanced for cost/responsiveness
+2. **CPU Throttling Enabled** - Reduces CPU allocation when idle  
+3. **Scheduler Currently Disabled** - Paused to minimize costs during low-activity period
 4. **Resource Optimization** (1 vCPU, 2 GB) - Reduced from 2 vCPU, 4 GB
 5. **GCS Lifecycle Policies** - Automatic storage class transitions
 6. **Artifact Registry Cleanup** - Weekly cleanup of old images
 
+**Note:** Scheduler is currently disabled (`scheduler_enabled = false` in both prod and dev environments). This eliminates scheduler invocation costs but requires manual job processing.
+
 ---
 
-## Actual Cost Breakdown (Last 4 Days)
+## Scheduler Status ⚠️
 
-Based on actual billing data from February 14-18, 2026:
+**Current State:** DISABLED
+
+The Cloud Scheduler is currently **paused** in both production and development environments:
+- `scheduler_enabled = false` in `infra/terraform/envs/prod.tfvars`
+- `scheduler_enabled = false` in `infra/terraform/envs/dev.tfvars`
+
+**Impact:**
+- ✅ Zero scheduler costs ($0.00 shown in cost reports)
+- ✅ Lower monthly costs during idle periods
+- ⚠️ Training jobs must be processed manually
+- ⚠️ Queue processing requires manual intervention
+
+**To Re-enable:**
+1. Set `scheduler_enabled = true` in appropriate tfvars file
+2. Run `terraform apply`
+3. Expected additional cost: ~$0.70-1.00/month (service fee + invocations)
+
+---
+
+## Actual Cost Breakdown (February 14-18, 2026)
+
+Based on actual billing data from latest 4-day period:
 
 ### Daily Costs by Service
 
-| Service | Daily Avg | Monthly Projection | Primary Cost Drivers |
-|---------|-----------|-------------------|---------------------|
-| **mmm-app-dev-training** | $0.14 | $4.20 | Compute CPU (65%), Memory (29%), Registry (6%) |
-| **mmm-app-dev-web** | $0.14 | $4.20 | User requests (89%), Registry (6%), Networking (5%) |
-| **mmm-app-training** | $0.01 | $0.30 | Registry (100%) |
-| **mmm-app-web** | $0.01 | $0.30 | Registry (92%), User requests (8%) |
-| **Total** | **$0.30** | **$8.87** | Primarily dev environment activity |
+| Service | 4-Day Total | Daily Avg | Monthly Projection | Primary Cost Drivers |
+|---------|-------------|-----------|-------------------|---------------------|
+| **mmm-app-dev-training** | $0.56 | $0.14 | $4.20 | Compute CPU (65%), Memory (29%), Registry (6%) |
+| **mmm-app-dev-web** | $0.55 | $0.14 | $4.12 | User requests (89%), Registry (6%), Networking (5%) |
+| **mmm-app-training** | $0.03 | $0.01 | $0.22 | Registry (100%) |
+| **mmm-app-web** | $0.04 | $0.01 | $0.30 | Registry (91%), User requests (8%) |
+| **GCP Total** | **$1.18** | **$0.30** | **$8.88** | Primarily dev environment activity |
+| **GitHub Actions** | **$0.03** | **$0.01** | **$0.21** | Weekly cleanup workflow (estimated) |
+| **Combined Total** | **$1.21** | **$0.30** | **$9.09** | **All costs including external** |
 
-### Cost by Category
+### Cost by Category (4-Day Period)
 
 | Category | Total Cost | Percentage | Notes |
 |----------|-----------|------------|-------|
+| **User Requests** | $0.49 | 41.5% | Web service invocations (dev environment) |
 | **Compute CPU** | $0.36 | 30.5% | Training job execution |
 | **Compute Memory** | $0.16 | 13.6% | Training job execution |
-| **User Requests** | $0.49 | 41.5% | Web service invocations (user + scheduler) |
 | **Registry** | $0.06 | 5.1% | Container image storage |
 | **Networking** | $0.03 | 2.5% | Data transfer |
 | **Storage** | $0.08 | 6.8% | GCS storage costs |
+| **Scheduler** | $0.00 | 0.0% | **Currently disabled** |
 
-**Notes:**
+**Key Observations:**
 - Costs are dominated by dev environment activity during this period
 - Production services show minimal activity ($0.01/day)
 - No major training jobs during this period (explains low compute costs)
+- Zero scheduler costs confirm scheduler is disabled
 
 ---
 
@@ -207,53 +236,96 @@ Current Cost: ~$0.06/day ($1.80/month)
 
 **Total:** €145-214/month depending on usage
 
-**Note:** This baseline represents documented historical costs from initial deployment analysis. Current optimized configuration uses 10-minute scheduler intervals.
+**Note:** This baseline represents documented historical costs from initial deployment analysis.
 
-### After Optimization ($8.87/month actual)
+### After Optimization ($9.09/month actual - February 2026)
 
 | Component | Monthly Cost | Solution Applied |
 |-----------|-------------|-----------------|
 | Web Services (idle) | $0.00 | Scale-to-zero (min_instances=0) ✅ |
-| Web Services (requests) | $4.20 | Only dev activity, scheduler + users ✅ |
-| Scheduler Service | $0.20 | 2 jobs × $0.10/month ✅ |
-| Scheduler Invocations | $0.50 | 10-minute intervals (4,320/month) ✅ |
-| Training Jobs | $4.50 | Variable, minimal during test period ✅ |
-| Artifact Registry | $1.80 | Weekly cleanup, keeps last 10 ✅ |
-| GCS Storage | $2.40 | Lifecycle policies applied ✅ |
-
-**Total:** $8.87/month (current), $15-45/month with moderate training
+| Web Services (requests) | $4.42 | Dev + prod activity (minimal) ✅ |
+| Scheduler Service | $0.00 | **Currently disabled** ⚠️ |
+| Scheduler Invocations | $0.00 | **Currently disabled** ⚠️ |
+| Training Jobs | $4.42 | Variable, minimal during test period ✅ |
+| Artifact Registry | $0.06 | Weekly cleanup, keeps last 10 ✅ |
+| GCS Storage | $0.08 | Lifecycle policies applied ✅ |
+| **GCP Subtotal** | **$8.88/month** | **Main infrastructure costs** |
+| GitHub Actions | $0.21 | Weekly cleanup workflow (external) ✅ |
+| **Combined Total** | **$9.09/month** | **All costs including external** |
 
 **Cost Reduction:** 94% (from $160 baseline to $9 actual)
 
-**Notes on Scheduler:**
-- Current configuration: 10-minute intervals (4,320 invocations/month)
-- This provides good balance between cost and responsiveness
-- Could be increased to 30-minute intervals for further savings if 10-minute job latency is acceptable
+**Notes on Current Configuration:**
+- Scheduler is **currently disabled** (`scheduler_enabled = false` in tfvars)
+- This saves ~$0.70-1.00/month in scheduler costs
+- CPU throttling is **enabled** in Terraform configuration
+- Training jobs must be processed manually with scheduler disabled
+
+---
+
+## Analysis of Recommendations from Scripts
+
+### Script Output Review (February 18, 2026)
+
+The `analyze_idle_costs.py` script outputs recommendations that are **no longer accurate** for the current configuration:
+
+#### ❌ Recommendation 1: "Enable CPU Throttling"
+**Status:** ALREADY IMPLEMENTED
+- Terraform configuration shows: `"run.googleapis.com/cpu-throttling" = "true"`
+- The script had outdated hardcoded configuration (`throttling: False`)
+- **Action Required:** ✅ Script has been updated with correct configuration
+
+#### ❌ Recommendation 2: "Increase Scheduler Interval"
+**Status:** NOT APPLICABLE - Scheduler is disabled
+- Scheduler is currently disabled (`scheduler_enabled = false`)
+- Zero scheduler costs in billing data confirm this
+- **If scheduler were enabled:** 10-minute intervals are already reasonable
+
+#### ❌ Recommendation 3: Cost Savings Estimates
+**Status:** INCORRECT - Based on wrong assumptions
+- Script assumes CPU throttling is disabled (it's not)
+- Script assumes scheduler is running every 10 minutes (it's not)
+- Projected savings of "$9.50/month" are not achievable since optimizations are already applied
+
+### ✅ Actual Current State Summary
+
+**All major optimizations are already in place:**
+1. ✅ Scale-to-zero enabled (min_instances=0)
+2. ✅ CPU throttling enabled
+3. ✅ Scheduler disabled (for cost savings)
+4. ✅ Resource optimization (1 vCPU, 2 GB for web services)
+5. ✅ GCS lifecycle policies
+6. ✅ Artifact Registry weekly cleanup
+
+**Current costs ($9.09/month) are already at target range for minimal activity.**
 
 ---
 
 ## Monthly Cost Projections
 
-### Scenario 1: Minimal Activity (Current)
-- **Web Services:** $5/month (mostly dev environment testing)
-- **Training Jobs:** $1-2/month (1-2 test jobs)
-- **Scheduler:** $1/month (service + invocations)
-- **Storage & Registry:** $4/month
-- **Total:** $10-12/month ✅ **Current status**
+### Scenario 1: Minimal Activity (Current State)
+- **Web Services:** $4.42/month (dev + prod testing)
+- **Training Jobs:** $4.42/month (minimal jobs)
+- **Scheduler:** $0.00/month (disabled)
+- **Storage & Registry:** $0.14/month
+- **GitHub Actions:** $0.21/month
+- **Total:** ~$9.09/month ✅ **Currently achieving**
 
-### Scenario 2: Light Production Use
+### Scenario 2: Light Production Use (With Scheduler Enabled)
 - **Web Services:** $5-8/month (occasional user interactions)
 - **Training Jobs:** $10-20/month (5-10 jobs)
-- **Scheduler:** $1/month
-- **Storage & Registry:** $4-6/month
-- **Total:** $20-35/month
+- **Scheduler:** $0.70-1.00/month (if re-enabled)
+- **Storage & Registry:** $0.50-1.00/month
+- **GitHub Actions:** $0.21/month
+- **Total:** ~$17-30/month
 
-### Scenario 3: Moderate Production Use
-- **Web Services:** $8-12/month (regular user activity)
-- **Training Jobs:** $30-50/month (15-25 jobs)
-- **Scheduler:** $1/month
-- **Storage & Registry:** $5-8/month
-- **Total:** $44-71/month
+### Scenario 3: Moderate Production Use (With Scheduler Enabled)
+- **Web Services:** $10-15/month (regular user traffic)
+- **Training Jobs:** $25-40/month (15-25 jobs)
+- **Scheduler:** $1.00/month (if re-enabled)
+- **Storage & Registry:** $2-4/month
+- **GitHub Actions:** $0.21/month
+- **Total:** ~$38-60/month
 
 ### Scenario 4: Heavy Production Use
 - **Web Services:** $12-20/month (high user activity)

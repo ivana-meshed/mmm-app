@@ -44,25 +44,26 @@ MEMORY_PRICE_PER_GB_SECOND = 0.00000250  # $0.0025 / GB-hour
 REQUEST_PRICE = 0.00000040  # $0.40 per million requests
 
 # Service configurations (from terraform)
+# NOTE: These should match the actual Terraform configuration in infra/terraform/main.tf
 SERVICE_CONFIGS = {
     "mmm-app-web": {
         "cpu": 1.0,  # vCPU allocated
         "memory": 2.0,  # GB allocated
-        "throttling": False,  # CPU throttling disabled
+        "throttling": True,  # CPU throttling enabled (as of Feb 2026)
         "min_instances": 0,
-        "scheduler_interval": 10,  # minutes
+        "scheduler_interval": None,  # Scheduler currently disabled
     },
     "mmm-app-dev-web": {
         "cpu": 1.0,
         "memory": 2.0,
-        "throttling": False,
+        "throttling": True,  # CPU throttling enabled (as of Feb 2026)
         "min_instances": 0,
-        "scheduler_interval": 10,
+        "scheduler_interval": None,  # Scheduler currently disabled
     },
     "mmm-app-training": {
         "cpu": 8.0,
         "memory": 32.0,
-        "throttling": True,  # Jobs don't have this setting
+        "throttling": True,  # Jobs always have CPU allocated during execution
         "min_instances": 0,
         "scheduler_interval": None,  # No scheduler for jobs
     },
