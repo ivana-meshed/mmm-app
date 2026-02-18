@@ -124,6 +124,11 @@ python scripts/analyze_idle_costs.py --days 7 --use-user-credentials
 python scripts/track_daily_costs.py --days 30 --output costs.csv
 ```
 
+**New:** Scripts now include a dedicated "Scheduler & Automation Costs" breakdown showing:
+- Cloud Scheduler service fees and invocations
+- GitHub Actions costs (weekly cleanup automation)
+- See [SCHEDULER_COSTS_TRACKING.md](SCHEDULER_COSTS_TRACKING.md) for details
+
 ### Cost Optimization Status
 
 All major cost optimizations have been applied:

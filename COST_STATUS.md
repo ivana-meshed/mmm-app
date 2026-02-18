@@ -83,7 +83,7 @@ Based on actual billing data from February 14-18, 2026:
    - Identifies optimization opportunities
    - Provides recommendations
 
-### Recent Script Improvements (PR #169 + Fixes)
+### Recent Script Improvements (PR #169 + Latest Enhancements)
 
 ✅ **Enhancements Applied:**
 - Added Secret Manager cost tracking
@@ -91,6 +91,17 @@ Based on actual billing data from February 14-18, 2026:
 - Enhanced service identification logic
 - Better categorization of cost types
 - Fixed string-to-number conversions in shell scripts
+- **NEW: Explicit scheduler run costs tracking** (service fees + invocations)
+- **NEW: GitHub Actions cost tracking** (weekly cleanup automation)
+- **NEW: Dedicated "Scheduler & Automation Costs" breakdown section**
+
+**Scheduler & Automation Tracking:**
+The scripts now provide a dedicated breakdown showing:
+- Cloud Scheduler service fees (~$0.10/month per job)
+- Scheduler invocation costs (Cloud Run container time)
+- GitHub Actions costs (Artifact Registry cleanup and CI/CD)
+
+See [SCHEDULER_COSTS_TRACKING.md](SCHEDULER_COSTS_TRACKING.md) for details on the new tracking features.
 
 ⚠️ **Known Limitations:**
 - Requires BigQuery billing export to be enabled
