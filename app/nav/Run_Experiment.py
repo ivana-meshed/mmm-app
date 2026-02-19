@@ -490,7 +490,9 @@ with tab_single:
         # Column 2: Goal (from training data configs)
         # Get available goals for selected country
         try:
-            available_goals = _list_available_goals(gcs_bucket, selected_country)
+            available_goals = _list_available_goals(
+                gcs_bucket, selected_country
+            )
             logger.info(
                 f"[DATA-PREFILL] Found {len(available_goals)} goals for {selected_country}"
             )
@@ -674,9 +676,7 @@ with tab_single:
             available_goals = []
 
         if not available_goals:
-            st.warning(
-                f"⚠️ No training data found for {lookup_country.upper()}"
-            )
+            st.warning(f"⚠️ No training data found for {lookup_country.upper()}")
             st.session_state["training_data_config"] = None
             selected_goal = None
             selected_training_timestamp = None
@@ -1463,9 +1463,7 @@ with tab_single:
             agg_summary = ", ".join(
                 [f"{count} {agg}" for agg, count in sorted(agg_counts.items())]
             )
-            st.info(
-                f"ℹ️ Using column aggregations from metadata: {agg_summary}"
-            )
+            st.info(f"ℹ️ Using column aggregations from metadata: {agg_summary}")
         elif resample_freq != "none" and not column_agg_strategies:
             st.warning(
                 "⚠️ No column aggregations found in metadata. Default 'sum' "
@@ -2542,9 +2540,7 @@ with tab_single:
             )
         else:
             combined_revision = ""
-            st.warning(
-                "⚠️ Please select or create a tag for the experiment run"
-            )
+            st.warning("⚠️ Please select or create a tag for the experiment run")
 
         # For backward compatibility, create a combined "revision" field
         revision = combined_revision

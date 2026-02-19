@@ -5,7 +5,24 @@ This is the main entry point for the MMM (Marketing Mix Modeling) application.
 Uses custom navigation to hide the main page from the sidebar.
 """
 
+# ULTRA-VERBOSE LOGGING: Add at very start to trace execution
+import logging
+import sys
+
+# Set up logging immediately
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+logger = logging.getLogger(__name__)
+
+# Log startup - this should ALWAYS appear if app runs
+logger.info("=" * 80)
+logger.info("[APP_STARTUP] Streamlit app starting...")
+logger.info(f"[APP_STARTUP] Python version: {sys.version}")
+logger.info("=" * 80)
+
 import streamlit as st
+
+# Log after streamlit import
+logger.info("[APP_STARTUP] Streamlit imported successfully")
 
 # Use custom navigation to control sidebar (Streamlit 1.31+)
 st.set_page_config(
@@ -14,11 +31,34 @@ st.set_page_config(
     layout="wide",
 )
 
+logger.info("[APP_STARTUP] Page config set")
+
+# Log query params immediately (before any processing)
+try:
+    query_params_obj = st.query_params
+    logger.info(f"[APP_STARTUP] st.query_params type: {type(query_params_obj)}")
+    logger.info(f"[APP_STARTUP] st.query_params value: {query_params_obj}")
+    logger.info(f"[APP_STARTUP] st.query_params bool: {bool(query_params_obj)}")
+    if query_params_obj:
+        logger.info(
+            f"[APP_STARTUP] st.query_params keys: {list(query_params_obj.keys())}"
+        )
+except Exception as e:
+    logger.error(
+        f"[APP_STARTUP] Error accessing query_params: {e}", exc_info=True
+    )
+
+logger.info("[APP_STARTUP] About to import app_split_helpers...")
+
 from app_split_helpers import *
+
+logger.info("[APP_STARTUP] app_split_helpers imported successfully")
 
 # Handle queue tick endpoint early (before navigation setup)
 # This needs to be called explicitly, not at module import time
+logger.info("[APP_STARTUP] About to call handle_queue_tick_if_requested()...")
 handle_queue_tick_if_requested()
+logger.info("[APP_STARTUP] handle_queue_tick_if_requested() returned")
 
 # Define pages for custom navigation
 connect_page = st.Page(

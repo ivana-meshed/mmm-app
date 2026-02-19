@@ -76,9 +76,7 @@ def get_credentials():
     # Check if GOOGLE_APPLICATION_CREDENTIALS is set
     gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if gac:
-        print(
-            f"\n⚠️  WARNING: GOOGLE_APPLICATION_CREDENTIALS is set to: {gac}"
-        )
+        print(f"\n⚠️  WARNING: GOOGLE_APPLICATION_CREDENTIALS is set to: {gac}")
         print(
             "The script will use this service account. "
             "Use --use-user-credentials to override.\n"
@@ -142,7 +140,7 @@ def identify_service_from_labels(
     """Identify MMM service from labels and resource name."""
     # Check all labels for service names
     labels_str = " ".join(all_labels).lower() if all_labels else ""
-    
+
     # Order matters - check dev services before prod to avoid matching "mmm-app" in "mmm-app-dev"
     if "mmm-app-dev-web" in labels_str:
         return "mmm-app-dev-web"
@@ -152,24 +150,33 @@ def identify_service_from_labels(
         return "mmm-app-web"
     if "mmm-app-training" in labels_str:
         return "mmm-app-training"
-    
+
     # Fallback to resource name if labels don't match
     if resource_full_name:
         resource_lower = resource_full_name.lower()
-        if "mmm-app-dev-web" in resource_lower or "mmm_app_dev_web" in resource_lower:
+        if (
+            "mmm-app-dev-web" in resource_lower
+            or "mmm_app_dev_web" in resource_lower
+        ):
             return "mmm-app-dev-web"
-        if "mmm-app-dev-training" in resource_lower or "mmm_app_dev_training" in resource_lower:
+        if (
+            "mmm-app-dev-training" in resource_lower
+            or "mmm_app_dev_training" in resource_lower
+        ):
             return "mmm-app-dev-training"
         if "mmm-app-web" in resource_lower or "mmm_app_web" in resource_lower:
             return "mmm-app-web"
-        if "mmm-app-training" in resource_lower or "mmm_app_training" in resource_lower:
+        if (
+            "mmm-app-training" in resource_lower
+            or "mmm_app_training" in resource_lower
+        ):
             return "mmm-app-training"
-    
+
     # For shared resources (storage, registry), distribute equally
     if labels_str or resource_full_name:
         # Check if it's a shared cost (artifact registry, storage)
         return "shared"
-    
+
     return None
 
 
@@ -229,10 +236,12 @@ def analyze_costs(
             continue
 
         # Identify service
-        mmm_service = identify_service_from_labels(all_labels, resource_full_name)
+        mmm_service = identify_service_from_labels(
+            all_labels, resource_full_name
+        )
         if not mmm_service:
             continue
-        
+
         # Handle shared costs
         if mmm_service == "shared":
             analysis["shared_costs"] += total_cost
@@ -297,7 +306,9 @@ def analyze_costs(
             analysis["by_service"][service]["total"] += shared_per_service
             if "shared" not in analysis["by_service"][service]["by_category"]:
                 analysis["by_service"][service]["by_category"]["shared"] = 0
-            analysis["by_service"][service]["by_category"]["shared"] += shared_per_service
+            analysis["by_service"][service]["by_category"][
+                "shared"
+            ] += shared_per_service
 
     # Convert sets to counts
     for service, data in analysis["by_service"].items():
@@ -353,9 +364,7 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
         print(f"\n{service}:")
         print(f"  Total Cost: ${data['total']:.2f}")
         print(f"  Daily Average: ${data['total'] / args.days:.2f}")
-        print(
-            f"  Monthly Projection: ${data['total'] / args.days * 30:.2f}"
-        )
+        print(f"  Monthly Projection: ${data['total'] / args.days * 30:.2f}")
         print(f"  Unique Hours Active: {data['unique_hours_active']}")
 
         print(f"\n  Cost by Category:")
@@ -430,10 +439,10 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
     print("\nWhy are costs high despite min_instances=0?")
     print("\n1. CPU THROTTLING DISABLED:")
     print("   - Current setting: cpu-throttling = false")
+    print("   - Impact: CPU remains allocated even when container is idle")
     print(
-        "   - Impact: CPU remains allocated even when container is idle"
+        "   - Consequence: You pay for CPU time, not just active request time"
     )
-    print("   - Consequence: You pay for CPU time, not just active request time")
 
     print("\n2. SCHEDULER WAKE-UPS:")
     print("   - Scheduler pings every 10 minutes")
@@ -490,29 +499,19 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
     print('   - To:   schedule = "*/30 * * * *"  # every 30 minutes')
     print("\n   Expected Impact:")
     print("     - Reduces wake-ups from 144/day to 48/day")
-    print(
-        "     - Reduces 'always warm' behavior, allowing true scale-to-zero"
-    )
+    print("     - Reduces 'always warm' behavior, allowing true scale-to-zero")
     print("     - Estimated monthly savings: ~$20-30")
     print("\n   Trade-offs:")
-    print(
-        "     - Training jobs in queue wait up to 30 min instead of 10 min"
-    )
+    print("     - Training jobs in queue wait up to 30 min instead of 10 min")
     print("     - Acceptable if training is not time-critical")
 
     print("\n3. CONSIDER ALTERNATIVE ARCHITECTURE (Low Priority)")
     print("   Options:")
-    print(
-        "     a) Use Cloud Tasks instead of scheduler for queue processing"
-    )
+    print("     a) Use Cloud Tasks instead of scheduler for queue processing")
     print("        - Only triggers when jobs are actually in queue")
     print("        - No wake-ups when queue is empty")
-    print(
-        "     b) Use Pub/Sub + Cloud Functions for queue management"
-    )
-    print(
-        "        - More granular, only pays for actual queue operations"
-    )
+    print("     b) Use Pub/Sub + Cloud Functions for queue management")
+    print("        - More granular, only pays for actual queue operations")
     print("\n   Expected Impact:")
     print("     - Could reduce idle costs to near-zero")
     print("     - Estimated monthly savings: ~$40-60")
@@ -526,9 +525,7 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
     print("\nExpected Results:")
     print(f"  Current monthly cost: ${total_monthly:.2f}")
     print(f"  After CPU throttling: ${total_monthly * 0.3:.2f} (-70%)")
-    print(
-        f"  After scheduler change: ${total_monthly * 0.2:.2f} (-80% total)"
-    )
+    print(f"  After scheduler change: ${total_monthly * 0.2:.2f} (-80% total)")
     print(
         f"\n  Monthly savings: ~${total_monthly * 0.8:.2f} (~$1,000-1,200/year)"
     )
@@ -572,7 +569,10 @@ def main():
 
     # Handle credentials
     saved_gac = None
-    if args.use_user_credentials and "GOOGLE_APPLICATION_CREDENTIALS" in os.environ:
+    if (
+        args.use_user_credentials
+        and "GOOGLE_APPLICATION_CREDENTIALS" in os.environ
+    ):
         print(
             "\nUsing user credentials (ignoring GOOGLE_APPLICATION_CREDENTIALS)"
         )

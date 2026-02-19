@@ -44,7 +44,8 @@ st.title("Review Model Stability")
 
 # Add helpful documentation at the top
 with st.expander("ℹ️ About This Page", expanded=False):
-    st.markdown("""
+    st.markdown(
+        """
         ### Purpose
         This page analyzes the **stability of your Robyn MMM models** across multiple model iterations 
         within a single training run. It helps you understand:
@@ -76,7 +77,8 @@ with st.expander("ℹ️ About This Page", expanded=False):
         - **decomp.rssd**: Decomposition residual sum of squares
         
         Choose from presets (Good, Acceptable, All) or set custom thresholds.
-        """)
+        """
+    )
 
 st.markdown("---")
 
@@ -191,17 +193,17 @@ def parse_rev_key(rev: str):
 
 def extract_goal_from_config(bucket_name: str, stamp: str, run_key=None):
     """Extract the goal (dep_var) from job_config.json or model_summary.json for a given timestamp.
-    
+
     Args:
         bucket_name: GCS bucket name
         stamp: Timestamp string
         run_key: Optional tuple of (rev, country, stamp) for fallback to robyn folder
-    
+
     Returns:
         str or None: The goal/dep_var if found
     """
     import json
-    
+
     # First try: training-configs/{stamp}/job_config.json
     try:
         config_blob_path = f"training-configs/{stamp}/job_config.json"
@@ -215,42 +217,47 @@ def extract_goal_from_config(bucket_name: str, stamp: str, run_key=None):
                 return goal
     except Exception:
         pass
-    
+
     # Second try: robyn/{rev}/{country}/{stamp}/model_summary.json
     if run_key:
         try:
             rev, country, _ = run_key
-            model_summary_path = f"robyn/{rev}/{country}/{stamp}/model_summary.json"
+            model_summary_path = (
+                f"robyn/{rev}/{country}/{stamp}/model_summary.json"
+            )
             client_instance = gcs_client()
             blob = client_instance.bucket(bucket_name).blob(model_summary_path)
             if blob.exists():
                 summary_data = blob.download_as_bytes()
                 summary = json.loads(summary_data.decode("utf-8"))
                 # Extract dep_var from input_metadata
-                if "input_metadata" in summary and "dep_var" in summary["input_metadata"]:
+                if (
+                    "input_metadata" in summary
+                    and "dep_var" in summary["input_metadata"]
+                ):
                     return summary["input_metadata"]["dep_var"]
         except Exception:
             pass
-    
+
     return None
 
 
 def get_goals_for_runs(bucket_name: str, run_keys):
     """Extract goals for a set of runs. Returns dict mapping (rev, country, stamp) to goal.
-    
+
     Tries two methods:
     1. training-configs/{stamp}/job_config.json (for runs with training configs)
     2. robyn/{rev}/{country}/{stamp}/model_summary.json (for runs without training configs)
     """
     goals_map = {}
-    
+
     for key in run_keys:
         rev, country, stamp = key
         # Try to extract goal with fallback to model_summary.json
         goal = extract_goal_from_config(bucket_name, stamp, run_key=key)
         if goal:
             goals_map[key] = goal
-    
+
     return goals_map
 
 
@@ -621,7 +628,11 @@ else:
 
 # Column 2: Country
 with col2:
-    country_index = rev_countries.index(default_country) if default_country in rev_countries else 0
+    country_index = (
+        rev_countries.index(default_country)
+        if default_country in rev_countries
+        else 0
+    )
     countries_sel = st.selectbox(
         "Country",
         rev_countries,
@@ -676,7 +687,11 @@ else:
 # Column 3: Goal
 if rev_country_goals:
     with col3:
-        goal_index = rev_country_goals.index(default_goal) if default_goal in rev_country_goals else 0
+        goal_index = (
+            rev_country_goals.index(default_goal)
+            if default_goal in rev_country_goals
+            else 0
+        )
         goals_sel = st.selectbox(
             "Goal (dep_var)",
             rev_country_goals,
