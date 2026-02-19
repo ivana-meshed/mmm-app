@@ -180,8 +180,7 @@ def parse_stamp(stamp: str):
     try:
         return dt.datetime.strptime(stamp, "%m%d_%H%M%S")
     except Exception:
-        # Return datetime.min for unparseable stamps so they sort to the end
-        return dt.datetime.min
+        return stamp
 
 
 def parse_rev_key(rev: str):
