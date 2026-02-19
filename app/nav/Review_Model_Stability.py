@@ -716,9 +716,30 @@ else:
     )
 
 # Timestamps available for selected revision and countries
-all_stamps = sorted(
+# Filter to only include timestamps with complete model outputs
+all_stamps_raw = sorted(
     {k[2] for k in rev_country_keys}, key=parse_stamp, reverse=True
 )
+
+# Filter out timestamps that don't have complete model outputs
+all_stamps = []
+incomplete_stamps = []
+for stamp in all_stamps_raw:
+    # Check if any run with this timestamp has complete outputs
+    stamp_runs = [k for k in rev_country_keys if k[2] == stamp]
+    has_valid_run = any(run_has_required_files(runs.get(k, [])) for k in stamp_runs)
+    if has_valid_run:
+        all_stamps.append(stamp)
+    else:
+        incomplete_stamps.append(stamp)
+
+# Inform user if some timestamps were filtered out
+if incomplete_stamps:
+    st.info(
+        f"ℹ️ Note: {len(incomplete_stamps)} timestamp(s) excluded from dropdown "
+        f"due to incomplete model outputs. "
+        f"Only showing {len(all_stamps)} timestamp(s) with complete data."
+    )
 
 # Restore previous selection if available
 stamp_options = [""] + all_stamps
@@ -1007,17 +1028,23 @@ for c in hyp_f.columns:
     elif cu.startswith("decomp.rssd"):
         hyp_f[c] = hyp_f[c].fillna(1.0)
 
-mask = pd.Series(True, index=hyp_f.index)
-for c in hyp_f.columns:
-    cu = c.lower()
-    if cu.startswith("rsq_"):
-        mask &= hyp_f[c] >= rsq_min
-    elif cu.startswith("nrmse_"):
-        mask &= hyp_f[c] <= nrmse_max
-    elif cu.startswith("decomp.rssd"):
-        mask &= hyp_f[c] <= decomp_max
-
-good_models = hyp_f.loc[mask, "solID"].astype(str).unique()
+# Apply filtering based on mode
+if mode == "All":
+    # In "All" mode, include all models without filtering
+    good_models = hyp_f["solID"].astype(str).unique()
+else:
+    # Apply threshold filters for other modes
+    mask = pd.Series(True, index=hyp_f.index)
+    for c in hyp_f.columns:
+        cu = c.lower()
+        if cu.startswith("rsq_"):
+            mask &= hyp_f[c] >= rsq_min
+        elif cu.startswith("nrmse_"):
+            mask &= hyp_f[c] <= nrmse_max
+        elif cu.startswith("decomp.rssd"):
+            mask &= hyp_f[c] <= decomp_max
+    
+    good_models = hyp_f.loc[mask, "solID"].astype(str).unique()
 st.write(
     f"Selected **{len(good_models)} / {len(hyp)}** models (mode: **{mode}**)"
 )
