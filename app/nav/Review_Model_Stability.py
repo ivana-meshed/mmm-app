@@ -146,6 +146,32 @@ def group_runs(blobs):
     return runs
 
 
+def run_has_required_files(run_blobs, required_files=None):
+    """
+    Check if a run has all required model output files.
+    
+    Args:
+        run_blobs: List of blobs for a specific run
+        required_files: List of required filenames. Defaults to the standard Robyn output files.
+    
+    Returns:
+        bool: True if all required files are present, False otherwise
+    """
+    if required_files is None:
+        required_files = [FILE_XAGG, FILE_HYP, FILE_MEDIA, FILE_XVEC]
+    
+    # Extract filenames from blob paths
+    blob_files = set()
+    for blob in run_blobs:
+        # Extract filename from path (e.g., "output_models_data/xDecompAgg.parquet" -> "xDecompAgg.parquet")
+        parts = blob.name.split("/")
+        if len(parts) >= 2 and parts[-2] == "output_models_data":
+            blob_files.add(parts[-1])
+    
+    # Check if all required files are present
+    return all(f in blob_files for f in required_files)
+
+
 def parse_stamp(stamp: str):
     """Parse timestamp string."""
     try:
@@ -733,18 +759,56 @@ if stamp_sel:
             f"No runs found for {rev}/{', '.join(countries_sel)}/{stamp_sel}"
         )
         st.stop()
-    # Use the first country's run for the analysis
+    
+    # Validate that the selected run has all required files
     analysis_key = selected_runs[0]
+    if not run_has_required_files(runs.get(analysis_key, [])):
+        st.error(
+            f"❌ **Incomplete model outputs for selected run**\n\n"
+            f"**Run:** {analysis_key[0]} / {analysis_key[1]} / {analysis_key[2]}\n\n"
+            "The selected run exists but is missing required output files.\n\n"
+            "**Required files:**\n"
+            f"- {FILE_XAGG}\n"
+            f"- {FILE_HYP}\n"
+            f"- {FILE_MEDIA}\n"
+            f"- {FILE_XVEC}\n\n"
+            "**Troubleshooting:**\n"
+            "- Check that the model training completed successfully\n"
+            "- Verify the output files were uploaded to GCS\n"
+            "- Try selecting a different timestamp"
+        )
+        st.stop()
 else:
-    # No timestamp - use latest for first country
+    # No timestamp - use latest for first country that has valid model outputs
     country_runs = [k for k in rev_country_keys if k[1] == countries_sel[0]]
     if not country_runs:
         st.error(f"No runs found for {rev}/{countries_sel[0]}")
         st.stop()
-    country_runs_sorted = sorted(
-        country_runs, key=lambda k: parse_stamp(k[2]), reverse=True
+    
+    # Filter to only runs that have all required output files
+    valid_runs = [k for k in country_runs if run_has_required_files(runs.get(k, []))]
+    
+    if not valid_runs:
+        st.error(
+            f"❌ **No valid model runs found for {rev}/{countries_sel[0]}**\n\n"
+            f"Found {len(country_runs)} run(s), but none have complete model outputs.\n\n"
+            "**Required files:**\n"
+            f"- {FILE_XAGG}\n"
+            f"- {FILE_HYP}\n"
+            f"- {FILE_MEDIA}\n"
+            f"- {FILE_XVEC}\n\n"
+            "**Troubleshooting:**\n"
+            "- Check that the model training completed successfully\n"
+            "- Verify the output files were uploaded to GCS\n"
+            "- Try selecting a specific timestamp from the dropdown"
+        )
+        st.stop()
+    
+    # Sort valid runs by timestamp (newest first)
+    valid_runs_sorted = sorted(
+        valid_runs, key=lambda k: parse_stamp(k[2]), reverse=True
     )
-    analysis_key = country_runs_sorted[0]
+    analysis_key = valid_runs_sorted[0]
 
 # Construct GCS_PREFIX from selected run
 GCS_PREFIX = f"robyn/{analysis_key[0]}/{analysis_key[1]}/{analysis_key[2]}/output_models_data"
