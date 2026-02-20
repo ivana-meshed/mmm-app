@@ -146,12 +146,39 @@ def group_runs(blobs):
     return runs
 
 
+def run_has_required_files(run_blobs, required_files=None):
+    """
+    Check if a run has all required model output files.
+    
+    Args:
+        run_blobs: List of blobs for a specific run
+        required_files: List of required filenames. Defaults to the standard Robyn output files.
+    
+    Returns:
+        bool: True if all required files are present, False otherwise
+    """
+    if required_files is None:
+        required_files = [FILE_XAGG, FILE_HYP, FILE_MEDIA, FILE_XVEC]
+    
+    # Extract filenames from blob paths
+    blob_files = set()
+    for blob in run_blobs:
+        # Extract filename from path (e.g., "output_models_data/xDecompAgg.parquet" -> "xDecompAgg.parquet")
+        parts = blob.name.split("/")
+        if len(parts) >= 2 and parts[-2] == "output_models_data":
+            blob_files.add(parts[-1])
+    
+    # Check if all required files are present
+    return all(f in blob_files for f in required_files)
+
+
 def parse_stamp(stamp: str):
     """Parse timestamp string."""
     try:
         return dt.datetime.strptime(stamp, "%m%d_%H%M%S")
     except Exception:
-        return stamp
+        # Return datetime.min for unparseable stamps so they sort to the end
+        return dt.datetime.min
 
 
 def parse_rev_key(rev: str):
@@ -689,9 +716,30 @@ else:
     )
 
 # Timestamps available for selected revision and countries
-all_stamps = sorted(
+# Filter to only include timestamps with complete model outputs
+all_stamps_raw = sorted(
     {k[2] for k in rev_country_keys}, key=parse_stamp, reverse=True
 )
+
+# Filter out timestamps that don't have complete model outputs
+all_stamps = []
+incomplete_stamps = []
+for stamp in all_stamps_raw:
+    # Check if any run with this timestamp has complete outputs
+    stamp_runs = [k for k in rev_country_keys if k[2] == stamp]
+    has_valid_run = any(run_has_required_files(runs.get(k, [])) for k in stamp_runs)
+    if has_valid_run:
+        all_stamps.append(stamp)
+    else:
+        incomplete_stamps.append(stamp)
+
+# Inform user if some timestamps were filtered out
+if incomplete_stamps:
+    st.info(
+        f"ℹ️ Note: {len(incomplete_stamps)} timestamp(s) excluded from dropdown "
+        f"due to incomplete model outputs. "
+        f"Only showing {len(all_stamps)} timestamp(s) with complete data."
+    )
 
 # Restore previous selection if available
 stamp_options = [""] + all_stamps
@@ -732,18 +780,56 @@ if stamp_sel:
             f"No runs found for {rev}/{', '.join(countries_sel)}/{stamp_sel}"
         )
         st.stop()
-    # Use the first country's run for the analysis
+    
+    # Validate that the selected run has all required files
     analysis_key = selected_runs[0]
+    if not run_has_required_files(runs.get(analysis_key, [])):
+        st.error(
+            f"❌ **Incomplete model outputs for selected run**\n\n"
+            f"**Run:** {analysis_key[0]} / {analysis_key[1]} / {analysis_key[2]}\n\n"
+            "The selected run exists but is missing required output files.\n\n"
+            "**Required files:**\n"
+            f"- {FILE_XAGG}\n"
+            f"- {FILE_HYP}\n"
+            f"- {FILE_MEDIA}\n"
+            f"- {FILE_XVEC}\n\n"
+            "**Troubleshooting:**\n"
+            "- Check that the model training completed successfully\n"
+            "- Verify the output files were uploaded to GCS\n"
+            "- Try selecting a different timestamp"
+        )
+        st.stop()
 else:
-    # No timestamp - use latest for first country
+    # No timestamp - use latest for first country that has valid model outputs
     country_runs = [k for k in rev_country_keys if k[1] == countries_sel[0]]
     if not country_runs:
         st.error(f"No runs found for {rev}/{countries_sel[0]}")
         st.stop()
-    country_runs_sorted = sorted(
-        country_runs, key=lambda k: parse_stamp(k[2]), reverse=True
+    
+    # Filter to only runs that have all required output files
+    valid_runs = [k for k in country_runs if run_has_required_files(runs.get(k, []))]
+    
+    if not valid_runs:
+        st.error(
+            f"❌ **No valid model runs found for {rev}/{countries_sel[0]}**\n\n"
+            f"Found {len(country_runs)} run(s), but none have complete model outputs.\n\n"
+            "**Required files:**\n"
+            f"- {FILE_XAGG}\n"
+            f"- {FILE_HYP}\n"
+            f"- {FILE_MEDIA}\n"
+            f"- {FILE_XVEC}\n\n"
+            "**Troubleshooting:**\n"
+            "- Check that the model training completed successfully\n"
+            "- Verify the output files were uploaded to GCS\n"
+            "- Try selecting a specific timestamp from the dropdown"
+        )
+        st.stop()
+    
+    # Sort valid runs by timestamp (newest first)
+    valid_runs_sorted = sorted(
+        valid_runs, key=lambda k: parse_stamp(k[2]), reverse=True
     )
-    analysis_key = country_runs_sorted[0]
+    analysis_key = valid_runs_sorted[0]
 
 # Construct GCS_PREFIX from selected run
 GCS_PREFIX = f"robyn/{analysis_key[0]}/{analysis_key[1]}/{analysis_key[2]}/output_models_data"
@@ -942,17 +1028,23 @@ for c in hyp_f.columns:
     elif cu.startswith("decomp.rssd"):
         hyp_f[c] = hyp_f[c].fillna(1.0)
 
-mask = pd.Series(True, index=hyp_f.index)
-for c in hyp_f.columns:
-    cu = c.lower()
-    if cu.startswith("rsq_"):
-        mask &= hyp_f[c] >= rsq_min
-    elif cu.startswith("nrmse_"):
-        mask &= hyp_f[c] <= nrmse_max
-    elif cu.startswith("decomp.rssd"):
-        mask &= hyp_f[c] <= decomp_max
-
-good_models = hyp_f.loc[mask, "solID"].astype(str).unique()
+# Apply filtering based on mode
+if mode == "All":
+    # In "All" mode, include all models without filtering
+    good_models = hyp_f["solID"].astype(str).unique()
+else:
+    # Apply threshold filters for other modes
+    mask = pd.Series(True, index=hyp_f.index)
+    for c in hyp_f.columns:
+        cu = c.lower()
+        if cu.startswith("rsq_"):
+            mask &= hyp_f[c] >= rsq_min
+        elif cu.startswith("nrmse_"):
+            mask &= hyp_f[c] <= nrmse_max
+        elif cu.startswith("decomp.rssd"):
+            mask &= hyp_f[c] <= decomp_max
+    
+    good_models = hyp_f.loc[mask, "solID"].astype(str).unique()
 st.write(
     f"Selected **{len(good_models)} / {len(hyp)}** models (mode: **{mode}**)"
 )
