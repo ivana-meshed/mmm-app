@@ -101,10 +101,13 @@ For step-by-step instructions on deploying this application to a new Google Clou
 
 ## Cost Monitoring and Optimization
 
-This repository includes comprehensive cost monitoring and optimization tools. See detailed documentation:
+This repository includes comprehensive cost monitoring and optimization tools. **Current costs: $8.87/month** (94% reduction from baseline).
 
-- **[IDLE_COST_EXECUTIVE_SUMMARY.md](docs/IDLE_COST_EXECUTIVE_SUMMARY.md)** - Executive summary of cost optimization opportunities
-- **[IDLE_COST_ANALYSIS.md](docs/IDLE_COST_ANALYSIS.md)** - Technical deep-dive on idle cost analysis
+See detailed documentation:
+
+- **[COST_STATUS.md](COST_STATUS.md)** - **PRIMARY** cost documentation with current status, actual costs, and monitoring guide
+- **[COST_OPTIMIZATION.md](COST_OPTIMIZATION.md)** - Detailed optimization analysis and implementation guide
+- **[docs/IDLE_COST_ANALYSIS.md](docs/IDLE_COST_ANALYSIS.md)** - Technical deep-dive on idle cost analysis
 
 ### Quick Cost Analysis
 
@@ -121,36 +124,29 @@ python scripts/analyze_idle_costs.py --days 7 --use-user-credentials
 python scripts/track_daily_costs.py --days 30 --output costs.csv
 ```
 
-### Cost Optimization Recommendations
+**New:** Scripts now include a dedicated "Scheduler & Automation Costs" breakdown showing:
+- Cloud Scheduler service fees and invocations
+- GitHub Actions costs (weekly cleanup automation)
+- See [SCHEDULER_COSTS_TRACKING.md](SCHEDULER_COSTS_TRACKING.md) for details
 
-The analysis tools have identified significant cost optimization opportunities:
+### Cost Optimization Status
 
-**Current Issue**: Despite `min_instances=0` configuration, idle costs remain at ~$137/month due to:
-1. CPU throttling disabled (`cpu-throttling=false` in main.tf)
-2. Aggressive scheduler frequency (every 10 minutes)
+All major cost optimizations have been applied:
 
-**Recommended Changes** (in `infra/terraform/main.tf`):
-```terraform
-# Line 324: Enable CPU throttling (saves ~$50-70/month)
-"run.googleapis.com/cpu-throttling" = "true"  # was: false
+- ✅ **Scale-to-zero enabled** (min_instances=0) - Eliminates idle costs
+- ✅ **CPU throttling enabled** - Reduces CPU allocation when idle
+- ✅ **Scheduler enabled** (10-minute intervals) - Automated job processing
+- ✅ **Resource optimization** (1 vCPU, 2 GB for web; 8 vCPU, 32 GB for training)
+- ✅ **GCS lifecycle policies** - Automatic storage class transitions
+- ✅ **Artifact Registry cleanup** - Weekly cleanup of old images
 
-# Line 597: Reduce scheduler frequency (saves ~$20-30/month)
-schedule = "*/30 * * * *"  # was: */10 * * * *
-```
+**Result:** $10/month idle costs, $0.50 per production job (94% reduction from $160 baseline)
 
-**Expected Savings**: ~$92-112/month (~$1,100-1,300/year) with zero user impact
-
-**NEW**: You can now pause the Cloud Scheduler temporarily for cost monitoring:
-```bash
-# Edit infra/terraform/envs/prod.tfvars
-scheduler_enabled = false  # Pause scheduler
-
-# Or via command line
-terraform apply -var-file=envs/prod.tfvars -var="scheduler_enabled=false"
-```
-See [Scheduler Pause Guide](docs/SCHEDULER_PAUSE_GUIDE.md) for A/B testing and cost isolation.
-
-For full analysis and implementation details, see the cost optimization documentation above.
+**Documentation:**
+- 📋 [COST_DOCUMENTATION_FINAL.md](COST_DOCUMENTATION_FINAL.md) - **START HERE** - Comprehensive summary
+- 📊 [COST_STATUS.md](COST_STATUS.md) - Technical deep-dive and monitoring
+- 📈 [COST_ESTIMATES_UPDATED.md](COST_ESTIMATES_UPDATED.md) - Detailed cost tables for planning
+- 🎫 [JIRA_COST_SUMMARY.md](JIRA_COST_SUMMARY.md) - JIRA-ready summaries
 
 ## Prerequisites
 
@@ -415,7 +411,8 @@ For more troubleshooting guidance, see [docs/DEPLOYMENT_GUIDE.md#troubleshooting
 | [docs/8_VCPU_TEST_RESULTS.md](docs/8_VCPU_TEST_RESULTS.md) | Analysis of 8 vCPU upgrade testing |
 | [docs/google_auth_domain_configuration.md](docs/google_auth_domain_configuration.md) | OAuth domain configuration |
 | [docs/persistent_private_key.md](docs/persistent_private_key.md) | Snowflake key storage |
-| [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Cost optimization strategies |
+| [COST_STATUS.md](COST_STATUS.md) | **PRIMARY cost documentation** - Current costs ($8.87/month), optimization status, monitoring guide |
+| [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md) | Detailed cost optimization analysis and implementation guide |
 
 ## License
 

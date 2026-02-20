@@ -116,3 +116,9 @@ variable "scheduler_enabled" {
   type        = bool
   default     = true
 }
+
+variable "scheduler_interval_minutes" {
+  description = "Interval in minutes for scheduler to check queue (e.g., 10 for every 10 minutes, 30 for every 30 minutes)"
+  type        = number
+  default     = 10
+}
