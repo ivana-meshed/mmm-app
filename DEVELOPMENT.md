@@ -631,8 +631,8 @@ that no spurious tasks are being created.
 This is the most realistic end-to-end test and requires the dev Cloud Run
 service to be deployed (push to a `feat-*` or `copilot/*` branch first).
 
-**Goal:** confirm that Cloud Tasks fires automatically when a job is added
-through the UI, and stops firing once the queue is empty.
+**Goal:** confirm that Cloud Tasks fires automatically when the queue
+transitions to RUNNING with pending jobs, and stops firing once done.
 
 **Set variables once (reused in all CLI commands below):**
 ```bash
@@ -641,57 +641,63 @@ REGION=europe-west1
 QUEUE=robyn-queue-tick-dev
 ```
 
-**Steps:**
+**Two supported workflows — both trigger a Cloud Task:**
+
+---
+
+**Workflow A — stage first, then start:**
 
 1. **Open the app** at `https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app`
    and log in.
 
 2. Navigate to **5. Run Models → Batch Run** tab.
 
-3. Configure a minimal test job (any country, small iterations, e.g.
-   `iterations=200`, `trials=3`).  Make sure a valid data source is
-   selected (table or query).
+3. Configure one or more test jobs and click **➕ Add to Queue** for each.
+   The queue status bar will show `Queue is STOPPED · N pending`.  
+   No Cloud Task is created yet — the queue is not running.
 
-4. Click **➕ Add & Start** (the combined button).  This adds the job to
-   the queue **and** starts it in one step (`queue_running=true`), which
-   is what triggers the Cloud Task.
+4. When you are ready to run, go to the **Queue Monitor** tab and click
+   **▶️ Start Queue**.  This writes `queue_running=true` together with your
+   PENDING entries to GCS, which immediately schedules a Cloud Task.
 
-   > **Why not "Add to Queue" alone?**  Adding a job to a *stopped* queue
-   > intentionally does **not** create a Cloud Task — you haven't asked it
-   > to run yet.  A Cloud Task is only scheduled when the queue is running
-   > **and** there are PENDING jobs.  If you used "Add to Queue" without
-   > starting, click **▶️ Start Queue** afterwards; that write
-   > (`queue_running=true` + PENDING entries) will also trigger the task.
-
-5. **Immediately** open a terminal and check the Cloud Tasks queue:
+5. **Immediately** check the Cloud Tasks queue:
    ```bash
    gcloud tasks list \
      --queue="$QUEUE" \
      --location="$REGION" \
      --project="$PROJECT"
    ```
-   Expected: **one task** listed with a `scheduledTime` in the past or
-   near future.  The task was created automatically by `save_queue_to_gcs()`
-   when the queue transitioned to running with PENDING entries.
+   Expected: **one task** listed.
 
-6. While the job is in **RUNNING** state, re-run the `gcloud tasks list`
-   command — you should see a new task with `scheduledTime` approximately
-   5 minutes in the future (the status-polling task).
+---
 
-7. After the training job completes (**SUCCEEDED** or **FAILED** in the
-   Queue Monitor tab), run `gcloud tasks list` once more.
-   Expected: **empty list** — no idle tasks, no idle compute costs.
+**Workflow B — add and start in one click:**
 
-8. **Confirm in Cloud Run logs** that the chain self-terminated:
-   ```bash
-   gcloud logging read \
-     'resource.labels.service_name="mmm-app-dev-web" AND
-      textPayload=~"\\[QUEUE_TICK\\]"' \
-     --limit=20 \
-     --project="$PROJECT"
-   ```
-   The last log line should be `"empty queue"` or `"no pending"`, confirming
-   the chain stopped cleanly.
+1–3. Same as above, but on step 4 click **➕ Add & Start** instead of
+   **Add to Queue**.  This adds the job and starts the queue in a single
+   write, triggering the Cloud Task immediately.
+
+---
+
+**After either workflow starts the queue:**
+
+- While a job is **RUNNING**, `gcloud tasks list` shows a new task with
+  `scheduledTime ≈ now + 5 minutes` (the status-polling task).
+
+- After the last job completes (**SUCCEEDED** or **FAILED** in the Queue
+  Monitor tab), `gcloud tasks list` returns **empty list** — no idle tasks,
+  no idle compute costs.
+
+- **Confirm in Cloud Run logs** that the chain self-terminated:
+  ```bash
+  gcloud logging read \
+    'resource.labels.service_name="mmm-app-dev-web" AND
+     textPayload=~"\\[QUEUE_TICK\\]"' \
+    --limit=20 \
+    --project="$PROJECT"
+  ```
+  The last `[QUEUE_TICK]` log line should show `"empty queue"` or
+  `"no pending"`, confirming the chain stopped cleanly.
 
 ---
 
