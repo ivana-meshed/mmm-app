@@ -188,7 +188,7 @@ def identify_service_from_labels(
     return None
 
 
-def categorize_sku(sku_description: str) -> str:
+def categorize_sku(sku_description: str, resource_name: Optional[str] = None) -> str:
     """Categorize SKU into cost type."""
     sku_lower = sku_description.lower()
 
@@ -202,9 +202,19 @@ def categorize_sku(sku_description: str) -> str:
     ):
         return "compute_memory"
 
-    # Check for requests
+    # Check for requests - distinguish between scheduler and user requests
     if "request" in sku_lower or "invocation" in sku_lower:
-        return "requests"
+        # Try to determine if scheduler or user based on resource name patterns
+        if resource_name:
+            resource_lower = resource_name.lower()
+            if (
+                "queue" in resource_lower
+                or "scheduler" in resource_lower
+                or "tick" in resource_lower
+                or "robyn-queue-tick" in resource_lower
+            ):
+                return "scheduler_requests"
+        return "user_requests"
 
     # Check for networking
     if (
@@ -254,7 +264,7 @@ def analyze_costs(
             continue
 
         # Categorize cost
-        category = categorize_sku(sku_description)
+        category = categorize_sku(sku_description, resource_full_name)
 
         # Aggregate by service
         if mmm_service not in analysis["by_service"]:
