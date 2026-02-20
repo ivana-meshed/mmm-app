@@ -4,7 +4,7 @@ Daily Google Cloud Services Cost Tracking Script
 
 This script tracks daily costs for the MMM Trainer application, broken down by:
 - mmm-app-dev-web (dev web service)
-- mmm-app-web (prod web service)  
+- mmm-app-web (prod web service)
 - mmm-app-training (prod training jobs)
 - mmm-app-dev-training (dev training jobs)
 

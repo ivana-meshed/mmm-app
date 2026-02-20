@@ -491,8 +491,7 @@ elif data_source_type == "BigQuery":
 elif data_source_type == "CSV Upload":
     st.subheader("Upload CSV File")
 
-    st.markdown(
-        """
+    st.markdown("""
     Upload a CSV file containing your marketing mix data. The file should include:
     - Date column
     - Dependent variable (e.g., revenue, conversions)
@@ -500,8 +499,7 @@ elif data_source_type == "CSV Upload":
     - Media impression/activity columns
     - Context variables (optional)
     - Organic variables (optional)
-    """
-    )
+    """)
 
     uploaded_file = st.file_uploader(
         "Choose a CSV file",

@@ -51,14 +51,16 @@ SERVICE_CONFIGS = {
         "memory": 2.0,  # GB allocated
         "throttling": True,  # CPU throttling enabled (as of Feb 2026)
         "min_instances": 0,
-        "scheduler_interval": None,  # Scheduler DISABLED for prod (cost optimization)
+        "scheduler_interval": None,  # No Cloud Scheduler (Cloud Tasks is event-driven)
+        "cloud_tasks_queue": "robyn-queue-tick",
     },
     "mmm-app-dev-web": {
         "cpu": 1.0,
         "memory": 2.0,
         "throttling": True,  # CPU throttling enabled (as of Feb 2026)
         "min_instances": 0,
-        "scheduler_interval": 30,  # Scheduler runs every 30 minutes in dev
+        "scheduler_interval": None,  # No Cloud Scheduler (Cloud Tasks is event-driven)
+        "cloud_tasks_queue": "robyn-queue-tick-dev",
     },
     "mmm-app-training": {
         "cpu": 8.0,
@@ -66,6 +68,7 @@ SERVICE_CONFIGS = {
         "throttling": True,  # Jobs always have CPU allocated during execution
         "min_instances": 0,
         "scheduler_interval": None,  # No scheduler for jobs
+        "cloud_tasks_queue": None,
     },
     "mmm-app-dev-training": {
         "cpu": 8.0,
@@ -73,6 +76,7 @@ SERVICE_CONFIGS = {
         "throttling": True,
         "min_instances": 0,
         "scheduler_interval": None,
+        "cloud_tasks_queue": None,
     },
 }
 
@@ -430,9 +434,13 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
             print(f"    - Memory: {config['memory']} GB")
             print(f"    - CPU Throttling: {config['throttling']}")
             print(f"    - Min Instances: {config['min_instances']}")
-            if config["scheduler_interval"]:
+            if config.get("scheduler_interval"):
                 print(
                     f"    - Scheduler: Every {config['scheduler_interval']} minutes"
+                )
+            elif config.get("cloud_tasks_queue"):
+                print(
+                    f"    - Queue tick: Cloud Tasks (event-driven, queue: {config['cloud_tasks_queue']})"
                 )
 
             print(f"\n  Theoretical Costs (based on configuration):")
@@ -475,14 +483,19 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
                     f"    Usage: {detail['usage_amount']:.2f} {detail['usage_unit']}"
                 )
 
-    # Scheduler Impact Analysis
+    # Queue Tick / Scheduler Impact Analysis
     print("\n" + "=" * 80)
-    print("SCHEDULER IMPACT ANALYSIS")
+    print("QUEUE TICK AUTOMATION ANALYSIS")
     print("=" * 80)
     print()
-    print("This section estimates the FULL cost impact of scheduler jobs,")
-    print("including both direct request costs and indirect compute costs")
-    print("during and after scheduler wake-ups (~2-5 minutes per wake-up).")
+    print("This section estimates the cost impact of queue tick automation.")
+    print(
+        "Queue ticks are now event-driven via Cloud Tasks (no periodic scheduler)."
+    )
+    print(
+        "Tasks are only created when there is pending or running work, so idle"
+    )
+    print("cost is zero when the queue is empty.")
     print()
 
     for service_name, data in analysis["by_service"].items():
@@ -491,12 +504,15 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
 
         config = SERVICE_CONFIGS.get(service_name, {})
         scheduler_interval = config.get("scheduler_interval")
+        cloud_tasks_queue = config.get("cloud_tasks_queue")
 
         print(f"{service_name}", end="")
         if scheduler_interval:
             print(f" (Scheduler: Every {scheduler_interval} minutes)")
+        elif cloud_tasks_queue:
+            print(f" (Queue tick: Cloud Tasks, queue: {cloud_tasks_queue})")
         else:
-            print(" (Scheduler: DISABLED)")
+            print(" (No queue tick automation)")
         print("-" * 80)
 
         total_cost = data["total"]
@@ -509,23 +525,18 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
         total_compute_cost = compute_cpu_cost + compute_memory_cost
 
         if scheduler_interval:
-            # Calculate expected scheduler activity
+            # Legacy: periodic Cloud Scheduler analysis
             wakeups_per_day = 24 * 60 // scheduler_interval
             wakeups_total = wakeups_per_day * args.days
 
-            # Assume 2-5 minutes per wake-up (configurable)
             min_duration_per_wakeup = 2  # minutes
             max_duration_per_wakeup = 5  # minutes
 
-            # Calculate expected scheduler hours
             min_scheduler_hours = (wakeups_total * min_duration_per_wakeup) / 60
             max_scheduler_hours = (wakeups_total * max_duration_per_wakeup) / 60
 
-            # Get actual active hours
             unique_hours = data["unique_hours_active"]
 
-            # Estimate scheduler compute costs
-            # Attribute compute proportionally to scheduler time
             if unique_hours > 0:
                 min_scheduler_compute_ratio = min(
                     min_scheduler_hours / unique_hours, 1.0
@@ -544,11 +555,9 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
             )
             user_compute_cost = total_compute_cost - scheduler_compute_cost
 
-            # Calculate totals
             scheduler_total = scheduler_requests_cost + scheduler_compute_cost
             user_total = user_requests_cost + user_compute_cost
 
-            # Calculate percentages
             scheduler_pct = (
                 (scheduler_total / total_cost * 100) if total_cost > 0 else 0
             )
@@ -576,19 +585,14 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
                 f"    - Estimated total user impact: ${user_total:.2f} ({user_pct:.1f}% of service cost)"
             )
 
-            # Calculate other costs (shared, networking, etc.)
             other_costs = total_cost - scheduler_total - user_total
 
-            if other_costs > 0.01:  # Only show if significant
+            if other_costs > 0.01:
                 print(f"\n  Other Costs (shared infrastructure):")
                 print(
                     f"    - Shared costs (registry, secrets, etc.): ${other_costs:.2f} ({other_costs/total_cost*100:.1f}% of service cost)"
                 )
-                print(
-                    f"    - These costs are not directly triggered by scheduler or users"
-                )
 
-            # Show total to verify everything adds up
             print(f"\n  Total: ${total_cost:.2f} (100.0%)")
 
             print()
@@ -605,7 +609,6 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
             print(
                 f"    - Actual active time: {unique_hours} hours over {args.days} days"
             )
-            print(f"    - User activity: Remaining time")
 
             print()
             if scheduler_pct > 50:
@@ -614,31 +617,69 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
                     f"    Scheduler causes {scheduler_pct:.1f}% of this service's costs."
                 )
                 print(
-                    f"    Consider disabling scheduler or increasing interval to reduce costs."
+                    f"    Consider migrating to Cloud Tasks (event-driven) to eliminate idle scheduler costs."
                 )
             elif scheduler_pct > 25:
                 print(f"  💡 Insight:")
                 print(
                     f"    Scheduler has moderate impact ({scheduler_pct:.1f}% of costs)."
                 )
-                print(f"    Increasing interval could provide some savings.")
+                print(
+                    f"    Migrating to Cloud Tasks would remove idle overhead."
+                )
             else:
                 print(f"  💡 Insight:")
                 print(
                     f"    Scheduler has low impact ({scheduler_pct:.1f}% of costs)."
                 )
                 print(f"    User traffic is the primary cost driver.")
+
+        elif cloud_tasks_queue:
+            # Cloud Tasks (event-driven) — no idle scheduler wake-ups
+            user_total = user_requests_cost + total_compute_cost
+            cloud_tasks_cost = (
+                scheduler_requests_cost  # tasks appear as requests
+            )
+
+            print()
+            print(
+                "  Queue tick: Cloud Tasks (event-driven — zero idle cost when queue empty)"
+            )
+            print(
+                f"    - Cloud Tasks invocations: ${cloud_tasks_cost:.4f} (~$0.00/month)"
+            )
+            print(f"    - User requests: ${user_requests_cost:.2f}")
+            print(
+                f"    - Compute (user + queue tick): ${total_compute_cost:.2f}"
+            )
+
+            other_costs = total_cost - user_total - cloud_tasks_cost
+            if other_costs > 0.01:
+                print(f"\n  Other Costs (shared infrastructure):")
+                print(
+                    f"    - Shared costs (registry, secrets, etc.): ${other_costs:.2f} ({other_costs/total_cost*100:.1f}% of service cost)"
+                )
+
+            print(f"\n  Total: ${total_cost:.2f} (100.0%)")
+            print()
+            print("  💡 Insight:")
+            print(
+                "    Cloud Tasks queue tick creates no idle wake-ups — the container"
+            )
+            print(
+                "    scales to zero when the queue is empty, minimising idle costs."
+            )
+
         else:
-            # No scheduler - all costs are user-triggered
+            # No automation
             user_total = user_requests_cost + total_compute_cost
 
             print()
-            print("  All costs are user-triggered (scheduler disabled):")
+            print("  All costs are user-triggered (no queue tick automation):")
             print(f"    - User requests: ${user_requests_cost:.2f}")
             print(f"    - Compute serving users: ${total_compute_cost:.2f}")
             print(f"    - Subtotal: ${user_total:.2f}")
 
-            # Calculate other costs
             other_costs = total_cost - user_total
 
             if other_costs > 0.01:
@@ -647,7 +688,6 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
                     f"    - Shared costs (registry, secrets, etc.): ${other_costs:.2f} ({other_costs/total_cost*100:.1f}% of service cost)"
                 )
 
-            # Show total
             print(f"\n  Total: ${total_cost:.2f} (100.0%)")
 
         print()
@@ -655,12 +695,14 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
     print()
     print("Methodology:")
     print(
-        "  - Estimates based on scheduler frequency and expected wake-up duration"
+        "  - Cloud Tasks: tasks created only when work is pending/running → no idle cost"
+    )
+    print(
+        "  - Legacy Scheduler estimates: based on scheduler frequency and ~2-5 min wake-up duration"
     )
     print(
         "  - Compute costs attributed proportionally to scheduler vs user activity time"
     )
-    print("  - Assumes 2-5 minutes warm-up time per scheduler wake-up")
     print(
         "  - These are ESTIMATES - billing data doesn't directly link costs to triggers"
     )

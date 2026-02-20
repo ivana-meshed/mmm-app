@@ -619,6 +619,61 @@ Look for lines like:
 The absence of `[CLOUD_TASKS]` log lines when the queue is idle confirms
 that no spurious tasks are being created.
 
+#### 8 — UI testing via the Streamlit app (Batch Run tab)
+
+This is the most realistic end-to-end test and requires the dev Cloud Run
+service to be deployed (push to a `feat-*` or `copilot/*` branch first).
+
+**Goal:** confirm that Cloud Tasks fires automatically when a job is added
+through the UI, and stops firing once the queue is empty.
+
+**Steps:**
+
+1. **Open the app** at `https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app`
+   and log in.
+
+2. Navigate to **5. Run Models → Batch Run** tab.
+
+3. Configure a minimal test job (any country, small iterations, e.g.
+   `iterations=200`, `trials=3`).  Make sure a valid data source is
+   selected (table or query).
+
+4. Click **➕ Add to Queue** (do **not** click "Add & Start" yet, so the
+   queue starts in PENDING state).
+
+5. **Immediately** open a terminal and check the Cloud Tasks queue:
+   ```bash
+   gcloud tasks list \
+     --queue=robyn-queue-tick-dev \
+     --location=europe-west1 \
+     --project=datawarehouse-422511
+   ```
+   Expected: **one task** listed with a `scheduledTime` in the past or
+   near future.  The task was created automatically by `save_queue_to_gcs()`
+   when you clicked "Add to Queue".
+
+6. Now click **▶️ Start Queue** in the UI (or use "Add & Start" from step 4).
+   The queue will pick up the job on the next tick.
+
+7. While the job is in **RUNNING** state, re-run the `gcloud tasks list`
+   command — you should see a new task with `scheduledTime` approximately
+   5 minutes in the future (the status-polling task).
+
+8. After the training job completes (**SUCCEEDED** or **FAILED** in the
+   Queue Monitor tab), run `gcloud tasks list` once more.
+   Expected: **empty list** — no idle tasks, no idle compute costs.
+
+9. **Confirm in Cloud Run logs** that the chain self-terminated:
+   ```bash
+   gcloud logging read \
+     'resource.labels.service_name="mmm-app-dev-web" AND
+      textPayload=~"\\[QUEUE_TICK\\]"' \
+     --limit=20 \
+     --project=datawarehouse-422511
+   ```
+   The last log line should be `"empty queue"` or `"no pending"`, confirming
+   the chain stopped cleanly.
+
 ---
 
 ### Manual Testing

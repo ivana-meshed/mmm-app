@@ -221,6 +221,12 @@ resource "google_project_iam_member" "deployer_scheduler_admin" {
   member  = "serviceAccount:${var.deployer_sa}"
 }
 
+resource "google_project_iam_member" "deployer_cloudtasks_admin" {
+  project = var.project_id
+  role    = "roles/cloudtasks.admin"
+  member  = "serviceAccount:${var.deployer_sa}"
+}
+
 ##############################################################
 # APIs
 ##############################################################

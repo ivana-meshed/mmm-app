@@ -44,8 +44,7 @@ st.title("Review Model Stability")
 
 # Add helpful documentation at the top
 with st.expander("ℹ️ About This Page", expanded=False):
-    st.markdown(
-        """
+    st.markdown("""
         ### Purpose
         This page analyzes the **stability of your Robyn MMM models** across multiple model iterations 
         within a single training run. It helps you understand:
@@ -77,8 +76,7 @@ with st.expander("ℹ️ About This Page", expanded=False):
         - **decomp.rssd**: Decomposition residual sum of squares
         
         Choose from presets (Good, Acceptable, All) or set custom thresholds.
-        """
-    )
+        """)
 
 st.markdown("---")
 

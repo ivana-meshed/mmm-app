@@ -1,8 +1,8 @@
 # MMM Trainer - Cost Optimization Status
 
-**Last Updated:** February 20, 2026 - **Scheduler Configuration Updated**  
-**Document Version:** 2.1  
-**Status:** ✅ Optimizations Applied - Scheduler Disabled in Production, Optimized in Dev
+**Last Updated:** February 20, 2026 - **Cloud Tasks Event-Driven Queue Processing**  
+**Document Version:** 2.2  
+**Status:** ✅ Optimizations Applied - Cloud Tasks replaces periodic Cloud Scheduler in both environments
 
 ---
 
@@ -14,12 +14,12 @@ This document consolidates all cost optimization information for the MMM Trainer
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| **Current Monthly Cost** | ~$9.30/month (projected) | Production with scheduler disabled |
-| **GCP Infrastructure** | ~$9.10/month | Excludes scheduler costs in production |
+| **Current Monthly Cost** | ~$8.80/month (projected) | Both environments with Cloud Tasks (no idle scheduler) |
+| **GCP Infrastructure** | ~$8.60/month | No Cloud Scheduler costs in any environment |
 | **GitHub Actions** | $0.21/month | Weekly cleanup workflow |
-| **Combined Total** | ~$9.30/month | **Within target range** ✅ |
+| **Combined Total** | ~$8.80/month | **Within target range** ✅ |
 | **Baseline (Pre-Optimization)** | €148/month (~$160/month) | Historical costs before optimizations |
-| **Cost Reduction** | ~94% | Optimizations successfully applied |
+| **Cost Reduction** | ~94%** | Optimizations successfully applied |
 | **Target Cost Range** | $8-15/month (idle) | Minimal activity baseline |
 | | $25-45/month (moderate) | With regular training jobs |
 
@@ -27,22 +27,47 @@ This document consolidates all cost optimization information for the MMM Trainer
 
 1. **Scale-to-Zero Enabled** (min_instances=0) - Eliminates idle costs
 2. **CPU Throttling Enabled** - Reduces CPU allocation when idle  
-3. **Scheduler Configuration Optimized**:
-   - **Production**: DISABLED - Manual job triggering (~$0.70/month savings)
-   - **Dev**: ENABLED at 30-minute intervals - Reduced from 10 minutes (~$0.20/month savings)
+3. **Event-Driven Queue Processing** - Cloud Tasks replaces periodic Cloud Scheduler:
+   - **Production**: Cloud Tasks only (no idle scheduler, $0.00/month when queue empty)
+   - **Dev**: Cloud Tasks only (no idle scheduler, $0.00/month when queue empty)
 4. **Resource Optimization** (1 vCPU, 2 GB) - Reduced from 2 vCPU, 4 GB
 5. **GCS Lifecycle Policies** - Automatic storage class transitions
 6. **Artifact Registry Cleanup** - Weekly cleanup of old images
 
 ---
 
-## Scheduler Status (Updated: February 20, 2026)
+## Queue Tick Automation (Updated: February 20, 2026)
 
-### Production Environment
+Queue processing now uses **event-driven Cloud Tasks** instead of a periodic
+Cloud Scheduler.  A Cloud Task is only created when there is pending or running
+work — so both environments incur **zero idle cost** when the queue is empty.
 
-**Current State:** **DISABLED** for cost optimization
+### How It Works
 
-Configuration:
+| Queue state | Action | Cost |
+|-------------|--------|------|
+| Job added to queue (PENDING) | Immediate Cloud Task created | ~$0.000004/task |
+| Job running | Delayed task created every 5 min to poll status | ~$0.000004/task |
+| Job completes | Immediate task created to start next job | ~$0.000004/task |
+| Queue empty or paused | **No task created** — container scales to zero | **$0.00** |
+
+### Both Environments
+
+**Configuration (prod & dev):**
+- `scheduler_enabled = false` in both `infra/terraform/envs/prod.tfvars` and `dev.tfvars`
+- `cloud_tasks_queue_name = "robyn-queue-tick"` (prod) / `"robyn-queue-tick-dev"` (dev)
+- `queue_tick_interval_seconds = 300` (5-minute polling for running jobs)
+
+**Benefits:**
+- ✅ **Zero idle cost** — no wake-ups when queue is empty
+- ✅ Immediate job pickup — task fired the moment a job is enqueued
+- ✅ Self-terminating chain — no periodic background activity
+- ✅ Manual trigger still works: `GET /?queue_tick=1&name=<queue>`
+
+**Cost Impact:**
+- Cloud Tasks pricing: $0.40 per million tasks — effectively free for this workload
+- At 100 training jobs/month (~3 tasks per job): $0.000120/month ≈ **$0.00/month**
+- Previous Cloud Scheduler cost (dev, 30-min): ~$0.50/month → **eliminated**
 - `scheduler_enabled = false` in `infra/terraform/envs/prod.tfvars`
 - `scheduler_interval_minutes = 30` (if re-enabled)
 
@@ -51,49 +76,12 @@ Configuration:
 - ✅ Achieves lowest possible idle costs
 - ✅ Production environment typically has on-demand job execution
 
-**Manual Job Triggering:**
+**Manual Job Triggering (still works):**
 ```bash
 # Trigger queue processing manually via API
 curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
   "https://mmm-app-web-wuepn6nq5a-ew.a.run.app/?queue_tick=1&name=default"
 ```
-
-### Development Environment
-
-**Current State:** **ENABLED** at 30-minute intervals
-
-Configuration:
-- `scheduler_enabled = true` in `infra/terraform/envs/dev.tfvars`
-- `scheduler_interval_minutes = 30` (reduced from 10 minutes)
-
-**Benefits:**
-- ✅ Automatic queue processing for development/testing
-- ✅ Saves ~$0.20/month compared to 10-minute intervals
-- ✅ Jobs start within 30 minutes (acceptable for dev)
-
-**Cost Impact:**
-- Scheduler costs: ~$0.50/month (48 wake-ups/day vs 144 previously)
-- Down from ~$0.70/month with 10-minute intervals
-
----
-
-## Cloud Scheduler Free Tier (Important!)
-
-**Why Scheduler Costs Show $0.00 in Billing:**
-
-Cloud Scheduler includes a **FREE TIER**:
-- First 3 jobs per month included at no charge
-- Currently deployed: 2 scheduler jobs (robyn-queue-tick-dev, mmm-warmup-job)
-- Within free tier = $0.00 service fee
-
-**What This Means:**
-- ✅ Scheduler service fee: $0.00 (correct, not a billing error)
-- ✅ Scheduler INVOCATIONS still have costs (Cloud Run requests)
-- ✅ You're not charged for the scheduler service itself
-
-**When Charges Apply:**
-- If you deploy more than 3 scheduler jobs
-- Each additional job: ~$0.10/month
 
 ---
 
@@ -106,9 +94,11 @@ Cloud Scheduler includes a **FREE TIER**:
 $ gcloud scheduler jobs list --location europe-west1
 
 ID                    SCHEDULE             STATE
-robyn-queue-tick-dev  */30 * * * *         ENABLED   # Queue processing
 mmm-warmup-job        */5 * * * *          ENABLED   # Container warm-up
 ```
+
+> **Note:** `robyn-queue-tick-dev` is no longer a Cloud Scheduler job.
+> Queue ticks are now triggered by Cloud Tasks (event-driven).
 
 ### Cost Impact
 
@@ -123,7 +113,7 @@ The warmup job is the **PRIMARY cost driver**:
 | Item | Cost Impact |
 |------|-------------|
 | Warmup job (every 5 min) | ~$70-80/month ⚠️ |
-| Queue tick (every 30 min) | ~$0.50/month ✓ |
+| Queue tick (Cloud Tasks) | ~$0.00/month ✓ |
 | Scheduler service fee | $0.00 (free tier) ✓ |
 | User traffic | ~$5-10/month ✓ |
 | **Total Actual** | **~$75-90/month** |
@@ -163,27 +153,27 @@ This explains why actual costs ($87/month) were much higher than documented ($9/
 
 ## Actual Cost Breakdown (February 2026 - Updated Configuration)
 
-Based on actual costs with scheduler optimization:
+Based on actual costs with Cloud Tasks event-driven queue processing:
 
 ### Monthly Projections by Environment
 
-| Environment | Idle Cost | With Scheduler | Training Jobs (50/month) |
-|-------------|-----------|----------------|-------------------------|
-| **Production** | ~$5/month | ~$5/month (disabled) | ~$30/month |
-| **Development** | ~$4/month | ~$4.50/month (30-min) | ~$29/month |
-| **Total** | **~$9/month** | **~$9.50/month** | **~$59/month** |
+| Environment | Idle Cost | Queue tick overhead | Training Jobs (50/month) |
+|-------------|-----------|---------------------|-------------------------|
+| **Production** | ~$5/month | ~$0.00/month (Cloud Tasks) | ~$30/month |
+| **Development** | ~$4/month | ~$0.00/month (Cloud Tasks) | ~$29/month |
+| **Total** | **~$9/month** | **~$0.00/month** | **~$59/month** |
 
 ### Cost by Category (Current Configuration)
 
 | Category | Estimated Cost | Percentage | Notes |
 |----------|---------------|------------|-------|
-| **Web Services (base)** | $5.32 | 58.0% | Always-on web application costs |
-| **Scheduler (dev only)** | $0.50 | 5.5% | Dev environment at 30-min intervals |
-| **Storage & Registry** | $0.14 | 1.5% | Container images & data storage |
-| **Base Infrastructure** | $3.14 | 34.5% | Network, API calls, secrets |
-| **GitHub Actions** | $0.21 | 2.3% | Weekly cleanup workflow |
+| **Web Services (base)** | $5.32 | 60.5% | Always-on web application costs |
+| **Cloud Tasks** | ~$0.00 | 0.0% | Event-driven queue ticks (pay per task, not per minute) |
+| **Storage & Registry** | $0.14 | 1.6% | Container images & data storage |
+| **Base Infrastructure** | $3.14 | 35.7% | Network, API calls, secrets |
+| **GitHub Actions** | $0.21 | 2.4% | Weekly cleanup workflow |
 
-**Total Monthly (Idle):** ~$9.30/month
+**Total Monthly (Idle):** ~$8.80/month
 
 ---
 
@@ -231,7 +221,7 @@ When all optimizations are applied:
 ```
 Current Configuration:
   - CPU throttling: ENABLED ✓
-  - Scheduler: DISABLED (prod) / ENABLED at 30 min (dev)
+  - Queue tick: EVENT-DRIVEN via Cloud Tasks (no idle scheduler)
   - Min instances: 0 (scale-to-zero)
 
 ✓ All major cost optimizations are already implemented!
@@ -322,34 +312,28 @@ Timeout: 120s (2 minutes)
 - Most Streamlit web requests complete in < 10s
 - Training job submission requests complete in < 5s
 
-### Cloud Scheduler
+### Cloud Tasks (Queue Tick Automation)
 
-**Production:**
+**Both environments (prod & dev):**
 ```yaml
-Status: DISABLED (for cost optimization)
-Scheduler Job: robyn-queue-tick
-Cost Savings: ~$0.70/month
-Manual Trigger: GET /?queue_tick=1&name=default
+Status: ACTIVE (event-driven)
+Queue (prod): robyn-queue-tick
+Queue (dev):  robyn-queue-tick-dev
+Trigger:      On job enqueue or after each running-job poll
+Poll interval: 300s (5 minutes) while a job is running
+Cost:         ~$0.00/month (Cloud Tasks @ $0.40/million tasks)
+Manual Trigger: GET /?queue_tick=1&name=<queue>
 ```
 
-**Development:**
-```yaml
-Status: ENABLED
-Scheduler Job: robyn-queue-tick-dev
-Frequency: Every 30 minutes (48 invocations/day)
-Base Service Fee: $0.10/month
-Invocation Costs: ~$0.40/month
-Total Scheduler Cost: ~$0.50/month
-```
+**Previous Configuration (Cloud Scheduler, Feb 18-20 → Feb 20, 2026):**
+- Both prod and dev used Cloud Scheduler with periodic intervals
+- Dev: Every 30 minutes → ~$0.50/month idle cost
+- Prod: Disabled, but still had Cloud Scheduler resource overhead
 
-**Previous Configuration (Feb 18-20):**
-- Both prod and dev: Every 10 minutes (144 invocations/day)
-- Total cost: ~$0.70/month per environment
-
-**Cost Savings from Optimization:**
-- Production: $0.70/month (scheduler disabled)
-- Development: $0.20/month (30-min vs 10-min intervals)
-- **Total savings:** ~$0.90/month (~$11/year)
+**Cost Savings from Cloud Tasks migration:**
+- Development: $0.50/month (eliminates idle scheduler invocations)
+- Production: no further savings (was already disabled)
+- **Total savings:** ~$0.50/month (~$6/year)
 
 ### Cloud Storage (GCS)
 

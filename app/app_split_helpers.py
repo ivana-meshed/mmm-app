@@ -562,7 +562,9 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                                                 from datetime import (
                                                     datetime as dt,
                                                 )
-                                                from datetime import timedelta
+                                                from datetime import (
+                                                    timedelta,
+                                                )
 
                                                 start_time = dt.fromisoformat(
                                                     str(start_time_str).replace(

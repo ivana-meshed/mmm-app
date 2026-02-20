@@ -290,8 +290,7 @@ if __name__ == "__main__":
             )
             st.success(f"Saved queue '{st.session_state.queue_name}' to GCS")
 
-        st.markdown(
-            """
+        st.markdown("""
     Upload a CSV where each row defines a training run. **Supported columns** (all optional except `country`, `revision`, and data source):
 
     - `country`, `revision`, `date_input`, `iterations`, `trials`, `train_size`
@@ -299,8 +298,7 @@ if __name__ == "__main__":
     - `gcs_bucket` (optional override per row)
     - **Data**: one of `query` **or** `table`
     - `annotations_gcs_path` (optional gs:// path)
-            """
-        )
+            """)
 
         # Template & Example CSVs
         template = pd.DataFrame(

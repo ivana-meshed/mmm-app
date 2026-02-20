@@ -15,14 +15,12 @@ ensure_session_defaults()
 
 st.title("⚡ Cache Management")
 
-st.markdown(
-    """
+st.markdown("""
 This page helps you manage the Snowflake query cache, which reduces costs by avoiding 
 repeated execution of identical queries.
 
 **Expected Savings:** ~70% reduction in Snowflake compute costs with typical usage patterns.
-"""
-)
+""")
 
 # Get cache statistics
 stats = get_cache_stats()
@@ -57,8 +55,7 @@ st.divider()
 
 # Cache explanation
 with st.expander("ℹ️ How Query Caching Works"):
-    st.markdown(
-        """
+    st.markdown("""
     ### Two-Tier Caching Strategy
     
     1. **In-Memory Cache (Fast)**
@@ -97,8 +94,7 @@ with st.expander("ℹ️ How Query Caching Works"):
     - Whitespace differences are ignored
     - Case differences are ignored
     - `SELECT * FROM table` and `select * from table` use the same cache
-    """
-    )
+    """)
 
 st.divider()
 
@@ -123,11 +119,9 @@ st.divider()
 # Cost savings calculator
 st.subheader("💰 Cost Savings Calculator")
 
-st.markdown(
-    """
+st.markdown("""
 Estimate your monthly savings based on cache hit rate and query volume.
-"""
-)
+""")
 
 col1, col2 = st.columns(2)
 
