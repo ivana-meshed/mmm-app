@@ -480,6 +480,147 @@ make typecheck
 make fix
 ```
 
+### Testing the Cloud Tasks Queue Tick
+
+The queue tick feature uses event-driven [Cloud Tasks](https://cloud.google.com/tasks/docs)
+instead of a periodic Cloud Scheduler.  A Cloud Task is created only when
+there is pending or running work, so the container stays idle (and incurs zero
+extra cost) when the queue is empty.
+
+#### 1 — Unit tests (no GCP required)
+
+The scheduling-decision logic is covered by a standalone test module that
+requires no GCP credentials:
+
+```bash
+python3 -m unittest tests.test_cloud_tasks_scheduling -v
+```
+
+Expected output: 15 tests, all passing.  The suite checks every combination
+of tick result (empty queue, paused, launched, running, succeeded, failed, …)
+and verifies the correct "none / immediate / delayed" scheduling decision.
+
+#### 2 — Local verification: graceful no-op without Cloud Tasks config
+
+When `CLOUD_TASKS_QUEUE` or `WEB_SERVICE_URL` are not set (normal local
+development), `schedule_queue_tick_via_cloud_tasks()` returns `False`
+silently — the queue tick itself still works, only the self-scheduling step
+is skipped.
+
+```bash
+# From the repo root with the app's virtualenv active:
+cd app
+python3 - <<'EOF'
+import os
+# Deliberately unset Cloud Tasks vars (simulating local dev)
+os.environ.pop("CLOUD_TASKS_QUEUE", None)
+os.environ.pop("WEB_SERVICE_URL", None)
+
+from app_shared import schedule_queue_tick_via_cloud_tasks
+result = schedule_queue_tick_via_cloud_tasks("default", delay_seconds=0)
+print("Scheduled:", result)   # Expected: False — graceful no-op
+EOF
+```
+
+#### 3 — Trigger the queue tick endpoint manually
+
+The `?queue_tick=1` endpoint bypasses OAuth and can be called directly.
+Use it to test the tick logic against the dev Cloud Run service without
+going through the Streamlit UI:
+
+```bash
+# Authenticate as yourself (dev only)
+TOKEN=$(gcloud auth print-identity-token)
+DEV_URL="https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app"
+
+# Trigger a tick on the dev queue
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "${DEV_URL}?queue_tick=1&name=default-dev" | python3 -m json.tool
+```
+
+Expected response when the queue is empty:
+```json
+{"ok": true, "message": "empty queue", "changed": false}
+```
+
+#### 4 — Verify Cloud Tasks are created when a job is enqueued
+
+After deploying to the dev environment (push to a `feat-*` or `copilot/*`
+branch to trigger CI):
+
+1. Open the app, go to **5. Run Models**, and add at least one job to the
+   queue.
+2. Immediately check the Cloud Tasks queue in one of two ways:
+
+**GCP Console:**
+- Navigate to **Cloud Tasks** → select queue `robyn-queue-tick-dev` →
+  **Tasks** tab.  You should see one task with a past or near-future
+  `Scheduled time`.
+
+**gcloud CLI:**
+```bash
+gcloud tasks list \
+  --queue=robyn-queue-tick-dev \
+  --location=europe-west1 \
+  --project=datawarehouse-422511
+```
+
+Expected: one task listed immediately after enqueueing.
+
+#### 5 — Verify no idle tasks remain after the queue empties
+
+After all jobs complete (or the queue is cleared):
+
+```bash
+gcloud tasks list \
+  --queue=robyn-queue-tick-dev \
+  --location=europe-west1 \
+  --project=datawarehouse-422511
+```
+
+Expected: **empty list** — no tasks, no idle wake-ups, no idle cost.
+
+#### 6 — Verify the polling interval for running jobs
+
+While a training job is in `RUNNING` state, the service schedules a
+follow-up task with a delay of `QUEUE_TICK_INTERVAL_SECONDS` (default: 300 s
+= 5 minutes).  Confirm it by checking the task's `Scheduled time` in the
+GCP Console or with:
+
+```bash
+gcloud tasks describe <TASK_NAME> \
+  --queue=robyn-queue-tick-dev \
+  --location=europe-west1 \
+  --project=datawarehouse-422511
+```
+
+The `scheduleTime` field should be approximately `now + 5 minutes`.
+
+#### 7 — Cloud Run logs
+
+All scheduling actions are logged at `INFO` level and can be filtered in
+Cloud Logging:
+
+```bash
+gcloud logging read \
+  'resource.labels.service_name="mmm-app-dev-web" AND
+   textPayload=~"\\[CLOUD_TASKS\\]"' \
+  --limit=20 \
+  --project=datawarehouse-422511
+```
+
+Look for lines like:
+
+```
+[CLOUD_TASKS] Scheduled queue tick for 'default-dev' delay=0s
+[CLOUD_TASKS] Scheduled queue tick for 'default-dev' delay=300s
+```
+
+The absence of `[CLOUD_TASKS]` log lines when the queue is idle confirms
+that no spurious tasks are being created.
+
+---
+
 ### Manual Testing
 
 #### Test Web Interface
