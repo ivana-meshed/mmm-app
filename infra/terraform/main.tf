@@ -611,6 +611,14 @@ resource "google_service_account_iam_member" "web_can_act_as_training_sa" {
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.web_service_sa.email}"
 }
+
+# Allow the web service SA to impersonate the scheduler SA when attaching OIDC
+# tokens to Cloud Tasks requests (required for iam.serviceAccounts.actAs).
+resource "google_service_account_iam_member" "web_can_act_as_scheduler_sa" {
+  service_account_id = google_service_account.scheduler.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
 resource "google_cloud_run_v2_job_iam_member" "training_job_runner" {
   provider = google-beta
   project  = var.project_id
