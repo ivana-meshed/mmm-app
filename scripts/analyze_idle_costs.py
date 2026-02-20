@@ -202,6 +202,14 @@ def categorize_sku(sku_description: str, resource_name: Optional[str] = None) ->
     ):
         return "compute_memory"
 
+    # Cloud Scheduler service costs (the base service fee, not invocations)
+    # Note: Cloud Scheduler base service fee is ~$0.10/month per job
+    # This is separate from invocation costs which are categorized below
+    if "scheduler" in sku_lower and "job" in sku_lower:
+        return "scheduler_service"
+    if "cron" in sku_lower:
+        return "scheduler_service"
+
     # Check for requests - distinguish between scheduler and user requests
     if "request" in sku_lower or "invocation" in sku_lower:
         # Try to determine if scheduler or user based on resource name patterns
