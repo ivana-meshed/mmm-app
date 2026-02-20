@@ -672,7 +672,10 @@ resource "google_cloud_tasks_queue" "robyn_queue_tick" {
     max_doublings = 3
   }
 
-  depends_on = [google_project_service.cloudtasks]
+  depends_on = [
+    google_project_service.cloudtasks,
+    google_project_iam_member.deployer_cloudtasks_admin,
+  ]
 }
 
 # Allow the web service SA to enqueue tasks into the Cloud Tasks queue
