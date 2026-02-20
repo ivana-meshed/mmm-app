@@ -543,6 +543,17 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
             print(f"    - Compute serving user traffic: ${user_compute_cost:.2f}")
             print(f"    - Estimated total user impact: ${user_total:.2f} ({user_pct:.1f}% of service cost)")
             
+            # Calculate other costs (shared, networking, etc.)
+            other_costs = total_cost - scheduler_total - user_total
+            
+            if other_costs > 0.01:  # Only show if significant
+                print(f"\n  Other Costs (shared infrastructure):")
+                print(f"    - Shared costs (registry, secrets, etc.): ${other_costs:.2f} ({other_costs/total_cost*100:.1f}% of service cost)")
+                print(f"    - These costs are not directly triggered by scheduler or users")
+            
+            # Show total to verify everything adds up
+            print(f"\n  Total: ${total_cost:.2f} (100.0%)")
+            
             print()
             print("  Analysis:")
             print(f"    - Scheduler wake-ups: {wakeups_per_day} times/day (every {scheduler_interval} minutes)")
@@ -572,7 +583,17 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
             print("  All costs are user-triggered (scheduler disabled):")
             print(f"    - User requests: ${user_requests_cost:.2f}")
             print(f"    - Compute serving users: ${total_compute_cost:.2f}")
-            print(f"    - Total: ${user_total:.2f} (100.0% user-driven)")
+            print(f"    - Subtotal: ${user_total:.2f}")
+            
+            # Calculate other costs
+            other_costs = total_cost - user_total
+            
+            if other_costs > 0.01:
+                print(f"\n  Other Costs (shared infrastructure):")
+                print(f"    - Shared costs (registry, secrets, etc.): ${other_costs:.2f} ({other_costs/total_cost*100:.1f}% of service cost)")
+            
+            # Show total
+            print(f"\n  Total: ${total_cost:.2f} (100.0%)")
         
         print()
     
