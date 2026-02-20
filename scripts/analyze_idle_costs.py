@@ -479,7 +479,7 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
             print(" (Scheduler: DISABLED)")
         print("-" * 80)
         
-        total_cost = data["total_cost"]
+        total_cost = data["total"]
         scheduler_requests_cost = data["by_category"].get("scheduler_requests", 0)
         user_requests_cost = data["by_category"].get("user_requests", 0)
         compute_cpu_cost = data["by_category"].get("compute_cpu", 0)
