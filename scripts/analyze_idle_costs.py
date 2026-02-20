@@ -489,7 +489,7 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
         if scheduler_interval:
             # Calculate expected scheduler activity
             wakeups_per_day = 24 * 60 // scheduler_interval
-            wakeups_total = wakeups_per_day * days_back
+            wakeups_total = wakeups_per_day * args.days
             
             # Assume 2-5 minutes per wake-up (configurable)
             min_duration_per_wakeup = 2  # minutes
