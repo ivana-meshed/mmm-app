@@ -455,6 +455,126 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
                     f"    Usage: {detail['usage_amount']:.2f} {detail['usage_unit']}"
                 )
 
+    # Scheduler Impact Analysis
+    print("\n" + "=" * 80)
+    print("SCHEDULER IMPACT ANALYSIS")
+    print("=" * 80)
+    print()
+    print("This section estimates the FULL cost impact of scheduler jobs,")
+    print("including both direct request costs and indirect compute costs")
+    print("during and after scheduler wake-ups (~2-5 minutes per wake-up).")
+    print()
+    
+    for service_name, data in analysis["by_service"].items():
+        if "web" not in service_name:
+            continue  # Only analyze web services
+            
+        config = SERVICE_CONFIGS.get(service_name, {})
+        scheduler_interval = config.get("scheduler_interval")
+        
+        print(f"{service_name}", end="")
+        if scheduler_interval:
+            print(f" (Scheduler: Every {scheduler_interval} minutes)")
+        else:
+            print(" (Scheduler: DISABLED)")
+        print("-" * 80)
+        
+        total_cost = data["total_cost"]
+        scheduler_requests_cost = data["by_category"].get("scheduler_requests", 0)
+        user_requests_cost = data["by_category"].get("user_requests", 0)
+        compute_cpu_cost = data["by_category"].get("compute_cpu", 0)
+        compute_memory_cost = data["by_category"].get("compute_memory", 0)
+        total_compute_cost = compute_cpu_cost + compute_memory_cost
+        
+        if scheduler_interval:
+            # Calculate expected scheduler activity
+            wakeups_per_day = 24 * 60 // scheduler_interval
+            wakeups_total = wakeups_per_day * days_back
+            
+            # Assume 2-5 minutes per wake-up (configurable)
+            min_duration_per_wakeup = 2  # minutes
+            max_duration_per_wakeup = 5  # minutes
+            
+            # Calculate expected scheduler hours
+            min_scheduler_hours = (wakeups_total * min_duration_per_wakeup) / 60
+            max_scheduler_hours = (wakeups_total * max_duration_per_wakeup) / 60
+            
+            # Get actual active hours
+            unique_hours = data["unique_hours"]
+            
+            # Estimate scheduler compute costs
+            # Attribute compute proportionally to scheduler time
+            if unique_hours > 0:
+                min_scheduler_compute_ratio = min(min_scheduler_hours / unique_hours, 1.0)
+                max_scheduler_compute_ratio = min(max_scheduler_hours / unique_hours, 1.0)
+                avg_scheduler_compute_ratio = (min_scheduler_compute_ratio + max_scheduler_compute_ratio) / 2
+            else:
+                avg_scheduler_compute_ratio = 0
+            
+            scheduler_compute_cost = total_compute_cost * avg_scheduler_compute_ratio
+            user_compute_cost = total_compute_cost - scheduler_compute_cost
+            
+            # Calculate totals
+            scheduler_total = scheduler_requests_cost + scheduler_compute_cost
+            user_total = user_requests_cost + user_compute_cost
+            
+            # Calculate percentages
+            scheduler_pct = (scheduler_total / total_cost * 100) if total_cost > 0 else 0
+            user_pct = (user_total / total_cost * 100) if total_cost > 0 else 0
+            
+            print()
+            print("  Scheduler-Triggered Costs (estimated):")
+            print(f"    - Direct scheduler requests: ${scheduler_requests_cost:.2f}")
+            print(f"    - Compute during scheduler execution: ${scheduler_compute_cost:.2f}")
+            print(f"    - Estimated total scheduler impact: ${scheduler_total:.2f} ({scheduler_pct:.1f}% of service cost)")
+            
+            print()
+            print("  User-Triggered Costs (estimated):")
+            print(f"    - Direct user requests: ${user_requests_cost:.2f}")
+            print(f"    - Compute serving user traffic: ${user_compute_cost:.2f}")
+            print(f"    - Estimated total user impact: ${user_total:.2f} ({user_pct:.1f}% of service cost)")
+            
+            print()
+            print("  Analysis:")
+            print(f"    - Scheduler wake-ups: {wakeups_per_day} times/day (every {scheduler_interval} minutes)")
+            print(f"    - Each wake-up keeps instance warm for ~{min_duration_per_wakeup}-{max_duration_per_wakeup} minutes")
+            print(f"    - Expected scheduler activity: ~{min_scheduler_hours:.1f}-{max_scheduler_hours:.1f} hours over {days_back} days")
+            print(f"    - Actual active time: {unique_hours} hours over {days_back} days")
+            print(f"    - User activity: Remaining time")
+            
+            print()
+            if scheduler_pct > 50:
+                print(f"  💡 Insight:")
+                print(f"    Scheduler causes {scheduler_pct:.1f}% of this service's costs.")
+                print(f"    Consider disabling scheduler or increasing interval to reduce costs.")
+            elif scheduler_pct > 25:
+                print(f"  💡 Insight:")
+                print(f"    Scheduler has moderate impact ({scheduler_pct:.1f}% of costs).")
+                print(f"    Increasing interval could provide some savings.")
+            else:
+                print(f"  💡 Insight:")
+                print(f"    Scheduler has low impact ({scheduler_pct:.1f}% of costs).")
+                print(f"    User traffic is the primary cost driver.")
+        else:
+            # No scheduler - all costs are user-triggered
+            user_total = user_requests_cost + total_compute_cost
+            
+            print()
+            print("  All costs are user-triggered (scheduler disabled):")
+            print(f"    - User requests: ${user_requests_cost:.2f}")
+            print(f"    - Compute serving users: ${total_compute_cost:.2f}")
+            print(f"    - Total: ${user_total:.2f} (100.0% user-driven)")
+        
+        print()
+    
+    print()
+    print("Methodology:")
+    print("  - Estimates based on scheduler frequency and expected wake-up duration")
+    print("  - Compute costs attributed proportionally to scheduler vs user activity time")
+    print("  - Assumes 2-5 minutes warm-up time per scheduler wake-up")
+    print("  - These are ESTIMATES - billing data doesn't directly link costs to triggers")
+    print("  - For exact attribution, would need Cloud Run request logs")
+
     # Root cause analysis
     print("\n" + "=" * 80)
     print("ROOT CAUSE ANALYSIS")
