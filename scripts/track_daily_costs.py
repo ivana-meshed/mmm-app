@@ -10,10 +10,22 @@ This script tracks daily costs for the MMM Trainer application, broken down by:
 
 Within each service, costs are further broken down by:
 - User requests costs
-- Scheduler requests costs
-- Registry costs
-- Storage costs
+- Scheduler requests costs (invocations)
+- Compute CPU costs
+- Compute memory costs
+- Registry costs (Artifact Registry)
+- Storage costs (Cloud Storage)
+- Scheduler service costs (base service fee)
+- Secret Manager costs
+- Networking costs
+- GitHub Actions costs (CI/CD automation, including registry cleanup)
 - Other relevant costs
+
+Special Features:
+- Dedicated "Scheduler & Automation Costs" section showing:
+  * Cloud Scheduler service fees
+  * Scheduler invocation costs (queue processing)
+  * GitHub Actions costs (weekly cleanup and CI/CD)
 
 Usage:
     python scripts/track_daily_costs.py [--days DAYS] [--output OUTPUT]
@@ -127,14 +139,22 @@ def build_cost_query(start_date: str, end_date: str, project_id: str) -> str:
           -- Cloud Scheduler
           OR service.description LIKE '%Scheduler%'
           OR service.description LIKE '%Cloud Scheduler%'
+          -- Secret Manager
+          OR service.description LIKE '%Secret Manager%'
+          -- Cloud Build (for GitHub Actions)
+          OR service.description LIKE '%Cloud Build%'
           -- Also catch by SKU description
           OR sku.description LIKE '%Cloud Run%'
           OR sku.description LIKE '%Artifact Registry%'
           OR sku.description LIKE '%Cloud Storage%'
           OR sku.description LIKE '%Cloud Scheduler%'
+          OR sku.description LIKE '%Secret Manager%'
+          OR sku.description LIKE '%Cloud Build%'
           -- Catch resources that match our service names
           OR resource.name LIKE '%mmm-app%'
           OR resource.name LIKE '%robyn-queue%'
+          OR resource.name LIKE '%sf-private-key%'
+          OR resource.name LIKE '%github%'
         )
       GROUP BY 
         usage_date, 
@@ -210,7 +230,11 @@ def categorize_cost(sku_description: str, resource_name: Optional[str]) -> str:
         return "storage"
 
     # Cloud Scheduler costs (the service itself, not the invocations)
-    if "scheduler" in sku_lower or "cron" in sku_lower:
+    # Note: Cloud Scheduler base service fee is $0.10/month per job
+    # This is separate from invocation costs which are categorized as requests
+    if "scheduler" in sku_lower and "job" in sku_lower:
+        return "scheduler_service"
+    if "cron" in sku_lower:
         return "scheduler_service"
 
     # Networking costs
@@ -220,6 +244,14 @@ def categorize_cost(sku_description: str, resource_name: Optional[str]) -> str:
         or "ingress" in sku_lower
     ):
         return "networking"
+
+    # Secret Manager costs
+    if "secret" in sku_lower or "secret manager" in sku_lower:
+        return "secrets"
+
+    # Cloud Build costs (GitHub Actions workflows)
+    if "build" in sku_lower or "cloud build" in sku_lower:
+        return "github_actions"
 
     # Default category
     return "other"
@@ -492,6 +524,40 @@ def format_currency(amount: float) -> str:
     return f"${amount:.2f}"
 
 
+def calculate_github_actions_costs(days_back: int) -> Dict[str, float]:
+    """
+    Calculate estimated GitHub Actions costs for repository workflows.
+    
+    GitHub Actions costs are external to GCP and based on:
+    - Private repo: $0.008 per minute (Linux runners)
+    - Weekly cleanup workflow: ~2-5 minutes per run
+    - Estimated: $0.016-0.04 per week
+    
+    Returns:
+        Dictionary with estimated GitHub Actions costs
+    """
+    # Weekly cleanup workflow runs on Sundays at 2 AM UTC
+    # Estimated runtime: 2-5 minutes (use 3.5 min average)
+    workflow_minutes_per_run = 3.5
+    cost_per_minute = 0.008  # Linux runner cost
+    
+    # Calculate number of weeks in the period
+    weeks_in_period = days_back / 7.0
+    
+    # Estimated cleanup runs (1 per week)
+    cleanup_runs = max(1, int(weeks_in_period))
+    
+    # Calculate total estimated cost
+    cleanup_cost = cleanup_runs * workflow_minutes_per_run * cost_per_minute
+    
+    return {
+        "cleanup_workflow": cleanup_cost,
+        "total": cleanup_cost,
+        "cleanup_runs": cleanup_runs,
+        "avg_minutes_per_run": workflow_minutes_per_run,
+    }
+
+
 def print_cost_summary(
     costs_by_date: Dict[str, Dict[str, Dict[str, float]]],
     days_back: int,
@@ -539,6 +605,10 @@ def print_cost_summary(
     print("=" * 80)
     print()
 
+    # Track scheduler-related costs for special reporting
+    total_scheduler_requests = 0.0
+    total_scheduler_service = 0.0
+
     for service, categories in sorted(service_totals.items()):
         service_total = sum(categories.values())
         print(f"{service}: {format_currency(service_total)}")
@@ -548,22 +618,110 @@ def print_cost_summary(
         ):
             pct = (cost / service_total * 100) if service_total > 0 else 0
             print(f"  - {category}: {format_currency(cost)} ({pct:.1f}%)")
+            
+            # Track scheduler costs across all services
+            if category == "scheduler_requests":
+                total_scheduler_requests += cost
+            elif category == "scheduler_service":
+                total_scheduler_service += cost
         print()
 
+    # Calculate and display GitHub Actions costs
+    github_costs = calculate_github_actions_costs(days_back)
+    
     print("=" * 80)
-    print(f"Grand Total: {format_currency(grand_total)}")
-    print(f"Daily Average: {format_currency(grand_total / max(days_back, 1))}")
+    print("Cloud Scheduler Costs Breakdown")
+    print("=" * 80)
+    print()
+    print(f"Scheduler Service Fee: {format_currency(total_scheduler_service)}")
+    print(f"  (Base service fee: ~$0.10/month per scheduler job)")
+    print()
+    print(f"Scheduler Invocations: {format_currency(total_scheduler_requests)}")
+    print(f"  (Queue tick invocations: ~4,320/month at 10-minute intervals)")
+    print()
+    scheduler_total = total_scheduler_requests + total_scheduler_service
+    print(f"Total Scheduler Costs: {format_currency(scheduler_total)}")
+    print()
+
+    print("=" * 80)
+    print("GitHub Actions Costs (External - Not in GCP Billing)")
+    print("=" * 80)
+    print()
+    print(f"Weekly Registry Cleanup Workflow:")
+    print(f"  - Estimated runs in period: {github_costs['cleanup_runs']}")
+    print(f"  - Average runtime: {github_costs['avg_minutes_per_run']:.1f} minutes/run")
+    print(f"  - Cost per minute: $0.008 (Linux runner)")
+    print(f"  - Total estimated cost: {format_currency(github_costs['cleanup_workflow'])}")
+    print()
+    print(f"Total GitHub Actions (Estimated): {format_currency(github_costs['total'])}")
+    monthly_github = github_costs['total'] * 30 / days_back
+    print(f"Monthly Projection: {format_currency(monthly_github)}")
+    print()
+    print("Note: GitHub Actions costs are charged separately by GitHub,")
+    print("      not included in GCP billing export.")
+    print()
+
+    print("=" * 80)
+    print(f"GCP Grand Total: {format_currency(grand_total)}")
+    print(f"GCP Daily Average: {format_currency(grand_total / max(days_back, 1))}")
+    monthly_gcp = grand_total * 30 / days_back
     print(
-        f"Monthly Projection: {format_currency(grand_total * 30 / days_back)}"
+        f"GCP Monthly Projection: {format_currency(monthly_gcp)}"
     )
+    print()
+    print(f"Combined Total (GCP + GitHub Actions): {format_currency(grand_total + github_costs['total'])}")
+    print(f"Combined Monthly Projection: {format_currency(monthly_gcp + monthly_github)}")
+    print("=" * 80)
+    
+    # Special section for scheduler and automation costs
+    print()
+    print("=" * 80)
+    print("Scheduler & Automation Costs Breakdown")
+    print("=" * 80)
+    print()
+    
+    scheduler_costs = {
+        "scheduler_service": 0.0,
+        "scheduler_requests": 0.0,
+        "github_actions": 0.0
+    }
+    
+    for service, categories in service_totals.items():
+        for category, cost in categories.items():
+            if category in scheduler_costs:
+                scheduler_costs[category] += cost
+    
+    total_automation = sum(scheduler_costs.values())
+    
+    if total_automation > 0:
+        print(f"Total Scheduler & Automation Costs: {format_currency(total_automation)}")
+        print(f"Monthly Projection: {format_currency(total_automation * 30 / days_back)}")
+        print()
+        print("Breakdown:")
+        print(f"  - Scheduler Service Fee: {format_currency(scheduler_costs['scheduler_service'])}")
+        print(f"    (Base Cloud Scheduler service charge, ~$0.10/month per job)")
+        print(f"  - Scheduler Invocations: {format_currency(scheduler_costs['scheduler_requests'])}")
+        print(f"    (Cloud Run container time for queue processing)")
+        print(f"  - GitHub Actions (CI/CD): {format_currency(scheduler_costs['github_actions'])}")
+        print(f"    (Artifact Registry cleanup and other automation)")
+        print()
+        print("Notes:")
+        print("  - Scheduler runs every 10 minutes (4,320 invocations/month)")
+        print("  - Artifact cleanup runs weekly via GitHub Actions")
+        print("  - These are automated operational costs")
+    else:
+        print("No scheduler or automation costs found in this period.")
+        print("(May not appear in short time periods)")
+    
     print("=" * 80)
 
 
 def export_to_csv(
     costs_by_date: Dict[str, Dict[str, Dict[str, float]]],
     output_file: str,
+    days_back: int,
 ) -> None:
-    """Export cost data to CSV file."""
+    """Export cost data to CSV file, including GitHub Actions costs."""
     rows = []
 
     for date, services in sorted(costs_by_date.items(), reverse=True):
@@ -575,15 +733,32 @@ def export_to_csv(
                         "service": service,
                         "category": category,
                         "cost": cost,
+                        "source": "GCP",
                     }
                 )
+
+    # Add GitHub Actions costs as separate entries
+    github_costs = calculate_github_actions_costs(days_back)
+    # Distribute costs evenly across days
+    daily_github_cost = github_costs['total'] / days_back
+    
+    for date in sorted(costs_by_date.keys(), reverse=True):
+        rows.append(
+            {
+                "date": date,
+                "service": "github-actions",
+                "category": "cleanup_workflow",
+                "cost": daily_github_cost,
+                "source": "GitHub",
+            }
+        )
 
     if not rows:
         print(f"No data to export to {output_file}")
         return
 
     with open(output_file, "w", newline="") as csvfile:
-        fieldnames = ["date", "service", "category", "cost"]
+        fieldnames = ["date", "service", "category", "cost", "source"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
@@ -868,7 +1043,7 @@ def main():
 
     # Export to CSV if requested
     if args.output:
-        export_to_csv(costs_by_date, args.output)
+        export_to_csv(costs_by_date, args.output, args.days)
 
 
 if __name__ == "__main__":

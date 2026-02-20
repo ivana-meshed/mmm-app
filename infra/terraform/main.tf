@@ -324,7 +324,7 @@ resource "google_cloud_run_service" "web_service" {
         "run.googleapis.com/cpu-throttling" = "true"
         "run.googleapis.com/min-instances"  = "0"
         "run.googleapis.com/max-instances"  = var.max_instances
-        "run.googleapis.com/timeout"        = "300s"
+        "run.googleapis.com/timeout"        = "120s"
         #"deploy.kubernetes.io/revision-sha" = substr(var.web_image, length(var.web_image) - 40, 40)
       }
     }
@@ -332,7 +332,7 @@ resource "google_cloud_run_service" "web_service" {
     spec {
       service_account_name  = google_service_account.web_service_sa.email
       container_concurrency = 5
-      timeout_seconds       = 300
+      timeout_seconds       = 120
 
       containers {
         image = var.web_image
@@ -595,7 +595,7 @@ resource "google_cloud_scheduler_job" "robyn_queue_tick" {
   count            = var.scheduler_enabled ? 1 : 0
   name             = var.scheduler_job_name
   description      = "Advance Robyn training queue (headless)"
-  schedule         = "*/10 * * * *" # every 10 minutes (reduced from 1 minute for cost optimization)
+  schedule         = "*/${var.scheduler_interval_minutes} * * * *" # configurable interval for cost optimization
   time_zone        = "Etc/UTC"
   attempt_deadline = "320s"
 
