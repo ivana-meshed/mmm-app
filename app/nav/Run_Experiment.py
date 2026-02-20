@@ -490,7 +490,9 @@ with tab_single:
         # Column 2: Goal (from training data configs)
         # Get available goals for selected country
         try:
-            available_goals = _list_available_goals(gcs_bucket, selected_country)
+            available_goals = _list_available_goals(
+                gcs_bucket, selected_country
+            )
             logger.info(
                 f"[DATA-PREFILL] Found {len(available_goals)} goals for {selected_country}"
             )

@@ -9,11 +9,15 @@ deployer_sa = "github-deployer@datawarehouse-422511.iam.gserviceaccount.com"
 scheduler_job_name = "robyn-queue-tick"
 queue_name         = "default"
 
-# Scheduler control: Disabled for production to minimize costs
-# When disabled, training jobs won't auto-process from queue (manual trigger required via API)
-# Training jobs can be triggered manually: GET /?queue_tick=1&name=default
-scheduler_enabled = false  # Disabled for cost optimization
-scheduler_interval_minutes = 30  # Would check every 30 minutes if enabled
+# Scheduler control: Disabled – queue ticks are triggered via Cloud Tasks
+# (event-driven), eliminating idle costs when the queue is empty.
+# Training jobs can also be triggered manually: GET /?queue_tick=1&name=default
+scheduler_enabled = false  # Disabled in favour of event-driven Cloud Tasks
+scheduler_interval_minutes = 30  # Unused (kept for reference)
+
+# Cloud Tasks queue for event-driven queue tick processing
+cloud_tasks_queue_name = "robyn-queue-tick"
+queue_tick_interval_seconds = 300  # Re-check running jobs every 5 minutes
 
 # Cost optimization: Scale-to-zero configuration
 min_instances = 0 # Eliminates idle costs, adds 1-3s cold start

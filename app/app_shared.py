@@ -40,6 +40,17 @@ SAFE_LAG_SECONDS_AFTER_RUNNING = int(
     os.getenv("SAFE_LAG_SECONDS_AFTER_RUNNING", "5")
 )
 
+# Cloud Tasks configuration for event-driven queue processing
+# When set, queue ticks are triggered via Cloud Tasks instead of a periodic scheduler,
+# eliminating idle costs when the queue is empty.
+CLOUD_TASKS_QUEUE = os.getenv("CLOUD_TASKS_QUEUE")  # full queue path
+WEB_SERVICE_URL = os.getenv("WEB_SERVICE_URL")  # base URL of this service
+CLOUD_TASKS_SA_EMAIL = os.getenv("CLOUD_TASKS_SA_EMAIL")  # SA for OIDC auth
+# How often (seconds) to re-check a running job via Cloud Tasks
+QUEUE_TICK_INTERVAL_SECONDS = int(
+    os.getenv("QUEUE_TICK_INTERVAL_SECONDS", "300")
+)
+
 # Initialize Snowflake query cache
 init_snowflake_cache(GCS_BUCKET)
 
@@ -126,6 +137,53 @@ def _empty_job_history_df() -> pd.DataFrame:
     # Matches fields written by run_all.R::append_to_job_history()
     cols = JOB_HISTORY_COLUMNS
     return pd.DataFrame(columns=cols)
+
+
+def schedule_queue_tick_via_cloud_tasks(
+    queue_name: str,
+    delay_seconds: int = 0,
+) -> bool:
+    """
+    Schedule a queue tick via Cloud Tasks.
+
+    This is the event-driven alternative to the periodic Cloud Scheduler.
+    Returns True if a task was scheduled, False if Cloud Tasks is not
+    configured (CLOUD_TASKS_QUEUE or WEB_SERVICE_URL not set) or on error.
+    """
+    if not CLOUD_TASKS_QUEUE or not WEB_SERVICE_URL:
+        return False
+    try:
+        from datetime import timedelta
+
+        from google.cloud import tasks_v2
+
+        client = tasks_v2.CloudTasksClient()
+        target_url = f"{WEB_SERVICE_URL}?queue_tick=1&name={queue_name}"
+        http_request: dict = {
+            "http_method": tasks_v2.HttpMethod.GET,
+            "url": target_url,
+        }
+        if CLOUD_TASKS_SA_EMAIL:
+            http_request["oidc_token"] = {
+                "service_account_email": CLOUD_TASKS_SA_EMAIL,
+                "audience": WEB_SERVICE_URL,
+            }
+        task: dict = {"http_request": http_request}
+        if delay_seconds > 0:
+            schedule_time = datetime.now(timezone.utc) + timedelta(
+                seconds=delay_seconds
+            )
+            task["schedule_time"] = schedule_time
+        client.create_task(parent=CLOUD_TASKS_QUEUE, task=task)
+        logger.info(
+            "[CLOUD_TASKS] Scheduled queue tick for '%s' delay=%ds",
+            queue_name,
+            delay_seconds,
+        )
+        return True
+    except Exception as e:
+        logger.warning("[CLOUD_TASKS] Failed to schedule task: %s", e)
+        return False
 
 
 def _safe_tick_once(
@@ -1458,6 +1516,13 @@ def save_queue_to_gcs(
     blob.upload_from_string(
         json.dumps(payload, indent=2), content_type="application/json"
     )
+    # Trigger an immediate queue tick via Cloud Tasks whenever there are
+    # pending jobs and the queue is running. This replaces the periodic
+    # Cloud Scheduler and eliminates idle costs when the queue is empty.
+    if bool(queue_running) and any(
+        e.get("status") == "PENDING" for e in entries
+    ):
+        schedule_queue_tick_via_cloud_tasks(queue_name, delay_seconds=0)
     return saved_at
 
 
@@ -1511,6 +1576,48 @@ def queue_tick_once_headless(
 # Stateless queue tick endpoint (AFTER defs/constants)
 # ─────────────────────────────
 
+# Messages that indicate the queue has no pending/running work.
+# When the tick result contains one of these messages, we do NOT schedule
+# another Cloud Tasks tick (this breaks the chain and eliminates idle costs).
+_QUEUE_IDLE_MESSAGES = frozenset(
+    {
+        "empty queue",
+        "queue is paused",
+        "no pending",
+        "launcher not provided",
+    }
+)
+
+# Messages that indicate a terminal job state (job just finished).
+# After a terminal state we reschedule immediately so the next pending job
+# starts as soon as possible.
+_TERMINAL_STATES = frozenset(
+    {"succeeded", "failed", "cancelled", "completed", "error"}
+)
+
+
+def _schedule_next_tick_if_needed(queue_name: str, result: dict) -> None:
+    """
+    Decide whether to schedule another queue tick via Cloud Tasks and, if so,
+    with what delay.  Called after every successful headless tick.
+
+    - Idle queue (empty / paused / no pending): no next tick → zero idle cost.
+    - Job completed (terminal state): immediate next tick to start the next job.
+    - Job running / launching / just launched: delayed next tick to poll status.
+    """
+    msg = (result.get("message") or "").lower()
+    if msg in _QUEUE_IDLE_MESSAGES:
+        return  # nothing to do; let the container go idle
+
+    if result.get("changed") and any(s in msg for s in _TERMINAL_STATES):
+        # A job just finished – immediately try to start the next one
+        schedule_queue_tick_via_cloud_tasks(queue_name, delay_seconds=0)
+    else:
+        # A job is running/launching or was just launched – poll again later
+        schedule_queue_tick_via_cloud_tasks(
+            queue_name, delay_seconds=QUEUE_TICK_INTERVAL_SECONDS
+        )
+
 
 def handle_queue_tick_from_query_params(
     query_params: Dict[str, Any],
@@ -1544,6 +1651,10 @@ def handle_queue_tick_from_query_params(
     try:
         result = queue_tick_once_headless(qname, bkt, launcher=launcher)
         logger.info(f"[QUEUE_TICK] Completed successfully: {result}")
+        # Self-schedule via Cloud Tasks so the queue is processed without a
+        # periodic scheduler. Only schedule when there is ongoing work;
+        # stop when the queue is empty or paused to eliminate idle costs.
+        _schedule_next_tick_if_needed(qname, result)
         return result
     except Exception as e:
         logger.exception("[QUEUE_TICK] Handler failed: %s", e)
