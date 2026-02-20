@@ -652,8 +652,16 @@ QUEUE=robyn-queue-tick-dev
    `iterations=200`, `trials=3`).  Make sure a valid data source is
    selected (table or query).
 
-4. Click **➕ Add to Queue** (do **not** click "Add & Start" yet, so the
-   queue starts in PENDING state).
+4. Click **➕ Add & Start** (the combined button).  This adds the job to
+   the queue **and** starts it in one step (`queue_running=true`), which
+   is what triggers the Cloud Task.
+
+   > **Why not "Add to Queue" alone?**  Adding a job to a *stopped* queue
+   > intentionally does **not** create a Cloud Task — you haven't asked it
+   > to run yet.  A Cloud Task is only scheduled when the queue is running
+   > **and** there are PENDING jobs.  If you used "Add to Queue" without
+   > starting, click **▶️ Start Queue** afterwards; that write
+   > (`queue_running=true` + PENDING entries) will also trigger the task.
 
 5. **Immediately** open a terminal and check the Cloud Tasks queue:
    ```bash
@@ -664,20 +672,17 @@ QUEUE=robyn-queue-tick-dev
    ```
    Expected: **one task** listed with a `scheduledTime` in the past or
    near future.  The task was created automatically by `save_queue_to_gcs()`
-   when you clicked "Add to Queue".
+   when the queue transitioned to running with PENDING entries.
 
-6. Now click **▶️ Start Queue** in the UI (or use "Add & Start" from step 4).
-   The queue will pick up the job on the next tick.
-
-7. While the job is in **RUNNING** state, re-run the `gcloud tasks list`
+6. While the job is in **RUNNING** state, re-run the `gcloud tasks list`
    command — you should see a new task with `scheduledTime` approximately
    5 minutes in the future (the status-polling task).
 
-8. After the training job completes (**SUCCEEDED** or **FAILED** in the
+7. After the training job completes (**SUCCEEDED** or **FAILED** in the
    Queue Monitor tab), run `gcloud tasks list` once more.
    Expected: **empty list** — no idle tasks, no idle compute costs.
 
-9. **Confirm in Cloud Run logs** that the chain self-terminated:
+8. **Confirm in Cloud Run logs** that the chain self-terminated:
    ```bash
    gcloud logging read \
      'resource.labels.service_name="mmm-app-dev-web" AND
