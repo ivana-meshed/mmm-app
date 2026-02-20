@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir \
     google-cloud-storage \
     google-cloud-run \
     google-cloud-secret-manager \
+    google-cloud-tasks \
     cryptography \
     pandas \
     pyarrow \
