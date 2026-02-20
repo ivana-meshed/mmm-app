@@ -595,7 +595,7 @@ resource "google_cloud_scheduler_job" "robyn_queue_tick" {
   count            = var.scheduler_enabled ? 1 : 0
   name             = var.scheduler_job_name
   description      = "Advance Robyn training queue (headless)"
-  schedule         = "*/10 * * * *" # every 10 minutes for cost optimization
+  schedule         = "*/${var.scheduler_interval_minutes} * * * *" # configurable interval for cost optimization
   time_zone        = "Etc/UTC"
   attempt_deadline = "320s"
 

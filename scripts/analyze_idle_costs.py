@@ -51,14 +51,14 @@ SERVICE_CONFIGS = {
         "memory": 2.0,  # GB allocated
         "throttling": True,  # CPU throttling enabled (as of Feb 2026)
         "min_instances": 0,
-        "scheduler_interval": 10,  # Scheduler re-enabled (Option 2 - Feb 2026)
+        "scheduler_interval": None,  # Scheduler DISABLED for prod (cost optimization)
     },
     "mmm-app-dev-web": {
         "cpu": 1.0,
         "memory": 2.0,
         "throttling": True,  # CPU throttling enabled (as of Feb 2026)
         "min_instances": 0,
-        "scheduler_interval": 10,  # Scheduler re-enabled (Option 2 - Feb 2026)
+        "scheduler_interval": 30,  # Scheduler runs every 30 minutes in dev
     },
     "mmm-app-training": {
         "cpu": 8.0,
@@ -442,32 +442,69 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
     print("ROOT CAUSE ANALYSIS")
     print("=" * 80)
 
-    print("\nWhy are costs high despite min_instances=0?")
-    print("\n1. CPU THROTTLING DISABLED:")
-    print("   - Current setting: cpu-throttling = false")
-    print(
-        "   - Impact: CPU remains allocated even when container is idle"
+    # Check actual configuration from SERVICE_CONFIGS
+    web_services = [s for s in analysis["by_service"].keys() if "web" in s]
+    has_throttling_enabled = all(
+        SERVICE_CONFIGS.get(s, {}).get("throttling", False) for s in web_services
     )
-    print("   - Consequence: You pay for CPU time, not just active request time")
+    scheduler_intervals = [
+        SERVICE_CONFIGS.get(s, {}).get("scheduler_interval")
+        for s in web_services
+        if SERVICE_CONFIGS.get(s, {}).get("scheduler_interval")
+    ]
+    has_scheduler = len(scheduler_intervals) > 0
+    scheduler_interval = scheduler_intervals[0] if scheduler_intervals else None
 
-    print("\n2. SCHEDULER WAKE-UPS:")
-    print("   - Scheduler pings every 10 minutes")
-    print("   - Each ping wakes up an instance")
-    print("   - Instance stays warm for several minutes after request")
-    print(
-        "   - Result: ~144 wake-ups/day = high 'hours active' even with no user traffic"
-    )
+    print("\nCurrent Configuration:")
+    print(f"  - CPU throttling: {'ENABLED' if has_throttling_enabled else 'DISABLED'}")
+    print(f"  - Scheduler: {'ENABLED' if has_scheduler else 'DISABLED'}")
+    if has_scheduler:
+        print(f"  - Scheduler interval: {scheduler_interval} minutes")
+    print(f"  - Min instances: 0 (scale-to-zero)")
+
+    print("\nWhy are there costs despite min_instances=0?")
+    
+    if not has_throttling_enabled:
+        print("\n1. CPU THROTTLING DISABLED:")
+        print("   - Current setting: cpu-throttling = false")
+        print(
+            "   - Impact: CPU remains allocated even when container is idle"
+        )
+        print("   - Consequence: You pay for CPU time, not just active request time")
+    else:
+        print("\n1. CPU THROTTLING:")
+        print("   - Current setting: cpu-throttling = true ✓")
+        print("   - Impact: CPU only allocated during active requests")
+        print("   - This is already optimized")
+
+    if has_scheduler:
+        print(f"\n2. SCHEDULER WAKE-UPS:")
+        print(f"   - Scheduler pings every {scheduler_interval} minutes")
+        print("   - Each ping wakes up an instance")
+        print("   - Instance stays warm for several minutes after request")
+        wake_ups_per_day = 24 * 60 // scheduler_interval
+        print(
+            f"   - Result: ~{wake_ups_per_day} wake-ups/day = higher costs even with no user traffic"
+        )
+    else:
+        print("\n2. SCHEDULER:")
+        print("   - Scheduler is currently DISABLED")
+        print("   - No automated wake-ups from scheduler")
 
     print("\n3. INSTANCE LIFECYCLE:")
     print("   - Instance starts on first request")
     print("   - Processes request quickly")
-    print("   - With cpu-throttling=false, keeps using CPU")
+    if has_throttling_enabled:
+        print("   - With cpu-throttling=true, CPU released when idle")
+    else:
+        print("   - With cpu-throttling=false, keeps using CPU")
     print(
         "   - Stays warm for ~15 minutes after last request (Cloud Run default)"
     )
-    print(
-        "   - With 10-min scheduler interval, nearly always has a warm instance"
-    )
+    if has_scheduler and scheduler_interval and scheduler_interval <= 15:
+        print(
+            f"   - With {scheduler_interval}-min scheduler interval, nearly always has a warm instance"
+        )
 
     # Recommendations
     print("\n" + "=" * 80)
@@ -480,73 +517,162 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
     )
 
     print(f"\nCurrent Monthly Projection: ${total_monthly:.2f}")
-    print("\nRecommendations (in priority order):")
+    
+    # Generate dynamic recommendations based on actual configuration
+    recommendations = []
+    recommendation_num = 1
+    
+    # Check CPU throttling
+    if not has_throttling_enabled:
+        recommendations.append({
+            'priority': 'Highest',
+            'savings': 80,
+            'reduction': 0.7,
+            'title': 'ENABLE CPU THROTTLING',
+            'change': 'In main.tf: Set "run.googleapis.com/cpu-throttling" = "true"',
+            'impact': [
+                'Reduces CPU costs by ~80% during idle time',
+                'Estimated monthly savings: ~$80-100',
+                'Minimal impact on performance (CPU allocated during active requests)'
+            ],
+            'tradeoffs': [
+                'CPU only allocated when actively processing requests',
+                'May see slight latency increase for long-running operations',
+                'For short web requests (< 1 second), no noticeable difference'
+            ]
+        })
+    
+    # Check scheduler interval
+    if has_scheduler and scheduler_interval and scheduler_interval < 30:
+        current_wakeups = 24 * 60 // scheduler_interval
+        new_wakeups = 24 * 60 // 30
+        recommendations.append({
+            'priority': 'Medium',
+            'savings': 30,
+            'reduction': 0.3,
+            'title': 'INCREASE SCHEDULER INTERVAL',
+            'change': f'In main.tf: Change schedule from "*/{"10" if scheduler_interval == 10 else scheduler_interval} * * * *" to "*/{30} * * * *"',
+            'impact': [
+                f'Reduces wake-ups from {current_wakeups}/day to {new_wakeups}/day',
+                'Reduces "always warm" behavior, allowing better scale-to-zero',
+                'Estimated monthly savings: ~$20-30'
+            ],
+            'tradeoffs': [
+                f'Training jobs in queue wait up to 30 min instead of {scheduler_interval} min',
+                'Acceptable if training is not time-critical'
+            ]
+        })
+    elif has_scheduler and scheduler_interval and scheduler_interval >= 30:
+        recommendations.append({
+            'priority': 'Low',
+            'savings': 50,
+            'reduction': 0.5,
+            'title': 'DISABLE SCHEDULER (if not needed)',
+            'change': 'In prod.tfvars: Set scheduler_enabled = false',
+            'impact': [
+                'Eliminates all scheduler-triggered wake-ups',
+                'Significantly reduces idle costs',
+                'Estimated monthly savings: ~$40-60'
+            ],
+            'tradeoffs': [
+                'Training jobs must be triggered manually or via API',
+                'No automatic queue processing',
+                'May increase operational overhead'
+            ]
+        })
+    
+    # Check timeout configuration
+    recommendations.append({
+        'priority': 'Low',
+        'savings': 5,
+        'reduction': 0.05,
+        'title': 'OPTIMIZE REQUEST TIMEOUT',
+        'change': 'In main.tf: Consider reducing timeout from 300s to 120-180s',
+        'impact': [
+            'Prevents instances from staying allocated for failed/hung requests',
+            'Small cost savings: ~$5-10/month',
+            'Faster failure detection'
+        ],
+        'tradeoffs': [
+            'Requests taking longer than timeout will be terminated',
+            'May need testing to ensure legitimate requests complete',
+            'Current 300s (5 min) is reasonable for most operations'
+        ]
+    })
+    
+    # Alternative architecture (always shown as informational)
+    recommendations.append({
+        'priority': 'Informational',
+        'savings': 60,
+        'reduction': 0.6,
+        'title': 'CONSIDER ALTERNATIVE ARCHITECTURE',
+        'change': 'Use Cloud Tasks or Pub/Sub + Cloud Functions instead of scheduler',
+        'impact': [
+            'Only triggers when jobs are actually in queue',
+            'No wake-ups when queue is empty',
+            'Could reduce idle costs to near-zero',
+            'Estimated monthly savings: ~$40-60'
+        ],
+        'tradeoffs': [
+            'Requires architectural changes',
+            'More complex to implement and test',
+            'Significant development effort'
+        ]
+    })
+    
+    if recommendations:
+        print("\nRecommendations (in priority order):")
+        
+        for i, rec in enumerate(recommendations, 1):
+            if rec['priority'] == 'Informational':
+                continue  # Show informational items last
+            print(f"\n{i}. {rec['title']} ({rec['priority']} Priority)")
+            print(f"   Change:")
+            print(f"   - {rec['change']}")
+            print("\n   Expected Impact:")
+            for impact in rec['impact']:
+                print(f"     - {impact}")
+            print("\n   Trade-offs:")
+            for tradeoff in rec['tradeoffs']:
+                print(f"     - {tradeoff}")
+        
+        # Show informational items at the end
+        info_recs = [r for r in recommendations if r['priority'] == 'Informational']
+        if info_recs:
+            for rec in info_recs:
+                print(f"\n{len(recommendations)}. {rec['title']} ({rec['priority']})")
+                print(f"   Options:")
+                for impact in rec['impact']:
+                    print(f"     - {impact}")
+                print("\n   Trade-offs:")
+                for tradeoff in rec['tradeoffs']:
+                    print(f"     - {tradeoff}")
+    else:
+        print("\n✓ All major cost optimizations are already implemented!")
+        print("  - CPU throttling: ENABLED")
+        if has_scheduler:
+            print(f"  - Scheduler interval: {scheduler_interval} minutes (reasonable)")
+        else:
+            print("  - Scheduler: DISABLED (maximum cost savings)")
+        print("  - Min instances: 0 (scale-to-zero)")
+        print("\nCurrent configuration is well-optimized for cost.")
 
-    print("\n1. ENABLE CPU THROTTLING (Highest Impact)")
-    print("   Change in main.tf:")
-    print('   - From: "run.googleapis.com/cpu-throttling" = "false"')
-    print('   - To:   "run.googleapis.com/cpu-throttling" = "true"')
-    print("\n   Expected Impact:")
-    print("     - Reduces CPU costs by ~80% during idle time")
-    print("     - Estimated monthly savings: ~$80-100")
-    print(
-        "     - Minimal impact on performance (CPU allocated during active requests)"
-    )
-    print("\n   Trade-offs:")
-    print("     - CPU only allocated when actively processing requests")
-    print("     - May see slight latency increase for long-running operations")
-    print(
-        "     - For short web requests (< 1 second), no noticeable difference"
-    )
-
-    print("\n2. INCREASE SCHEDULER INTERVAL (Medium Impact)")
-    print("   Change in main.tf:")
-    print('   - From: schedule = "*/10 * * * *"  # every 10 minutes')
-    print('   - To:   schedule = "*/30 * * * *"  # every 30 minutes')
-    print("\n   Expected Impact:")
-    print("     - Reduces wake-ups from 144/day to 48/day")
-    print(
-        "     - Reduces 'always warm' behavior, allowing true scale-to-zero"
-    )
-    print("     - Estimated monthly savings: ~$20-30")
-    print("\n   Trade-offs:")
-    print(
-        "     - Training jobs in queue wait up to 30 min instead of 10 min"
-    )
-    print("     - Acceptable if training is not time-critical")
-
-    print("\n3. CONSIDER ALTERNATIVE ARCHITECTURE (Low Priority)")
-    print("   Options:")
-    print(
-        "     a) Use Cloud Tasks instead of scheduler for queue processing"
-    )
-    print("        - Only triggers when jobs are actually in queue")
-    print("        - No wake-ups when queue is empty")
-    print(
-        "     b) Use Pub/Sub + Cloud Functions for queue management"
-    )
-    print(
-        "        - More granular, only pays for actual queue operations"
-    )
-    print("\n   Expected Impact:")
-    print("     - Could reduce idle costs to near-zero")
-    print("     - Estimated monthly savings: ~$40-60")
-    print("\n   Trade-offs:")
-    print("     - Requires architectural changes")
-    print("     - More complex to implement and test")
-
-    print("\n" + "=" * 80)
-    print("QUICK WIN: Implement Recommendations 1 & 2")
-    print("=" * 80)
-    print("\nExpected Results:")
-    print(f"  Current monthly cost: ${total_monthly:.2f}")
-    print(f"  After CPU throttling: ${total_monthly * 0.3:.2f} (-70%)")
-    print(
-        f"  After scheduler change: ${total_monthly * 0.2:.2f} (-80% total)"
-    )
-    print(
-        f"\n  Monthly savings: ~${total_monthly * 0.8:.2f} (~$1,000-1,200/year)"
-    )
+    # Quick win summary
+    actionable_recs = [r for r in recommendations if r['priority'] in ['Highest', 'Medium']]
+    if actionable_recs:
+        print("\n" + "=" * 80)
+        print("QUICK WIN: Implement Top Recommendations")
+        print("=" * 80)
+        print("\nExpected Results:")
+        print(f"  Current monthly cost: ${total_monthly:.2f}")
+        
+        cumulative_reduction = 1.0
+        for rec in actionable_recs:
+            cumulative_reduction *= (1 - rec['reduction'])
+            print(f"  After {rec['title'].lower()}: ${total_monthly * cumulative_reduction:.2f} ({int((1-cumulative_reduction)*100)}% reduction)")
+        
+        total_savings = total_monthly * (1 - cumulative_reduction)
+        print(f"\n  Total monthly savings: ~${total_savings:.2f} (~${total_savings * 12:.0f}/year)")
 
     print("\n" + "=" * 80)
 
