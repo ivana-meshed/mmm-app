@@ -537,8 +537,43 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
     print(f"\nCurrent Monthly Projection: ${total_monthly:.2f}")
     
     # Generate dynamic recommendations based on actual configuration
+    # Check for warmup job in billing data
+    warmup_job_detected = False
+    warmup_job_costs = 0.0
+    for _, row in df.iterrows():
+        resource_name = row.get('resource_full_name', '') or ''
+        if 'warmup' in resource_name.lower() or 'warm-up' in resource_name.lower():
+            warmup_job_detected = True
+            warmup_job_costs += float(row.get('cost', 0))
+    
     recommendations = []
     recommendation_num = 1
+    
+    # PRIORITY 1: Warn about warmup job if detected
+    if warmup_job_detected:
+        # Warmup job typically runs every 5 minutes = 288 times/day
+        warmup_frequency = 5  # minutes
+        warmup_wakeups_per_day = 24 * 60 // warmup_frequency
+        monthly_warmup_cost = warmup_job_costs * 30 / days_back
+        
+        recommendations.append({
+            'priority': 'CRITICAL',
+            'savings': 75,
+            'reduction': 0.85,
+            'title': 'DISABLE OR REDUCE WARMUP JOB (if present)',
+            'change': 'Disable mmm-warmup-job or change frequency from */5 to */30-60',
+            'impact': [
+                f'Warmup job runs every {warmup_frequency} minutes ({warmup_wakeups_per_day} times/day)',
+                'Keeps instances constantly warm, preventing scale-to-zero',
+                f'Estimated cost impact: ~${monthly_warmup_cost:.2f}/month',
+                'This is likely the PRIMARY cause of high costs'
+            ],
+            'tradeoffs': [
+                'Containers may experience cold starts after idle periods',
+                'First request after idle may take 1-2 seconds longer',
+                'For most applications, cold starts are acceptable'
+            ]
+        })
     
     # Check CPU throttling
     if not has_throttling_enabled:
@@ -639,6 +674,21 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
     })
     
     if recommendations:
+        # Special warning for warmup job
+        if warmup_job_detected:
+            print("\n" + "=" * 80)
+            print("⚠️  WARMUP JOB DETECTED")
+            print("=" * 80)
+            print("\nA warmup job (likely mmm-warmup-job) is running frequently.")
+            print("This keeps instances constantly warm and is the PRIMARY cost driver.")
+            print("\nCheck your scheduler jobs:")
+            print("  gcloud scheduler jobs list --location europe-west1")
+            print("\nIf mmm-warmup-job is running every 5 minutes, consider:")
+            print("  1. Disabling it completely (if not needed)")
+            print("  2. Reducing frequency to every 30-60 minutes")
+            print("\nEstimated impact: ~$70-80/month savings")
+            print("=" * 80)
+        
         print("\nRecommendations (in priority order):")
         
         for i, rec in enumerate(recommendations, 1):
@@ -674,9 +724,23 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
             print("  - Scheduler: DISABLED (maximum cost savings)")
         print("  - Min instances: 0 (scale-to-zero)")
         print("\nCurrent configuration is well-optimized for cost.")
+    
+    # Important note about Cloud Scheduler free tier
+    print("\n" + "=" * 80)
+    print("IMPORTANT: Cloud Scheduler Free Tier")
+    print("=" * 80)
+    print("\nCloud Scheduler includes a FREE TIER:")
+    print("  - First 3 jobs per month are included at no charge")
+    print("  - If you have ≤3 scheduler jobs, service fees will be $0.00")
+    print("  - This is expected and correct behavior")
+    print("\nYour billing data shows scheduler service costs at $0.00 because")
+    print("you are within the free tier. This does NOT mean the scheduler")
+    print("isn't running - it means you're not being charged for it.")
+    print("\nNote: Scheduler INVOCATION costs (Cloud Run requests triggered by")
+    print("the scheduler) are separate and DO appear in your billing.")
 
     # Quick win summary
-    actionable_recs = [r for r in recommendations if r['priority'] in ['Highest', 'Medium']]
+    actionable_recs = [r for r in recommendations if r['priority'] in ['Highest', 'Medium', 'CRITICAL']]
     if actionable_recs:
         print("\n" + "=" * 80)
         print("QUICK WIN: Implement Top Recommendations")

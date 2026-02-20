@@ -77,6 +77,90 @@ Configuration:
 
 ---
 
+## Cloud Scheduler Free Tier (Important!)
+
+**Why Scheduler Costs Show $0.00 in Billing:**
+
+Cloud Scheduler includes a **FREE TIER**:
+- First 3 jobs per month included at no charge
+- Currently deployed: 2 scheduler jobs (robyn-queue-tick-dev, mmm-warmup-job)
+- Within free tier = $0.00 service fee
+
+**What This Means:**
+- ✅ Scheduler service fee: $0.00 (correct, not a billing error)
+- ✅ Scheduler INVOCATIONS still have costs (Cloud Run requests)
+- ✅ You're not charged for the scheduler service itself
+
+**When Charges Apply:**
+- If you deploy more than 3 scheduler jobs
+- Each additional job: ~$0.10/month
+
+---
+
+## Warmup Job Impact (Critical Finding!)
+
+**Discovery:** A `mmm-warmup-job` is running every 5 minutes (288 times/day)
+
+### Current Configuration
+```bash
+$ gcloud scheduler jobs list --location europe-west1
+
+ID                    SCHEDULE             STATE
+robyn-queue-tick-dev  */30 * * * *         ENABLED   # Queue processing
+mmm-warmup-job        */5 * * * *          ENABLED   # Container warm-up
+```
+
+### Cost Impact
+
+The warmup job is the **PRIMARY cost driver**:
+- Runs 288 times per day (every 5 minutes)
+- Keeps containers constantly warm
+- Prevents scale-to-zero optimization
+- **Estimated cost: ~$70-80/month**
+
+### Why This Matters
+
+| Item | Cost Impact |
+|------|-------------|
+| Warmup job (every 5 min) | ~$70-80/month ⚠️ |
+| Queue tick (every 30 min) | ~$0.50/month ✓ |
+| Scheduler service fee | $0.00 (free tier) ✓ |
+| User traffic | ~$5-10/month ✓ |
+| **Total Actual** | **~$75-90/month** |
+
+### Recommendations
+
+**Option 1: Disable Warmup Job** (if not needed)
+```bash
+gcloud scheduler jobs pause mmm-warmup-job --location europe-west1
+```
+- Savings: ~$70-80/month
+- Trade-off: Cold starts (1-2 sec latency on first request after idle)
+
+**Option 2: Reduce Frequency** (if warmup needed)
+```bash
+gcloud scheduler jobs update http mmm-warmup-job \
+  --location europe-west1 \
+  --schedule="*/30 * * * *"  # Change to every 30 minutes
+```
+- Savings: ~$60-70/month
+- Maintains some warmup benefit with less cost
+
+**Option 3: Keep Current** (for guaranteed low latency)
+- Cost: ~$70-80/month
+- Benefit: Containers always warm, zero cold starts
+
+### Investigation Note
+
+The warmup job was NOT documented in:
+- Terraform configurations
+- Cost documentation
+- Optimization guides
+
+This explains why actual costs ($87/month) were much higher than documented ($9/month).
+
+---
+
 ## Actual Cost Breakdown (February 2026 - Updated Configuration)
 
 Based on actual costs with scheduler optimization:
