@@ -44,7 +44,8 @@ st.title("Review Model Stability")
 
 # Add helpful documentation at the top
 with st.expander("ℹ️ About This Page", expanded=False):
-    st.markdown("""
+    st.markdown(
+        """
         ### Purpose
         This page analyzes the **stability of your Robyn MMM models** across multiple model iterations 
         within a single training run. It helps you understand:
@@ -76,7 +77,8 @@ with st.expander("ℹ️ About This Page", expanded=False):
         - **decomp.rssd**: Decomposition residual sum of squares
         
         Choose from presets (Good, Acceptable, All) or set custom thresholds.
-        """)
+        """
+    )
 
 st.markdown("---")
 
@@ -149,17 +151,17 @@ def group_runs(blobs):
 def run_has_required_files(run_blobs, required_files=None):
     """
     Check if a run has all required model output files.
-    
+
     Args:
         run_blobs: List of blobs for a specific run
         required_files: List of required filenames. Defaults to the standard Robyn output files.
-    
+
     Returns:
         bool: True if all required files are present, False otherwise
     """
     if required_files is None:
         required_files = [FILE_XAGG, FILE_HYP, FILE_MEDIA, FILE_XVEC]
-    
+
     # Extract filenames from blob paths
     blob_files = set()
     for blob in run_blobs:
@@ -167,7 +169,7 @@ def run_has_required_files(run_blobs, required_files=None):
         parts = blob.name.split("/")
         if len(parts) >= 2 and parts[-2] == "output_models_data":
             blob_files.add(parts[-1])
-    
+
     # Check if all required files are present
     return all(f in blob_files for f in required_files)
 
@@ -191,17 +193,17 @@ def parse_rev_key(rev: str):
 
 def extract_goal_from_config(bucket_name: str, stamp: str, run_key=None):
     """Extract the goal (dep_var) from job_config.json or model_summary.json for a given timestamp.
-    
+
     Args:
         bucket_name: GCS bucket name
         stamp: Timestamp string
         run_key: Optional tuple of (rev, country, stamp) for fallback to robyn folder
-    
+
     Returns:
         str or None: The goal/dep_var if found
     """
     import json
-    
+
     # First try: training-configs/{stamp}/job_config.json
     try:
         config_blob_path = f"training-configs/{stamp}/job_config.json"
@@ -215,42 +217,47 @@ def extract_goal_from_config(bucket_name: str, stamp: str, run_key=None):
                 return goal
     except Exception:
         pass
-    
+
     # Second try: robyn/{rev}/{country}/{stamp}/model_summary.json
     if run_key:
         try:
             rev, country, _ = run_key
-            model_summary_path = f"robyn/{rev}/{country}/{stamp}/model_summary.json"
+            model_summary_path = (
+                f"robyn/{rev}/{country}/{stamp}/model_summary.json"
+            )
             client_instance = gcs_client()
             blob = client_instance.bucket(bucket_name).blob(model_summary_path)
             if blob.exists():
                 summary_data = blob.download_as_bytes()
                 summary = json.loads(summary_data.decode("utf-8"))
                 # Extract dep_var from input_metadata
-                if "input_metadata" in summary and "dep_var" in summary["input_metadata"]:
+                if (
+                    "input_metadata" in summary
+                    and "dep_var" in summary["input_metadata"]
+                ):
                     return summary["input_metadata"]["dep_var"]
         except Exception:
             pass
-    
+
     return None
 
 
 def get_goals_for_runs(bucket_name: str, run_keys):
     """Extract goals for a set of runs. Returns dict mapping (rev, country, stamp) to goal.
-    
+
     Tries two methods:
     1. training-configs/{stamp}/job_config.json (for runs with training configs)
     2. robyn/{rev}/{country}/{stamp}/model_summary.json (for runs without training configs)
     """
     goals_map = {}
-    
+
     for key in run_keys:
         rev, country, stamp = key
         # Try to extract goal with fallback to model_summary.json
         goal = extract_goal_from_config(bucket_name, stamp, run_key=key)
         if goal:
             goals_map[key] = goal
-    
+
     return goals_map
 
 
@@ -621,7 +628,11 @@ else:
 
 # Column 2: Country
 with col2:
-    country_index = rev_countries.index(default_country) if default_country in rev_countries else 0
+    country_index = (
+        rev_countries.index(default_country)
+        if default_country in rev_countries
+        else 0
+    )
     countries_sel = st.selectbox(
         "Country",
         rev_countries,
@@ -676,7 +687,11 @@ else:
 # Column 3: Goal
 if rev_country_goals:
     with col3:
-        goal_index = rev_country_goals.index(default_goal) if default_goal in rev_country_goals else 0
+        goal_index = (
+            rev_country_goals.index(default_goal)
+            if default_goal in rev_country_goals
+            else 0
+        )
         goals_sel = st.selectbox(
             "Goal (dep_var)",
             rev_country_goals,
@@ -727,7 +742,9 @@ incomplete_stamps = []
 for stamp in all_stamps_raw:
     # Check if any run with this timestamp has complete outputs
     stamp_runs = [k for k in rev_country_keys if k[2] == stamp]
-    has_valid_run = any(run_has_required_files(runs.get(k, [])) for k in stamp_runs)
+    has_valid_run = any(
+        run_has_required_files(runs.get(k, [])) for k in stamp_runs
+    )
     if has_valid_run:
         all_stamps.append(stamp)
     else:
@@ -780,7 +797,7 @@ if stamp_sel:
             f"No runs found for {rev}/{', '.join(countries_sel)}/{stamp_sel}"
         )
         st.stop()
-    
+
     # Validate that the selected run has all required files
     analysis_key = selected_runs[0]
     if not run_has_required_files(runs.get(analysis_key, [])):
@@ -805,10 +822,12 @@ else:
     if not country_runs:
         st.error(f"No runs found for {rev}/{countries_sel[0]}")
         st.stop()
-    
+
     # Filter to only runs that have all required output files
-    valid_runs = [k for k in country_runs if run_has_required_files(runs.get(k, []))]
-    
+    valid_runs = [
+        k for k in country_runs if run_has_required_files(runs.get(k, []))
+    ]
+
     if not valid_runs:
         st.error(
             f"❌ **No valid model runs found for {rev}/{countries_sel[0]}**\n\n"
@@ -824,7 +843,7 @@ else:
             "- Try selecting a specific timestamp from the dropdown"
         )
         st.stop()
-    
+
     # Sort valid runs by timestamp (newest first)
     valid_runs_sorted = sorted(
         valid_runs, key=lambda k: parse_stamp(k[2]), reverse=True
@@ -1043,7 +1062,7 @@ else:
             mask &= hyp_f[c] <= nrmse_max
         elif cu.startswith("decomp.rssd"):
             mask &= hyp_f[c] <= decomp_max
-    
+
     good_models = hyp_f.loc[mask, "solID"].astype(str).unique()
 st.write(
     f"Selected **{len(good_models)} / {len(hyp)}** models (mode: **{mode}**)"

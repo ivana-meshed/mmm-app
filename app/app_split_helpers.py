@@ -47,6 +47,7 @@ from app_shared import (  # Env / constants (already read from env in app_shared
     run_sql,
     save_job_history_to_gcs,
     save_queue_to_gcs,
+    schedule_queue_tick_via_cloud_tasks,
     timed_step,
     upload_to_gcs,
 )
@@ -82,6 +83,7 @@ __all__ = [
     "queue_tick_once_headless",
     "handle_queue_tick_from_query_params",
     "handle_queue_tick_if_requested",
+    "schedule_queue_tick_via_cloud_tasks",
     "get_job_manager",
     "get_data_processor",
     "_fmt_secs",
@@ -560,9 +562,7 @@ def update_running_jobs_in_history(bucket_name: str) -> int:
                                                 from datetime import (
                                                     datetime as dt,
                                                 )
-                                                from datetime import (
-                                                    timedelta,
-                                                )
+                                                from datetime import timedelta
 
                                                 start_time = dt.fromisoformat(
                                                     str(start_time_str).replace(
