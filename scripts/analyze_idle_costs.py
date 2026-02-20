@@ -245,6 +245,8 @@ def analyze_costs(
         "by_hour": {},
         "total_days": days,
         "shared_costs": 0,  # Track shared costs for distribution
+        "warmup_job_detected": False,
+        "warmup_job_costs": 0.0,
     }
 
     for row in query_results:
@@ -260,6 +262,13 @@ def analyze_costs(
 
         if total_cost <= 0:
             continue
+        
+        # Check for warmup job
+        if resource_full_name:
+            resource_lower = resource_full_name.lower()
+            if 'warmup' in resource_lower or 'warm-up' in resource_lower:
+                analysis["warmup_job_detected"] = True
+                analysis["warmup_job_costs"] += total_cost
 
         # Identify service
         mmm_service = identify_service_from_labels(all_labels, resource_full_name)
@@ -657,14 +666,9 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
     print(f"\nCurrent Monthly Projection: ${total_monthly:.2f}")
     
     # Generate dynamic recommendations based on actual configuration
-    # Check for warmup job in billing data
-    warmup_job_detected = False
-    warmup_job_costs = 0.0
-    for _, row in df.iterrows():
-        resource_name = row.get('resource_full_name', '') or ''
-        if 'warmup' in resource_name.lower() or 'warm-up' in resource_name.lower():
-            warmup_job_detected = True
-            warmup_job_costs += float(row.get('cost', 0))
+    # Get warmup job data from analysis
+    warmup_job_detected = analysis.get("warmup_job_detected", False)
+    warmup_job_costs = analysis.get("warmup_job_costs", 0.0)
     
     recommendations = []
     recommendation_num = 1
