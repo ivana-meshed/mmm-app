@@ -500,7 +500,7 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
             max_scheduler_hours = (wakeups_total * max_duration_per_wakeup) / 60
             
             # Get actual active hours
-            unique_hours = data["unique_hours"]
+            unique_hours = data["unique_hours_active"]
             
             # Estimate scheduler compute costs
             # Attribute compute proportionally to scheduler time
