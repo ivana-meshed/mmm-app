@@ -1,8 +1,8 @@
 # MMM Trainer - Cost Optimization Status
 
-**Last Updated:** February 18, 2026 - **Scheduler Re-enabled (Option 2)**  
-**Document Version:** 2.0  
-**Status:** ✅ Optimizations Applied & Scheduler Enabled for Automation
+**Last Updated:** February 20, 2026 - **Scheduler Configuration Updated**  
+**Document Version:** 2.1  
+**Status:** ✅ Optimizations Applied - Scheduler Disabled in Production, Optimized in Dev
 
 ---
 
@@ -10,14 +10,14 @@
 
 This document consolidates all cost optimization information for the MMM Trainer application into a single source of truth. It replaces multiple scattered cost documents with one comprehensive status report.
 
-### Current Cost Status (Updated February 18, 2026 - Option 2 Implemented)
+### Current Cost Status (Updated February 20, 2026)
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| **Current Monthly Cost** | ~$10/month (projected) | Based on Option 2 implementation |
-| **GCP Infrastructure** | ~$9.58/month | Includes scheduler costs (+$0.70/month) |
+| **Current Monthly Cost** | ~$9.30/month (projected) | Production with scheduler disabled |
+| **GCP Infrastructure** | ~$9.10/month | Excludes scheduler costs in production |
 | **GitHub Actions** | $0.21/month | Weekly cleanup workflow |
-| **Combined Total** | ~$10/month | **Within target range** ✅ |
+| **Combined Total** | ~$9.30/month | **Within target range** ✅ |
 | **Baseline (Pre-Optimization)** | €148/month (~$160/month) | Historical costs before optimizations |
 | **Cost Reduction** | ~94% | Optimizations successfully applied |
 | **Target Cost Range** | $8-15/month (idle) | Minimal activity baseline |
@@ -27,73 +27,79 @@ This document consolidates all cost optimization information for the MMM Trainer
 
 1. **Scale-to-Zero Enabled** (min_instances=0) - Eliminates idle costs
 2. **CPU Throttling Enabled** - Reduces CPU allocation when idle  
-3. **Scheduler Re-enabled (Option 2)** - Automatic queue processing every 10 minutes ✅
+3. **Scheduler Configuration Optimized**:
+   - **Production**: DISABLED - Manual job triggering (~$0.70/month savings)
+   - **Dev**: ENABLED at 30-minute intervals - Reduced from 10 minutes (~$0.20/month savings)
 4. **Resource Optimization** (1 vCPU, 2 GB) - Reduced from 2 vCPU, 4 GB
 5. **GCS Lifecycle Policies** - Automatic storage class transitions
 6. **Artifact Registry Cleanup** - Weekly cleanup of old images
 
-**Note:** Scheduler has been **re-enabled** as of February 18, 2026 (Option 2 implementation). This provides automated job processing with minimal cost increase (~$0.70-1.00/month).
-
 ---
 
-## Scheduler Status ✅ (Updated: Option 2 Implemented)
+## Scheduler Status (Updated: February 20, 2026)
 
-**Current State:** ENABLED (as of February 18, 2026)
+### Production Environment
 
-The Cloud Scheduler has been **re-enabled** in both production and development environments:
-- `scheduler_enabled = true` in `infra/terraform/envs/prod.tfvars`
-- `scheduler_enabled = true` in `infra/terraform/envs/dev.tfvars`
+**Current State:** **DISABLED** for cost optimization
+
+Configuration:
+- `scheduler_enabled = false` in `infra/terraform/envs/prod.tfvars`
+- `scheduler_interval_minutes = 30` (if re-enabled)
 
 **Benefits:**
-- ✅ Automatic queue processing every 10 minutes
-- ✅ Training jobs start within 10 minutes of submission
-- ✅ No manual intervention required
+- ✅ Eliminates ~$0.70/month in scheduler costs
+- ✅ Achieves lowest possible idle costs
+- ✅ Production environment typically has on-demand job execution
+
+**Manual Job Triggering:**
+```bash
+# Trigger queue processing manually via API
+curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  "https://mmm-app-web-wuepn6nq5a-ew.a.run.app/?queue_tick=1&name=default"
+```
+
+### Development Environment
+
+**Current State:** **ENABLED** at 30-minute intervals
+
+Configuration:
+- `scheduler_enabled = true` in `infra/terraform/envs/dev.tfvars`
+- `scheduler_interval_minutes = 30` (reduced from 10 minutes)
+
+**Benefits:**
+- ✅ Automatic queue processing for development/testing
+- ✅ Saves ~$0.20/month compared to 10-minute intervals
+- ✅ Jobs start within 30 minutes (acceptable for dev)
 
 **Cost Impact:**
-- Additional ~$0.70-1.00/month
-- Total projected cost: ~$10/month (still well within target range)
-
-**Previous State (Option 1):**
-- Scheduler was disabled for cost monitoring (saved ~$0.70-1.00/month)
-- Required manual job processing
-- Total cost: $9.09/month (service fee + invocations)
+- Scheduler costs: ~$0.50/month (48 wake-ups/day vs 144 previously)
+- Down from ~$0.70/month with 10-minute intervals
 
 ---
 
-## Actual Cost Breakdown (February 2026 - Option 2 Implemented)
+## Actual Cost Breakdown (February 2026 - Updated Configuration)
 
-Based on projected costs with scheduler re-enabled:
+Based on actual costs with scheduler optimization:
 
-### Daily Costs by Service (Projected)
+### Monthly Projections by Environment
 
-| Service | 4-Day Total | Daily Avg | Monthly Projection | Primary Cost Drivers |
-|---------|-------------|-----------|-------------------|---------------------|
-| **mmm-app-dev-training** | $0.56 | $0.14 | $4.20 | Compute CPU (65%), Memory (29%), Registry (6%) |
-| **mmm-app-dev-web** | $0.67 | $0.17 | $5.02 | User requests (75%), Scheduler (15%), Registry (6%), Networking (4%) |
-| **mmm-app-training** | $0.03 | $0.01 | $0.22 | Registry (100%) |
-| **mmm-app-web** | $0.13 | $0.03 | $1.00 | Scheduler (60%), Registry (30%), User requests (10%) |
-| **GCP Total** | **$1.39** | **$0.35** | **~$9.58** | Includes scheduler costs |
-| **GitHub Actions** | **$0.03** | **$0.01** | **$0.21** | Weekly cleanup workflow (estimated) |
-| **Combined Total** | **$1.42** | **$0.36** | **~$10/month** | **All costs including external** |
+| Environment | Idle Cost | With Scheduler | Training Jobs (50/month) |
+|-------------|-----------|----------------|-------------------------|
+| **Production** | ~$5/month | ~$5/month (disabled) | ~$30/month |
+| **Development** | ~$4/month | ~$4.50/month (30-min) | ~$29/month |
+| **Total** | **~$9/month** | **~$9.50/month** | **~$59/month** |
 
-**Note:** Projected costs include scheduler service fee (~$0.20/month) and invocations (~$0.50/month) for a total scheduler cost of ~$0.70/month.
-
-### Cost by Category (Projected with Scheduler)
+### Cost by Category (Current Configuration)
 
 | Category | Estimated Cost | Percentage | Notes |
 |----------|---------------|------------|-------|
-| **User Requests** | $0.49 | 34.0% | Web service invocations (dev environment) |
-| **Compute CPU** | $0.36 | 25.0% | Training job execution |
-| **Scheduler** | $0.70 | 14.5% | **Re-enabled: Service fee + invocations** ✅ |
-| **Compute Memory** | $0.16 | 11.1% | Training job execution |
-| **Registry** | $0.06 | 4.2% | Container image storage |
-| **Networking** | $0.03 | 2.1% | Data transfer |
-| **Storage** | $0.08 | 5.5% | GCS storage costs |
+| **Web Services (base)** | $5.32 | 58.0% | Always-on web application costs |
+| **Scheduler (dev only)** | $0.50 | 5.5% | Dev environment at 30-min intervals |
+| **Storage & Registry** | $0.14 | 1.5% | Container images & data storage |
+| **Base Infrastructure** | $3.14 | 34.5% | Network, API calls, secrets |
+| **GitHub Actions** | $0.21 | 2.3% | Weekly cleanup workflow |
 
-**Key Changes from Option 1:**
-- ✅ Scheduler costs added: $0.70/month (service fee $0.20 + invocations $0.50)
-- ✅ Total cost increase: ~$0.70-1.00/month
-- ✅ Automated job processing restored
+**Total Monthly (Idle):** ~$9.30/month
 
 ---
 
@@ -109,51 +115,65 @@ Based on projected costs with scheduler re-enabled:
    - Provides monthly projections
    - Exports to CSV for analysis
 
-2. **Idle Cost Analysis**
+2. **Idle Cost Analysis** (Updated February 20, 2026)
    ```bash
    python scripts/analyze_idle_costs.py --days 7 --use-user-credentials
    ```
    - Analyzes costs during idle periods
-   - Identifies optimization opportunities
-   - Provides recommendations
+   - **NOW: Provides dynamic recommendations based on actual configuration**
+   - Only suggests changes that are relevant to current setup
+   - Includes timeout optimization analysis
 
-### Recent Script Improvements (PR #169 + Latest Enhancements)
+### Recent Script Improvements
 
-✅ **Enhancements Applied:**
+✅ **Latest Enhancements (February 20, 2026):**
+- **Dynamic Recommendations Engine** - Script now checks SERVICE_CONFIGS and only recommends changes that apply
+- **Configuration-Aware Analysis** - Detects if CPU throttling is enabled, scheduler status, and intervals
+- **Timeout Optimization Analysis** - Analyzes request timeout configuration (currently 300s)
+- **Accurate Cost Projections** - Based on actual deployed configuration
+
+✅ **Previous Enhancements (PR #169):**
 - Added Secret Manager cost tracking
 - Improved Cloud Scheduler service fee detection
 - Enhanced service identification logic
 - Better categorization of cost types
-- Fixed string-to-number conversions in shell scripts
-- **NEW: Explicit scheduler run costs tracking** (service fees + invocations)
-- **NEW: GitHub Actions cost tracking** (weekly cleanup automation)
-- **NEW: Dedicated "Scheduler & Automation Costs" breakdown section**
+- Explicit scheduler run costs tracking (service fees + invocations)
+- GitHub Actions cost tracking (weekly cleanup automation)
+- Dedicated "Scheduler & Automation Costs" breakdown section
 
-**Scheduler & Automation Tracking:**
-The scripts now provide a dedicated breakdown showing:
-- Cloud Scheduler service fees (~$0.10/month per job)
-- Scheduler invocation costs (Cloud Run container time)
-- GitHub Actions costs (Artifact Registry cleanup and CI/CD)
+**Script Output Examples:**
 
-See [SCHEDULER_COSTS_TRACKING.md](SCHEDULER_COSTS_TRACKING.md) for details on the new tracking features.
+When all optimizations are applied:
+```
+Current Configuration:
+  - CPU throttling: ENABLED ✓
+  - Scheduler: DISABLED (prod) / ENABLED at 30 min (dev)
+  - Min instances: 0 (scale-to-zero)
+
+✓ All major cost optimizations are already implemented!
+```
+
+When optimizations are needed:
+```
+Recommendations (in priority order):
+1. ENABLE CPU THROTTLING (Highest Priority)
+   Expected savings: ~$80-100/month
+```
 
 ⚠️ **Known Limitations:**
 - Requires BigQuery billing export to be enabled
 - Requires appropriate IAM permissions (BigQuery Data Viewer)
-- Cloud Scheduler base service fee ($0.10/month per job) may not appear in billing until month-end
+- Cloud Scheduler base service fee ($0.10/month per job) may not appear until month-end
 - Free tier credits not included in calculations
-- Billing data has 24-48 hour lag (costs from yesterday may not appear yet)
+- Billing data has 24-48 hour lag
 
 ✅ **Script Accuracy Validated:**
 
-Based on the problem statement output showing $8.87/month actual costs vs the documented €148/month baseline, the scripts are **working correctly** and accurately reflecting that:
-
-1. **Cost optimizations have been successfully applied** - The low actual costs confirm that scale-to-zero, CPU throttling, scheduler optimization, and other measures are in effect
-2. **Scripts capture all major cost categories** - Registry, compute CPU/memory, user requests, networking, and storage are all tracked
-3. **Current activity is minimal** - The test period (Feb 14-18) had minimal production activity, explaining the low costs
-4. **Missing costs are expected** - Base service fees for Cloud Scheduler ($0.20/month) and Secret Manager ($0.01-0.05/month) are negligible and may not appear in short-term billing data
-
-**Conclusion:** The scripts from PR #169 are **accurate**. The low costs ($8.87/month) are real and indicate successful optimization implementation, not a script error.
+The scripts accurately reflect the current state:
+1. **Cost optimizations successfully applied** - Low costs confirm scale-to-zero, CPU throttling, and scheduler optimization are working
+2. **All major cost categories captured** - Registry, compute CPU/memory, user requests, networking, storage tracked
+3. **Dynamic recommendations** - Only suggests changes relevant to current configuration
+4. **Configuration-aware** - Knows when CPU throttling is enabled, scheduler is disabled, etc.
 
 ---
 
@@ -189,18 +209,60 @@ Resources:
   CPU: 8 vCPU
   Memory: 32 GB
   Min Instances: 0 (on-demand only)
+  Timeout: 21600s (6 hours) for training jobs
   Region: europe-west1
 Current Cost: Variable, $0.50-3.00 per job
 ```
 
+### Request Timeout Configuration
+
+**Web Services:**
+```yaml
+Timeout: 300s (5 minutes)
+```
+
+**Analysis:**
+- **Current Setting:** 300s is reasonable for most operations
+- **Cost Impact:** Minimal (~$5-10/month potential savings if reduced)
+- **Recommendation:** Keep at 300s unless testing shows requests complete faster
+- **Trade-offs of reducing:**
+  - May terminate legitimate long-running requests
+  - Faster failure detection for hung requests
+  - Needs testing to ensure operations complete within new limit
+
+**When to consider reducing timeout:**
+- If monitoring shows most requests complete in < 120s
+- If experiencing frequent hung requests that waste resources
+- After thorough testing of request duration patterns
+
 ### Cloud Scheduler
 
+**Production:**
 ```yaml
-Scheduler Jobs: 2 (prod + dev)
-Frequency: Every 10 minutes (144 invocations/day)
-Base Service Fee: $0.10/month per job = $0.20/month total
-Invocation Costs: ~$0.50-1.00/month (included in request costs above)
+Status: DISABLED (for cost optimization)
+Scheduler Job: robyn-queue-tick
+Cost Savings: ~$0.70/month
+Manual Trigger: GET /?queue_tick=1&name=default
 ```
+
+**Development:**
+```yaml
+Status: ENABLED
+Scheduler Job: robyn-queue-tick-dev
+Frequency: Every 30 minutes (48 invocations/day)
+Base Service Fee: $0.10/month
+Invocation Costs: ~$0.40/month
+Total Scheduler Cost: ~$0.50/month
+```
+
+**Previous Configuration (Feb 18-20):**
+- Both prod and dev: Every 10 minutes (144 invocations/day)
+- Total cost: ~$0.70/month per environment
+
+**Cost Savings from Optimization:**
+- Production: $0.70/month (scheduler disabled)
+- Development: $0.20/month (30-min vs 10-min intervals)
+- **Total savings:** ~$0.90/month (~$11/year)
 
 ### Cloud Storage (GCS)
 

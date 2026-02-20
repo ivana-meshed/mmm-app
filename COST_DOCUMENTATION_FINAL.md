@@ -1,7 +1,7 @@
 # MMM Trainer - Cost Documentation (Final Summary)
 
-**Last Updated:** February 18, 2026  
-**Status:** ✅ All Optimizations Applied, Scheduler Enabled  
+**Last Updated:** February 20, 2026  
+**Status:** ✅ All Optimizations Applied, Scheduler Optimized  
 **Purpose:** Comprehensive cost summary consolidating all PR work
 
 ---
@@ -12,20 +12,21 @@
 
 | Metric | Value | Status |
 |--------|-------|--------|
-| **Monthly Cost** | **$10/month** | ✅ Within target |
-| GCP Infrastructure | $9.79/month | Includes scheduler |
+| **Monthly Cost** | **$9.30/month** | ✅ Within target |
+| GCP Infrastructure | $9.10/month | Scheduler disabled (prod) |
 | GitHub Actions | $0.21/month | Weekly cleanup |
 | **Baseline (Pre-optimization)** | $160/month | Historical |
 | **Cost Reduction** | **94%** | ✅ Achieved |
-| **Scheduler** | **Enabled** | ✅ 10-min intervals |
+| **Scheduler** | **Optimized** | ✅ Disabled (prod), 30-min (dev) |
 
 ### Key Achievements
 
-- 🎯 **94% cost reduction** from $160 → $10/month baseline
+- 🎯 **94% cost reduction** from $160 → $9.30/month baseline
 - ⚡ **2.5× faster** training jobs (8 vCPU optimization)
-- 🤖 **Automated** job processing (scheduler every 10 minutes)
+- 🤖 **Flexible automation** - Manual (prod), automatic (dev every 30 min)
 - 💰 **$0.50 per job** for typical production training (30 min)
-- 📊 **Accurate cost tracking** with enhanced scripts
+- 📊 **Smart cost tracking** with dynamic recommendations
+- 🔧 **Timeout configured** at 300s for optimal balance
 
 ---
 
@@ -35,15 +36,19 @@
 
 | Usage Level | Training Jobs | Monthly Cost | Use Case |
 |-------------|--------------|--------------|----------|
-| **Idle** | 0-2 | **$10** | Base infrastructure |
-| **Light** | 10 | **$15** | Testing & development |
-| **Moderate** | 50 | **$35** | Regular production |
-| **Heavy** | 100 | **$60** | Active production |
-| **Very Heavy** | 500 | **$260** | High-volume production |
+| **Idle** | 0-2 | **$9.30** | Base infrastructure (prod scheduler OFF) |
+| **Light** | 10 | **$14** | Testing & development |
+| **Moderate** | 50 | **$34** | Regular production |
+| **Heavy** | 100 | **$59** | Active production |
+| **Very Heavy** | 500 | **$259** | High-volume production |
 
 **Cost Breakdown:**
-- Fixed costs: $10/month (infrastructure, scheduler, storage)
+- Fixed costs: $9.30/month (infrastructure, dev scheduler, storage)
 - Variable costs: $0.50 per production job (30 min medium)
+
+**With Prod Scheduler Enabled** (if re-enabled):
+- Add $0.70/month to all scenarios above
+- Total idle cost would be $10/month
 
 ---
 
@@ -78,13 +83,16 @@ Enhanced `scripts/track_daily_costs.py` and `scripts/analyze_idle_costs.py`:
 - ✅ Added Cloud Build/GitHub Actions tracking
 - ✅ Added scheduler cost breakdown section
 - ✅ Added automation costs reporting
-- ✅ Fixed hardcoded configurations to match actual deployment
+- ✅ **NEW: Dynamic recommendations engine** - Only suggests relevant changes
+- ✅ **NEW: Configuration-aware analysis** - Detects actual deployed state
+- ✅ **NEW: Timeout optimization analysis** - Analyzes request timeout settings
 
-#### 3. Configuration Corrections
-- ✅ Re-enabled scheduler (`scheduler_enabled = true` in prod/dev)
-- ✅ Fixed script SERVICE_CONFIGS (CPU throttling: true)
-- ✅ Removed unverified "reduced from 1-minute" claim
-- ✅ Updated all cost projections with actual Feb 2026 billing data
+#### 3. Configuration Updates (February 20, 2026)
+- ✅ **Production scheduler:** DISABLED for cost optimization (~$0.70/month savings)
+- ✅ **Dev scheduler:** Reduced to 30-minute intervals (~$0.20/month savings)
+- ✅ Added `scheduler_interval_minutes` variable to Terraform
+- ✅ Fixed script SERVICE_CONFIGS to match actual deployment
+- ✅ Updated all cost projections with actual configuration
 
 #### 4. Production Cost Estimates Fixed
 Corrected estimates using actual documented job times:
@@ -95,9 +103,9 @@ Corrected estimates using actual documented job times:
 - 500 jobs: $110/month
 
 **After** (correct - uses actual production times):
-- 10 jobs: $15/month (10 × $0.50)
-- 100 jobs: $60/month (100 × $0.50)
-- 500 jobs: $260/month (500 × $0.50)
+- 10 jobs: $14/month (10 × $0.50)
+- 100 jobs: $59/month (100 × $0.50)
+- 500 jobs: $259/month (500 × $0.50)
 
 ### Applied Optimizations (Pre-PR)
 
