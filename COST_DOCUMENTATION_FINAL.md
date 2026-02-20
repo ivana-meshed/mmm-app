@@ -26,7 +26,7 @@
 - 🤖 **Flexible automation** - Manual (prod), automatic (dev every 30 min)
 - 💰 **$0.50 per job** for typical production training (30 min)
 - 📊 **Smart cost tracking** with dynamic recommendations
-- 🔧 **Timeout configured** at 300s for optimal balance
+- 🔧 **Timeout configured** at 120s for optimal balance
 
 ---
 

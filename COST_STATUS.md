@@ -129,7 +129,7 @@ Based on actual costs with scheduler optimization:
 ✅ **Latest Enhancements (February 20, 2026):**
 - **Dynamic Recommendations Engine** - Script now checks SERVICE_CONFIGS and only recommends changes that apply
 - **Configuration-Aware Analysis** - Detects if CPU throttling is enabled, scheduler status, and intervals
-- **Timeout Optimization Analysis** - Analyzes request timeout configuration (currently 300s)
+- **Timeout Optimization Analysis** - Analyzes request timeout configuration (currently 120s)
 - **Accurate Cost Projections** - Based on actual deployed configuration
 
 ✅ **Previous Enhancements (PR #169):**
@@ -218,22 +218,25 @@ Current Cost: Variable, $0.50-3.00 per job
 
 **Web Services:**
 ```yaml
-Timeout: 300s (5 minutes)
+Timeout: 120s (2 minutes)
 ```
 
 **Analysis:**
-- **Current Setting:** 300s is reasonable for most operations
-- **Cost Impact:** Minimal (~$5-10/month potential savings if reduced)
-- **Recommendation:** Keep at 300s unless testing shows requests complete faster
-- **Trade-offs of reducing:**
-  - May terminate legitimate long-running requests
+- **Current Setting:** 120s optimized for faster failure detection
+- **Cost Impact:** Minimal improvement (~$5-10/month savings vs 300s)
+- **Benefits:**
   - Faster failure detection for hung requests
-  - Needs testing to ensure operations complete within new limit
+  - Reduced resource waste from stalled operations
+  - Most legitimate requests complete well under 120s
+- **Trade-offs:**
+  - May terminate some long-running legitimate requests (rare)
+  - Requires monitoring to ensure operations complete within limit
 
-**When to consider reducing timeout:**
-- If monitoring shows most requests complete in < 120s
-- If experiencing frequent hung requests that waste resources
-- After thorough testing of request duration patterns
+**Monitoring:**
+- Track request durations to ensure < 120s for normal operations
+- Monitor timeout errors and adjust if legitimate requests are failing
+- Most Streamlit web requests complete in < 10s
+- Training job submission requests complete in < 5s
 
 ### Cloud Scheduler
 
