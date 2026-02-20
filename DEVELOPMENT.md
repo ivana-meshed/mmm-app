@@ -546,7 +546,14 @@ Expected response when the queue is empty:
 #### 4 — Verify Cloud Tasks are created when a job is enqueued
 
 After deploying to the dev environment (push to a `feat-*` or `copilot/*`
-branch to trigger CI):
+branch to trigger CI), set these shell variables once and reuse them for all
+commands below — this avoids project-ID typos:
+
+```bash
+PROJECT=datawarehouse-422511   # ← GCP project (note: 422511, six digits)
+REGION=europe-west1
+QUEUE=robyn-queue-tick-dev
+```
 
 1. Open the app, go to **5. Run Models**, and add at least one job to the
    queue.
@@ -560,9 +567,9 @@ branch to trigger CI):
 **gcloud CLI:**
 ```bash
 gcloud tasks list \
-  --queue=robyn-queue-tick-dev \
-  --location=europe-west1 \
-  --project=datawarehouse-422511
+  --queue="$QUEUE" \
+  --location="$REGION" \
+  --project="$PROJECT"
 ```
 
 Expected: one task listed immediately after enqueueing.
@@ -573,9 +580,9 @@ After all jobs complete (or the queue is cleared):
 
 ```bash
 gcloud tasks list \
-  --queue=robyn-queue-tick-dev \
-  --location=europe-west1 \
-  --project=datawarehouse-422511
+  --queue="$QUEUE" \
+  --location="$REGION" \
+  --project="$PROJECT"
 ```
 
 Expected: **empty list** — no tasks, no idle wake-ups, no idle cost.
@@ -589,9 +596,9 @@ GCP Console or with:
 
 ```bash
 gcloud tasks describe <TASK_NAME> \
-  --queue=robyn-queue-tick-dev \
-  --location=europe-west1 \
-  --project=datawarehouse-422511
+  --queue="$QUEUE" \
+  --location="$REGION" \
+  --project="$PROJECT"
 ```
 
 The `scheduleTime` field should be approximately `now + 5 minutes`.
@@ -606,7 +613,7 @@ gcloud logging read \
   'resource.labels.service_name="mmm-app-dev-web" AND
    textPayload=~"\\[CLOUD_TASKS\\]"' \
   --limit=20 \
-  --project=datawarehouse-422511
+  --project="$PROJECT"
 ```
 
 Look for lines like:
@@ -627,6 +634,13 @@ service to be deployed (push to a `feat-*` or `copilot/*` branch first).
 **Goal:** confirm that Cloud Tasks fires automatically when a job is added
 through the UI, and stops firing once the queue is empty.
 
+**Set variables once (reused in all CLI commands below):**
+```bash
+PROJECT=datawarehouse-422511   # ← GCP project (note: 422511, six digits)
+REGION=europe-west1
+QUEUE=robyn-queue-tick-dev
+```
+
 **Steps:**
 
 1. **Open the app** at `https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app`
@@ -644,9 +658,9 @@ through the UI, and stops firing once the queue is empty.
 5. **Immediately** open a terminal and check the Cloud Tasks queue:
    ```bash
    gcloud tasks list \
-     --queue=robyn-queue-tick-dev \
-     --location=europe-west1 \
-     --project=datawarehouse-422511
+     --queue="$QUEUE" \
+     --location="$REGION" \
+     --project="$PROJECT"
    ```
    Expected: **one task** listed with a `scheduledTime` in the past or
    near future.  The task was created automatically by `save_queue_to_gcs()`
@@ -669,7 +683,7 @@ through the UI, and stops firing once the queue is empty.
      'resource.labels.service_name="mmm-app-dev-web" AND
       textPayload=~"\\[QUEUE_TICK\\]"' \
      --limit=20 \
-     --project=datawarehouse-422511
+     --project="$PROJECT"
    ```
    The last log line should be `"empty queue"` or `"no pending"`, confirming
    the chain stopped cleanly.
