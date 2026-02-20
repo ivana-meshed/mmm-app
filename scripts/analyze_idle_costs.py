@@ -538,8 +538,8 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
             print("  Analysis:")
             print(f"    - Scheduler wake-ups: {wakeups_per_day} times/day (every {scheduler_interval} minutes)")
             print(f"    - Each wake-up keeps instance warm for ~{min_duration_per_wakeup}-{max_duration_per_wakeup} minutes")
-            print(f"    - Expected scheduler activity: ~{min_scheduler_hours:.1f}-{max_scheduler_hours:.1f} hours over {days_back} days")
-            print(f"    - Actual active time: {unique_hours} hours over {days_back} days")
+            print(f"    - Expected scheduler activity: ~{min_scheduler_hours:.1f}-{max_scheduler_hours:.1f} hours over {args.days} days")
+            print(f"    - Actual active time: {unique_hours} hours over {args.days} days")
             print(f"    - User activity: Remaining time")
             
             print()
@@ -674,7 +674,7 @@ def print_analysis(analysis: Dict[str, Any], args: argparse.Namespace):
         # Warmup job typically runs every 5 minutes = 288 times/day
         warmup_frequency = 5  # minutes
         warmup_wakeups_per_day = 24 * 60 // warmup_frequency
-        monthly_warmup_cost = warmup_job_costs * 30 / days_back
+        monthly_warmup_cost = warmup_job_costs * 30 / args.days
         
         recommendations.append({
             'priority': 'CRITICAL',
