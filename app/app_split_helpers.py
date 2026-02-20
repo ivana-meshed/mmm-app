@@ -1639,7 +1639,7 @@ def ensure_session_defaults():
     ss.setdefault("last_timings", {})  # {'df':..., 'timestamp':...}
 
     # Queue defaults
-    ss.setdefault("queue_name", "default")
+    ss.setdefault("queue_name", DEFAULT_QUEUE_NAME)
     ss.setdefault("job_queue", [])
     ss.setdefault("queue_running", False)
     ss.setdefault("queue_saved_at", None)
