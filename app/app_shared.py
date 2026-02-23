@@ -191,12 +191,21 @@ def _safe_tick_once(
     bucket_name: Optional[str] = None,
     launcher: Optional[callable] = None,  # type: ignore
     max_retries: int = 3,
+    force: bool = False,
 ) -> dict:
     """
     Single safe tick with optimistic concurrency on GCS:
     - If a RUNNING/LAUNCHING job exists: update its status (or promote LAUNCHING→RUNNING) and persist guarded.
     - Else lease the first PENDING job by writing LAUNCHING with an if_generation_match precondition,
       then launch outside the critical section, and persist the RUNNING/ERROR result with another guarded write.
+
+    Args:
+        queue_name: Name of the queue to process
+        bucket_name: GCS bucket name
+        launcher: Function to launch jobs
+        max_retries: Maximum number of retries for concurrency conflicts
+        force: If True, bypass queue_running check (for manual "Start Next Job" action)
+
     Returns {ok, message, changed}.
     """
     bucket_name = bucket_name or GCS_BUCKET
@@ -278,7 +287,7 @@ def _safe_tick_once(
         )
         if not q:
             return {"ok": True, "message": "empty queue", "changed": False}
-        if not running_flag:
+        if not running_flag and not force:
             return {"ok": True, "message": "queue is paused", "changed": False}
 
         jm = CloudRunJobManager(PROJECT_ID, REGION)  # type: ignore
@@ -1663,8 +1672,9 @@ def queue_tick_once_headless(
     queue_name: str,
     bucket_name: Optional[str] = None,
     launcher: Optional[callable] = None,  # type: ignore
+    force: bool = False,
 ) -> dict:
-    return _safe_tick_once(queue_name, bucket_name, launcher)
+    return _safe_tick_once(queue_name, bucket_name, launcher, force=force)
 
 
 # ─────────────────────────────
