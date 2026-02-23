@@ -480,6 +480,250 @@ make typecheck
 make fix
 ```
 
+### Testing the Cloud Tasks Queue Tick
+
+The queue tick feature uses event-driven [Cloud Tasks](https://cloud.google.com/tasks/docs)
+instead of a periodic Cloud Scheduler.  A Cloud Task is created only when
+there is pending or running work, so the container stays idle (and incurs zero
+extra cost) when the queue is empty.
+
+#### 1 — Unit tests (no GCP required)
+
+The scheduling-decision logic is covered by a standalone test module that
+requires no GCP credentials:
+
+```bash
+python3 -m unittest tests.test_cloud_tasks_scheduling -v
+```
+
+Expected output: 15 tests, all passing.  The suite checks every combination
+of tick result (empty queue, paused, launched, running, succeeded, failed, …)
+and verifies the correct "none / immediate / delayed" scheduling decision.
+
+#### 2 — Local verification: graceful no-op without Cloud Tasks config
+
+When `CLOUD_TASKS_QUEUE` or `WEB_SERVICE_URL` are not set (normal local
+development), `schedule_queue_tick_via_cloud_tasks()` returns `False`
+silently — the queue tick itself still works, only the self-scheduling step
+is skipped.
+
+```bash
+# From the repo root with the app's virtualenv active:
+cd app
+python3 - <<'EOF'
+import os
+# Deliberately unset Cloud Tasks vars (simulating local dev)
+os.environ.pop("CLOUD_TASKS_QUEUE", None)
+os.environ.pop("WEB_SERVICE_URL", None)
+
+from app_shared import schedule_queue_tick_via_cloud_tasks
+result = schedule_queue_tick_via_cloud_tasks("default", delay_seconds=0)
+print("Scheduled:", result)   # Expected: False — graceful no-op
+EOF
+```
+
+#### 3 — Trigger the queue tick endpoint manually
+
+The `?queue_tick=1` endpoint bypasses OAuth and can be called directly.
+Use it to test the tick logic against the dev Cloud Run service without
+going through the Streamlit UI:
+
+```bash
+# Authenticate as yourself (dev only)
+TOKEN=$(gcloud auth print-identity-token)
+DEV_URL="https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app"
+
+# Trigger a tick on the dev queue
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "${DEV_URL}?queue_tick=1&name=default-dev" | python3 -m json.tool
+```
+
+Expected response when the queue is empty:
+```json
+{"ok": true, "message": "empty queue", "changed": false}
+```
+
+#### 4 — Verify Cloud Tasks are created when a job is enqueued
+
+After deploying to the dev environment (push to a `feat-*` or `copilot/*`
+branch to trigger CI), set these shell variables once and reuse them for all
+commands below — this avoids project-ID typos:
+
+```bash
+PROJECT=datawarehouse-422511   # ← GCP project (note: 422511, six digits)
+REGION=europe-west1
+QUEUE=robyn-queue-tick-dev
+```
+
+1. Open the app, go to **5. Run Models**, and add at least one job to the
+   queue.
+2. Immediately check the Cloud Tasks queue in one of two ways:
+
+**GCP Console:**
+- Navigate to **Cloud Tasks** → select queue `robyn-queue-tick-dev` →
+  **Tasks** tab.  You should see one task with a past or near-future
+  `Scheduled time`.
+
+**gcloud CLI:**
+```bash
+gcloud tasks list \
+  --queue="$QUEUE" \
+  --location="$REGION" \
+  --project="$PROJECT"
+```
+
+Expected: one task listed immediately after enqueueing.
+
+#### 5 — Verify no idle tasks remain after the queue empties
+
+After all jobs complete (or the queue is cleared):
+
+```bash
+gcloud tasks list \
+  --queue="$QUEUE" \
+  --location="$REGION" \
+  --project="$PROJECT"
+```
+
+Expected: **empty list** — no tasks, no idle wake-ups, no idle cost.
+
+#### 6 — Verify the polling interval for running jobs
+
+While a training job is in `RUNNING` state, the service schedules a
+follow-up task with a delay of `QUEUE_TICK_INTERVAL_SECONDS` (default: 300 s
+= 5 minutes).  Confirm it by checking the task's `Scheduled time` in the
+GCP Console or with:
+
+```bash
+gcloud tasks describe <TASK_NAME> \
+  --queue="$QUEUE" \
+  --location="$REGION" \
+  --project="$PROJECT"
+```
+
+The `scheduleTime` field should be approximately `now + 5 minutes`.
+
+#### 7 — Cloud Run logs
+
+Pipe `gcloud beta run services logs read` through `grep` to filter out the
+high-volume Streamlit noise (DATA-PREFILL, SESSION-SYNC, STATUS_MONITOR …)
+and show only the queue scheduling events:
+
+```bash
+gcloud beta run services logs read mmm-app-dev-web \
+  --region="$REGION" \
+  --project="$PROJECT" \
+  --limit=200 \
+  | grep -E "\[QUEUE\]|\[QUEUE_TICK\]|\[CLOUD_TASKS\]|\[PROXY\]"
+```
+
+A successful end-to-end run produces a sequence like:
+
+```
+[QUEUE] Saving queue 'default-dev': 3 entries (3 pending, 0 running/launching), queue_running=True
+[QUEUE] 3 pending job(s) + running=True → scheduling immediate Cloud Task for 'default-dev'
+[CLOUD_TASKS] Scheduled queue tick for 'default-dev' delay=0s
+[PROXY] queue_tick request for queue 'default-dev'
+[QUEUE_TICK] Starting tick for queue 'default-dev' bucket 'mmm-app-output'
+[QUEUE_TICK] Queue 'default-dev': 3 entries, running=True
+[QUEUE_TICK] Leasing job 1 as LAUNCHING (gen=...)
+[CLOUD_TASKS] Scheduled queue tick for 'default-dev' delay=300s   ← polling task while job runs
+...
+[CLOUD_TASKS] Queue idle — no next tick scheduled                  ← chain self-terminated
+```
+
+When the queue finishes, the last `[CLOUD_TASKS]` entry should be
+`Queue idle — no next tick scheduled` — confirming zero idle scheduling.
+
+To filter for Cloud Tasks scheduling events only (shorter output):
+
+```bash
+gcloud beta run services logs read mmm-app-dev-web \
+  --region="$REGION" \
+  --project="$PROJECT" \
+  --limit=200 \
+  | grep "\[CLOUD_TASKS\]"
+```
+
+The absence of `[CLOUD_TASKS]` log lines when the queue is idle confirms
+that no spurious tasks are being created.
+
+#### 8 — UI testing via the Streamlit app (Batch Run tab)
+
+This is the most realistic end-to-end test and requires the dev Cloud Run
+service to be deployed (push to a `feat-*` or `copilot/*` branch first).
+
+**Goal:** confirm that Cloud Tasks fires automatically when the queue
+transitions to RUNNING with pending jobs, and stops firing once done.
+
+**Set variables once (reused in all CLI commands below):**
+```bash
+PROJECT=datawarehouse-422511   # ← GCP project (note: 422511, six digits)
+REGION=europe-west1
+QUEUE=robyn-queue-tick-dev
+```
+
+**Two supported workflows — both trigger a Cloud Task:**
+
+---
+
+**Workflow A — stage first, then start:**
+
+1. **Open the app** at `https://mmm-app-dev-web-wuepn6nq5a-ew.a.run.app`
+   and log in.
+
+2. Navigate to **5. Run Models → Batch Run** tab.
+
+3. Configure one or more test jobs and click **➕ Add to Queue** for each.
+   The queue status bar will show `Queue is STOPPED · N pending`.  
+   No Cloud Task is created yet — the queue is not running.
+
+4. When you are ready to run, go to the **Queue Monitor** tab and click
+   **▶️ Start Queue**.  This writes `queue_running=true` together with your
+   PENDING entries to GCS, which immediately schedules a Cloud Task.
+
+5. **Immediately** check the Cloud Tasks queue:
+   ```bash
+   gcloud tasks list \
+     --queue="$QUEUE" \
+     --location="$REGION" \
+     --project="$PROJECT"
+   ```
+   Expected: **one task** listed.
+
+---
+
+**Workflow B — add and start in one click:**
+
+1–3. Same as above, but on step 4 click **➕ Add & Start** instead of
+   **Add to Queue**.  This adds the job and starts the queue in a single
+   write, triggering the Cloud Task immediately.
+
+---
+
+**After either workflow starts the queue:**
+
+- While a job is **RUNNING**, `gcloud tasks list` shows a new task with
+  `scheduledTime ≈ now + 5 minutes` (the status-polling task).
+
+- After the last job completes (**SUCCEEDED** or **FAILED** in the Queue
+  Monitor tab), `gcloud tasks list` returns **empty list** — no idle tasks,
+  no idle compute costs.
+
+- **Confirm in Cloud Run logs** that the chain self-terminated
+  (see [section 7](#7--cloud-run-logs)):
+  ```bash
+  gcloud beta run services logs read mmm-app-dev-web \
+    --region="$REGION" \
+    --project="$PROJECT" \
+    --limit=200 \
+    | grep -E "\[QUEUE\]|\[QUEUE_TICK\]|\[CLOUD_TASKS\]|\[PROXY\]"
+  ```
+  The last `[CLOUD_TASKS]` entry should be
+  `Queue idle — no next tick scheduled`, confirming the chain stopped cleanly.
+
+---
+
 ### Manual Testing
 
 #### Test Web Interface

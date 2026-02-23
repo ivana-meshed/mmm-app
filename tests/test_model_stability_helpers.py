@@ -7,7 +7,6 @@ that model runs have all required output files.
 
 from unittest.mock import Mock
 
-
 # Copy the function here for standalone testing
 FILE_XAGG = "xDecompAgg.parquet"
 FILE_HYP = "resultHypParam.parquet"
@@ -18,17 +17,17 @@ FILE_XVEC = "xDecompVecCollect.parquet"
 def run_has_required_files(run_blobs, required_files=None):
     """
     Check if a run has all required model output files.
-    
+
     Args:
         run_blobs: List of blobs for a specific run
         required_files: List of required filenames. Defaults to the standard Robyn output files.
-    
+
     Returns:
         bool: True if all required files are present, False otherwise
     """
     if required_files is None:
         required_files = [FILE_XAGG, FILE_HYP, FILE_MEDIA, FILE_XVEC]
-    
+
     # Extract filenames from blob paths
     blob_files = set()
     for blob in run_blobs:
@@ -36,7 +35,7 @@ def run_has_required_files(run_blobs, required_files=None):
         parts = blob.name.split("/")
         if len(parts) >= 2 and parts[-2] == "output_models_data":
             blob_files.add(parts[-1])
-    
+
     # Check if all required files are present
     return all(f in blob_files for f in required_files)
 
@@ -45,31 +44,44 @@ def test_run_has_required_files_complete():
     """Test run_has_required_files with complete set of files"""
     # Mock blobs with all required files
     blobs = []
-    for fname in ["xDecompAgg.parquet", "resultHypParam.parquet", "mediaVecCollect.parquet", "xDecompVecCollect.parquet"]:
+    for fname in [
+        "xDecompAgg.parquet",
+        "resultHypParam.parquet",
+        "mediaVecCollect.parquet",
+        "xDecompVecCollect.parquet",
+    ]:
         blob = Mock()
         blob.name = f"robyn/default/de/0213_162352/output_models_data/{fname}"
         blobs.append(blob)
-    
+
     # Add extra file
     extra_blob = Mock()
     extra_blob.name = "robyn/default/de/0213_162352/some_other_file.txt"
     blobs.append(extra_blob)
-    
+
     result = run_has_required_files(blobs)
-    assert result is True, "Should return True when all required files are present"
+    assert (
+        result is True
+    ), "Should return True when all required files are present"
 
 
 def test_run_has_required_files_missing_one():
     """Test run_has_required_files when one file is missing"""
     # Missing xDecompVecCollect.parquet
     blobs = []
-    for fname in ["xDecompAgg.parquet", "resultHypParam.parquet", "mediaVecCollect.parquet"]:
+    for fname in [
+        "xDecompAgg.parquet",
+        "resultHypParam.parquet",
+        "mediaVecCollect.parquet",
+    ]:
         blob = Mock()
         blob.name = f"robyn/default/de/0213_162352/output_models_data/{fname}"
         blobs.append(blob)
-    
+
     result = run_has_required_files(blobs)
-    assert result is False, "Should return False when required files are missing"
+    assert (
+        result is False
+    ), "Should return False when required files are missing"
 
 
 def test_run_has_required_files_empty():
@@ -82,13 +94,20 @@ def test_run_has_required_files_wrong_directory():
     """Test run_has_required_files when files are in wrong directory"""
     # Files not in output_models_data directory
     blobs = []
-    for fname in ["xDecompAgg.parquet", "resultHypParam.parquet", "mediaVecCollect.parquet", "xDecompVecCollect.parquet"]:
+    for fname in [
+        "xDecompAgg.parquet",
+        "resultHypParam.parquet",
+        "mediaVecCollect.parquet",
+        "xDecompVecCollect.parquet",
+    ]:
         blob = Mock()
         blob.name = f"robyn/default/de/0213_162352/{fname}"
         blobs.append(blob)
-    
+
     result = run_has_required_files(blobs)
-    assert result is False, "Should return False when files are not in output_models_data/"
+    assert (
+        result is False
+    ), "Should return False when files are not in output_models_data/"
 
 
 def test_run_has_required_files_custom_requirements():
@@ -98,13 +117,17 @@ def test_run_has_required_files_custom_requirements():
         blob = Mock()
         blob.name = f"robyn/default/de/0213_162352/output_models_data/{fname}"
         blobs.append(blob)
-    
+
     # Should pass with these custom requirements
-    result = run_has_required_files(blobs, required_files=["file1.txt", "file2.txt"])
+    result = run_has_required_files(
+        blobs, required_files=["file1.txt", "file2.txt"]
+    )
     assert result is True
-    
+
     # Should fail if we require a file that's not present
-    result = run_has_required_files(blobs, required_files=["file1.txt", "file3.txt"])
+    result = run_has_required_files(
+        blobs, required_files=["file1.txt", "file3.txt"]
+    )
     assert result is False
 
 

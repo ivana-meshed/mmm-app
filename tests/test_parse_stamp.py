@@ -62,7 +62,9 @@ def test_parse_stamp_invalid_format():
     for stamp in invalid_stamps:
         result = parse_stamp(stamp)
         assert isinstance(result, dt.datetime), f"Failed for {stamp}"
-        assert result == dt.datetime.min, f"Should return datetime.min for {stamp}"
+        assert (
+            result == dt.datetime.min
+        ), f"Should return datetime.min for {stamp}"
 
 
 def test_parse_stamp_sorting():
@@ -158,12 +160,16 @@ def test_sorting_with_parse_functions():
 
     # Sort by stamp only - should not raise TypeError
     try:
-        sorted_by_stamp = sorted(keys, key=lambda k: parse_stamp(k[2]), reverse=True)
+        sorted_by_stamp = sorted(
+            keys, key=lambda k: parse_stamp(k[2]), reverse=True
+        )
         assert len(sorted_by_stamp) == len(keys)
 
         # Invalid stamps should be at the end (datetime.min < valid dates when sorted reverse=True means they go to end)
         # Find the key with invalid_stamp
-        invalid_key_index = next(i for i, k in enumerate(sorted_by_stamp) if k[2] == "invalid_stamp")
+        invalid_key_index = next(
+            i for i, k in enumerate(sorted_by_stamp) if k[2] == "invalid_stamp"
+        )
         # It should be last since datetime.min is smallest
         assert invalid_key_index == len(sorted_by_stamp) - 1
     except TypeError as e:
