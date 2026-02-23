@@ -605,24 +605,16 @@ The `scheduleTime` field should be approximately `now + 5 minutes`.
 
 #### 7 — Cloud Run logs
 
-> **Tip:** avoid `gcloud beta run services logs read` without a filter.  That
-> command shows *all* logs (DATA-PREFILL, SESSION-SYNC, STATUS_MONITOR, …) and
-> a `--limit=200` cap is quickly exhausted by Streamlit noise, hiding the
-> important queue-tick entries.  Use the structured-log filter below instead.
-
-Use `gcloud logging read` with a combined filter to show **only** the queue
-scheduling events:
+Pipe `gcloud beta run services logs read` through `grep` to filter out the
+high-volume Streamlit noise (DATA-PREFILL, SESSION-SYNC, STATUS_MONITOR …)
+and show only the queue scheduling events:
 
 ```bash
-gcloud logging read \
-  'resource.labels.service_name="mmm-app-dev-web" AND
-   (textPayload=~"\\[QUEUE_TICK\\]" OR
-    textPayload=~"\\[CLOUD_TASKS\\]" OR
-    textPayload=~"\\[PROXY\\]" OR
-    textPayload=~"\\[QUEUE\\]")' \
-  --limit=50 \
-  --order=asc \
-  --project="$PROJECT"
+gcloud beta run services logs read mmm-app-dev-web \
+  --region="$REGION" \
+  --project="$PROJECT" \
+  --limit=200 \
+  | grep -E "\[QUEUE\]|\[QUEUE_TICK\]|\[CLOUD_TASKS\]|\[PROXY\]"
 ```
 
 A successful end-to-end run produces a sequence like:
@@ -646,11 +638,11 @@ When the queue finishes, the last `[CLOUD_TASKS]` entry should be
 To filter for Cloud Tasks scheduling events only (shorter output):
 
 ```bash
-gcloud logging read \
-  'resource.labels.service_name="mmm-app-dev-web" AND
-   textPayload=~"\\[CLOUD_TASKS\\]"' \
-  --limit=20 \
-  --project="$PROJECT"
+gcloud beta run services logs read mmm-app-dev-web \
+  --region="$REGION" \
+  --project="$PROJECT" \
+  --limit=200 \
+  | grep "\[CLOUD_TASKS\]"
 ```
 
 The absence of `[CLOUD_TASKS]` log lines when the queue is idle confirms
@@ -718,25 +710,17 @@ QUEUE=robyn-queue-tick-dev
   Monitor tab), `gcloud tasks list` returns **empty list** — no idle tasks,
   no idle compute costs.
 
-- **Confirm in Cloud Run logs** that the chain self-terminated using the
-  combined queue filter (see [section 7](#7--cloud-run-logs)):
+- **Confirm in Cloud Run logs** that the chain self-terminated
+  (see [section 7](#7--cloud-run-logs)):
   ```bash
-  gcloud logging read \
-    'resource.labels.service_name="mmm-app-dev-web" AND
-     (textPayload=~"\\[QUEUE_TICK\\]" OR
-      textPayload=~"\\[CLOUD_TASKS\\]" OR
-      textPayload=~"\\[PROXY\\]" OR
-      textPayload=~"\\[QUEUE\\]")' \
-    --limit=50 \
-    --order=asc \
-    --project="$PROJECT"
+  gcloud beta run services logs read mmm-app-dev-web \
+    --region="$REGION" \
+    --project="$PROJECT" \
+    --limit=200 \
+    | grep -E "\[QUEUE\]|\[QUEUE_TICK\]|\[CLOUD_TASKS\]|\[PROXY\]"
   ```
   The last `[CLOUD_TASKS]` entry should be
   `Queue idle — no next tick scheduled`, confirming the chain stopped cleanly.
-
-  > **Note:** do not use `gcloud beta run services logs read` without a filter
-  > for this check — the 200-line cap fills up with Streamlit UI noise and
-  > hides the queue-tick entries.
 
 ---
 
