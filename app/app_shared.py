@@ -230,6 +230,7 @@ def _safe_tick_once(
             # Blob still doesn't exist, retry
             continue
 
+        blob._properties.pop("generation", None)  # ensure we fetch latest
         blob.reload()  # get current generation
         gen = int(blob.generation)  # type: ignore
         try:
@@ -521,6 +522,7 @@ def _safe_tick_once(
             )
 
         # Persist the post-launch state with another guarded write
+        blob._properties.pop("generation", None)  # ensure we fetch latest
         blob.reload()
         gen2 = int(blob.generation)  # type: ignore
         doc["saved_at"] = get_cet_now().isoformat()
