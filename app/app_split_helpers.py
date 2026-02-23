@@ -192,7 +192,11 @@ def prepare_and_launch_job(params: dict) -> dict:
     For GCS-based workflows, if data_gcs_path is provided, skip Snowflake query and use existing data.
     Returns exec_info dict with execution_name, timestamp, gcs_prefix, etc.
     """
-    gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
+    gcs_bucket = (
+        params.get("gcs_bucket")
+        or st.session_state.get("gcs_bucket")
+        or GCS_BUCKET
+    )
     timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
     # Support both 'revision' and 'version' keys for backward compatibility
     revision = params.get("revision") or params.get("version") or ""
