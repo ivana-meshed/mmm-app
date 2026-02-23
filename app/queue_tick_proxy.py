@@ -71,6 +71,11 @@ def _ensure_tick_imports() -> None:
         _GCS_BUCKET = GCS_BUCKET
         _DEFAULT_QUEUE_NAME = DEFAULT_QUEUE_NAME
         _tick_imports_done = True
+        logger.info(
+            "[PROXY] Queue tick modules imported (DEFAULT_QUEUE_NAME=%s, GCS_BUCKET=%s)",
+            DEFAULT_QUEUE_NAME,
+            GCS_BUCKET,
+        )
 
 
 def _do_queue_tick(queue_name: str) -> dict:
@@ -79,6 +84,7 @@ def _do_queue_tick(queue_name: str) -> dict:
     result = _queue_tick_once_headless(  # type: ignore[misc]
         queue_name, _GCS_BUCKET, launcher=_prepare_and_launch_job
     )
+    logger.info("[PROXY] Tick result for '%s': %s", queue_name, result)
     _schedule_next_tick_if_needed(queue_name, result)  # type: ignore[misc]
     return result or {}
 
