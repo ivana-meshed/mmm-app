@@ -605,8 +605,45 @@ The `scheduleTime` field should be approximately `now + 5 minutes`.
 
 #### 7 — Cloud Run logs
 
-All scheduling actions are logged at `INFO` level and can be filtered in
-Cloud Logging:
+> **Tip:** avoid `gcloud beta run services logs read` without a filter.  That
+> command shows *all* logs (DATA-PREFILL, SESSION-SYNC, STATUS_MONITOR, …) and
+> a `--limit=200` cap is quickly exhausted by Streamlit noise, hiding the
+> important queue-tick entries.  Use the structured-log filter below instead.
+
+Use `gcloud logging read` with a combined filter to show **only** the queue
+scheduling events:
+
+```bash
+gcloud logging read \
+  'resource.labels.service_name="mmm-app-dev-web" AND
+   (textPayload=~"\\[QUEUE_TICK\\]" OR
+    textPayload=~"\\[CLOUD_TASKS\\]" OR
+    textPayload=~"\\[PROXY\\]" OR
+    textPayload=~"\\[QUEUE\\]")' \
+  --limit=50 \
+  --order=asc \
+  --project="$PROJECT"
+```
+
+A successful end-to-end run produces a sequence like:
+
+```
+[QUEUE] Saving queue 'default-dev': 3 entries (3 pending, 0 running/launching), queue_running=True
+[QUEUE] 3 pending job(s) + running=True → scheduling immediate Cloud Task for 'default-dev'
+[CLOUD_TASKS] Scheduled queue tick for 'default-dev' delay=0s
+[PROXY] queue_tick request for queue 'default-dev'
+[QUEUE_TICK] Starting tick for queue 'default-dev' bucket 'mmm-app-output'
+[QUEUE_TICK] Queue 'default-dev': 3 entries, running=True
+[QUEUE_TICK] Leasing job 1 as LAUNCHING (gen=...)
+[CLOUD_TASKS] Scheduled queue tick for 'default-dev' delay=300s   ← polling task while job runs
+...
+[CLOUD_TASKS] Queue idle — no next tick scheduled                  ← chain self-terminated
+```
+
+When the queue finishes, the last `[CLOUD_TASKS]` entry should be
+`Queue idle — no next tick scheduled` — confirming zero idle scheduling.
+
+To filter for Cloud Tasks scheduling events only (shorter output):
 
 ```bash
 gcloud logging read \
@@ -614,13 +651,6 @@ gcloud logging read \
    textPayload=~"\\[CLOUD_TASKS\\]"' \
   --limit=20 \
   --project="$PROJECT"
-```
-
-Look for lines like:
-
-```
-[CLOUD_TASKS] Scheduled queue tick for 'default-dev' delay=0s
-[CLOUD_TASKS] Scheduled queue tick for 'default-dev' delay=300s
 ```
 
 The absence of `[CLOUD_TASKS]` log lines when the queue is idle confirms
@@ -688,16 +718,25 @@ QUEUE=robyn-queue-tick-dev
   Monitor tab), `gcloud tasks list` returns **empty list** — no idle tasks,
   no idle compute costs.
 
-- **Confirm in Cloud Run logs** that the chain self-terminated:
+- **Confirm in Cloud Run logs** that the chain self-terminated using the
+  combined queue filter (see [section 7](#7--cloud-run-logs)):
   ```bash
   gcloud logging read \
     'resource.labels.service_name="mmm-app-dev-web" AND
-     textPayload=~"\\[QUEUE_TICK\\]"' \
-    --limit=20 \
+     (textPayload=~"\\[QUEUE_TICK\\]" OR
+      textPayload=~"\\[CLOUD_TASKS\\]" OR
+      textPayload=~"\\[PROXY\\]" OR
+      textPayload=~"\\[QUEUE\\]")' \
+    --limit=50 \
+    --order=asc \
     --project="$PROJECT"
   ```
-  The last `[QUEUE_TICK]` log line should show `"empty queue"` or
-  `"no pending"`, confirming the chain stopped cleanly.
+  The last `[CLOUD_TASKS]` entry should be
+  `Queue idle — no next tick scheduled`, confirming the chain stopped cleanly.
+
+  > **Note:** do not use `gcloud beta run services logs read` without a filter
+  > for this check — the 200-line cap fills up with Streamlit UI noise and
+  > hides the queue-tick entries.
 
 ---
 
