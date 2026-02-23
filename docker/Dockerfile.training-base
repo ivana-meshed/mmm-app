@@ -141,8 +141,21 @@ RUN R -q -e "repos <- c(CRAN=Sys.getenv('RSPM'), CRAN2='https://cloud.r-project.
     if (!requireNamespace('patchwork', quietly=TRUE) || utils::packageVersion('patchwork') < '1.3.1') \
     remotes::install_version('patchwork', version='1.3.1', repos=repos, upgrade='never')"
 
-# ---------- Robyn (pin) ----------
-RUN R -q -e "options(Ncpus=8); \
-    remotes::install_github('facebookexperimental/Robyn', subdir='R', upgrade='never', dependencies=c('Depends','Imports')); \
-    library(Robyn); cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')"
+# ---------- Robyn (pin) with patch for metric_name_updated fix -----------
+# Download Robyn source, apply patch to fix check_metric_type() issue, then install, check again
+COPY docker/robyn_check_metric_type.patch /tmp/robyn_check_metric_type.patch
+RUN cd /tmp && \
+    git clone --depth 1 https://github.com/facebookexperimental/Robyn.git && \
+    cd Robyn && \
+    echo "Applying patch to fix metric_name_updated subscript error..." && \
+    patch --dry-run -p1 < /tmp/robyn_check_metric_type.patch && \
+    patch -p1 < /tmp/robyn_check_metric_type.patch && \
+    echo "Patch applied successfully" && \
+    grep -A 2 "name_loc\[1\]" R/R/checks.R && \
+    echo "Patch verification: metric_name_updated line found" && \
+    cd /tmp && \
+    R -q -e "options(Ncpus=8); \
+        remotes::install_local('Robyn/R', upgrade='never', dependencies=c('Depends','Imports')); \
+        library(Robyn); cat('Robyn version:', as.character(utils::packageVersion('Robyn')), '\n')" && \
+    rm -rf /tmp/Robyn /tmp/robyn_check_metric_type.patch
 
