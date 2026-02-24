@@ -1140,6 +1140,11 @@ def main():
         action="store_true",
         help="Run quick test with minimal iterations (10) and trials (1), first variant only",
     )
+    parser.add_argument(
+        "--test-run-all",
+        action="store_true",
+        help="Run quick test with minimal iterations (10) and trials (1) for ALL variants (validates queue processing)",
+    )
 
     args = parser.parse_args()
 
@@ -1303,6 +1308,13 @@ def main():
         )
         return
 
+    if args.test_run and args.test_run_all:
+        logger.error("Cannot use both --test-run and --test-run-all")
+        print("\n❌ Error: Use either --test-run OR --test-run-all, not both")
+        print("  --test-run: Tests first variant only")
+        print("  --test-run-all: Tests all variants with reduced resources")
+        sys.exit(1)
+
     if args.test_run:
         if not variants:
             logger.error("Cannot run test - no variants generated")
@@ -1320,6 +1332,7 @@ def main():
             f"Testing variant: {variants[0].get('benchmark_variant', 'first')}"
         )
         print(f"\n💡 To run all {len(variants)} variants, use --config without --test-run")
+        print(f"💡 To test all variants with reduced resources, use --test-run-all")
 
         # Modify first variant for test
         test_variants = [variants[0].copy()]
@@ -1329,6 +1342,38 @@ def main():
 
         # Update benchmark_id to indicate test
         benchmark_id = f"{benchmark_id}_test"
+
+    if args.test_run_all:
+        if not variants:
+            logger.error("Cannot run test - no variants generated")
+            print("\n❌ Error: Cannot run test with empty variants list")
+            sys.exit(1)
+
+        logger.info(
+            "🧪 TEST RUN ALL MODE - Running ALL variants with minimal settings"
+        )
+        print("\n🧪 TEST RUN ALL MODE")
+        print(f"Generated {len(variants)} variants - ALL will run with reduced resources")
+        print(f"Iterations: 10 (reduced from {benchmark_config.iterations})")
+        print(f"Trials: 1 (reduced from {benchmark_config.trials})")
+        print(f"\nVariants to test:")
+        for i, var in enumerate(variants, 1):
+            print(f"  {i}. {var.get('benchmark_variant', f'variant_{i}')}")
+        print(f"\n💡 This tests queue processing with multiple jobs")
+        print(f"💡 Expected time: ~{len(variants) * 5}-{len(variants) * 10} minutes")
+        print(f"💡 To test just one variant, use --test-run instead")
+
+        # Modify ALL variants for test
+        test_variants = []
+        for variant in variants:
+            test_var = variant.copy()
+            test_var["iterations"] = 10
+            test_var["trials"] = 1
+            test_variants.append(test_var)
+        variants = test_variants
+
+        # Update benchmark_id to indicate test
+        benchmark_id = f"{benchmark_id}_testall"
 
     if args.no_submit:
         logger.info("--no-submit flag set - variants saved but not queued")

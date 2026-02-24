@@ -5,6 +5,7 @@
 ## Table of Contents
 - [Prerequisites](#prerequisites)
 - [Quick Test (5 minutes)](#quick-test-5-minutes)
+- [Test All Variants (NEW)](#test-all-variants-new)
 - [Full Test Workflow](#full-test-workflow)
 - [Expected Outputs](#expected-outputs)
 - [Troubleshooting](#troubleshooting)
@@ -259,6 +260,110 @@ gsutil cat gs://mmm-app-output/robyn/default/de/20260224_111301_890/model_summar
 ✅ **Success:** You see model files in GCS at the logged path.
 
 **Total Time:** ~5-10 minutes for test-run mode.
+
+---
+
+## Test All Variants (NEW)
+
+This option tests **ALL** variants with reduced resources to validate queue processing with multiple jobs.
+
+### When to Use
+
+- Test that queue processor handles multiple jobs correctly
+- Verify all variants in a benchmark can be generated
+- Validate end-to-end workflow without waiting hours
+
+### Step 1: Submit All Variants with Test Mode
+
+```bash
+python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --test-run-all
+```
+
+**Expected Output:**
+```
+2026-02-24 12:45:00,456 - INFO - Generated 3 test variants
+
+🧪 TEST RUN ALL MODE
+Generated 3 variants - ALL will run with reduced resources
+Iterations: 10 (reduced from 2000)
+Trials: 1 (reduced from 5)
+
+Variants to test:
+  1. geometric
+  2. weibull_cdf
+  3. weibull_pdf
+
+💡 This tests queue processing with multiple jobs
+💡 Expected time: ~15-30 minutes
+💡 To test just one variant, use --test-run instead
+
+✅ Benchmark submitted successfully!
+Benchmark ID: adstock_comparison_20260224_124500_testall
+Variants queued: 3
+Queue: default-dev
+```
+
+✅ **Success:** All 3 variants queued with reduced iterations/trials.
+
+**Time:** ~10 seconds
+
+### Step 2: Process All Jobs
+
+```bash
+python scripts/process_queue_simple.py --loop --cleanup
+```
+
+**What Happens:**
+1. Launches job 1 (geometric) → runs ~5 min → completes ✓
+2. Launches job 2 (weibull_cdf) → runs ~5 min → completes ✓
+3. Launches job 3 (weibull_pdf) → runs ~5 min → completes ✓
+
+**Expected Output for Each Job:**
+```
+2026-02-24 12:46:00,123 - INFO - Processing job X/3
+2026-02-24 12:46:00,123 - INFO -   Benchmark variant: geometric
+2026-02-24 12:46:00,456 - INFO - ✅ Launched job: mmm-app-dev-training
+2026-02-24 12:46:00,456 - INFO -    Results will be saved to: gs://mmm-app-output/robyn/default/de/TIMESTAMP/
+
+[Job runs for ~5 minutes]
+
+2026-02-24 12:51:00,789 - INFO - ✅ Job completed: geometric
+2026-02-24 12:51:00,789 - INFO -    Results at: gs://mmm-app-output/robyn/default/de/TIMESTAMP/
+2026-02-24 12:51:00,789 - INFO -    Verifying results in GCS...
+2026-02-24 12:51:02,123 - INFO -    ✓ Results verified: Found 12 files
+```
+
+✅ **Success:** All jobs complete, results verified.
+
+**Total Time:** ~15-30 minutes for 3 variants.
+
+### Step 3: Verify All Results
+
+```bash
+# List all result directories
+gsutil ls gs://mmm-app-output/robyn/default/de/
+
+# Should see 3 new directories with timestamps
+```
+
+**Expected:** 3 result directories, each containing model files.
+
+### Timing for Different Benchmarks
+
+| Benchmark | Variants | Test-Run-All Time |
+|-----------|----------|-------------------|
+| adstock_comparison | 3 | ~15-30 min |
+| time_aggregation | 2 | ~10-20 min |
+| spend_var_mapping | 3 | ~15-30 min |
+| train_val_test_splits | 5 | ~25-50 min |
+
+### Comparison: Test Modes
+
+| Mode | Command | Variants | Time | Purpose |
+|------|---------|----------|------|---------|
+| **test-run** | `--test-run` | First only | ~5 min | Quick validation |
+| **test-run-all** | `--test-run-all` | All | ~15-30 min | Queue validation |
+| **Full** | (no flag) | All | ~1-2 hours | Production |
 
 ---
 

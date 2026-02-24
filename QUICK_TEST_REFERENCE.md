@@ -16,14 +16,19 @@ gsutil ls gs://mmm-app-output/
 python scripts/benchmark_mmm.py --list-configs
 ```
 
-### 3. Test
+### 3. Test Options
+
+**Option A: Test First Variant (5 min)**
 ```bash
 python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --test-run
 python scripts/process_queue_simple.py --loop --cleanup
 ```
 
-**Expected Time:** 5-10 minutes
-**Expected Result:** Job completes, results verified in GCS
+**Option B: Test ALL Variants (15-30 min) - NEW!**
+```bash
+python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --test-run-all
+python scripts/process_queue_simple.py --loop --cleanup
+```
 
 ---
 
@@ -38,8 +43,11 @@ python scripts/benchmark_mmm.py --list-configs
 # Preview without submission
 python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --dry-run
 
-# Quick test (10 iterations, 1 trial, first variant only)
+# Quick test - First variant only (10 iterations, 1 trial)
 python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --test-run
+
+# Quick test - ALL variants (10 iterations, 1 trial each) - NEW!
+python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --test-run-all
 
 # Full benchmark (all variants, full iterations)
 python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json
@@ -106,13 +114,20 @@ gcloud run jobs describe mmm-app-dev-training --region=europe-west1
 
 ## ✅ Success Checklist
 
-### Quick Test
+### Quick Test (First Variant)
 - [ ] Auth setup complete (no errors with `gsutil ls`)
 - [ ] Benchmark submission works (`✅ Benchmark submitted successfully!`)
 - [ ] Queue processor launches job (`✅ Launched job: mmm-app-dev-training`)
 - [ ] Job completes (`✅ Job completed: geometric`)
 - [ ] Results verified (`✓ Results verified: Found X files`)
 - [ ] Files exist in GCS at logged path
+
+### Test All Variants (NEW)
+- [ ] All variants submitted (count matches config)
+- [ ] Jobs process sequentially
+- [ ] Each job creates results in GCS
+- [ ] Result paths match logs
+- [ ] Results verified for all variants
 
 ### Full Test
 - [ ] All variants submitted (count matches config)
@@ -178,20 +193,20 @@ decomposition_*.csv     # Media contribution
 
 ## ⏱️ Timing Expectations
 
-| Operation | Test Mode | Full Mode |
-|-----------|-----------|-----------|
-| Submit benchmark | 10s | 10s |
-| Launch job | 5s | 5s |
-| Job execution | 2-5 min | 15-30 min |
-| Verification | 10s | 10s |
-| **Per job** | **3-6 min** | **16-31 min** |
-| **3 variants** | **10-20 min** | **50-95 min** |
+| Operation | Test Mode | Test-All Mode (NEW) | Full Mode |
+|-----------|-----------|---------------------|-----------|
+| Submit benchmark | 10s | 10s | 10s |
+| Launch job | 5s | 5s | 5s |
+| Job execution | 2-5 min | 2-5 min per job | 15-30 min per job |
+| Verification | 10s | 10s | 10s |
+| **Per job** | **3-6 min** | **3-6 min** | **16-31 min** |
+| **3 variants** | **One only** | **10-20 min** | **50-95 min** |
 
 ---
 
 ## 🎯 Common Workflows
 
-### Workflow 1: Quick Validation
+### Workflow 1: Quick Validation (First Variant)
 ```bash
 python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --test-run
 python scripts/process_queue_simple.py --loop --cleanup
@@ -199,7 +214,15 @@ python scripts/process_queue_simple.py --loop --cleanup
 gsutil ls gs://mmm-app-output/robyn/default/de/
 ```
 
-### Workflow 2: Full Benchmark
+### Workflow 2: Queue Validation (All Variants) - NEW!
+```bash
+python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --test-run-all
+python scripts/process_queue_simple.py --loop --cleanup
+# Wait 15-30 minutes for 3 variants
+gsutil ls gs://mmm-app-output/robyn/default/de/
+```
+
+### Workflow 3: Full Benchmark
 ```bash
 python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json
 python scripts/process_queue_simple.py --loop --cleanup
@@ -207,7 +230,7 @@ python scripts/process_queue_simple.py --loop --cleanup
 python scripts/benchmark_mmm.py --collect-results BENCHMARK_ID --export-format csv
 ```
 
-### Workflow 3: Multiple Benchmarks
+### Workflow 4: Multiple Benchmarks
 ```bash
 python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json
 python scripts/benchmark_mmm.py --config benchmarks/time_aggregation.json
@@ -253,15 +276,16 @@ gsutil ls gs://mmm-app-output/robyn/default/de/
 
 ## 💡 Pro Tips
 
-1. **Always use --test-run first** to validate before expensive runs
-2. **Use --dry-run to preview** configuration changes
-3. **Monitor costs** - full benchmarks can be expensive
-4. **Check queue before submitting** to avoid conflicts
-5. **Use --cleanup** to keep queue manageable
-6. **Save benchmark IDs** for result collection later
-7. **Document your findings** as you test different configurations
+1. **Start with --test-run** for initial validation (one variant)
+2. **Use --test-run-all** to validate queue processing (all variants, reduced resources)
+3. **Run full benchmark** only after both pass
+4. **Check logs** to confirm reduced iterations are used
+5. **Monitor costs** - even test runs have minimal compute costs
+6. **Use --cleanup** to keep queue manageable
+7. **Save benchmark IDs** for result collection later
+8. **Document your findings** as you test different configurations
 
 ---
 
 **Last Updated:** 2026-02-24  
-**Version:** PR #170 - Complete Benchmarking System
+**Version:** PR #170 - Complete Benchmarking System + Test-Run-All Feature
