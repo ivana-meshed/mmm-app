@@ -176,6 +176,31 @@ python scripts/benchmark_mmm.py --collect-results benchmark_id --export-format c
 python scripts/benchmark_mmm.py --collect-results benchmark_id --export-format parquet
 ```
 
+### analyze_benchmark_results.py
+
+```bash
+# Analyze results and generate plots
+python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id
+
+# Save plots and CSV locally
+python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --output-dir ./results
+
+# Custom plot format
+python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --format pdf
+
+# CSV only (no plots)
+python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --no-plots
+```
+
+**What it generates:**
+- CSV export with all metrics
+- R² comparison plot
+- NRMSE comparison plot
+- Decomposition RSSD plot
+- Train/val/test gap analysis
+- Metric correlations heatmap
+- Best models summary
+
 ### process_queue_simple.py
 
 ```bash

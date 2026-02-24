@@ -1,6 +1,6 @@
 {
   "name": "comprehensive_benchmark",
-  "description": "Comprehensive benchmark testing combinations of multiple dimensions (use sparingly - creates many variants)",
+  "description": "Comprehensive benchmark testing cartesian product of multiple dimensions",
   "base_config": {
     "country": "de",
     "goal": "N_UPLOADS_WEB",
@@ -8,21 +8,27 @@
   },
   "iterations": 1000,
   "trials": 3,
-  "max_combinations": 20,
+  "max_combinations": 30,
   "combination_mode": "cartesian",
   "variants": {
     "adstock": [
       {
         "name": "geometric",
         "description": "Geometric adstock",
-        "type": "geometric",
+        "adstock": "geometric",
         "hyperparameter_preset": "Meshed recommend"
       },
       {
         "name": "weibull_cdf",
         "description": "Weibull CDF adstock",
-        "type": "weibull_cdf",
+        "adstock": "weibull_cdf",
         "hyperparameter_preset": "Meta default"
+      },
+      {
+        "name": "weibull_pdf",
+        "description": "Weibull PDF adstock",
+        "adstock": "weibull_pdf",
+        "hyperparameter_preset": "Meshed recommend"
       }
     ],
     "train_splits": [
@@ -35,6 +41,23 @@
         "name": "75_90",
         "description": "75% train, 15% val, 10% test",
         "train_size": [0.75, 0.9]
+      },
+      {
+        "name": "65_80",
+        "description": "65% train, 15% val, 20% test",
+        "train_size": [0.65, 0.8]
+      }
+    ],
+    "time_aggregation": [
+      {
+        "name": "daily",
+        "description": "Daily time aggregation",
+        "resample_freq": "none"
+      },
+      {
+        "name": "weekly",
+        "description": "Weekly time aggregation",
+        "resample_freq": "W"
       }
     ]
   }
