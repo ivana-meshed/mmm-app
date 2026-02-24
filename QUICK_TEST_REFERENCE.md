@@ -30,6 +30,12 @@ python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --te
 python scripts/process_queue_simple.py --loop --cleanup
 ```
 
+**Option C: Test ALL Benchmarks (1-2 hours) - NEW!**
+```bash
+python scripts/benchmark_mmm.py --all-benchmarks --test-run-all
+python scripts/process_queue_simple.py --loop --cleanup
+```
+
 ---
 
 ## 📋 Command Cheat Sheet
@@ -49,8 +55,14 @@ python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --te
 # Quick test - ALL variants (10 iterations, 1 trial each) - NEW!
 python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --test-run-all
 
+# Run ALL benchmarks with test mode (10 iter, 1 trial) - NEW!
+python scripts/benchmark_mmm.py --all-benchmarks --test-run-all
+
 # Full benchmark (all variants, full iterations)
 python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json
+
+# Full execution of ALL benchmarks
+python scripts/benchmark_mmm.py --all-benchmarks
 
 # Collect results
 python scripts/benchmark_mmm.py --collect-results BENCHMARK_ID --export-format csv

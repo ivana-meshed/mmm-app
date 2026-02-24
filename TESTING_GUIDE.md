@@ -348,6 +348,69 @@ gsutil ls gs://mmm-app-output/robyn/default/de/
 
 **Expected:** 3 result directories, each containing model files.
 
+---
+
+## Test All Benchmarks (NEW)
+
+**Purpose:** Run ALL benchmark types (adstock, train_splits, time_aggregation, spend_var_mapping) with a single command.
+
+### When to Use
+
+- Comprehensive testing of the entire benchmarking system
+- Validate all test dimensions systematically
+- Test queue with variety of configurations
+- One-command execution for convenience
+
+### Step 1: Preview All Benchmarks
+
+```bash
+python scripts/benchmark_mmm.py --all-benchmarks --dry-run
+```
+
+**Expected Output:**
+```
+🚀 ALL BENCHMARKS MODE
+================================================================================
+
+Discovered 4 benchmark configuration(s):
+--------------------------------------------------------------------------------
+  ✓ adstock_comparison: 3 variants
+  ✓ train_val_test_splits: 5 variants
+  ✓ time_aggregation: 2 variants
+  ✓ spend_var_mapping: 3 variants
+--------------------------------------------------------------------------------
+Total estimated variants: 13
+
+🔍 DRY RUN - No jobs will be submitted
+```
+
+✅ **Success:** Shows all benchmarks that would be run.
+
+### Step 2: Submit All with Test Mode (Recommended)
+
+```bash
+python scripts/benchmark_mmm.py --all-benchmarks --test-run-all
+```
+
+**What It Does:**
+- Submits ALL 13 variants from 4 benchmark types
+- Each with 10 iterations, 1 trial
+- Total time: ~1-2 hours
+
+✅ **Success:** All 13 variants queued.
+
+### Step 3: Process All Jobs
+
+```bash
+python scripts/process_queue_simple.py --loop --cleanup
+```
+
+**Expected:** Queue processor completes all 13 jobs with results verified.
+
+**Total Time:** ~1-2 hours for all benchmarks.
+
+---
+
 ### Timing for Different Benchmarks
 
 | Benchmark | Variants | Test-Run-All Time |

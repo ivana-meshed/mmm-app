@@ -1145,6 +1145,11 @@ def main():
         action="store_true",
         help="Run quick test with minimal iterations (10) and trials (1) for ALL variants (validates queue processing)",
     )
+    parser.add_argument(
+        "--all-benchmarks",
+        action="store_true",
+        help="Run ALL benchmark configurations in one command (discovers all .json files in benchmarks/)",
+    )
 
     args = parser.parse_args()
 
@@ -1232,8 +1237,176 @@ def main():
             print("No results found")
         return
 
+    # Handle --all-benchmarks mode
+    if args.all_benchmarks:
+        if args.config:
+            logger.error("Cannot use both --all-benchmarks and --config")
+            print("\n❌ Error: Use either --all-benchmarks OR --config, not both")
+            print("  --all-benchmarks: Runs all benchmark configs automatically")
+            print("  --config: Runs a specific benchmark config")
+            sys.exit(1)
+
+        logger.info("🚀 ALL BENCHMARKS MODE - Running all test configurations")
+        print("\n🚀 ALL BENCHMARKS MODE")
+        print("=" * 80)
+        
+        # Discover all benchmark configs
+        configs = runner.list_config_files()
+        if not configs:
+            print("\n❌ No benchmark configuration files found in benchmarks/ directory")
+            sys.exit(1)
+        
+        # Filter out comprehensive_benchmark as it's typically for cartesian testing
+        configs = [c for c in configs if 'comprehensive' not in c['file'].lower()]
+        
+        print(f"\nDiscovered {len(configs)} benchmark configuration(s):")
+        print("-" * 80)
+        
+        total_variants = 0
+        for cfg in configs:
+            print(f"  ✓ {cfg['name']}: {cfg['variant_count']} variants")
+            print(f"    ({cfg['description'][:70]}...)" if len(cfg['description']) > 70 else f"    ({cfg['description']})")
+            total_variants += cfg['variant_count']
+        
+        print("-" * 80)
+        print(f"Total estimated variants: {total_variants}")
+        
+        if args.test_run:
+            print("\n⚠️  Note: --test-run with --all-benchmarks will run first variant of each benchmark")
+            print("    (Not recommended - use --test-run-all instead for better testing)")
+        elif args.test_run_all:
+            print("\n🧪 TEST RUN ALL MODE")
+            print(f"  Iterations: 10 (reduced from default)")
+            print(f"  Trials: 1 (reduced from default)")
+            print(f"  Expected time: ~{total_variants * 5}-{total_variants * 10} minutes")
+        else:
+            print("\n⏱️  Full benchmark execution")
+            print(f"  Expected time: ~{total_variants * 20}-{total_variants * 30} minutes")
+        
+        if args.dry_run:
+            print("\n🔍 DRY RUN - No jobs will be submitted")
+        
+        print("\n" + "=" * 80)
+        print("Processing benchmarks...\n")
+        
+        # Process each benchmark config
+        benchmark_results = []
+        total_submitted = 0
+        
+        for cfg in configs:
+            try:
+                print(f"\n📊 Processing: {cfg['name']}")
+                print("-" * 60)
+                
+                # Load config
+                config_path = Path(cfg['path'])
+                with open(config_path) as f:
+                    config_dict = json.load(f)
+                
+                benchmark_config = BenchmarkConfig(config_dict)
+                
+                # Load base configuration
+                base_cfg = benchmark_config.base_config
+                base_config = runner.load_base_config(
+                    country=base_cfg["country"],
+                    goal=base_cfg["goal"],
+                    version=base_cfg["version"],
+                )
+                
+                # Override iterations/trials
+                base_config["iterations"] = benchmark_config.iterations
+                base_config["trials"] = benchmark_config.trials
+                
+                # Generate variants
+                variants = runner.generate_variants(base_config, benchmark_config)
+                
+                if not variants:
+                    logger.warning(f"No variants generated for {cfg['name']}")
+                    print(f"  ⚠️  No variants generated - skipping")
+                    continue
+                
+                print(f"  Generated {len(variants)} variant(s)")
+                
+                # Apply test modes
+                if args.test_run:
+                    # Only first variant
+                    variants = [variants[0].copy()]
+                    variants[0]["iterations"] = 10
+                    variants[0]["trials"] = 1
+                    print(f"  🧪 TEST MODE: Running first variant only")
+                elif args.test_run_all:
+                    # All variants with reduced resources
+                    test_variants = []
+                    for variant in variants:
+                        test_var = variant.copy()
+                        test_var["iterations"] = 10
+                        test_var["trials"] = 1
+                        test_variants.append(test_var)
+                    variants = test_variants
+                    print(f"  🧪 TEST MODE: All {len(variants)} variants with reduced resources")
+                
+                # Generate benchmark ID
+                benchmark_id = (
+                    f"{benchmark_config.name}_"
+                    f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+                )
+                
+                if args.test_run:
+                    benchmark_id = f"{benchmark_id}_test"
+                elif args.test_run_all:
+                    benchmark_id = f"{benchmark_id}_testall"
+                
+                # Save plan
+                runner.save_benchmark_plan(benchmark_id, benchmark_config, variants)
+                
+                if not args.dry_run and not args.no_submit:
+                    # Submit to queue
+                    submitted_count = runner.submit_variants_to_queue(
+                        benchmark_id, variants, queue_name=args.queue_name
+                    )
+                    total_submitted += submitted_count
+                    print(f"  ✅ Submitted {submitted_count} job(s) to queue '{args.queue_name}'")
+                else:
+                    print(f"  💾 Plan saved (not submitted)")
+                
+                benchmark_results.append({
+                    'name': benchmark_config.name,
+                    'benchmark_id': benchmark_id,
+                    'variants': len(variants),
+                    'submitted': not (args.dry_run or args.no_submit)
+                })
+                
+            except Exception as e:
+                logger.error(f"Failed to process {cfg['name']}: {e}", exc_info=True)
+                print(f"  ❌ Error: {e}")
+                continue
+        
+        # Summary
+        print("\n" + "=" * 80)
+        print("📋 SUMMARY")
+        print("=" * 80)
+        
+        if benchmark_results:
+            for result in benchmark_results:
+                status = "✅ Submitted" if result['submitted'] else "💾 Saved"
+                print(f"  {status}: {result['name']}")
+                print(f"    Benchmark ID: {result['benchmark_id']}")
+                print(f"    Variants: {result['variants']}")
+        
+        print("-" * 80)
+        if not (args.dry_run or args.no_submit):
+            print(f"✅ Total variants queued: {total_submitted}")
+            print(f"Queue: {args.queue_name}")
+            print(f"\n💡 Process the queue with:")
+            print(f"  python scripts/process_queue_simple.py --loop --cleanup")
+        else:
+            print(f"💾 Plans saved but not submitted")
+            print(f"   Remove --dry-run or --no-submit to submit jobs")
+        
+        return
+
     if not args.config:
-        parser.error("--config is required (or use --list-configs)")
+        parser.error("--config is required (or use --list-configs, --all-benchmarks)")
 
     # Load benchmark configuration
     if not args.config.exists():
