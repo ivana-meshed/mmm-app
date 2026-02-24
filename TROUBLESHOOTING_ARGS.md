@@ -12,13 +12,41 @@ You get:
 benchmark_mmm.py: error: unrecognized arguments: --all-benchmarks --test-run-all
 ```
 
+## ⚠️ MOST COMMON CAUSE: Wrong Branch!
+
+**FIRST, CHECK YOUR BRANCH:**
+```bash
+git branch
+```
+
+If you see:
+```
+* copilot/build-benchmarking-script  <-- WRONG!
+```
+
+**You need to switch to the correct branch!** See `BRANCH_SWITCH_GUIDE.md` or run:
+```bash
+git checkout copilot/follow-up-on-pr-170
+```
+
+---
+
 ## Root Cause
 
-The arguments `--all-benchmarks` and `--test-run-all` were recently added to the script. If you're seeing this error, your local copy is outdated.
+The arguments `--all-benchmarks` and `--test-run-all` exist on `copilot/follow-up-on-pr-170` but NOT on other branches. Common issues:
+
+1. **Wrong branch** (most common) ← Check this first!
+2. Outdated local copy
+3. Python cache issues
 
 ## Quick Fix
 
 ```bash
+# 0. CHECK YOUR BRANCH FIRST!
+git branch
+# If not on copilot/follow-up-on-pr-170, switch to it:
+git checkout copilot/follow-up-on-pr-170
+
 # 1. Navigate to repository
 cd /path/to/mmm-app
 
