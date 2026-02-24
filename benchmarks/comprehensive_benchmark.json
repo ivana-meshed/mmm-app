@@ -1,56 +1,40 @@
 {
   "name": "comprehensive_benchmark",
-  "description": "Comprehensive test combining multiple configuration dimensions (use with caution - generates many combinations)",
-  "combination_mode": "cartesian",
+  "description": "Comprehensive benchmark testing combinations of multiple dimensions (use sparingly - creates many variants)",
   "base_config": {
     "country": "de",
-    "goal": "UPLOAD_VALUE",
-    "version": "20260113_160850"
+    "goal": "N_UPLOADS_WEB",
+    "version": "Latest"
   },
-  "iterations": 1500,
+  "iterations": 1000,
   "trials": 3,
-  "max_combinations": 30,
+  "max_combinations": 20,
+  "combination_mode": "cartesian",
   "variants": {
     "adstock": [
       {
         "name": "geometric",
         "description": "Geometric adstock",
-        "type": "geometric"
+        "type": "geometric",
+        "hyperparameter_preset": "Meshed recommend"
       },
       {
         "name": "weibull_cdf",
         "description": "Weibull CDF adstock",
-        "type": "weibull_cdf"
+        "type": "weibull_cdf",
+        "hyperparameter_preset": "Meta default"
       }
     ],
     "train_splits": [
       {
         "name": "70_90",
-        "description": "Standard split: 70-90-100",
-        "train_size": [
-          0.7,
-          0.9
-        ]
+        "description": "70% train, 20% val, 10% test",
+        "train_size": [0.7, 0.9]
       },
       {
         "name": "75_90",
-        "description": "More training: 75-90-100",
-        "train_size": [
-          0.75,
-          0.9
-        ]
-      }
-    ],
-    "time_aggregation": [
-      {
-        "name": "daily",
-        "description": "Daily granularity",
-        "frequency": "none"
-      },
-      {
-        "name": "weekly",
-        "description": "Weekly granularity",
-        "frequency": "W"
+        "description": "75% train, 15% val, 10% test",
+        "train_size": [0.75, 0.9]
       }
     ]
   }

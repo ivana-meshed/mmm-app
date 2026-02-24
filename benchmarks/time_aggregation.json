@@ -1,25 +1,25 @@
 {
   "name": "time_aggregation",
-  "description": "Compare daily vs weekly time aggregation for model fit and stability",
+  "description": "Compare daily vs weekly time aggregation for fit vs stability tradeoff",
   "base_config": {
     "country": "de",
-    "goal": "UPLOAD_VALUE",
-    "version": "20260113_160850"
+    "goal": "N_UPLOADS_WEB",
+    "version": "Latest"
   },
   "iterations": 2000,
   "trials": 5,
-  "max_combinations": 5,
+  "max_combinations": 10,
   "variants": {
     "time_aggregation": [
       {
         "name": "daily",
-        "description": "Daily time aggregation (no resampling)",
-        "frequency": "none"
+        "description": "Daily aggregation - better decomposition, may overfit",
+        "aggregation_level": "day"
       },
       {
         "name": "weekly",
-        "description": "Weekly time aggregation",
-        "frequency": "W"
+        "description": "Weekly aggregation - more stable, better for budget planning",
+        "aggregation_level": "week"
       }
     ]
   }

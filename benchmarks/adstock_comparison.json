@@ -3,8 +3,8 @@
   "description": "Compare different adstock transformation types to find best fit per channel",
   "base_config": {
     "country": "de",
-    "goal": "UPLOAD_VALUE",
-    "version": "20260113_160850"
+    "goal": "N_UPLOADS_WEB",
+    "version": "Latest"
   },
   "iterations": 2000,
   "trials": 5,
