@@ -1,0 +1,81 @@
+{
+  "name": "comprehensive_benchmark",
+  "description": "Comprehensive benchmark testing cartesian product of 4 dimensions: adstock × train_splits × time_aggregation × spend_var_mapping",
+  "base_config": {
+    "country": "de",
+    "goal": "N_UPLOADS_WEB",
+    "version": "Latest"
+  },
+  "iterations": 1000,
+  "trials": 3,
+  "max_combinations": 60,
+  "combination_mode": "cartesian",
+  "variants": {
+    "adstock": [
+      {
+        "name": "geometric",
+        "description": "Geometric adstock",
+        "adstock": "geometric",
+        "hyperparameter_preset": "Meshed recommend"
+      },
+      {
+        "name": "weibull_cdf",
+        "description": "Weibull CDF adstock",
+        "adstock": "weibull_cdf",
+        "hyperparameter_preset": "Meta default"
+      },
+      {
+        "name": "weibull_pdf",
+        "description": "Weibull PDF adstock",
+        "adstock": "weibull_pdf",
+        "hyperparameter_preset": "Meshed recommend"
+      }
+    ],
+    "train_splits": [
+      {
+        "name": "70_90",
+        "description": "70% train, 20% val, 10% test",
+        "train_size": [0.7, 0.9]
+      },
+      {
+        "name": "75_90",
+        "description": "75% train, 15% val, 10% test",
+        "train_size": [0.75, 0.9]
+      },
+      {
+        "name": "65_80",
+        "description": "65% train, 15% val, 20% test",
+        "train_size": [0.65, 0.8]
+      }
+    ],
+    "time_aggregation": [
+      {
+        "name": "daily",
+        "description": "Daily time aggregation",
+        "resample_freq": "none"
+      },
+      {
+        "name": "weekly",
+        "description": "Weekly time aggregation",
+        "resample_freq": "W"
+      }
+    ],
+    "spend_var_mapping": [
+      {
+        "name": "spend_to_spend",
+        "description": "All channels: spend → spend (direct cost impact)",
+        "mapping_strategy": "spend_to_spend"
+      },
+      {
+        "name": "spend_to_proxy",
+        "description": "All channels: spend → sessions (ad delivery proxy)",
+        "mapping_strategy": "spend_to_proxy"
+      },
+      {
+        "name": "mixed_by_funnel",
+        "description": "Upper funnel → sessions, lower funnel → spend",
+        "mapping_strategy": "mixed"
+      }
+    ]
+  }
+}
