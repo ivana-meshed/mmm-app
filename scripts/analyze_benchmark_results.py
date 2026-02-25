@@ -68,7 +68,56 @@ class BenchmarkAnalyzer:
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
 
-    def collect_results(self, benchmark_id: str) -> Optional[pd.DataFrame]:
+    def load_queue_entries(self, queue_name: str = "default-dev") -> List[Dict]:
+        """Load queue entries to find actual job execution timestamps."""
+        try:
+            queue_path = f"robyn-queues/{queue_name}/queue.json"
+            blob = self.bucket.blob(queue_path)
+            if blob.exists():
+                queue_data = json.loads(blob.download_as_bytes())
+                entries = queue_data.get("entries", [])
+                logger.debug(f"Loaded {len(entries)} queue entries from {queue_name}")
+                return entries
+        except Exception as e:
+            logger.warning(f"Could not load queue {queue_name}: {e}")
+        return []
+    
+    def map_variants_to_timestamps(
+        self, variants: List[Dict], queue_entries: List[Dict]
+    ) -> Dict[str, str]:
+        """
+        Map variant names to their actual result timestamps from queue.
+        
+        Extracts timestamp from gcs_prefix field in completed queue entries.
+        """
+        timestamp_map = {}
+        
+        for variant in variants:
+            variant_name = variant.get("benchmark_variant", "")
+            if not variant_name:
+                continue
+                
+            # Find matching queue entry
+            for entry in queue_entries:
+                params = entry.get("params", {})
+                entry_variant = params.get("benchmark_variant", "")
+                
+                if entry_variant == variant_name and entry.get("status") == "COMPLETED":
+                    # Extract timestamp from gcs_prefix
+                    # Format: gs://bucket/robyn/default/de/20260225_112345/
+                    gcs_prefix = entry.get("gcs_prefix", "")
+                    if gcs_prefix:
+                        parts = gcs_prefix.rstrip("/").split("/")
+                        if len(parts) >= 5:
+                            timestamp = parts[-1]
+                            timestamp_map[variant_name] = timestamp
+                            logger.debug(f"Mapped {variant_name} -> {timestamp}")
+                            break
+        
+        logger.info(f"Mapped {len(timestamp_map)} variants to timestamps")
+        return timestamp_map
+
+    def collect_results(self, benchmark_id: str, queue_name: str = "default-dev") -> Optional[pd.DataFrame]:
         """
         Collect results from a benchmark run.
         
@@ -91,10 +140,14 @@ class BenchmarkAnalyzer:
             logger.error(f"Error loading benchmark plan: {e}")
             return None
 
+        # Load queue entries to find actual timestamps
+        queue_entries = self.load_queue_entries(queue_name)
+        timestamp_map = self.map_variants_to_timestamps(variants, queue_entries)
+
         # Collect results for each variant
         results = []
         for variant in variants:
-            result = self._collect_variant_result(variant, benchmark_id)
+            result = self._collect_variant_result(variant, benchmark_id, timestamp_map)
             if result:
                 results.append(result)
 
@@ -107,20 +160,26 @@ class BenchmarkAnalyzer:
         return df
 
     def _collect_variant_result(
-        self, variant: Dict[str, Any], benchmark_id: str
+        self, variant: Dict[str, Any], benchmark_id: str, timestamp_map: Dict[str, str] = None
     ) -> Optional[Dict[str, Any]]:
         """Collect result for a single variant."""
         country = variant.get("country", "")
         revision = variant.get("revision", "default")
-        output_timestamp = variant.get("output_timestamp", "")
+        variant_name = variant.get("benchmark_variant", "")
         
-        # If we have output_timestamp, use exact path
-        if output_timestamp:
-            exact_path = f"robyn/{revision}/{country}/{output_timestamp}/model_summary.json"
+        # Get timestamp from map (actual execution timestamp)
+        timestamp = None
+        if timestamp_map:
+            timestamp = timestamp_map.get(variant_name)
+        
+        # If we have timestamp, use exact path
+        if timestamp:
+            exact_path = f"robyn/{revision}/{country}/{timestamp}/model_summary.json"
             try:
                 blob = self.bucket.blob(exact_path)
                 if blob.exists():
                     summary = json.loads(blob.download_as_bytes())
+                    logger.debug(f"Found result for {variant_name} at {exact_path}")
                     return self._extract_metrics(summary, variant)
                 else:
                     logger.debug(f"Exact path not found: {exact_path}")
@@ -139,6 +198,7 @@ class BenchmarkAnalyzer:
                 try:
                     summary = json.loads(blob.download_as_bytes())
                     if self._matches_variant(summary, variant):
+                        logger.debug(f"Found result for {variant_name} via fallback matching")
                         return self._extract_metrics(summary, variant)
                 except Exception as e:
                     logger.debug(f"Error loading summary {blob.name}: {e}")
@@ -147,7 +207,7 @@ class BenchmarkAnalyzer:
         except Exception as e:
             logger.debug(f"Error searching for results: {e}")
         
-        logger.warning(f"No results found for variant: {variant.get('benchmark_variant', 'unknown')}")
+        logger.warning(f"No results found for variant: {variant_name}")
         return None
 
     def _matches_variant(

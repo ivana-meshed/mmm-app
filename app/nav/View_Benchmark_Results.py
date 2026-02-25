@@ -51,8 +51,8 @@ def list_benchmarks():
     blobs = bucket.list_blobs(prefix=f"{BENCHMARK_ROOT}/", delimiter="/")
     benchmarks = []
     
-    # Get the prefixes (directories)
-    for prefix in blobs.prefixes:
+    # Get the prefixes (directories) - convert to list to avoid iterator consumption
+    for prefix in list(blobs.prefixes):
         benchmark_id = prefix.replace(f"{BENCHMARK_ROOT}/", "").rstrip("/")
         if benchmark_id:  # Skip empty
             benchmarks.append(benchmark_id)
