@@ -167,47 +167,61 @@ class BenchmarkAnalyzer:
         revision = variant.get("revision", "default")
         variant_name = variant.get("benchmark_variant", "")
         
+        logger.info(f"Collecting result for variant: {variant_name}")
+        logger.debug(f"  Variant config: adstock={variant.get('adstock')}, train_size={variant.get('train_size')}")
+        
         # Get timestamp from map (actual execution timestamp)
         timestamp = None
         if timestamp_map:
             timestamp = timestamp_map.get(variant_name)
+            if timestamp:
+                logger.info(f"  Using timestamp from queue: {timestamp}")
+            else:
+                logger.warning(f"  No timestamp found in map for {variant_name}")
         
         # If we have timestamp, use exact path
         if timestamp:
             exact_path = f"robyn/{revision}/{country}/{timestamp}/model_summary.json"
+            logger.info(f"  Trying exact path: {exact_path}")
             try:
                 blob = self.bucket.blob(exact_path)
                 if blob.exists():
                     summary = json.loads(blob.download_as_bytes())
-                    logger.debug(f"Found result for {variant_name} at {exact_path}")
+                    logger.info(f"  ✓ Found result at exact path")
+                    logger.debug(f"  Summary has: adstock={summary.get('adstock')}, train_size={summary.get('train_size')}")
                     return self._extract_metrics(summary, variant)
                 else:
-                    logger.debug(f"Exact path not found: {exact_path}")
+                    logger.warning(f"  ✗ Exact path not found: {exact_path}")
             except Exception as e:
-                logger.debug(f"Error loading exact path {exact_path}: {e}")
+                logger.error(f"  ✗ Error loading exact path {exact_path}: {e}")
         
         # Fallback: Search for model_summary.json in expected location
         prefix = f"robyn/{revision}/{country}/"
+        logger.info(f"  Falling back to search in: {prefix}")
         
         try:
             blobs = list(self.bucket.list_blobs(prefix=prefix))
             summaries = [b for b in blobs if "model_summary.json" in b.name]
+            logger.info(f"  Found {len(summaries)} model_summary.json files")
             
             # Find most recent matching summary
-            for blob in sorted(summaries, key=lambda b: b.time_created, reverse=True):
+            for i, blob in enumerate(sorted(summaries, key=lambda b: b.time_created, reverse=True)):
                 try:
+                    logger.debug(f"  Checking blob {i+1}/{len(summaries)}: {blob.name}")
                     summary = json.loads(blob.download_as_bytes())
                     if self._matches_variant(summary, variant):
-                        logger.debug(f"Found result for {variant_name} via fallback matching")
+                        logger.info(f"  ✓ Found matching result via fallback at {blob.name}")
                         return self._extract_metrics(summary, variant)
+                    else:
+                        logger.debug(f"    Doesn't match variant config")
                 except Exception as e:
-                    logger.debug(f"Error loading summary {blob.name}: {e}")
+                    logger.debug(f"    Error loading {blob.name}: {e}")
                     continue
                     
         except Exception as e:
-            logger.debug(f"Error searching for results: {e}")
+            logger.error(f"  ✗ Error searching for results: {e}")
         
-        logger.warning(f"No results found for variant: {variant_name}")
+        logger.error(f"❌ NO RESULTS FOUND for variant: {variant_name}")
         return None
 
     def _matches_variant(
@@ -250,19 +264,35 @@ class BenchmarkAnalyzer:
     ) -> Dict[str, Any]:
         """Extract metrics from model summary."""
         best_model = summary.get("best_model", {})
+        
+        # Extract config from summary first, fall back to variant
+        # This is crucial because model_summary.json has the actual config used
+        adstock = summary.get("adstock") or variant.get("adstock", "")
+        train_size = summary.get("train_size") or variant.get("train_size", "")
+        iterations = summary.get("iterations") or variant.get("iterations", "")
+        trials = summary.get("trials") or variant.get("trials", "")
+        resample_freq = summary.get("resample_freq") or variant.get("resample_freq", "none")
+        
+        # Log what we extracted for debugging
+        variant_name = variant.get("benchmark_variant", "unknown")
+        logger.debug(f"Extracting metrics for {variant_name}:")
+        logger.debug(f"  adstock: {adstock} (from {'summary' if summary.get('adstock') else 'variant'})")
+        logger.debug(f"  train_size: {train_size} (from {'summary' if summary.get('train_size') else 'variant'})")
+        logger.debug(f"  iterations: {iterations} (from {'summary' if summary.get('iterations') else 'variant'})")
+        logger.debug(f"  rsq_val: {best_model.get('rsq_val')}")
 
         return {
             # Benchmark metadata
             "benchmark_test": variant.get("benchmark_test", ""),
-            "benchmark_variant": variant.get("benchmark_variant", ""),
+            "benchmark_variant": variant_name,
             "country": variant.get("country", ""),
             "revision": variant.get("revision", "default"),
-            # Configuration
-            "adstock": variant.get("adstock", ""),
-            "train_size": str(variant.get("train_size", "")),
-            "iterations": variant.get("iterations", ""),
-            "trials": variant.get("trials", ""),
-            "resample_freq": variant.get("resample_freq", "none"),
+            # Configuration (from summary primarily)
+            "adstock": adstock,
+            "train_size": str(train_size),
+            "iterations": str(iterations),
+            "trials": str(trials),
+            "resample_freq": resample_freq,
             # Model fit metrics
             "rsq_train": best_model.get("rsq_train"),
             "rsq_val": best_model.get("rsq_val"),
@@ -712,8 +742,27 @@ def main():
         action="store_true",
         help="Skip plot generation, only export CSV",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging",
+    )
 
     args = parser.parse_args()
+    
+    # Set logging level
+    if args.debug:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s - %(levelname)s - %(message)s",
+        )
+        logger.setLevel(logging.DEBUG)
+        logger.info("🔍 DEBUG MODE ENABLED")
+    else:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(levelname)s - %(message)s",
+        )
 
     # Initialize analyzer
     analyzer = BenchmarkAnalyzer()

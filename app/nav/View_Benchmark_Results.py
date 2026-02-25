@@ -44,20 +44,37 @@ def get_storage_client():
 
 def list_benchmarks():
     """List available benchmarks from GCS."""
-    client = get_storage_client()
-    bucket = client.bucket(GCS_BUCKET)
-    
-    # List all benchmark directories
-    blobs = bucket.list_blobs(prefix=f"{BENCHMARK_ROOT}/", delimiter="/")
-    benchmarks = []
-    
-    # Get the prefixes (directories) - convert to list to avoid iterator consumption
-    for prefix in list(blobs.prefixes):
-        benchmark_id = prefix.replace(f"{BENCHMARK_ROOT}/", "").rstrip("/")
-        if benchmark_id:  # Skip empty
-            benchmarks.append(benchmark_id)
-    
-    return sorted(benchmarks, reverse=True)
+    try:
+        client = get_storage_client()
+        bucket = client.bucket(GCS_BUCKET)
+        
+        # List all benchmark directories
+        prefix_to_search = f"{BENCHMARK_ROOT}/"
+        st.write(f"🔍 DEBUG: Searching GCS path: gs://{GCS_BUCKET}/{prefix_to_search}")
+        
+        blobs = bucket.list_blobs(prefix=prefix_to_search, delimiter="/")
+        benchmarks = []
+        
+        # Convert to list to avoid iterator consumption
+        prefixes_list = list(blobs.prefixes) if hasattr(blobs, 'prefixes') else []
+        st.write(f"🔍 DEBUG: Found {len(prefixes_list)} prefixes")
+        
+        for prefix in prefixes_list:
+            benchmark_id = prefix.replace(f"{BENCHMARK_ROOT}/", "").rstrip("/")
+            if benchmark_id:  # Skip empty
+                benchmarks.append(benchmark_id)
+                st.write(f"  - Found: {benchmark_id}")
+        
+        st.write(f"✅ DEBUG: Total benchmarks found: {len(benchmarks)}")
+        return sorted(benchmarks, reverse=True)
+        
+    except Exception as e:
+        st.error(f"❌ Error listing benchmarks: {str(e)}")
+        st.write(f"🔍 DEBUG: Exception type: {type(e).__name__}")
+        st.write(f"🔍 DEBUG: Exception details: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+        return []
 
 def load_benchmark_csv(benchmark_id):
     """Load the most recent CSV for a benchmark."""
