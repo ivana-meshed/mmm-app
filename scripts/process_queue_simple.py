@@ -417,7 +417,7 @@ def process_one_job(
     logger.info(f"📂 Results will be saved to:")
     logger.info(f"   {result_path}")
     logger.info(
-        f"   Key files: model_summary.json, best_model_plots.png, console.log"
+        f"   Key files: model_summary.json, console.log"
     )
     
     # Store benchmark info in job entry for better tracking
@@ -643,7 +643,7 @@ def update_running_jobs_status(
                 
                 if verification["exists"]:
                     logger.info(f"   ✓ Results verified: {verification['message']}")
-                    key_files = ["model_summary.json", "best_model_plots.png", "console.log"]
+                    key_files = ["model_summary.json", "console.log"]
                     found_key_files = [f for f in verification["files_found"] if f in key_files]
                     if found_key_files:
                         logger.info(f"   ✓ Key files found: {', '.join(found_key_files)}")

@@ -1040,8 +1040,8 @@ class ResultsCollector:
             )
             print(f"   Contains:")
             print(f"     - model_summary.json  (metrics and metadata)")
-            print(f"     - best_model_plots.png (visualizations)")
-            print(f"     - model_params.json   (configuration)")
+            print(f"     - {{model_id}}.png     (visualization plot, e.g., 1_112_3.png)")
+            print(f"     - console.log         (execution logs)")
 
         print("\n" + "=" * 80)
         print("Manual Access Commands:")
