@@ -65,6 +65,35 @@ def parse_gcs_path(path: str) -> tuple:
         return parts[0], ""
 
 
+def extract_version_from_path(gcs_path: str) -> str:
+    """
+    Extract version (timestamp) from GCS path.
+    
+    Example: gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
+    Returns: 20260122_113141
+    """
+    # Remove gs:// prefix if present
+    if gcs_path.startswith("gs://"):
+        gcs_path = gcs_path[5:]
+    
+    # Split path and get the timestamp part (before selected_columns.json)
+    # Format: bucket/training_data/country/goal/timestamp/selected_columns.json
+    parts = gcs_path.split("/")
+    
+    # Find selected_columns.json and get the part before it
+    for i, part in enumerate(parts):
+        if part == "selected_columns.json" and i > 0:
+            return parts[i - 1]
+    
+    # Fallback: try to find a timestamp-like pattern (YYYYMMDD_HHMMSS)
+    import re
+    for part in reversed(parts):
+        if re.match(r'\d{8}_\d{6}', part):
+            return part
+    
+    return "Latest"
+
+
 def download_selected_columns(gcs_path: str) -> Dict[str, Any]:
     """Download and parse selected_columns.json from GCS."""
     logger.info(f"📥 Downloading config from: {gcs_path}")
@@ -84,7 +113,7 @@ def download_selected_columns(gcs_path: str) -> Dict[str, Any]:
     return config
 
 
-def generate_benchmark_config(selected_columns: Dict[str, Any], is_test_run: bool = True) -> Dict[str, Any]:
+def generate_benchmark_config(selected_columns: Dict[str, Any], version_from_path: str, is_test_run: bool = True) -> Dict[str, Any]:
     """
     Generate comprehensive benchmark configuration from selected_columns.json.
     
@@ -99,11 +128,11 @@ def generate_benchmark_config(selected_columns: Dict[str, Any], is_test_run: boo
     goal = selected_columns.get("selected_goal", "N_UPLOADS_WEB")
     timestamp = selected_columns.get("timestamp", datetime.now().strftime("%Y%m%d_%H%M%S"))
     
-    # Base configuration
+    # Base configuration - use version from GCS path, not data_version from JSON
     base_config = {
         "country": country,
         "goal": goal,
-        "version": selected_columns.get("data_version", "Latest")
+        "version": version_from_path  # Use the timestamp from GCS path
     }
     
     # Iterations and trials based on test vs full run
@@ -386,11 +415,16 @@ Examples:
         logger.info("STEP 0: LOADING CONFIGURATION")
         logger.info("=" * 80)
         selected_columns = download_selected_columns(args.path)
+        
+        # Extract version (timestamp) from GCS path
+        version_from_path = extract_version_from_path(args.path)
+        logger.info(f"📍 Extracted version from path: {version_from_path}")
         logger.info("")
         
         # Generate benchmark configuration
         benchmark_config = generate_benchmark_config(
             selected_columns,
+            version_from_path=version_from_path,
             is_test_run=not args.full_run
         )
         
