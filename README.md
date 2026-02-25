@@ -39,31 +39,45 @@ A benchmarking system that:
 
 ## Quick Start
 
-### 1. Run Benchmarks
+### One-Line Command (Recommended)
+
+Complete end-to-end workflow - submit, process, and analyze:
 
 ```bash
-# Quick test all benchmarks (1-2 hours)
+# Test run (default - 10 iterations, 1 trial per variant)
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
+
+# Full production run (1000 iterations, 3 trials per variant)
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json \
+  --full-run
+```
+
+This single command:
+1. Loads your selected_columns.json configuration
+2. Generates comprehensive benchmark (54 variants: 3 adstock × 3 train_splits × 2 time_agg × 3 spend_var_mapping)
+3. Submits all jobs to queue
+4. Processes queue until complete
+5. Analyzes results and generates visualizations
+
+**Output:**
+- CSV: `./benchmark_analysis/results_*.csv`
+- Plots: `./benchmark_analysis/*.png` (6 visualization plots)
+
+### Manual Workflow (Alternative)
+
+If you prefer step-by-step control:
+
+```bash
+# 1. Run benchmarks
 python scripts/benchmark_mmm.py --all-benchmarks --test-run-all
 
-# Process queue
+# 2. Process queue
 python scripts/process_queue_simple.py --loop --cleanup
-```
 
-### 2. Collect Results
-
-```bash
-# Export results to CSV
-python scripts/benchmark_mmm.py --collect-results <benchmark_id> --export-format csv
-```
-
-### 3. Analyze
-
-```python
-import pandas as pd
-df = pd.read_csv('results.csv')
-
-# Compare variants
-print(df.groupby('benchmark_variant')[['rsq_val', 'nrmse_val']].mean())
+# 3. Analyze results
+python scripts/analyze_benchmark_results.py --benchmark-id <id> --output-dir ./analysis
 ```
 
 See **USAGE_GUIDE.md** for detailed instructions and **ANALYSIS_GUIDE.md** for analysis workflows.

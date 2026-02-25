@@ -1,5 +1,46 @@
 # Usage Guide - Benchmarking System
 
+## One-Line Command (Recommended)
+
+The easiest way to run a complete benchmark workflow:
+
+```bash
+# Test run (default - 10 iterations, 1 trial)
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
+
+# Full production run (1000 iterations, 3 trials)
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json \
+  --full-run
+
+# With custom queue name
+python scripts/run_full_benchmark.py \
+  --path <path_to_selected_columns.json> \
+  --queue-name default-dev
+```
+
+**What it does:**
+1. Downloads selected_columns.json from GCS
+2. Generates comprehensive benchmark config (54 variants)
+3. Submits all test combinations to queue
+4. Processes queue until complete
+5. Analyzes results and creates visualizations
+
+**Output:**
+- CSV: `./benchmark_analysis/results_{timestamp}.csv`
+- Plots: `./benchmark_analysis/*.png` (6 plots)
+
+**Expected time:**
+- Test run: ~1-2 hours for 54 variants
+- Full run: ~4-6 hours for 54 variants
+
+---
+
+## Manual Workflow (Alternative)
+
+If you prefer step-by-step control, follow these scenarios:
+
 ## Quick Start (5 Minutes)
 
 ```bash
@@ -200,6 +241,45 @@ python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --no-plo
 - Train/val/test gap analysis
 - Metric correlations heatmap
 - Best models summary
+
+### run_full_benchmark.py (One-Line Command)
+
+```bash
+# Test run (default)
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
+
+# Full production run
+python scripts/run_full_benchmark.py \
+  --path <path_to_selected_columns.json> \
+  --full-run
+
+# With custom queue
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --queue-name default-dev
+
+# Skip queue processing (submit only)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --skip-queue
+
+# Skip analysis (submit and process only)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --skip-analysis
+```
+
+**What it does:**
+1. Downloads selected_columns.json from GCS
+2. Generates comprehensive benchmark (54 variants):
+   - 3 adstock types (geometric, weibull_cdf, weibull_pdf)
+   - 3 train splits (70/90, 75/90, 65/80)
+   - 2 time aggregations (daily, weekly)
+   - 3 spend→var mappings (spend_to_spend, spend_to_proxy, mixed_by_funnel)
+3. Submits all 54 jobs to queue
+4. Processes queue until empty
+5. Analyzes results and saves to `./benchmark_analysis/`
 
 ### process_queue_simple.py
 
