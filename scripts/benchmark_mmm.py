@@ -294,7 +294,7 @@ class BenchmarkRunner:
             variant["benchmark_variant"] = spec.get("name", "unnamed")
             variant["benchmark_description"] = spec.get("description", "")
 
-            mapping_type = spec.get("type")
+            mapping_type = spec.get("mapping_strategy")
 
             if mapping_type == "spend_to_spend":
                 # All channels: spend → spend
