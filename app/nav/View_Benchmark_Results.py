@@ -55,7 +55,8 @@ def list_benchmarks():
         blobs = bucket.list_blobs(prefix=prefix_to_search, delimiter="/")
         benchmarks = []
         
-        # Convert to list to avoid iterator consumption
+        # GCS iterator pattern: Must consume blobs before accessing prefixes
+        _ = list(blobs)  # Consume iterator to populate prefixes
         prefixes_list = list(blobs.prefixes) if hasattr(blobs, 'prefixes') else []
         st.write(f"🔍 DEBUG: Found {len(prefixes_list)} prefixes")
         

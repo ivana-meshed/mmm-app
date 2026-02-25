@@ -342,7 +342,7 @@ class BenchmarkRunner:
             variant["benchmark_test"] = "adstock"
             variant["benchmark_variant"] = spec.get("name", "unnamed")
             variant["benchmark_description"] = spec.get("description", "")
-            variant["adstock"] = spec.get("type")
+            variant["adstock"] = spec.get("adstock")
 
             # Optional: specify hyperparameter preset
             if "hyperparameter_preset" in spec:
@@ -380,7 +380,7 @@ class BenchmarkRunner:
             variant["benchmark_test"] = "time_aggregation"
             variant["benchmark_variant"] = spec.get("name", "unnamed")
             variant["benchmark_description"] = spec.get("description", "")
-            variant["resample_freq"] = spec.get("frequency")
+            variant["resample_freq"] = spec.get("resample_freq")
 
             variants.append(variant)
 
