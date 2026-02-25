@@ -112,8 +112,22 @@ class BenchmarkAnalyzer:
         """Collect result for a single variant."""
         country = variant.get("country", "")
         revision = variant.get("revision", "default")
+        output_timestamp = variant.get("output_timestamp", "")
         
-        # Search for model_summary.json in expected location
+        # If we have output_timestamp, use exact path
+        if output_timestamp:
+            exact_path = f"robyn/{revision}/{country}/{output_timestamp}/model_summary.json"
+            try:
+                blob = self.bucket.blob(exact_path)
+                if blob.exists():
+                    summary = json.loads(blob.download_as_bytes())
+                    return self._extract_metrics(summary, variant)
+                else:
+                    logger.debug(f"Exact path not found: {exact_path}")
+            except Exception as e:
+                logger.debug(f"Error loading exact path {exact_path}: {e}")
+        
+        # Fallback: Search for model_summary.json in expected location
         prefix = f"robyn/{revision}/{country}/"
         
         try:
@@ -133,15 +147,42 @@ class BenchmarkAnalyzer:
         except Exception as e:
             logger.debug(f"Error searching for results: {e}")
         
+        logger.warning(f"No results found for variant: {variant.get('benchmark_variant', 'unknown')}")
         return None
 
     def _matches_variant(
         self, summary: Dict[str, Any], variant: Dict[str, Any]
     ) -> bool:
-        """Check if summary matches variant (simplified matching)."""
+        """Check if summary matches variant configuration."""
         # Match on country
         if summary.get("country", "").lower() != variant.get("country", "").lower():
             return False
+        
+        # Match on adstock if available
+        variant_adstock = variant.get("adstock", "")
+        summary_adstock = summary.get("adstock", "")
+        if variant_adstock and summary_adstock:
+            if variant_adstock.lower() != summary_adstock.lower():
+                return False
+        
+        # Match on train_size if available
+        variant_train = variant.get("train_size")
+        summary_train = summary.get("train_size")
+        if variant_train and summary_train:
+            # Convert to float for comparison
+            try:
+                if abs(float(variant_train) - float(summary_train)) > 0.01:
+                    return False
+            except (ValueError, TypeError):
+                pass
+        
+        # Match on iterations if available
+        variant_iter = variant.get("iterations")
+        summary_iter = summary.get("iterations")
+        if variant_iter and summary_iter:
+            if int(variant_iter) != int(summary_iter):
+                return False
+        
         return True
 
     def _extract_metrics(
