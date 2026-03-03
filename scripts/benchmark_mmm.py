@@ -108,10 +108,49 @@ class BenchmarkRunner:
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
 
+    def _find_latest_version(self, country: str, goal: str) -> str:
+        """Find the most recent version (timestamp) for a country/goal combination."""
+        prefix = f"training_data/{country.lower()}/{goal}/"
+        
+        # List all "folders" (prefixes) under this path
+        blobs = self.bucket.list_blobs(prefix=prefix, delimiter="/")
+        
+        # Consume the iterator to populate prefixes
+        _ = list(blobs)
+        
+        # Get all version folders
+        versions = []
+        for prefix_path in blobs.prefixes:
+            # Extract version from path like "training_data/de/N_UPLOADS_WEB/20260122_113141/"
+            version = prefix_path.rstrip("/").split("/")[-1]
+            # Filter for timestamp pattern (YYYYMMDD_HHMMSS)
+            if len(version) == 15 and "_" in version:
+                try:
+                    # Validate it's a timestamp
+                    datetime.strptime(version, "%Y%m%d_%H%M%S")
+                    versions.append(version)
+                except ValueError:
+                    continue
+        
+        if not versions:
+            raise FileNotFoundError(
+                f"No versions found at gs://{self.bucket_name}/{prefix}"
+            )
+        
+        # Sort and return most recent
+        versions.sort(reverse=True)
+        latest = versions[0]
+        logger.info(f"ℹ️  Resolved 'Latest' to most recent version: {latest}")
+        return latest
+
     def load_base_config(
         self, country: str, goal: str, version: str
     ) -> Dict[str, Any]:
         """Load selected_columns.json from GCS."""
+        # Handle special "Latest" version
+        if version.lower() == "latest":
+            version = self._find_latest_version(country, goal)
+        
         blob_path = (
             f"training_data/{country.lower()}/{goal}/{version}/"
             f"selected_columns.json"
