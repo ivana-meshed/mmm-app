@@ -347,15 +347,24 @@ class BenchmarkRunner:
                 # Use provided proxy mapping or default pattern
                 proxy_map = spec.get("proxy_mapping", {})
                 variant["var_to_spend_mapping"] = proxy_map
+                if proxy_map:
+                    # Derive paid_media_vars from proxy map values, ordered by
+                    # paid_media_spends so Robyn receives different inputs
+                    variant["paid_media_vars"] = [
+                        proxy_map.get(s, s)
+                        for s in variant.get("paid_media_spends", [])
+                    ]
 
-            elif mapping_type == "mixed_by_funnel":
+            elif mapping_type in ("mixed_by_funnel", "mixed"):
+                # Both "mixed" (used in JSON configs) and "mixed_by_funnel"
+                # (legacy alias) are accepted here for forward compatibility.
                 # Upper funnel → proxy, lower funnel → spend
                 upper_channels = spec.get("upper_funnel_channels", [])
                 lower_channels = spec.get("lower_funnel_channels", [])
                 proxy_map = spec.get("proxy_mapping", {})
 
                 mapping = {}
-                for spend in variant["paid_media_spends"]:
+                for spend in variant.get("paid_media_spends", []):
                     if spend in upper_channels:
                         mapping[spend] = proxy_map.get(spend, spend)
                     elif spend in lower_channels:
@@ -365,6 +374,16 @@ class BenchmarkRunner:
                         mapping[spend] = spend
 
                 variant["var_to_spend_mapping"] = mapping
+                if upper_channels or lower_channels:
+                    # Derive paid_media_vars from the computed channel mapping
+                    variant["paid_media_vars"] = [
+                        mapping.get(s, s)
+                        for s in variant.get("paid_media_spends", [])
+                    ]
+
+            # Apply explicit override last — always wins over derived values
+            if "paid_media_vars_override" in spec:
+                variant["paid_media_vars"] = spec["paid_media_vars_override"]
 
             variants.append(variant)
 
