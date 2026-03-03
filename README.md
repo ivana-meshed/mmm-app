@@ -1,103 +1,105 @@
-# MMM Trainer on Google Cloud – README
+# PR #170 - MMM Benchmarking System
 
-This repo deploys a **Streamlit** web app to **Cloud Run** that orchestrates an **R/Robyn** training pipeline.
-Data is fetched from **Snowflake** with Python, passed as a CSV to R, and the model artifacts are written to **Google Cloud Storage**.
-Infrastructure is managed with **Terraform**; the container image lives in **Artifact Registry**.
+## Overview
 
-## High-level Architecture
+This PR implements a comprehensive benchmarking system for systematically testing Marketing Mix Modeling (MMM) configurations. The goal is to identify optimal model configurations through structured testing of different parameters and approaches.
 
-- User accesses the Streamlit UI at the Cloud Run URL.
-- Streamlit (Python) connects to Snowflake, exports a CSV snapshot, and calls `Rscript r/run_all.R job_cfg=/tmp/job.json`.
-- R runs Robyn, using `reticulate` → system Python (`/usr/bin/python3`) for **nevergrad**.
-- R uploads outputs (RDS, plots, one-pagers, metrics) to the GCS bucket.
-- Logs from Python/R appear in the Streamlit UI and in **Cloud Logging**.
+### Parent Application
 
-See the diagrams:
-- **Architecture (boxes & arrows):** `mmm_architecture_v2.png`
-- **Runtime sequence (swimlanes):** `mmm_sequence_v2.png`
-- **Both pages PDF:** `mmm_system_design_v2.pdf`
+This MMM Trainer deploys a **Streamlit** web app to **Cloud Run** that orchestrates an **R/Robyn** training pipeline.
+Data is fetched from **Snowflake** with Python, and model artifacts are written to **Google Cloud Storage**.
+Infrastructure is managed with **Terraform**; container images live in **Artifact Registry**.
 
-## Repo Layout
+## PR #170 Requirements
 
-```
-app/
-  streamlit_app.py          # Streamlit UI entry point
-  config/
-    settings.py             # Centralized configuration (env vars, GCP, Snowflake)
-    __init__.py
-  utils/
-    gcs_utils.py            # GCS operations (upload, download, read/write)
-    snowflake_connector.py  # Snowflake connection and query utilities
-  pages/                    # Streamlit multi-page app
-    Connect_Data.py       # Snowflake connection setup
-    Map_Data.py           # Data mapping and metadata
-    Review_Data.py        # Data validation
-    3_Prepare_Training_Data.py  # Data preparation
-    Run_Experiment.py     # Job configuration and execution
-    5_View_Results.py       # Results visualization
-    6_View_Best_Results.py  # Best model selection
-  app_shared.py             # Shared helper functions
-  data_processor.py         # Data optimization and Parquet conversion
-  gcp_secrets.py            # Secret Manager integration
-  snowflake_utils.py        # Backward compatibility wrapper
-r/
-  run_all.R                 # Robyn training entrypoint (reads job_cfg and csv_path)
-infra/terraform/
-  main.tf                   # Cloud Run, service accounts, IAM, storage
-  variables.tf
-  envs/
-    prod.tfvars             # Production environment config
-    dev.tfvars              # Development environment config
-docker/
-  Dockerfile.web            # Web service container
-  Dockerfile.training       # Training job container
-  Dockerfile.training-base  # Base image with R dependencies
-  training_entrypoint.sh    # Training job entrypoint
-.github/workflows/
-  ci.yml                    # Production CI/CD (main branch)
-  ci-dev.yml                # Development CI/CD (feat-*, dev branches)
-scripts/                    # Utility scripts for data management and monitoring
-  download_test_data.py     # Download test data from GCS
-  track_daily_costs.py      # Daily cost tracking with service/category breakdowns
-  analyze_idle_costs.py     # Deep-dive idle cost analysis and optimization
-  get_actual_costs.sh       # Historical actual costs from BigQuery billing
-  get_comprehensive_costs.sh # Estimated costs with detailed breakdowns
-  upload_test_data.py       # Upload test data to GCS
-  delete_bucket_data.py     # Clean GCS bucket (with protections)
-  README_GCS_SCRIPTS.md     # Documentation for GCS scripts
-tests/                      # Unit and integration tests
-docs/                       # Additional documentation
-  IDLE_COST_ANALYSIS.md     # Technical analysis of idle costs and optimization
-  IDLE_COST_EXECUTIVE_SUMMARY.md  # Executive summary of cost optimization
+### Original Problem Statement
+
+"It's hard to tell which Robyn configuration is better for a given goal (fit vs allocation), and we can't systematically evaluate whether our assumptions hold across datasets. This makes onboarding and tuning subjective and non-reproducible."
+
+### Solution Implemented
+
+A benchmarking system that:
+1. **Runs queued MMM configs** based on existing selected_columns.json files
+2. **Writes results table** with model config, performance metrics, and allocation metrics
+3. **Supports systematic testing** of 5 test dimensions:
+   - Adstock types (geometric, Weibull CDF, Weibull PDF)
+   - Train/val/test splits (different ratios)
+   - Time aggregation (daily vs weekly)
+   - Spend→variable mappings (spend vs proxy)
+   - Seasonality window variations
+4. **Single command execution** for comprehensive testing
+5. **Result collection and analysis** for decision-making
+
+### Use Cases
+
+- **Preconfigure customer models** with tested defaults
+- **Learn generalizable MMM patterns** across datasets
+- **Systematic evaluation** of configuration assumptions
+- **Reproducible benchmarking** with version-controlled configs
+
+## Quick Start
+
+### One-Line Command (Recommended)
+
+Complete end-to-end workflow - submit, process, and analyze:
+
+```bash
+# Test run (default - 10 iterations, 1 trial per variant)
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
+
+# Full production run (1000 iterations, 3 trials per variant)
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json \
+  --full-run
 ```
 
-For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
+This single command:
+1. Loads your selected_columns.json configuration
+2. Generates comprehensive benchmark (54 variants: 3 adstock × 3 train_splits × 2 time_agg × 3 spend_var_mapping)
+3. Submits all jobs to queue
+4. Processes queue until complete
+5. Analyzes results and generates visualizations
 
-## Deploying to a New Company/Project
+**Output:**
+- CSV: `./benchmark_analysis/results_*.csv`
+- Plots: `./benchmark_analysis/*.png` (6 visualization plots)
 
-### Quick Start: Requirements
+### Manual Workflow (Alternative)
 
-For a concise list of basic requirements to deploy and maintain this repository, see **[REQUIREMENTS.md](docs/REQUIREMENTS.md)**. This includes:
+If you prefer step-by-step control:
 
-- Required tools and software (gcloud, Terraform, Docker, Git)
-- Required accounts and access (GCP, GitHub, Snowflake)
-- Required GCP APIs and resources
-- Required credentials and secrets
-- Ongoing maintenance considerations
-- Quick reference deployment checklist
+```bash
+# 1. Run benchmarks
+python scripts/benchmark_mmm.py --all-benchmarks --test-run-all
 
-### Detailed Deployment Guide
+# 2. Process queue
+python scripts/process_queue_simple.py --loop --cleanup
 
-For step-by-step instructions on deploying this application to a new Google Cloud project, see the **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)**. This comprehensive guide covers:
+# 3. Analyze results
+python scripts/analyze_benchmark_results.py --benchmark-id <id> --output-dir ./analysis
+```
 
-- GCP project setup and API enablement
-- Workload Identity Federation configuration for GitHub Actions
-- Service accounts and IAM permissions
-- Artifact Registry and GCS bucket creation
-- Google OAuth and Snowflake configuration
-- GitHub repository secrets setup
-- Terraform configuration and deployment
-- Post-deployment verification and troubleshooting
+See **USAGE_GUIDE.md** for detailed instructions and **ANALYSIS_GUIDE.md** for analysis workflows.
+
+## Documentation
+
+### Essential Documentation (5 files)
+
+1. **README.md** (this file) - PR requirements and quick start
+2. **IMPLEMENTATION_GUIDE.md** - What was implemented and how it works
+3. **USAGE_GUIDE.md** - How to execute benchmarks
+4. **ANALYSIS_GUIDE.md** - How to analyze results
+5. **ARCHITECTURE.md** - System architecture
+
+### Benchmark Configurations
+
+Located in `benchmarks/` directory:
+- `adstock_comparison.json` - Test adstock types
+- `train_val_test_splits.json` - Test split ratios
+- `time_aggregation.json` - Test daily vs weekly
+- `spend_var_mapping.json` - Test spend→var mappings
+- `comprehensive_benchmark.json` - Cartesian combinations
 
 ## Cost Monitoring and Optimization
 
@@ -443,3 +445,87 @@ See [docs/LICENSING.md](docs/LICENSING.md) for:
 
 See [scripts/prepare_distribution.sh](scripts/prepare_distribution.sh) for automated distribution package creation.
 
+
+## Implementation Details
+
+### Core Components
+
+**1. Benchmarking Script** (`scripts/benchmark_mmm.py`)
+- Generates test variants from config files
+- Submits jobs to Cloud Run queue
+- Collects and exports results
+- CLI with --test-run, --test-run-all, --all-benchmarks flags
+
+**2. Queue Processor** (`scripts/process_queue_simple.py`)
+- Monitors GCS job queue
+- Creates job config JSON and uploads to GCS
+- Sets JOB_CONFIG_GCS_PATH for R script
+- Passes output_timestamp for consistent result paths
+- Verifies results after completion
+
+**3. R Script Updates** (`r/run_all.R`)
+- Prioritizes output_timestamp from config
+- Reads config from GCS JSON file
+- Saves results to exact logged paths
+
+### Key Features
+
+**Result Path Consistency:**
+- Python generates timestamp once
+- Uploads complete config JSON to GCS
+- R reads config from GCS (not env vars)
+- Results saved where Python logs them
+
+**Multiple Test Modes:**
+- `--test-run`: First variant, 10 iterations (5-10 min)
+- `--test-run-all`: All variants, 10 iterations each (15-30 min)
+- Full mode: All variants, full iterations (1-2 hours)
+
+**Result Collection:**
+- Gathers metrics from all completed runs
+- Exports to CSV or Parquet
+- Includes rsq_val, nrmse_val, decomp_rssd, etc.
+
+## Command Examples
+
+```bash
+# List available benchmarks
+python scripts/benchmark_mmm.py --list-configs
+
+# Preview without submitting
+python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --dry-run
+
+# Quick test single benchmark
+python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --test-run
+
+# Test all variants of single benchmark
+python scripts/benchmark_mmm.py --config benchmarks/adstock_comparison.json --test-run-all
+
+# Run all benchmarks quickly
+python scripts/benchmark_mmm.py --all-benchmarks --test-run-all
+
+# Full benchmark execution
+python scripts/benchmark_mmm.py --all-benchmarks
+
+# Collect and analyze results
+python scripts/benchmark_mmm.py --collect-results <benchmark_id> --export-format csv
+```
+
+## System Requirements
+
+- Python 3.9+
+- GCP authentication (impersonated service account)
+- Access to mmm-app-output GCS bucket
+- Cloud Run Jobs API enabled
+- Required Python packages in requirements.txt
+
+## Related Documentation
+
+- **Deployment Guide:** `docs/DEPLOYMENT_GUIDE.md`
+- **System Architecture:** See ARCHITECTURE.md and architecture diagrams
+- **Cost Analysis:** `docs/IDLE_COST_ANALYSIS.md`
+- **GCS Scripts:** `scripts/README_GCS_SCRIPTS.md`
+
+## License
+
+See LICENSE file for details.
