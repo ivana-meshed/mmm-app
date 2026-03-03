@@ -748,18 +748,27 @@ class BenchmarkAnalyzer:
                     "median": float(df[col].median()),
                 }
 
-        # Best variants
-        if "rsq_val" in df.columns:
-            best_idx = df["rsq_val"].idxmax()
-            summary["best_by_rsq_val"] = df.loc[best_idx, "benchmark_variant"]
+        # Best variants (skip if all NaN - happens in test runs)
+        if "rsq_val" in df.columns and not df["rsq_val"].isna().all():
+            try:
+                best_idx = df["rsq_val"].idxmax()
+                summary["best_by_rsq_val"] = df.loc[best_idx, "benchmark_variant"]
+            except (ValueError, KeyError):
+                logger.warning("Could not determine best variant by R² validation")
 
-        if "nrmse_val" in df.columns:
-            best_idx = df["nrmse_val"].idxmin()
-            summary["best_by_nrmse_val"] = df.loc[best_idx, "benchmark_variant"]
+        if "nrmse_val" in df.columns and not df["nrmse_val"].isna().all():
+            try:
+                best_idx = df["nrmse_val"].idxmin()
+                summary["best_by_nrmse_val"] = df.loc[best_idx, "benchmark_variant"]
+            except (ValueError, KeyError):
+                logger.warning("Could not determine best variant by NRMSE validation")
 
-        if "decomp_rssd" in df.columns:
-            best_idx = df["decomp_rssd"].idxmin()
-            summary["best_by_decomp_rssd"] = df.loc[best_idx, "benchmark_variant"]
+        if "decomp_rssd" in df.columns and not df["decomp_rssd"].isna().all():
+            try:
+                best_idx = df["decomp_rssd"].idxmin()
+                summary["best_by_decomp_rssd"] = df.loc[best_idx, "benchmark_variant"]
+            except (ValueError, KeyError):
+                logger.warning("Could not determine best variant by decomp RSSD")
         
         # Check for test run quality issues
         if "iterations" in df.columns:
