@@ -178,6 +178,22 @@ if selected_benchmark:
             df, csv_path = result
             st.success(f"Loaded: `{csv_path}`")
             
+            # Check for test run warning
+            test_run_warning = False
+            if "iterations" in df.columns:
+                avg_iterations = df["iterations"].mean()
+                if avg_iterations < 100:
+                    test_run_warning = True
+                    st.warning(
+                        f"⚠️ **Test Run Results Detected**\n\n"
+                        f"This benchmark used only **{int(avg_iterations)} iterations** on average.\n\n"
+                        f"Results may appear similar across variants because models haven't converged. "
+                        f"For meaningful comparison, consider running with:\n"
+                        f"- **1000+ iterations**\n"
+                        f"- **3+ trials**\n\n"
+                        f"Use `--full-run` flag for production analysis."
+                    )
+            
             # Show metrics summary
             col1, col2, col3, col4 = st.columns(4)
             with col1:

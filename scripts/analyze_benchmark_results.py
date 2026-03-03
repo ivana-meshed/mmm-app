@@ -408,7 +408,10 @@ class BenchmarkAnalyzer:
 
     def _plot_rsq_comparison(self, df: pd.DataFrame):
         """Plot R² comparison across variants."""
-        fig, ax = plt.subplots(figsize=(14, 8))
+        # Adjust figure size based on number of variants
+        n_variants = len(df)
+        fig_width = max(14, n_variants * 0.4)
+        fig, ax = plt.subplots(figsize=(fig_width, 8))
 
         # Prepare data
         rsq_cols = ["rsq_train", "rsq_val", "rsq_test"]
@@ -433,7 +436,13 @@ class BenchmarkAnalyzer:
         ax.set_xlabel("Variant", fontsize=12)
         ax.set_ylabel("R²", fontsize=12)
         ax.set_ylim(0, 1)
-        plt.xticks(rotation=45, ha="right")
+        
+        # Rotate labels if many variants
+        if n_variants > 15:
+            plt.xticks(rotation=45, ha="right", fontsize=9)
+        else:
+            plt.xticks(rotation=45, ha="right")
+            
         ax.legend(title="Data Split")
         ax.grid(axis="y", alpha=0.3)
 
@@ -441,7 +450,10 @@ class BenchmarkAnalyzer:
 
     def _plot_nrmse_comparison(self, df: pd.DataFrame):
         """Plot NRMSE comparison across variants."""
-        fig, ax = plt.subplots(figsize=(14, 8))
+        # Adjust figure size based on number of variants
+        n_variants = len(df)
+        fig_width = max(14, n_variants * 0.4)
+        fig, ax = plt.subplots(figsize=(fig_width, 8))
 
         # Prepare data
         nrmse_cols = ["nrmse_train", "nrmse_val", "nrmse_test"]
@@ -467,7 +479,13 @@ class BenchmarkAnalyzer:
         ax.set_title("NRMSE Comparison Across Variants", fontsize=16, fontweight="bold")
         ax.set_xlabel("Variant", fontsize=12)
         ax.set_ylabel("NRMSE (lower is better)", fontsize=12)
-        plt.xticks(rotation=45, ha="right")
+        
+        # Rotate labels if many variants
+        if n_variants > 15:
+            plt.xticks(rotation=45, ha="right", fontsize=9)
+        else:
+            plt.xticks(rotation=45, ha="right")
+            
         ax.legend(title="Data Split")
         ax.grid(axis="y", alpha=0.3)
 
@@ -475,7 +493,10 @@ class BenchmarkAnalyzer:
 
     def _plot_decomp_rssd(self, df: pd.DataFrame):
         """Plot decomposition RSSD comparison."""
-        fig, ax = plt.subplots(figsize=(14, 8))
+        # Adjust figure size based on number of variants
+        n_variants = len(df)
+        fig_height = max(8, n_variants * 0.3)  # Scale height with variants
+        fig, ax = plt.subplots(figsize=(14, fig_height))
 
         plot_df = df[["benchmark_variant", "decomp_rssd"]].copy()
         plot_df = plot_df.dropna(subset=["decomp_rssd"])
@@ -494,6 +515,11 @@ class BenchmarkAnalyzer:
         )
         ax.set_xlabel("Decomposition RSSD (lower is better)", fontsize=12)
         ax.set_ylabel("Variant", fontsize=12)
+        
+        # Adjust label size for many variants
+        if n_variants > 20:
+            ax.tick_params(axis='y', labelsize=8)
+        
         ax.grid(axis="x", alpha=0.3)
 
         return fig
@@ -597,6 +623,23 @@ class BenchmarkAnalyzer:
             return None
 
         corr = df[available_cols].corr()
+        
+        # Check if all correlations are NaN (happens in test runs with no variation)
+        if corr.isna().all().all():
+            logger.warning("No correlation data - metrics show no variation (test run?)")
+            ax.text(
+                0.5, 0.5,
+                "⚠️ No Correlation Data\n\n"
+                "Metrics show no variation across variants.\n"
+                "This typically happens in test runs with low iterations.\n\n"
+                "Consider using --full-run for meaningful comparison.",
+                ha='center', va='center', fontsize=14,
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+            )
+            ax.set_title("Metric Correlations", fontsize=16, fontweight="bold")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            return fig
 
         # Plot
         sns.heatmap(
@@ -626,6 +669,7 @@ class BenchmarkAnalyzer:
             ax.barh(top_models["benchmark_variant"], top_models["rsq_val"])
             ax.set_title("Top 10 Models by R² Validation", fontsize=14, fontweight="bold")
             ax.set_xlabel("R² Validation", fontsize=12)
+            ax.tick_params(axis='y', labelsize=9)
             ax.grid(axis="x", alpha=0.3)
 
         # Best by NRMSE validation
@@ -639,6 +683,7 @@ class BenchmarkAnalyzer:
                 "Top 10 Models by NRMSE Validation", fontsize=14, fontweight="bold"
             )
             ax.set_xlabel("NRMSE Validation", fontsize=12)
+            ax.tick_params(axis='y', labelsize=9)
             ax.grid(axis="x", alpha=0.3)
 
         # Best by decomp RSSD
@@ -650,6 +695,7 @@ class BenchmarkAnalyzer:
             ax.barh(top_models["benchmark_variant"], top_models["decomp_rssd"])
             ax.set_title("Top 10 Models by Decomp RSSD", fontsize=14, fontweight="bold")
             ax.set_xlabel("Decomp RSSD", fontsize=12)
+            ax.tick_params(axis='y', labelsize=9)
             ax.grid(axis="x", alpha=0.3)
 
         # Generalization (smallest val-test gap)
@@ -667,9 +713,10 @@ class BenchmarkAnalyzer:
                 fontweight="bold",
             )
             ax.set_xlabel("Val-Test Gap (R²)", fontsize=12)
+            ax.tick_params(axis='y', labelsize=9)
             ax.grid(axis="x", alpha=0.3)
 
-        plt.tight_layout()
+        plt.tight_layout(pad=2.0)  # More padding for readability
         return fig
 
     def generate_summary_stats(self, df: pd.DataFrame) -> Dict[str, Any]:
@@ -713,7 +760,14 @@ class BenchmarkAnalyzer:
         if "decomp_rssd" in df.columns:
             best_idx = df["decomp_rssd"].idxmin()
             summary["best_by_decomp_rssd"] = df.loc[best_idx, "benchmark_variant"]
-
+        
+        # Check for test run quality issues
+        if "iterations" in df.columns:
+            avg_iterations = df["iterations"].mean()
+            if avg_iterations < 100:
+                summary["test_run_warning"] = True
+                summary["avg_iterations"] = int(avg_iterations)
+        
         return summary
 
 
@@ -787,6 +841,20 @@ def main():
     logger.info("SUMMARY STATISTICS")
     logger.info("=" * 80)
     logger.info(f"Total variants: {summary['total_variants']}")
+    
+    # Check for test run warning
+    if summary.get("test_run_warning"):
+        logger.warning("")
+        logger.warning("⚠️  TEST RUN DETECTED")
+        logger.warning(f"Average iterations: {summary.get('avg_iterations', 'unknown')}")
+        logger.warning("")
+        logger.warning("Results may show little variation between configurations.")
+        logger.warning("For meaningful comparison, consider running with:")
+        logger.warning("  - 1000+ iterations")
+        logger.warning("  - 3+ trials")
+        logger.warning("")
+        logger.warning("Use --full-run flag for production analysis.")
+        logger.warning("")
     
     if "best_by_rsq_val" in summary:
         logger.info(f"Best by R² validation: {summary['best_by_rsq_val']}")
