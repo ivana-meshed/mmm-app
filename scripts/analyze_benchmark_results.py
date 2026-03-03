@@ -269,8 +269,19 @@ class BenchmarkAnalyzer:
         # This is crucial because model_summary.json has the actual config used
         adstock = summary.get("adstock") or variant.get("adstock", "")
         train_size = summary.get("train_size") or variant.get("train_size", "")
-        iterations = summary.get("iterations") or variant.get("iterations", "")
-        trials = summary.get("trials") or variant.get("trials", "")
+        
+        # Convert iterations and trials to int (they should be numeric)
+        iterations_raw = summary.get("iterations") or variant.get("iterations", 0)
+        trials_raw = summary.get("trials") or variant.get("trials", 0)
+        try:
+            iterations = int(iterations_raw) if iterations_raw else 0
+        except (ValueError, TypeError):
+            iterations = 0
+        try:
+            trials = int(trials_raw) if trials_raw else 0
+        except (ValueError, TypeError):
+            trials = 0
+            
         resample_freq = summary.get("resample_freq") or variant.get("resample_freq", "none")
         
         # Log what we extracted for debugging
@@ -290,8 +301,8 @@ class BenchmarkAnalyzer:
             # Configuration (from summary primarily)
             "adstock": adstock,
             "train_size": str(train_size),
-            "iterations": str(iterations),
-            "trials": str(trials),
+            "iterations": iterations,  # Keep as int
+            "trials": trials,  # Keep as int
             "resample_freq": resample_freq,
             # Model fit metrics
             "rsq_train": best_model.get("rsq_train"),
@@ -772,10 +783,15 @@ class BenchmarkAnalyzer:
         
         # Check for test run quality issues
         if "iterations" in df.columns:
-            avg_iterations = df["iterations"].mean()
-            if avg_iterations < 100:
-                summary["test_run_warning"] = True
-                summary["avg_iterations"] = int(avg_iterations)
+            try:
+                # Convert to numeric, handling any string issues
+                iterations_col = pd.to_numeric(df["iterations"], errors='coerce')
+                avg_iterations = iterations_col.mean()
+                if not pd.isna(avg_iterations) and avg_iterations < 100:
+                    summary["test_run_warning"] = True
+                    summary["avg_iterations"] = int(avg_iterations)
+            except Exception as e:
+                logger.warning(f"Could not check test run quality: {e}")
         
         return summary
 
