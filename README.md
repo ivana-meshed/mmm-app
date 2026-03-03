@@ -39,31 +39,78 @@ A benchmarking system that:
 
 ## Quick Start
 
+### Prerequisites
+
+1. **Python environment** with all requirements installed:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **GCP authentication** configured:
+   ```bash
+   gcloud auth application-default login
+   ```
+
+3. **Access to GCS bucket**: `mmm-app-output`
+
+4. **Your selected_columns.json path** ready, for example:
+   ```
+   gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
+   ```
+
 ### One-Line Command (Recommended)
 
 Complete end-to-end workflow - submit, process, and analyze:
 
 ```bash
-# Test run (default - 10 iterations, 1 trial per variant)
+# Test run (default - 10 iterations, 1 trial per variant, ~1-2 hours, ~$10)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
 
-# Full production run (1000 iterations, 3 trials per variant)
+# Standard run (1000 iterations, 3 trials per variant, ~4-6 hours, ~$75)
 python scripts/run_full_benchmark.py \
-  --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json \
-  --full-run
+  --path <path> --full-run
+
+# Extended run (2000 iterations, 5 trials per variant, ~10-15 hours, ~$220)
+python scripts/run_full_benchmark.py \
+  --path <path> --extended-run
+
+# Production run (5000 iterations, 5 trials per variant, ~25-35 hours, ~$500)
+python scripts/run_full_benchmark.py \
+  --path <path> --production-run
+
+# Top-10 combinations with extended run (~2-3 hours, ~$41)
+python scripts/run_full_benchmark.py \
+  --path <path> --top-n 10 --extended-run
 ```
 
 This single command:
 1. Loads your selected_columns.json configuration
 2. Generates comprehensive benchmark (54 variants: 3 adstock × 3 train_splits × 2 time_agg × 3 spend_var_mapping)
-3. Submits all jobs to queue
-4. Processes queue until complete
-5. Analyzes results and generates visualizations
+3. Optionally selects top-N combinations (5, 10, or all 54)
+4. Submits all jobs to queue
+5. Waits for all running jobs to complete
+6. Analyzes results and generates visualizations
 
 **Output:**
 - CSV: `./benchmark_analysis/results_*.csv`
 - Plots: `./benchmark_analysis/*.png` (6 visualization plots)
+
+### Common Use Cases
+
+```bash
+# Quick validation (~$1, ~10 min)
+python scripts/run_full_benchmark.py --path <path> --top-n 5
+
+# Thorough analysis - recommended (~$41, ~2-3 hours)
+python scripts/run_full_benchmark.py --path <path> --top-n 10 --extended-run
+
+# Production quality (~$95, ~5-7 hours)
+python scripts/run_full_benchmark.py --path <path> --top-n 10 --production-run
+
+# Complete benchmark standard mode (~$75, ~4-6 hours)
+python scripts/run_full_benchmark.py --path <path> --full-run
+```
 
 ### Manual Workflow (Alternative)
 
@@ -82,13 +129,44 @@ python scripts/analyze_benchmark_results.py --benchmark-id <id> --output-dir ./a
 
 See **USAGE_GUIDE.md** for detailed instructions and **ANALYSIS_GUIDE.md** for analysis workflows.
 
+## Cost & Time Estimates
+
+All estimates based on GCP Cloud Run Jobs (n2-standard-8: 8 vCPU, 32GB RAM) in europe-west1 region.
+
+### Full Benchmark Matrix
+
+| Combinations | Run Mode | Iterations × Trials | Time Estimate | Cost Estimate (USD) |
+|-------------|----------|---------------------|---------------|---------------------|
+| **54 (Full)** | Test | 10 × 1 | ~1-2 hours | ~$10 |
+| **54 (Full)** | Standard | 1000 × 3 | ~4-6 hours | ~$75 |
+| **54 (Full)** | Extended | 2000 × 5 | ~10-15 hours | ~$220 |
+| **54 (Full)** | Production | 5000 × 5 | ~25-35 hours | ~$500 |
+| **10 (Top)** | Test | 10 × 1 | ~15-30 min | ~$2 |
+| **10 (Top)** | Standard | 1000 × 3 | ~1-2 hours | ~$14 |
+| **10 (Top)** | Extended | 2000 × 5 | ~2-3 hours | ~$41 |
+| **10 (Top)** | Production | 5000 × 5 | ~5-7 hours | ~$95 |
+| **5 (Top)** | Test | 10 × 1 | ~8-15 min | ~$1 |
+| **5 (Top)** | Standard | 1000 × 3 | ~40-70 min | ~$7 |
+| **5 (Top)** | Extended | 2000 × 5 | ~1-2 hours | ~$20 |
+| **5 (Top)** | Production | 5000 × 5 | ~3-4 hours | ~$50 |
+
+**Calculation details:**
+- Time per job: Iterations × Trials × ~0.15 seconds per iteration + ~30 seconds startup
+- Cost per job: 8 vCPU × job duration × $0.38/vCPU-hour + ~10% data/storage overhead
+
+**Recommendations:**
+- **Quick validation:** 5 combinations, test mode (~$1, 10 min)
+- **Thorough analysis:** 10 combinations, extended mode (~$41, 2-3 hours)
+- **Complete benchmark:** 54 combinations, standard mode (~$75, 4-6 hours)
+- **Production quality:** 10 combinations, production mode (~$95, 5-7 hours)
+
 ## Documentation
 
 ### Essential Documentation (5 files)
 
-1. **README.md** (this file) - PR requirements and quick start
+1. **README.md** (this file) - PR requirements, quick start, and cost estimates
 2. **IMPLEMENTATION_GUIDE.md** - What was implemented and how it works
-3. **USAGE_GUIDE.md** - How to execute benchmarks
+3. **USAGE_GUIDE.md** - How to execute benchmarks and troubleshoot
 4. **ANALYSIS_GUIDE.md** - How to analyze results
 5. **ARCHITECTURE.md** - System architecture
 
