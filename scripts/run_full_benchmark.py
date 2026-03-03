@@ -246,7 +246,7 @@ def save_temp_benchmark_config(config: Dict[str, Any]) -> str:
     return temp_file.name
 
 
-def run_benchmark_submission(config_path: str) -> str:
+def run_benchmark_submission(config_path: str, queue_name: str = DEFAULT_QUEUE) -> str:
     """
     Submit benchmark to queue.
     Returns benchmark_id for tracking.
@@ -258,7 +258,8 @@ def run_benchmark_submission(config_path: str) -> str:
     cmd = [
         "python3",
         "scripts/benchmark_mmm.py",
-        "--config", config_path
+        "--config", config_path,
+        "--queue-name", queue_name
     ]
     
     logger.info(f"🚀 Running: {' '.join(cmd)}")
@@ -433,7 +434,7 @@ Examples:
         logger.info("")
         
         # Step 1: Submit benchmark
-        benchmark_id = run_benchmark_submission(config_path)
+        benchmark_id = run_benchmark_submission(config_path, args.queue_name)
         logger.info("")
         
         # Clean up temp file
