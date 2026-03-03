@@ -41,6 +41,7 @@ try:
     import matplotlib.pyplot as plt
     import seaborn as sns
     import numpy as np
+
     PLOTTING_AVAILABLE = True
 except ImportError:
     PLOTTING_AVAILABLE = False
@@ -76,55 +77,87 @@ class BenchmarkAnalyzer:
             if blob.exists():
                 queue_data = json.loads(blob.download_as_bytes())
                 entries = queue_data.get("entries", [])
-                logger.debug(f"Loaded {len(entries)} queue entries from {queue_name}")
+                logger.debug(
+                    f"Loaded {len(entries)} queue entries from {queue_name}"
+                )
                 return entries
         except Exception as e:
             logger.warning(f"Could not load queue {queue_name}: {e}")
         return []
-    
+
     def map_variants_to_timestamps(
         self, variants: List[Dict], queue_entries: List[Dict]
     ) -> Dict[str, str]:
         """
         Map variant names to their actual result timestamps from queue.
-        
-        Extracts timestamp from gcs_prefix field in completed queue entries.
+
+        Checks (in priority order):
+        1. ``timestamp`` field set directly by process_queue_simple.py
+        2. ``expected_result_path`` (parse last path segment)
+        3. ``gcs_prefix`` (legacy field, for backward compatibility)
+
+        Accepts both COMPLETED and RUNNING entries so results can be read
+        while jobs are still in progress (useful for partial analysis).
+        Variants whose entry has none of these path fields are not mapped and
+        will fall back to recency-based search in ``_collect_variant_result``.
         """
         timestamp_map = {}
-        
+
         for variant in variants:
             variant_name = variant.get("benchmark_variant", "")
             if not variant_name:
                 continue
-                
-            # Find matching queue entry
+
+            # Find matching completed queue entry
             for entry in queue_entries:
                 params = entry.get("params", {})
                 entry_variant = params.get("benchmark_variant", "")
-                
-                if entry_variant == variant_name and entry.get("status") == "COMPLETED":
-                    # Extract timestamp from gcs_prefix
-                    # Format: gs://bucket/robyn/default/de/20260225_112345/
-                    gcs_prefix = entry.get("gcs_prefix", "")
-                    if gcs_prefix:
-                        parts = gcs_prefix.rstrip("/").split("/")
-                        if len(parts) >= 5:
-                            timestamp = parts[-1]
-                            timestamp_map[variant_name] = timestamp
-                            logger.debug(f"Mapped {variant_name} -> {timestamp}")
-                            break
-        
+
+                if entry_variant == variant_name and entry.get("status") in (
+                    "COMPLETED",
+                    "RUNNING",
+                ):
+                    timestamp = None
+
+                    # 1. Direct timestamp field (set by process_queue_simple.py)
+                    ts = entry.get("timestamp", "")
+                    if ts:
+                        timestamp = ts
+
+                    # 2. Parse from expected_result_path
+                    if not timestamp:
+                        erp = entry.get("expected_result_path", "")
+                        if erp:
+                            parts = erp.rstrip("/").split("/")
+                            if parts:
+                                timestamp = parts[-1]
+
+                    # 3. Legacy gcs_prefix field
+                    if not timestamp:
+                        gcs_prefix = entry.get("gcs_prefix", "")
+                        if gcs_prefix:
+                            parts = gcs_prefix.rstrip("/").split("/")
+                            if len(parts) >= 5:
+                                timestamp = parts[-1]
+
+                    if timestamp:
+                        timestamp_map[variant_name] = timestamp
+                        logger.debug(f"Mapped {variant_name} -> {timestamp}")
+                        break
+
         logger.info(f"Mapped {len(timestamp_map)} variants to timestamps")
         return timestamp_map
 
-    def collect_results(self, benchmark_id: str, queue_name: str = "default-dev") -> Optional[pd.DataFrame]:
+    def collect_results(
+        self, benchmark_id: str, queue_name: str = "default-dev"
+    ) -> Optional[pd.DataFrame]:
         """
         Collect results from a benchmark run.
-        
+
         Returns DataFrame with all benchmark results.
         """
         logger.info(f"Collecting results for benchmark: {benchmark_id}")
-        
+
         # Load benchmark plan
         plan_path = f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
         try:
@@ -132,7 +165,7 @@ class BenchmarkAnalyzer:
             if not blob.exists():
                 logger.error(f"Benchmark plan not found: {plan_path}")
                 return None
-            
+
             plan = json.loads(blob.download_as_bytes())
             variants = plan.get("variants", [])
             logger.info(f"Found {len(variants)} variants in benchmark plan")
@@ -147,7 +180,9 @@ class BenchmarkAnalyzer:
         # Collect results for each variant
         results = []
         for variant in variants:
-            result = self._collect_variant_result(variant, benchmark_id, timestamp_map)
+            result = self._collect_variant_result(
+                variant, benchmark_id, timestamp_map
+            )
             if result:
                 results.append(result)
 
@@ -160,16 +195,21 @@ class BenchmarkAnalyzer:
         return df
 
     def _collect_variant_result(
-        self, variant: Dict[str, Any], benchmark_id: str, timestamp_map: Dict[str, str] = None
+        self,
+        variant: Dict[str, Any],
+        benchmark_id: str,
+        timestamp_map: Dict[str, str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Collect result for a single variant."""
         country = variant.get("country", "")
         revision = variant.get("revision", "default")
         variant_name = variant.get("benchmark_variant", "")
-        
+
         logger.info(f"Collecting result for variant: {variant_name}")
-        logger.debug(f"  Variant config: adstock={variant.get('adstock')}, train_size={variant.get('train_size')}")
-        
+        logger.debug(
+            f"  Variant config: adstock={variant.get('adstock')}, train_size={variant.get('train_size')}"
+        )
+
         # Get timestamp from map (actual execution timestamp)
         timestamp = None
         if timestamp_map:
@@ -177,50 +217,62 @@ class BenchmarkAnalyzer:
             if timestamp:
                 logger.info(f"  Using timestamp from queue: {timestamp}")
             else:
-                logger.warning(f"  No timestamp found in map for {variant_name}")
-        
+                logger.warning(
+                    f"  No timestamp found in map for {variant_name}"
+                )
+
         # If we have timestamp, use exact path
         if timestamp:
-            exact_path = f"robyn/{revision}/{country}/{timestamp}/model_summary.json"
+            exact_path = (
+                f"robyn/{revision}/{country}/{timestamp}/model_summary.json"
+            )
             logger.info(f"  Trying exact path: {exact_path}")
             try:
                 blob = self.bucket.blob(exact_path)
                 if blob.exists():
                     summary = json.loads(blob.download_as_bytes())
                     logger.info(f"  ✓ Found result at exact path")
-                    logger.debug(f"  Summary has: adstock={summary.get('adstock')}, train_size={summary.get('train_size')}")
+                    logger.debug(
+                        f"  Summary has: adstock={summary.get('adstock')}, train_size={summary.get('train_size')}"
+                    )
                     return self._extract_metrics(summary, variant)
                 else:
                     logger.warning(f"  ✗ Exact path not found: {exact_path}")
             except Exception as e:
                 logger.error(f"  ✗ Error loading exact path {exact_path}: {e}")
-        
+
         # Fallback: Search for model_summary.json in expected location
         prefix = f"robyn/{revision}/{country}/"
         logger.info(f"  Falling back to search in: {prefix}")
-        
+
         try:
             blobs = list(self.bucket.list_blobs(prefix=prefix))
             summaries = [b for b in blobs if "model_summary.json" in b.name]
             logger.info(f"  Found {len(summaries)} model_summary.json files")
-            
+
             # Find most recent matching summary
-            for i, blob in enumerate(sorted(summaries, key=lambda b: b.time_created, reverse=True)):
+            for i, blob in enumerate(
+                sorted(summaries, key=lambda b: b.time_created, reverse=True)
+            ):
                 try:
-                    logger.debug(f"  Checking blob {i+1}/{len(summaries)}: {blob.name}")
+                    logger.debug(
+                        f"  Checking blob {i+1}/{len(summaries)}: {blob.name}"
+                    )
                     summary = json.loads(blob.download_as_bytes())
                     if self._matches_variant(summary, variant):
-                        logger.info(f"  ✓ Found matching result via fallback at {blob.name}")
+                        logger.info(
+                            f"  ✓ Found matching result via fallback at {blob.name}"
+                        )
                         return self._extract_metrics(summary, variant)
                     else:
                         logger.debug(f"    Doesn't match variant config")
                 except Exception as e:
                     logger.debug(f"    Error loading {blob.name}: {e}")
                     continue
-                    
+
         except Exception as e:
             logger.error(f"  ✗ Error searching for results: {e}")
-        
+
         logger.error(f"❌ NO RESULTS FOUND for variant: {variant_name}")
         return None
 
@@ -229,16 +281,19 @@ class BenchmarkAnalyzer:
     ) -> bool:
         """Check if summary matches variant configuration."""
         # Match on country
-        if summary.get("country", "").lower() != variant.get("country", "").lower():
+        if (
+            summary.get("country", "").lower()
+            != variant.get("country", "").lower()
+        ):
             return False
-        
+
         # Match on adstock if available
         variant_adstock = variant.get("adstock", "")
         summary_adstock = summary.get("adstock", "")
         if variant_adstock and summary_adstock:
             if variant_adstock.lower() != summary_adstock.lower():
                 return False
-        
+
         # Match on train_size if available
         variant_train = variant.get("train_size")
         summary_train = summary.get("train_size")
@@ -249,14 +304,14 @@ class BenchmarkAnalyzer:
                     return False
             except (ValueError, TypeError):
                 pass
-        
+
         # Match on iterations if available
         variant_iter = variant.get("iterations")
         summary_iter = summary.get("iterations")
         if variant_iter and summary_iter:
             if int(variant_iter) != int(summary_iter):
                 return False
-        
+
         return True
 
     def _extract_metrics(
@@ -264,14 +319,16 @@ class BenchmarkAnalyzer:
     ) -> Dict[str, Any]:
         """Extract metrics from model summary."""
         best_model = summary.get("best_model", {})
-        
+
         # Extract config from summary first, fall back to variant
         # This is crucial because model_summary.json has the actual config used
         adstock = summary.get("adstock") or variant.get("adstock", "")
         train_size = summary.get("train_size") or variant.get("train_size", "")
-        
+
         # Convert iterations and trials to int (they should be numeric)
-        iterations_raw = summary.get("iterations") or variant.get("iterations", 0)
+        iterations_raw = summary.get("iterations") or variant.get(
+            "iterations", 0
+        )
         trials_raw = summary.get("trials") or variant.get("trials", 0)
         try:
             iterations = int(iterations_raw) if iterations_raw else 0
@@ -281,15 +338,23 @@ class BenchmarkAnalyzer:
             trials = int(trials_raw) if trials_raw else 0
         except (ValueError, TypeError):
             trials = 0
-            
-        resample_freq = summary.get("resample_freq") or variant.get("resample_freq", "none")
-        
+
+        resample_freq = summary.get("resample_freq") or variant.get(
+            "resample_freq", "none"
+        )
+
         # Log what we extracted for debugging
         variant_name = variant.get("benchmark_variant", "unknown")
         logger.debug(f"Extracting metrics for {variant_name}:")
-        logger.debug(f"  adstock: {adstock} (from {'summary' if summary.get('adstock') else 'variant'})")
-        logger.debug(f"  train_size: {train_size} (from {'summary' if summary.get('train_size') else 'variant'})")
-        logger.debug(f"  iterations: {iterations} (from {'summary' if summary.get('iterations') else 'variant'})")
+        logger.debug(
+            f"  adstock: {adstock} (from {'summary' if summary.get('adstock') else 'variant'})"
+        )
+        logger.debug(
+            f"  train_size: {train_size} (from {'summary' if summary.get('train_size') else 'variant'})"
+        )
+        logger.debug(
+            f"  iterations: {iterations} (from {'summary' if summary.get('iterations') else 'variant'})"
+        )
         logger.debug(f"  rsq_val: {best_model.get('rsq_val')}")
 
         return {
@@ -319,11 +384,14 @@ class BenchmarkAnalyzer:
         }
 
     def export_csv(
-        self, df: pd.DataFrame, benchmark_id: str, local_path: Optional[str] = None
+        self,
+        df: pd.DataFrame,
+        benchmark_id: str,
+        local_path: Optional[str] = None,
     ) -> str:
         """Export results to CSV."""
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        
+
         # Export to GCS
         gcs_path = f"{BENCHMARK_ROOT}/{benchmark_id}/results_{timestamp}.csv"
         csv_data = df.to_csv(index=False)
@@ -349,14 +417,16 @@ class BenchmarkAnalyzer:
     ):
         """Generate analysis plots."""
         if not PLOTTING_AVAILABLE:
-            logger.error("Matplotlib/seaborn not available. Cannot generate plots.")
+            logger.error(
+                "Matplotlib/seaborn not available. Cannot generate plots."
+            )
             return
 
         logger.info("Generating analysis plots...")
-        
+
         # Set style
         sns.set_style("whitegrid")
-        plt.rcParams['figure.figsize'] = (12, 8)
+        plt.rcParams["figure.figsize"] = (12, 8)
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         plots_dir = f"{BENCHMARK_ROOT}/{benchmark_id}/plots_{timestamp}"
@@ -397,6 +467,7 @@ class BenchmarkAnalyzer:
         """Save plot to GCS and optionally local directory."""
         # Save to temporary file first
         import tempfile
+
         with tempfile.NamedTemporaryFile(
             suffix=f".{format}", delete=False
         ) as tmp:
@@ -442,18 +513,22 @@ class BenchmarkAnalyzer:
         )
 
         # Plot
-        sns.barplot(data=melted, x="benchmark_variant", y="R²", hue="Split", ax=ax)
-        ax.set_title("R² Comparison Across Variants", fontsize=16, fontweight="bold")
+        sns.barplot(
+            data=melted, x="benchmark_variant", y="R²", hue="Split", ax=ax
+        )
+        ax.set_title(
+            "R² Comparison Across Variants", fontsize=16, fontweight="bold"
+        )
         ax.set_xlabel("Variant", fontsize=12)
         ax.set_ylabel("R²", fontsize=12)
         ax.set_ylim(0, 1)
-        
+
         # Rotate labels if many variants
         if n_variants > 15:
             plt.xticks(rotation=45, ha="right", fontsize=9)
         else:
             plt.xticks(rotation=45, ha="right")
-            
+
         ax.legend(title="Data Split")
         ax.grid(axis="y", alpha=0.3)
 
@@ -487,16 +562,18 @@ class BenchmarkAnalyzer:
         sns.barplot(
             data=melted, x="benchmark_variant", y="NRMSE", hue="Split", ax=ax
         )
-        ax.set_title("NRMSE Comparison Across Variants", fontsize=16, fontweight="bold")
+        ax.set_title(
+            "NRMSE Comparison Across Variants", fontsize=16, fontweight="bold"
+        )
         ax.set_xlabel("Variant", fontsize=12)
         ax.set_ylabel("NRMSE (lower is better)", fontsize=12)
-        
+
         # Rotate labels if many variants
         if n_variants > 15:
             plt.xticks(rotation=45, ha="right", fontsize=9)
         else:
             plt.xticks(rotation=45, ha="right")
-            
+
         ax.legend(title="Data Split")
         ax.grid(axis="y", alpha=0.3)
 
@@ -526,11 +603,11 @@ class BenchmarkAnalyzer:
         )
         ax.set_xlabel("Decomposition RSSD (lower is better)", fontsize=12)
         ax.set_ylabel("Variant", fontsize=12)
-        
+
         # Adjust label size for many variants
         if n_variants > 20:
-            ax.tick_params(axis='y', labelsize=8)
-        
+            ax.tick_params(axis="y", labelsize=8)
+
         ax.grid(axis="x", alpha=0.3)
 
         return fig
@@ -550,7 +627,9 @@ class BenchmarkAnalyzer:
                 plot_df["train_val_gap"] = (
                     plot_df["rsq_train"] - plot_df["rsq_val"]
                 )
-                plot_df["val_test_gap"] = plot_df["rsq_val"] - plot_df["rsq_test"]
+                plot_df["val_test_gap"] = (
+                    plot_df["rsq_val"] - plot_df["rsq_test"]
+                )
 
                 ax1.scatter(
                     plot_df["train_val_gap"],
@@ -570,7 +649,9 @@ class BenchmarkAnalyzer:
                 ax1.axvline(x=0, color="r", linestyle="--", alpha=0.3)
                 ax1.set_xlabel("Train-Val Gap (R²)", fontsize=12)
                 ax1.set_ylabel("Val-Test Gap (R²)", fontsize=12)
-                ax1.set_title("R² Performance Gaps", fontsize=14, fontweight="bold")
+                ax1.set_title(
+                    "R² Performance Gaps", fontsize=14, fontweight="bold"
+                )
                 ax1.grid(alpha=0.3)
 
         # NRMSE gaps
@@ -606,7 +687,9 @@ class BenchmarkAnalyzer:
                 ax2.axvline(x=0, color="r", linestyle="--", alpha=0.3)
                 ax2.set_xlabel("Train-Val Gap (NRMSE)", fontsize=12)
                 ax2.set_ylabel("Val-Test Gap (NRMSE)", fontsize=12)
-                ax2.set_title("NRMSE Performance Gaps", fontsize=14, fontweight="bold")
+                ax2.set_title(
+                    "NRMSE Performance Gaps", fontsize=14, fontweight="bold"
+                )
                 ax2.grid(alpha=0.3)
 
         plt.tight_layout()
@@ -634,18 +717,23 @@ class BenchmarkAnalyzer:
             return None
 
         corr = df[available_cols].corr()
-        
+
         # Check if all correlations are NaN (happens in test runs with no variation)
         if corr.isna().all().all():
-            logger.warning("No correlation data - metrics show no variation (test run?)")
+            logger.warning(
+                "No correlation data - metrics show no variation (test run?)"
+            )
             ax.text(
-                0.5, 0.5,
+                0.5,
+                0.5,
                 "⚠️ No Correlation Data\n\n"
                 "Metrics show no variation across variants.\n"
                 "This typically happens in test runs with low iterations.\n\n"
                 "Consider using --full-run for meaningful comparison.",
-                ha='center', va='center', fontsize=14,
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+                ha="center",
+                va="center",
+                fontsize=14,
+                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
             )
             ax.set_title("Metric Correlations", fontsize=16, fontweight="bold")
             ax.set_xticks([])
@@ -678,9 +766,11 @@ class BenchmarkAnalyzer:
                 ["benchmark_variant", "rsq_val"]
             ]
             ax.barh(top_models["benchmark_variant"], top_models["rsq_val"])
-            ax.set_title("Top 10 Models by R² Validation", fontsize=14, fontweight="bold")
+            ax.set_title(
+                "Top 10 Models by R² Validation", fontsize=14, fontweight="bold"
+            )
             ax.set_xlabel("R² Validation", fontsize=12)
-            ax.tick_params(axis='y', labelsize=9)
+            ax.tick_params(axis="y", labelsize=9)
             ax.grid(axis="x", alpha=0.3)
 
         # Best by NRMSE validation
@@ -691,10 +781,12 @@ class BenchmarkAnalyzer:
             ]
             ax.barh(top_models["benchmark_variant"], top_models["nrmse_val"])
             ax.set_title(
-                "Top 10 Models by NRMSE Validation", fontsize=14, fontweight="bold"
+                "Top 10 Models by NRMSE Validation",
+                fontsize=14,
+                fontweight="bold",
             )
             ax.set_xlabel("NRMSE Validation", fontsize=12)
-            ax.tick_params(axis='y', labelsize=9)
+            ax.tick_params(axis="y", labelsize=9)
             ax.grid(axis="x", alpha=0.3)
 
         # Best by decomp RSSD
@@ -704,16 +796,20 @@ class BenchmarkAnalyzer:
                 ["benchmark_variant", "decomp_rssd"]
             ]
             ax.barh(top_models["benchmark_variant"], top_models["decomp_rssd"])
-            ax.set_title("Top 10 Models by Decomp RSSD", fontsize=14, fontweight="bold")
+            ax.set_title(
+                "Top 10 Models by Decomp RSSD", fontsize=14, fontweight="bold"
+            )
             ax.set_xlabel("Decomp RSSD", fontsize=12)
-            ax.tick_params(axis='y', labelsize=9)
+            ax.tick_params(axis="y", labelsize=9)
             ax.grid(axis="x", alpha=0.3)
 
         # Generalization (smallest val-test gap)
         if "rsq_val" in df.columns and "rsq_test" in df.columns:
             ax = axes[1, 1]
             df_temp = df.copy()
-            df_temp["val_test_gap"] = abs(df_temp["rsq_val"] - df_temp["rsq_test"])
+            df_temp["val_test_gap"] = abs(
+                df_temp["rsq_val"] - df_temp["rsq_test"]
+            )
             top_models = df_temp.nsmallest(10, "val_test_gap")[
                 ["benchmark_variant", "val_test_gap"]
             ]
@@ -724,7 +820,7 @@ class BenchmarkAnalyzer:
                 fontweight="bold",
             )
             ax.set_xlabel("Val-Test Gap (R²)", fontsize=12)
-            ax.tick_params(axis='y', labelsize=9)
+            ax.tick_params(axis="y", labelsize=9)
             ax.grid(axis="x", alpha=0.3)
 
         plt.tight_layout(pad=2.0)  # More padding for readability
@@ -763,36 +859,50 @@ class BenchmarkAnalyzer:
         if "rsq_val" in df.columns and not df["rsq_val"].isna().all():
             try:
                 best_idx = df["rsq_val"].idxmax()
-                summary["best_by_rsq_val"] = df.loc[best_idx, "benchmark_variant"]
+                summary["best_by_rsq_val"] = df.loc[
+                    best_idx, "benchmark_variant"
+                ]
             except (ValueError, KeyError):
-                logger.warning("Could not determine best variant by R² validation")
+                logger.warning(
+                    "Could not determine best variant by R² validation"
+                )
 
         if "nrmse_val" in df.columns and not df["nrmse_val"].isna().all():
             try:
                 best_idx = df["nrmse_val"].idxmin()
-                summary["best_by_nrmse_val"] = df.loc[best_idx, "benchmark_variant"]
+                summary["best_by_nrmse_val"] = df.loc[
+                    best_idx, "benchmark_variant"
+                ]
             except (ValueError, KeyError):
-                logger.warning("Could not determine best variant by NRMSE validation")
+                logger.warning(
+                    "Could not determine best variant by NRMSE validation"
+                )
 
         if "decomp_rssd" in df.columns and not df["decomp_rssd"].isna().all():
             try:
                 best_idx = df["decomp_rssd"].idxmin()
-                summary["best_by_decomp_rssd"] = df.loc[best_idx, "benchmark_variant"]
+                summary["best_by_decomp_rssd"] = df.loc[
+                    best_idx, "benchmark_variant"
+                ]
             except (ValueError, KeyError):
-                logger.warning("Could not determine best variant by decomp RSSD")
-        
+                logger.warning(
+                    "Could not determine best variant by decomp RSSD"
+                )
+
         # Check for test run quality issues
         if "iterations" in df.columns:
             try:
                 # Convert to numeric, handling any string issues
-                iterations_col = pd.to_numeric(df["iterations"], errors='coerce')
+                iterations_col = pd.to_numeric(
+                    df["iterations"], errors="coerce"
+                )
                 avg_iterations = iterations_col.mean()
                 if not pd.isna(avg_iterations) and avg_iterations < 100:
                     summary["test_run_warning"] = True
                     summary["avg_iterations"] = int(avg_iterations)
             except Exception as e:
                 logger.warning(f"Could not check test run quality: {e}")
-        
+
         return summary
 
 
@@ -828,7 +938,7 @@ def main():
     )
 
     args = parser.parse_args()
-    
+
     # Set logging level
     if args.debug:
         logging.basicConfig(
@@ -866,34 +976,40 @@ def main():
     logger.info("SUMMARY STATISTICS")
     logger.info("=" * 80)
     logger.info(f"Total variants: {summary['total_variants']}")
-    
+
     # Check for test run warning
     if summary.get("test_run_warning"):
         logger.warning("")
         logger.warning("⚠️  TEST RUN DETECTED")
-        logger.warning(f"Average iterations: {summary.get('avg_iterations', 'unknown')}")
+        logger.warning(
+            f"Average iterations: {summary.get('avg_iterations', 'unknown')}"
+        )
         logger.warning("")
-        logger.warning("Results may show little variation between configurations.")
+        logger.warning(
+            "Results may show little variation between configurations."
+        )
         logger.warning("For meaningful comparison, consider running with:")
         logger.warning("  - 1000+ iterations")
         logger.warning("  - 3+ trials")
         logger.warning("")
         logger.warning("Use --full-run flag for production analysis.")
         logger.warning("")
-    
+
     if "best_by_rsq_val" in summary:
         logger.info(f"Best by R² validation: {summary['best_by_rsq_val']}")
     if "best_by_nrmse_val" in summary:
         logger.info(f"Best by NRMSE validation: {summary['best_by_nrmse_val']}")
     if "best_by_decomp_rssd" in summary:
         logger.info(f"Best by decomp RSSD: {summary['best_by_decomp_rssd']}")
-    
+
     logger.info("=" * 80)
 
     # Generate plots
     if not args.no_plots:
         if not PLOTTING_AVAILABLE:
-            logger.error("Cannot generate plots. Install matplotlib and seaborn:")
+            logger.error(
+                "Cannot generate plots. Install matplotlib and seaborn:"
+            )
             logger.error("  pip install matplotlib seaborn")
             return 1
 
@@ -903,9 +1019,13 @@ def main():
 
     logger.info("\n✅ Analysis complete!")
     logger.info(f"\nView results:")
-    logger.info(f"  CSV: gs://{GCS_BUCKET}/{BENCHMARK_ROOT}/{args.benchmark_id}/")
-    logger.info(f"  Plots: gs://{GCS_BUCKET}/{BENCHMARK_ROOT}/{args.benchmark_id}/plots_*/")
-    
+    logger.info(
+        f"  CSV: gs://{GCS_BUCKET}/{BENCHMARK_ROOT}/{args.benchmark_id}/"
+    )
+    logger.info(
+        f"  Plots: gs://{GCS_BUCKET}/{BENCHMARK_ROOT}/{args.benchmark_id}/plots_*/"
+    )
+
     if args.output_dir:
         logger.info(f"  Local: {args.output_dir}")
 

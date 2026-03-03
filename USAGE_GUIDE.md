@@ -9,10 +9,25 @@ The easiest way to run a complete benchmark workflow:
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
 
-# Full production run (1000 iterations, 3 trials)
+# Standard run (1000 iterations, 3 trials)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json \
   --full-run
+
+# Extended run (2000 iterations, 5 trials)
+python scripts/run_full_benchmark.py \
+  --path <path_to_selected_columns.json> \
+  --extended-run
+
+# Production run (5000 iterations, 5 trials)
+python scripts/run_full_benchmark.py \
+  --path <path_to_selected_columns.json> \
+  --production-run
+
+# Top-N combinations
+python scripts/run_full_benchmark.py \
+  --path <path_to_selected_columns.json> \
+  --top-n 10 --extended-run
 
 # With custom queue name
 python scripts/run_full_benchmark.py \
@@ -249,10 +264,25 @@ python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --no-plo
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
 
-# Full production run
+# Standard run (1000 iterations, 3 trials)
 python scripts/run_full_benchmark.py \
   --path <path_to_selected_columns.json> \
   --full-run
+
+# Extended run (2000 iterations, 5 trials)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --extended-run
+
+# Production run (5000 iterations, 5 trials)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --production-run
+
+# Top-N combinations (5, 10, or 54)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --top-n 10 --extended-run
 
 # With custom queue
 python scripts/run_full_benchmark.py \
@@ -453,3 +483,115 @@ After successful execution:
 2. Collect results for analysis
 3. See **ANALYSIS_GUIDE.md** for result analysis
 4. Make configuration decisions based on findings
+
+---
+
+## Advanced Troubleshooting
+
+### Debugging Missing Columns in CSV
+
+If CSV results are missing columns (e.g., adstock, resample_freq), run analysis with `--debug` flag:
+
+```bash
+python scripts/analyze_benchmark_results.py \
+  --benchmark-id <your_benchmark_id> \
+  --debug
+```
+
+**Good output (config found):**
+```
+Extracting metrics for geometric_70_90_daily_spend_to_spend:
+  adstock: geometric (from summary)
+  train_size: 0.7 (from summary)
+  iterations: 10 (from variant)
+  rsq_val: 0.85
+```
+
+**Problem output (config missing):**
+```
+Extracting metrics for geometric_70_90_daily_spend_to_spend:
+  adstock:  (from variant)  ← Empty!
+```
+
+Verify fields in model_summary.json:
+```bash
+gsutil cat gs://mmm-app-output/robyn/default/de/<timestamp>/model_summary.json | jq .adstock
+gsutil cat gs://mmm-app-output/robyn/default/de/<timestamp>/model_summary.json | jq .train_size
+```
+
+### Debugging Empty Benchmark Page in Streamlit
+
+Open the Benchmark Results page and look for debug output:
+```
+🔍 DEBUG: Searching GCS path: gs://mmm-app-output/benchmarks/
+🔍 DEBUG: Found 3 prefixes
+  - Found: comprehensive_benchmark_20260122_113141_20260225_112436
+✅ DEBUG: Total benchmarks found: 2
+```
+
+**No benchmarks found (0 prefixes):** Run a benchmark first:
+```bash
+python scripts/run_full_benchmark.py --path <path>
+```
+
+**Permission error:** Re-authenticate:
+```bash
+gcloud auth application-default login
+```
+
+**Module not found:** Install requirements:
+```bash
+pip install -r requirements.txt
+```
+
+### Debugging Result Collection
+
+Run analysis with debug flag and save to log:
+```bash
+python scripts/analyze_benchmark_results.py --benchmark-id <id> --debug 2>&1 | tee debug.log
+```
+
+**Check for missing timestamps:**
+```bash
+grep "No timestamp found" debug.log
+```
+
+**Check for failed result collections:**
+```bash
+grep "NO RESULTS FOUND" debug.log
+```
+
+**For each failed variant, verify in GCS:**
+```bash
+gsutil ls gs://mmm-app-output/robyn/default/de/ | tail -20
+```
+
+**Check queue entries:**
+```bash
+gsutil cat gs://mmm-app-output/robyn-queues/default-dev/queue.json | jq '.[] | select(.status == "completed") | .benchmark_variant'
+```
+
+### Expected File Structure
+
+```
+gs://mmm-app-output/
+├── benchmarks/
+│   └── comprehensive_benchmark_20260122_113141_20260225_112436/
+│       ├── plan.json
+│       ├── results_20260225_114052.csv
+│       └── plots_20260225_114053/
+│           ├── rsq_comparison.png
+│           ├── nrmse_comparison.png
+│           └── ...
+├── robyn/
+│   └── default/
+│       └── de/
+│           ├── 20260225_112436/
+│           │   ├── model_summary.json  ← Must have config fields
+│           │   ├── console.log
+│           │   └── ...
+│           └── ...
+└── robyn-queues/
+    └── default-dev/
+        └── queue.json  ← Must have completed entries with gcs_prefix
+```
