@@ -52,6 +52,125 @@ GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 BENCHMARK_ROOT = "benchmarks"
 
 
+def _resample_freq_to_frequency(resample_freq: Optional[str]) -> str:
+    """Map a resample_freq value to a frequency key used in ranges config.
+
+    Args:
+        resample_freq: The resample_freq field value from a variant
+            (e.g. "none", "W", "MS").
+
+    Returns:
+        One of "daily", "weekly", or "monthly".
+    """
+    freq_upper = (resample_freq or "").upper().strip()
+    if freq_upper in ("W", "WEEKLY"):
+        return "weekly"
+    if freq_upper in ("M", "MS", "MONTHLY"):
+        return "monthly"
+    return "daily"
+
+
+class HyperparameterRangesConfig:
+    """Loads and queries a generic hyperparameter ranges config (v2 format).
+
+    The config JSON contains per-frequency, per-adstock-type,
+    per-channel-type, and per-preset ranges for Robyn hyperparameters.
+    """
+
+    def __init__(self, config_path: str):
+        with open(config_path) as f:
+            self.config = json.load(f)
+
+    def get_ranges(
+        self,
+        frequency: str,
+        adstock_type: str,
+        channel_type: Optional[str],
+        preset: str = "balanced",
+    ) -> Optional[Dict[str, List[float]]]:
+        """Return hyperparameter ranges for the given combination.
+
+        Falls back to the ``_default`` entry when no channel-specific
+        ranges exist for the requested ``adstock_type``.
+
+        Args:
+            frequency: One of "daily", "weekly", "monthly".
+            adstock_type: One of "geometric", "weibull_cdf", "weibull_pdf".
+            channel_type: Channel type key (e.g. "search_brand"), or None
+                to use the ``_default`` entry.
+            preset: One of "conservative", "balanced", "exploratory".
+
+        Returns:
+            Dict with range lists (e.g. ``{"alpha": [0.5, 3.0], ...}``),
+            or None if the combination is not found.
+        """
+        ranges = self.config.get("ranges", {})
+        freq_ranges = ranges.get(frequency, {})
+        adstock_ranges = freq_ranges.get(adstock_type, {})
+
+        # Try the requested channel type first, then fall back to _default.
+        channel_ranges = None
+        if channel_type:
+            channel_ranges = adstock_ranges.get(channel_type)
+        if channel_ranges is None:
+            channel_ranges = adstock_ranges.get("_default")
+        if channel_ranges is None:
+            return None
+
+        return channel_ranges.get(preset)
+
+    def resolve_custom_hyperparameters(
+        self,
+        var_names: List[str],
+        adstock_type: str,
+        frequency: str,
+        channel_type_mapping: Dict[str, str],
+        preset: str = "balanced",
+    ) -> Dict[str, Any]:
+        """Build a ``custom_hyperparameters`` dict for all variables.
+
+        Each variable is looked up using the channel type from
+        ``channel_type_mapping``.  Variables without a mapping entry
+        use the ``_default`` ranges for the adstock type.
+
+        Args:
+            var_names: List of paid-media or organic variable names.
+            adstock_type: Adstock type ("geometric", "weibull_cdf", …).
+            frequency: Frequency key ("daily", "weekly", "monthly").
+            channel_type_mapping: Maps variable names to channel types.
+            preset: Preset to use ("balanced", "conservative", "exploratory").
+
+        Returns:
+            Dict with keys like ``"{var}_alphas"``, ``"{var}_thetas"``, etc.
+        """
+        custom_hp: Dict[str, Any] = {}
+
+        for var_name in var_names:
+            channel_type = channel_type_mapping.get(var_name)
+            ranges = self.get_ranges(
+                frequency, adstock_type, channel_type, preset
+            )
+            if ranges is None:
+                logger.debug(
+                    f"No ranges found for {var_name} "
+                    f"({frequency}/{adstock_type}/{channel_type}/{preset})"
+                )
+                continue
+
+            if "alpha" in ranges:
+                custom_hp[f"{var_name}_alphas"] = ranges["alpha"]
+            if "gamma" in ranges:
+                custom_hp[f"{var_name}_gammas"] = ranges["gamma"]
+            if "theta" in ranges:
+                custom_hp[f"{var_name}_thetas"] = ranges["theta"]
+            if "shape" in ranges:
+                custom_hp[f"{var_name}_shapes"] = ranges["shape"]
+            if "scale" in ranges:
+                custom_hp[f"{var_name}_scales"] = ranges["scale"]
+
+        return custom_hp
+
+
 class BenchmarkConfig:
     """Configuration for a benchmark test run."""
 
@@ -98,6 +217,37 @@ class BenchmarkConfig:
     def trials(self) -> int:
         """Robyn trials per config."""
         return self.config.get("trials", 5)
+
+    @property
+    def hyperparameter_ranges_config(self) -> Optional[str]:
+        """Optional path to a hyperparameter ranges config JSON file.
+
+        When set, per-channel hyperparameter ranges are resolved from
+        this file and passed as ``custom_hyperparameters`` to each job.
+        The path is relative to the repository root.
+        """
+        return self.config.get("hyperparameter_ranges_config")
+
+    @property
+    def channel_type_mapping(self) -> Dict[str, str]:
+        """Map of variable name → channel type used for range lookups.
+
+        Example::
+
+            {
+                "GA_BRAND_SESSIONS": "search_brand",
+                "TV_COSTS": "tv_offline"
+            }
+        """
+        return self.config.get("channel_type_mapping", {})
+
+    @property
+    def hyperparameter_preset(self) -> str:
+        """Preset to use when resolving hyperparameter ranges.
+
+        One of "conservative", "balanced" (default), or "exploratory".
+        """
+        return self.config.get("hyperparameter_preset", "balanced")
 
 
 class BenchmarkRunner:
@@ -168,20 +318,31 @@ class BenchmarkRunner:
     def generate_variants(
         self, base_config: Dict[str, Any], benchmark_config: BenchmarkConfig
     ) -> List[Dict[str, Any]]:
-        """Generate test configuration variants."""
-        variant_specs = benchmark_config.variants
+        """Generate test configuration variants.
+
+        After building variants from dimension specs, applies per-channel
+        hyperparameter ranges if ``hyperparameter_ranges_config`` is set
+        in the benchmark config.
+        """
         combination_mode = benchmark_config.config.get(
             "combination_mode", "single"
         )
 
         if combination_mode == "cartesian":
             # Generate cartesian product of all dimensions
-            return self._generate_cartesian_variants(
+            variants = self._generate_cartesian_variants(
                 base_config, benchmark_config
             )
         else:
             # Generate variants for each dimension separately (default)
-            return self._generate_single_variants(base_config, benchmark_config)
+            variants = self._generate_single_variants(
+                base_config, benchmark_config
+            )
+
+        # Apply per-channel hyperparameter ranges when configured.
+        variants = self._apply_hyperparameter_ranges(variants, benchmark_config)
+
+        return variants
 
     def _generate_single_variants(
         self, base_config: Dict[str, Any], benchmark_config: BenchmarkConfig
@@ -465,6 +626,102 @@ class BenchmarkRunner:
             variants.append(variant)
 
         return variants
+
+    def _apply_hyperparameter_ranges(
+        self,
+        variants: List[Dict[str, Any]],
+        benchmark_config: BenchmarkConfig,
+    ) -> List[Dict[str, Any]]:
+        """Apply per-channel hyperparameter ranges to variants.
+
+        When ``benchmark_config.hyperparameter_ranges_config`` is set,
+        this method loads the ranges config file, resolves per-channel
+        hyperparameter ranges for every variant (based on its adstock
+        type and resample frequency), and stores the result as
+        ``custom_hyperparameters`` on the variant.  The
+        ``hyperparameter_preset`` field is also set to ``"Custom"`` so
+        the R training script uses the resolved ranges directly.
+
+        Variants that already carry ``custom_hyperparameters`` are left
+        unchanged (their existing custom ranges take precedence).
+
+        Args:
+            variants: List of generated variant dicts.
+            benchmark_config: The active benchmark configuration.
+
+        Returns:
+            The same list of variants, with ``custom_hyperparameters``
+            added where applicable.
+        """
+        ranges_config_path = benchmark_config.hyperparameter_ranges_config
+        if not ranges_config_path:
+            return variants
+
+        # Resolve path relative to the repository root.
+        resolved_path = Path(ranges_config_path)
+        if not resolved_path.is_absolute():
+            resolved_path = Path(__file__).parent.parent / ranges_config_path
+
+        if not resolved_path.exists():
+            logger.warning(
+                f"Hyperparameter ranges config not found: "
+                f"{resolved_path}. Skipping per-channel ranges."
+            )
+            return variants
+
+        try:
+            hp_config = HyperparameterRangesConfig(str(resolved_path))
+        except Exception as e:
+            logger.warning(
+                f"Failed to load hyperparameter ranges config "
+                f"'{resolved_path}': {e}. Skipping per-channel ranges."
+            )
+            return variants
+
+        channel_type_mapping = benchmark_config.channel_type_mapping
+        preset = benchmark_config.hyperparameter_preset
+
+        logger.info(
+            f"Applying hyperparameter ranges from '{resolved_path.name}' "
+            f"(preset: {preset}) to {len(variants)} variant(s)"
+        )
+
+        updated_variants = []
+        for variant in variants:
+            # Don't overwrite explicit custom_hyperparameters.
+            if "custom_hyperparameters" in variant:
+                updated_variants.append(variant)
+                continue
+
+            adstock_type = variant.get("adstock", "geometric")
+            resample_freq = variant.get("resample_freq", "none")
+            frequency = _resample_freq_to_frequency(resample_freq)
+
+            paid_media_vars = variant.get("paid_media_vars", [])
+            organic_vars = variant.get("organic_vars", [])
+            all_vars = list(paid_media_vars) + list(organic_vars)
+
+            custom_hp = hp_config.resolve_custom_hyperparameters(
+                all_vars,
+                adstock_type,
+                frequency,
+                channel_type_mapping,
+                preset,
+            )
+
+            updated = variant.copy()
+            if custom_hp:
+                updated["custom_hyperparameters"] = custom_hp
+                updated["hyperparameter_preset"] = "Custom"
+                logger.debug(
+                    f"Variant '{variant.get('benchmark_variant')}': "
+                    f"resolved {len(custom_hp)} hyperparameter keys "
+                    f"({frequency}/{adstock_type}/{preset})"
+                )
+
+            updated_variants.append(updated)
+
+        return updated_variants
 
     def save_benchmark_plan(
         self,
