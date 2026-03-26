@@ -78,6 +78,11 @@ Six benchmark types for systematic testing:
    - Three presets per combination: `conservative`, `balanced` (default), `exploratory`
    - Referenced by other benchmark configs via the `hyperparameter_ranges_config` field
 
+7. **channel_type_assignments.json** - Variable name → channel type mapping
+   - Maps spend/media variable names to the channel types in `generic_hyperparameter_ranges_v2.json`
+   - Maintained once and shared across benchmark configs
+   - Referenced by other benchmark configs via the `channel_type_assignments_config` field
+
 ## System Architecture
 
 ### Data Flow
@@ -152,6 +157,7 @@ ranges = hp_config.get_ranges(
 # => {"theta": [0.3, 0.8], "alpha": [0.5, 3.0], "gamma": [0.35, 1.0]}
 
 # Build custom_hyperparameters dict for a list of variable names
+# (channel_type_mapping is loaded from channel_type_assignments.json in practice)
 custom_hp = hp_config.resolve_custom_hyperparameters(
     var_names=["GA_BRAND_SESSIONS", "TV_COSTS"],
     adstock_type="geometric",
@@ -211,14 +217,12 @@ def verify_results_exist(gcs_path, timeout=10)
   // Path is relative to the repository root.
   "hyperparameter_ranges_config": "benchmarks/generic_hyperparameter_ranges_v2.json",
 
-  // Optional: map variable names to channel types defined in the ranges config.
-  // Variables not listed here fall back to the adstock type's _default ranges
+  // Optional: path to a JSON file that maps variable names to channel types.
+  // The file must have an "assignments" key (see channel_type_assignments.json).
+  // Variables not listed fall back to the adstock type's _default ranges
   // (available for weibull_cdf / weibull_pdf; geometric has no _default).
-  "channel_type_mapping": {
-    "GA_BRAND_SESSIONS": "search_brand",
-    "TV_COSTS": "tv_offline",
-    "META_SUPPLY_SESSIONS": "paid_social_performance"
-  },
+  // Takes precedence over the inline channel_type_mapping field below.
+  "channel_type_assignments_config": "benchmarks/channel_type_assignments.json",
 
   // Optional: which preset to use when looking up ranges.
   // One of "conservative", "balanced" (default), or "exploratory".

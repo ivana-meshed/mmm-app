@@ -1,0 +1,49 @@
+{
+  "name": "channel_type_assignments",
+  "description": "Maps spend and media variable names to channel types defined in generic_hyperparameter_ranges_v2.json. Used by the benchmark script to resolve per-channel hyperparameter ranges.",
+  "version": "1.0",
+  "assignments": {
+    "GA_BRAND_SESSIONS": "search_brand",
+    "GA_BRAND_COST": "search_brand",
+    "BING_BRAND_SESSIONS": "search_brand",
+    "BING_BRAND_COST": "search_brand",
+
+    "GA_DEMAND_SESSIONS": "search_nonbrand",
+    "GA_DEMAND_COST": "search_nonbrand",
+    "GA_SUPPLY_SESSIONS": "search_nonbrand",
+    "GA_SUPPLY_COST": "search_nonbrand",
+    "GA_COMPETITOR_SESSIONS": "search_nonbrand",
+    "GA_COMPETITOR_COST": "search_nonbrand",
+    "GA_TOTAL_SESSIONS_CUSTOM": "search_nonbrand",
+    "GA_TOTAL_COST_CUSTOM": "search_nonbrand",
+    "BING_DEMAND_SESSIONS": "search_nonbrand",
+    "BING_DEMAND_COST": "search_nonbrand",
+    "BING_SUPPLY_SESSIONS": "search_nonbrand",
+    "BING_SUPPLY_COST": "search_nonbrand",
+    "BING_COMPETITOR_SESSIONS": "search_nonbrand",
+    "BING_COMPETITOR_COST": "search_nonbrand",
+    "BING_TOTAL_SESSIONS_CUSTOM": "search_nonbrand",
+    "BING_TOTAL_COST_CUSTOM": "search_nonbrand",
+
+    "META_SUPPLY_SESSIONS": "paid_social_performance",
+    "META_SUPPLY_COST": "paid_social_performance",
+    "META_DEMAND_SESSIONS": "paid_social_performance",
+    "META_DEMAND_COST": "paid_social_performance",
+    "META_TOTAL_SESSIONS_CUSTOM": "paid_social_performance",
+    "META_TOTAL_COST_CUSTOM": "paid_social_performance",
+
+    "META_OTHER_COST": "digital_other_mixed",
+    "GA_OTHER_SESSIONS": "digital_other_mixed",
+    "GA_OTHER_COST": "digital_other_mixed",
+    "BING_OTHER_SESSIONS": "digital_other_mixed",
+    "BING_OTHER_COST": "digital_other_mixed",
+
+    "TV_COST": "tv_offline",
+    "TV_COSTS": "tv_offline",
+
+    "PARTNERSHIP_COSTS": "affiliate_partner",
+
+    "GA_APP_COST": "app_install",
+    "BING_APP_COST": "app_install"
+  }
+}

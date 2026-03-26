@@ -229,8 +229,35 @@ class BenchmarkConfig:
         return self.config.get("hyperparameter_ranges_config")
 
     @property
+    def channel_type_assignments_config(self) -> Optional[str]:
+        """Path to a JSON file that maps variable names to channel types.
+
+        The file must contain an ``"assignments"`` key whose value is a
+        flat dict of ``{"VARIABLE_NAME": "channel_type"}``.  The path is
+        relative to the repository root.
+
+        Example file (``benchmarks/channel_type_assignments.json``)::
+
+            {
+                "name": "channel_type_assignments",
+                "description": "...",
+                "assignments": {
+                    "GA_BRAND_SESSIONS": "search_brand",
+                    "TV_COSTS": "tv_offline"
+                }
+            }
+
+        Takes precedence over the inline ``channel_type_mapping`` field.
+        """
+        return self.config.get("channel_type_assignments_config")
+
+    @property
     def channel_type_mapping(self) -> Dict[str, str]:
         """Map of variable name → channel type used for range lookups.
+
+        Prefer ``channel_type_assignments_config`` (external file) over
+        this inline dict.  This property is kept for backward
+        compatibility when no external file is configured.
 
         Example::
 
@@ -678,7 +705,35 @@ class BenchmarkRunner:
             )
             return variants
 
-        channel_type_mapping = benchmark_config.channel_type_mapping
+        # Load channel type assignments from an external file when configured,
+        # otherwise fall back to the inline channel_type_mapping dict.
+        assignments_config_path = (
+            benchmark_config.channel_type_assignments_config
+        )
+        if assignments_config_path:
+            assignments_path = Path(assignments_config_path)
+            if not assignments_path.is_absolute():
+                assignments_path = (
+                    Path(__file__).parent.parent / assignments_config_path
+                )
+            try:
+                with open(assignments_path) as f:
+                    assignments_doc = json.load(f)
+                channel_type_mapping = assignments_doc.get("assignments", {})
+                logger.info(
+                    f"Loaded {len(channel_type_mapping)} channel type "
+                    f"assignment(s) from '{assignments_path.name}'"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load channel type assignments from "
+                    f"'{assignments_path}': {e}. Falling back to inline "
+                    f"channel_type_mapping."
+                )
+                channel_type_mapping = benchmark_config.channel_type_mapping
+        else:
+            channel_type_mapping = benchmark_config.channel_type_mapping
+
         preset = benchmark_config.hyperparameter_preset
 
         logger.info(
