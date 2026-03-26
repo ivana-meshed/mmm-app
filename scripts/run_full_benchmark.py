@@ -116,26 +116,51 @@ def download_selected_columns(gcs_path: str) -> Dict[str, Any]:
     return config
 
 
+ALL_ADSTOCK_VARIANTS = [
+    {
+        "name": "geometric",
+        "description": "Geometric adstock",
+        "adstock": "geometric",
+        "hyperparameter_preset": "Meshed recommend",
+    },
+    {
+        "name": "weibull_cdf",
+        "description": "Weibull CDF adstock",
+        "adstock": "weibull_cdf",
+        "hyperparameter_preset": "Meta default",
+    },
+    {
+        "name": "weibull_pdf",
+        "description": "Weibull PDF adstock",
+        "adstock": "weibull_pdf",
+        "hyperparameter_preset": "Meshed recommend",
+    },
+]
+
+
 def generate_benchmark_config(
     selected_columns: Dict[str, Any],
     version_from_path: str,
     run_mode: str = "test",
+    adstock_types: list = None,
 ) -> Dict[str, Any]:
     """
     Generate comprehensive benchmark configuration from selected_columns.json.
 
     Creates cartesian product of:
-    - 3 adstock types
+    - N adstock types (default: 1 – geometric only; use --all-adstock for all 3)
     - 3 train/test splits
     - 2 time aggregations
     - 3 spend→var mapping strategies
-    = 54 total combinations
+    = 18 combinations by default (geometric only), 54 when all adstock tested
 
     run_mode options:
     - "test": 10 iterations, 1 trial
     - "standard": 1000 iterations, 3 trials
     - "extended": 2000 iterations, 5 trials
     - "production": 5000 iterations, 5 trials
+
+    adstock_types: list of adstock names to include (None → geometric only)
     """
     country = selected_columns.get("country", "de")
     goal = selected_columns.get("selected_goal", "N_UPLOADS_WEB")
@@ -169,6 +194,31 @@ def generate_benchmark_config(
     }
     logger.info(mode_labels[run_mode])
 
+    # Resolve adstock variants to include
+    adstock_name_map = {v["name"]: v for v in ALL_ADSTOCK_VARIANTS}
+    if adstock_types:
+        selected_adstock = [
+            adstock_name_map[name]
+            for name in adstock_types
+            if name in adstock_name_map
+        ]
+    else:
+        selected_adstock = [adstock_name_map["geometric"]]
+
+    n_adstock = len(selected_adstock)
+    n_combos = n_adstock * 3 * 2 * 3  # adstock × splits × time_agg × spend_var
+    max_combinations = max(60, n_combos + 10)
+
+    adstock_label = (
+        ", ".join(v["name"] for v in selected_adstock)
+        if n_adstock > 1
+        else selected_adstock[0]["name"]
+    )
+    logger.info(
+        f"🎯 Adstock: {adstock_label} "
+        f"({'all types' if n_adstock == 3 else 'geometric only' if n_adstock == 1 else f'{n_adstock} types'})"
+    )
+
     # Build comprehensive benchmark config
     benchmark_config = {
         "name": f"comprehensive_benchmark_{timestamp}",
@@ -176,29 +226,10 @@ def generate_benchmark_config(
         "base_config": base_config,
         "iterations": iterations,
         "trials": trials,
-        "max_combinations": 60,
+        "max_combinations": max_combinations,
         "combination_mode": "cartesian",
         "variants": {
-            "adstock": [
-                {
-                    "name": "geometric",
-                    "description": "Geometric adstock",
-                    "adstock": "geometric",
-                    "hyperparameter_preset": "Meshed recommend",
-                },
-                {
-                    "name": "weibull_cdf",
-                    "description": "Weibull CDF adstock",
-                    "adstock": "weibull_cdf",
-                    "hyperparameter_preset": "Meta default",
-                },
-                {
-                    "name": "weibull_pdf",
-                    "description": "Weibull PDF adstock",
-                    "adstock": "weibull_pdf",
-                    "hyperparameter_preset": "Meshed recommend",
-                },
-            ],
+            "adstock": selected_adstock,
             "train_splits": [
                 {
                     "name": "70_90",
@@ -253,7 +284,9 @@ def generate_benchmark_config(
     logger.info(f"   Goal: {goal}")
     logger.info(f"   Iterations: {iterations}")
     logger.info(f"   Trials: {trials}")
-    logger.info(f"   Expected variants: 54 (3 × 3 × 2 × 3)")
+    logger.info(
+        f"   Expected variants: {n_combos} ({n_adstock} × 3 × 2 × 3)"
+    )
 
     return benchmark_config
 
@@ -400,17 +433,20 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Test run (default - reduced iterations/trials)
+  # Test run (default - geometric only, 18 combos, reduced iterations/trials)
   python scripts/run_full_benchmark.py --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
 
-  # Standard run (1000 iterations, 3 trials)
+  # Standard run, geometric only (18 combos, 1000 iterations, 3 trials)
   python scripts/run_full_benchmark.py --path <path> --full-run
 
-  # Extended run (2000 iterations, 5 trials)
-  python scripts/run_full_benchmark.py --path <path> --extended-run
+  # Standard run, all adstock types (54 combos, 1000 iterations, 3 trials)
+  python scripts/run_full_benchmark.py --path <path> --full-run --all-adstock --top-n 54
 
-  # Production run (5000 iterations, 5 trials)
-  python scripts/run_full_benchmark.py --path <path> --production-run
+  # Extended run, specific adstock types
+  python scripts/run_full_benchmark.py --path <path> --extended-run --adstock geometric weibull_cdf
+
+  # Production run, all adstock types
+  python scripts/run_full_benchmark.py --path <path> --production-run --all-adstock --top-n 54
 
   # Top-N combinations with extended run
   python scripts/run_full_benchmark.py --path <path> --top-n 10 --extended-run
@@ -446,9 +482,23 @@ Examples:
     parser.add_argument(
         "--top-n",
         type=int,
-        choices=[5, 10, 54],
-        default=54,
-        help="Number of combinations to test (5, 10, or 54 for all). Default: 54",
+        choices=[5, 10, 18, 54],
+        default=18,
+        help="Number of combinations to test (5, 10, 18, or 54 for all). Default: 18 (geometric only)",
+    )
+
+    adstock_group = parser.add_mutually_exclusive_group()
+    adstock_group.add_argument(
+        "--all-adstock",
+        action="store_true",
+        help="Test all 3 adstock types: geometric, weibull_cdf, weibull_pdf (54 combos)",
+    )
+    adstock_group.add_argument(
+        "--adstock",
+        nargs="+",
+        choices=["geometric", "weibull_cdf", "weibull_pdf"],
+        metavar="TYPE",
+        help="Adstock type(s) to test. Default: geometric only",
     )
 
     parser.add_argument(
@@ -481,11 +531,20 @@ Examples:
     else:
         run_mode = "test"
 
+    # Determine adstock types to test
+    if args.all_adstock:
+        adstock_types = ["geometric", "weibull_cdf", "weibull_pdf"]
+    elif args.adstock:
+        adstock_types = args.adstock
+    else:
+        adstock_types = None  # defaults to geometric only
+
     # Print header
     logger.info("=" * 80)
     logger.info("COMPLETE BENCHMARKING WORKFLOW")
     logger.info("=" * 80)
     logger.info(f"Mode: {run_mode.upper()}")
+    logger.info(f"Adstock: {', '.join(adstock_types) if adstock_types else 'geometric (default)'}")
     logger.info(f"Top-N combinations: {args.top_n}")
     logger.info(f"Config path: {args.path}")
     logger.info(f"Queue: {args.queue_name}")
@@ -508,6 +567,7 @@ Examples:
             selected_columns,
             version_from_path=version_from_path,
             run_mode=run_mode,
+            adstock_types=adstock_types,
         )
 
         # Save to temporary file
