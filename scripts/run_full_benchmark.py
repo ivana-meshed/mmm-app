@@ -27,9 +27,9 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 # Add app directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
@@ -116,26 +116,78 @@ def download_selected_columns(gcs_path: str) -> Dict[str, Any]:
     return config
 
 
+ALL_ADSTOCK_VARIANTS = [
+    {
+        "name": "geometric",
+        "description": "Geometric adstock",
+        "adstock": "geometric",
+        "hyperparameter_preset": "Meshed recommend",
+    },
+    {
+        "name": "weibull_cdf",
+        "description": "Weibull CDF adstock",
+        "adstock": "weibull_cdf",
+        "hyperparameter_preset": "Meta default",
+    },
+    {
+        "name": "weibull_pdf",
+        "description": "Weibull PDF adstock",
+        "adstock": "weibull_pdf",
+        "hyperparameter_preset": "Meshed recommend",
+    },
+]
+
+# Window-length variants expressed as weeks_back from end_date.
+# None means "use all available history" (no start_date override).
+ALL_WINDOW_VARIANTS: List[Dict[str, Any]] = [
+    {
+        "name": "full",
+        "description": "Full data window (all available history)",
+        "weeks_back": None,
+    },
+    {
+        "name": "2y",
+        "description": "Last 2 years (~104 weeks)",
+        "weeks_back": 104,
+    },
+    {
+        "name": "3y",
+        "description": "Last 3 years (~156 weeks)",
+        "weeks_back": 156,
+    },
+]
+
+
 def generate_benchmark_config(
     selected_columns: Dict[str, Any],
     version_from_path: str,
     run_mode: str = "test",
+    adstock_types: list = None,
+    window_lengths: list = None,
 ) -> Dict[str, Any]:
     """
     Generate comprehensive benchmark configuration from selected_columns.json.
 
     Creates cartesian product of:
-    - 3 adstock types
+    - N adstock types (default: 1 – geometric only; use --all-adstock for all 3)
     - 3 train/test splits
     - 2 time aggregations
     - 3 spend→var mapping strategies
-    = 54 total combinations
+    - M window lengths (default: none; use --all-windows / --windows to add)
+    = 18 combinations by default (geometric, no window sweep),
+      54 when all adstock tested,
+      54 when geometric + all 3 windows,
+      162 when all adstock + all 3 windows
 
     run_mode options:
     - "test": 10 iterations, 1 trial
     - "standard": 1000 iterations, 3 trials
     - "extended": 2000 iterations, 5 trials
     - "production": 5000 iterations, 5 trials
+
+    adstock_types: list of adstock names to include (None → geometric only)
+    window_lengths: list of window names from ALL_WINDOW_VARIANTS to include
+                    (None → no window sweep; the base config dates are used)
     """
     country = selected_columns.get("country", "de")
     goal = selected_columns.get("selected_goal", "N_UPLOADS_WEB")
@@ -169,91 +221,159 @@ def generate_benchmark_config(
     }
     logger.info(mode_labels[run_mode])
 
+    # Resolve adstock variants to include
+    adstock_name_map = {v["name"]: v for v in ALL_ADSTOCK_VARIANTS}
+    if adstock_types:
+        selected_adstock = [
+            adstock_name_map[name]
+            for name in adstock_types
+            if name in adstock_name_map
+        ]
+    else:
+        selected_adstock = [adstock_name_map["geometric"]]
+
+    n_adstock = len(selected_adstock)
+
+    adstock_label = (
+        ", ".join(v["name"] for v in selected_adstock)
+        if n_adstock > 1
+        else selected_adstock[0]["name"]
+    )
+    logger.info(
+        f"🎯 Adstock: {adstock_label} "
+        f"({'all types' if n_adstock == 3 else 'geometric only' if n_adstock == 1 else f'{n_adstock} types'})"
+    )
+
+    # Resolve window-length variants to include
+    window_name_map = {v["name"]: v for v in ALL_WINDOW_VARIANTS}
+    selected_windows_raw: Optional[List[Dict]] = None
+    if window_lengths:
+        selected_windows_raw = [
+            window_name_map[name]
+            for name in window_lengths
+            if name in window_name_map
+        ]
+
+    # Convert relative offsets to absolute start_date strings using end_date
+    selected_window_specs: Optional[List[Dict]] = None
+    if selected_windows_raw:
+        end_date_str = selected_columns.get("end_date", "")
+        if end_date_str:
+            try:
+                end_dt = datetime.strptime(end_date_str, "%Y-%m-%d")
+            except ValueError:
+                end_dt = datetime.now()
+                logger.warning(
+                    f"Could not parse end_date '{end_date_str}', using today"
+                )
+        else:
+            end_dt = datetime.now()
+            logger.warning(
+                "No end_date in selected_columns; using today for window offsets"
+            )
+
+        selected_window_specs = []
+        for w in selected_windows_raw:
+            spec: Dict[str, Any] = {
+                "name": w["name"],
+                "description": w["description"],
+            }
+            weeks = w["weeks_back"]
+            if weeks is not None:
+                start_dt = end_dt - timedelta(weeks=weeks)
+                spec["start_date"] = start_dt.strftime("%Y-%m-%d")
+                spec["end_date"] = end_dt.strftime("%Y-%m-%d")
+            # else: no override → base config dates used
+            selected_window_specs.append(spec)
+
+        n_windows = len(selected_window_specs)
+        window_label = ", ".join(w["name"] for w in selected_windows_raw)
+        logger.info(f"📅 Window lengths: {window_label} ({n_windows} variants)")
+    else:
+        n_windows = 1  # counts as one implicit "full" window in the product
+
+    n_combos = n_adstock * 3 * 2 * 3 * n_windows  # adstock × splits × time_agg × spend_var × windows
+    max_combinations = max(60, n_combos + 10)
+
+    # Build variants dict
+    variants_dict: Dict[str, Any] = {
+        "adstock": selected_adstock,
+        "train_splits": [
+            {
+                "name": "70_90",
+                "description": "70% train, 20% val, 10% test",
+                "train_size": [0.7, 0.9],
+            },
+            {
+                "name": "75_90",
+                "description": "75% train, 15% val, 10% test",
+                "train_size": [0.75, 0.9],
+            },
+            {
+                "name": "65_80",
+                "description": "65% train, 15% val, 20% test",
+                "train_size": [0.65, 0.8],
+            },
+        ],
+        "time_aggregation": [
+            {
+                "name": "daily",
+                "description": "Daily time aggregation",
+                "resample_freq": "none",
+            },
+            {
+                "name": "weekly",
+                "description": "Weekly time aggregation",
+                "resample_freq": "W",
+            },
+        ],
+        "spend_var_mapping": [
+            {
+                "name": "spend_to_spend",
+                "description": "All channels: spend → spend",
+                "mapping_strategy": "spend_to_spend",
+            },
+            {
+                "name": "spend_to_proxy",
+                "description": "All channels: spend → sessions",
+                "mapping_strategy": "spend_to_proxy",
+            },
+            {
+                "name": "mixed_by_funnel",
+                "description": "Upper funnel → sessions, lower → spend",
+                "mapping_strategy": "mixed",
+            },
+        ],
+    }
+
+    if selected_window_specs:
+        variants_dict["seasonality_window"] = selected_window_specs
+
     # Build comprehensive benchmark config
+    window_dim = f" × {n_windows} windows" if selected_window_specs else ""
     benchmark_config = {
         "name": f"comprehensive_benchmark_{timestamp}",
-        "description": "Complete cartesian product benchmark: adstock × train_splits × time_agg × spend_var_mapping",
+        "description": (
+            "Complete cartesian product benchmark: "
+            f"adstock × train_splits × time_agg × spend_var_mapping{window_dim}"
+        ),
         "base_config": base_config,
         "iterations": iterations,
         "trials": trials,
-        "max_combinations": 60,
+        "max_combinations": max_combinations,
         "combination_mode": "cartesian",
-        "variants": {
-            "adstock": [
-                {
-                    "name": "geometric",
-                    "description": "Geometric adstock",
-                    "adstock": "geometric",
-                    "hyperparameter_preset": "Meshed recommend",
-                },
-                {
-                    "name": "weibull_cdf",
-                    "description": "Weibull CDF adstock",
-                    "adstock": "weibull_cdf",
-                    "hyperparameter_preset": "Meta default",
-                },
-                {
-                    "name": "weibull_pdf",
-                    "description": "Weibull PDF adstock",
-                    "adstock": "weibull_pdf",
-                    "hyperparameter_preset": "Meshed recommend",
-                },
-            ],
-            "train_splits": [
-                {
-                    "name": "70_90",
-                    "description": "70% train, 20% val, 10% test",
-                    "train_size": [0.7, 0.9],
-                },
-                {
-                    "name": "75_90",
-                    "description": "75% train, 15% val, 10% test",
-                    "train_size": [0.75, 0.9],
-                },
-                {
-                    "name": "65_80",
-                    "description": "65% train, 15% val, 20% test",
-                    "train_size": [0.65, 0.8],
-                },
-            ],
-            "time_aggregation": [
-                {
-                    "name": "daily",
-                    "description": "Daily time aggregation",
-                    "resample_freq": "none",
-                },
-                {
-                    "name": "weekly",
-                    "description": "Weekly time aggregation",
-                    "resample_freq": "W",
-                },
-            ],
-            "spend_var_mapping": [
-                {
-                    "name": "spend_to_spend",
-                    "description": "All channels: spend → spend",
-                    "mapping_strategy": "spend_to_spend",
-                },
-                {
-                    "name": "spend_to_proxy",
-                    "description": "All channels: spend → sessions",
-                    "mapping_strategy": "spend_to_proxy",
-                },
-                {
-                    "name": "mixed_by_funnel",
-                    "description": "Upper funnel → sessions, lower → spend",
-                    "mapping_strategy": "mixed",
-                },
-            ],
-        },
+        "variants": variants_dict,
     }
 
+    window_factor = f" × {n_windows}" if selected_window_specs else ""
     logger.info(f"📊 Generated benchmark config:")
     logger.info(f"   Country: {country}")
     logger.info(f"   Goal: {goal}")
     logger.info(f"   Iterations: {iterations}")
     logger.info(f"   Trials: {trials}")
-    logger.info(f"   Expected variants: 54 (3 × 3 × 2 × 3)")
+    logger.info(
+        f"   Expected variants: {n_combos} ({n_adstock} × 3 × 2 × 3{window_factor})"
+    )
 
     return benchmark_config
 
@@ -400,17 +520,26 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Test run (default - reduced iterations/trials)
+  # Test run (default - geometric only, 18 combos, reduced iterations/trials)
   python scripts/run_full_benchmark.py --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
 
-  # Standard run (1000 iterations, 3 trials)
+  # Standard run, geometric only (18 combos, 1000 iterations, 3 trials)
   python scripts/run_full_benchmark.py --path <path> --full-run
 
-  # Extended run (2000 iterations, 5 trials)
-  python scripts/run_full_benchmark.py --path <path> --extended-run
+  # Standard run, all adstock types (54 combos)
+  python scripts/run_full_benchmark.py --path <path> --full-run --all-adstock --top-n 54
 
-  # Production run (5000 iterations, 5 trials)
-  python scripts/run_full_benchmark.py --path <path> --production-run
+  # Standard run, window-length sweep only (54 combos: 1 adstock × 3 × 2 × 3 × 3 windows)
+  python scripts/run_full_benchmark.py --path <path> --full-run --all-windows --top-n 54
+
+  # Extended run, specific adstock types
+  python scripts/run_full_benchmark.py --path <path> --extended-run --adstock geometric weibull_cdf
+
+  # Extended run, window-length sweep with specific windows
+  python scripts/run_full_benchmark.py --path <path> --extended-run --windows 2y 3y
+
+  # Production run, all adstock + all windows (162 combos)
+  python scripts/run_full_benchmark.py --path <path> --production-run --all-adstock --all-windows --top-n 162
 
   # Top-N combinations with extended run
   python scripts/run_full_benchmark.py --path <path> --top-n 10 --extended-run
@@ -446,9 +575,42 @@ Examples:
     parser.add_argument(
         "--top-n",
         type=int,
-        choices=[5, 10, 54],
-        default=54,
-        help="Number of combinations to test (5, 10, or 54 for all). Default: 54",
+        default=18,
+        help=(
+            "Number of combinations to submit (default: 18 = geometric only). "
+            "Set higher when using --all-adstock / --all-windows."
+        ),
+    )
+
+    adstock_group = parser.add_mutually_exclusive_group()
+    adstock_group.add_argument(
+        "--all-adstock",
+        action="store_true",
+        help="Test all 3 adstock types: geometric, weibull_cdf, weibull_pdf (54 combos)",
+    )
+    adstock_group.add_argument(
+        "--adstock",
+        nargs="+",
+        choices=["geometric", "weibull_cdf", "weibull_pdf"],
+        metavar="TYPE",
+        help="Adstock type(s) to test. Default: geometric only",
+    )
+
+    window_group = parser.add_mutually_exclusive_group()
+    window_group.add_argument(
+        "--all-windows",
+        action="store_true",
+        help="Test all 3 window lengths: full, 2y, 3y (multiplies combos by 3)",
+    )
+    window_group.add_argument(
+        "--windows",
+        nargs="+",
+        choices=["full", "2y", "3y"],
+        metavar="WINDOW",
+        help=(
+            "Window length(s) to test: full (all history), 2y (last 2 years), "
+            "3y (last 3 years). Requires end_date in selected_columns.json."
+        ),
     )
 
     parser.add_argument(
@@ -481,11 +643,29 @@ Examples:
     else:
         run_mode = "test"
 
+    # Determine adstock types to test
+    if args.all_adstock:
+        adstock_types = ["geometric", "weibull_cdf", "weibull_pdf"]
+    elif args.adstock:
+        adstock_types = args.adstock
+    else:
+        adstock_types = None  # defaults to geometric only
+
+    # Determine window lengths to test
+    if args.all_windows:
+        window_lengths = ["full", "2y", "3y"]
+    elif args.windows:
+        window_lengths = args.windows
+    else:
+        window_lengths = None  # no window sweep
+
     # Print header
     logger.info("=" * 80)
     logger.info("COMPLETE BENCHMARKING WORKFLOW")
     logger.info("=" * 80)
     logger.info(f"Mode: {run_mode.upper()}")
+    logger.info(f"Adstock: {', '.join(adstock_types) if adstock_types else 'geometric (default)'}")
+    logger.info(f"Windows: {', '.join(window_lengths) if window_lengths else 'none (base config dates)'}")
     logger.info(f"Top-N combinations: {args.top_n}")
     logger.info(f"Config path: {args.path}")
     logger.info(f"Queue: {args.queue_name}")
@@ -508,6 +688,8 @@ Examples:
             selected_columns,
             version_from_path=version_from_path,
             run_mode=run_mode,
+            adstock_types=adstock_types,
+            window_lengths=window_lengths,
         )
 
         # Save to temporary file

@@ -1249,10 +1249,11 @@ def main():
     parser.add_argument(
         "--top-n",
         type=int,
-        choices=[5, 10, 54],
         default=54,
-        help="Number of combinations to test (5, 10, or 54 for all). "
-        "Selects best based on Robyn best practices. Default: 54",
+        help="Number of combinations to submit (default: 54). "
+        "Selects best combinations based on Robyn best practices. "
+        "Use 18 for geometric-only, 54 for all adstock types, "
+        "or higher values when combining adstock × window sweeps.",
     )
 
     args = parser.parse_args()
