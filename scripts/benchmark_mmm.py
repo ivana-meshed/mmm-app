@@ -62,7 +62,7 @@ def _resample_freq_to_frequency(resample_freq: Optional[str]) -> str:
     Returns:
         One of "daily", "weekly", or "monthly".
     """
-    freq_upper = (resample_freq or "").upper().strip()
+    freq_upper = str(resample_freq).upper().strip() if resample_freq else ""
     if freq_upper in ("W", "WEEKLY"):
         return "weekly"
     if freq_upper in ("M", "MS", "MONTHLY"):
@@ -690,6 +690,11 @@ class BenchmarkRunner:
         for variant in variants:
             # Don't overwrite explicit custom_hyperparameters.
             if "custom_hyperparameters" in variant:
+                logger.debug(
+                    f"Variant '{variant.get('benchmark_variant')}': "
+                    f"skipping range resolution — custom_hyperparameters "
+                    f"already set"
+                )
                 updated_variants.append(variant)
                 continue
 

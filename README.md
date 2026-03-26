@@ -178,6 +178,7 @@ Located in `benchmarks/` directory:
 - `time_aggregation.json` - Test daily vs weekly
 - `spend_var_mapping.json` - Test spend→var mappings
 - `comprehensive_benchmark.json` - Cartesian combinations
+- `generic_hyperparameter_ranges_v2.json` - Per-channel, per-frequency hyperparameter ranges (referenced by other configs via `hyperparameter_ranges_config`)
 
 ## Cost Monitoring and Optimization
 
@@ -533,6 +534,14 @@ See [scripts/prepare_distribution.sh](scripts/prepare_distribution.sh) for autom
 - Submits jobs to Cloud Run queue
 - Collects and exports results
 - CLI with --test-run, --test-run-all, --all-benchmarks flags
+- Supports per-channel hyperparameter ranges via `hyperparameter_ranges_config`, `channel_type_mapping`, and `hyperparameter_preset` in benchmark configs
+
+**1a. Hyperparameter Ranges Config** (`benchmarks/generic_hyperparameter_ranges_v2.json`)
+- Defines per-channel, per-frequency, per-adstock hyperparameter ranges
+- Three presets: `conservative`, `balanced` (default), `exploratory`
+- Covers all three frequencies (daily, weekly, monthly) and all three adstock types
+- 20 channel types with geometric-specific per-channel ranges; Weibull types use a `_default` entry
+- Referenced from a benchmark config using the `hyperparameter_ranges_config` field
 
 **2. Queue Processor** (`scripts/process_queue_simple.py`)
 - Monitors GCS job queue
