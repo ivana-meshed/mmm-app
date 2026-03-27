@@ -755,8 +755,11 @@ Examples:
         logger.info(
             f"Channel type assignments: {args.channel_type_assignments_config or '(none)'}"
         )
+        preset_label = args.hyperparameter_preset or "balanced (default)"
+        logger.info(f"Hyperparameter preset: {preset_label}")
         logger.info(
-            f"Hyperparameter preset: {args.hyperparameter_preset or 'balanced (default)'}"
+            "  Per-variable range resolution will be logged at the "
+            "benchmark submission step (one line per variable per variant)."
         )
     logger.info("=" * 80)
     logger.info("")

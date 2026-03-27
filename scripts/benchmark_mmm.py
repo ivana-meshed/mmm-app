@@ -151,12 +151,18 @@ class HyperparameterRangesConfig:
                 frequency, adstock_type, channel_type, preset
             )
             if ranges is None:
-                logger.debug(
-                    f"No ranges found for {var_name} "
-                    f"({frequency}/{adstock_type}/{channel_type}/{preset})"
+                logger.info(
+                    f"  No ranges found for '{var_name}' "
+                    f"(channel_type={channel_type!r}, "
+                    f"{frequency}/{adstock_type}/{preset}) — "
+                    "using Robyn defaults for this variable"
                 )
                 continue
 
+            logger.info(
+                f"  '{var_name}' → type={channel_type!r} → "
+                f"{', '.join(f'{k}={ranges[k]}' for k in ('alpha', 'gamma', 'theta', 'shape', 'scale') if k in ranges)}"  # noqa: E501
+            )
             if "alpha" in ranges:
                 custom_hp[f"{var_name}_alphas"] = ranges["alpha"]
             if "gamma" in ranges:
@@ -773,10 +779,22 @@ class BenchmarkRunner:
             if custom_hp:
                 updated["custom_hyperparameters"] = custom_hp
                 updated["hyperparameter_preset"] = "Custom"
-                logger.debug(
+                # Summarise per-variable resolution so the operator can
+                # verify the preset is being applied.
+                resolved_channels = sorted(
+                    {
+                        k.rsplit("_", 1)[0]
+                        for k in custom_hp
+                        if not k.endswith("_min")
+                        and not k.endswith("_max")
+                    }
+                )
+                logger.info(
                     f"Variant '{variant.get('benchmark_variant')}': "
-                    f"resolved {len(custom_hp)} hyperparameter keys "
-                    f"({frequency}/{adstock_type}/{preset})"
+                    f"resolved {len(custom_hp)} hyperparameter keys for "
+                    f"{len(resolved_channels)} variable(s) "
+                    f"[{frequency}/{adstock_type}/{preset}]: "
+                    + ", ".join(resolved_channels)
                 )
 
             updated_variants.append(updated)

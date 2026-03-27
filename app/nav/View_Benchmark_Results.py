@@ -267,7 +267,8 @@ if selected_benchmark:
             st.success(f"Loaded {len(plots)} plots")
 
             # Define plot order and titles
-            plot_config = [
+            # Core metric plots — always expected; warn if missing.
+            core_plots = [
                 (
                     "rsq_comparison",
                     "R² Comparison",
@@ -282,21 +283,6 @@ if selected_benchmark:
                     "decomp_rssd",
                     "Decomposition RSSD",
                     "Shows decomposition quality (lower is better)",
-                ),
-                (
-                    "driver_waterfall",
-                    "Driver Contribution Shares",
-                    "Stacked bar showing paid-media / organic / context / baseline share of total response per variant",
-                ),
-                (
-                    "roas_by_channel",
-                    "ROAS by Channel",
-                    "Return on Ad Spend per paid-media channel across variants",
-                ),
-                (
-                    "cpa_by_channel",
-                    "CPA by Channel",
-                    "Cost Per Acquisition per paid-media channel across variants",
                 ),
                 (
                     "train_val_test_gap",
@@ -315,15 +301,65 @@ if selected_benchmark:
                 ),
             ]
 
-            # Display plots in order
-            for plot_name, title, description in plot_config:
+            # Enrichment plots — derived from decomposition data in
+            # model_summary.json.  Only available when the training image
+            # includes the extract_model_summary.R decomp extraction logic
+            # (introduced with the per-channel hyperparameter feature).
+            enrichment_plots = [
+                (
+                    "driver_waterfall",
+                    "Driver Contribution Shares",
+                    "Stacked bar: paid-media / organic / context / baseline share of total response per variant",  # noqa: E501
+                ),
+                (
+                    "roas_by_channel",
+                    "ROAS by Channel",
+                    "Return on Ad Spend per paid-media channel across variants",
+                ),
+                (
+                    "cpa_by_channel",
+                    "CPA by Channel",
+                    "Cost Per Acquisition per paid-media channel across variants",  # noqa: E501
+                ),
+            ]
+
+            # Display core plots (warn loudly if missing)
+            for plot_name, title, description in core_plots:
                 if plot_name in plots:
                     st.markdown(f"### {title}")
                     st.caption(description)
                     st.image(plots[plot_name], use_container_width=True)
                     st.divider()
                 else:
-                    st.warning(f"Plot not found: {plot_name}")
+                    st.warning(f"Plot not available: {plot_name}")
+
+            # Display enrichment plots (silent info if missing — data may not
+            # be present for benchmarks run with older training images)
+            enrichment_missing = [
+                (n, t, d)
+                for n, t, d in enrichment_plots
+                if n not in plots
+            ]
+            for plot_name, title, description in enrichment_plots:
+                if plot_name in plots:
+                    st.markdown(f"### {title}")
+                    st.caption(description)
+                    st.image(plots[plot_name], use_container_width=True)
+                    st.divider()
+
+            if enrichment_missing:
+                missing_titles = ", ".join(
+                    t for _, t, _ in enrichment_missing
+                )
+                st.info(
+                    f"ℹ️ **Enrichment plots not available** "
+                    f"({missing_titles}). "
+                    "These require decomposition data extracted by "
+                    "`extract_model_summary.R`. They are produced when the "
+                    "benchmark is re-analysed after training with a current "
+                    "training image, or when `analyze_benchmark_results.py` "
+                    "is run once the jobs complete."
+                )
 
     except Exception as e:
         st.error(f"Error loading plots: {e}")
