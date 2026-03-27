@@ -625,3 +625,165 @@ gs://mmm-app-output/
     └── default-dev/
         └── queue.json  ← Must have completed entries with gcs_prefix
 ```
+
+---
+
+## Fleet / Mobility Marketplace Dataset
+
+This section covers running benchmarks for datasets that follow the fleet/mobility marketplace column schema (Google Search, Meta, Bing, Facebook sub-channels, CRM/newsletter organic, and fleet context variables such as availability rate, occupancy, and location count).
+
+### Config Files
+
+| File | Purpose |
+|------|---------|
+| `benchmarks/channel_type_assignments_fleet_marketplace.json` | Maps all spend and proxy column names to channel types in `generic_hyperparameter_ranges_v2.json` |
+| `benchmarks/comprehensive_benchmark_fleet_marketplace.json` | Full 54-variant benchmark (adstock × train splits × time aggregation × spend-var mapping) |
+
+### One-Line Command
+
+Before running, edit `benchmarks/comprehensive_benchmark_fleet_marketplace.json` and replace `"FILL_IN_COUNTRY_CODE"` with your country code and optionally change `"goal"` to `"gmv_net_eur"` or `"gmv_gross_eur"` instead of `"bookings"`.
+
+```bash
+# Test run (default — 10 iterations, 1 trial, ~1-2 hours, ~$10)
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json
+
+# Standard run (1000 iterations, 3 trials per variant, ~4-6 hours, ~$75)
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --full-run
+
+# Extended run (2000 iterations, 5 trials per variant, ~10-15 hours, ~$220)
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --extended-run
+
+# Production run (5000 iterations, 5 trials per variant, ~25-35 hours, ~$500)
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --production-run
+```
+
+### Recommended Quick Starts
+
+```bash
+# Thorough analysis — recommended (~$41, ~2-3 hours)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --top-n 10 --extended-run
+
+# Production quality (~$95, ~5-7 hours)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --top-n 10 --production-run
+```
+
+### Cost Estimates
+
+| Run mode | Iterations | Trials | Variants | Approx. time | Approx. cost |
+|----------|-----------|--------|----------|-------------|-------------|
+| Test (default) | 10 | 1 | 54 | ~1-2 h | ~$10 |
+| Top-5 test | 10 | 1 | 5 | ~10 min | ~$1 |
+| Top-10 extended | 2000 | 5 | 10 | ~2-3 h | ~$41 |
+| Top-10 production | 5000 | 5 | 10 | ~5-7 h | ~$95 |
+| Standard (full) | 1000 | 3 | 54 | ~4-6 h | ~$75 |
+| Extended | 2000 | 5 | 54 | ~10-15 h | ~$220 |
+| Production | 5000 | 5 | 54 | ~25-35 h | ~$500 |
+
+### Column Schema
+
+The benchmark config assumes `selected_columns.json` in GCS defines the following columns.
+
+**paid_media_spends** (priority-1 channels, in order):
+```
+meta_total_spend
+google_search_brand_cost
+google_search_nonbrand_cost
+google_pmax_cost
+google_display_cost
+google_youtube_cost
+bing_search_cost
+```
+
+Optional additional spend columns (add to `selected_columns.json` when available):
+```
+google_search_nonbrand_cost_2, google_pmax_cost_2, google_other_cost_2
+fb_video_cost, fb_static_cost, fb_upper_cost, fb_lower_cost, fb_app_cost
+```
+
+**paid_media_vars** (proxy columns for `spend_to_proxy` / `mixed_by_funnel` scenarios):
+```
+meta_total_impressions       # or meta_total_clicks / meta_total_sessions
+google_search_brand_impressions
+google_search_nonbrand_impressions
+google_pmax_impressions
+google_display_impressions
+google_youtube_impressions
+bing_search_impressions
+```
+
+**organic_vars**:
+```
+crm_email_sends_marketing
+crm_push_sends_marketing
+newsletter_sends_marketing
+```
+
+**context_vars** (priority-1):
+```
+availability_rate
+occupancy_rate
+fleet_available_units
+n_locations
+```
+
+**factor_vars**:
+```
+holiday_flag
+```
+
+**dep_var** (choose one):
+```
+bookings          # primary recommendation
+gmv_net_eur
+gmv_gross_eur
+```
+
+### Spend-var Mapping Variants
+
+| Variant | paid_media_vars | Best for |
+|---------|----------------|---------|
+| `spend_to_spend` | = paid_media_spends | Attribution via cost directly |
+| `spend_to_proxy` | impression columns (all) | Ad delivery signal as input |
+| `mixed_by_funnel` | awareness channels → impressions; search/pmax → spend | Funnel-aware hybrid |
+
+For `mixed_by_funnel` the mapping is:
+- `meta_total_spend` → `meta_total_impressions`
+- `google_search_brand_cost` → `google_search_brand_cost` (lower funnel, keep spend)
+- `google_search_nonbrand_cost` → `google_search_nonbrand_cost` (lower funnel, keep spend)
+- `google_pmax_cost` → `google_pmax_cost` (performance, keep spend)
+- `google_display_cost` → `google_display_impressions` (upper funnel, use impressions)
+- `google_youtube_cost` → `google_youtube_impressions` (upper funnel, use impressions)
+- `bing_search_cost` → `bing_search_cost` (lower funnel, keep spend)
+
+### Adjusting the Preset
+
+The config uses `"hyperparameter_preset": "balanced"` by default. To use a different preset per adstock type, set the `hyperparameter_preset` field directly on each adstock variant in the JSON, or pass `--hyperparameter-preset exploratory` on the CLI to override all variants at once.

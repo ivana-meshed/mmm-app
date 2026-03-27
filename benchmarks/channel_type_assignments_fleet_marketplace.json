@@ -1,0 +1,43 @@
+{
+  "name": "channel_type_assignments_fleet_marketplace",
+  "description": "Maps paid media spend and proxy variable names for a fleet/mobility marketplace dataset to channel types defined in generic_hyperparameter_ranges_v2.json. Covers Google Search (brand / non-brand / pmax / display / video), Meta, Bing, Facebook sub-channels, and owned CRM/newsletter channels.",
+  "version": "1.0",
+  "assignments": {
+    "meta_total_spend": "paid_social_performance",
+    "meta_total_impressions": "paid_social_performance",
+    "meta_total_clicks": "paid_social_performance",
+    "meta_total_sessions": "paid_social_performance",
+
+    "google_search_brand_cost": "search_brand",
+    "google_search_brand_impressions": "search_brand",
+
+    "google_search_nonbrand_cost": "search_nonbrand",
+    "google_search_nonbrand_impressions": "search_nonbrand",
+    "google_search_nonbrand_cost_2": "search_nonbrand",
+
+    "google_pmax_cost": "marketplace_pmax",
+    "google_pmax_impressions": "marketplace_pmax",
+    "google_pmax_cost_2": "marketplace_pmax",
+
+    "google_display_cost": "display_prospecting",
+    "google_display_impressions": "display_prospecting",
+
+    "google_youtube_cost": "video_online",
+    "google_youtube_impressions": "video_online",
+
+    "google_other_cost_2": "digital_other_mixed",
+
+    "bing_search_cost": "search_nonbrand",
+    "bing_search_impressions": "search_nonbrand",
+
+    "fb_video_cost": "paid_social_video",
+    "fb_upper_cost": "paid_social_awareness",
+    "fb_static_cost": "paid_social_performance",
+    "fb_lower_cost": "paid_social_performance",
+    "fb_app_cost": "app_install",
+
+    "crm_email_sends_marketing": "crm_email",
+    "crm_push_sends_marketing": "crm_push_sms",
+    "newsletter_sends_marketing": "newsletter"
+  }
+}
