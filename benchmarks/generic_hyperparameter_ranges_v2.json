@@ -14,7 +14,7 @@
     "search_brand",
     "search_nonbrand",
     "shopping",
-    "marketplace_pmax",
+    "rentacar_pmax",
     "paid_social_performance",
     "paid_social_awareness",
     "paid_social_video",
@@ -91,7 +91,7 @@
             "gamma": [0.16, 0.805]
           }
         },
-        "marketplace_pmax": {
+        "rentacar_pmax": {
           "conservative": {
             "theta": [0.01, 0.09],
             "alpha": [0.5, 2.125],
@@ -479,7 +479,7 @@
             "gamma": [0.16, 0.805]
           }
         },
-        "marketplace_pmax": {
+        "rentacar_pmax": {
           "conservative": {
             "theta": [0.05, 0.1875],
             "alpha": [0.5, 2.125],
@@ -867,7 +867,7 @@
             "gamma": [0.16, 0.805]
           }
         },
-        "marketplace_pmax": {
+        "rentacar_pmax": {
           "conservative": {
             "theta": [0.1, 0.4125],
             "alpha": [0.5, 2.125],

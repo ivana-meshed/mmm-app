@@ -1,6 +1,6 @@
 {
-  "name": "channel_type_assignments_fleet_marketplace",
-  "description": "Maps paid media spend and proxy variable names for a fleet/mobility marketplace dataset to channel types defined in generic_hyperparameter_ranges_v2.json. Covers Google Search (brand / non-brand / pmax / display / video), Meta, Bing, Facebook sub-channels, and owned CRM/newsletter channels.",
+  "name": "channel_type_assignments_rentacar",
+  "description": "Maps paid media spend and proxy variable names for a rentacar dataset to channel types defined in generic_hyperparameter_ranges_v2.json. Covers Google Search (brand / non-brand / pmax / display / video), Meta, Bing, Facebook sub-channels, and owned CRM/newsletter channels.",
   "version": "1.0",
   "assignments": {
     "meta_total_spend": "paid_social_performance",
@@ -17,10 +17,10 @@
     "google_search_nonbrand_clicks": "search_nonbrand",
     "google_search_nonbrand_cost_2": "search_nonbrand",
 
-    "google_pmax_cost": "marketplace_pmax",
-    "google_pmax_impressions": "marketplace_pmax",
-    "google_pmax_clicks": "marketplace_pmax",
-    "google_pmax_cost_2": "marketplace_pmax",
+    "google_pmax_cost": "rentacar_pmax",
+    "google_pmax_impressions": "rentacar_pmax",
+    "google_pmax_clicks": "rentacar_pmax",
+    "google_pmax_cost_2": "rentacar_pmax",
 
     "google_display_cost": "display_prospecting",
     "google_display_impressions": "display_prospecting",

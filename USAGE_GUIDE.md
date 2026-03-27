@@ -628,20 +628,20 @@ gs://mmm-app-output/
 
 ---
 
-## Fleet / Mobility Marketplace Dataset
+## Rentacar Dataset
 
-This section covers running benchmarks for datasets that follow the fleet/mobility marketplace column schema (Google Search, Meta, Bing, Facebook sub-channels, CRM/newsletter organic, and fleet context variables such as availability rate, occupancy, and location count).
+This section covers running benchmarks for datasets that follow the rentacar column schema (Google Search, Meta, Bing, Facebook sub-channels, CRM/newsletter organic, and rentacar context variables such as availability rate, occupancy, and location count).
 
 ### Config Files
 
 | File | Purpose |
 |------|---------|
-| `benchmarks/channel_type_assignments_fleet_marketplace.json` | Maps all spend, impressions, and clicks column names to channel types in `generic_hyperparameter_ranges_v2.json` |
-| `benchmarks/comprehensive_benchmark_fleet_marketplace.json` | Default 30-variant benchmark (geometric adstock × 3 train splits × 2 time aggregations × 5 spend-var mappings). Use `--all-adstock` to extend to 90 variants across all 3 adstock types. |
+| `benchmarks/channel_type_assignments_rentacar.json` | Maps all spend, impressions, and clicks column names to channel types in `generic_hyperparameter_ranges_v2.json` |
+| `benchmarks/comprehensive_benchmark_rentacar.json` | Default 30-variant benchmark (geometric adstock × 3 train splits × 2 time aggregations × 5 spend-var mappings). Use `--all-adstock` to extend to 90 variants across all 3 adstock types. |
 
 ### Before Running
 
-Edit `benchmarks/comprehensive_benchmark_fleet_marketplace.json` and replace `"FILL_IN_COUNTRY_CODE"` with your country code. Optionally change `"goal"` to `"gmv_net_eur"` or `"gmv_gross_eur"` instead of `"bookings"`.
+Edit `benchmarks/comprehensive_benchmark_rentacar.json` and replace `"FILL_IN_COUNTRY_CODE"` with your country code. Optionally change `"goal"` to `"gmv_net_eur"` or `"gmv_gross_eur"` instead of `"bookings"`.
 
 ### One-Line Command
 
@@ -649,32 +649,32 @@ Edit `benchmarks/comprehensive_benchmark_fleet_marketplace.json` and replace `"F
 # Default run — geometric adstock only, test mode (10 iterations, 1 trial, ~30 min, ~$5)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
-  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --config benchmarks/comprehensive_benchmark_rentacar.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
-  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json
+  --channel-type-assignments-config benchmarks/channel_type_assignments_rentacar.json
 
 # Standard run — geometric only (1000 iterations, 3 trials, ~2 h, ~$25)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
-  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --config benchmarks/comprehensive_benchmark_rentacar.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
-  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_rentacar.json \
   --full-run
 
 # Extended run — geometric only (2000 iterations, 5 trials, ~4-5 h, ~$70)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
-  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --config benchmarks/comprehensive_benchmark_rentacar.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
-  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_rentacar.json \
   --extended-run
 
 # Production run — geometric only (5000 iterations, 5 trials, ~10-12 h, ~$165)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
-  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --config benchmarks/comprehensive_benchmark_rentacar.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
-  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_rentacar.json \
   --production-run
 ```
 
@@ -686,9 +686,9 @@ To test all adstock types (geometric + weibull_cdf + weibull_pdf) × all window 
 # All combinations — standard run (90 adstock variants × 3 windows = 270 combos, ~$200)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
-  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --config benchmarks/comprehensive_benchmark_rentacar.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
-  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_rentacar.json \
   --hyperparameter-preset balanced \
   --all-adstock --all-windows --full-run --top-n 270
 ```
@@ -698,16 +698,16 @@ To run only the top-N variants after screening, first run a test sweep and then 
 ```bash
 # Step 1: test sweep — all adstock, all windows, test mode (~$30)
 python scripts/run_full_benchmark.py \
-  --path <path> --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --path <path> --config benchmarks/comprehensive_benchmark_rentacar.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
-  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_rentacar.json \
   --hyperparameter-preset balanced --all-adstock --all-windows
 
 # Step 2: production run on top-10 (~$95)
 python scripts/run_full_benchmark.py \
-  --path <path> --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --path <path> --config benchmarks/comprehensive_benchmark_rentacar.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
-  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_rentacar.json \
   --hyperparameter-preset balanced --all-adstock --all-windows --top-n 10 --production-run
 ```
 
@@ -717,17 +717,17 @@ python scripts/run_full_benchmark.py \
 # Thorough analysis — geometric adstock, top-10 variants, extended run (~$35, ~2-3 h)
 python scripts/run_full_benchmark.py \
   --path <path> \
-  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --config benchmarks/comprehensive_benchmark_rentacar.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
-  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_rentacar.json \
   --top-n 10 --extended-run
 
 # Production quality — geometric adstock, top-10 variants (~$55, ~4-5 h)
 python scripts/run_full_benchmark.py \
   --path <path> \
-  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --config benchmarks/comprehensive_benchmark_rentacar.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
-  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_rentacar.json \
   --top-n 10 --production-run
 ```
 
@@ -761,9 +761,9 @@ Example — standard run with 2-year and 3-year windows:
 ```bash
 python scripts/run_full_benchmark.py \
   --path <path> \
-  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --config benchmarks/comprehensive_benchmark_rentacar.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
-  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_rentacar.json \
   --full-run --windows 2y 3y
 ```
 
@@ -828,7 +828,7 @@ newsletter_sends_marketing
 ```
 availability_rate
 occupancy_rate
-fleet_available_units
+rentacar_available_units
 n_locations
 ```
 
