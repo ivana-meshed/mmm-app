@@ -10,25 +10,31 @@
 
     "google_search_brand_cost": "search_brand",
     "google_search_brand_impressions": "search_brand",
+    "google_search_brand_clicks": "search_brand",
 
     "google_search_nonbrand_cost": "search_nonbrand",
     "google_search_nonbrand_impressions": "search_nonbrand",
+    "google_search_nonbrand_clicks": "search_nonbrand",
     "google_search_nonbrand_cost_2": "search_nonbrand",
 
     "google_pmax_cost": "marketplace_pmax",
     "google_pmax_impressions": "marketplace_pmax",
+    "google_pmax_clicks": "marketplace_pmax",
     "google_pmax_cost_2": "marketplace_pmax",
 
     "google_display_cost": "display_prospecting",
     "google_display_impressions": "display_prospecting",
+    "google_display_clicks": "display_prospecting",
 
     "google_youtube_cost": "video_online",
     "google_youtube_impressions": "video_online",
+    "google_youtube_clicks": "video_online",
 
     "google_other_cost_2": "digital_other_mixed",
 
     "bing_search_cost": "search_nonbrand",
     "bing_search_impressions": "search_nonbrand",
+    "bing_search_clicks": "search_nonbrand",
 
     "fb_video_cost": "paid_social_video",
     "fb_upper_cost": "paid_social_awareness",

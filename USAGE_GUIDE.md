@@ -636,22 +636,24 @@ This section covers running benchmarks for datasets that follow the fleet/mobili
 
 | File | Purpose |
 |------|---------|
-| `benchmarks/channel_type_assignments_fleet_marketplace.json` | Maps all spend and proxy column names to channel types in `generic_hyperparameter_ranges_v2.json` |
-| `benchmarks/comprehensive_benchmark_fleet_marketplace.json` | Full 54-variant benchmark (adstock × train splits × time aggregation × spend-var mapping) |
+| `benchmarks/channel_type_assignments_fleet_marketplace.json` | Maps all spend, impressions, and clicks column names to channel types in `generic_hyperparameter_ranges_v2.json` |
+| `benchmarks/comprehensive_benchmark_fleet_marketplace.json` | Default 30-variant benchmark (geometric adstock × 3 train splits × 2 time aggregations × 5 spend-var mappings). Use `--all-adstock` to extend to 90 variants across all 3 adstock types. |
+
+### Before Running
+
+Edit `benchmarks/comprehensive_benchmark_fleet_marketplace.json` and replace `"FILL_IN_COUNTRY_CODE"` with your country code. Optionally change `"goal"` to `"gmv_net_eur"` or `"gmv_gross_eur"` instead of `"bookings"`.
 
 ### One-Line Command
 
-Before running, edit `benchmarks/comprehensive_benchmark_fleet_marketplace.json` and replace `"FILL_IN_COUNTRY_CODE"` with your country code and optionally change `"goal"` to `"gmv_net_eur"` or `"gmv_gross_eur"` instead of `"bookings"`.
-
 ```bash
-# Test run (default — 10 iterations, 1 trial, ~1-2 hours, ~$10)
+# Default run — geometric adstock only, test mode (10 iterations, 1 trial, ~30 min, ~$5)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json
 
-# Standard run (1000 iterations, 3 trials per variant, ~4-6 hours, ~$75)
+# Standard run — geometric only (1000 iterations, 3 trials, ~2 h, ~$25)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
@@ -659,7 +661,7 @@ python scripts/run_full_benchmark.py \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
   --full-run
 
-# Extended run (2000 iterations, 5 trials per variant, ~10-15 hours, ~$220)
+# Extended run — geometric only (2000 iterations, 5 trials, ~4-5 h, ~$70)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
@@ -667,7 +669,7 @@ python scripts/run_full_benchmark.py \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
   --extended-run
 
-# Production run (5000 iterations, 5 trials per variant, ~25-35 hours, ~$500)
+# Production run — geometric only (5000 iterations, 5 trials, ~10-12 h, ~$165)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
@@ -676,10 +678,43 @@ python scripts/run_full_benchmark.py \
   --production-run
 ```
 
+### All Combinations (Balanced Preset)
+
+To test all adstock types (geometric + weibull_cdf + weibull_pdf) × all window lengths × all spend-var mappings with the `balanced` hyperparameter preset:
+
+```bash
+# All combinations — standard run (90 adstock variants × 3 windows = 270 combos, ~$200)
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --hyperparameter-preset balanced \
+  --all-adstock --all-windows --full-run --top-n 270
+```
+
+To run only the top-N variants after screening, first run a test sweep and then re-run with `--top-n`:
+
+```bash
+# Step 1: test sweep — all adstock, all windows, test mode (~$30)
+python scripts/run_full_benchmark.py \
+  --path <path> --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --hyperparameter-preset balanced --all-adstock --all-windows
+
+# Step 2: production run on top-10 (~$95)
+python scripts/run_full_benchmark.py \
+  --path <path> --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --hyperparameter-preset balanced --all-adstock --all-windows --top-n 10 --production-run
+```
+
 ### Recommended Quick Starts
 
 ```bash
-# Thorough analysis — recommended (~$41, ~2-3 hours)
+# Thorough analysis — geometric adstock, top-10 variants, extended run (~$35, ~2-3 h)
 python scripts/run_full_benchmark.py \
   --path <path> \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
@@ -687,7 +722,7 @@ python scripts/run_full_benchmark.py \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
   --top-n 10 --extended-run
 
-# Production quality (~$95, ~5-7 hours)
+# Production quality — geometric adstock, top-10 variants (~$55, ~4-5 h)
 python scripts/run_full_benchmark.py \
   --path <path> \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
@@ -698,15 +733,44 @@ python scripts/run_full_benchmark.py \
 
 ### Cost Estimates
 
-| Run mode | Iterations | Trials | Variants | Approx. time | Approx. cost |
-|----------|-----------|--------|----------|-------------|-------------|
-| Test (default) | 10 | 1 | 54 | ~1-2 h | ~$10 |
-| Top-5 test | 10 | 1 | 5 | ~10 min | ~$1 |
-| Top-10 extended | 2000 | 5 | 10 | ~2-3 h | ~$41 |
-| Top-10 production | 5000 | 5 | 10 | ~5-7 h | ~$95 |
-| Standard (full) | 1000 | 3 | 54 | ~4-6 h | ~$75 |
-| Extended | 2000 | 5 | 54 | ~10-15 h | ~$220 |
-| Production | 5000 | 5 | 54 | ~25-35 h | ~$500 |
+Default config runs **geometric adstock only** (30 variants). Use `--all-adstock` to multiply by 3.
+
+| Run mode | Adstock | Variants | Approx. time | Approx. cost |
+|----------|---------|----------|-------------|-------------|
+| Test (default) | geometric | 30 | ~30 min | ~$5 |
+| Test (all adstock) | all 3 | 90 | ~1.5 h | ~$15 |
+| Standard | geometric | 30 | ~2 h | ~$25 |
+| Standard (all adstock) | all 3 | 90 | ~6 h | ~$75 |
+| Extended | geometric | 30 | ~4-5 h | ~$70 |
+| Extended (all adstock) | all 3 | 90 | ~12-15 h | ~$210 |
+| Production | geometric | 30 | ~10-12 h | ~$165 |
+| Production (all adstock + all windows) | all 3 | 270 | ~35-40 h | ~$500 |
+| Top-10 extended | geometric | 10 | ~1.5 h | ~$23 |
+| Top-10 production | geometric | 10 | ~3-4 h | ~$55 |
+
+### Window Length
+
+By default, the benchmark uses the full training window defined in `selected_columns.json`. You can add a **window sweep** to test whether a shorter lookback period improves model fit:
+
+| Flag | Description |
+|------|-------------|
+| `--all-windows` | Test 3 window lengths: `full`, `2y` (last 104 weeks), `3y` (last 156 weeks). Multiplies total variants by 3. |
+| `--windows 2y 3y` | Test only selected window lengths (choose any subset of `full`, `2y`, `3y`). |
+
+Example — standard run with 2-year and 3-year windows:
+```bash
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --full-run --windows 2y 3y
+```
+
+Window lengths are applied as a trailing lookback from the latest data date:
+- `full` — all available history (no truncation)
+- `3y` — last 156 weeks (~3 years)
+- `2y` — last 104 weeks (~2 years)
 
 ### Column Schema
 
@@ -729,15 +793,28 @@ google_search_nonbrand_cost_2, google_pmax_cost_2, google_other_cost_2
 fb_video_cost, fb_static_cost, fb_upper_cost, fb_lower_cost, fb_app_cost
 ```
 
-**paid_media_vars** (proxy columns for `spend_to_proxy` / `mixed_by_funnel` scenarios):
+**paid_media_vars** (proxy columns for impression/clicks-based spend-var variants):
+
+*Impressions:*
 ```
-meta_total_impressions       # or meta_total_clicks / meta_total_sessions
+meta_total_impressions
 google_search_brand_impressions
 google_search_nonbrand_impressions
 google_pmax_impressions
 google_display_impressions
 google_youtube_impressions
 bing_search_impressions
+```
+
+*Clicks:*
+```
+meta_total_clicks
+google_search_brand_clicks
+google_search_nonbrand_clicks
+google_pmax_clicks
+google_display_clicks
+google_youtube_clicks
+bing_search_clicks
 ```
 
 **organic_vars**:
@@ -772,17 +849,21 @@ gmv_gross_eur
 | Variant | paid_media_vars | Best for |
 |---------|----------------|---------|
 | `spend_to_spend` | = paid_media_spends | Attribution via cost directly |
-| `spend_to_proxy` | impression columns (all) | Ad delivery signal as input |
-| `mixed_by_funnel` | awareness channels → impressions; search/pmax → spend | Funnel-aware hybrid |
+| `spend_to_impressions` | impression columns (all) | Ad delivery volume signal |
+| `spend_to_clicks` | click columns (all) | Engagement-weighted signal |
+| `mixed_by_funnel_impressions` | awareness channels → impressions; search/pmax → spend | Funnel-aware hybrid (impressions) |
+| `mixed_by_funnel_clicks` | awareness channels → clicks; search/pmax → spend | Funnel-aware hybrid (clicks) |
 
-For `mixed_by_funnel` the mapping is:
-- `meta_total_spend` → `meta_total_impressions`
-- `google_search_brand_cost` → `google_search_brand_cost` (lower funnel, keep spend)
-- `google_search_nonbrand_cost` → `google_search_nonbrand_cost` (lower funnel, keep spend)
-- `google_pmax_cost` → `google_pmax_cost` (performance, keep spend)
-- `google_display_cost` → `google_display_impressions` (upper funnel, use impressions)
-- `google_youtube_cost` → `google_youtube_impressions` (upper funnel, use impressions)
-- `bing_search_cost` → `bing_search_cost` (lower funnel, keep spend)
+For `mixed_by_funnel_impressions` the per-channel mapping is:
+- `meta_total_spend` → `meta_total_impressions` (upper funnel)
+- `google_display_cost` → `google_display_impressions` (upper funnel)
+- `google_youtube_cost` → `google_youtube_impressions` (upper funnel)
+- `google_search_brand_cost` → kept as spend (lower funnel)
+- `google_search_nonbrand_cost` → kept as spend (lower funnel)
+- `google_pmax_cost` → kept as spend (performance)
+- `bing_search_cost` → kept as spend (lower funnel)
+
+For `mixed_by_funnel_clicks` the same logic applies but awareness channels use clicks instead of impressions.
 
 ### Adjusting the Preset
 
