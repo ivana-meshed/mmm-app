@@ -357,6 +357,10 @@ class BenchmarkAnalyzer:
         )
         logger.debug(f"  rsq_val: {best_model.get('rsq_val')}")
 
+        # Decomposition contributions (new fields from extract_model_summary.R)
+        decomp = summary.get("decomp_contribution", {}) or {}
+        channel_roas = decomp.get("channel_roas") or {}
+
         return {
             # Benchmark metadata
             "benchmark_test": variant.get("benchmark_test", ""),
@@ -378,6 +382,19 @@ class BenchmarkAnalyzer:
             "nrmse_test": best_model.get("nrmse_test"),
             "decomp_rssd": best_model.get("decomp_rssd"),
             "mape": best_model.get("mape"),
+            # Decomposition contribution shares
+            "paid_media_share": decomp.get("paid_media_share"),
+            "baseline_share": decomp.get("baseline_share"),
+            "organic_share": decomp.get("organic_share"),
+            "context_share": decomp.get("context_share"),
+            # Allocator stability (ROAS CV across Pareto front – lower = more stable)
+            "allocator_stability_roas_cv": decomp.get(
+                "allocator_stability_roas_cv"
+            ),
+            # Per-channel ROAS serialised as JSON string for CSV portability
+            "channel_roas_json": (
+                json.dumps(channel_roas) if channel_roas else ""
+            ),
             # Model metadata
             "model_id": best_model.get("model_id"),
             "timestamp": summary.get("timestamp", ""),
@@ -439,6 +456,8 @@ class BenchmarkAnalyzer:
             ("train_val_test_gap", self._plot_train_val_test_gap),
             ("metric_correlations", self._plot_metric_correlations),
             ("best_models_summary", self._plot_best_models_summary),
+            ("driver_waterfall", self._plot_driver_waterfall),
+            ("roas_by_channel", self._plot_roas_by_channel),
         ]
 
         for plot_name, plot_func in plots:
@@ -826,6 +845,159 @@ class BenchmarkAnalyzer:
         plt.tight_layout(pad=2.0)  # More padding for readability
         return fig
 
+    def _plot_driver_waterfall(self, df: pd.DataFrame):
+        """Stacked bar: paid-media / organic / context / baseline share per variant."""
+        share_cols = [
+            "paid_media_share",
+            "organic_share",
+            "context_share",
+            "baseline_share",
+        ]
+        available = [c for c in share_cols if c in df.columns]
+        if not available:
+            logger.warning(
+                "No decomposition share columns – skipping waterfall"
+            )
+            return None
+
+        plot_df = df[["benchmark_variant"] + available].copy()
+        plot_df = plot_df.dropna(subset=available, how="all")
+        if plot_df.empty:
+            logger.warning("No decomposition share data to plot")
+            return None
+
+        n_variants = len(plot_df)
+        fig_width = max(14, n_variants * 0.5)
+        fig, ax = plt.subplots(figsize=(fig_width, 8))
+
+        colors = {
+            "paid_media_share": "#2196F3",
+            "organic_share": "#4CAF50",
+            "context_share": "#FF9800",
+            "baseline_share": "#9E9E9E",
+        }
+        labels = {
+            "paid_media_share": "Paid Media",
+            "organic_share": "Organic",
+            "context_share": "Context",
+            "baseline_share": "Baseline (trend/season/intercept)",
+        }
+
+        bottom = np.zeros(len(plot_df))
+        for col in available:
+            vals = plot_df[col].fillna(0).values
+            ax.bar(
+                plot_df["benchmark_variant"],
+                vals,
+                bottom=bottom,
+                label=labels.get(col, col),
+                color=colors.get(col, None),
+                alpha=0.85,
+            )
+            bottom += vals
+
+        ax.set_title(
+            "Driver Contribution Shares by Variant",
+            fontsize=16,
+            fontweight="bold",
+        )
+        ax.set_xlabel("Variant", fontsize=12)
+        ax.set_ylabel("Share of Total Response", fontsize=12)
+        ax.set_ylim(0, 1.05)
+        ax.legend(title="Driver", bbox_to_anchor=(1.01, 1), loc="upper left")
+        ax.grid(axis="y", alpha=0.3)
+
+        if n_variants > 15:
+            plt.xticks(rotation=45, ha="right", fontsize=9)
+        else:
+            plt.xticks(rotation=45, ha="right")
+
+        plt.tight_layout()
+        return fig
+
+    def _plot_roas_by_channel(self, df: pd.DataFrame):
+        """Grouped bar chart of ROAS per channel across variants."""
+        if "channel_roas_json" not in df.columns:
+            logger.warning(
+                "No channel_roas_json column – skipping ROAS by channel plot"
+            )
+            return None
+
+        # Parse the JSON strings into a wide DataFrame
+        roas_rows = []
+        for _, row in df.iterrows():
+            raw = row.get("channel_roas_json", "")
+            if not raw or raw == "{}":
+                continue
+            try:
+                roas_dict = json.loads(raw) if isinstance(raw, str) else raw
+                if not isinstance(roas_dict, dict):
+                    continue
+                entry = {"benchmark_variant": row["benchmark_variant"]}
+                entry.update(
+                    {
+                        ch: float(v)
+                        for ch, v in roas_dict.items()
+                        if v is not None and isinstance(v, (int, float))
+                    }
+                )
+                roas_rows.append(entry)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
+
+        if not roas_rows:
+            logger.warning("No parseable channel ROAS data – skipping plot")
+            return None
+
+        roas_df = pd.DataFrame(roas_rows).set_index("benchmark_variant")
+        channel_cols = [c for c in roas_df.columns if roas_df[c].notna().any()]
+        if not channel_cols:
+            return None
+
+        roas_df = roas_df[channel_cols].dropna(how="all")
+        if roas_df.empty:
+            return None
+
+        n_variants = len(roas_df)
+        n_channels = len(channel_cols)
+        fig_width = max(14, n_variants * n_channels * 0.25)
+        fig, ax = plt.subplots(figsize=(fig_width, 8))
+
+        melted = roas_df.reset_index().melt(
+            id_vars="benchmark_variant",
+            value_vars=channel_cols,
+            var_name="Channel",
+            value_name="ROAS",
+        )
+
+        sns.barplot(
+            data=melted,
+            x="benchmark_variant",
+            y="ROAS",
+            hue="Channel",
+            ax=ax,
+        )
+        ax.set_title(
+            "ROAS by Channel and Variant", fontsize=16, fontweight="bold"
+        )
+        ax.set_xlabel("Variant", fontsize=12)
+        ax.set_ylabel("ROAS (Return on Ad Spend)", fontsize=12)
+        ax.legend(
+            title="Channel",
+            bbox_to_anchor=(1.01, 1),
+            loc="upper left",
+            fontsize=8,
+        )
+        ax.grid(axis="y", alpha=0.3)
+
+        if n_variants > 10:
+            plt.xticks(rotation=45, ha="right", fontsize=9)
+        else:
+            plt.xticks(rotation=45, ha="right")
+
+        plt.tight_layout()
+        return fig
+
     def generate_summary_stats(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Generate summary statistics."""
         summary = {
@@ -843,6 +1015,11 @@ class BenchmarkAnalyzer:
             "nrmse_test",
             "decomp_rssd",
             "mape",
+            "paid_media_share",
+            "baseline_share",
+            "organic_share",
+            "context_share",
+            "allocator_stability_roas_cv",
         ]
 
         for col in metric_cols:
@@ -887,6 +1064,20 @@ class BenchmarkAnalyzer:
             except (ValueError, KeyError):
                 logger.warning(
                     "Could not determine best variant by decomp RSSD"
+                )
+
+        if (
+            "allocator_stability_roas_cv" in df.columns
+            and not df["allocator_stability_roas_cv"].isna().all()
+        ):
+            try:
+                best_idx = df["allocator_stability_roas_cv"].idxmin()
+                summary["best_by_allocator_stability"] = df.loc[
+                    best_idx, "benchmark_variant"
+                ]
+            except (ValueError, KeyError):
+                logger.warning(
+                    "Could not determine best variant by allocator stability"
                 )
 
         # Check for test run quality issues
@@ -1001,6 +1192,11 @@ def main():
         logger.info(f"Best by NRMSE validation: {summary['best_by_nrmse_val']}")
     if "best_by_decomp_rssd" in summary:
         logger.info(f"Best by decomp RSSD: {summary['best_by_decomp_rssd']}")
+    if "best_by_allocator_stability" in summary:
+        logger.info(
+            f"Best allocator stability (lowest ROAS CV): "
+            f"{summary['best_by_allocator_stability']}"
+        )
 
     logger.info("=" * 80)
 

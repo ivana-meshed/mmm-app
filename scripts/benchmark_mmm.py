@@ -1227,6 +1227,8 @@ class ResultsCollector:
     ) -> Dict[str, Any]:
         """Extract benchmark metrics from model summary."""
         best_model = summary.get("best_model", {})
+        decomp = summary.get("decomp_contribution", {}) or {}
+        channel_roas = decomp.get("channel_roas") or {}
 
         result = {
             # Benchmark metadata
@@ -1249,6 +1251,19 @@ class ResultsCollector:
             "nrmse_test": best_model.get("nrmse_test"),
             "decomp_rssd": best_model.get("decomp_rssd"),
             "mape": best_model.get("mape"),
+            # Decomposition contribution shares
+            "paid_media_share": decomp.get("paid_media_share"),
+            "baseline_share": decomp.get("baseline_share"),
+            "organic_share": decomp.get("organic_share"),
+            "context_share": decomp.get("context_share"),
+            # Allocator stability (ROAS CV across Pareto front – lower = more stable)
+            "allocator_stability_roas_cv": decomp.get(
+                "allocator_stability_roas_cv"
+            ),
+            # Per-channel ROAS serialised as JSON string for CSV portability
+            "channel_roas_json": (
+                json.dumps(channel_roas) if channel_roas else ""
+            ),
             # Model metadata
             "model_id": best_model.get("model_id"),
             "pareto_model_count": summary.get("pareto_model_count", 0),

@@ -38,76 +38,78 @@ PROJECT_ID = "datawarehouse-422511"
 GCS_BUCKET = "mmm-app-output"
 BENCHMARK_ROOT = "benchmarks"
 
+
 @st.cache_resource
 def get_storage_client():
     return storage.Client()
+
 
 def list_benchmarks():
     """List available benchmarks from GCS."""
     try:
         client = get_storage_client()
         bucket = client.bucket(GCS_BUCKET)
-        
+
         # List all benchmark directories
         prefix_to_search = f"{BENCHMARK_ROOT}/"
-        st.write(f"🔍 DEBUG: Searching GCS path: gs://{GCS_BUCKET}/{prefix_to_search}")
-        
         blobs = bucket.list_blobs(prefix=prefix_to_search, delimiter="/")
         benchmarks = []
-        
+
         # GCS iterator pattern: Must consume blobs before accessing prefixes
         _ = list(blobs)  # Consume iterator to populate prefixes
-        prefixes_list = list(blobs.prefixes) if hasattr(blobs, 'prefixes') else []
-        st.write(f"🔍 DEBUG: Found {len(prefixes_list)} prefixes")
-        
+        prefixes_list = (
+            list(blobs.prefixes) if hasattr(blobs, "prefixes") else []
+        )
+
         for prefix in prefixes_list:
             benchmark_id = prefix.replace(f"{BENCHMARK_ROOT}/", "").rstrip("/")
             if benchmark_id:  # Skip empty
                 benchmarks.append(benchmark_id)
-                st.write(f"  - Found: {benchmark_id}")
-        
-        st.write(f"✅ DEBUG: Total benchmarks found: {len(benchmarks)}")
+
         return sorted(benchmarks, reverse=True)
-        
+
     except Exception as e:
         st.error(f"❌ Error listing benchmarks: {str(e)}")
-        st.write(f"🔍 DEBUG: Exception type: {type(e).__name__}")
-        st.write(f"🔍 DEBUG: Exception details: {str(e)}")
         import traceback
+
         st.code(traceback.format_exc())
         return []
+
 
 def load_benchmark_csv(benchmark_id):
     """Load the most recent CSV for a benchmark."""
     client = get_storage_client()
     bucket = client.bucket(GCS_BUCKET)
-    
+
     # List all CSV files for this benchmark
     prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/"
     blobs = bucket.list_blobs(prefix=prefix)
     csv_blobs = [b for b in blobs if b.name.endswith(".csv")]
-    
+
     if not csv_blobs:
         return None
-    
+
     # Get most recent
-    latest_csv = sorted(csv_blobs, key=lambda b: b.time_created, reverse=True)[0]
-    
+    latest_csv = sorted(csv_blobs, key=lambda b: b.time_created, reverse=True)[
+        0
+    ]
+
     # Download and parse
     csv_data = latest_csv.download_as_bytes()
     df = pd.read_csv(io.BytesIO(csv_data))
-    
+
     return df, latest_csv.name
+
 
 def load_benchmark_plots(benchmark_id):
     """Load all plots for a benchmark."""
     client = get_storage_client()
     bucket = client.bucket(GCS_BUCKET)
-    
+
     # Find the most recent plots directory
     prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/"
     blobs = bucket.list_blobs(prefix=prefix)
-    
+
     # Find plot directories
     plot_dirs = set()
     for blob in blobs:
@@ -117,47 +119,48 @@ def load_benchmark_plots(benchmark_id):
             if len(parts) >= 3:
                 plot_dir = "/".join(parts[:3])  # benchmarks/id/plots_timestamp
                 plot_dirs.add(plot_dir)
-    
+
     if not plot_dirs:
         return {}
-    
+
     # Use most recent plot directory
     latest_plot_dir = sorted(list(plot_dirs), reverse=True)[0]
-    
+
     # Load all plots from that directory
     plots = {}
     plot_blobs = bucket.list_blobs(prefix=latest_plot_dir + "/")
-    
+
     for blob in plot_blobs:
         if blob.name.endswith(".png"):
             plot_name = blob.name.split("/")[-1].replace(".png", "")
             img_data = blob.download_as_bytes()
             plots[plot_name] = Image.open(io.BytesIO(img_data))
-    
+
     return plots
+
 
 # Sidebar - Benchmark Selection
 with st.sidebar:
     st.header("Select Benchmark")
-    
+
     # List benchmarks
     try:
         benchmarks = list_benchmarks()
-        
+
         if not benchmarks:
             st.warning("No benchmarks found")
             st.stop()
-        
+
         selected_benchmark = st.selectbox(
             "Benchmark ID",
             options=benchmarks,
-            help="Select a benchmark to visualize"
+            help="Select a benchmark to visualize",
         )
-        
+
         if st.button("🔄 Refresh List"):
             st.cache_resource.clear()
             st.rerun()
-            
+
     except Exception as e:
         st.error(f"Error loading benchmarks: {e}")
         st.stop()
@@ -165,10 +168,10 @@ with st.sidebar:
 # Main content
 if selected_benchmark:
     st.info(f"**Selected Benchmark:** `{selected_benchmark}`")
-    
+
     # Load CSV data
     st.subheader("📊 Results Data")
-    
+
     try:
         result = load_benchmark_csv(selected_benchmark)
         if result is None:
@@ -177,7 +180,7 @@ if selected_benchmark:
         else:
             df, csv_path = result
             st.success(f"Loaded: `{csv_path}`")
-            
+
             # Check for test run warning
             test_run_warning = False
             if "iterations" in df.columns:
@@ -193,69 +196,120 @@ if selected_benchmark:
                         f"- **3+ trials**\n\n"
                         f"Use `--full-run` flag for production analysis."
                     )
-            
+
             # Show metrics summary
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4, col5 = st.columns(5)
             with col1:
                 st.metric("Total Variants", len(df))
             with col2:
                 if "rsq_val" in df.columns:
                     avg_rsq = df["rsq_val"].mean()
-                    st.metric("Avg R² (val)", f"{avg_rsq:.3f}" if pd.notna(avg_rsq) else "N/A")
+                    st.metric(
+                        "Avg R² (val)",
+                        f"{avg_rsq:.3f}" if pd.notna(avg_rsq) else "N/A",
+                    )
             with col3:
                 if "nrmse_val" in df.columns:
                     avg_nrmse = df["nrmse_val"].mean()
-                    st.metric("Avg NRMSE (val)", f"{avg_nrmse:.3f}" if pd.notna(avg_nrmse) else "N/A")
+                    st.metric(
+                        "Avg NRMSE (val)",
+                        f"{avg_nrmse:.3f}" if pd.notna(avg_nrmse) else "N/A",
+                    )
             with col4:
                 if "decomp_rssd" in df.columns:
                     avg_rssd = df["decomp_rssd"].mean()
-                    st.metric("Avg Decomp RSSD", f"{avg_rssd:.3f}" if pd.notna(avg_rssd) else "N/A")
-            
+                    st.metric(
+                        "Avg Decomp RSSD",
+                        f"{avg_rssd:.3f}" if pd.notna(avg_rssd) else "N/A",
+                    )
+            with col5:
+                if "allocator_stability_roas_cv" in df.columns:
+                    avg_cv = df["allocator_stability_roas_cv"].mean()
+                    st.metric(
+                        "ROAS CV (Allocator Stability)",
+                        f"{avg_cv:.3f}" if pd.notna(avg_cv) else "N/A",
+                        help="Lower is better. CV of ROAS across Pareto-optimal models — measures how stable channel ROAS estimates are.",
+                    )
+
             st.divider()
-            
+
             # Display data table
             st.dataframe(
                 df,
                 use_container_width=True,
                 height=400,
             )
-            
+
             # Download button
-            csv_data = df.to_csv(index=False).encode('utf-8')
+            csv_data = df.to_csv(index=False).encode("utf-8")
             st.download_button(
                 label="📥 Download CSV",
                 data=csv_data,
                 file_name=f"{selected_benchmark}_results.csv",
                 mime="text/csv",
             )
-            
+
     except Exception as e:
         st.error(f"Error loading CSV: {e}")
         df = None
-    
+
     st.divider()
-    
+
     # Load and display plots
     st.subheader("📈 Visualization Plots")
-    
+
     try:
         plots = load_benchmark_plots(selected_benchmark)
-        
+
         if not plots:
             st.warning("No plots found for this benchmark")
         else:
             st.success(f"Loaded {len(plots)} plots")
-            
+
             # Define plot order and titles
             plot_config = [
-                ("rsq_comparison", "R² Comparison", "Compares R² across train/val/test splits for each variant"),
-                ("nrmse_comparison", "NRMSE Comparison", "Compares NRMSE across train/val/test splits for each variant"),
-                ("decomp_rssd", "Decomposition RSSD", "Shows decomposition quality (lower is better)"),
-                ("train_val_test_gap", "Train/Val/Test Gap Analysis", "Scatter plots showing overfitting patterns"),
-                ("metric_correlations", "Metric Correlations", "Heatmap of relationships between metrics"),
-                ("best_models_summary", "Best Models Summary", "Top performers across different criteria"),
+                (
+                    "rsq_comparison",
+                    "R² Comparison",
+                    "Compares R² across train/val/test splits for each variant",
+                ),
+                (
+                    "nrmse_comparison",
+                    "NRMSE Comparison",
+                    "Compares NRMSE across train/val/test splits for each variant",
+                ),
+                (
+                    "decomp_rssd",
+                    "Decomposition RSSD",
+                    "Shows decomposition quality (lower is better)",
+                ),
+                (
+                    "driver_waterfall",
+                    "Driver Contribution Shares",
+                    "Stacked bar showing paid-media / organic / context / baseline share of total response per variant",
+                ),
+                (
+                    "roas_by_channel",
+                    "ROAS by Channel",
+                    "Return on Ad Spend per paid-media channel across variants",
+                ),
+                (
+                    "train_val_test_gap",
+                    "Train/Val/Test Gap Analysis",
+                    "Scatter plots showing overfitting patterns",
+                ),
+                (
+                    "metric_correlations",
+                    "Metric Correlations",
+                    "Heatmap of relationships between metrics",
+                ),
+                (
+                    "best_models_summary",
+                    "Best Models Summary",
+                    "Top performers across different criteria",
+                ),
             ]
-            
+
             # Display plots in order
             for plot_name, title, description in plot_config:
                 if plot_name in plots:
@@ -265,7 +319,7 @@ if selected_benchmark:
                     st.divider()
                 else:
                     st.warning(f"Plot not found: {plot_name}")
-            
+
     except Exception as e:
         st.error(f"Error loading plots: {e}")
         st.exception(e)

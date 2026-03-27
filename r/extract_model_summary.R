@@ -179,7 +179,159 @@ extract_model_summary <- function(output_collect, input_collect = NULL,
         )
     }
 
+    # Extract decomposition contributions and channel ROAS from xDecompAgg
+    if (!is.null(output_collect$xDecompAgg) && !is.null(summary$best_model)) {
+        decomp_contrib <- .extract_decomp_contributions(
+            output_collect, input_collect, summary$best_model$model_id
+        )
+        summary$decomp_contribution <- decomp_contrib
+    }
+
     return(summary)
+}
+
+#' Extract decomposition contributions and ROAS from xDecompAgg
+#'
+#' @param output_collect OutputCollect from robyn_outputs()
+#' @param input_collect InputCollect from robyn_inputs() (may be NULL)
+#' @param best_model_id The best model's solID
+#' @return A list with paid_media_share, baseline_share, organic_share,
+#'   context_share, channel_roas, and allocator_stability_roas_cv
+.extract_decomp_contributions <- function(output_collect, input_collect,
+                                          best_model_id) {
+    xda <- output_collect$xDecompAgg
+
+    # Resolve known paid-media, organic, and context variable names
+    paid_media_vars <- character(0)
+    organic_vars <- character(0)
+    context_vars <- character(0)
+    factor_vars <- character(0)
+    if (!is.null(input_collect)) {
+        paid_media_vars <- as.character(input_collect$paid_media_vars %||% character(0))
+        organic_vars <- as.character(input_collect$organic_vars %||% character(0))
+        context_vars <- as.character(input_collect$context_vars %||% character(0))
+    }
+
+    result <- list(
+        paid_media_share = NA_real_,
+        baseline_share = NA_real_,
+        organic_share = NA_real_,
+        context_share = NA_real_,
+        channel_roas = list(),
+        allocator_stability_roas_cv = NA_real_
+    )
+
+    # ---- Best-model decomposition shares ----
+    tryCatch({
+        best_rows <- xda[xda$solID == best_model_id, ]
+        if (nrow(best_rows) == 0) {
+            return(result)
+        }
+
+        # xDecompPerc gives the share of each variable in total response
+        perc_col <- if ("xDecompPerc" %in% names(best_rows)) "xDecompPerc" else NULL
+        if (is.null(perc_col)) {
+            return(result)
+        }
+
+        vars <- best_rows$rn
+
+        paid_idx <- vars %in% paid_media_vars
+        organic_idx <- vars %in% organic_vars
+        context_idx <- vars %in% context_vars
+        # Baseline = everything not classified above (intercept, trend, season, holiday, …)
+        baseline_idx <- !paid_idx & !organic_idx & !context_idx
+
+        result$paid_media_share <- round(
+            sum(best_rows[[perc_col]][paid_idx], na.rm = TRUE), 4
+        )
+        result$organic_share <- round(
+            sum(best_rows[[perc_col]][organic_idx], na.rm = TRUE), 4
+        )
+        result$context_share <- round(
+            sum(best_rows[[perc_col]][context_idx], na.rm = TRUE), 4
+        )
+        result$baseline_share <- round(
+            sum(best_rows[[perc_col]][baseline_idx], na.rm = TRUE), 4
+        )
+
+        # ---- Per-channel ROAS for best model ----
+        roas_col <- if ("roi_total" %in% names(best_rows)) {
+            "roi_total"
+        } else if ("roi_mean" %in% names(best_rows)) {
+            "roi_mean"
+        } else {
+            NULL
+        }
+
+        if (!is.null(roas_col) && length(paid_media_vars) > 0) {
+            media_rows <- best_rows[paid_idx, ]
+            roas_vals <- setNames(
+                as.list(round(as.numeric(media_rows[[roas_col]]), 4)),
+                as.character(media_rows$rn)
+            )
+            # Replace NULL/NA values with NA_real_ and ensure numeric type
+            roas_vals <- lapply(roas_vals, function(v) {
+                if (is.null(v) || length(v) == 0) return(NA_real_)
+                v_num <- suppressWarnings(as.numeric(v))
+                if (length(v_num) == 1 && !is.na(v_num)) v_num else NA_real_
+            })
+            result$channel_roas <- roas_vals
+        }
+    }, error = function(e) {
+        message("⚠️ Failed to extract decomp contributions: ", conditionMessage(e))
+    })
+
+    # ---- Allocator stability: ROAS CV across Pareto models ----
+    tryCatch({
+        roas_col <- if ("roi_total" %in% names(xda)) {
+            "roi_total"
+        } else if ("roi_mean" %in% names(xda)) {
+            "roi_mean"
+        } else {
+            NULL
+        }
+
+        # Identify Pareto model IDs
+        pareto_ids <- NULL
+        if (!is.null(output_collect$resultHypParam)) {
+            rhp <- output_collect$resultHypParam
+            if ("robyn_pareto_front" %in% names(rhp)) {
+                pareto_ids <- rhp$solID[
+                    !is.na(rhp$robyn_pareto_front) & rhp$robyn_pareto_front > 0
+                ]
+            } else if ("pareto_optimal" %in% names(rhp)) {
+                pareto_ids <- rhp$solID[rhp$pareto_optimal == TRUE]
+            }
+        }
+
+        if (!is.null(roas_col) && length(paid_media_vars) > 0 &&
+            !is.null(pareto_ids) && length(pareto_ids) >= 2) {
+            pareto_rows <- xda[xda$solID %in% pareto_ids &
+                xda$rn %in% paid_media_vars, ]
+
+            # For each channel, compute CV of ROAS across Pareto models
+            cvs <- vapply(paid_media_vars, function(ch) {
+                ch_roas <- as.numeric(
+                    pareto_rows[[roas_col]][pareto_rows$rn == ch]
+                )
+                ch_roas <- ch_roas[!is.na(ch_roas)]
+                if (length(ch_roas) < 2 || mean(ch_roas) == 0) {
+                    return(NA_real_)
+                }
+                sd(ch_roas) / abs(mean(ch_roas))
+            }, numeric(1))
+
+            cvs <- cvs[!is.na(cvs)]
+            if (length(cvs) > 0) {
+                result$allocator_stability_roas_cv <- round(mean(cvs), 4)
+            }
+        }
+    }, error = function(e) {
+        message("⚠️ Failed to compute allocator stability: ", conditionMessage(e))
+    })
+
+    return(result)
 }
 
 #' Save model summary to JSON file
