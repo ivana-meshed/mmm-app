@@ -1458,11 +1458,26 @@ for (v in hyper_vars_filtered) {
     if (adstock == "geometric") {
         hyperparameters_filtered[[paste0(v, "_gammas")]] <- spec$gammas
         hyperparameters_filtered[[paste0(v, "_thetas")]] <- spec$thetas
+        message(sprintf(
+            "   [%s preset] %s → alphas=[%s], gammas=[%s], thetas=[%s]",
+            hyperparameter_preset, v,
+            paste(round(spec$alphas, 4), collapse = ", "),
+            paste(round(spec$gammas, 4), collapse = ", "),
+            paste(round(spec$thetas, 4), collapse = ", ")
+        ))
     } else {
         # Weibull uses alphas, gammas, shapes and scales (4 params per variable)
         hyperparameters_filtered[[paste0(v, "_gammas")]] <- spec$gammas
         hyperparameters_filtered[[paste0(v, "_shapes")]] <- spec$shapes
         hyperparameters_filtered[[paste0(v, "_scales")]] <- spec$scales
+        message(sprintf(
+            "   [%s preset] %s → alphas=[%s], gammas=[%s], shapes=[%s], scales=[%s]",
+            hyperparameter_preset, v,
+            paste(round(spec$alphas, 4), collapse = ", "),
+            paste(round(spec$gammas, 4), collapse = ", "),
+            paste(round(spec$shapes, 4), collapse = ", "),
+            paste(round(spec$scales, 4), collapse = ", ")
+        ))
     }
 }
 hyperparameters_filtered[["train_size"]] <- train_size

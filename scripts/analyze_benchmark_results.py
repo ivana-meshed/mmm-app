@@ -357,6 +357,11 @@ class BenchmarkAnalyzer:
         )
         logger.debug(f"  rsq_val: {best_model.get('rsq_val')}")
 
+        # Decomposition contributions (new fields from extract_model_summary.R)
+        decomp = summary.get("decomp_contribution", {}) or {}
+        channel_roas = decomp.get("channel_roas") or {}
+        channel_cpa = decomp.get("channel_cpa") or {}
+
         return {
             # Benchmark metadata
             "benchmark_test": variant.get("benchmark_test", ""),
@@ -378,6 +383,23 @@ class BenchmarkAnalyzer:
             "nrmse_test": best_model.get("nrmse_test"),
             "decomp_rssd": best_model.get("decomp_rssd"),
             "mape": best_model.get("mape"),
+            # Decomposition contribution shares
+            "paid_media_share": decomp.get("paid_media_share"),
+            "baseline_share": decomp.get("baseline_share"),
+            "organic_share": decomp.get("organic_share"),
+            "context_share": decomp.get("context_share"),
+            # Allocator stability (ROAS CV across Pareto front – lower = more stable)
+            "allocator_stability_roas_cv": decomp.get(
+                "allocator_stability_roas_cv"
+            ),
+            # Per-channel ROAS serialised as JSON string for CSV portability
+            "channel_roas_json": (
+                json.dumps(channel_roas) if channel_roas else ""
+            ),
+            # Per-channel CPA serialised as JSON string for CSV portability
+            "channel_cpa_json": (
+                json.dumps(channel_cpa) if channel_cpa else ""
+            ),
             # Model metadata
             "model_id": best_model.get("model_id"),
             "timestamp": summary.get("timestamp", ""),
@@ -439,6 +461,9 @@ class BenchmarkAnalyzer:
             ("train_val_test_gap", self._plot_train_val_test_gap),
             ("metric_correlations", self._plot_metric_correlations),
             ("best_models_summary", self._plot_best_models_summary),
+            ("driver_waterfall", self._plot_driver_waterfall),
+            ("roas_by_channel", self._plot_roas_by_channel),
+            ("cpa_by_channel", self._plot_cpa_by_channel),
         ]
 
         for plot_name, plot_func in plots:
@@ -826,6 +851,295 @@ class BenchmarkAnalyzer:
         plt.tight_layout(pad=2.0)  # More padding for readability
         return fig
 
+    def _plot_driver_waterfall(self, df: pd.DataFrame):
+        """Stacked bar: paid-media / organic / context / baseline share per variant."""
+        share_cols = [
+            "paid_media_share",
+            "organic_share",
+            "context_share",
+            "baseline_share",
+        ]
+        available = [c for c in share_cols if c in df.columns]
+        if not available:
+            logger.warning(
+                "No decomposition share columns – skipping waterfall"
+            )
+            return None
+
+        plot_df = df[["benchmark_variant"] + available].copy()
+        plot_df = plot_df.dropna(subset=available, how="all")
+        if plot_df.empty:
+            logger.warning("No decomposition share data to plot")
+            return None
+
+        n_variants = len(plot_df)
+        fig_width = max(14, n_variants * 0.5)
+        fig, ax = plt.subplots(figsize=(fig_width, 8))
+
+        colors = {
+            "paid_media_share": "#2196F3",
+            "organic_share": "#4CAF50",
+            "context_share": "#FF9800",
+            "baseline_share": "#9E9E9E",
+        }
+        labels = {
+            "paid_media_share": "Paid Media",
+            "organic_share": "Organic",
+            "context_share": "Context",
+            "baseline_share": "Baseline (trend/season/intercept)",
+        }
+
+        bottom = np.zeros(len(plot_df))
+        for col in available:
+            vals = plot_df[col].fillna(0).values
+            ax.bar(
+                plot_df["benchmark_variant"],
+                vals,
+                bottom=bottom,
+                label=labels.get(col, col),
+                color=colors.get(col, None),
+                alpha=0.85,
+            )
+            bottom += vals
+
+        ax.set_title(
+            "Driver Contribution Shares by Variant",
+            fontsize=16,
+            fontweight="bold",
+        )
+        ax.set_xlabel("Variant", fontsize=12)
+        ax.set_ylabel("Share of Total Response", fontsize=12)
+        ax.set_ylim(0, 1.05)
+        ax.legend(title="Driver", bbox_to_anchor=(1.01, 1), loc="upper left")
+        ax.grid(axis="y", alpha=0.3)
+
+        if n_variants > 15:
+            plt.xticks(rotation=45, ha="right", fontsize=9)
+        else:
+            plt.xticks(rotation=45, ha="right")
+
+        plt.tight_layout()
+        return fig
+
+    def _plot_roas_by_channel(self, df: pd.DataFrame):
+        """Grouped bar chart of ROAS per channel across variants."""
+        if "channel_roas_json" not in df.columns:
+            logger.warning(
+                "No channel_roas_json column – skipping ROAS by channel plot"
+            )
+            return None
+
+        # Parse the JSON strings into a wide DataFrame
+        roas_rows = []
+        for _, row in df.iterrows():
+            raw = row.get("channel_roas_json", "")
+            if not raw or raw == "{}":
+                continue
+            try:
+                roas_dict = json.loads(raw) if isinstance(raw, str) else raw
+                if not isinstance(roas_dict, dict):
+                    continue
+                entry = {"benchmark_variant": row["benchmark_variant"]}
+                entry.update(
+                    {
+                        ch: float(v)
+                        for ch, v in roas_dict.items()
+                        if v is not None and isinstance(v, (int, float))
+                    }
+                )
+                roas_rows.append(entry)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
+
+        if not roas_rows:
+            logger.warning("No parseable channel ROAS data – skipping plot")
+            return None
+
+        roas_df = pd.DataFrame(roas_rows).set_index("benchmark_variant")
+        channel_cols = [c for c in roas_df.columns if roas_df[c].notna().any()]
+        if not channel_cols:
+            return None
+
+        roas_df = roas_df[channel_cols].dropna(how="all")
+        if roas_df.empty:
+            return None
+
+        n_variants = len(roas_df)
+        n_channels = len(channel_cols)
+        fig_width = max(14, n_variants * n_channels * 0.25)
+        fig, ax = plt.subplots(figsize=(fig_width, 8))
+
+        melted = roas_df.reset_index().melt(
+            id_vars="benchmark_variant",
+            value_vars=channel_cols,
+            var_name="Channel",
+            value_name="ROAS",
+        )
+
+        # Cap y-axis at the 98th percentile to handle extreme outliers.
+        p98 = float(melted["ROAS"].quantile(0.98))
+        actual_max = float(melted["ROAS"].max())
+        y_ceiling = p98 * 1.05
+
+        sns.barplot(
+            data=melted,
+            x="benchmark_variant",
+            y="ROAS",
+            hue="Channel",
+            ax=ax,
+        )
+        if y_ceiling > 0:
+            ax.set_ylim(0, y_ceiling)
+
+        title = "ROAS by Channel and Variant"
+        subtitle_parts = []
+        if actual_max > y_ceiling and y_ceiling > 0:
+            clipped_channels = (
+                melted.groupby("Channel")["ROAS"]
+                .max()
+                .pipe(lambda s: s[s > y_ceiling].index.tolist())
+            )
+            subtitle_parts.append(
+                f"y-axis capped at {y_ceiling:.4g}; "
+                f"actual max {actual_max:.4g} – "
+                f"clipped: {', '.join(clipped_channels)}"
+            )
+        # Note when ROAS values are very small (proxy/sessions-based KPIs)
+        if actual_max < 0.1:
+            subtitle_parts.append(
+                "Note: small values expected when dep_var is a "
+                "proxy (sessions/clicks) rather than revenue"
+            )
+        if subtitle_parts:
+            title += "\n(" + "; ".join(subtitle_parts) + ")"
+
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.set_xlabel("Variant", fontsize=12)
+        ax.set_ylabel("ROAS (Return on Ad Spend)", fontsize=12)
+        ax.legend(
+            title="Channel",
+            bbox_to_anchor=(1.01, 1),
+            loc="upper left",
+            fontsize=8,
+        )
+        ax.grid(axis="y", alpha=0.3)
+
+        if n_variants > 10:
+            plt.xticks(rotation=45, ha="right", fontsize=9)
+        else:
+            plt.xticks(rotation=45, ha="right")
+
+        plt.tight_layout()
+        return fig
+
+    def _plot_cpa_by_channel(self, df: pd.DataFrame):
+        """Grouped bar chart of CPA per channel across variants."""
+        if "channel_cpa_json" not in df.columns:
+            logger.warning(
+                "No channel_cpa_json column – skipping CPA by channel plot"
+            )
+            return None
+
+        # Parse the JSON strings into a wide DataFrame
+        cpa_rows = []
+        for _, row in df.iterrows():
+            raw = row.get("channel_cpa_json", "")
+            if not raw or raw == "{}":
+                continue
+            try:
+                cpa_dict = json.loads(raw) if isinstance(raw, str) else raw
+                if not isinstance(cpa_dict, dict):
+                    continue
+                entry = {"benchmark_variant": row["benchmark_variant"]}
+                entry.update(
+                    {
+                        ch: float(v)
+                        for ch, v in cpa_dict.items()
+                        if v is not None and isinstance(v, (int, float))
+                    }
+                )
+                cpa_rows.append(entry)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
+
+        if not cpa_rows:
+            logger.warning("No parseable channel CPA data – skipping plot")
+            return None
+
+        cpa_df = pd.DataFrame(cpa_rows).set_index("benchmark_variant")
+        channel_cols = [c for c in cpa_df.columns if cpa_df[c].notna().any()]
+        if not channel_cols:
+            return None
+
+        cpa_df = cpa_df[channel_cols].dropna(how="all")
+        if cpa_df.empty:
+            return None
+
+        n_variants = len(cpa_df)
+        n_channels = len(channel_cols)
+        fig_width = max(14, n_variants * n_channels * 0.25)
+        fig, ax = plt.subplots(figsize=(fig_width, 8))
+
+        melted = cpa_df.reset_index().melt(
+            id_vars="benchmark_variant",
+            value_vars=channel_cols,
+            var_name="Channel",
+            value_name="CPA",
+        )
+
+        # Cap y-axis at the 98th percentile so extreme outlier channels
+        # (e.g. low-spend partners with very high CPA) don't compress the
+        # scale for all other channels.  Annotate when capping occurs.
+        p98 = float(melted["CPA"].quantile(0.98))
+        actual_max = float(melted["CPA"].max())
+        y_ceiling = p98 * 1.05  # 5 % headroom above the 98th pct
+
+        sns.barplot(
+            data=melted,
+            x="benchmark_variant",
+            y="CPA",
+            hue="Channel",
+            ax=ax,
+        )
+        ax.set_ylim(0, y_ceiling)
+
+        title = "CPA by Channel and Variant"
+        if actual_max > y_ceiling:
+            clipped_channels = (
+                melted.groupby("Channel")["CPA"]
+                .max()
+                .pipe(lambda s: s[s > y_ceiling].index.tolist())
+            )
+            title += (
+                f"\n(y-axis capped at {y_ceiling:,.0f}; "
+                f"actual max {actual_max:,.0f} – "
+                f"clipped: {', '.join(clipped_channels)})"
+            )
+            logger.info(
+                f"CPA plot: y-axis capped at {y_ceiling:,.0f} "
+                f"(actual max {actual_max:,.0f} from "
+                f"{clipped_channels})"
+            )
+
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.set_xlabel("Variant", fontsize=12)
+        ax.set_ylabel("CPA (Cost Per Acquisition)", fontsize=12)
+        ax.legend(
+            title="Channel",
+            bbox_to_anchor=(1.01, 1),
+            loc="upper left",
+            fontsize=8,
+        )
+        ax.grid(axis="y", alpha=0.3)
+
+        if n_variants > 10:
+            plt.xticks(rotation=45, ha="right", fontsize=9)
+        else:
+            plt.xticks(rotation=45, ha="right")
+
+        plt.tight_layout()
+        return fig
+
     def generate_summary_stats(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Generate summary statistics."""
         summary = {
@@ -843,6 +1157,11 @@ class BenchmarkAnalyzer:
             "nrmse_test",
             "decomp_rssd",
             "mape",
+            "paid_media_share",
+            "baseline_share",
+            "organic_share",
+            "context_share",
+            "allocator_stability_roas_cv",
         ]
 
         for col in metric_cols:
@@ -887,6 +1206,20 @@ class BenchmarkAnalyzer:
             except (ValueError, KeyError):
                 logger.warning(
                     "Could not determine best variant by decomp RSSD"
+                )
+
+        if (
+            "allocator_stability_roas_cv" in df.columns
+            and not df["allocator_stability_roas_cv"].isna().all()
+        ):
+            try:
+                best_idx = df["allocator_stability_roas_cv"].idxmin()
+                summary["best_by_allocator_stability"] = df.loc[
+                    best_idx, "benchmark_variant"
+                ]
+            except (ValueError, KeyError):
+                logger.warning(
+                    "Could not determine best variant by allocator stability"
                 )
 
         # Check for test run quality issues
@@ -1001,6 +1334,11 @@ def main():
         logger.info(f"Best by NRMSE validation: {summary['best_by_nrmse_val']}")
     if "best_by_decomp_rssd" in summary:
         logger.info(f"Best by decomp RSSD: {summary['best_by_decomp_rssd']}")
+    if "best_by_allocator_stability" in summary:
+        logger.info(
+            f"Best allocator stability (lowest ROAS CV): "
+            f"{summary['best_by_allocator_stability']}"
+        )
 
     logger.info("=" * 80)
 

@@ -110,6 +110,12 @@ python scripts/run_full_benchmark.py --path <path> --top-n 10 --production-run
 
 # Complete benchmark standard mode (~$75, ~4-6 hours)
 python scripts/run_full_benchmark.py --path <path> --full-run
+
+# With per-channel hyperparameter ranges (balanced preset is the default)
+python scripts/run_full_benchmark.py --path <path> --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments.json \
+  --hyperparameter-preset balanced
 ```
 
 ### Manual Workflow (Alternative)
@@ -178,6 +184,10 @@ Located in `benchmarks/` directory:
 - `time_aggregation.json` - Test daily vs weekly
 - `spend_var_mapping.json` - Test spend→var mappings
 - `comprehensive_benchmark.json` - Cartesian combinations
+- `comprehensive_benchmark_fleet_marketplace.json` - Fleet/mobility marketplace cartesian benchmark: 5 dimensions (adstock × train_splits × time_aggregation × spend_var_mapping × seasonality_window). Default geometric adstock gives 90 variants (1 × 3 × 2 × 5 × 3 — including full, 2y, and 3y training windows). Use `--all-adstock` for 270 variants. The `seasonality_window` variants use `weeks_back` offsets resolved at runtime against the dataset's `end_date`.
+- `channel_type_assignments_fleet_marketplace.json` - Channel-type assignments for the fleet marketplace dataset (referenced via `channel_type_assignments_config`)
+- `generic_hyperparameter_ranges_v2.json` - Per-channel, per-frequency hyperparameter ranges (referenced by other configs via `hyperparameter_ranges_config`)
+- `channel_type_assignments.json` - Maps variable names to channel types (referenced via `channel_type_assignments_config`)
 
 ## Cost Monitoring and Optimization
 
@@ -533,6 +543,19 @@ See [scripts/prepare_distribution.sh](scripts/prepare_distribution.sh) for autom
 - Submits jobs to Cloud Run queue
 - Collects and exports results
 - CLI with --test-run, --test-run-all, --all-benchmarks flags
+- Supports per-channel hyperparameter ranges via `hyperparameter_ranges_config`, `channel_type_assignments_config`, and `hyperparameter_preset` in benchmark configs
+
+**1a. Hyperparameter Ranges Config** (`benchmarks/generic_hyperparameter_ranges_v2.json`)
+- Defines per-channel, per-frequency, per-adstock hyperparameter ranges
+- Three presets: `conservative`, `balanced` (default), `exploratory`
+- Covers all three frequencies (daily, weekly, monthly) and all three adstock types
+- 20 channel types with geometric-specific per-channel ranges; Weibull types use a `_default` entry
+- Referenced from a benchmark config using the `hyperparameter_ranges_config` field
+
+**1b. Channel Type Assignments** (`benchmarks/channel_type_assignments.json`)
+- Maps spend/media variable names to channel types from `generic_hyperparameter_ranges_v2.json`
+- Standalone file so the mapping is maintained once and shared across benchmark configs
+- Referenced from a benchmark config using the `channel_type_assignments_config` field
 
 **2. Queue Processor** (`scripts/process_queue_simple.py`)
 - Monitors GCS job queue

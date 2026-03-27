@@ -50,7 +50,7 @@ This PR implements a comprehensive benchmarking system for systematically testin
 
 ### 4. Benchmark Configurations (`benchmarks/`)
 
-Five benchmark types for systematic testing:
+Six benchmark types for systematic testing:
 
 1. **adstock_comparison.json** - Test adstock types
    - Geometric
@@ -70,6 +70,18 @@ Five benchmark types for systematic testing:
    - Mixed by funnel type
 
 5. **comprehensive_benchmark.json** - Cartesian combinations
+
+6. **generic_hyperparameter_ranges_v2.json** - Per-channel hyperparameter ranges
+   - 20 channel types (search_brand, tv_offline, paid_social_video, …)
+   - Three frequencies: daily, weekly, monthly
+   - Three adstock types: geometric (per-channel), weibull_cdf / weibull_pdf (`_default`)
+   - Three presets per combination: `conservative`, `balanced` (default), `exploratory`
+   - Referenced by other benchmark configs via the `hyperparameter_ranges_config` field
+
+7. **channel_type_assignments.json** - Variable name → channel type mapping
+   - Maps spend/media variable names to the channel types in `generic_hyperparameter_ranges_v2.json`
+   - Maintained once and shared across benchmark configs
+   - Referenced by other benchmark configs via the `channel_type_assignments_config` field
 
 ## System Architecture
 
@@ -111,9 +123,14 @@ Five benchmark types for systematic testing:
 ### benchmark_mmm.py
 
 ```python
-# Generate variants for a benchmark
+# Generate variants for a benchmark (applies hyperparameter ranges if configured)
 def generate_variants(config, test_dimensions)
     # Returns list of variant configs
+
+# Apply per-channel hyperparameter ranges to all variants
+def _apply_hyperparameter_ranges(variants, benchmark_config)
+    # Loads HyperparameterRangesConfig, resolves custom_hyperparameters
+    # per variant based on adstock type and resample frequency
 
 # Submit variants to queue
 def submit_to_queue(variants, queue_name)
@@ -122,6 +139,33 @@ def submit_to_queue(variants, queue_name)
 # Collect results
 def collect_results(benchmark_id, export_format)
     # Gathers metrics, exports CSV/Parquet
+```
+
+### HyperparameterRangesConfig (benchmark_mmm.py)
+
+```python
+# Load ranges config JSON
+hp_config = HyperparameterRangesConfig("benchmarks/generic_hyperparameter_ranges_v2.json")
+
+# Look up ranges for one combination
+ranges = hp_config.get_ranges(
+    frequency="weekly",        # "daily" | "weekly" | "monthly"
+    adstock_type="geometric",  # "geometric" | "weibull_cdf" | "weibull_pdf"
+    channel_type="tv_offline", # channel type key, or None for _default fallback
+    preset="balanced"          # "conservative" | "balanced" | "exploratory"
+)
+# => {"theta": [0.3, 0.8], "alpha": [0.5, 3.0], "gamma": [0.35, 1.0]}
+
+# Build custom_hyperparameters dict for a list of variable names
+# (channel_type_mapping is loaded from channel_type_assignments.json in practice)
+custom_hp = hp_config.resolve_custom_hyperparameters(
+    var_names=["GA_BRAND_SESSIONS", "TV_COSTS"],
+    adstock_type="geometric",
+    frequency="daily",
+    channel_type_mapping={"GA_BRAND_SESSIONS": "search_brand", "TV_COSTS": "tv_offline"},
+    preset="balanced"
+)
+# => {"GA_BRAND_SESSIONS_alphas": [...], "TV_COSTS_thetas": [...], ...}
 ```
 
 ### process_queue_simple.py
@@ -167,7 +211,22 @@ def verify_results_exist(gcs_path, timeout=10)
         "parameter": "value"
       }
     ]
-  }
+  },
+
+  // Optional: resolve per-channel hyperparameter ranges from a ranges config.
+  // Path is relative to the repository root.
+  "hyperparameter_ranges_config": "benchmarks/generic_hyperparameter_ranges_v2.json",
+
+  // Optional: path to a JSON file that maps variable names to channel types.
+  // The file must have an "assignments" key (see channel_type_assignments.json).
+  // Variables not listed fall back to the adstock type's _default ranges
+  // (available for weibull_cdf / weibull_pdf; geometric has no _default).
+  // Takes precedence over the inline channel_type_mapping field below.
+  "channel_type_assignments_config": "benchmarks/channel_type_assignments.json",
+
+  // Optional: which preset to use when looking up ranges.
+  // One of "conservative", "balanced" (default), or "exploratory".
+  "hyperparameter_preset": "balanced"
 }
 ```
 
