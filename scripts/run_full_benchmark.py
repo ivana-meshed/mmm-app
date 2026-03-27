@@ -163,6 +163,12 @@ ALL_WINDOW_VARIANTS: List[Dict[str, Any]] = [
     },
 ]
 
+# Fixed dimension sizes for the four benchmark dimensions.
+# These must stay in sync with the variants_dict built in generate_benchmark_config.
+_NUM_TRAIN_SPLITS = 3  # 70_90, 75_90, 65_80
+_NUM_TIME_AGGREGATIONS = 2  # daily, weekly
+_NUM_SPEND_VAR_MAPPINGS = 3  # spend_to_spend, spend_to_proxy, mixed_by_funnel
+
 
 def generate_benchmark_config(
     selected_columns: Dict[str, Any],
@@ -330,7 +336,12 @@ def generate_benchmark_config(
     mode_label = "sequential" if sequential else "cartesian"
 
     # Calculate expected number of variants
-    dim_sizes = [n_adstock, 3, 2, 3]  # adstock, splits, time_agg, spend_var
+    dim_sizes = [
+        n_adstock,
+        _NUM_TRAIN_SPLITS,
+        _NUM_TIME_AGGREGATIONS,
+        _NUM_SPEND_VAR_MAPPINGS,
+    ]  # adstock, splits, time_agg, spend_var
     if selected_window_specs and n_windows > 1:
         dim_sizes.append(n_windows)
     if sequential:
@@ -432,10 +443,14 @@ def generate_benchmark_config(
         logger.info(f"🔧 Hyperparameter preset: {hyperparameter_preset}")
 
     window_factor = f" × {n_windows}" if selected_window_specs else ""
+    _ns = _NUM_TRAIN_SPLITS
+    _nt = _NUM_TIME_AGGREGATIONS
+    _nv = _NUM_SPEND_VAR_MAPPINGS
     combo_formula = (
-        f"{n_adstock} + 3 + 2 + 3{(' + ' + str(n_windows)) if selected_window_specs and n_windows > 1 else ''}"
+        f"{n_adstock} + {_ns} + {_nt} + {_nv}"
+        f"{(' + ' + str(n_windows)) if selected_window_specs and n_windows > 1 else ''}"
         if sequential
-        else f"{n_adstock} × 3 × 2 × 3{window_factor}"
+        else f"{n_adstock} × {_ns} × {_nt} × {_nv}{window_factor}"
     )
     logger.info(f"📊 Generated benchmark config:")
     logger.info(f"   Mode: {mode_label}")
@@ -857,9 +872,13 @@ Examples:
             hyperparameter_preset=args.hyperparameter_preset,
         )
 
-        # Derive top_n: if not specified, submit all generated variants
-        max_combinations = benchmark_config.get("max_combinations", 162)
-        top_n = args.top_n if args.top_n is not None else max_combinations
+        # Derive top_n: if not specified, submit all generated variants.
+        # max_combinations is always set to n_combos + 10, so it safely covers all.
+        top_n = (
+            args.top_n
+            if args.top_n is not None
+            else benchmark_config["max_combinations"]
+        )
 
         # Save to temporary file
         config_path = save_temp_benchmark_config(benchmark_config)
