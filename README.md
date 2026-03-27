@@ -110,6 +110,12 @@ python scripts/run_full_benchmark.py --path <path> --top-n 10 --production-run
 
 # Complete benchmark standard mode (~$75, ~4-6 hours)
 python scripts/run_full_benchmark.py --path <path> --full-run
+
+# With per-channel hyperparameter ranges (balanced preset is the default)
+python scripts/run_full_benchmark.py --path <path> --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments.json \
+  --hyperparameter-preset balanced
 ```
 
 ### Manual Workflow (Alternative)

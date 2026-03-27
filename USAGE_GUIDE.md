@@ -33,6 +33,21 @@ python scripts/run_full_benchmark.py \
 python scripts/run_full_benchmark.py \
   --path <path_to_selected_columns.json> \
   --queue-name default-dev
+
+# With per-channel hyperparameter ranges (balanced preset is the default)
+python scripts/run_full_benchmark.py \
+  --path <path_to_selected_columns.json> \
+  --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments.json
+
+# With an explicit hyperparameter preset
+python scripts/run_full_benchmark.py \
+  --path <path_to_selected_columns.json> \
+  --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments.json \
+  --hyperparameter-preset exploratory
 ```
 
 **What it does:**
@@ -298,6 +313,21 @@ python scripts/run_full_benchmark.py \
 python scripts/run_full_benchmark.py \
   --path <path> \
   --skip-analysis
+
+# With per-channel hyperparameter ranges
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments.json
+
+# With an explicit hyperparameter preset
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments.json \
+  --hyperparameter-preset exploratory
 ```
 
 **What it does:**
