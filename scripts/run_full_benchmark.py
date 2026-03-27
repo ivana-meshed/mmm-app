@@ -170,6 +170,7 @@ def generate_benchmark_config(
     run_mode: str = "test",
     adstock_types: list = None,
     window_lengths: list = None,
+    sequential: bool = False,
     hyperparameter_ranges_config: Optional[str] = None,
     channel_type_assignments_config: Optional[str] = None,
     hyperparameter_preset: Optional[str] = None,
@@ -177,26 +178,34 @@ def generate_benchmark_config(
     """
     Generate comprehensive benchmark configuration from selected_columns.json.
 
-    Creates cartesian product of:
+    By default (cartesian mode) creates a cartesian product of:
     - N adstock types (default: 1 – geometric only; use --all-adstock for all 3)
     - 3 train/test splits
     - 2 time aggregations
     - 3 spend→var mapping strategies
-    - M window lengths (default: none; use --all-windows / --windows to add)
-    = 18 combinations by default (geometric, no window sweep),
+    - M window lengths (non-test default: 1 – "full"; use --all-windows / --windows to add more)
+    = 18 combinations by default (geometric, full window),
       54 when all adstock tested,
       54 when geometric + all 3 windows,
       162 when all adstock + all 3 windows
 
+    In sequential mode (--sequential) each dimension is varied independently:
+    - Dimensions are tested one at a time using the base config for other dimensions
+    - Order: adstock → train_splits → time_aggregation → spend_var_mapping → window_lengths
+    - Total = sum of dimension sizes (e.g. 1+3+2+3 = 9 for geometric-only default)
+    - Recommended for initial exploration before committing to a full cartesian sweep
+
     run_mode options:
-    - "test": 10 iterations, 1 trial
-    - "standard": 1000 iterations, 3 trials
-    - "extended": 2000 iterations, 5 trials
-    - "production": 5000 iterations, 5 trials
+    - "test": 10 iterations, 1 trial (no window sweep by default)
+    - "standard": 1000 iterations, 3 trials (full window by default)
+    - "extended": 2000 iterations, 5 trials (full window by default)
+    - "production": 5000 iterations, 5 trials (full window by default)
 
     adstock_types: list of adstock names to include (None → geometric only)
     window_lengths: list of window names from ALL_WINDOW_VARIANTS to include
-                    (None → no window sweep; the base config dates are used)
+                    (None → "full" for non-test modes; no window dim for test mode)
+    sequential: if True, use sequential (single-dimension) mode instead of
+                    cartesian product; reduces combinations from product to sum
     hyperparameter_ranges_config: optional path to a hyperparameter ranges JSON
                     file (relative to repo root), e.g.
                     "benchmarks/generic_hyperparameter_ranges_v2.json"
@@ -261,13 +270,20 @@ def generate_benchmark_config(
         f"({'all types' if n_adstock == 3 else 'geometric only' if n_adstock == 1 else f'{n_adstock} types'})"
     )
 
+    # For non-test runs, default to the "full" window so results always carry
+    # an explicit seasonality_window label (no data-window change; weeks_back=None
+    # leaves base-config dates unchanged).
+    effective_window_lengths = window_lengths
+    if effective_window_lengths is None and run_mode != "test":
+        effective_window_lengths = ["full"]
+
     # Resolve window-length variants to include
     window_name_map = {v["name"]: v for v in ALL_WINDOW_VARIANTS}
     selected_windows_raw: Optional[List[Dict]] = None
-    if window_lengths:
+    if effective_window_lengths:
         selected_windows_raw = [
             window_name_map[name]
-            for name in window_lengths
+            for name in effective_window_lengths
             if name in window_name_map
         ]
 
@@ -300,7 +316,7 @@ def generate_benchmark_config(
                 start_dt = end_dt - timedelta(weeks=weeks)
                 spec["start_date"] = start_dt.strftime("%Y-%m-%d")
                 spec["end_date"] = end_dt.strftime("%Y-%m-%d")
-            # else: no override → base config dates used
+            # else: no override → base config dates used (full history)
             selected_window_specs.append(spec)
 
         n_windows = len(selected_window_specs)
@@ -309,7 +325,22 @@ def generate_benchmark_config(
     else:
         n_windows = 1  # counts as one implicit "full" window in the product
 
-    n_combos = n_adstock * 3 * 2 * 3 * n_windows  # adstock × splits × time_agg × spend_var × windows
+    # Determine combination mode
+    combination_mode = "single" if sequential else "cartesian"
+    mode_label = "sequential" if sequential else "cartesian"
+
+    # Calculate expected number of variants
+    dim_sizes = [n_adstock, 3, 2, 3]  # adstock, splits, time_agg, spend_var
+    if selected_window_specs and n_windows > 1:
+        dim_sizes.append(n_windows)
+    if sequential:
+        # Sequential: each dimension varied independently (sum)
+        n_combos = sum(dim_sizes)
+    else:
+        # Cartesian: product of all dimensions
+        n_combos = 1
+        for s in dim_sizes:
+            n_combos *= s
     max_combinations = max(60, n_combos + 10)
 
     # Build variants dict
@@ -371,14 +402,14 @@ def generate_benchmark_config(
     benchmark_config = {
         "name": f"comprehensive_benchmark_{timestamp}",
         "description": (
-            "Complete cartesian product benchmark: "
+            f"Complete {mode_label} benchmark: "
             f"adstock × train_splits × time_agg × spend_var_mapping{window_dim}"
         ),
         "base_config": base_config,
         "iterations": iterations,
         "trials": trials,
         "max_combinations": max_combinations,
-        "combination_mode": "cartesian",
+        "combination_mode": combination_mode,
         "variants": variants_dict,
     }
 
@@ -401,14 +432,18 @@ def generate_benchmark_config(
         logger.info(f"🔧 Hyperparameter preset: {hyperparameter_preset}")
 
     window_factor = f" × {n_windows}" if selected_window_specs else ""
+    combo_formula = (
+        f"{n_adstock} + 3 + 2 + 3{(' + ' + str(n_windows)) if selected_window_specs and n_windows > 1 else ''}"
+        if sequential
+        else f"{n_adstock} × 3 × 2 × 3{window_factor}"
+    )
     logger.info(f"📊 Generated benchmark config:")
+    logger.info(f"   Mode: {mode_label}")
     logger.info(f"   Country: {country}")
     logger.info(f"   Goal: {goal}")
     logger.info(f"   Iterations: {iterations}")
     logger.info(f"   Trials: {trials}")
-    logger.info(
-        f"   Expected variants: {n_combos} ({n_adstock} × 3 × 2 × 3{window_factor})"
-    )
+    logger.info(f"   Expected variants: {n_combos} ({combo_formula})")
 
     return benchmark_config
 
@@ -447,7 +482,7 @@ def run_benchmark_submission(
         queue_name,
     ]
 
-    if top_n < 54:
+    if top_n < 162:
         cmd.extend(["--top-n", str(top_n)])
 
     logger.info(f"🚀 Running: {' '.join(cmd)}")
@@ -555,16 +590,19 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Test run (default - geometric only, 18 combos, reduced iterations/trials)
+  # Test run (default - geometric only, 10 combos, reduced iterations/trials)
   python scripts/run_full_benchmark.py --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
 
-  # Standard run, geometric only (18 combos, 1000 iterations, 3 trials)
+  # Standard run, geometric only (18 combos cartesian, full window default, 1000 iterations, 3 trials)
   python scripts/run_full_benchmark.py --path <path> --full-run
 
-  # Standard run, all adstock types (54 combos)
+  # Sequential run — each dimension tested independently (9 combos, faster exploration)
+  python scripts/run_full_benchmark.py --path <path> --full-run --sequential
+
+  # Standard run, all adstock types (54 combos cartesian)
   python scripts/run_full_benchmark.py --path <path> --full-run --all-adstock --top-n 54
 
-  # Standard run, window-length sweep only (54 combos: 1 adstock × 3 × 2 × 3 × 3 windows)
+  # Standard run, window-length sweep (54 combos: 1 adstock × 3 × 2 × 3 × 3 windows)
   python scripts/run_full_benchmark.py --path <path> --full-run --all-windows --top-n 54
 
   # Extended run, specific adstock types
@@ -621,10 +659,10 @@ Examples:
     parser.add_argument(
         "--top-n",
         type=int,
-        default=18,
+        default=None,
         help=(
-            "Number of combinations to submit (default: 18 = geometric only). "
-            "Set higher when using --all-adstock / --all-windows."
+            "Number of combinations to submit (default: all generated). "
+            "Set to limit e.g. --top-n 10 for a quick sweep."
         ),
     )
 
@@ -632,7 +670,7 @@ Examples:
     adstock_group.add_argument(
         "--all-adstock",
         action="store_true",
-        help="Test all 3 adstock types: geometric, weibull_cdf, weibull_pdf (54 combos)",
+        help="Test all 3 adstock types: geometric, weibull_cdf, weibull_pdf (54 combos cartesian)",
     )
     adstock_group.add_argument(
         "--adstock",
@@ -646,7 +684,7 @@ Examples:
     window_group.add_argument(
         "--all-windows",
         action="store_true",
-        help="Test all 3 window lengths: full, 2y, 3y (multiplies combos by 3)",
+        help="Test all 3 window lengths: full, 2y, 3y (multiplies cartesian combos by 3)",
     )
     window_group.add_argument(
         "--windows",
@@ -655,7 +693,22 @@ Examples:
         metavar="WINDOW",
         help=(
             "Window length(s) to test: full (all history), 2y (last 2 years), "
-            "3y (last 3 years). Requires end_date in selected_columns.json."
+            "3y (last 3 years). Requires end_date in selected_columns.json. "
+            "Non-test runs default to 'full' when no window flag is given."
+        ),
+    )
+
+    parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help=(
+            "Run tests sequentially per dimension instead of the cartesian product. "
+            "Each dimension (adstock, splits, time_agg, spend_var, windows) is varied "
+            "independently, using base-config defaults for the other dimensions. "
+            "Order: adstock → train_splits → time_aggregation → spend_var_mapping → "
+            "seasonality_window. Reduces combinations from product to sum "
+            "(e.g. 9 vs 18 for geometric-only default). "
+            "Recommended for initial exploration before a full cartesian sweep."
         ),
     )
 
@@ -731,21 +784,37 @@ Examples:
         adstock_types = None  # defaults to geometric only
 
     # Determine window lengths to test
+    # Non-test runs default to ["full"] (applied inside generate_benchmark_config).
     if args.all_windows:
         window_lengths = ["full", "2y", "3y"]
     elif args.windows:
         window_lengths = args.windows
     else:
-        window_lengths = None  # no window sweep
+        window_lengths = (
+            None  # generate_benchmark_config applies "full" for non-test
+        )
+
+    sequential = args.sequential
 
     # Print header
     logger.info("=" * 80)
     logger.info("COMPLETE BENCHMARKING WORKFLOW")
     logger.info("=" * 80)
     logger.info(f"Mode: {run_mode.upper()}")
-    logger.info(f"Adstock: {', '.join(adstock_types) if adstock_types else 'geometric (default)'}")
-    logger.info(f"Windows: {', '.join(window_lengths) if window_lengths else 'none (base config dates)'}")
-    logger.info(f"Top-N combinations: {args.top_n}")
+    logger.info(
+        f"Combination strategy: {'sequential (one dimension at a time)' if sequential else 'cartesian (product of all dimensions)'}"
+    )
+    logger.info(
+        f"Adstock: {', '.join(adstock_types) if adstock_types else 'geometric (default)'}"
+    )
+    if window_lengths:
+        logger.info(f"Windows: {', '.join(window_lengths)}")
+    elif run_mode != "test":
+        logger.info("Windows: full (default for non-test runs)")
+    else:
+        logger.info("Windows: none (test mode)")
+    if args.top_n is not None:
+        logger.info(f"Top-N combinations: {args.top_n}")
     logger.info(f"Config path: {args.path}")
     logger.info(f"Queue: {args.queue_name}")
     if args.hyperparameter_ranges_config:
@@ -782,10 +851,15 @@ Examples:
             run_mode=run_mode,
             adstock_types=adstock_types,
             window_lengths=window_lengths,
+            sequential=sequential,
             hyperparameter_ranges_config=args.hyperparameter_ranges_config,
             channel_type_assignments_config=args.channel_type_assignments_config,
             hyperparameter_preset=args.hyperparameter_preset,
         )
+
+        # Derive top_n: if not specified, submit all generated variants
+        max_combinations = benchmark_config.get("max_combinations", 162)
+        top_n = args.top_n if args.top_n is not None else max_combinations
 
         # Save to temporary file
         config_path = save_temp_benchmark_config(benchmark_config)
@@ -793,7 +867,7 @@ Examples:
 
         # Step 1: Submit benchmark
         benchmark_id = run_benchmark_submission(
-            config_path, args.queue_name, top_n=args.top_n
+            config_path, args.queue_name, top_n=top_n
         )
         logger.info("")
 

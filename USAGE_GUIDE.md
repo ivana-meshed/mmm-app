@@ -52,7 +52,9 @@ python scripts/run_full_benchmark.py \
 
 **What it does:**
 1. Downloads selected_columns.json from GCS
-2. Generates comprehensive benchmark config (54 variants)
+2. Generates comprehensive benchmark — default **18 variants** (1 adstock × 3 splits × 2 time_agg × 3 spend_var).
+   Non-test runs include the `full` training window by default.
+   Use `--all-adstock` for 54 variants, `--sequential` for 9 variants (per-dimension).
 3. Submits all test combinations to queue
 4. Processes queue until complete
 5. Analyzes results and creates visualizations
@@ -275,14 +277,19 @@ python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --no-plo
 ### run_full_benchmark.py (One-Line Command)
 
 ```bash
-# Test run (default)
+# Test run (default - geometric only, ~10 combos)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
 
-# Standard run (1000 iterations, 3 trials)
+# Standard run, geometric only (18 combos cartesian, full window default)
 python scripts/run_full_benchmark.py \
   --path <path_to_selected_columns.json> \
   --full-run
+
+# Sequential run — each dimension tested independently (9 combos, faster exploration)
+python scripts/run_full_benchmark.py \
+  --path <path_to_selected_columns.json> \
+  --full-run --sequential
 
 # Extended run (2000 iterations, 5 trials)
 python scripts/run_full_benchmark.py \
@@ -294,7 +301,17 @@ python scripts/run_full_benchmark.py \
   --path <path> \
   --production-run
 
-# Top-N combinations (5, 10, or 54)
+# All adstock types, cartesian (54 combos)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --full-run --all-adstock
+
+# Window-length sweep (full + 2y + 3y, multiplies combos by 3)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --full-run --all-windows
+
+# Top-N combinations (5, 10, or any number)
 python scripts/run_full_benchmark.py \
   --path <path> \
   --top-n 10 --extended-run
@@ -332,14 +349,27 @@ python scripts/run_full_benchmark.py \
 
 **What it does:**
 1. Downloads selected_columns.json from GCS
-2. Generates comprehensive benchmark (54 variants):
-   - 3 adstock types (geometric, weibull_cdf, weibull_pdf)
-   - 3 train splits (70/90, 75/90, 65/80)
-   - 2 time aggregations (daily, weekly)
-   - 3 spend→var mappings (spend_to_spend, spend_to_proxy, mixed_by_funnel)
-3. Submits all 54 jobs to queue
+2. Generates comprehensive benchmark:
+   - Default: **18 variants** cartesian (1 adstock × 3 splits × 2 time_agg × 3 spend_var)
+   - `--all-adstock`: 54 variants (3 adstock × 3 × 2 × 3)
+   - `--sequential`: 9 variants (each dimension varied independently)
+   - Non-test runs include `full` training window by default
+3. Submits all jobs to queue
 4. Processes queue until empty
 5. Analyzes results and saves to `./benchmark_analysis/`
+
+**Sequential mode strategy (--sequential):**
+
+Each dimension is tested one at a time using base-config defaults for the other dimensions.
+Testing order is chosen to progressively build on results:
+
+1. **adstock** — most fundamental choice; affects model fit and decomposition
+2. **train_splits** — evaluation methodology; how much data to hold out
+3. **time_aggregation** — daily vs weekly granularity
+4. **spend_var_mapping** — media signal strategy (spend vs proxy)
+5. **seasonality_window** — training period length (if `--all-windows` or `--windows` given)
+
+Use sequential mode for initial exploration before committing to a full cartesian sweep.
 
 ### process_queue_simple.py
 

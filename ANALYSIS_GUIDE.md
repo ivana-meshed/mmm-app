@@ -71,6 +71,10 @@ python3 -c "import pandas as pd; df = pd.read_csv('results.csv'); print(df.colum
 
 ## Analysis Workflows
 
+> **Note on combination modes:** Results from `--sequential` runs have `benchmark_test` set to the
+> dimension name (e.g. `adstock`, `train_splits`). Results from cartesian runs have
+> `benchmark_test = "combination"` and a combined `benchmark_variant` name. Filter accordingly.
+
 ### Workflow 1: Compare Adstock Types
 
 **Question:** Which adstock transformation works best for our data?
@@ -299,12 +303,17 @@ import pandas as pd
 
 df = pd.read_csv('results.csv')
 
-# Expected counts per benchmark type
+# Expected counts per benchmark type depend on combination mode:
+# - cartesian (default): adstock=1, train_splits=3, time_aggregation=2,
+#   spend_var_mapping=3, combination=18 (1×3×2×3)
+# - sequential (--sequential): one variant per dimension entry
+# Adjust to match your actual run configuration.
 expected = {
-    'adstock': 3,
-    'train_splits': 5,
+    'adstock': 3,          # comprehensive_benchmark adstock dim (3 types)
+    'train_splits': 3,
     'time_aggregation': 2,
-    'spend_var_mapping': 3
+    'spend_var_mapping': 3,
+    'combination': 18,     # cartesian product (default geometric-only run)
 }
 
 actual = df.groupby('benchmark_test')['benchmark_variant'].nunique()
@@ -312,8 +321,8 @@ actual = df.groupby('benchmark_test')['benchmark_variant'].nunique()
 print("\nCompletion Check:")
 for test_type, expected_count in expected.items():
     actual_count = actual.get(test_type, 0)
-    status = "✅" if actual_count == expected_count else "⚠️"
-    print(f"{status} {test_type}: {actual_count}/{expected_count} variants")
+    status = "✅" if actual_count >= expected_count else "⚠️"
+    print(f"{status} {test_type}: {actual_count} (expected ~{expected_count})")
 ```
 
 ## Decision Framework
