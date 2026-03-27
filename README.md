@@ -204,6 +204,34 @@ Sequential mode varies one dimension at a time — 9 variants instead of 18:
 - **Complete benchmark:** 54 combinations (all adstock), standard mode (~$40, 4-6 hours)
 - **Production quality:** 10 combinations, production mode (~$50, 5-7 hours)
 
+## Hyperparameter Presets & Window Length
+
+### Presets
+
+Three built-in presets control the range of hyperparameters sent to Robyn:
+
+| Preset | Typical use |
+|--------|-------------|
+| `conservative` | Narrow ranges; stable baselines, short-cycle products |
+| `balanced` | Moderate ranges (default) — recommended starting point |
+| `exploratory` | Wide ranges; complex markets, long-cycle products |
+
+**Preset precedence (highest to lowest):**
+
+1. **Variant-level** — `"hyperparameter_preset"` set directly on an adstock spec in JSON
+2. **Benchmark-level** — `--hyperparameter-preset` CLI flag or top-level JSON key
+3. **Default** — `"balanced"`
+
+When `--hyperparameter-ranges-config` is given, per-channel ranges are resolved using each variant's effective preset. The resolved ranges are embedded in the queue entry as `custom_hyperparameters` and `hyperparameter_preset` is set to `"Custom"` so the R training script uses them directly.
+
+### Window Length
+
+Non-test runs default to the `full` window (all available history). Add a window sweep with `--all-windows` (full/2y/3y) or `--windows 2y 3y`.
+
+**Data flow:** `weeks_back` → resolved to `start_date`/`end_date` → forwarded in queue entry → R `robyn_inputs(window_start=..., window_end=...)`.
+
+See **USAGE_GUIDE.md** — *Window Length* and *Hyperparameter Presets* sections for details.
+
 ## Documentation
 
 ### Essential Documentation (5 files)

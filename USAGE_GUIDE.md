@@ -802,6 +802,57 @@ Window lengths are applied as a trailing lookback from the latest data date:
 - `3y` — last 156 weeks (~3 years)
 - `2y` — last 104 weeks (~2 years)
 
+**How window dates flow through the system:**
+
+1. `--windows` / `--all-windows` → `weeks_back` stored in `ALL_WINDOW_VARIANTS`
+2. `generate_benchmark_config()` resolves `weeks_back` to an absolute `start_date` / `end_date` using the `end_date` from `selected_columns.json`
+3. Each queue entry carries `start_date` and `end_date`
+4. The R training script (`r/run_all.R`) reads these values and passes them directly to `robyn_inputs(window_start=..., window_end=...)` to filter training data
+
+Non-test runs automatically include a `full` window variant so every result row carries an explicit `seasonality_window` label.
+
+---
+
+### Hyperparameter Presets
+
+Presets control the range of hyperparameters (alpha, gamma, theta) passed to Robyn for each channel. Three built-in presets are available:
+
+| Preset | Alpha | Gamma | Theta | Use case |
+|--------|-------|-------|-------|----------|
+| `conservative` | Narrow ranges, low saturation | Narrow | Low carryover | Stable baselines, short-cycle products |
+| `balanced` | Moderate ranges (default) | Moderate | Moderate | General purpose — recommended starting point |
+| `exploratory` | Wide ranges, high saturation | Wide | High carryover | Complex markets, long-cycle products |
+
+**Preset precedence** (highest to lowest):
+
+1. **Variant-level preset** — set directly on an adstock spec in the JSON config:
+   ```json
+   {"name": "weibull_cdf", "adstock": "weibull_cdf", "hyperparameter_preset": "Meta default"}
+   ```
+2. **Benchmark-level preset** — `--hyperparameter-preset` CLI flag or `"hyperparameter_preset"` key in the benchmark JSON
+3. **Default** — `"balanced"` when nothing is set
+
+When `--hyperparameter-ranges-config` is provided, per-channel ranges are resolved for each variant using that variant's effective preset. After resolution, the preset is set to `"Custom"` and the ranges are embedded directly in the queue entry as `custom_hyperparameters`. The R training script then uses these exact ranges instead of the built-in preset lookup.
+
+**Example — use different presets per adstock type:**
+```json
+{
+  "variants": {
+    "adstock": [
+      {"name": "geometric",   "adstock": "geometric",   "hyperparameter_preset": "Meshed recommend"},
+      {"name": "weibull_cdf", "adstock": "weibull_cdf", "hyperparameter_preset": "Meta default"},
+      {"name": "weibull_pdf", "adstock": "weibull_pdf", "hyperparameter_preset": "balanced"}
+    ]
+  }
+}
+```
+
+Each adstock variant will resolve its per-channel ranges using its own preset when `--hyperparameter-ranges-config` is set.
+
+**Without per-channel ranges config:** the `hyperparameter_preset` value is forwarded as-is to the R training script, which applies built-in preset lookups. In this case variant-level presets are also respected.
+
+---
+
 ### Column Schema
 
 The benchmark config assumes `selected_columns.json` in GCS defines the following columns.

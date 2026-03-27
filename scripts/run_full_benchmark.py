@@ -164,10 +164,22 @@ ALL_WINDOW_VARIANTS: List[Dict[str, Any]] = [
 ]
 
 # Fixed dimension sizes for the four benchmark dimensions.
-# These must stay in sync with the variants_dict built in generate_benchmark_config.
+# These must stay in sync with the variants_dict built in
+# generate_benchmark_config() (the train_splits / time_aggregation /
+# spend_var_mapping lists defined inside that function).
 _NUM_TRAIN_SPLITS = 3  # 70_90, 75_90, 65_80
 _NUM_TIME_AGGREGATIONS = 2  # daily, weekly
 _NUM_SPEND_VAR_MAPPINGS = 3  # spend_to_spend, spend_to_proxy, mixed_by_funnel
+
+# Maximum possible cartesian combinations across all adstock types and windows:
+# 3 adstock × 3 splits × 2 time_agg × 3 spend_var × 3 windows = 162
+_MAX_CARTESIAN_COMBINATIONS = (
+    len(ALL_ADSTOCK_VARIANTS)
+    * _NUM_TRAIN_SPLITS
+    * _NUM_TIME_AGGREGATIONS
+    * _NUM_SPEND_VAR_MAPPINGS
+    * len(ALL_WINDOW_VARIANTS)
+)
 
 
 def generate_benchmark_config(
@@ -497,7 +509,7 @@ def run_benchmark_submission(
         queue_name,
     ]
 
-    if top_n < 162:
+    if top_n < _MAX_CARTESIAN_COMBINATIONS:
         cmd.extend(["--top-n", str(top_n)])
 
     logger.info(f"🚀 Running: {' '.join(cmd)}")

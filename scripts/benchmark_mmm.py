@@ -705,6 +705,13 @@ class BenchmarkRunner:
         ``hyperparameter_preset`` field is also set to ``"Custom"`` so
         the R training script uses the resolved ranges directly.
 
+        **Preset precedence**: each variant may carry its own
+        ``hyperparameter_preset`` value (e.g. set by an adstock spec such
+        as ``"Meta default"`` for weibull_cdf).  That variant-level preset
+        takes precedence over the benchmark-level
+        ``benchmark_config.hyperparameter_preset``.  If neither is set,
+        the default is ``"balanced"``.
+
         Variants that already carry ``custom_hyperparameters`` are left
         unchanged (their existing custom ranges take precedence).
 
@@ -770,11 +777,16 @@ class BenchmarkRunner:
         else:
             channel_type_mapping = benchmark_config.channel_type_mapping
 
-        preset = benchmark_config.hyperparameter_preset
+        # benchmark-level preset acts as the default; individual variants
+        # may override it (e.g. an adstock spec that sets "Meta default"
+        # for weibull_cdf).  See preset-precedence note in the docstring.
+        benchmark_preset = benchmark_config.hyperparameter_preset
 
         logger.info(
             f"Applying hyperparameter ranges from '{resolved_path.name}' "
-            f"(preset: {preset}) to {len(variants)} variant(s)"
+            f"(benchmark preset: {benchmark_preset}, "
+            f"per-variant overrides respected) "
+            f"to {len(variants)} variant(s)"
         )
 
         updated_variants = []
@@ -788,6 +800,10 @@ class BenchmarkRunner:
                 )
                 updated_variants.append(variant)
                 continue
+
+            # Respect the variant-level preset (e.g. set by an adstock spec)
+            # and fall back to the benchmark-level preset when absent.
+            preset = variant.get("hyperparameter_preset") or benchmark_preset
 
             adstock_type = variant.get("adstock", "geometric")
             resample_freq = variant.get("resample_freq", "none")
@@ -815,8 +831,7 @@ class BenchmarkRunner:
                     {
                         k.rsplit("_", 1)[0]
                         for k in custom_hp
-                        if not k.endswith("_min")
-                        and not k.endswith("_max")
+                        if not k.endswith("_min") and not k.endswith("_max")
                     }
                 )
                 logger.info(
