@@ -735,18 +735,18 @@ python scripts/run_full_benchmark.py \
 
 Default config runs **geometric adstock only** (30 variants). Use `--all-adstock` to multiply by 3.
 
-| Run mode | Adstock | Variants | Approx. time | Approx. cost |
-|----------|---------|----------|-------------|-------------|
-| Test (default) | geometric | 30 | ~30 min | ~$5 |
-| Test (all adstock) | all 3 | 90 | ~1.5 h | ~$15 |
-| Standard | geometric | 30 | ~2 h | ~$25 |
-| Standard (all adstock) | all 3 | 90 | ~6 h | ~$75 |
-| Extended | geometric | 30 | ~4-5 h | ~$70 |
-| Extended (all adstock) | all 3 | 90 | ~12-15 h | ~$210 |
-| Production | geometric | 30 | ~10-12 h | ~$165 |
-| Production (all adstock + all windows) | all 3 | 270 | ~35-40 h | ~$500 |
-| Top-10 extended | geometric | 10 | ~1.5 h | ~$23 |
-| Top-10 production | geometric | 10 | ~3-4 h | ~$55 |
+| Run mode | Adstock | Variants | Approx. time | Approx. cost | One-liner flag(s) |
+|----------|---------|----------|-------------|-------------|-----------------|
+| Test (default) | geometric | 30 | ~30 min | ~$5 | _(none)_ |
+| Test (all adstock) | all 3 | 90 | ~1.5 h | ~$15 | `--all-adstock` |
+| Standard | geometric | 30 | ~2 h | ~$25 | `--full-run` |
+| Standard (all adstock) | all 3 | 90 | ~6 h | ~$75 | `--all-adstock --full-run` |
+| Extended | geometric | 30 | ~4-5 h | ~$70 | `--extended-run` |
+| Extended (all adstock) | all 3 | 90 | ~12-15 h | ~$210 | `--all-adstock --extended-run` |
+| Production | geometric | 30 | ~10-12 h | ~$165 | `--production-run` |
+| Production (all adstock + all windows) | all 3 | 270 | ~35-40 h | ~$500 | `--all-adstock --all-windows --production-run --top-n 270` |
+| Top-10 extended | geometric | 10 | ~1.5 h | ~$23 | `--top-n 10 --extended-run` |
+| Top-10 production | geometric | 10 | ~3-4 h | ~$55 | `--top-n 10 --production-run` |
 
 ### Window Length
 
