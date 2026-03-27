@@ -976,6 +976,11 @@ class BenchmarkAnalyzer:
             value_name="ROAS",
         )
 
+        # Cap y-axis at the 98th percentile to handle extreme outliers.
+        p98 = float(melted["ROAS"].quantile(0.98))
+        actual_max = float(melted["ROAS"].max())
+        y_ceiling = p98 * 1.05
+
         sns.barplot(
             data=melted,
             x="benchmark_variant",
@@ -983,9 +988,32 @@ class BenchmarkAnalyzer:
             hue="Channel",
             ax=ax,
         )
-        ax.set_title(
-            "ROAS by Channel and Variant", fontsize=16, fontweight="bold"
-        )
+        if y_ceiling > 0:
+            ax.set_ylim(0, y_ceiling)
+
+        title = "ROAS by Channel and Variant"
+        subtitle_parts = []
+        if actual_max > y_ceiling and y_ceiling > 0:
+            clipped_channels = (
+                melted.groupby("Channel")["ROAS"]
+                .max()
+                .pipe(lambda s: s[s > y_ceiling].index.tolist())
+            )
+            subtitle_parts.append(
+                f"y-axis capped at {y_ceiling:.4g}; "
+                f"actual max {actual_max:.4g} – "
+                f"clipped: {', '.join(clipped_channels)}"
+            )
+        # Note when ROAS values are very small (proxy/sessions-based KPIs)
+        if actual_max < 0.1:
+            subtitle_parts.append(
+                "Note: small values expected when dep_var is a "
+                "proxy (sessions/clicks) rather than revenue"
+            )
+        if subtitle_parts:
+            title += "\n(" + "; ".join(subtitle_parts) + ")"
+
+        ax.set_title(title, fontsize=14, fontweight="bold")
         ax.set_xlabel("Variant", fontsize=12)
         ax.set_ylabel("ROAS (Return on Ad Spend)", fontsize=12)
         ax.legend(
@@ -1059,6 +1087,13 @@ class BenchmarkAnalyzer:
             value_name="CPA",
         )
 
+        # Cap y-axis at the 98th percentile so extreme outlier channels
+        # (e.g. low-spend partners with very high CPA) don't compress the
+        # scale for all other channels.  Annotate when capping occurs.
+        p98 = float(melted["CPA"].quantile(0.98))
+        actual_max = float(melted["CPA"].max())
+        y_ceiling = p98 * 1.05  # 5 % headroom above the 98th pct
+
         sns.barplot(
             data=melted,
             x="benchmark_variant",
@@ -1066,9 +1101,27 @@ class BenchmarkAnalyzer:
             hue="Channel",
             ax=ax,
         )
-        ax.set_title(
-            "CPA by Channel and Variant", fontsize=16, fontweight="bold"
-        )
+        ax.set_ylim(0, y_ceiling)
+
+        title = "CPA by Channel and Variant"
+        if actual_max > y_ceiling:
+            clipped_channels = (
+                melted.groupby("Channel")["CPA"]
+                .max()
+                .pipe(lambda s: s[s > y_ceiling].index.tolist())
+            )
+            title += (
+                f"\n(y-axis capped at {y_ceiling:,.0f}; "
+                f"actual max {actual_max:,.0f} – "
+                f"clipped: {', '.join(clipped_channels)})"
+            )
+            logger.info(
+                f"CPA plot: y-axis capped at {y_ceiling:,.0f} "
+                f"(actual max {actual_max:,.0f} from "
+                f"{clipped_channels})"
+            )
+
+        ax.set_title(title, fontsize=14, fontweight="bold")
         ax.set_xlabel("Variant", fontsize=12)
         ax.set_ylabel("CPA (Cost Per Acquisition)", fontsize=12)
         ax.legend(
