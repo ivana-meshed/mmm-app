@@ -16,6 +16,12 @@ Usage:
     # Full production run
     python scripts/run_full_benchmark.py --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json --full-run
 
+    # With per-channel hyperparameter ranges
+    python scripts/run_full_benchmark.py --path <path> --full-run \\
+        --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+        --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
+        --hyperparameter-preset balanced
+
     # With custom queue name
     python scripts/run_full_benchmark.py --path <path> --queue-name default-dev
 """
@@ -164,6 +170,9 @@ def generate_benchmark_config(
     run_mode: str = "test",
     adstock_types: list = None,
     window_lengths: list = None,
+    hyperparameter_ranges_config: Optional[str] = None,
+    channel_type_assignments_config: Optional[str] = None,
+    hyperparameter_preset: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Generate comprehensive benchmark configuration from selected_columns.json.
@@ -188,6 +197,14 @@ def generate_benchmark_config(
     adstock_types: list of adstock names to include (None → geometric only)
     window_lengths: list of window names from ALL_WINDOW_VARIANTS to include
                     (None → no window sweep; the base config dates are used)
+    hyperparameter_ranges_config: optional path to a hyperparameter ranges JSON
+                    file (relative to repo root), e.g.
+                    "benchmarks/generic_hyperparameter_ranges_v2.json"
+    channel_type_assignments_config: optional path to a channel-type assignments
+                    JSON file (relative to repo root), e.g.
+                    "benchmarks/channel_type_assignments.json"
+    hyperparameter_preset: one of "conservative", "balanced" (default),
+                    or "exploratory"
     """
     country = selected_columns.get("country", "de")
     goal = selected_columns.get("selected_goal", "N_UPLOADS_WEB")
@@ -364,6 +381,24 @@ def generate_benchmark_config(
         "combination_mode": "cartesian",
         "variants": variants_dict,
     }
+
+    if hyperparameter_ranges_config:
+        benchmark_config["hyperparameter_ranges_config"] = (
+            hyperparameter_ranges_config
+        )
+        logger.info(
+            f"🎛️  Hyperparameter ranges config: {hyperparameter_ranges_config}"
+        )
+    if channel_type_assignments_config:
+        benchmark_config["channel_type_assignments_config"] = (
+            channel_type_assignments_config
+        )
+        logger.info(
+            f"📋 Channel type assignments config: {channel_type_assignments_config}"
+        )
+    if hyperparameter_preset:
+        benchmark_config["hyperparameter_preset"] = hyperparameter_preset
+        logger.info(f"🔧 Hyperparameter preset: {hyperparameter_preset}")
 
     window_factor = f" × {n_windows}" if selected_window_specs else ""
     logger.info(f"📊 Generated benchmark config:")
@@ -544,6 +579,17 @@ Examples:
   # Top-N combinations with extended run
   python scripts/run_full_benchmark.py --path <path> --top-n 10 --extended-run
 
+  # With per-channel hyperparameter ranges (balanced preset is the default)
+  python scripts/run_full_benchmark.py --path <path> --full-run \\
+      --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+      --channel-type-assignments-config benchmarks/channel_type_assignments.json
+
+  # With hyperparameter ranges and an explicit preset
+  python scripts/run_full_benchmark.py --path <path> --full-run \\
+      --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+      --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
+      --hyperparameter-preset exploratory
+
   # With custom queue
   python scripts/run_full_benchmark.py --path <path> --queue-name default-dev
         """,
@@ -631,6 +677,39 @@ Examples:
         help="Skip analysis (only submit and process queue)",
     )
 
+    parser.add_argument(
+        "--hyperparameter-ranges-config",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Path to a hyperparameter ranges JSON file (relative to repo root). "
+            "E.g. benchmarks/generic_hyperparameter_ranges_v2.json. "
+            "When set, per-channel hyperparameter ranges are resolved from "
+            "this file and embedded in the generated benchmark config."
+        ),
+    )
+    parser.add_argument(
+        "--channel-type-assignments-config",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Path to a channel-type assignments JSON file (relative to repo root). "
+            "E.g. benchmarks/channel_type_assignments.json. "
+            "Maps variable names to channel types for hyperparameter range lookups. "
+            "Required when --hyperparameter-ranges-config is set."
+        ),
+    )
+    parser.add_argument(
+        "--hyperparameter-preset",
+        choices=["conservative", "balanced", "exploratory"],
+        default=None,
+        help=(
+            "Preset to use when resolving hyperparameter ranges "
+            "(conservative / balanced / exploratory). "
+            "Defaults to 'balanced' when --hyperparameter-ranges-config is set."
+        ),
+    )
+
     args = parser.parse_args()
 
     # Determine run mode
@@ -669,6 +748,16 @@ Examples:
     logger.info(f"Top-N combinations: {args.top_n}")
     logger.info(f"Config path: {args.path}")
     logger.info(f"Queue: {args.queue_name}")
+    if args.hyperparameter_ranges_config:
+        logger.info(
+            f"Hyperparameter ranges: {args.hyperparameter_ranges_config}"
+        )
+        logger.info(
+            f"Channel type assignments: {args.channel_type_assignments_config or '(none)'}"
+        )
+        logger.info(
+            f"Hyperparameter preset: {args.hyperparameter_preset or 'balanced (default)'}"
+        )
     logger.info("=" * 80)
     logger.info("")
 
@@ -690,6 +779,9 @@ Examples:
             run_mode=run_mode,
             adstock_types=adstock_types,
             window_lengths=window_lengths,
+            hyperparameter_ranges_config=args.hyperparameter_ranges_config,
+            channel_type_assignments_config=args.channel_type_assignments_config,
+            hyperparameter_preset=args.hyperparameter_preset,
         )
 
         # Save to temporary file
