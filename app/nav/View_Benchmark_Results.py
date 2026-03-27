@@ -294,6 +294,11 @@ if selected_benchmark:
                     "Return on Ad Spend per paid-media channel across variants",
                 ),
                 (
+                    "cpa_by_channel",
+                    "CPA by Channel",
+                    "Cost Per Acquisition per paid-media channel across variants",
+                ),
+                (
                     "train_val_test_gap",
                     "Train/Val/Test Gap Analysis",
                     "Scatter plots showing overfitting patterns",

@@ -360,6 +360,7 @@ class BenchmarkAnalyzer:
         # Decomposition contributions (new fields from extract_model_summary.R)
         decomp = summary.get("decomp_contribution", {}) or {}
         channel_roas = decomp.get("channel_roas") or {}
+        channel_cpa = decomp.get("channel_cpa") or {}
 
         return {
             # Benchmark metadata
@@ -394,6 +395,10 @@ class BenchmarkAnalyzer:
             # Per-channel ROAS serialised as JSON string for CSV portability
             "channel_roas_json": (
                 json.dumps(channel_roas) if channel_roas else ""
+            ),
+            # Per-channel CPA serialised as JSON string for CSV portability
+            "channel_cpa_json": (
+                json.dumps(channel_cpa) if channel_cpa else ""
             ),
             # Model metadata
             "model_id": best_model.get("model_id"),
@@ -458,6 +463,7 @@ class BenchmarkAnalyzer:
             ("best_models_summary", self._plot_best_models_summary),
             ("driver_waterfall", self._plot_driver_waterfall),
             ("roas_by_channel", self._plot_roas_by_channel),
+            ("cpa_by_channel", self._plot_cpa_by_channel),
         ]
 
         for plot_name, plot_func in plots:
@@ -982,6 +988,89 @@ class BenchmarkAnalyzer:
         )
         ax.set_xlabel("Variant", fontsize=12)
         ax.set_ylabel("ROAS (Return on Ad Spend)", fontsize=12)
+        ax.legend(
+            title="Channel",
+            bbox_to_anchor=(1.01, 1),
+            loc="upper left",
+            fontsize=8,
+        )
+        ax.grid(axis="y", alpha=0.3)
+
+        if n_variants > 10:
+            plt.xticks(rotation=45, ha="right", fontsize=9)
+        else:
+            plt.xticks(rotation=45, ha="right")
+
+        plt.tight_layout()
+        return fig
+
+    def _plot_cpa_by_channel(self, df: pd.DataFrame):
+        """Grouped bar chart of CPA per channel across variants."""
+        if "channel_cpa_json" not in df.columns:
+            logger.warning(
+                "No channel_cpa_json column – skipping CPA by channel plot"
+            )
+            return None
+
+        # Parse the JSON strings into a wide DataFrame
+        cpa_rows = []
+        for _, row in df.iterrows():
+            raw = row.get("channel_cpa_json", "")
+            if not raw or raw == "{}":
+                continue
+            try:
+                cpa_dict = json.loads(raw) if isinstance(raw, str) else raw
+                if not isinstance(cpa_dict, dict):
+                    continue
+                entry = {"benchmark_variant": row["benchmark_variant"]}
+                entry.update(
+                    {
+                        ch: float(v)
+                        for ch, v in cpa_dict.items()
+                        if v is not None and isinstance(v, (int, float))
+                    }
+                )
+                cpa_rows.append(entry)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
+
+        if not cpa_rows:
+            logger.warning("No parseable channel CPA data – skipping plot")
+            return None
+
+        cpa_df = pd.DataFrame(cpa_rows).set_index("benchmark_variant")
+        channel_cols = [c for c in cpa_df.columns if cpa_df[c].notna().any()]
+        if not channel_cols:
+            return None
+
+        cpa_df = cpa_df[channel_cols].dropna(how="all")
+        if cpa_df.empty:
+            return None
+
+        n_variants = len(cpa_df)
+        n_channels = len(channel_cols)
+        fig_width = max(14, n_variants * n_channels * 0.25)
+        fig, ax = plt.subplots(figsize=(fig_width, 8))
+
+        melted = cpa_df.reset_index().melt(
+            id_vars="benchmark_variant",
+            value_vars=channel_cols,
+            var_name="Channel",
+            value_name="CPA",
+        )
+
+        sns.barplot(
+            data=melted,
+            x="benchmark_variant",
+            y="CPA",
+            hue="Channel",
+            ax=ax,
+        )
+        ax.set_title(
+            "CPA by Channel and Variant", fontsize=16, fontweight="bold"
+        )
+        ax.set_xlabel("Variant", fontsize=12)
+        ax.set_ylabel("CPA (Cost Per Acquisition)", fontsize=12)
         ax.legend(
             title="Channel",
             bbox_to_anchor=(1.01, 1),

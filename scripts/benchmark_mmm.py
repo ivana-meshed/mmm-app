@@ -1229,6 +1229,7 @@ class ResultsCollector:
         best_model = summary.get("best_model", {})
         decomp = summary.get("decomp_contribution", {}) or {}
         channel_roas = decomp.get("channel_roas") or {}
+        channel_cpa = decomp.get("channel_cpa") or {}
 
         result = {
             # Benchmark metadata
@@ -1263,6 +1264,10 @@ class ResultsCollector:
             # Per-channel ROAS serialised as JSON string for CSV portability
             "channel_roas_json": (
                 json.dumps(channel_roas) if channel_roas else ""
+            ),
+            # Per-channel CPA serialised as JSON string for CSV portability
+            "channel_cpa_json": (
+                json.dumps(channel_cpa) if channel_cpa else ""
             ),
             # Model metadata
             "model_id": best_model.get("model_id"),

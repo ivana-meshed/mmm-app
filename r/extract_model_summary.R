@@ -218,6 +218,7 @@ extract_model_summary <- function(output_collect, input_collect = NULL,
         organic_share = NA_real_,
         context_share = NA_real_,
         channel_roas = list(),
+        channel_cpa = list(),
         allocator_stability_roas_cv = NA_real_
     )
 
@@ -264,19 +265,34 @@ extract_model_summary <- function(output_collect, input_collect = NULL,
             NULL
         }
 
-        if (!is.null(roas_col) && length(paid_media_vars) > 0) {
-            media_rows <- best_rows[paid_idx, ]
-            roas_vals <- setNames(
-                as.list(round(as.numeric(media_rows[[roas_col]]), 4)),
-                as.character(media_rows$rn)
+        cpa_col <- if ("cpa_total" %in% names(best_rows)) {
+            "cpa_total"
+        } else if ("cpa_mean" %in% names(best_rows)) {
+            "cpa_mean"
+        } else {
+            NULL
+        }
+
+        .safe_named_numeric <- function(rows, col) {
+            vals <- setNames(
+                as.list(round(as.numeric(rows[[col]]), 4)),
+                as.character(rows$rn)
             )
-            # Replace NULL/NA values with NA_real_ and ensure numeric type
-            roas_vals <- lapply(roas_vals, function(v) {
+            lapply(vals, function(v) {
                 if (is.null(v) || length(v) == 0) return(NA_real_)
                 v_num <- suppressWarnings(as.numeric(v))
                 if (length(v_num) == 1 && !is.na(v_num)) v_num else NA_real_
             })
-            result$channel_roas <- roas_vals
+        }
+
+        if (!is.null(roas_col) && length(paid_media_vars) > 0) {
+            media_rows <- best_rows[paid_idx, ]
+            result$channel_roas <- .safe_named_numeric(media_rows, roas_col)
+        }
+
+        if (!is.null(cpa_col) && length(paid_media_vars) > 0) {
+            media_rows <- best_rows[paid_idx, ]
+            result$channel_cpa <- .safe_named_numeric(media_rows, cpa_col)
         }
     }, error = function(e) {
         message("⚠️ Failed to extract decomp contributions: ", conditionMessage(e))
