@@ -24,7 +24,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from itertools import product
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -641,8 +641,31 @@ class BenchmarkRunner:
     def _generate_seasonality_variants(
         self, base_config: Dict[str, Any], specs: List[Dict]
     ) -> List[Dict[str, Any]]:
-        """Generate seasonality window variants."""
+        """Generate seasonality window variants.
+
+        Each spec may provide either explicit ``start_date``/``end_date``
+        strings or a ``weeks_back`` integer.  When ``weeks_back`` is given
+        the start date is computed relative to the ``end_date`` found in
+        ``base_config`` (falling back to today when absent).  Specs with
+        neither field leave the base-config training window unchanged
+        (i.e. the "full history" variant).
+        """
         variants = []
+
+        # Resolve reference end date once for all weeks_back specs
+        ref_end_date_str = base_config.get("end_date", "")
+        if ref_end_date_str:
+            try:
+                ref_end_dt = datetime.strptime(ref_end_date_str, "%Y-%m-%d")
+            except ValueError:
+                ref_end_dt = datetime.now()
+                logger.warning(
+                    f"Could not parse end_date '{ref_end_date_str}' "
+                    "(expected YYYY-MM-DD format); using today for "
+                    "weeks_back resolution"
+                )
+        else:
+            ref_end_dt = datetime.now()
 
         for spec in specs:
             variant = base_config.copy()
@@ -650,11 +673,18 @@ class BenchmarkRunner:
             variant["benchmark_variant"] = spec.get("name", "unnamed")
             variant["benchmark_description"] = spec.get("description", "")
 
-            # Override start/end dates for seasonality window
-            if "start_date" in spec:
-                variant["start_date"] = spec["start_date"]
-            if "end_date" in spec:
-                variant["end_date"] = spec["end_date"]
+            # Resolve weeks_back to absolute start_date
+            if "weeks_back" in spec:
+                weeks = spec["weeks_back"]
+                start_dt = ref_end_dt - timedelta(weeks=weeks)
+                variant["start_date"] = start_dt.strftime("%Y-%m-%d")
+                variant["end_date"] = ref_end_dt.strftime("%Y-%m-%d")
+            else:
+                # Override start/end dates when provided explicitly
+                if "start_date" in spec:
+                    variant["start_date"] = spec["start_date"]
+                if "end_date" in spec:
+                    variant["end_date"] = spec["end_date"]
 
             variants.append(variant)
 

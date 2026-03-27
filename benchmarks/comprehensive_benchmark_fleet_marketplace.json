@@ -1,6 +1,6 @@
 {
   "name": "comprehensive_benchmark_fleet_marketplace",
-  "description": "Comprehensive benchmark for a fleet/mobility marketplace dataset. Default: geometric adstock only. Tests cartesian product of 3 dimensions: train_splits × time_aggregation × spend_var_mapping (18 variants). Use run_full_benchmark.py --all-adstock to also sweep weibull_cdf and weibull_pdf (54 variants total). Designed for datasets with Google Search (brand/non-brand/pmax/display/video), Meta, Bing, Facebook sub-channels, CRM/newsletter organic channels, and context variables such as fleet availability, occupancy and location count. Dependent variable is typically 'bookings', 'gmv_net_eur', or 'gmv_gross_eur'.",
+  "description": "Comprehensive benchmark for a fleet/mobility marketplace dataset. Default: geometric adstock only. Tests cartesian product of 5 dimensions: adstock × train_splits × time_aggregation × spend_var_mapping × seasonality_window (90 variants). Use run_full_benchmark.py --all-adstock to also sweep weibull_cdf and weibull_pdf (270 variants total). Designed for datasets with Google Search (brand/non-brand/pmax/display/video), Meta, Bing, Facebook sub-channels, CRM/newsletter organic channels, and context variables such as fleet availability, occupancy and location count. Dependent variable is typically 'bookings', 'gmv_net_eur', or 'gmv_gross_eur'.",
   "base_config": {
     "country": "FILL_IN_COUNTRY_CODE",
     "goal": "bookings",
@@ -8,7 +8,7 @@
   },
   "iterations": 1000,
   "trials": 3,
-  "max_combinations": 60,
+  "max_combinations": 300,
   "combination_mode": "cartesian",
   "hyperparameter_ranges_config": "benchmarks/generic_hyperparameter_ranges_v2.json",
   "channel_type_assignments_config": "benchmarks/channel_type_assignments_fleet_marketplace.json",
@@ -112,6 +112,22 @@
           "google_youtube_clicks",
           "bing_search_cost"
         ]
+      }
+    ],
+    "seasonality_window": [
+      {
+        "name": "full",
+        "description": "Full data window (all available history — no start_date override)"
+      },
+      {
+        "name": "2y",
+        "description": "Last 2 years (~104 weeks back from end_date)",
+        "weeks_back": 104
+      },
+      {
+        "name": "3y",
+        "description": "Last 3 years (~156 weeks back from end_date)",
+        "weeks_back": 156
       }
     ]
   }
