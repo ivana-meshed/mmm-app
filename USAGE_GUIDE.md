@@ -52,7 +52,9 @@ python scripts/run_full_benchmark.py \
 
 **What it does:**
 1. Downloads selected_columns.json from GCS
-2. Generates comprehensive benchmark config (54 variants)
+2. Generates comprehensive benchmark — default **18 variants** (1 adstock × 3 splits × 2 time_agg × 3 spend_var).
+   Non-test runs include the `full` training window by default.
+   Use `--all-adstock` for 54 variants, `--sequential` for 9 variants (per-dimension).
 3. Submits all test combinations to queue
 4. Processes queue until complete
 5. Analyzes results and creates visualizations
@@ -275,14 +277,19 @@ python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --no-plo
 ### run_full_benchmark.py (One-Line Command)
 
 ```bash
-# Test run (default)
+# Test run (default - geometric only, ~10 combos)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
 
-# Standard run (1000 iterations, 3 trials)
+# Standard run, geometric only (18 combos cartesian, full window default)
 python scripts/run_full_benchmark.py \
   --path <path_to_selected_columns.json> \
   --full-run
+
+# Sequential run — each dimension tested independently (9 combos, faster exploration)
+python scripts/run_full_benchmark.py \
+  --path <path_to_selected_columns.json> \
+  --full-run --sequential
 
 # Extended run (2000 iterations, 5 trials)
 python scripts/run_full_benchmark.py \
@@ -294,7 +301,17 @@ python scripts/run_full_benchmark.py \
   --path <path> \
   --production-run
 
-# Top-N combinations (5, 10, or 54)
+# All adstock types, cartesian (54 combos)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --full-run --all-adstock
+
+# Window-length sweep (full + 2y + 3y, multiplies combos by 3)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --full-run --all-windows
+
+# Top-N combinations (5, 10, or any number)
 python scripts/run_full_benchmark.py \
   --path <path> \
   --top-n 10 --extended-run
@@ -332,14 +349,27 @@ python scripts/run_full_benchmark.py \
 
 **What it does:**
 1. Downloads selected_columns.json from GCS
-2. Generates comprehensive benchmark (54 variants):
-   - 3 adstock types (geometric, weibull_cdf, weibull_pdf)
-   - 3 train splits (70/90, 75/90, 65/80)
-   - 2 time aggregations (daily, weekly)
-   - 3 spend→var mappings (spend_to_spend, spend_to_proxy, mixed_by_funnel)
-3. Submits all 54 jobs to queue
+2. Generates comprehensive benchmark:
+   - Default: **18 variants** cartesian (1 adstock × 3 splits × 2 time_agg × 3 spend_var)
+   - `--all-adstock`: 54 variants (3 adstock × 3 × 2 × 3)
+   - `--sequential`: 9 variants (each dimension varied independently)
+   - Non-test runs include `full` training window by default
+3. Submits all jobs to queue
 4. Processes queue until empty
 5. Analyzes results and saves to `./benchmark_analysis/`
+
+**Sequential mode strategy (--sequential):**
+
+Each dimension is tested one at a time using base-config defaults for the other dimensions.
+Testing order is chosen to progressively build on results:
+
+1. **adstock** — most fundamental choice; affects model fit and decomposition
+2. **train_splits** — evaluation methodology; how much data to hold out
+3. **time_aggregation** — daily vs weekly granularity
+4. **spend_var_mapping** — media signal strategy (spend vs proxy)
+5. **seasonality_window** — training period length (if `--all-windows` or `--windows` given)
+
+Use sequential mode for initial exploration before committing to a full cartesian sweep.
 
 ### process_queue_simple.py
 
@@ -637,7 +667,7 @@ This section covers running benchmarks for datasets that follow the fleet/mobili
 | File | Purpose |
 |------|---------|
 | `benchmarks/channel_type_assignments_fleet_marketplace.json` | Maps all spend, impressions, and clicks column names to channel types in `generic_hyperparameter_ranges_v2.json` |
-| `benchmarks/comprehensive_benchmark_fleet_marketplace.json` | Default 30-variant benchmark (geometric adstock × 3 train splits × 2 time aggregations × 5 spend-var mappings). Use `--all-adstock` to extend to 90 variants across all 3 adstock types. |
+| `benchmarks/comprehensive_benchmark_fleet_marketplace.json` | Default 30-variant benchmark (geometric adstock × 3 train splits × 2 time aggregations × 5 spend-var mappings, `full` window). Use `--all-adstock` to extend to 90 variants; `--all-windows` to add the `2y` and `3y` window variants (90 → 270 with both flags). |
 
 ### Before Running
 
@@ -731,46 +761,135 @@ python scripts/run_full_benchmark.py \
   --top-n 10 --production-run
 ```
 
+
 ### Cost Estimates
 
-Default config runs **geometric adstock only** (30 variants). Use `--all-adstock` to multiply by 3.
+All figures below are for the fleet marketplace config:
 
-| Run mode | Adstock | Variants | Approx. time | Approx. cost | One-liner flag(s) |
-|----------|---------|----------|-------------|-------------|-----------------|
-| Test (default) | geometric | 30 | ~30 min | ~$5 | _(none)_ |
-| Test (all adstock) | all 3 | 90 | ~1.5 h | ~$15 | `--all-adstock` |
-| Standard | geometric | 30 | ~2 h | ~$25 | `--full-run` |
-| Standard (all adstock) | all 3 | 90 | ~6 h | ~$75 | `--all-adstock --full-run` |
-| Extended | geometric | 30 | ~4-5 h | ~$70 | `--extended-run` |
-| Extended (all adstock) | all 3 | 90 | ~12-15 h | ~$210 | `--all-adstock --extended-run` |
-| Production | geometric | 30 | ~10-12 h | ~$165 | `--production-run` |
-| Production (all adstock + all windows) | all 3 | 270 | ~35-40 h | ~$500 | `--all-adstock --all-windows --production-run --top-n 270` |
-| Top-10 extended | geometric | 10 | ~1.5 h | ~$23 | `--top-n 10 --extended-run` |
-| Top-10 production | geometric | 10 | ~3-4 h | ~$55 | `--top-n 10 --production-run` |
-
-### Window Length
-
-By default, the benchmark uses the full training window defined in `selected_columns.json`. You can add a **window sweep** to test whether a shorter lookback period improves model fit:
-
-| Flag | Description |
-|------|-------------|
-| `--all-windows` | Test 3 window lengths: `full`, `2y` (last 104 weeks), `3y` (last 156 weeks). Multiplies total variants by 3. |
-| `--windows 2y 3y` | Test only selected window lengths (choose any subset of `full`, `2y`, `3y`). |
-
-Example — standard run with 2-year and 3-year windows:
 ```bash
 python scripts/run_full_benchmark.py \
-  --path <path> \
+  --path <gs-path-to-selected_columns.json> \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
-  --full-run --windows 2y 3y
+  [run-mode & variant flags below]
 ```
 
-Window lengths are applied as a trailing lookback from the latest data date:
-- `full` — all available history (no truncation)
-- `3y` — last 156 weeks (~3 years)
-- `2y` — last 104 weeks (~2 years)
+**Fleet marketplace variant dimensions:**
+
+| Dimension | Values | Default count | With flag |
+|-----------|--------|--------------|-----------|
+| Adstock | geometric _(+ weibull_cdf / weibull_pdf)_ | 1 | 3 (`--all-adstock`) |
+| Train splits | 70_90, 75_90, 65_80 | 3 | — |
+| Time aggregation | daily, weekly | 2 | — |
+| Spend-var mapping | spend_to_spend, spend_to_impressions, spend_to_clicks, mixed_by_funnel_impressions, mixed_by_funnel_clicks | 5 | — |
+| Seasonality window | full _(+ 2y, 3y)_ | 1 | 3 (`--all-windows`) |
+
+**Default (geometric, full window):** 1×3×2×5×**1** = **30 combos**  
+**With `--all-adstock`:** 3×3×2×5×1 = **90 combos**  
+**With `--all-windows`:** 1×3×2×5×3 = **90 combos**  
+**With `--all-adstock --all-windows`:** 3×3×2×5×3 = **270 combos**
+
+#### Cartesian mode (default)
+
+| Run mode | Adstock | Windows | Variants | Approx. time | Approx. cost | Flag(s) to add |
+|----------|---------|---------|----------|-------------|-------------|----------------|
+| Test (default) | geometric | full | 30 | ~0.5 h | ~$5 | _(none)_ |
+| Test (all adstock) | all 3 | full | 90 | ~1.5 h | ~$15 | `--all-adstock` |
+| Test (all windows) | geometric | full+2y+3y | 90 | ~1.5 h | ~$15 | `--all-windows` |
+| Test (all adstock + windows) | all 3 | full+2y+3y | 270 | ~4.5 h | ~$45 | `--all-adstock --all-windows` |
+| Standard | geometric | full | 30 | ~2 h | ~$25 | `--full-run` |
+| Standard (all adstock) | all 3 | full | 90 | ~6 h | ~$75 | `--full-run --all-adstock` |
+| Standard (all windows) | geometric | full+2y+3y | 90 | ~6 h | ~$75 | `--full-run --all-windows` |
+| Standard (all adstock + windows) | all 3 | full+2y+3y | 270 | ~18 h | ~$225 | `--full-run --all-adstock --all-windows` |
+| Extended | geometric | full | 30 | ~4-5 h | ~$70 | `--extended-run` |
+| Extended (all adstock) | all 3 | full | 90 | ~12-15 h | ~$210 | `--extended-run --all-adstock` |
+| Extended (all windows) | geometric | full+2y+3y | 90 | ~12-15 h | ~$210 | `--extended-run --all-windows` |
+| Extended (all adstock + windows) | all 3 | full+2y+3y | 270 | ~40 h | ~$630 | `--extended-run --all-adstock --all-windows` |
+| Production | geometric | full | 30 | ~10-12 h | ~$165 | `--production-run` |
+| Production (all adstock) | all 3 | full | 90 | ~30-35 h | ~$495 | `--production-run --all-adstock` |
+| Production (all windows) | geometric | full+2y+3y | 90 | ~30-35 h | ~$495 | `--production-run --all-windows` |
+| Production (all adstock + windows) | all 3 | full+2y+3y | 270 | ~90-100 h | ~$1,485 | `--production-run --all-adstock --all-windows` |
+| Top-10 extended | geometric | full | 10 | ~1.5 h | ~$23 | `--extended-run --top-n 10` |
+| Top-10 production | geometric | full | 10 | ~3-4 h | ~$55 | `--production-run --top-n 10` |
+
+#### Sequential mode (`--sequential`)
+
+In sequential mode each dimension is varied **independently** (all others held at baseline), so combinations add rather than multiply.
+
+Default (full window only): `1 adstock + 3 splits + 2 time-agg + 5 spend-var = 11`.  
+With `--all-windows`: `1 + 3 + 2 + 5 + 3 windows = 14`.
+
+| Run mode | Adstock | Windows | Variants | Approx. time | Approx. cost | Flag(s) to add |
+|----------|---------|---------|----------|-------------|-------------|----------------|
+| Sequential standard | geometric | full | 11 | ~45 min | ~$9 | `--full-run --sequential` |
+| Sequential standard (all adstock) | all 3 | full | 13 | ~1 h | ~$11 | `--full-run --sequential --all-adstock` |
+| Sequential standard (all windows) | geometric | full+2y+3y | 14 | ~1 h | ~$12 | `--full-run --sequential --all-windows` |
+| Sequential extended | geometric | full | 11 | ~1.5 h | ~$26 | `--extended-run --sequential` |
+| Sequential production | geometric | full | 11 | ~4 h | ~$61 | `--production-run --sequential` |
+
+---
+
+### Window Length
+
+By default only the `full` window variant (all available history) is used.  Pass `--all-windows` to add the `2y` and `3y` variants and triple the number of combinations.
+
+Window lengths are applied as a trailing lookback from the data's `end_date`:
+
+| Window variant | `weeks_back` | Training window start (example, end = 2026-01-22) |
+|---------------|-------------|--------------------------------------------------|
+| `full` _(default)_ | — | All available history (no start-date override) |
+| `2y` | 104 weeks | 2023-10-05 |
+| `3y` | 156 weeks | 2022-09-29 |
+
+**How window dates flow through the system:**
+
+1. Each `seasonality_window` spec in the JSON carries a `weeks_back` value.
+2. `benchmark_mmm.py` resolves `weeks_back` → absolute `start_date` / `end_date` relative to the data's `end_date`.
+3. Each queue entry carries `start_date` and `end_date`.
+4. The R training script (`r/run_all.R`) reads these and passes them directly to `robyn_inputs(window_start=..., window_end=...)`.
+
+---
+
+### Hyperparameter Presets
+
+Presets control the range of hyperparameters (alpha, gamma, theta) passed to Robyn for each channel. Three built-in presets are available:
+
+| Preset | Alpha | Gamma | Theta | Use case |
+|--------|-------|-------|-------|----------|
+| `conservative` | Narrow ranges, low saturation | Narrow | Low carryover | Stable baselines, short-cycle products |
+| `balanced` | Moderate ranges (default) | Moderate | Moderate | General purpose — recommended starting point |
+| `exploratory` | Wide ranges, high saturation | Wide | High carryover | Complex markets, long-cycle products |
+
+**Preset precedence** (highest to lowest):
+
+1. **Variant-level preset** — set directly on an adstock spec in the JSON config:
+   ```json
+   {"name": "weibull_cdf", "adstock": "weibull_cdf", "hyperparameter_preset": "Meta default"}
+   ```
+2. **Benchmark-level preset** — `--hyperparameter-preset` CLI flag or `"hyperparameter_preset"` key in the benchmark JSON
+3. **Default** — `"balanced"` when nothing is set
+
+When `--hyperparameter-ranges-config` is provided, per-channel ranges are resolved for each variant using that variant's effective preset. After resolution, the preset is set to `"Custom"` and the ranges are embedded directly in the queue entry as `custom_hyperparameters`. The R training script then uses these exact ranges instead of the built-in preset lookup.
+
+**Example — use different presets per adstock type:**
+```json
+{
+  "variants": {
+    "adstock": [
+      {"name": "geometric",   "adstock": "geometric",   "hyperparameter_preset": "Meshed recommend"},
+      {"name": "weibull_cdf", "adstock": "weibull_cdf", "hyperparameter_preset": "Meta default"},
+      {"name": "weibull_pdf", "adstock": "weibull_pdf", "hyperparameter_preset": "balanced"}
+    ]
+  }
+}
+```
+
+Each adstock variant will resolve its per-channel ranges using its own preset when `--hyperparameter-ranges-config` is set.
+
+**Without per-channel ranges config:** the `hyperparameter_preset` value is forwarded as-is to the R training script, which applies built-in preset lookups. In this case variant-level presets are also respected.
+
+---
 
 ### Column Schema
 
@@ -868,3 +987,239 @@ For `mixed_by_funnel_clicks` the same logic applies but awareness channels use c
 ### Adjusting the Preset
 
 The config uses `"hyperparameter_preset": "balanced"` by default. To use a different preset per adstock type, set the `hyperparameter_preset` field directly on each adstock variant in the JSON, or pass `--hyperparameter-preset exploratory` on the CLI to override all variants at once.
+
+
+---
+
+## Appendix: Benchmark Combinations Reference
+
+This appendix enumerates every combination that the fleet marketplace benchmark command submits to the training queue, and lists the hyperparameters applied for each adstock type and preset.
+
+**Reference command:**
+```bash
+python scripts/run_full_benchmark.py \
+  --path <gs-path-to-selected_columns.json> \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  [flags]
+```
+
+---
+
+### A. Dimension Reference
+
+| Dimension | Values | Default count | With flag |
+|-----------|--------|--------------|-----------|
+| Adstock | `geometric` _(default)_ / `weibull_cdf` / `weibull_pdf` | 1 | 3 (`--all-adstock`) |
+| Train split | `70_90`, `75_90`, `65_80` | 3 | — |
+| Time aggregation | `daily`, `weekly` | 2 | — |
+| Spend-var mapping | `spend_to_spend`, `spend_to_impressions`, `spend_to_clicks`, `mixed_by_funnel_impressions`, `mixed_by_funnel_clicks` | 5 | — |
+| Seasonality window | `full` _(default)_ / `2y` / `3y` | 1 | 3 (`--all-windows`) |
+
+**Default (geometric, full window):** 1×3×2×5×**1** = **30 combinations**  
+**With `--all-adstock`:** 3×3×2×5×1 = **90 combinations**  
+**With `--all-windows`:** 1×3×2×5×3 = **90 combinations**  
+**With `--all-adstock --all-windows`:** 3×3×2×5×3 = **270 combinations**
+
+**Baseline values** (used for the non-varying dimension in sequential mode):
+
+| Dimension | Baseline |
+|-----------|---------|
+| Adstock | geometric |
+| Train split | 70_90 |
+| Time aggregation | daily |
+| Spend-var | spend_to_spend |
+| Window | full |
+
+---
+
+### B. Combination Count by Flag
+
+| Flags added to reference command | Mode | Adstock(s) | Windows | Combos | Formula |
+|----------------------------------|------|-----------|---------|--------|---------|
+| _(none — test)_ | cartesian | geometric | full | **30** | 1×3×2×5×1 |
+| `--all-adstock` | cartesian | all 3 | full | **90** | 3×3×2×5×1 |
+| `--all-windows` | cartesian | geometric | full+2y+3y | **90** | 1×3×2×5×3 |
+| `--all-adstock --all-windows` | cartesian | all 3 | full+2y+3y | **270** | 3×3×2×5×3 |
+| `--full-run` | cartesian | geometric | full | **30** | 1×3×2×5×1 |
+| `--full-run --all-adstock` | cartesian | all 3 | full | **90** | 3×3×2×5×1 |
+| `--full-run --all-windows` | cartesian | geometric | full+2y+3y | **90** | 1×3×2×5×3 |
+| `--full-run --all-adstock --all-windows` | cartesian | all 3 | full+2y+3y | **270** | 3×3×2×5×3 |
+| `--extended-run` | cartesian | geometric | full | **30** | 1×3×2×5×1 |
+| `--extended-run --all-adstock` | cartesian | all 3 | full | **90** | 3×3×2×5×1 |
+| `--production-run` | cartesian | geometric | full | **30** | 1×3×2×5×1 |
+| `--production-run --all-adstock` | cartesian | all 3 | full | **90** | 3×3×2×5×1 |
+| `--full-run --sequential` | sequential | geometric | full | **11** | 1+3+2+5 |
+| `--full-run --sequential --all-adstock` | sequential | all 3 | full | **13** | 3+3+2+5 |
+| `--full-run --sequential --all-windows` | sequential | geometric | full+2y+3y | **14** | 1+3+2+5+3 |
+| `--top-n 10 --extended-run` | cartesian | geometric | full | **10** | first 10 of 30 |
+| `--top-n 10 --production-run` | cartesian | geometric | full | **10** | first 10 of 30 |
+
+---
+
+### C. Full Combination Matrix — Geometric Only (30 Combinations)
+
+Applies to all cartesian runs with geometric adstock and default window (test default, `--full-run`, `--extended-run`, `--production-run`).  
+All 30 combos use `adstock = geometric`, `seasonality_window = full`, and `hyperparameter_preset = Meshed recommend` (or `Custom` when ranges config is provided).
+
+| # | Train split | Time agg | Spend-var |
+|---|-------------|---------|-----------|
+| 1 | 70_90 | daily | spend_to_spend |
+| 2 | 70_90 | daily | spend_to_impressions |
+| 3 | 70_90 | daily | spend_to_clicks |
+| 4 | 70_90 | daily | mixed_by_funnel_impressions |
+| 5 | 70_90 | daily | mixed_by_funnel_clicks |
+| 6 | 70_90 | weekly | spend_to_spend |
+| 7 | 70_90 | weekly | spend_to_impressions |
+| 8 | 70_90 | weekly | spend_to_clicks |
+| 9 | 70_90 | weekly | mixed_by_funnel_impressions |
+| 10 | 70_90 | weekly | mixed_by_funnel_clicks |
+| 11 | 75_90 | daily | spend_to_spend |
+| 12 | 75_90 | daily | spend_to_impressions |
+| 13 | 75_90 | daily | spend_to_clicks |
+| 14 | 75_90 | daily | mixed_by_funnel_impressions |
+| 15 | 75_90 | daily | mixed_by_funnel_clicks |
+| 16 | 75_90 | weekly | spend_to_spend |
+| 17 | 75_90 | weekly | spend_to_impressions |
+| 18 | 75_90 | weekly | spend_to_clicks |
+| 19 | 75_90 | weekly | mixed_by_funnel_impressions |
+| 20 | 75_90 | weekly | mixed_by_funnel_clicks |
+| 21 | 65_80 | daily | spend_to_spend |
+| 22 | 65_80 | daily | spend_to_impressions |
+| 23 | 65_80 | daily | spend_to_clicks |
+| 24 | 65_80 | daily | mixed_by_funnel_impressions |
+| 25 | 65_80 | daily | mixed_by_funnel_clicks |
+| 26 | 65_80 | weekly | spend_to_spend |
+| 27 | 65_80 | weekly | spend_to_impressions |
+| 28 | 65_80 | weekly | spend_to_clicks |
+| 29 | 65_80 | weekly | mixed_by_funnel_impressions |
+| 30 | 65_80 | weekly | mixed_by_funnel_clicks |
+
+Add `--all-windows` to expand each of the 30 rows into 3 window variants (full / 2y / 3y) → **90 combinations**.
+
+---
+
+### D. All Adstock — 90 Combinations (`--all-adstock`)
+
+**Structure:** repeat the 30-combination block from section C three times, one per adstock type.
+
+| Block | Adstock | Combos | Hyperparameter preset |
+|-------|---------|--------|-----------------------|
+| 1–30 | geometric | 30 | Meshed recommend |
+| 31–60 | weibull_cdf | 30 | Meta default |
+| 61–90 | weibull_pdf | 30 | Meshed recommend |
+
+Within each block the 30 combinations are identical to section C (3 splits × 2 time-agg × 5 spend-var, `full` window). Add `--all-windows` to expand each block to 90 rows → **270 total**.
+
+---
+
+### E. Sequential Mode — Geometric (11 Combinations, `--sequential`)
+
+Each dimension is varied in isolation; all others are held at the baseline. Window is fixed to `full` (the default); add `--all-windows` for 3 additional window variants → 14 total.
+
+| # | Adstock | Train split | Time agg | Spend-var | Window | Varying |
+|---|---------|-------------|---------|-----------|--------|---------|
+| 1 | geometric | 70_90 | daily | spend_to_spend | full | adstock baseline |
+| 2 | geometric | **70_90** | daily | spend_to_spend | full | split |
+| 3 | geometric | **75_90** | daily | spend_to_spend | full | split |
+| 4 | geometric | **65_80** | daily | spend_to_spend | full | split |
+| 5 | geometric | 70_90 | **daily** | spend_to_spend | full | time agg |
+| 6 | geometric | 70_90 | **weekly** | spend_to_spend | full | time agg |
+| 7 | geometric | 70_90 | daily | **spend_to_spend** | full | spend-var |
+| 8 | geometric | 70_90 | daily | **spend_to_impressions** | full | spend-var |
+| 9 | geometric | 70_90 | daily | **spend_to_clicks** | full | spend-var |
+| 10 | geometric | 70_90 | daily | **mixed_by_funnel_impressions** | full | spend-var |
+| 11 | geometric | 70_90 | daily | **mixed_by_funnel_clicks** | full | spend-var |
+
+With `--all-windows`, 3 rows are appended (rows 12–14: window = full, 2y, 3y).
+
+---
+
+### F. Sequential Mode — All Adstock (13 Combinations, `--sequential --all-adstock`)
+
+Adds the adstock dimension to section E; window is still `full` by default.
+
+| # | Adstock | Train split | Time agg | Spend-var | Window | Varying |
+|---|---------|-------------|---------|-----------|--------|---------|
+| 1 | **geometric** | 70_90 | daily | spend_to_spend | full | adstock |
+| 2 | **weibull_cdf** | 70_90 | daily | spend_to_spend | full | adstock |
+| 3 | **weibull_pdf** | 70_90 | daily | spend_to_spend | full | adstock |
+| 4–13 | geometric | _(same as E rows 2–11)_ | | | | split / time / spend |
+
+---
+
+### G. Train Split Reference
+
+| Split name | `train_size` | Train % | Val % | Test % |
+|-----------|-------------|---------|-------|--------|
+| `70_90` | [0.70, 0.90] | 70 % | 20 % | 10 % |
+| `75_90` | [0.75, 0.90] | 75 % | 15 % | 10 % |
+| `65_80` | [0.65, 0.80] | 65 % | 15 % | 20 % |
+
+---
+
+### H. Spend-var Mapping Reference
+
+| Variant | `paid_media_vars` | Best for |
+|---------|------------------|---------|
+| `spend_to_spend` | = paid_media_spends (cost columns) | Direct cost attribution |
+| `spend_to_impressions` | impression columns (same order as spends) | Ad delivery volume signal |
+| `spend_to_clicks` | click columns (same order as spends) | Engagement-weighted signal |
+| `mixed_by_funnel_impressions` | upper-funnel channels → impressions; search/pmax/bing → spend | Funnel-aware hybrid (impressions) |
+| `mixed_by_funnel_clicks` | upper-funnel channels → clicks; search/pmax/bing → spend | Funnel-aware hybrid (clicks) |
+
+**Upper funnel** (awareness): `meta_total`, `google_display`, `google_youtube`  
+**Lower funnel** (performance): `google_search_brand`, `google_search_nonbrand`, `google_pmax`, `bing_search`
+
+---
+
+### I. Hyperparameter Reference
+
+#### I.1 Default preset per adstock type
+
+| Adstock | Default `hyperparameter_preset` |
+|---------|--------------------------------|
+| geometric | `Meshed recommend` |
+| weibull_cdf | `Meta default` |
+| weibull_pdf | `Meshed recommend` |
+
+These defaults are set in `ALL_ADSTOCK_VARIANTS` in `scripts/run_full_benchmark.py` and can be overridden via `--hyperparameter-preset` or a `hyperparameter_preset` field on each adstock variant in the JSON.
+
+#### I.2 Built-in presets in `generic_hyperparameter_ranges_v2.json`
+
+| Preset | Theta (decay) | Alpha (saturation) | Gamma (diminishing returns) | Best for |
+|--------|--------------|--------------------|-----------------------------|---------|
+| `conservative` | Narrow, low carryover | [0.4, 1.7] | [0.16, 0.51] | Fast screening, short-cycle products |
+| `balanced` | Moderate | [0.5, 2.0] | [0.20, 0.60] | General purpose (default) |
+| `exploratory` | Wide, high carryover | [0.5, 2.4] | [0.20, 0.69] | Complex markets, long-cycle products |
+
+> Ranges above are approximate; exact values vary by channel type and frequency.  
+> Full lookup: `benchmarks/generic_hyperparameter_ranges_v2.json` → `ranges[frequency][adstock][channel_type][preset]`
+
+#### I.3 Example ranges — daily frequency, `balanced` preset
+
+| Channel type | Adstock | theta | alpha | gamma |
+|-------------|---------|-------|-------|-------|
+| search_brand | geometric | [0.00, 0.05] | [0.5, 2.0] | [0.20, 0.60] |
+| search_nonbrand | geometric | [0.00, 0.08] | [0.5, 2.0] | [0.25, 0.65] |
+| paid_social_performance | geometric | [0.05, 0.15] | [0.5, 2.0] | [0.30, 0.70] |
+| paid_social_awareness | geometric | [0.10, 0.25] | [0.5, 1.8] | [0.35, 0.75] |
+| display_prospecting | geometric | [0.10, 0.30] | [0.4, 1.8] | [0.30, 0.70] |
+| video_online | geometric | [0.15, 0.35] | [0.4, 1.8] | [0.35, 0.75] |
+| tv_offline | geometric | [0.20, 0.50] | [0.3, 1.5] | [0.40, 0.80] |
+| crm_email | geometric | [0.00, 0.05] | [0.5, 2.0] | [0.20, 0.60] |
+
+> `theta` is not applicable for weibull adstock types (they use shape/scale parameters). See `generic_hyperparameter_ranges_v2.json` for weibull ranges.
+
+#### I.4 Iterations and trials per run mode
+
+| Run mode | Flag | Iterations | Trials | Approx. cost/combo |
+|----------|------|-----------|--------|-------------------|
+| test | _(none)_ | 10 | 1 | ~$0.17 |
+| standard | `--full-run` | 1,000 | 3 | ~$0.83 |
+| extended | `--extended-run` | 2,000 | 5 | ~$2.33 |
+| production | `--production-run` | 5,000 | 5 | ~$5.50 |
+
+**Total cost = combos × cost/combo**  
+Examples: standard geometric (90 × $0.83 = **~$75**) · extended all-adstock (270 × $2.33 = **~$630**)

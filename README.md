@@ -63,19 +63,27 @@ A benchmarking system that:
 Complete end-to-end workflow - submit, process, and analyze:
 
 ```bash
-# Test run (default - 10 iterations, 1 trial per variant, ~1-2 hours, ~$10)
+# Test run (default - geometric only, ~10 combos, 10 iterations, 1 trial, ~15-30 min, ~$2)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
 
-# Standard run (1000 iterations, 3 trials per variant, ~4-6 hours, ~$75)
+# Standard run, geometric only (18 combos cartesian, 1000 iterations, 3 trials, ~4-6 hours, ~$14)
 python scripts/run_full_benchmark.py \
   --path <path> --full-run
 
-# Extended run (2000 iterations, 5 trials per variant, ~10-15 hours, ~$220)
+# Sequential run — each dimension independently (9 combos, ~2-3 hours, ~$7)
+python scripts/run_full_benchmark.py \
+  --path <path> --full-run --sequential
+
+# Standard run, all adstock types (54 combos cartesian, ~4-6 hours, ~$40)
+python scripts/run_full_benchmark.py \
+  --path <path> --full-run --all-adstock
+
+# Extended run (2000 iterations, 5 trials per variant, ~10-15 hours, ~$110)
 python scripts/run_full_benchmark.py \
   --path <path> --extended-run
 
-# Production run (5000 iterations, 5 trials per variant, ~25-35 hours, ~$500)
+# Production run (5000 iterations, 5 trials per variant, ~25-35 hours, ~$260)
 python scripts/run_full_benchmark.py \
   --path <path> --production-run
 
@@ -86,8 +94,10 @@ python scripts/run_full_benchmark.py \
 
 This single command:
 1. Loads your selected_columns.json configuration
-2. Generates comprehensive benchmark (54 variants: 3 adstock × 3 train_splits × 2 time_agg × 3 spend_var_mapping)
-3. Optionally selects top-N combinations (5, 10, or all 54)
+2. Generates comprehensive benchmark — default **18 variants** (cartesian: 1 adstock × 3 splits × 2 time_agg × 3 spend_var).
+   Use `--all-adstock` for 54, `--sequential` for 9 (independent per-dimension), `--all-windows` to add a window sweep.
+   Non-test runs default to the `full` training window; use `--all-windows` or `--windows 2y 3y` to compare shorter windows.
+3. Optionally selects top-N combinations via `--top-n`
 4. Submits all jobs to queue
 5. Waits for all running jobs to complete
 6. Analyzes results and generates visualizations
@@ -102,14 +112,17 @@ This single command:
 # Quick validation (~$1, ~10 min)
 python scripts/run_full_benchmark.py --path <path> --top-n 5
 
+# Sequential sweep — fast exploration of all dimensions (~$7, ~2-3 hours)
+python scripts/run_full_benchmark.py --path <path> --full-run --sequential
+
 # Thorough analysis - recommended (~$41, ~2-3 hours)
 python scripts/run_full_benchmark.py --path <path> --top-n 10 --extended-run
 
 # Production quality (~$95, ~5-7 hours)
 python scripts/run_full_benchmark.py --path <path> --top-n 10 --production-run
 
-# Complete benchmark standard mode (~$75, ~4-6 hours)
-python scripts/run_full_benchmark.py --path <path> --full-run
+# Complete cartesian benchmark standard mode (~$40, ~4-6 hours)
+python scripts/run_full_benchmark.py --path <path> --full-run --all-adstock
 
 # With per-channel hyperparameter ranges (balanced preset is the default)
 python scripts/run_full_benchmark.py --path <path> --full-run \
@@ -139,32 +152,85 @@ See **USAGE_GUIDE.md** for detailed instructions and **ANALYSIS_GUIDE.md** for a
 
 All estimates based on GCP Cloud Run Jobs (n2-standard-8: 8 vCPU, 32GB RAM) in europe-west1 region.
 
-### Full Benchmark Matrix
-
-| Combinations | Run Mode | Iterations × Trials | Time Estimate | Cost Estimate (USD) |
-|-------------|----------|---------------------|---------------|---------------------|
-| **54 (Full)** | Test | 10 × 1 | ~1-2 hours | ~$10 |
-| **54 (Full)** | Standard | 1000 × 3 | ~4-6 hours | ~$75 |
-| **54 (Full)** | Extended | 2000 × 5 | ~10-15 hours | ~$220 |
-| **54 (Full)** | Production | 5000 × 5 | ~25-35 hours | ~$500 |
-| **10 (Top)** | Test | 10 × 1 | ~15-30 min | ~$2 |
-| **10 (Top)** | Standard | 1000 × 3 | ~1-2 hours | ~$14 |
-| **10 (Top)** | Extended | 2000 × 5 | ~2-3 hours | ~$41 |
-| **10 (Top)** | Production | 5000 × 5 | ~5-7 hours | ~$95 |
-| **5 (Top)** | Test | 10 × 1 | ~8-15 min | ~$1 |
-| **5 (Top)** | Standard | 1000 × 3 | ~40-70 min | ~$7 |
-| **5 (Top)** | Extended | 2000 × 5 | ~1-2 hours | ~$20 |
-| **5 (Top)** | Production | 5000 × 5 | ~3-4 hours | ~$50 |
-
 **Calculation details:**
 - Time per job: Iterations × Trials × ~0.15 seconds per iteration + ~30 seconds startup
 - Cost per job: 8 vCPU × job duration × $0.38/vCPU-hour + ~10% data/storage overhead
 
+### Default Cartesian Benchmark (geometric adstock only)
+
+| Combinations | Run Mode | Iterations × Trials | Time Estimate | Cost Estimate (USD) |
+|-------------|----------|---------------------|---------------|---------------------|
+| **18 (default)** | Test | 10 × 1 | ~15-30 min | ~$2 |
+| **18 (default)** | Standard (`--full-run`) | 1000 × 3 | ~1.5-2 hours | ~$14 |
+| **18 (default)** | Extended (`--extended-run`) | 2000 × 5 | ~3-4 hours | ~$40 |
+| **18 (default)** | Production (`--production-run`) | 5000 × 5 | ~7-10 hours | ~$90 |
+
+### Sequential Benchmark (`--sequential`, geometric adstock only)
+
+Sequential mode varies one dimension at a time — 9 variants instead of 18:
+
+| Combinations | Run Mode | Iterations × Trials | Time Estimate | Cost Estimate (USD) |
+|-------------|----------|---------------------|---------------|---------------------|
+| **9 (sequential)** | Standard | 1000 × 3 | ~40-70 min | ~$7 |
+| **9 (sequential)** | Extended | 2000 × 5 | ~1.5-2 hours | ~$20 |
+| **9 (sequential)** | Production | 5000 × 5 | ~3-4 hours | ~$45 |
+
+### Full Cartesian Benchmark (`--all-adstock`, all 3 adstock types)
+
+| Combinations | Run Mode | Iterations × Trials | Time Estimate | Cost Estimate (USD) |
+|-------------|----------|---------------------|---------------|---------------------|
+| **54 (all adstock)** | Test | 10 × 1 | ~1-2 hours | ~$5 |
+| **54 (all adstock)** | Standard | 1000 × 3 | ~4-6 hours | ~$40 |
+| **54 (all adstock)** | Extended | 2000 × 5 | ~10-15 hours | ~$110 |
+| **54 (all adstock)** | Production | 5000 × 5 | ~25-35 hours | ~$260 |
+
+### Top-N Combinations
+
+| Combinations | Run Mode | Iterations × Trials | Time Estimate | Cost Estimate (USD) |
+|-------------|----------|---------------------|---------------|---------------------|
+| **10 (Top)** | Test | 10 × 1 | ~15-30 min | ~$1 |
+| **10 (Top)** | Standard | 1000 × 3 | ~1-2 hours | ~$8 |
+| **10 (Top)** | Extended | 2000 × 5 | ~2-3 hours | ~$20 |
+| **10 (Top)** | Production | 5000 × 5 | ~5-7 hours | ~$50 |
+| **5 (Top)** | Test | 10 × 1 | ~8-15 min | ~$1 |
+| **5 (Top)** | Standard | 1000 × 3 | ~40-70 min | ~$4 |
+| **5 (Top)** | Extended | 2000 × 5 | ~1-2 hours | ~$10 |
+| **5 (Top)** | Production | 5000 × 5 | ~3-4 hours | ~$25 |
+
 **Recommendations:**
 - **Quick validation:** 5 combinations, test mode (~$1, 10 min)
-- **Thorough analysis:** 10 combinations, extended mode (~$41, 2-3 hours)
-- **Complete benchmark:** 54 combinations, standard mode (~$75, 4-6 hours)
-- **Production quality:** 10 combinations, production mode (~$95, 5-7 hours)
+- **Fast exploration:** 9 combinations, sequential + standard mode (~$7, 1 hour)
+- **Thorough analysis:** 10 combinations, extended mode (~$20, 2-3 hours)
+- **Complete benchmark:** 54 combinations (all adstock), standard mode (~$40, 4-6 hours)
+- **Production quality:** 10 combinations, production mode (~$50, 5-7 hours)
+
+## Hyperparameter Presets & Window Length
+
+### Presets
+
+Three built-in presets control the range of hyperparameters sent to Robyn:
+
+| Preset | Typical use |
+|--------|-------------|
+| `conservative` | Narrow ranges; stable baselines, short-cycle products |
+| `balanced` | Moderate ranges (default) — recommended starting point |
+| `exploratory` | Wide ranges; complex markets, long-cycle products |
+
+**Preset precedence (highest to lowest):**
+
+1. **Variant-level** — `"hyperparameter_preset"` set directly on an adstock spec in JSON
+2. **Benchmark-level** — `--hyperparameter-preset` CLI flag or top-level JSON key
+3. **Default** — `"balanced"`
+
+When `--hyperparameter-ranges-config` is given, per-channel ranges are resolved using each variant's effective preset. The resolved ranges are embedded in the queue entry as `custom_hyperparameters` and `hyperparameter_preset` is set to `"Custom"` so the R training script uses them directly.
+
+### Window Length
+
+Non-test runs default to the `full` window (all available history). Add a window sweep with `--all-windows` (full/2y/3y) or `--windows 2y 3y`.
+
+**Data flow:** `weeks_back` → resolved to `start_date`/`end_date` → forwarded in queue entry → R `robyn_inputs(window_start=..., window_end=...)`.
+
+See **USAGE_GUIDE.md** — *Window Length* and *Hyperparameter Presets* sections for details.
 
 ## Documentation
 
