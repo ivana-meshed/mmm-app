@@ -122,12 +122,12 @@ See Workflow 3 in [ANALYSIS_GUIDE.md] for daily-vs-weekly interpretation guidanc
 
 **(5) Training start/end date + seasonality window**
 
-Implemented as the {{seasonality_window}} dimension — 3 variants (already in the fleet marketplace config, no extra flag needed):
+Implemented as the {{seasonality_window}} dimension. **Default:** only the `full` variant (all available history). Add {{--all-windows}} to include {{2y}} and {{3y}} as well.
 
 || Variant || Lookback || Notes ||
-| {{full}} | all available history | no date override — default for all non-test runs |
-| {{2y}} | last 104 weeks | resolved from {{end_date}} in {{selected_columns.json}} |
-| {{3y}} | last 156 weeks | resolved from {{end_date}} in {{selected_columns.json}} |
+| {{full}} _(default)_ | all available history | no date override — always included |
+| {{2y}} | last 104 weeks | add with {{--all-windows}} |
+| {{3y}} | last 156 weeks | add with {{--all-windows}} |
 
 Window offsets are resolved to absolute {{start_date}} / {{end_date}} at submission time.
 Evaluation: fit metrics + media contributions stability + {{decomp_rssd}} across windows.
@@ -139,11 +139,23 @@ See Workflow 5 in [ANALYSIS_GUIDE.md].
 
 Two modes are available:
 
-|| Mode || Flag || Variants (geometric, fleet config) || Formula ||
-| Cartesian (default) | _(none)_ | 90 | 1×3×2×5×3 |
-| Sequential | {{--sequential}} | 14 | 1+3+2+5+3 |
+|| Mode || Flag || Variants (geometric, full window default) || Formula ||
+| Cartesian (default) | _(none)_ | 30 | 1×3×2×5×1 |
+| Sequential | {{--sequential}} | 11 | 1+3+2+5 |
 
-With {{--all-adstock}} (all 3 adstock types):
+With {{--all-windows}} (all 3 window lengths):
+
+|| Mode || Variants ||
+| Cartesian | 90 (1×3×2×5×3) |
+| Sequential | 14 (1+3+2+5+3) |
+
+With {{--all-adstock}} (all 3 adstock types, full window):
+
+|| Mode || Variants ||
+| Cartesian | 90 (3×3×2×5×1) |
+| Sequential | 13 (3+3+2+5) |
+
+With {{--all-adstock --all-windows}}:
 
 || Mode || Variants ||
 | Cartesian | 270 (3×3×2×5×3) |
@@ -154,29 +166,33 @@ Sequential order (from most to least fundamental):
 # {{train_splits}} — evaluation methodology
 # {{time_aggregation}} — data granularity
 # {{spend_var_mapping}} — media signal strategy
-# {{seasonality_window}} — training period
+# {{seasonality_window}} — training period (only when {{--all-windows}} is given)
 
-Recommended: run sequential first (~14 variants) to screen dimensions, then cartesian on the top settings.
+Recommended: run sequential first (~11 variants) to screen dimensions, then cartesian on the top settings.
 
 ---
 
 **h3. Cost & Time Estimates**
 
-Based on the fleet marketplace config (90 base variants, geometric only).
+Based on the fleet marketplace config with default `full` window.
 
 || Config || Mode || Variants || Time || Cost (USD) ||
-| Default geometric, cartesian | Test | 90 | ~1.5 h | ~$15 |
-| Default geometric, cartesian | Standard | 90 | ~6 h | ~$75 |
-| All adstock, cartesian | Standard | 270 | ~18 h | ~$225 |
-| Default geometric, cartesian | Extended | 90 | ~12-15 h | ~$210 |
-| All adstock, cartesian | Extended | 270 | ~40 h | ~$630 |
-| Sequential geometric | Standard | 14 | ~1 h | ~$12 |
+| Default geometric, cartesian | Test | 30 | ~0.5 h | ~$5 |
+| Default geometric, cartesian | Standard | 30 | ~2 h | ~$25 |
+| All adstock, cartesian | Standard | 90 | ~6 h | ~$75 |
+| All windows, cartesian | Standard | 90 | ~6 h | ~$75 |
+| All adstock + windows, cartesian | Standard | 270 | ~18 h | ~$225 |
+| Default geometric, cartesian | Extended | 30 | ~4-5 h | ~$70 |
+| All adstock, cartesian | Extended | 90 | ~12-15 h | ~$210 |
+| All adstock + windows, cartesian | Extended | 270 | ~40 h | ~$630 |
+| Default geometric, cartesian | Production | 30 | ~10-12 h | ~$165 |
+| All adstock + windows, cartesian | Production | 270 | ~90-100 h | ~$1,485 |
+| Sequential geometric | Standard | 11 | ~45 min | ~$9 |
+| Sequential, all windows | Standard | 14 | ~1 h | ~$12 |
 | Top-10 | Extended | 10 | ~1.5 h | ~$23 |
 | Top-10 | Production | 10 | ~3-4 h | ~$55 |
 
 Full cost table with all flag combinations: [USAGE_GUIDE.md — Cost Estimates].
-
-*Cost per combo: test ~$0.17 · standard ~$0.83 · extended ~$2.33 · production ~$5.50*
 
 ---
 
@@ -196,7 +212,7 @@ comprehensive ranking) are documented in [ANALYSIS_GUIDE.md].
 **h3. Quick Start**
 
 {code:bash}
-# Sequential exploration — fastest way to screen all dimensions (14 variants, ~$12, ~1 h)
+# Sequential exploration — fastest way to screen all dimensions (11 variants, ~$9, ~45 min)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
@@ -204,7 +220,7 @@ python scripts/run_full_benchmark.py \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
   --full-run --sequential
 
-# Full cartesian sweep — geometric adstock (90 variants, ~$75, ~6 h)
+# Full cartesian sweep — geometric adstock, full window (30 variants, ~$25, ~2 h)
 python scripts/run_full_benchmark.py \
   --path <path> \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
@@ -212,13 +228,21 @@ python scripts/run_full_benchmark.py \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
   --full-run
 
-# All adstock types (270 variants, ~$225, ~18 h)
+# All adstock types, full window (90 variants, ~$75, ~6 h)
 python scripts/run_full_benchmark.py \
   --path <path> \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
   --full-run --all-adstock
+
+# All adstock + all windows (270 variants, ~$225, ~18 h)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --full-run --all-adstock --all-windows
 {code}
 
 See [USAGE_GUIDE.md] for the complete command reference and appendix with every combination enumerated.

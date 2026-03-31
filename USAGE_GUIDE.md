@@ -667,7 +667,7 @@ This section covers running benchmarks for datasets that follow the fleet/mobili
 | File | Purpose |
 |------|---------|
 | `benchmarks/channel_type_assignments_fleet_marketplace.json` | Maps all spend, impressions, and clicks column names to channel types in `generic_hyperparameter_ranges_v2.json` |
-| `benchmarks/comprehensive_benchmark_fleet_marketplace.json` | Default 30-variant benchmark (geometric adstock × 3 train splits × 2 time aggregations × 5 spend-var mappings). Use `--all-adstock` to extend to 90 variants across all 3 adstock types. |
+| `benchmarks/comprehensive_benchmark_fleet_marketplace.json` | Default 30-variant benchmark (geometric adstock × 3 train splits × 2 time aggregations × 5 spend-var mappings, `full` window). Use `--all-adstock` to extend to 90 variants; `--all-windows` to add the `2y` and `3y` window variants (90 → 270 with both flags). |
 
 ### Before Running
 
@@ -775,58 +775,70 @@ python scripts/run_full_benchmark.py \
   [run-mode & variant flags below]
 ```
 
-**Fleet marketplace variant dimensions** (all included in the JSON config):
+**Fleet marketplace variant dimensions:**
 
-| Dimension | Values | Count |
-|-----------|--------|-------|
-| Adstock | geometric _(+ weibull_cdf / weibull_pdf with `--all-adstock`)_ | 1 or 3 |
-| Train splits | 70_90, 75_90, 65_80 | 3 |
-| Time aggregation | daily, weekly | 2 |
-| Spend-var mapping | spend_to_spend, spend_to_impressions, spend_to_clicks, mixed_by_funnel_impressions, mixed_by_funnel_clicks | 5 |
-| Seasonality window | full, 2y (104 wks), 3y (156 wks) | 3 |
+| Dimension | Values | Default count | With flag |
+|-----------|--------|--------------|-----------|
+| Adstock | geometric _(+ weibull_cdf / weibull_pdf)_ | 1 | 3 (`--all-adstock`) |
+| Train splits | 70_90, 75_90, 65_80 | 3 | — |
+| Time aggregation | daily, weekly | 2 | — |
+| Spend-var mapping | spend_to_spend, spend_to_impressions, spend_to_clicks, mixed_by_funnel_impressions, mixed_by_funnel_clicks | 5 | — |
+| Seasonality window | full _(+ 2y, 3y)_ | 1 | 3 (`--all-windows`) |
 
-**Cartesian base:** 1 (adstock) × 3 × 2 × 5 × 3 = **90 combos** (geometric only)  
-**With `--all-adstock`:** 3 × 3 × 2 × 5 × 3 = **270 combos**
+**Default (geometric, full window):** 1×3×2×5×**1** = **30 combos**  
+**With `--all-adstock`:** 3×3×2×5×1 = **90 combos**  
+**With `--all-windows`:** 1×3×2×5×3 = **90 combos**  
+**With `--all-adstock --all-windows`:** 3×3×2×5×3 = **270 combos**
 
 #### Cartesian mode (default)
 
-| Run mode | Adstock | Variants | Approx. time | Approx. cost | Flag(s) to add |
-|----------|---------|----------|-------------|-------------|----------------|
-| Test (default) | geometric | 90 | ~1.5 h | ~$15 | _(none)_ |
-| Test (all adstock) | all 3 | 270 | ~4.5 h | ~$45 | `--all-adstock` |
-| Standard | geometric | 90 | ~6 h | ~$75 | `--full-run` |
-| Standard (all adstock) | all 3 | 270 | ~18 h | ~$225 | `--full-run --all-adstock` |
-| Extended | geometric | 90 | ~12-15 h | ~$210 | `--extended-run` |
-| Extended (all adstock) | all 3 | 270 | ~40 h | ~$630 | `--extended-run --all-adstock` |
-| Production | geometric | 90 | ~30-35 h | ~$495 | `--production-run` |
-| Production (all adstock) | all 3 | 270 | ~90-100 h | ~$1,485 | `--production-run --all-adstock` |
-| Top-10 extended | geometric | 10 | ~1.5 h | ~$23 | `--extended-run --top-n 10` |
-| Top-10 production | geometric | 10 | ~3-4 h | ~$55 | `--production-run --top-n 10` |
+| Run mode | Adstock | Windows | Variants | Approx. time | Approx. cost | Flag(s) to add |
+|----------|---------|---------|----------|-------------|-------------|----------------|
+| Test (default) | geometric | full | 30 | ~0.5 h | ~$5 | _(none)_ |
+| Test (all adstock) | all 3 | full | 90 | ~1.5 h | ~$15 | `--all-adstock` |
+| Test (all windows) | geometric | full+2y+3y | 90 | ~1.5 h | ~$15 | `--all-windows` |
+| Test (all adstock + windows) | all 3 | full+2y+3y | 270 | ~4.5 h | ~$45 | `--all-adstock --all-windows` |
+| Standard | geometric | full | 30 | ~2 h | ~$25 | `--full-run` |
+| Standard (all adstock) | all 3 | full | 90 | ~6 h | ~$75 | `--full-run --all-adstock` |
+| Standard (all windows) | geometric | full+2y+3y | 90 | ~6 h | ~$75 | `--full-run --all-windows` |
+| Standard (all adstock + windows) | all 3 | full+2y+3y | 270 | ~18 h | ~$225 | `--full-run --all-adstock --all-windows` |
+| Extended | geometric | full | 30 | ~4-5 h | ~$70 | `--extended-run` |
+| Extended (all adstock) | all 3 | full | 90 | ~12-15 h | ~$210 | `--extended-run --all-adstock` |
+| Extended (all windows) | geometric | full+2y+3y | 90 | ~12-15 h | ~$210 | `--extended-run --all-windows` |
+| Extended (all adstock + windows) | all 3 | full+2y+3y | 270 | ~40 h | ~$630 | `--extended-run --all-adstock --all-windows` |
+| Production | geometric | full | 30 | ~10-12 h | ~$165 | `--production-run` |
+| Production (all adstock) | all 3 | full | 90 | ~30-35 h | ~$495 | `--production-run --all-adstock` |
+| Production (all windows) | geometric | full+2y+3y | 90 | ~30-35 h | ~$495 | `--production-run --all-windows` |
+| Production (all adstock + windows) | all 3 | full+2y+3y | 270 | ~90-100 h | ~$1,485 | `--production-run --all-adstock --all-windows` |
+| Top-10 extended | geometric | full | 10 | ~1.5 h | ~$23 | `--extended-run --top-n 10` |
+| Top-10 production | geometric | full | 10 | ~3-4 h | ~$55 | `--production-run --top-n 10` |
 
 #### Sequential mode (`--sequential`)
 
-In sequential mode each dimension is varied **independently** (all others held at baseline), so combinations add rather than multiply: `1 adstock + 3 splits + 2 time-agg + 5 spend-var + 3 windows = 14`.
+In sequential mode each dimension is varied **independently** (all others held at baseline), so combinations add rather than multiply.
 
-| Run mode | Adstock | Variants | Approx. time | Approx. cost | Flag(s) to add |
-|----------|---------|----------|-------------|-------------|----------------|
-| Sequential standard | geometric | 14 | ~1 h | ~$12 | `--full-run --sequential` |
-| Sequential standard (all adstock) | all 3 | 16 | ~1 h | ~$13 | `--full-run --sequential --all-adstock` |
-| Sequential extended | geometric | 14 | ~2 h | ~$33 | `--extended-run --sequential` |
-| Sequential production | geometric | 14 | ~5 h | ~$77 | `--production-run --sequential` |
+Default (full window only): `1 adstock + 3 splits + 2 time-agg + 5 spend-var = 11`.  
+With `--all-windows`: `1 + 3 + 2 + 5 + 3 windows = 14`.
 
-> **Note:** `--all-windows` and `--windows` are ignored when `--config` is used — the three window variants (`full`, `2y`, `3y`) are already defined inside `comprehensive_benchmark_fleet_marketplace.json`.
+| Run mode | Adstock | Windows | Variants | Approx. time | Approx. cost | Flag(s) to add |
+|----------|---------|---------|----------|-------------|-------------|----------------|
+| Sequential standard | geometric | full | 11 | ~45 min | ~$9 | `--full-run --sequential` |
+| Sequential standard (all adstock) | all 3 | full | 13 | ~1 h | ~$11 | `--full-run --sequential --all-adstock` |
+| Sequential standard (all windows) | geometric | full+2y+3y | 14 | ~1 h | ~$12 | `--full-run --sequential --all-windows` |
+| Sequential extended | geometric | full | 11 | ~1.5 h | ~$26 | `--extended-run --sequential` |
+| Sequential production | geometric | full | 11 | ~4 h | ~$61 | `--production-run --sequential` |
 
 ---
 
 ### Window Length
 
-The `comprehensive_benchmark_fleet_marketplace.json` config already includes all three window variants; no extra CLI flag is needed.
+By default only the `full` window variant (all available history) is used.  Pass `--all-windows` to add the `2y` and `3y` variants and triple the number of combinations.
 
 Window lengths are applied as a trailing lookback from the data's `end_date`:
 
 | Window variant | `weeks_back` | Training window start (example, end = 2026-01-22) |
 |---------------|-------------|--------------------------------------------------|
-| `full` | — | All available history (no start-date override) |
+| `full` _(default)_ | — | All available history (no start-date override) |
 | `2y` | 104 weeks | 2023-10-05 |
 | `3y` | 156 weeks | 2022-09-29 |
 
@@ -997,16 +1009,18 @@ python scripts/run_full_benchmark.py \
 
 ### A. Dimension Reference
 
-| Dimension | Values | Count |
-|-----------|--------|-------|
-| Adstock | `geometric` _(default)_ / `weibull_cdf` / `weibull_pdf` | 1–3 |
-| Train split | `70_90`, `75_90`, `65_80` | 3 |
-| Time aggregation | `daily`, `weekly` | 2 |
-| Spend-var mapping | `spend_to_spend`, `spend_to_impressions`, `spend_to_clicks`, `mixed_by_funnel_impressions`, `mixed_by_funnel_clicks` | 5 |
-| Seasonality window | `full`, `2y`, `3y` | 3 |
+| Dimension | Values | Default count | With flag |
+|-----------|--------|--------------|-----------|
+| Adstock | `geometric` _(default)_ / `weibull_cdf` / `weibull_pdf` | 1 | 3 (`--all-adstock`) |
+| Train split | `70_90`, `75_90`, `65_80` | 3 | — |
+| Time aggregation | `daily`, `weekly` | 2 | — |
+| Spend-var mapping | `spend_to_spend`, `spend_to_impressions`, `spend_to_clicks`, `mixed_by_funnel_impressions`, `mixed_by_funnel_clicks` | 5 | — |
+| Seasonality window | `full` _(default)_ / `2y` / `3y` | 1 | 3 (`--all-windows`) |
 
-**Cartesian base** (geometric only): 1 × 3 × 2 × 5 × 3 = **90 combinations**  
-**With `--all-adstock`**: 3 × 3 × 2 × 5 × 3 = **270 combinations**
+**Default (geometric, full window):** 1×3×2×5×**1** = **30 combinations**  
+**With `--all-adstock`:** 3×3×2×5×1 = **90 combinations**  
+**With `--all-windows`:** 1×3×2×5×3 = **90 combinations**  
+**With `--all-adstock --all-windows`:** 3×3×2×5×3 = **270 combinations**
 
 **Baseline values** (used for the non-varying dimension in sequential mode):
 
@@ -1022,141 +1036,87 @@ python scripts/run_full_benchmark.py \
 
 ### B. Combination Count by Flag
 
-| Flags added to reference command | Mode | Adstock(s) | Combos | Formula |
-|----------------------------------|------|-----------|--------|---------|
-| _(none — test)_ | cartesian | geometric | **90** | 1×3×2×5×3 |
-| `--all-adstock` | cartesian | all 3 | **270** | 3×3×2×5×3 |
-| `--full-run` | cartesian | geometric | **90** | 1×3×2×5×3 |
-| `--full-run --all-adstock` | cartesian | all 3 | **270** | 3×3×2×5×3 |
-| `--extended-run` | cartesian | geometric | **90** | 1×3×2×5×3 |
-| `--extended-run --all-adstock` | cartesian | all 3 | **270** | 3×3×2×5×3 |
-| `--production-run` | cartesian | geometric | **90** | 1×3×2×5×3 |
-| `--production-run --all-adstock` | cartesian | all 3 | **270** | 3×3×2×5×3 |
-| `--full-run --sequential` | sequential | geometric | **14** | 1+3+2+5+3 |
-| `--full-run --sequential --all-adstock` | sequential | all 3 | **16** | 3+3+2+5+3 |
-| `--extended-run --sequential` | sequential | geometric | **14** | 1+3+2+5+3 |
-| `--top-n 10 --extended-run` | cartesian | geometric | **10** | first 10 of 90 |
-| `--top-n 10 --production-run` | cartesian | geometric | **10** | first 10 of 90 |
+| Flags added to reference command | Mode | Adstock(s) | Windows | Combos | Formula |
+|----------------------------------|------|-----------|---------|--------|---------|
+| _(none — test)_ | cartesian | geometric | full | **30** | 1×3×2×5×1 |
+| `--all-adstock` | cartesian | all 3 | full | **90** | 3×3×2×5×1 |
+| `--all-windows` | cartesian | geometric | full+2y+3y | **90** | 1×3×2×5×3 |
+| `--all-adstock --all-windows` | cartesian | all 3 | full+2y+3y | **270** | 3×3×2×5×3 |
+| `--full-run` | cartesian | geometric | full | **30** | 1×3×2×5×1 |
+| `--full-run --all-adstock` | cartesian | all 3 | full | **90** | 3×3×2×5×1 |
+| `--full-run --all-windows` | cartesian | geometric | full+2y+3y | **90** | 1×3×2×5×3 |
+| `--full-run --all-adstock --all-windows` | cartesian | all 3 | full+2y+3y | **270** | 3×3×2×5×3 |
+| `--extended-run` | cartesian | geometric | full | **30** | 1×3×2×5×1 |
+| `--extended-run --all-adstock` | cartesian | all 3 | full | **90** | 3×3×2×5×1 |
+| `--production-run` | cartesian | geometric | full | **30** | 1×3×2×5×1 |
+| `--production-run --all-adstock` | cartesian | all 3 | full | **90** | 3×3×2×5×1 |
+| `--full-run --sequential` | sequential | geometric | full | **11** | 1+3+2+5 |
+| `--full-run --sequential --all-adstock` | sequential | all 3 | full | **13** | 3+3+2+5 |
+| `--full-run --sequential --all-windows` | sequential | geometric | full+2y+3y | **14** | 1+3+2+5+3 |
+| `--top-n 10 --extended-run` | cartesian | geometric | full | **10** | first 10 of 30 |
+| `--top-n 10 --production-run` | cartesian | geometric | full | **10** | first 10 of 30 |
 
 ---
 
-### C. Full Combination Matrix — Geometric Only (90 Combinations)
+### C. Full Combination Matrix — Geometric Only (30 Combinations)
 
-Applies to all cartesian runs with geometric adstock (test default, `--full-run`, `--extended-run`, `--production-run`).  
-All 90 combos use `adstock = geometric` and `hyperparameter_preset = Meshed recommend` (or `Custom` when ranges config is provided).
+Applies to all cartesian runs with geometric adstock and default window (test default, `--full-run`, `--extended-run`, `--production-run`).  
+All 30 combos use `adstock = geometric`, `seasonality_window = full`, and `hyperparameter_preset = Meshed recommend` (or `Custom` when ranges config is provided).
 
-| # | Train split | Time agg | Spend-var | Window |
-|---|-------------|---------|-----------|--------|
-| 1 | 70_90 | daily | spend_to_spend | full |
-| 2 | 70_90 | daily | spend_to_spend | 2y |
-| 3 | 70_90 | daily | spend_to_spend | 3y |
-| 4 | 70_90 | daily | spend_to_impressions | full |
-| 5 | 70_90 | daily | spend_to_impressions | 2y |
-| 6 | 70_90 | daily | spend_to_impressions | 3y |
-| 7 | 70_90 | daily | spend_to_clicks | full |
-| 8 | 70_90 | daily | spend_to_clicks | 2y |
-| 9 | 70_90 | daily | spend_to_clicks | 3y |
-| 10 | 70_90 | daily | mixed_by_funnel_impressions | full |
-| 11 | 70_90 | daily | mixed_by_funnel_impressions | 2y |
-| 12 | 70_90 | daily | mixed_by_funnel_impressions | 3y |
-| 13 | 70_90 | daily | mixed_by_funnel_clicks | full |
-| 14 | 70_90 | daily | mixed_by_funnel_clicks | 2y |
-| 15 | 70_90 | daily | mixed_by_funnel_clicks | 3y |
-| 16 | 70_90 | weekly | spend_to_spend | full |
-| 17 | 70_90 | weekly | spend_to_spend | 2y |
-| 18 | 70_90 | weekly | spend_to_spend | 3y |
-| 19 | 70_90 | weekly | spend_to_impressions | full |
-| 20 | 70_90 | weekly | spend_to_impressions | 2y |
-| 21 | 70_90 | weekly | spend_to_impressions | 3y |
-| 22 | 70_90 | weekly | spend_to_clicks | full |
-| 23 | 70_90 | weekly | spend_to_clicks | 2y |
-| 24 | 70_90 | weekly | spend_to_clicks | 3y |
-| 25 | 70_90 | weekly | mixed_by_funnel_impressions | full |
-| 26 | 70_90 | weekly | mixed_by_funnel_impressions | 2y |
-| 27 | 70_90 | weekly | mixed_by_funnel_impressions | 3y |
-| 28 | 70_90 | weekly | mixed_by_funnel_clicks | full |
-| 29 | 70_90 | weekly | mixed_by_funnel_clicks | 2y |
-| 30 | 70_90 | weekly | mixed_by_funnel_clicks | 3y |
-| 31 | 75_90 | daily | spend_to_spend | full |
-| 32 | 75_90 | daily | spend_to_spend | 2y |
-| 33 | 75_90 | daily | spend_to_spend | 3y |
-| 34 | 75_90 | daily | spend_to_impressions | full |
-| 35 | 75_90 | daily | spend_to_impressions | 2y |
-| 36 | 75_90 | daily | spend_to_impressions | 3y |
-| 37 | 75_90 | daily | spend_to_clicks | full |
-| 38 | 75_90 | daily | spend_to_clicks | 2y |
-| 39 | 75_90 | daily | spend_to_clicks | 3y |
-| 40 | 75_90 | daily | mixed_by_funnel_impressions | full |
-| 41 | 75_90 | daily | mixed_by_funnel_impressions | 2y |
-| 42 | 75_90 | daily | mixed_by_funnel_impressions | 3y |
-| 43 | 75_90 | daily | mixed_by_funnel_clicks | full |
-| 44 | 75_90 | daily | mixed_by_funnel_clicks | 2y |
-| 45 | 75_90 | daily | mixed_by_funnel_clicks | 3y |
-| 46 | 75_90 | weekly | spend_to_spend | full |
-| 47 | 75_90 | weekly | spend_to_spend | 2y |
-| 48 | 75_90 | weekly | spend_to_spend | 3y |
-| 49 | 75_90 | weekly | spend_to_impressions | full |
-| 50 | 75_90 | weekly | spend_to_impressions | 2y |
-| 51 | 75_90 | weekly | spend_to_impressions | 3y |
-| 52 | 75_90 | weekly | spend_to_clicks | full |
-| 53 | 75_90 | weekly | spend_to_clicks | 2y |
-| 54 | 75_90 | weekly | spend_to_clicks | 3y |
-| 55 | 75_90 | weekly | mixed_by_funnel_impressions | full |
-| 56 | 75_90 | weekly | mixed_by_funnel_impressions | 2y |
-| 57 | 75_90 | weekly | mixed_by_funnel_impressions | 3y |
-| 58 | 75_90 | weekly | mixed_by_funnel_clicks | full |
-| 59 | 75_90 | weekly | mixed_by_funnel_clicks | 2y |
-| 60 | 75_90 | weekly | mixed_by_funnel_clicks | 3y |
-| 61 | 65_80 | daily | spend_to_spend | full |
-| 62 | 65_80 | daily | spend_to_spend | 2y |
-| 63 | 65_80 | daily | spend_to_spend | 3y |
-| 64 | 65_80 | daily | spend_to_impressions | full |
-| 65 | 65_80 | daily | spend_to_impressions | 2y |
-| 66 | 65_80 | daily | spend_to_impressions | 3y |
-| 67 | 65_80 | daily | spend_to_clicks | full |
-| 68 | 65_80 | daily | spend_to_clicks | 2y |
-| 69 | 65_80 | daily | spend_to_clicks | 3y |
-| 70 | 65_80 | daily | mixed_by_funnel_impressions | full |
-| 71 | 65_80 | daily | mixed_by_funnel_impressions | 2y |
-| 72 | 65_80 | daily | mixed_by_funnel_impressions | 3y |
-| 73 | 65_80 | daily | mixed_by_funnel_clicks | full |
-| 74 | 65_80 | daily | mixed_by_funnel_clicks | 2y |
-| 75 | 65_80 | daily | mixed_by_funnel_clicks | 3y |
-| 76 | 65_80 | weekly | spend_to_spend | full |
-| 77 | 65_80 | weekly | spend_to_spend | 2y |
-| 78 | 65_80 | weekly | spend_to_spend | 3y |
-| 79 | 65_80 | weekly | spend_to_impressions | full |
-| 80 | 65_80 | weekly | spend_to_impressions | 2y |
-| 81 | 65_80 | weekly | spend_to_impressions | 3y |
-| 82 | 65_80 | weekly | spend_to_clicks | full |
-| 83 | 65_80 | weekly | spend_to_clicks | 2y |
-| 84 | 65_80 | weekly | spend_to_clicks | 3y |
-| 85 | 65_80 | weekly | mixed_by_funnel_impressions | full |
-| 86 | 65_80 | weekly | mixed_by_funnel_impressions | 2y |
-| 87 | 65_80 | weekly | mixed_by_funnel_impressions | 3y |
-| 88 | 65_80 | weekly | mixed_by_funnel_clicks | full |
-| 89 | 65_80 | weekly | mixed_by_funnel_clicks | 2y |
-| 90 | 65_80 | weekly | mixed_by_funnel_clicks | 3y |
+| # | Train split | Time agg | Spend-var |
+|---|-------------|---------|-----------|
+| 1 | 70_90 | daily | spend_to_spend |
+| 2 | 70_90 | daily | spend_to_impressions |
+| 3 | 70_90 | daily | spend_to_clicks |
+| 4 | 70_90 | daily | mixed_by_funnel_impressions |
+| 5 | 70_90 | daily | mixed_by_funnel_clicks |
+| 6 | 70_90 | weekly | spend_to_spend |
+| 7 | 70_90 | weekly | spend_to_impressions |
+| 8 | 70_90 | weekly | spend_to_clicks |
+| 9 | 70_90 | weekly | mixed_by_funnel_impressions |
+| 10 | 70_90 | weekly | mixed_by_funnel_clicks |
+| 11 | 75_90 | daily | spend_to_spend |
+| 12 | 75_90 | daily | spend_to_impressions |
+| 13 | 75_90 | daily | spend_to_clicks |
+| 14 | 75_90 | daily | mixed_by_funnel_impressions |
+| 15 | 75_90 | daily | mixed_by_funnel_clicks |
+| 16 | 75_90 | weekly | spend_to_spend |
+| 17 | 75_90 | weekly | spend_to_impressions |
+| 18 | 75_90 | weekly | spend_to_clicks |
+| 19 | 75_90 | weekly | mixed_by_funnel_impressions |
+| 20 | 75_90 | weekly | mixed_by_funnel_clicks |
+| 21 | 65_80 | daily | spend_to_spend |
+| 22 | 65_80 | daily | spend_to_impressions |
+| 23 | 65_80 | daily | spend_to_clicks |
+| 24 | 65_80 | daily | mixed_by_funnel_impressions |
+| 25 | 65_80 | daily | mixed_by_funnel_clicks |
+| 26 | 65_80 | weekly | spend_to_spend |
+| 27 | 65_80 | weekly | spend_to_impressions |
+| 28 | 65_80 | weekly | spend_to_clicks |
+| 29 | 65_80 | weekly | mixed_by_funnel_impressions |
+| 30 | 65_80 | weekly | mixed_by_funnel_clicks |
+
+Add `--all-windows` to expand each of the 30 rows into 3 window variants (full / 2y / 3y) → **90 combinations**.
 
 ---
 
-### D. All Adstock — 270 Combinations (`--all-adstock`)
+### D. All Adstock — 90 Combinations (`--all-adstock`)
 
-**Structure:** repeat the 90-combination block from section C three times, one per adstock type.
+**Structure:** repeat the 30-combination block from section C three times, one per adstock type.
 
 | Block | Adstock | Combos | Hyperparameter preset |
 |-------|---------|--------|-----------------------|
-| 1–90 | geometric | 90 | Meshed recommend |
-| 91–180 | weibull_cdf | 90 | Meta default |
-| 181–270 | weibull_pdf | 90 | Meshed recommend |
+| 1–30 | geometric | 30 | Meshed recommend |
+| 31–60 | weibull_cdf | 30 | Meta default |
+| 61–90 | weibull_pdf | 30 | Meshed recommend |
 
-Within each block the 90 combinations are identical to section C (3 splits × 2 time-agg × 5 spend-var × 3 windows). Combinations 91–270 mirror rows 1–90 with the adstock column changed.
+Within each block the 30 combinations are identical to section C (3 splits × 2 time-agg × 5 spend-var, `full` window). Add `--all-windows` to expand each block to 90 rows → **270 total**.
 
 ---
 
-### E. Sequential Mode — Geometric (14 Combinations, `--sequential`)
+### E. Sequential Mode — Geometric (11 Combinations, `--sequential`)
 
-Each dimension is varied in isolation; all others are held at the baseline. Windows are the 3rd independent dimension (full / 2y / 3y) taken from the JSON config.
+Each dimension is varied in isolation; all others are held at the baseline. Window is fixed to `full` (the default); add `--all-windows` for 3 additional window variants → 14 total.
 
 | # | Adstock | Train split | Time agg | Spend-var | Window | Varying |
 |---|---------|-------------|---------|-----------|--------|---------|
@@ -1171,22 +1131,21 @@ Each dimension is varied in isolation; all others are held at the baseline. Wind
 | 9 | geometric | 70_90 | daily | **spend_to_clicks** | full | spend-var |
 | 10 | geometric | 70_90 | daily | **mixed_by_funnel_impressions** | full | spend-var |
 | 11 | geometric | 70_90 | daily | **mixed_by_funnel_clicks** | full | spend-var |
-| 12 | geometric | 70_90 | daily | spend_to_spend | **full** | window |
-| 13 | geometric | 70_90 | daily | spend_to_spend | **2y** | window |
-| 14 | geometric | 70_90 | daily | spend_to_spend | **3y** | window |
+
+With `--all-windows`, 3 rows are appended (rows 12–14: window = full, 2y, 3y).
 
 ---
 
-### F. Sequential Mode — All Adstock (16 Combinations, `--sequential --all-adstock`)
+### F. Sequential Mode — All Adstock (13 Combinations, `--sequential --all-adstock`)
 
-Adds the adstock dimension to section E; all other dimensions are the same.
+Adds the adstock dimension to section E; window is still `full` by default.
 
 | # | Adstock | Train split | Time agg | Spend-var | Window | Varying |
 |---|---------|-------------|---------|-----------|--------|---------|
 | 1 | **geometric** | 70_90 | daily | spend_to_spend | full | adstock |
 | 2 | **weibull_cdf** | 70_90 | daily | spend_to_spend | full | adstock |
 | 3 | **weibull_pdf** | 70_90 | daily | spend_to_spend | full | adstock |
-| 4–16 | geometric | _(same as E rows 2–14)_ | | | | split / time / spend / window |
+| 4–13 | geometric | _(same as E rows 2–11)_ | | | | split / time / spend |
 
 ---
 

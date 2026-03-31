@@ -181,7 +181,6 @@ _MAX_CARTESIAN_COMBINATIONS = (
     * len(ALL_WINDOW_VARIANTS)
 )
 
-
 def generate_benchmark_config(
     selected_columns: Dict[str, Any],
     version_from_path: str,
@@ -201,7 +200,7 @@ def generate_benchmark_config(
     - 3 train/test splits
     - 2 time aggregations
     - 3 spend→var mapping strategies
-    - M window lengths (non-test default: 1 – "full"; use --all-windows / --windows to add more)
+    - M window lengths (default: 1 – "full"; use --all-windows / --windows to add more)
     = 18 combinations by default (geometric, full window),
       54 when all adstock tested,
       54 when geometric + all 3 windows,
@@ -479,6 +478,7 @@ def load_external_benchmark_config(
     config_path: str,
     run_mode: str = "test",
     adstock_types: Optional[List[str]] = None,
+    window_lengths: Optional[List[str]] = None,
     sequential: bool = False,
     hyperparameter_ranges_config: Optional[str] = None,
     channel_type_assignments_config: Optional[str] = None,
@@ -493,6 +493,10 @@ def load_external_benchmark_config(
     config file as-is, with the following exceptions:
 
     * ``--all-adstock`` / ``--adstock`` replaces the config's adstock list.
+    * ``--all-windows`` / ``--windows`` filters the config's
+      ``seasonality_window`` list.  By default (no flag) only the ``"full"``
+      window variant is kept; ``--all-windows`` restores all variants defined
+      in the file.
     * ``--sequential`` sets ``combination_mode`` to ``"single"``.
     * ``--hyperparameter-ranges-config``, ``--channel-type-assignments-config``,
       and ``--hyperparameter-preset`` are merged into the config when supplied.
@@ -504,6 +508,9 @@ def load_external_benchmark_config(
             ``"production"``.  Determines iterations and trials.
         adstock_types: If provided, replaces the config's adstock variant list
             with the named types from ``ALL_ADSTOCK_VARIANTS``.
+        window_lengths: Window variant names to keep from the config's
+            ``seasonality_window`` list (e.g. ``["full", "2y", "3y"]``).
+            When ``None`` (default) only the ``"full"`` variant is kept.
         sequential: If ``True``, sets ``combination_mode`` to ``"single"``
             (vary one dimension at a time instead of cartesian product).
         hyperparameter_ranges_config: Optional path to a hyperparameter ranges
@@ -552,6 +559,23 @@ def load_external_benchmark_config(
             config.setdefault("variants", {})["adstock"] = replaced
             logger.info(
                 f"🎯 Adstock overridden to: " f"{[v['name'] for v in replaced]}"
+            )
+
+    # Filter seasonality_window: default = full only; --all-windows keeps all.
+    effective_windows = window_lengths if window_lengths else ["full"]
+    variants_section = config.setdefault("variants", {})
+    if "seasonality_window" in variants_section:
+        filtered = [
+            w
+            for w in variants_section["seasonality_window"]
+            if w.get("name") in effective_windows
+        ]
+        if filtered:
+            variants_section["seasonality_window"] = filtered
+            logger.info(
+                f"📅 Seasonality window(s): "
+                f"{[w['name'] for w in filtered]}"
+                + (" (use --all-windows to add 2y / 3y)" if len(filtered) == 1 else "")
             )
 
     # Sequential mode: vary one dimension at a time.
@@ -839,7 +863,7 @@ Examples:
     adstock_group.add_argument(
         "--all-adstock",
         action="store_true",
-        help="Test all 3 adstock types: geometric, weibull_cdf, weibull_pdf (54 combos cartesian)",
+        help="Test all 3 adstock types: geometric, weibull_cdf, weibull_pdf (triples variant count)",
     )
     adstock_group.add_argument(
         "--adstock",
@@ -853,7 +877,7 @@ Examples:
     window_group.add_argument(
         "--all-windows",
         action="store_true",
-        help="Test all 3 window lengths: full, 2y, 3y (multiplies cartesian combos by 3)",
+        help="Test all 3 window lengths: full, 2y, 3y (triples variant count). Default: full only.",
     )
     window_group.add_argument(
         "--windows",
@@ -876,7 +900,7 @@ Examples:
             "independently, using base-config defaults for the other dimensions. "
             "Order: adstock → train_splits → time_aggregation → spend_var_mapping → "
             "seasonality_window. Reduces combinations from product to sum "
-            "(e.g. 9 vs 18 for geometric-only default). "
+            "(e.g. 11 vs 30 for geometric-only default; 14 with --all-windows). "
             "Recommended for initial exploration before a full cartesian sweep."
         ),
     )
@@ -978,12 +1002,12 @@ Examples:
     )
     if window_lengths:
         logger.info(f"Windows: {', '.join(window_lengths)}")
-    elif args.config:
-        logger.info("Windows: defined in config file")
     elif run_mode != "test":
-        logger.info("Windows: full (default for non-test runs)")
+        logger.info(
+            "Windows: full (default — use --all-windows to add 2y / 3y)"
+        )
     else:
-        logger.info("Windows: none (test mode)")
+        logger.info("Windows: full (default — use --all-windows to add 2y / 3y)")
     if args.top_n is not None:
         logger.info(f"Top-N combinations: {args.top_n}")
     logger.info(f"Data path: {args.path}")
@@ -1024,6 +1048,7 @@ Examples:
                 args.config,
                 run_mode=run_mode,
                 adstock_types=adstock_types,
+                window_lengths=window_lengths,
                 sequential=sequential,
                 hyperparameter_ranges_config=args.hyperparameter_ranges_config,
                 channel_type_assignments_config=args.channel_type_assignments_config,
