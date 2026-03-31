@@ -1,7 +1,7 @@
 {
   "name": "channel_type_assignments_fleet_marketplace",
-  "description": "Maps paid media spend and proxy variable names for a fleet/mobility marketplace dataset to channel types defined in generic_hyperparameter_ranges_v2.json. Covers Google Search (brand / non-brand / pmax / display / video), Meta, Bing, Facebook sub-channels, and owned CRM/newsletter channels.",
-  "version": "1.0",
+  "description": "Maps paid media spend and proxy variable names for a fleet/mobility marketplace dataset to channel types defined in generic_hyperparameter_ranges_v2.json. Covers Google Search (brand / non-brand / pmax / display / video), Meta, Bing (brand / non-brand / other), Facebook sub-channels (video / static / upper / lower / app), and owned CRM/newsletter channels.",
+  "version": "1.1",
   "assignments": {
     "meta_total_spend": "paid_social_performance",
     "meta_total_impressions": "paid_social_performance",
@@ -31,6 +31,18 @@
     "google_youtube_clicks": "video_online",
 
     "google_other_cost_2": "digital_other_mixed",
+
+    "bing_search_brand_cost": "search_brand",
+    "bing_search_brand_impressions": "search_brand",
+    "bing_search_brand_clicks": "search_brand",
+
+    "bing_search_nonbrand_cost": "search_nonbrand",
+    "bing_search_nonbrand_impressions": "search_nonbrand",
+    "bing_search_nonbrand_clicks": "search_nonbrand",
+
+    "bing_search_other_cost": "digital_other_mixed",
+    "bing_search_other_impressions": "digital_other_mixed",
+    "bing_search_other_clicks": "digital_other_mixed",
 
     "bing_search_cost": "search_nonbrand",
     "bing_search_impressions": "search_nonbrand",

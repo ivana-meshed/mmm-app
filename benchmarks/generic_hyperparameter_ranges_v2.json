@@ -3,11 +3,23 @@
   "description": "Generic Robyn hyperparameter ranges by frequency, adstock type, and channel type for reusable benchmark/test configurations. Extended with a few additional digital channel types to better cover common modern media taxonomies.",
   "version": "2.0",
   "global_defaults": {
-    "lambda": [0.0, 1.0],
+    "lambda": [
+      0.0,
+      1.0
+    ],
     "train_size": {
-      "daily": [0.7, 0.85],
-      "weekly": [0.6, 0.8],
-      "monthly": [0.6, 0.85]
+      "daily": [
+        0.7,
+        0.85
+      ],
+      "weekly": [
+        0.6,
+        0.8
+      ],
+      "monthly": [
+        0.6,
+        0.85
+      ]
     }
   },
   "channel_types": [
@@ -35,393 +47,1639 @@
   "presets": {
     "conservative": "Tighter search space for fast screening and more stable optimization.",
     "balanced": "General-purpose default preset.",
-    "exploratory": "Wider search space for uncertain channels and stress testing."
+    "exploratory": "Wider search space for uncertain channels and stress testing.",
+    "fb": "Robyn/Facebook official documentation defaults. Uniform across all channel types \u2014 mirrors Robyn's built-in 'Facebook recommend' preset.",
+    "meshed": "Meshed recommended ranges. Channel-type-differentiated for geometric adstock; tighter saturation and higher carryover than Facebook defaults."
   },
   "ranges": {
     "daily": {
       "geometric": {
         "search_brand": {
           "conservative": {
-            "theta": [0.0, 0.0375],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.51]
+            "theta": [
+              0.0,
+              0.0375
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.51
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.05],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.6]
+            "theta": [
+              0.0,
+              0.05
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.6
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.0625],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.69]
+            "theta": [
+              0.0,
+              0.0625
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.69
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.0,
+              0.15
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "search_nonbrand": {
           "conservative": {
-            "theta": [0.0, 0.06],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.06
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.08],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.08
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.1],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.05,
+              0.2
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "shopping": {
           "conservative": {
-            "theta": [0.0, 0.06],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.06
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.08],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.08
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.1],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.05,
+              0.2
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "marketplace_pmax": {
           "conservative": {
-            "theta": [0.01, 0.09],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.25, 0.68]
+            "theta": [
+              0.01,
+              0.09
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.25,
+              0.68
+            ]
           },
           "balanced": {
-            "theta": [0.01, 0.12],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.25, 0.8]
+            "theta": [
+              0.01,
+              0.12
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.25,
+              0.8
+            ]
           },
           "exploratory": {
-            "theta": [0.008, 0.15],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.2, 0.92]
+            "theta": [
+              0.008,
+              0.15
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.2,
+              0.92
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.1,
+              0.3
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "paid_social_performance": {
           "conservative": {
-            "theta": [0.01, 0.09],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.2, 0.68]
+            "theta": [
+              0.01,
+              0.09
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.2,
+              0.68
+            ]
           },
           "balanced": {
-            "theta": [0.01, 0.12],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.8]
+            "theta": [
+              0.01,
+              0.12
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.8
+            ]
           },
           "exploratory": {
-            "theta": [0.008, 0.15],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.16, 0.92]
+            "theta": [
+              0.008,
+              0.15
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.16,
+              0.92
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.1,
+              0.4
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "paid_social_awareness": {
           "conservative": {
-            "theta": [0.03, 0.135],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.03,
+              0.135
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.03, 0.18],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.03,
+              0.18
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.024, 0.225],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.024,
+              0.225
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.15,
+              0.45
+            ],
+            "alpha": [
+              0.8,
+              2.8
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "paid_social_video": {
           "conservative": {
-            "theta": [0.04, 0.15],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.04,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.04, 0.2],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.04,
+              0.2
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.032, 0.25],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.032,
+              0.25
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.15,
+              0.45
+            ],
+            "alpha": [
+              0.8,
+              2.8
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "display_prospecting": {
           "conservative": {
-            "theta": [0.03, 0.135],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.03,
+              0.135
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.03, 0.18],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.03,
+              0.18
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.024, 0.225],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.024,
+              0.225
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.15,
+              0.45
+            ],
+            "alpha": [
+              0.8,
+              2.8
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "video_online": {
           "conservative": {
-            "theta": [0.05, 0.165],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.05,
+              0.165
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.05, 0.22],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.05,
+              0.22
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.04, 0.275],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.04,
+              0.275
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.15,
+              0.45
+            ],
+            "alpha": [
+              0.8,
+              2.8
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "tv_offline": {
           "conservative": {
-            "theta": [0.08, 0.225],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.35, 0.85]
+            "theta": [
+              0.08,
+              0.225
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.35,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.08, 0.3],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.35, 1.0]
+            "theta": [
+              0.08,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.35,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.064, 0.375],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.28, 1.0]
+            "theta": [
+              0.064,
+              0.375
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.28,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.4,
+              0.8
+            ],
+            "alpha": [
+              0.8,
+              2.2
+            ],
+            "gamma": [
+              0.6,
+              0.99
+            ]
           }
         },
         "audio_radio_podcast": {
           "conservative": {
-            "theta": [0.04, 0.165],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.04,
+              0.165
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.04, 0.22],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.04,
+              0.22
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.032, 0.275],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.032,
+              0.275
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.2,
+              0.55
+            ],
+            "alpha": [
+              0.8,
+              2.5
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "ooh_print_cinema": {
           "conservative": {
-            "theta": [0.03, 0.135],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.03,
+              0.135
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.03, 0.18],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.03,
+              0.18
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.024, 0.225],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.024,
+              0.225
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.15,
+              0.5
+            ],
+            "alpha": [
+              0.8,
+              2.5
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "affiliate_partner": {
           "conservative": {
-            "theta": [0.0, 0.075],
-            "alpha": [0.5, 1.955],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.075
+            ],
+            "alpha": [
+              0.5,
+              1.955
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.1],
-            "alpha": [0.5, 2.3],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.5,
+              2.3
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.125],
-            "alpha": [0.4, 2.76],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.125
+            ],
+            "alpha": [
+              0.4,
+              2.76
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.15,
+              0.45
+            ],
+            "alpha": [
+              0.65,
+              2.25
+            ],
+            "gamma": [
+              0.45,
+              0.875
+            ]
           }
         },
         "crm_email": {
           "conservative": {
-            "theta": [0.0, 0.06],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.06
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.08],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.08
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.1],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.6,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.3,
+              0.7
+            ]
           }
         },
         "crm_push_sms": {
           "conservative": {
-            "theta": [0.0, 0.045],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.045
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.06],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.06
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.075],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.075
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.5,
+              0.85
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.3,
+              0.7
+            ]
           }
         },
         "newsletter": {
           "conservative": {
-            "theta": [0.0, 0.06],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.06
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.08],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.08
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.1],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.6,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.3,
+              0.7
+            ]
           }
         },
         "influencer_creator": {
           "conservative": {
-            "theta": [0.02, 0.1125],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.25, 0.765]
+            "theta": [
+              0.02,
+              0.1125
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.25,
+              0.765
+            ]
           },
           "balanced": {
-            "theta": [0.02, 0.15],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.25, 0.9]
+            "theta": [
+              0.02,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.25,
+              0.9
+            ]
           },
           "exploratory": {
-            "theta": [0.016, 0.1875],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.2, 1.0]
+            "theta": [
+              0.016,
+              0.1875
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.2,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.15,
+              0.45
+            ],
+            "alpha": [
+              0.8,
+              2.5
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "app_install": {
           "conservative": {
-            "theta": [0.01, 0.09],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.2, 0.68]
+            "theta": [
+              0.01,
+              0.09
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.2,
+              0.68
+            ]
           },
           "balanced": {
-            "theta": [0.01, 0.12],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.8]
+            "theta": [
+              0.01,
+              0.12
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.8
+            ]
           },
           "exploratory": {
-            "theta": [0.008, 0.15],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.16, 0.92]
+            "theta": [
+              0.008,
+              0.15
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.16,
+              0.92
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.1,
+              0.35
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "retail_trade_promo": {
           "conservative": {
-            "theta": [0.0, 0.045],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.045
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.06],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.06
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.075],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.075
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.1,
+              0.4
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "digital_other_mixed": {
           "conservative": {
-            "theta": [0.01, 0.1125],
-            "alpha": [0.5, 2.38],
-            "gamma": [0.25, 0.765]
+            "theta": [
+              0.01,
+              0.1125
+            ],
+            "alpha": [
+              0.5,
+              2.38
+            ],
+            "gamma": [
+              0.25,
+              0.765
+            ]
           },
           "balanced": {
-            "theta": [0.01, 0.15],
-            "alpha": [0.5, 2.8],
-            "gamma": [0.25, 0.9]
+            "theta": [
+              0.01,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              2.8
+            ],
+            "gamma": [
+              0.25,
+              0.9
+            ]
           },
           "exploratory": {
-            "theta": [0.008, 0.1875],
-            "alpha": [0.4, 3.36],
-            "gamma": [0.2, 1.0]
+            "theta": [
+              0.008,
+              0.1875
+            ],
+            "alpha": [
+              0.4,
+              3.36
+            ],
+            "gamma": [
+              0.2,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.1,
+              0.4
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         }
       },
       "weibull_cdf": {
         "_default": {
           "conservative": {
-            "shape": [0.0001, 1.5],
-            "scale": [0.0, 0.05],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.8]
+            "shape": [
+              0.0001,
+              1.5
+            ],
+            "scale": [
+              0.0,
+              0.05
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.8
+            ]
           },
           "balanced": {
-            "shape": [0.0001, 2.0],
-            "scale": [0.0, 0.1],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "shape": [
+              0.0001,
+              2.0
+            ],
+            "scale": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "shape": [0.0001, 3.0],
-            "scale": [0.0, 0.15],
-            "alpha": [0.4, 3.5],
-            "gamma": [0.2, 1.0]
+            "shape": [
+              0.0001,
+              3.0
+            ],
+            "scale": [
+              0.0,
+              0.15
+            ],
+            "alpha": [
+              0.4,
+              3.5
+            ],
+            "gamma": [
+              0.2,
+              1.0
+            ]
+          },
+          "fb": {
+            "shape": [
+              0.0001,
+              2.0
+            ],
+            "scale": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "shape": [
+              0.5,
+              2.5
+            ],
+            "scale": [
+              0.001,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           }
         }
       },
       "weibull_pdf": {
         "_default": {
           "conservative": {
-            "shape": [0.0001, 3.0],
-            "scale": [0.0, 0.05],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.8]
+            "shape": [
+              0.0001,
+              3.0
+            ],
+            "scale": [
+              0.0,
+              0.05
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.8
+            ]
           },
           "balanced": {
-            "shape": [0.0001, 5.0],
-            "scale": [0.0, 0.1],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "shape": [
+              0.0001,
+              5.0
+            ],
+            "scale": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "shape": [0.0001, 8.0],
-            "scale": [0.0, 0.15],
-            "alpha": [0.4, 3.5],
-            "gamma": [0.2, 1.0]
+            "shape": [
+              0.0001,
+              8.0
+            ],
+            "scale": [
+              0.0,
+              0.15
+            ],
+            "alpha": [
+              0.4,
+              3.5
+            ],
+            "gamma": [
+              0.2,
+              1.0
+            ]
+          },
+          "fb": {
+            "shape": [
+              0.0001,
+              2.0
+            ],
+            "scale": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "shape": [
+              0.5,
+              2.5
+            ],
+            "scale": [
+              0.001,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           }
         }
       }
@@ -430,386 +1688,1630 @@
       "geometric": {
         "search_brand": {
           "conservative": {
-            "theta": [0.0, 0.09],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.51]
+            "theta": [
+              0.0,
+              0.09
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.51
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.12],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.6]
+            "theta": [
+              0.0,
+              0.12
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.6
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.15],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.69]
+            "theta": [
+              0.0,
+              0.15
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.69
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.0,
+              0.345
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "search_nonbrand": {
           "conservative": {
-            "theta": [0.0, 0.15],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.2],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.2
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.25],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.25
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.1,
+              0.46
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "shopping": {
           "conservative": {
-            "theta": [0.0, 0.135],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.135
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.18],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.18
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.225],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.225
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.1,
+              0.46
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "marketplace_pmax": {
           "conservative": {
-            "theta": [0.05, 0.1875],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.25, 0.68]
+            "theta": [
+              0.05,
+              0.1875
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.25,
+              0.68
+            ]
           },
           "balanced": {
-            "theta": [0.05, 0.25],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.25, 0.8]
+            "theta": [
+              0.05,
+              0.25
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.25,
+              0.8
+            ]
           },
           "exploratory": {
-            "theta": [0.04, 0.3125],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.2, 0.92]
+            "theta": [
+              0.04,
+              0.3125
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.2,
+              0.92
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.2,
+              0.69
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "paid_social_performance": {
           "conservative": {
-            "theta": [0.05, 0.1875],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.2, 0.68]
+            "theta": [
+              0.05,
+              0.1875
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.2,
+              0.68
+            ]
           },
           "balanced": {
-            "theta": [0.05, 0.25],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.8]
+            "theta": [
+              0.05,
+              0.25
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.8
+            ]
           },
           "exploratory": {
-            "theta": [0.04, 0.3125],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.16, 0.92]
+            "theta": [
+              0.04,
+              0.3125
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.16,
+              0.92
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.2,
+              0.92
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "paid_social_awareness": {
           "conservative": {
-            "theta": [0.1, 0.225],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.1,
+              0.225
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.1, 0.3],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.1,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.08, 0.375],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.08,
+              0.375
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.3,
+              0.95
+            ],
+            "alpha": [
+              0.8,
+              2.8
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "paid_social_video": {
           "conservative": {
-            "theta": [0.12, 0.24],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.12,
+              0.24
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.12, 0.32],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.12,
+              0.32
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.096, 0.4],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.096,
+              0.4
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.3,
+              0.95
+            ],
+            "alpha": [
+              0.8,
+              2.8
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "display_prospecting": {
           "conservative": {
-            "theta": [0.1, 0.225],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.1,
+              0.225
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.1, 0.3],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.1,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.08, 0.375],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.08,
+              0.375
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.3,
+              0.95
+            ],
+            "alpha": [
+              0.8,
+              2.8
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "video_online": {
           "conservative": {
-            "theta": [0.15, 0.2625],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.15,
+              0.2625
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.15, 0.35],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.15,
+              0.35
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.12, 0.4375],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.12,
+              0.4375
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.3,
+              0.95
+            ],
+            "alpha": [
+              0.8,
+              2.8
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "tv_offline": {
           "conservative": {
-            "theta": [0.3, 0.6],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.35, 0.85]
+            "theta": [
+              0.3,
+              0.6
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.35,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.3, 0.8],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.35, 1.0]
+            "theta": [
+              0.3,
+              0.8
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.35,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.24, 0.95],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.28, 1.0]
+            "theta": [
+              0.24,
+              0.95
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.28,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.6,
+              0.92
+            ],
+            "alpha": [
+              0.8,
+              2.2
+            ],
+            "gamma": [
+              0.6,
+              0.99
+            ]
           }
         },
         "audio_radio_podcast": {
           "conservative": {
-            "theta": [0.1, 0.2625],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.1,
+              0.2625
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.1, 0.35],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.1,
+              0.35
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.08, 0.4375],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.08,
+              0.4375
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.4,
+              0.95
+            ],
+            "alpha": [
+              0.8,
+              2.5
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "ooh_print_cinema": {
           "conservative": {
-            "theta": [0.1, 0.225],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.1,
+              0.225
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.1, 0.3],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.1,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.08, 0.375],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.08,
+              0.375
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.3,
+              0.95
+            ],
+            "alpha": [
+              0.8,
+              2.5
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "affiliate_partner": {
           "conservative": {
-            "theta": [0.0, 0.1875],
-            "alpha": [0.5, 1.955],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.1875
+            ],
+            "alpha": [
+              0.5,
+              1.955
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.25],
-            "alpha": [0.5, 2.3],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.25
+            ],
+            "alpha": [
+              0.5,
+              2.3
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.3125],
-            "alpha": [0.4, 2.76],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.3125
+            ],
+            "alpha": [
+              0.4,
+              2.76
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.3,
+              0.95
+            ],
+            "alpha": [
+              0.65,
+              2.25
+            ],
+            "gamma": [
+              0.45,
+              0.875
+            ]
           }
         },
         "crm_email": {
           "conservative": {
-            "theta": [0.0, 0.15],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.2],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.2
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.25],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.25
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.75,
+              0.95
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.3,
+              0.7
+            ]
           }
         },
         "crm_push_sms": {
           "conservative": {
-            "theta": [0.0, 0.1125],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.1125
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.15],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.1875],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.1875
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.65,
+              0.92
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.3,
+              0.7
+            ]
           }
         },
         "newsletter": {
           "conservative": {
-            "theta": [0.0, 0.15],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.2],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.2
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.25],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.25
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.75,
+              0.95
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.3,
+              0.7
+            ]
           }
         },
         "influencer_creator": {
           "conservative": {
-            "theta": [0.08, 0.1875],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.25, 0.765]
+            "theta": [
+              0.08,
+              0.1875
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.25,
+              0.765
+            ]
           },
           "balanced": {
-            "theta": [0.08, 0.25],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.25, 0.9]
+            "theta": [
+              0.08,
+              0.25
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.25,
+              0.9
+            ]
           },
           "exploratory": {
-            "theta": [0.064, 0.3125],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.2, 1.0]
+            "theta": [
+              0.064,
+              0.3125
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.2,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.3,
+              0.95
+            ],
+            "alpha": [
+              0.8,
+              2.5
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "app_install": {
           "conservative": {
-            "theta": [0.05, 0.1875],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.2, 0.68]
+            "theta": [
+              0.05,
+              0.1875
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.2,
+              0.68
+            ]
           },
           "balanced": {
-            "theta": [0.05, 0.25],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.8]
+            "theta": [
+              0.05,
+              0.25
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.8
+            ]
           },
           "exploratory": {
-            "theta": [0.04, 0.3125],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.16, 0.92]
+            "theta": [
+              0.04,
+              0.3125
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.16,
+              0.92
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.2,
+              0.805
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "retail_trade_promo": {
           "conservative": {
-            "theta": [0.0, 0.1125],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.1125
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.15],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.1875],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.1875
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.2,
+              0.92
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "digital_other_mixed": {
           "conservative": {
-            "theta": [0.05, 0.1875],
-            "alpha": [0.5, 2.38],
-            "gamma": [0.25, 0.765]
+            "theta": [
+              0.05,
+              0.1875
+            ],
+            "alpha": [
+              0.5,
+              2.38
+            ],
+            "gamma": [
+              0.25,
+              0.765
+            ]
           },
           "balanced": {
-            "theta": [0.05, 0.25],
-            "alpha": [0.5, 2.8],
-            "gamma": [0.25, 0.9]
+            "theta": [
+              0.05,
+              0.25
+            ],
+            "alpha": [
+              0.5,
+              2.8
+            ],
+            "gamma": [
+              0.25,
+              0.9
+            ]
           },
           "exploratory": {
-            "theta": [0.04, 0.3125],
-            "alpha": [0.4, 3.36],
-            "gamma": [0.2, 1.0]
+            "theta": [
+              0.04,
+              0.3125
+            ],
+            "alpha": [
+              0.4,
+              3.36
+            ],
+            "gamma": [
+              0.2,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.2,
+              0.92
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         }
       },
       "weibull_cdf": {
         "_default": {
           "conservative": {
-            "shape": [0.0001, 1.5],
-            "scale": [0.0, 0.2],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.8]
+            "shape": [
+              0.0001,
+              1.5
+            ],
+            "scale": [
+              0.0,
+              0.2
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.8
+            ]
           },
           "balanced": {
-            "shape": [0.0001, 2.0],
-            "scale": [0.0, 0.4],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "shape": [
+              0.0001,
+              2.0
+            ],
+            "scale": [
+              0.0,
+              0.4
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "shape": [0.0001, 3.0],
-            "scale": [0.0, 0.6],
-            "alpha": [0.4, 3.5],
-            "gamma": [0.2, 1.0]
+            "shape": [
+              0.0001,
+              3.0
+            ],
+            "scale": [
+              0.0,
+              0.6
+            ],
+            "alpha": [
+              0.4,
+              3.5
+            ],
+            "gamma": [
+              0.2,
+              1.0
+            ]
+          },
+          "fb": {
+            "shape": [
+              0.0001,
+              2.0
+            ],
+            "scale": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "shape": [
+              0.5,
+              2.5
+            ],
+            "scale": [
+              0.001,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           }
         }
       },
       "weibull_pdf": {
         "_default": {
           "conservative": {
-            "shape": [0.0001, 3.0],
-            "scale": [0.0, 0.2],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.8]
+            "shape": [
+              0.0001,
+              3.0
+            ],
+            "scale": [
+              0.0,
+              0.2
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.8
+            ]
           },
           "balanced": {
-            "shape": [0.0001, 5.0],
-            "scale": [0.0, 0.4],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "shape": [
+              0.0001,
+              5.0
+            ],
+            "scale": [
+              0.0,
+              0.4
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "shape": [0.0001, 8.0],
-            "scale": [0.0, 0.6],
-            "alpha": [0.4, 3.5],
-            "gamma": [0.2, 1.0]
+            "shape": [
+              0.0001,
+              8.0
+            ],
+            "scale": [
+              0.0,
+              0.6
+            ],
+            "alpha": [
+              0.4,
+              3.5
+            ],
+            "gamma": [
+              0.2,
+              1.0
+            ]
+          },
+          "fb": {
+            "shape": [
+              0.0001,
+              2.0
+            ],
+            "scale": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "shape": [
+              0.5,
+              2.5
+            ],
+            "scale": [
+              0.001,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           }
         }
       }
@@ -818,386 +3320,1630 @@
       "geometric": {
         "search_brand": {
           "conservative": {
-            "theta": [0.0, 0.3],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.51]
+            "theta": [
+              0.0,
+              0.3
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.51
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.4],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.6]
+            "theta": [
+              0.0,
+              0.4
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.6
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.5],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.69]
+            "theta": [
+              0.0,
+              0.5
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.69
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.0,
+              0.6
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "search_nonbrand": {
           "conservative": {
-            "theta": [0.0, 0.375],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.375
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.5],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.5
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.625],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.625
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.175,
+              0.8
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "shopping": {
           "conservative": {
-            "theta": [0.0, 0.3375],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.3375
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.45],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.45
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.5625],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.5625
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.175,
+              0.8
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "marketplace_pmax": {
           "conservative": {
-            "theta": [0.1, 0.4125],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.25, 0.68]
+            "theta": [
+              0.1,
+              0.4125
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.25,
+              0.68
+            ]
           },
           "balanced": {
-            "theta": [0.1, 0.55],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.25, 0.8]
+            "theta": [
+              0.1,
+              0.55
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.25,
+              0.8
+            ]
           },
           "exploratory": {
-            "theta": [0.08, 0.6875],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.2, 0.92]
+            "theta": [
+              0.08,
+              0.6875
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.2,
+              0.92
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.35,
+              0.98
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "paid_social_performance": {
           "conservative": {
-            "theta": [0.1, 0.4125],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.2, 0.68]
+            "theta": [
+              0.1,
+              0.4125
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.2,
+              0.68
+            ]
           },
           "balanced": {
-            "theta": [0.1, 0.55],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.8]
+            "theta": [
+              0.1,
+              0.55
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.8
+            ]
           },
           "exploratory": {
-            "theta": [0.08, 0.6875],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.16, 0.92]
+            "theta": [
+              0.08,
+              0.6875
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.16,
+              0.92
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.35,
+              0.98
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "paid_social_awareness": {
           "conservative": {
-            "theta": [0.2, 0.45],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.2,
+              0.45
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.2, 0.6],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.2,
+              0.6
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.16, 0.75],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.16,
+              0.75
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.525,
+              0.98
+            ],
+            "alpha": [
+              0.8,
+              2.8
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "paid_social_video": {
           "conservative": {
-            "theta": [0.25, 0.4875],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.25,
+              0.4875
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.25, 0.65],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.25,
+              0.65
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.2, 0.8125],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.2,
+              0.8125
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.525,
+              0.98
+            ],
+            "alpha": [
+              0.8,
+              2.8
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "display_prospecting": {
           "conservative": {
-            "theta": [0.2, 0.45],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.2,
+              0.45
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.2, 0.6],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.2,
+              0.6
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.16, 0.75],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.16,
+              0.75
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.525,
+              0.98
+            ],
+            "alpha": [
+              0.8,
+              2.8
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "video_online": {
           "conservative": {
-            "theta": [0.3, 0.525],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.3,
+              0.525
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.3, 0.7],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.3,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.24, 0.875],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.24,
+              0.875
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.525,
+              0.98
+            ],
+            "alpha": [
+              0.8,
+              2.8
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "tv_offline": {
           "conservative": {
-            "theta": [0.6, 0.7125],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.35, 0.85]
+            "theta": [
+              0.6,
+              0.7125
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.35,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.6, 0.95],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.35, 1.0]
+            "theta": [
+              0.6,
+              0.95
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.35,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.5, 0.975],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.28, 1.0]
+            "theta": [
+              0.5,
+              0.975
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.28,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.75,
+              0.98
+            ],
+            "alpha": [
+              0.8,
+              2.2
+            ],
+            "gamma": [
+              0.6,
+              0.99
+            ]
           }
         },
         "audio_radio_podcast": {
           "conservative": {
-            "theta": [0.25, 0.525],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.25,
+              0.525
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.25, 0.7],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.25,
+              0.7
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.2, 0.875],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.2,
+              0.875
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.7,
+              0.98
+            ],
+            "alpha": [
+              0.8,
+              2.5
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "ooh_print_cinema": {
           "conservative": {
-            "theta": [0.2, 0.45],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.3, 0.85]
+            "theta": [
+              0.2,
+              0.45
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.3,
+              0.85
+            ]
           },
           "balanced": {
-            "theta": [0.2, 0.6],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "theta": [
+              0.2,
+              0.6
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "theta": [0.16, 0.75],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.24, 1.0]
+            "theta": [
+              0.16,
+              0.75
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.24,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.525,
+              0.98
+            ],
+            "alpha": [
+              0.8,
+              2.5
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "affiliate_partner": {
           "conservative": {
-            "theta": [0.0, 0.4125],
-            "alpha": [0.5, 1.955],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.4125
+            ],
+            "alpha": [
+              0.5,
+              1.955
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.55],
-            "alpha": [0.5, 2.3],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.55
+            ],
+            "alpha": [
+              0.5,
+              2.3
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.6875],
-            "alpha": [0.4, 2.76],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.6875
+            ],
+            "alpha": [
+              0.4,
+              2.76
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.525,
+              0.98
+            ],
+            "alpha": [
+              0.65,
+              2.25
+            ],
+            "gamma": [
+              0.45,
+              0.875
+            ]
           }
         },
         "crm_email": {
           "conservative": {
-            "theta": [0.0, 0.3375],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.3375
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.45],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.45
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.5625],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.5625
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.85,
+              0.98
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.3,
+              0.7
+            ]
           }
         },
         "crm_push_sms": {
           "conservative": {
-            "theta": [0.0, 0.2625],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.2625
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.35],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.35
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.4375],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.4375
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.8,
+              0.97
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.3,
+              0.7
+            ]
           }
         },
         "newsletter": {
           "conservative": {
-            "theta": [0.0, 0.3375],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.3375
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.45],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.45
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.5625],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.5625
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.85,
+              0.98
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.3,
+              0.7
+            ]
           }
         },
         "influencer_creator": {
           "conservative": {
-            "theta": [0.2, 0.4125],
-            "alpha": [0.5, 2.55],
-            "gamma": [0.25, 0.765]
+            "theta": [
+              0.2,
+              0.4125
+            ],
+            "alpha": [
+              0.5,
+              2.55
+            ],
+            "gamma": [
+              0.25,
+              0.765
+            ]
           },
           "balanced": {
-            "theta": [0.2, 0.55],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.25, 0.9]
+            "theta": [
+              0.2,
+              0.55
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.25,
+              0.9
+            ]
           },
           "exploratory": {
-            "theta": [0.16, 0.6875],
-            "alpha": [0.4, 3.6],
-            "gamma": [0.2, 1.0]
+            "theta": [
+              0.16,
+              0.6875
+            ],
+            "alpha": [
+              0.4,
+              3.6
+            ],
+            "gamma": [
+              0.2,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.525,
+              0.98
+            ],
+            "alpha": [
+              0.8,
+              2.5
+            ],
+            "gamma": [
+              0.5,
+              0.95
+            ]
           }
         },
         "app_install": {
           "conservative": {
-            "theta": [0.1, 0.4125],
-            "alpha": [0.5, 2.125],
-            "gamma": [0.2, 0.68]
+            "theta": [
+              0.1,
+              0.4125
+            ],
+            "alpha": [
+              0.5,
+              2.125
+            ],
+            "gamma": [
+              0.2,
+              0.68
+            ]
           },
           "balanced": {
-            "theta": [0.1, 0.55],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.8]
+            "theta": [
+              0.1,
+              0.55
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.8
+            ]
           },
           "exploratory": {
-            "theta": [0.08, 0.6875],
-            "alpha": [0.4, 3.0],
-            "gamma": [0.16, 0.92]
+            "theta": [
+              0.08,
+              0.6875
+            ],
+            "alpha": [
+              0.4,
+              3.0
+            ],
+            "gamma": [
+              0.16,
+              0.92
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.35,
+              0.98
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "retail_trade_promo": {
           "conservative": {
-            "theta": [0.0, 0.2625],
-            "alpha": [0.5, 1.7],
-            "gamma": [0.2, 0.595]
+            "theta": [
+              0.0,
+              0.2625
+            ],
+            "alpha": [
+              0.5,
+              1.7
+            ],
+            "gamma": [
+              0.2,
+              0.595
+            ]
           },
           "balanced": {
-            "theta": [0.0, 0.35],
-            "alpha": [0.5, 2.0],
-            "gamma": [0.2, 0.7]
+            "theta": [
+              0.0,
+              0.35
+            ],
+            "alpha": [
+              0.5,
+              2.0
+            ],
+            "gamma": [
+              0.2,
+              0.7
+            ]
           },
           "exploratory": {
-            "theta": [0.0, 0.4375],
-            "alpha": [0.4, 2.4],
-            "gamma": [0.16, 0.805]
+            "theta": [
+              0.0,
+              0.4375
+            ],
+            "alpha": [
+              0.4,
+              2.4
+            ],
+            "gamma": [
+              0.16,
+              0.805
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.35,
+              0.98
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         },
         "digital_other_mixed": {
           "conservative": {
-            "theta": [0.1, 0.4125],
-            "alpha": [0.5, 2.38],
-            "gamma": [0.25, 0.765]
+            "theta": [
+              0.1,
+              0.4125
+            ],
+            "alpha": [
+              0.5,
+              2.38
+            ],
+            "gamma": [
+              0.25,
+              0.765
+            ]
           },
           "balanced": {
-            "theta": [0.1, 0.55],
-            "alpha": [0.5, 2.8],
-            "gamma": [0.25, 0.9]
+            "theta": [
+              0.1,
+              0.55
+            ],
+            "alpha": [
+              0.5,
+              2.8
+            ],
+            "gamma": [
+              0.25,
+              0.9
+            ]
           },
           "exploratory": {
-            "theta": [0.08, 0.6875],
-            "alpha": [0.4, 3.36],
-            "gamma": [0.2, 1.0]
+            "theta": [
+              0.08,
+              0.6875
+            ],
+            "alpha": [
+              0.4,
+              3.36
+            ],
+            "gamma": [
+              0.2,
+              1.0
+            ]
+          },
+          "fb": {
+            "theta": [
+              0.0,
+              0.9
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "theta": [
+              0.35,
+              0.98
+            ],
+            "alpha": [
+              1.0,
+              3.0
+            ],
+            "gamma": [
+              0.6,
+              0.9
+            ]
           }
         }
       },
       "weibull_cdf": {
         "_default": {
           "conservative": {
-            "shape": [0.0001, 1.5],
-            "scale": [0.0, 0.45],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.8]
+            "shape": [
+              0.0001,
+              1.5
+            ],
+            "scale": [
+              0.0,
+              0.45
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.8
+            ]
           },
           "balanced": {
-            "shape": [0.0001, 2.0],
-            "scale": [0.0, 0.6],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "shape": [
+              0.0001,
+              2.0
+            ],
+            "scale": [
+              0.0,
+              0.6
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "shape": [0.0001, 3.0],
-            "scale": [0.0, 0.8],
-            "alpha": [0.4, 3.5],
-            "gamma": [0.2, 1.0]
+            "shape": [
+              0.0001,
+              3.0
+            ],
+            "scale": [
+              0.0,
+              0.8
+            ],
+            "alpha": [
+              0.4,
+              3.5
+            ],
+            "gamma": [
+              0.2,
+              1.0
+            ]
+          },
+          "fb": {
+            "shape": [
+              0.0001,
+              2.0
+            ],
+            "scale": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "shape": [
+              0.5,
+              2.5
+            ],
+            "scale": [
+              0.001,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           }
         }
       },
       "weibull_pdf": {
         "_default": {
           "conservative": {
-            "shape": [0.0001, 3.0],
-            "scale": [0.0, 0.45],
-            "alpha": [0.5, 2.5],
-            "gamma": [0.2, 0.8]
+            "shape": [
+              0.0001,
+              3.0
+            ],
+            "scale": [
+              0.0,
+              0.45
+            ],
+            "alpha": [
+              0.5,
+              2.5
+            ],
+            "gamma": [
+              0.2,
+              0.8
+            ]
           },
           "balanced": {
-            "shape": [0.0001, 5.0],
-            "scale": [0.0, 0.6],
-            "alpha": [0.5, 3.0],
-            "gamma": [0.3, 1.0]
+            "shape": [
+              0.0001,
+              5.0
+            ],
+            "scale": [
+              0.0,
+              0.6
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           },
           "exploratory": {
-            "shape": [0.0001, 8.0],
-            "scale": [0.0, 0.8],
-            "alpha": [0.4, 3.5],
-            "gamma": [0.2, 1.0]
+            "shape": [
+              0.0001,
+              8.0
+            ],
+            "scale": [
+              0.0,
+              0.8
+            ],
+            "alpha": [
+              0.4,
+              3.5
+            ],
+            "gamma": [
+              0.2,
+              1.0
+            ]
+          },
+          "fb": {
+            "shape": [
+              0.0001,
+              2.0
+            ],
+            "scale": [
+              0.0,
+              0.1
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
+          },
+          "meshed": {
+            "shape": [
+              0.5,
+              2.5
+            ],
+            "scale": [
+              0.001,
+              0.15
+            ],
+            "alpha": [
+              0.5,
+              3.0
+            ],
+            "gamma": [
+              0.3,
+              1.0
+            ]
           }
         }
       }

@@ -98,7 +98,7 @@ class HyperparameterRangesConfig:
             adstock_type: One of "geometric", "weibull_cdf", "weibull_pdf".
             channel_type: Channel type key (e.g. "search_brand"), or None
                 to use the ``_default`` entry.
-            preset: One of "conservative", "balanced", "exploratory".
+            preset: One of "conservative", "balanced", "exploratory", "fb", or "meshed".
 
         Returns:
             Dict with range lists (e.g. ``{"alpha": [0.5, 3.0], ...}``),
@@ -138,7 +138,7 @@ class HyperparameterRangesConfig:
             adstock_type: Adstock type ("geometric", "weibull_cdf", …).
             frequency: Frequency key ("daily", "weekly", "monthly").
             channel_type_mapping: Maps variable names to channel types.
-            preset: Preset to use ("balanced", "conservative", "exploratory").
+            preset: Preset to use ("balanced", "conservative", "exploratory", "fb", or "meshed").
 
         Returns:
             Dict with keys like ``"{var}_alphas"``, ``"{var}_thetas"``, etc.
@@ -278,7 +278,7 @@ class BenchmarkConfig:
     def hyperparameter_preset(self) -> str:
         """Preset to use when resolving hyperparameter ranges.
 
-        One of "conservative", "balanced" (default), or "exploratory".
+        One of "conservative", "balanced" (default), "exploratory", "fb", or "meshed".
         """
         return self.config.get("hyperparameter_preset", "balanced")
 
@@ -1655,8 +1655,46 @@ def main():
         "Use 18 for geometric-only, 54 for all adstock types, "
         "or higher values when combining adstock × window sweeps.",
     )
+    parser.add_argument(
+        "--hyperparameter-preset",
+        dest="hyperparameter_preset",
+        choices=["conservative", "balanced", "exploratory", "fb", "meshed"],
+        default=None,
+        help=(
+            "Override the hyperparameter preset defined in the benchmark config JSON "
+            "(conservative / balanced / exploratory / fb / meshed). "
+            "'fb' mirrors Robyn/Facebook official documentation defaults. "
+            "'meshed' uses Meshed recommended ranges (channel-type-differentiated). "
+            "Shorthand: use --fb or --meshed instead."
+        ),
+    )
+    preset_shorthand_group = parser.add_mutually_exclusive_group()
+    preset_shorthand_group.add_argument(
+        "--fb",
+        action="store_true",
+        default=False,
+        help=(
+            "Shorthand for --hyperparameter-preset fb. "
+            "Uses Robyn/Facebook official documentation defaults (uniform across all channel types)."
+        ),
+    )
+    preset_shorthand_group.add_argument(
+        "--meshed",
+        action="store_true",
+        default=False,
+        help=(
+            "Shorthand for --hyperparameter-preset meshed. "
+            "Uses Meshed recommended ranges (channel-type-differentiated, tighter saturation)."
+        ),
+    )
 
     args = parser.parse_args()
+
+    # Resolve shorthand preset flags
+    if args.fb:
+        args.hyperparameter_preset = "fb"
+    elif args.meshed:
+        args.hyperparameter_preset = "meshed"
 
     runner = BenchmarkRunner()
 
@@ -1828,6 +1866,10 @@ def main():
                 with open(config_path) as f:
                     config_dict = json.load(f)
 
+                # Apply CLI preset override before constructing BenchmarkConfig
+                if args.hyperparameter_preset:
+                    config_dict["hyperparameter_preset"] = args.hyperparameter_preset
+
                 benchmark_config = BenchmarkConfig(config_dict)
 
                 # Load base configuration
@@ -1954,6 +1996,11 @@ def main():
 
     with open(args.config) as f:
         config_dict = json.load(f)
+
+    # Apply CLI preset override before constructing BenchmarkConfig
+    if args.hyperparameter_preset:
+        config_dict["hyperparameter_preset"] = args.hyperparameter_preset
+        logger.info(f"�� Hyperparameter preset override: {args.hyperparameter_preset}")
 
     benchmark_config = BenchmarkConfig(config_dict)
     logger.info(f"Loaded benchmark: {benchmark_config.name}")

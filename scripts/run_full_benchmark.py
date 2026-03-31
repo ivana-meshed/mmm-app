@@ -16,11 +16,22 @@ Usage:
     # Full production run
     python scripts/run_full_benchmark.py --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json --full-run
 
-    # With per-channel hyperparameter ranges
+    # With per-channel hyperparameter ranges (balanced preset is the default)
+    python scripts/run_full_benchmark.py --path <path> --full-run \\
+        --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+        --channel-type-assignments-config benchmarks/channel_type_assignments.json
+
+    # With Meshed recommended preset (shorthand --meshed flag)
     python scripts/run_full_benchmark.py --path <path> --full-run \\
         --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
         --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
-        --hyperparameter-preset balanced
+        --meshed
+
+    # With Facebook/Robyn official preset (shorthand --fb flag)
+    python scripts/run_full_benchmark.py --path <path> --full-run \\
+        --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+        --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
+        --fb
 
     # With custom queue name
     python scripts/run_full_benchmark.py --path <path> --queue-name default-dev
@@ -230,7 +241,8 @@ def generate_benchmark_config(
                     JSON file (relative to repo root), e.g.
                     "benchmarks/channel_type_assignments.json"
     hyperparameter_preset: one of "conservative", "balanced" (default),
-                    or "exploratory"
+                    "exploratory", "fb" (Facebook/Robyn official), or "meshed"
+                    (Meshed recommended)
     """
     country = selected_columns.get("country", "de")
     goal = selected_columns.get("selected_goal", "N_UPLOADS_WEB")
@@ -518,7 +530,7 @@ def load_external_benchmark_config(
         channel_type_assignments_config: Optional path to a channel-type
             assignments JSON.  Added to the config when supplied.
         hyperparameter_preset: Optional preset override
-            (``conservative`` / ``balanced`` / ``exploratory``).
+            (``conservative`` / ``balanced`` / ``exploratory`` / ``fb`` / ``meshed``).
 
     Returns:
         Modified benchmark config dict ready to be saved and passed to
@@ -798,11 +810,22 @@ Examples:
       --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
       --channel-type-assignments-config benchmarks/channel_type_assignments.json
 
-  # With hyperparameter ranges and an explicit preset
+  # With an explicit preset (conservative / balanced / exploratory / fb / meshed)
   python scripts/run_full_benchmark.py --path <path> --full-run \\
       --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
       --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
       --hyperparameter-preset exploratory
+
+  # Shorthand preset flags: --fb (Facebook/Robyn defaults) or --meshed (Meshed recommended)
+  python scripts/run_full_benchmark.py --path <path> --full-run \\
+      --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+      --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
+      --fb
+
+  python scripts/run_full_benchmark.py --path <path> --full-run \\
+      --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+      --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
+      --meshed
 
   # With custom queue
   python scripts/run_full_benchmark.py --path <path> --queue-name default-dev
@@ -947,16 +970,44 @@ Examples:
     )
     parser.add_argument(
         "--hyperparameter-preset",
-        choices=["conservative", "balanced", "exploratory"],
+        choices=["conservative", "balanced", "exploratory", "fb", "meshed"],
         default=None,
         help=(
             "Preset to use when resolving hyperparameter ranges "
-            "(conservative / balanced / exploratory). "
-            "Defaults to 'balanced' when --hyperparameter-ranges-config is set."
+            "(conservative / balanced / exploratory / fb / meshed). "
+            "Defaults to 'balanced' when --hyperparameter-ranges-config is set. "
+            "'fb' mirrors Robyn/Facebook official documentation defaults (uniform across channels). "
+            "'meshed' uses Meshed recommended ranges (channel-type-differentiated). "
+            "Shorthand: use --fb or --meshed instead of --hyperparameter-preset fb/meshed."
+        ),
+    )
+    preset_shorthand_group = parser.add_mutually_exclusive_group()
+    preset_shorthand_group.add_argument(
+        "--fb",
+        action="store_true",
+        default=False,
+        help=(
+            "Shorthand for --hyperparameter-preset fb. "
+            "Uses Robyn/Facebook official documentation defaults (uniform across all channel types)."
+        ),
+    )
+    preset_shorthand_group.add_argument(
+        "--meshed",
+        action="store_true",
+        default=False,
+        help=(
+            "Shorthand for --hyperparameter-preset meshed. "
+            "Uses Meshed recommended ranges (channel-type-differentiated, tighter saturation)."
         ),
     )
 
     args = parser.parse_args()
+
+    # Resolve shorthand preset flags
+    if args.fb:
+        args.hyperparameter_preset = "fb"
+    elif args.meshed:
+        args.hyperparameter_preset = "meshed"
 
     # Determine run mode
     if args.production_run:

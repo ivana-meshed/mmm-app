@@ -248,6 +248,51 @@ for test_type in df['benchmark_test'].unique():
     print(f"  NRMSE: {best['nrmse_val'].values[0]:.4f}")
 ```
 
+### Workflow 6: Compare Hyperparameter Presets
+
+**Question:** Which preset (`fb`, `meshed`, `balanced`, `conservative`, `exploratory`) produces the best model fit?
+
+Run the same benchmark config twice with different presets and compare:
+
+```bash
+# Run with Meshed recommended preset
+python scripts/run_full_benchmark.py --path <path> --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --meshed
+
+# Run with Facebook/Robyn official preset
+python scripts/run_full_benchmark.py --path <path> --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --fb
+```
+
+Collect results and compare:
+
+```python
+import pandas as pd
+
+df_meshed = pd.read_csv('results_meshed.csv')
+df_fb = pd.read_csv('results_fb.csv')
+
+df_meshed['preset'] = 'meshed'
+df_fb['preset'] = 'fb'
+df = pd.concat([df_meshed, df_fb], ignore_index=True)
+
+comparison = df.groupby('preset')[['rsq_val', 'nrmse_val', 'decomp_rssd']].mean()
+print(comparison)
+```
+
+**Preset guidance:**
+- `fb` — Robyn/Facebook official documentation ranges; good neutral starting point; uniform across channel types
+- `meshed` — Meshed recommended; channel-type-differentiated; tighter saturation for search, longer carryover for organic/TV/CRM channels
+- `balanced` — General-purpose default; moderate ranges
+- `conservative` — Narrow ranges; fast screening runs, short-cycle products
+- `exploratory` — Wide ranges; useful for stress-testing or when data history is short
+
+---
+
 ## Quality Checks
 
 ### Check 1: Reasonable Metrics
