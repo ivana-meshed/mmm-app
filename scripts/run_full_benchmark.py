@@ -976,7 +976,8 @@ Examples:
             "Preset to use when resolving hyperparameter ranges "
             "(conservative / balanced / exploratory / fb / meshed). "
             "Defaults to 'balanced' when --hyperparameter-ranges-config is set. "
-            "'fb' mirrors Robyn/Facebook official documentation defaults (uniform across channels). "
+            "'fb' uses Robyn/Facebook official documentation defaults, channel-type-differentiated "
+            "(Digital 0.0–0.3, OOH/Print/Radio 0.1–0.4, TV 0.3–0.8 at weekly frequency). "
             "'meshed' uses Meshed recommended ranges (channel-type-differentiated). "
             "Shorthand: use --fb or --meshed instead of --hyperparameter-preset fb/meshed."
         ),
@@ -988,7 +989,8 @@ Examples:
         default=False,
         help=(
             "Shorthand for --hyperparameter-preset fb. "
-            "Uses Robyn/Facebook official documentation defaults (uniform across all channel types)."
+            "Uses Robyn/Facebook official documentation defaults, channel-type-differentiated: "
+            "Digital theta 0.0–0.3, OOH/Print/Radio 0.1–0.4, TV 0.3–0.8 (weekly; scaled for other frequencies)."
         ),
     )
     preset_shorthand_group.add_argument(

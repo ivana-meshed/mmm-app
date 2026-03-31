@@ -285,7 +285,7 @@ print(comparison)
 ```
 
 **Preset guidance:**
-- `fb` — Robyn/Facebook official documentation ranges; good neutral starting point; uniform across channel types
+- `fb` — Robyn/Facebook official documentation ranges; channel-type-differentiated theta (Digital: 0.0–0.3, OOH/Print/Radio: 0.1–0.4, TV: 0.3–0.8 at weekly frequency)
 - `meshed` — Meshed recommended; channel-type-differentiated; tighter saturation for search, longer carryover for organic/TV/CRM channels
 - `balanced` — General-purpose default; moderate ranges
 - `conservative` — Narrow ranges; fast screening runs, short-cycle products

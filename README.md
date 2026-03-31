@@ -220,7 +220,7 @@ Five built-in presets control the range of hyperparameters sent to Robyn:
 | `conservative` | Narrow ranges; stable baselines, short-cycle products | `--hyperparameter-preset conservative` |
 | `balanced` | Moderate ranges (default) — recommended starting point | (default) |
 | `exploratory` | Wide ranges; complex markets, long-cycle products | `--hyperparameter-preset exploratory` |
-| `fb` | Robyn/Facebook official documentation defaults; uniform across all channel types | `--fb` |
+| `fb` | Robyn/Facebook official documentation defaults; channel-type-differentiated theta (Digital: 0.0–0.3, OOH/Print/Radio: 0.1–0.4, TV: 0.3–0.8 at weekly) | `--fb` |
 | `meshed` | Meshed recommended ranges; channel-type-differentiated (tighter saturation, stronger carryover for organic/TV) | `--meshed` |
 
 **Preset precedence (highest to lowest):**

@@ -1663,7 +1663,8 @@ def main():
         help=(
             "Override the hyperparameter preset defined in the benchmark config JSON "
             "(conservative / balanced / exploratory / fb / meshed). "
-            "'fb' mirrors Robyn/Facebook official documentation defaults. "
+            "'fb' uses Robyn/Facebook official documentation defaults, channel-type-differentiated "
+            "(Digital 0.0–0.3, OOH/Print/Radio 0.1–0.4, TV 0.3–0.8 at weekly frequency). "
             "'meshed' uses Meshed recommended ranges (channel-type-differentiated). "
             "Shorthand: use --fb or --meshed instead."
         ),
@@ -1675,7 +1676,8 @@ def main():
         default=False,
         help=(
             "Shorthand for --hyperparameter-preset fb. "
-            "Uses Robyn/Facebook official documentation defaults (uniform across all channel types)."
+            "Uses Robyn/Facebook official documentation defaults, channel-type-differentiated: "
+            "Digital theta 0.0–0.3, OOH/Print/Radio 0.1–0.4, TV 0.3–0.8 (weekly; scaled for other frequencies)."
         ),
     )
     preset_shorthand_group.add_argument(

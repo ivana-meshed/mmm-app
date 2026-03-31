@@ -868,7 +868,7 @@ Presets control the range of hyperparameters (alpha, gamma, theta) passed to Rob
 | `conservative` | Narrow ranges, low saturation | Narrow | Low carryover | Stable baselines, short-cycle products |
 | `balanced` | Moderate ranges (default) | Moderate | Moderate | General purpose — recommended starting point |
 | `exploratory` | Wide ranges, high saturation | Wide | High carryover | Complex markets, long-cycle products |
-| `fb` | Robyn/Facebook official docs | Uniform | Low–medium | Robyn documentation defaults, channel-agnostic |
+| `fb` | Robyn/Facebook official docs | Channel-type-specific | Digital 0.0–0.3 / OOH 0.1–0.4 / TV 0.3–0.8 | Robyn documentation defaults, differentiated by channel category |
 | `meshed` | Meshed recommendation | Channel-type-specific | Higher than fb | Channel-differentiated; tighter saturation, stronger carryover for organic/TV |
 
 **Shorthand CLI flags:**
@@ -1221,7 +1221,7 @@ These defaults are set in `ALL_ADSTOCK_VARIANTS` in `scripts/run_full_benchmark.
 | `conservative` | Narrow, low carryover | [0.4, 1.7] | [0.16, 0.51] | Fast screening, short-cycle products |
 | `balanced` | Moderate | [0.5, 2.0] | [0.20, 0.60] | General purpose (default) |
 | `exploratory` | Wide, high carryover | [0.5, 2.4] | [0.20, 0.69] | Complex markets, long-cycle products |
-| `fb` | Low (uniform) | [0.5, 3.0] | [0.30, 1.00] | Robyn/Facebook official docs; channel-agnostic |
+| `fb` | Digital: [0.0, 0.3] / OOH: [0.1, 0.4] / TV: [0.3, 0.8] | [0.5, 3.0] | [0.30, 1.00] | Robyn/Facebook official docs; channel-type-differentiated theta |
 | `meshed` | Channel-type-specific | [0.5–1.0, 2.0–3.0] | [0.30–0.60, 0.70–0.99] | Meshed recommendation; tighter saturation for search, longer carryover for organic/TV |
 
 > Use `--fb` or `--meshed` CLI flags as shorthand. Ranges above are approximate; exact values vary by channel type and frequency.  

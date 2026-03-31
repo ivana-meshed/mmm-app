@@ -48,7 +48,7 @@
     "conservative": "Tighter search space for fast screening and more stable optimization.",
     "balanced": "General-purpose default preset.",
     "exploratory": "Wider search space for uncertain channels and stress testing.",
-    "fb": "Robyn/Facebook official documentation defaults. Uniform across all channel types \u2014 mirrors Robyn's built-in 'Facebook recommend' preset.",
+    "fb": "Robyn/Facebook official documentation defaults. Channel-type-differentiated theta for geometric adstock: Digital 0.0\u20130.3, OOH/Print/Radio 0.1\u20130.4, TV 0.3\u20130.8 (at weekly frequency, scaled proportionally for daily/monthly). Saturation parameters (alpha, gamma) are uniform across channels.",
     "meshed": "Meshed recommended ranges. Channel-type-differentiated for geometric adstock; tighter saturation and higher carryover than Facebook defaults."
   },
   "ranges": {
@@ -100,7 +100,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -172,7 +172,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -244,7 +244,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -316,7 +316,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -388,7 +388,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -460,7 +460,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -532,7 +532,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -604,7 +604,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -676,7 +676,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -747,8 +747,8 @@
           },
           "fb": {
             "theta": [
-              0.0,
-              0.3
+              0.13,
+              0.34
             ],
             "alpha": [
               0.5,
@@ -819,8 +819,8 @@
           },
           "fb": {
             "theta": [
-              0.0,
-              0.3
+              0.04,
+              0.17
             ],
             "alpha": [
               0.5,
@@ -891,8 +891,8 @@
           },
           "fb": {
             "theta": [
-              0.0,
-              0.3
+              0.04,
+              0.17
             ],
             "alpha": [
               0.5,
@@ -964,7 +964,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -1036,7 +1036,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -1108,7 +1108,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -1180,7 +1180,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -1252,7 +1252,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -1324,7 +1324,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -1395,8 +1395,8 @@
           },
           "fb": {
             "theta": [
-              0.0,
-              0.3
+              0.04,
+              0.17
             ],
             "alpha": [
               0.5,
@@ -1468,7 +1468,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.3
+              0.13
             ],
             "alpha": [
               0.5,
@@ -1732,7 +1732,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -1804,7 +1804,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -1876,7 +1876,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -1948,7 +1948,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -2020,7 +2020,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -2092,7 +2092,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -2164,7 +2164,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -2236,7 +2236,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -2308,7 +2308,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -2379,8 +2379,8 @@
           },
           "fb": {
             "theta": [
-              0.0,
-              0.7
+              0.3,
+              0.8
             ],
             "alpha": [
               0.5,
@@ -2451,8 +2451,8 @@
           },
           "fb": {
             "theta": [
-              0.0,
-              0.7
+              0.1,
+              0.4
             ],
             "alpha": [
               0.5,
@@ -2523,8 +2523,8 @@
           },
           "fb": {
             "theta": [
-              0.0,
-              0.7
+              0.1,
+              0.4
             ],
             "alpha": [
               0.5,
@@ -2596,7 +2596,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -2668,7 +2668,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -2740,7 +2740,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -2812,7 +2812,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -2884,7 +2884,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -2956,7 +2956,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -3027,8 +3027,8 @@
           },
           "fb": {
             "theta": [
-              0.0,
-              0.7
+              0.1,
+              0.4
             ],
             "alpha": [
               0.5,
@@ -3100,7 +3100,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.7
+              0.3
             ],
             "alpha": [
               0.5,
@@ -3364,7 +3364,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -3436,7 +3436,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -3508,7 +3508,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -3580,7 +3580,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -3652,7 +3652,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -3724,7 +3724,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -3796,7 +3796,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -3868,7 +3868,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -3940,7 +3940,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -4011,8 +4011,8 @@
           },
           "fb": {
             "theta": [
-              0.0,
-              0.9
+              0.39,
+              0.99
             ],
             "alpha": [
               0.5,
@@ -4083,8 +4083,8 @@
           },
           "fb": {
             "theta": [
-              0.0,
-              0.9
+              0.13,
+              0.51
             ],
             "alpha": [
               0.5,
@@ -4155,8 +4155,8 @@
           },
           "fb": {
             "theta": [
-              0.0,
-              0.9
+              0.13,
+              0.51
             ],
             "alpha": [
               0.5,
@@ -4228,7 +4228,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -4300,7 +4300,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -4372,7 +4372,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -4444,7 +4444,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -4516,7 +4516,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -4588,7 +4588,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
@@ -4659,8 +4659,8 @@
           },
           "fb": {
             "theta": [
-              0.0,
-              0.9
+              0.13,
+              0.51
             ],
             "alpha": [
               0.5,
@@ -4732,7 +4732,7 @@
           "fb": {
             "theta": [
               0.0,
-              0.9
+              0.39
             ],
             "alpha": [
               0.5,
