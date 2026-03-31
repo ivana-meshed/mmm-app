@@ -98,7 +98,7 @@ class HyperparameterRangesConfig:
             adstock_type: One of "geometric", "weibull_cdf", "weibull_pdf".
             channel_type: Channel type key (e.g. "search_brand"), or None
                 to use the ``_default`` entry.
-            preset: One of "conservative", "balanced", "exploratory".
+            preset: One of "conservative", "balanced", "exploratory", "fb", or "meshed".
 
         Returns:
             Dict with range lists (e.g. ``{"alpha": [0.5, 3.0], ...}``),
@@ -138,7 +138,7 @@ class HyperparameterRangesConfig:
             adstock_type: Adstock type ("geometric", "weibull_cdf", …).
             frequency: Frequency key ("daily", "weekly", "monthly").
             channel_type_mapping: Maps variable names to channel types.
-            preset: Preset to use ("balanced", "conservative", "exploratory").
+            preset: Preset to use ("balanced", "conservative", "exploratory", "fb", or "meshed").
 
         Returns:
             Dict with keys like ``"{var}_alphas"``, ``"{var}_thetas"``, etc.
@@ -278,7 +278,7 @@ class BenchmarkConfig:
     def hyperparameter_preset(self) -> str:
         """Preset to use when resolving hyperparameter ranges.
 
-        One of "conservative", "balanced" (default), or "exploratory".
+        One of "conservative", "balanced" (default), "exploratory", "fb", or "meshed".
         """
         return self.config.get("hyperparameter_preset", "balanced")
 
@@ -424,6 +424,14 @@ class BenchmarkRunner:
                 )
             )
 
+        # Generate hyperparameter preset comparison variants
+        if "hyperparameter_preset" in variant_specs:
+            variants.extend(
+                self._generate_preset_variants(
+                    base_config, variant_specs["hyperparameter_preset"]
+                )
+            )
+
         # Limit combinations if needed
         max_combos = benchmark_config.max_combinations
         if len(variants) > max_combos:
@@ -472,6 +480,13 @@ class BenchmarkRunner:
             dimension_variants["seasonality_window"] = (
                 self._generate_seasonality_variants(
                     base_config, variant_specs["seasonality_window"]
+                )
+            )
+
+        if "hyperparameter_preset" in variant_specs:
+            dimension_variants["hyperparameter_preset"] = (
+                self._generate_preset_variants(
+                    base_config, variant_specs["hyperparameter_preset"]
                 )
             )
 
@@ -690,6 +705,44 @@ class BenchmarkRunner:
 
         return variants
 
+    def _generate_preset_variants(
+        self, base_config: Dict[str, Any], specs: List[Dict]
+    ) -> List[Dict[str, Any]]:
+        """Generate hyperparameter preset comparison variants.
+
+        Each spec is a dict with at minimum a ``"name"`` key that matches
+        a valid preset name (``"conservative"``, ``"balanced"``,
+        ``"exploratory"``, ``"fb"``, or ``"meshed"``).  The ``"name"``
+        value is used as both the ``benchmark_variant`` label and the
+        ``hyperparameter_preset`` value forwarded to the training job.
+
+        Args:
+            base_config: Base configuration dict.
+            specs: List of preset spec dicts, e.g.
+                ``[{"name": "balanced"}, {"name": "fb"}, {"name": "meshed"}]``.
+
+        Returns:
+            List of variant dicts, one per preset.
+        """
+        variants = []
+
+        for spec in specs:
+            preset_name = spec.get("name", "balanced")
+            variant = base_config.copy()
+            variant["benchmark_test"] = "hyperparameter_preset"
+            variant["benchmark_variant"] = preset_name
+            variant["benchmark_description"] = spec.get(
+                "description",
+                f"Hyperparameter preset: {preset_name}",
+            )
+            variant["hyperparameter_preset"] = preset_name
+            # Preserve original preset name so it survives the
+            # "Custom" overwrite performed by _apply_hyperparameter_ranges.
+            variant["preset_label"] = preset_name
+            variants.append(variant)
+
+        return variants
+
     def _apply_hyperparameter_ranges(
         self,
         variants: List[Dict[str, Any]],
@@ -824,6 +877,10 @@ class BenchmarkRunner:
             updated = variant.copy()
             if custom_hp:
                 updated["custom_hyperparameters"] = custom_hp
+                # Preserve the human-readable preset name so it survives
+                # the "Custom" overwrite and can be tracked in results.
+                if "preset_label" not in updated:
+                    updated["preset_label"] = preset
                 updated["hyperparameter_preset"] = "Custom"
                 # Summarise per-variable resolution so the operator can
                 # verify the preset is being applied.
@@ -988,6 +1045,8 @@ class BenchmarkRunner:
             "benchmark_id": benchmark_id,
             "benchmark_test": variant.get("benchmark_test", ""),
             "benchmark_variant": variant.get("benchmark_variant", ""),
+            # Preserve original preset label (survives "Custom" overwrite)
+            "preset_label": variant.get("preset_label", ""),
         }
 
         # Add optional fields if present
@@ -1655,8 +1714,48 @@ def main():
         "Use 18 for geometric-only, 54 for all adstock types, "
         "or higher values when combining adstock × window sweeps.",
     )
+    parser.add_argument(
+        "--hyperparameter-preset",
+        dest="hyperparameter_preset",
+        choices=["conservative", "balanced", "exploratory", "fb", "meshed"],
+        default=None,
+        help=(
+            "Override the hyperparameter preset defined in the benchmark config JSON "
+            "(conservative / balanced / exploratory / fb / meshed). "
+            "'fb' uses Robyn/Facebook official documentation defaults, channel-type-differentiated "
+            "(Digital 0.0–0.3, OOH/Print/Radio 0.1–0.4, TV 0.3–0.8 at weekly frequency). "
+            "'meshed' uses Meshed recommended ranges (channel-type-differentiated). "
+            "Shorthand: use --fb or --meshed instead."
+        ),
+    )
+    preset_shorthand_group = parser.add_mutually_exclusive_group()
+    preset_shorthand_group.add_argument(
+        "--fb",
+        action="store_true",
+        default=False,
+        help=(
+            "Shorthand for --hyperparameter-preset fb. "
+            "Uses Robyn/Facebook official documentation defaults, channel-type-differentiated: "
+            "Digital theta 0.0–0.3, OOH/Print/Radio 0.1–0.4, TV 0.3–0.8 (weekly; scaled for other frequencies)."
+        ),
+    )
+    preset_shorthand_group.add_argument(
+        "--meshed",
+        action="store_true",
+        default=False,
+        help=(
+            "Shorthand for --hyperparameter-preset meshed. "
+            "Uses Meshed recommended ranges (channel-type-differentiated, tighter saturation)."
+        ),
+    )
 
     args = parser.parse_args()
+
+    # Resolve shorthand preset flags
+    if args.fb:
+        args.hyperparameter_preset = "fb"
+    elif args.meshed:
+        args.hyperparameter_preset = "meshed"
 
     runner = BenchmarkRunner()
 
@@ -1828,6 +1927,10 @@ def main():
                 with open(config_path) as f:
                     config_dict = json.load(f)
 
+                # Apply CLI preset override before constructing BenchmarkConfig
+                if args.hyperparameter_preset:
+                    config_dict["hyperparameter_preset"] = args.hyperparameter_preset
+
                 benchmark_config = BenchmarkConfig(config_dict)
 
                 # Load base configuration
@@ -1954,6 +2057,11 @@ def main():
 
     with open(args.config) as f:
         config_dict = json.load(f)
+
+    # Apply CLI preset override before constructing BenchmarkConfig
+    if args.hyperparameter_preset:
+        config_dict["hyperparameter_preset"] = args.hyperparameter_preset
+        logger.info(f"�� Hyperparameter preset override: {args.hyperparameter_preset}")
 
     benchmark_config = BenchmarkConfig(config_dict)
     logger.info(f"Loaded benchmark: {benchmark_config.name}")

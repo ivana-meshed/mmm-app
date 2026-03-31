@@ -127,8 +127,25 @@ python scripts/run_full_benchmark.py --path <path> --full-run --all-adstock
 # With per-channel hyperparameter ranges (balanced preset is the default)
 python scripts/run_full_benchmark.py --path <path> --full-run \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments.json
+
+# Shorthand preset flags (--fb = Facebook/Robyn defaults, --meshed = Meshed recommended)
+python scripts/run_full_benchmark.py --path <path> --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --meshed
+
+# Preset comparison: compare balanced, fb, and meshed in one run (3× variants)
+python scripts/run_full_benchmark.py --path <path> --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments.json \
-  --hyperparameter-preset balanced
+  --compare-presets
+
+# Compare all five presets (conservative, balanced, exploratory, fb, meshed) in one run
+python scripts/run_full_benchmark.py --path <path> --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments.json \
+  --compare-all-presets
 ```
 
 ### Manual Workflow (Alternative)
@@ -208,18 +225,29 @@ Sequential mode varies one dimension at a time — 9 variants instead of 18:
 
 ### Presets
 
-Three built-in presets control the range of hyperparameters sent to Robyn:
+Five built-in presets control the range of hyperparameters sent to Robyn:
 
-| Preset | Typical use |
-|--------|-------------|
-| `conservative` | Narrow ranges; stable baselines, short-cycle products |
-| `balanced` | Moderate ranges (default) — recommended starting point |
-| `exploratory` | Wide ranges; complex markets, long-cycle products |
+| Preset | Typical use | CLI flag |
+|--------|-------------|----------|
+| `conservative` | Narrow ranges; stable baselines, short-cycle products | `--hyperparameter-preset conservative` |
+| `balanced` | Moderate ranges (default) — recommended starting point | (default) |
+| `exploratory` | Wide ranges; complex markets, long-cycle products | `--hyperparameter-preset exploratory` |
+| `fb` | Robyn/Facebook official documentation defaults; channel-type-differentiated theta (Digital: 0.0–0.3, OOH/Print/Radio: 0.1–0.4, TV: 0.3–0.8 at weekly) | `--fb` |
+| `meshed` | Meshed recommended ranges; channel-type-differentiated (tighter saturation, stronger carryover for organic/TV) | `--meshed` |
+
+**To compare multiple presets in one run**, use the preset comparison flags:
+
+| Flag | Presets compared | Variant multiplier |
+|------|-----------------|-------------------|
+| `--compare-presets` | balanced, fb, meshed | 3× base count |
+| `--compare-all-presets` | conservative, balanced, exploratory, fb, meshed | 5× base count |
+
+Results include a `preset_label` column; the Benchmark Results page shows a grouped comparison chart automatically.
 
 **Preset precedence (highest to lowest):**
 
 1. **Variant-level** — `"hyperparameter_preset"` set directly on an adstock spec in JSON
-2. **Benchmark-level** — `--hyperparameter-preset` CLI flag or top-level JSON key
+2. **Benchmark-level** — `--hyperparameter-preset` / `--fb` / `--meshed` / `--compare-presets` / `--compare-all-presets` CLI flag or top-level JSON key
 3. **Default** — `"balanced"`
 
 When `--hyperparameter-ranges-config` is given, per-channel ranges are resolved using each variant's effective preset. The resolved ranges are embedded in the queue entry as `custom_hyperparameters` and `hyperparameter_preset` is set to `"Custom"` so the R training script uses them directly.
@@ -610,10 +638,12 @@ See [scripts/prepare_distribution.sh](scripts/prepare_distribution.sh) for autom
 - Collects and exports results
 - CLI with --test-run, --test-run-all, --all-benchmarks flags
 - Supports per-channel hyperparameter ranges via `hyperparameter_ranges_config`, `channel_type_assignments_config`, and `hyperparameter_preset` in benchmark configs
+- Shorthand preset flags: `--fb` (Facebook/Robyn official) and `--meshed` (Meshed recommended)
+- Preset comparison flags: `--compare-presets` (balanced/fb/meshed, 3× variants) and `--compare-all-presets` (all 5 presets, 5× variants)
 
 **1a. Hyperparameter Ranges Config** (`benchmarks/generic_hyperparameter_ranges_v2.json`)
 - Defines per-channel, per-frequency, per-adstock hyperparameter ranges
-- Three presets: `conservative`, `balanced` (default), `exploratory`
+- Five presets: `conservative`, `balanced` (default), `exploratory`, `fb` (Facebook/Robyn official), `meshed` (Meshed recommended)
 - Covers all three frequencies (daily, weekly, monthly) and all three adstock types
 - 20 channel types with geometric-specific per-channel ranges; Weibull types use a `_default` entry
 - Referenced from a benchmark config using the `hyperparameter_ranges_config` field

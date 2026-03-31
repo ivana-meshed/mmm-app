@@ -16,11 +16,34 @@ Usage:
     # Full production run
     python scripts/run_full_benchmark.py --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json --full-run
 
-    # With per-channel hyperparameter ranges
+    # With per-channel hyperparameter ranges (balanced preset is the default)
+    python scripts/run_full_benchmark.py --path <path> --full-run \\
+        --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+        --channel-type-assignments-config benchmarks/channel_type_assignments.json
+
+    # With Meshed recommended preset (shorthand --meshed flag)
     python scripts/run_full_benchmark.py --path <path> --full-run \\
         --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
         --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
-        --hyperparameter-preset balanced
+        --meshed
+
+    # With Facebook/Robyn official preset (shorthand --fb flag)
+    python scripts/run_full_benchmark.py --path <path> --full-run \\
+        --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+        --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
+        --fb
+
+    # Compare balanced, fb, and meshed presets in one run (3× variants)
+    python scripts/run_full_benchmark.py --path <path> --full-run \\
+        --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+        --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
+        --compare-presets
+
+    # Compare all five presets in one run (5× variants)
+    python scripts/run_full_benchmark.py --path <path> --full-run \\
+        --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+        --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
+        --compare-all-presets
 
     # With custom queue name
     python scripts/run_full_benchmark.py --path <path> --queue-name default-dev
@@ -53,6 +76,22 @@ logger = logging.getLogger(__name__)
 PROJECT_ID = os.getenv("PROJECT_ID", "datawarehouse-422511")
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 DEFAULT_QUEUE = os.getenv("QUEUE_NAME", "default-dev")
+
+# Preset comparison groups
+# --compare-presets: compare the three most common presets
+PRESETS_COMPARE = [
+    {"name": "balanced", "description": "General-purpose default preset"},
+    {"name": "fb", "description": "Robyn/Facebook official documentation defaults"},
+    {"name": "meshed", "description": "Meshed recommended ranges"},
+]
+# --compare-all-presets: compare all five built-in presets
+PRESETS_ALL = [
+    {"name": "conservative", "description": "Narrow search space for fast screening"},
+    {"name": "balanced", "description": "General-purpose default preset"},
+    {"name": "exploratory", "description": "Wide search space for uncertain channels"},
+    {"name": "fb", "description": "Robyn/Facebook official documentation defaults"},
+    {"name": "meshed", "description": "Meshed recommended ranges"},
+]
 
 
 def parse_gcs_path(path: str) -> tuple:
@@ -191,6 +230,7 @@ def generate_benchmark_config(
     hyperparameter_ranges_config: Optional[str] = None,
     channel_type_assignments_config: Optional[str] = None,
     hyperparameter_preset: Optional[str] = None,
+    compare_presets: Optional[List[Dict]] = None,
 ) -> Dict[str, Any]:
     """
     Generate comprehensive benchmark configuration from selected_columns.json.
@@ -230,7 +270,15 @@ def generate_benchmark_config(
                     JSON file (relative to repo root), e.g.
                     "benchmarks/channel_type_assignments.json"
     hyperparameter_preset: one of "conservative", "balanced" (default),
-                    or "exploratory"
+                    "exploratory", "fb" (Facebook/Robyn official), or "meshed"
+                    (Meshed recommended). Ignored when compare_presets is set.
+    compare_presets: list of preset spec dicts to compare as a dimension,
+                    e.g. ``PRESETS_COMPARE`` (balanced/fb/meshed) or
+                    ``PRESETS_ALL`` (all five). When set, the preset becomes
+                    a full variant dimension (multiplied into cartesian product
+                    or added as a sequential sweep). Requires
+                    hyperparameter_ranges_config to be set for per-channel
+                    range resolution. Mutually exclusive with hyperparameter_preset.
     """
     country = selected_columns.get("country", "de")
     goal = selected_columns.get("selected_goal", "N_UPLOADS_WEB")
@@ -347,6 +395,7 @@ def generate_benchmark_config(
     mode_label = "sequential" if sequential else "cartesian"
 
     # Calculate expected number of variants
+    n_presets = len(compare_presets) if compare_presets else 1
     dim_sizes = [
         n_adstock,
         _NUM_TRAIN_SPLITS,
@@ -355,6 +404,8 @@ def generate_benchmark_config(
     ]  # adstock, splits, time_agg, spend_var
     if selected_window_specs and n_windows > 1:
         dim_sizes.append(n_windows)
+    if compare_presets and n_presets > 1:
+        dim_sizes.append(n_presets)
     if sequential:
         # Sequential: each dimension varied independently (sum)
         n_combos = sum(dim_sizes)
@@ -419,13 +470,20 @@ def generate_benchmark_config(
     if selected_window_specs:
         variants_dict["seasonality_window"] = selected_window_specs
 
+    if compare_presets:
+        variants_dict["hyperparameter_preset"] = compare_presets
+
     # Build comprehensive benchmark config
+    preset_dim = (
+        f" × {n_presets} presets" if compare_presets and n_presets > 1 else ""
+    )
     window_dim = f" × {n_windows} windows" if selected_window_specs else ""
     benchmark_config = {
         "name": f"comprehensive_benchmark_{timestamp}",
         "description": (
             f"Complete {mode_label} benchmark: "
-            f"adstock × train_splits × time_agg × spend_var_mapping{window_dim}"
+            f"adstock × train_splits × time_agg × spend_var_mapping"
+            f"{window_dim}{preset_dim}"
         ),
         "base_config": base_config,
         "iterations": iterations,
@@ -449,19 +507,28 @@ def generate_benchmark_config(
         logger.info(
             f"📋 Channel type assignments config: {channel_type_assignments_config}"
         )
-    if hyperparameter_preset:
+    if compare_presets:
+        preset_names = [p["name"] for p in compare_presets]
+        logger.info(
+            f"🔀 Preset comparison: {', '.join(preset_names)} "
+            f"({n_presets} presets × {n_combos // n_presets} base variants "
+            f"= {n_combos} total)"
+        )
+    elif hyperparameter_preset:
         benchmark_config["hyperparameter_preset"] = hyperparameter_preset
         logger.info(f"🔧 Hyperparameter preset: {hyperparameter_preset}")
 
     window_factor = f" × {n_windows}" if selected_window_specs else ""
+    preset_factor = f" × {n_presets}" if compare_presets and n_presets > 1 else ""
     _ns = _NUM_TRAIN_SPLITS
     _nt = _NUM_TIME_AGGREGATIONS
     _nv = _NUM_SPEND_VAR_MAPPINGS
     combo_formula = (
         f"{n_adstock} + {_ns} + {_nt} + {_nv}"
         f"{(' + ' + str(n_windows)) if selected_window_specs and n_windows > 1 else ''}"
+        f"{(' + ' + str(n_presets)) if compare_presets and n_presets > 1 else ''}"
         if sequential
-        else f"{n_adstock} × {_ns} × {_nt} × {_nv}{window_factor}"
+        else f"{n_adstock} × {_ns} × {_nt} × {_nv}{window_factor}{preset_factor}"
     )
     logger.info(f"📊 Generated benchmark config:")
     logger.info(f"   Mode: {mode_label}")
@@ -483,6 +550,7 @@ def load_external_benchmark_config(
     hyperparameter_ranges_config: Optional[str] = None,
     channel_type_assignments_config: Optional[str] = None,
     hyperparameter_preset: Optional[str] = None,
+    compare_presets: Optional[List[Dict]] = None,
 ) -> Dict[str, Any]:
     """Load an external benchmark config JSON and apply CLI run-mode overrides.
 
@@ -518,7 +586,7 @@ def load_external_benchmark_config(
         channel_type_assignments_config: Optional path to a channel-type
             assignments JSON.  Added to the config when supplied.
         hyperparameter_preset: Optional preset override
-            (``conservative`` / ``balanced`` / ``exploratory``).
+            (``conservative`` / ``balanced`` / ``exploratory`` / ``fb`` / ``meshed``).
 
     Returns:
         Modified benchmark config dict ready to be saved and passed to
@@ -600,6 +668,15 @@ def load_external_benchmark_config(
     if hyperparameter_preset:
         config["hyperparameter_preset"] = hyperparameter_preset
         logger.info(f"🔧 Hyperparameter preset: {hyperparameter_preset}")
+
+    if compare_presets:
+        config.setdefault("variants", {})["hyperparameter_preset"] = (
+            compare_presets
+        )
+        preset_names = [p["name"] for p in compare_presets]
+        logger.info(
+            f"🔀 Preset comparison dimension added: {', '.join(preset_names)}"
+        )
 
     return config
 
@@ -798,11 +875,34 @@ Examples:
       --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
       --channel-type-assignments-config benchmarks/channel_type_assignments.json
 
-  # With hyperparameter ranges and an explicit preset
+  # With an explicit preset (conservative / balanced / exploratory / fb / meshed)
   python scripts/run_full_benchmark.py --path <path> --full-run \\
       --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
       --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
       --hyperparameter-preset exploratory
+
+  # Shorthand preset flags: --fb (Facebook/Robyn defaults) or --meshed (Meshed recommended)
+  python scripts/run_full_benchmark.py --path <path> --full-run \\
+      --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+      --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
+      --fb
+
+  python scripts/run_full_benchmark.py --path <path> --full-run \\
+      --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+      --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
+      --meshed
+
+  # Preset comparison: compare balanced, fb, and meshed in one run (3× variants)
+  python scripts/run_full_benchmark.py --path <path> --full-run \\
+      --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+      --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
+      --compare-presets
+
+  # Compare all five presets in one run (5× variants)
+  python scripts/run_full_benchmark.py --path <path> --full-run \\
+      --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+      --channel-type-assignments-config benchmarks/channel_type_assignments.json \\
+      --compare-all-presets
 
   # With custom queue
   python scripts/run_full_benchmark.py --path <path> --queue-name default-dev
@@ -947,16 +1047,79 @@ Examples:
     )
     parser.add_argument(
         "--hyperparameter-preset",
-        choices=["conservative", "balanced", "exploratory"],
+        choices=["conservative", "balanced", "exploratory", "fb", "meshed"],
         default=None,
         help=(
             "Preset to use when resolving hyperparameter ranges "
-            "(conservative / balanced / exploratory). "
-            "Defaults to 'balanced' when --hyperparameter-ranges-config is set."
+            "(conservative / balanced / exploratory / fb / meshed). "
+            "Defaults to 'balanced' when --hyperparameter-ranges-config is set. "
+            "'fb' uses Robyn/Facebook official documentation defaults, channel-type-differentiated "
+            "(Digital 0.0–0.3, OOH/Print/Radio 0.1–0.4, TV 0.3–0.8 at weekly frequency). "
+            "'meshed' uses Meshed recommended ranges (channel-type-differentiated). "
+            "Shorthand: use --fb or --meshed instead of --hyperparameter-preset fb/meshed."
+        ),
+    )
+    preset_shorthand_group = parser.add_mutually_exclusive_group()
+    preset_shorthand_group.add_argument(
+        "--fb",
+        action="store_true",
+        default=False,
+        help=(
+            "Shorthand for --hyperparameter-preset fb. "
+            "Uses Robyn/Facebook official documentation defaults, channel-type-differentiated: "
+            "Digital theta 0.0–0.3, OOH/Print/Radio 0.1–0.4, TV 0.3–0.8 (weekly; scaled for other frequencies)."
+        ),
+    )
+    preset_shorthand_group.add_argument(
+        "--meshed",
+        action="store_true",
+        default=False,
+        help=(
+            "Shorthand for --hyperparameter-preset meshed. "
+            "Uses Meshed recommended ranges (channel-type-differentiated, tighter saturation)."
+        ),
+    )
+    preset_shorthand_group.add_argument(
+        "--compare-presets",
+        dest="compare_presets",
+        action="store_true",
+        default=False,
+        help=(
+            "Compare balanced, fb, and meshed presets within a single benchmark run. "
+            "Adds the hyperparameter preset as a variant dimension: each base combination "
+            "is run 3× (once per preset). "
+            "Requires --hyperparameter-ranges-config and --channel-type-assignments-config. "
+            "Variant count is multiplied by 3 vs. the single-preset default."
+        ),
+    )
+    preset_shorthand_group.add_argument(
+        "--compare-all-presets",
+        dest="compare_all_presets",
+        action="store_true",
+        default=False,
+        help=(
+            "Compare all five presets (conservative, balanced, exploratory, fb, meshed) "
+            "within a single benchmark run. "
+            "Each base combination is run 5×. "
+            "Requires --hyperparameter-ranges-config and --channel-type-assignments-config. "
+            "Variant count is multiplied by 5 vs. the single-preset default."
         ),
     )
 
     args = parser.parse_args()
+
+    # Resolve shorthand preset flags and preset comparison modes
+    compare_presets: Optional[List[Dict]] = None
+    if args.fb:
+        args.hyperparameter_preset = "fb"
+    elif args.meshed:
+        args.hyperparameter_preset = "meshed"
+    elif args.compare_presets:
+        compare_presets = PRESETS_COMPARE
+        args.hyperparameter_preset = None
+    elif args.compare_all_presets:
+        compare_presets = PRESETS_ALL
+        args.hyperparameter_preset = None
 
     # Determine run mode
     if args.production_run:
@@ -1021,8 +1184,14 @@ Examples:
         logger.info(
             f"Channel type assignments: {args.channel_type_assignments_config or '(none)'}"
         )
-        preset_label = args.hyperparameter_preset or "balanced (default)"
-        logger.info(f"Hyperparameter preset: {preset_label}")
+        if compare_presets:
+            preset_names = [p["name"] for p in compare_presets]
+            logger.info(
+                f"Preset comparison: {', '.join(preset_names)} ({len(compare_presets)} presets)"
+            )
+        else:
+            preset_label = args.hyperparameter_preset or "balanced (default)"
+            logger.info(f"Hyperparameter preset: {preset_label}")
         logger.info(
             "  Per-variable range resolution will be logged at the "
             "benchmark submission step (one line per variable per variant)."
@@ -1053,6 +1222,7 @@ Examples:
                 hyperparameter_ranges_config=args.hyperparameter_ranges_config,
                 channel_type_assignments_config=args.channel_type_assignments_config,
                 hyperparameter_preset=args.hyperparameter_preset,
+                compare_presets=compare_presets,
             )
         else:
             # Build config dynamically from selected_columns.json.
@@ -1066,6 +1236,7 @@ Examples:
                 hyperparameter_ranges_config=args.hyperparameter_ranges_config,
                 channel_type_assignments_config=args.channel_type_assignments_config,
                 hyperparameter_preset=args.hyperparameter_preset,
+                compare_presets=compare_presets,
             )
 
         # Derive top_n: if not specified, submit all generated variants.

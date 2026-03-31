@@ -368,6 +368,8 @@ class BenchmarkAnalyzer:
             "benchmark_variant": variant_name,
             "country": variant.get("country", ""),
             "revision": variant.get("revision", "default"),
+            # Hyperparameter preset label (empty when no preset sweep)
+            "preset_label": variant.get("preset_label", ""),
             # Configuration (from summary primarily)
             "adstock": adstock,
             "train_size": str(train_size),

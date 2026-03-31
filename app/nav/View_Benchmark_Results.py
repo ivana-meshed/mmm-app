@@ -249,6 +249,84 @@ if selected_benchmark:
                 mime="text/csv",
             )
 
+            # ── Preset comparison ──────────────────────────────────────
+            # Only shown when the benchmark included a preset-comparison
+            # sweep (i.e. the 'preset_label' column is non-empty).
+            if (
+                df is not None
+                and "preset_label" in df.columns
+                and df["preset_label"].notna().any()
+                and (df["preset_label"] != "").any()
+            ):
+                st.divider()
+                st.subheader("🔀 Preset Comparison")
+                st.caption(
+                    "Results aggregated by hyperparameter preset. "
+                    "Metrics show the mean across all variants that share the same preset."
+                )
+
+                preset_df = df[df["preset_label"].notna() & (df["preset_label"] != "")].copy()
+                available_metrics = [
+                    c for c in ["rsq_val", "nrmse_val", "decomp_rssd", "allocator_stability_roas_cv"]
+                    if c in preset_df.columns
+                ]
+
+                if available_metrics and not preset_df.empty:
+                    agg = (
+                        preset_df.groupby("preset_label")[available_metrics]
+                        .mean()
+                        .round(4)
+                        .reset_index()
+                        .rename(columns={
+                            "preset_label": "Preset",
+                            "rsq_val": "R² (val)",
+                            "nrmse_val": "NRMSE (val)",
+                            "decomp_rssd": "Decomp RSSD",
+                            "allocator_stability_roas_cv": "ROAS CV",
+                        })
+                    )
+                    # Preset order: conservative → balanced → exploratory → fb → meshed
+                    _preset_order = ["conservative", "balanced", "exploratory", "fb", "meshed"]
+                    agg["_order"] = agg["Preset"].apply(
+                        lambda p: _preset_order.index(p) if p in _preset_order else 99
+                    )
+                    agg = agg.sort_values("_order").drop(columns=["_order"])
+
+                    st.dataframe(agg, use_container_width=True, hide_index=True)
+
+                    # Bar charts for each available metric
+                    import plotly.graph_objects as go  # type: ignore
+
+                    metric_labels = {
+                        "R² (val)": ("Higher is better", False),
+                        "NRMSE (val)": ("Lower is better", True),
+                        "Decomp RSSD": ("Lower is better", True),
+                        "ROAS CV": ("Lower is better — allocator stability", True),
+                    }
+                    display_cols = [c for c in agg.columns if c != "Preset"]
+                    ncols = min(len(display_cols), 2)
+                    cols = st.columns(ncols)
+                    for idx, metric in enumerate(display_cols):
+                        note, lower_better = metric_labels.get(metric, ("", False))
+                        fig = go.Figure(
+                            go.Bar(
+                                x=agg["Preset"],
+                                y=agg[metric],
+                                text=agg[metric].astype(str),
+                                textposition="outside",
+                            )
+                        )
+                        fig.update_layout(
+                            title=f"{metric}<br><sup>{note}</sup>",
+                            xaxis_title="Preset",
+                            yaxis_title=metric,
+                            height=320,
+                            margin=dict(t=60, b=30, l=40, r=20),
+                        )
+                        cols[idx % ncols].plotly_chart(
+                            fig, use_container_width=True
+                        )
+
     except Exception as e:
         st.error(f"Error loading CSV: {e}")
         df = None

@@ -41,13 +41,21 @@ python scripts/run_full_benchmark.py \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments.json
 
-# With an explicit hyperparameter preset
+# With an explicit hyperparameter preset (conservative / balanced / exploratory / fb / meshed)
 python scripts/run_full_benchmark.py \
   --path <path_to_selected_columns.json> \
   --full-run \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments.json \
   --hyperparameter-preset exploratory
+
+# Shorthand: --fb (Facebook/Robyn defaults) or --meshed (Meshed recommended)
+python scripts/run_full_benchmark.py \
+  --path <path_to_selected_columns.json> \
+  --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --meshed
 ```
 
 **What it does:**
@@ -813,6 +821,19 @@ python scripts/run_full_benchmark.py \
 | Top-10 extended | geometric | full | 10 | ~1.5 h | ~$23 | `--extended-run --top-n 10` |
 | Top-10 production | geometric | full | 10 | ~3-4 h | ~$55 | `--production-run --top-n 10` |
 
+#### Preset comparison (`--compare-presets` / `--compare-all-presets`)
+
+Adds the hyperparameter preset as an additional variant dimension. Each base combination is run once per preset, multiplying total variant count.
+
+| Run mode | Presets | Base variants | Total variants | Approx. time | Approx. cost | Flag(s) to add |
+|----------|---------|--------------|---------------|-------------|-------------|----------------|
+| Test, compare 3 presets | balanced/fb/meshed | 30 | 90 | ~1.5 h | ~$15 | `--compare-presets` |
+| Test, compare all 5 | all 5 | 30 | 150 | ~2.5 h | ~$25 | `--compare-all-presets` |
+| Standard, compare 3 presets | balanced/fb/meshed | 30 | 90 | ~6 h | ~$75 | `--full-run --compare-presets` |
+| Standard, compare all 5 | all 5 | 30 | 150 | ~10 h | ~$125 | `--full-run --compare-all-presets` |
+| Extended, compare 3 presets | balanced/fb/meshed | 30 | 90 | ~12-15 h | ~$210 | `--extended-run --compare-presets` |
+| Extended, compare all 5 | all 5 | 30 | 150 | ~20-25 h | ~$350 | `--extended-run --compare-all-presets` |
+
 #### Sequential mode (`--sequential`)
 
 In sequential mode each dimension is varied **independently** (all others held at baseline), so combinations add rather than multiply.
@@ -853,13 +874,45 @@ Window lengths are applied as a trailing lookback from the data's `end_date`:
 
 ### Hyperparameter Presets
 
-Presets control the range of hyperparameters (alpha, gamma, theta) passed to Robyn for each channel. Three built-in presets are available:
+Presets control the range of hyperparameters (alpha, gamma, theta) passed to Robyn for each channel. Five built-in presets are available:
 
 | Preset | Alpha | Gamma | Theta | Use case |
 |--------|-------|-------|-------|----------|
 | `conservative` | Narrow ranges, low saturation | Narrow | Low carryover | Stable baselines, short-cycle products |
 | `balanced` | Moderate ranges (default) | Moderate | Moderate | General purpose — recommended starting point |
 | `exploratory` | Wide ranges, high saturation | Wide | High carryover | Complex markets, long-cycle products |
+| `fb` | Robyn/Facebook official docs | Channel-type-specific | Digital 0.0–0.3 / OOH 0.1–0.4 / TV 0.3–0.8 | Robyn documentation defaults, differentiated by channel category |
+| `meshed` | Meshed recommendation | Channel-type-specific | Higher than fb | Channel-differentiated; tighter saturation, stronger carryover for organic/TV |
+
+**Shorthand CLI flags:**
+
+```bash
+# Equivalent to --hyperparameter-preset fb
+python scripts/run_full_benchmark.py --path <path> --full-run     --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json     --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json     --fb
+
+# Equivalent to --hyperparameter-preset meshed
+python scripts/run_full_benchmark.py --path <path> --full-run     --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json     --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json     --meshed
+```
+
+**Preset comparison flags:**
+
+Run multiple presets in a single benchmark — the preset becomes a full variant dimension (multiplied into the cartesian product), so results can be compared directly.
+
+```bash
+# Compare balanced, fb, and meshed in one run (3× base variant count)
+python scripts/run_full_benchmark.py --path <path> --full-run \
+    --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+    --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+    --compare-presets
+
+# Compare all five presets in one run (5× base variant count)
+python scripts/run_full_benchmark.py --path <path> --full-run \
+    --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+    --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+    --compare-all-presets
+```
+
+`--compare-presets`, `--compare-all-presets`, `--fb`, `--meshed`, and `--hyperparameter-preset` are mutually exclusive.  Results include a `preset_label` column so the Benchmark Results page can group by preset.
 
 **Preset precedence** (highest to lowest):
 
@@ -867,7 +920,7 @@ Presets control the range of hyperparameters (alpha, gamma, theta) passed to Rob
    ```json
    {"name": "weibull_cdf", "adstock": "weibull_cdf", "hyperparameter_preset": "Meta default"}
    ```
-2. **Benchmark-level preset** — `--hyperparameter-preset` CLI flag or `"hyperparameter_preset"` key in the benchmark JSON
+2. **Benchmark-level preset** — `--hyperparameter-preset` / `--fb` / `--meshed` / `--compare-presets` / `--compare-all-presets` CLI flag or `"hyperparameter_preset"` key in the benchmark JSON
 3. **Default** — `"balanced"` when nothing is set
 
 When `--hyperparameter-ranges-config` is provided, per-channel ranges are resolved for each variant using that variant's effective preset. After resolution, the preset is set to `"Custom"` and the ranges are embedded directly in the queue entry as `custom_hyperparameters`. The R training script then uses these exact ranges instead of the built-in preset lookup.
@@ -903,7 +956,9 @@ google_search_nonbrand_cost
 google_pmax_cost
 google_display_cost
 google_youtube_cost
-bing_search_cost
+bing_search_brand_cost
+bing_search_nonbrand_cost
+bing_search_other_cost
 ```
 
 Optional additional spend columns (add to `selected_columns.json` when available):
@@ -911,6 +966,8 @@ Optional additional spend columns (add to `selected_columns.json` when available
 google_search_nonbrand_cost_2, google_pmax_cost_2, google_other_cost_2
 fb_video_cost, fb_static_cost, fb_upper_cost, fb_lower_cost, fb_app_cost
 ```
+
+> **Note:** FB sub-channels (`fb_video_cost`, `fb_static_cost`, `fb_upper_cost`, `fb_lower_cost`, `fb_app_cost`) and Google split columns (`google_*_cost_2`) do not have dedicated impression/click proxy columns. Use `spend_to_spend` mapping for these channels.
 
 **paid_media_vars** (proxy columns for impression/clicks-based spend-var variants):
 
@@ -922,7 +979,9 @@ google_search_nonbrand_impressions
 google_pmax_impressions
 google_display_impressions
 google_youtube_impressions
-bing_search_impressions
+bing_search_brand_impressions
+bing_search_nonbrand_impressions
+bing_search_other_impressions
 ```
 
 *Clicks:*
@@ -933,7 +992,9 @@ google_search_nonbrand_clicks
 google_pmax_clicks
 google_display_clicks
 google_youtube_clicks
-bing_search_clicks
+bing_search_brand_clicks
+bing_search_nonbrand_clicks
+bing_search_other_clicks
 ```
 
 **organic_vars**:
@@ -986,7 +1047,7 @@ For `mixed_by_funnel_clicks` the same logic applies but awareness channels use c
 
 ### Adjusting the Preset
 
-The config uses `"hyperparameter_preset": "balanced"` by default. To use a different preset per adstock type, set the `hyperparameter_preset` field directly on each adstock variant in the JSON, or pass `--hyperparameter-preset exploratory` on the CLI to override all variants at once.
+The config uses `"hyperparameter_preset": "balanced"` by default. To use a different preset per adstock type, set the `hyperparameter_preset` field directly on each adstock variant in the JSON, or pass `--hyperparameter-preset <preset>` (choices: `conservative`, `balanced`, `exploratory`, `fb`, `meshed`) on the CLI to override all variants at once. Shorthand flags `--fb` and `--meshed` are also available.
 
 
 ---
@@ -1193,8 +1254,10 @@ These defaults are set in `ALL_ADSTOCK_VARIANTS` in `scripts/run_full_benchmark.
 | `conservative` | Narrow, low carryover | [0.4, 1.7] | [0.16, 0.51] | Fast screening, short-cycle products |
 | `balanced` | Moderate | [0.5, 2.0] | [0.20, 0.60] | General purpose (default) |
 | `exploratory` | Wide, high carryover | [0.5, 2.4] | [0.20, 0.69] | Complex markets, long-cycle products |
+| `fb` | Digital: [0.0, 0.3] / OOH: [0.1, 0.4] / TV: [0.3, 0.8] | [0.5, 3.0] | [0.30, 1.00] | Robyn/Facebook official docs; channel-type-differentiated theta |
+| `meshed` | Channel-type-specific | [0.5–1.0, 2.0–3.0] | [0.30–0.60, 0.70–0.99] | Meshed recommendation; tighter saturation for search, longer carryover for organic/TV |
 
-> Ranges above are approximate; exact values vary by channel type and frequency.  
+> Use `--fb` or `--meshed` CLI flags as shorthand. Ranges above are approximate; exact values vary by channel type and frequency.  
 > Full lookup: `benchmarks/generic_hyperparameter_ranges_v2.json` → `ranges[frequency][adstock][channel_type][preset]`
 
 #### I.3 Example ranges — daily frequency, `balanced` preset
