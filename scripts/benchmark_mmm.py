@@ -424,6 +424,14 @@ class BenchmarkRunner:
                 )
             )
 
+        # Generate hyperparameter preset comparison variants
+        if "hyperparameter_preset" in variant_specs:
+            variants.extend(
+                self._generate_preset_variants(
+                    base_config, variant_specs["hyperparameter_preset"]
+                )
+            )
+
         # Limit combinations if needed
         max_combos = benchmark_config.max_combinations
         if len(variants) > max_combos:
@@ -472,6 +480,13 @@ class BenchmarkRunner:
             dimension_variants["seasonality_window"] = (
                 self._generate_seasonality_variants(
                     base_config, variant_specs["seasonality_window"]
+                )
+            )
+
+        if "hyperparameter_preset" in variant_specs:
+            dimension_variants["hyperparameter_preset"] = (
+                self._generate_preset_variants(
+                    base_config, variant_specs["hyperparameter_preset"]
                 )
             )
 
@@ -690,6 +705,44 @@ class BenchmarkRunner:
 
         return variants
 
+    def _generate_preset_variants(
+        self, base_config: Dict[str, Any], specs: List[Dict]
+    ) -> List[Dict[str, Any]]:
+        """Generate hyperparameter preset comparison variants.
+
+        Each spec is a dict with at minimum a ``"name"`` key that matches
+        a valid preset name (``"conservative"``, ``"balanced"``,
+        ``"exploratory"``, ``"fb"``, or ``"meshed"``).  The ``"name"``
+        value is used as both the ``benchmark_variant`` label and the
+        ``hyperparameter_preset`` value forwarded to the training job.
+
+        Args:
+            base_config: Base configuration dict.
+            specs: List of preset spec dicts, e.g.
+                ``[{"name": "balanced"}, {"name": "fb"}, {"name": "meshed"}]``.
+
+        Returns:
+            List of variant dicts, one per preset.
+        """
+        variants = []
+
+        for spec in specs:
+            preset_name = spec.get("name", "balanced")
+            variant = base_config.copy()
+            variant["benchmark_test"] = "hyperparameter_preset"
+            variant["benchmark_variant"] = preset_name
+            variant["benchmark_description"] = spec.get(
+                "description",
+                f"Hyperparameter preset: {preset_name}",
+            )
+            variant["hyperparameter_preset"] = preset_name
+            # Preserve original preset name so it survives the
+            # "Custom" overwrite performed by _apply_hyperparameter_ranges.
+            variant["preset_label"] = preset_name
+            variants.append(variant)
+
+        return variants
+
     def _apply_hyperparameter_ranges(
         self,
         variants: List[Dict[str, Any]],
@@ -824,6 +877,10 @@ class BenchmarkRunner:
             updated = variant.copy()
             if custom_hp:
                 updated["custom_hyperparameters"] = custom_hp
+                # Preserve the human-readable preset name so it survives
+                # the "Custom" overwrite and can be tracked in results.
+                if "preset_label" not in updated:
+                    updated["preset_label"] = preset
                 updated["hyperparameter_preset"] = "Custom"
                 # Summarise per-variable resolution so the operator can
                 # verify the preset is being applied.
@@ -988,6 +1045,8 @@ class BenchmarkRunner:
             "benchmark_id": benchmark_id,
             "benchmark_test": variant.get("benchmark_test", ""),
             "benchmark_variant": variant.get("benchmark_variant", ""),
+            # Preserve original preset label (survives "Custom" overwrite)
+            "preset_label": variant.get("preset_label", ""),
         }
 
         # Add optional fields if present

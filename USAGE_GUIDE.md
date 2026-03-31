@@ -821,6 +821,19 @@ python scripts/run_full_benchmark.py \
 | Top-10 extended | geometric | full | 10 | ~1.5 h | ~$23 | `--extended-run --top-n 10` |
 | Top-10 production | geometric | full | 10 | ~3-4 h | ~$55 | `--production-run --top-n 10` |
 
+#### Preset comparison (`--compare-presets` / `--compare-all-presets`)
+
+Adds the hyperparameter preset as an additional variant dimension. Each base combination is run once per preset, multiplying total variant count.
+
+| Run mode | Presets | Base variants | Total variants | Approx. time | Approx. cost | Flag(s) to add |
+|----------|---------|--------------|---------------|-------------|-------------|----------------|
+| Test, compare 3 presets | balanced/fb/meshed | 30 | 90 | ~1.5 h | ~$15 | `--compare-presets` |
+| Test, compare all 5 | all 5 | 30 | 150 | ~2.5 h | ~$25 | `--compare-all-presets` |
+| Standard, compare 3 presets | balanced/fb/meshed | 30 | 90 | ~6 h | ~$75 | `--full-run --compare-presets` |
+| Standard, compare all 5 | all 5 | 30 | 150 | ~10 h | ~$125 | `--full-run --compare-all-presets` |
+| Extended, compare 3 presets | balanced/fb/meshed | 30 | 90 | ~12-15 h | ~$210 | `--extended-run --compare-presets` |
+| Extended, compare all 5 | all 5 | 30 | 150 | ~20-25 h | ~$350 | `--extended-run --compare-all-presets` |
+
 #### Sequential mode (`--sequential`)
 
 In sequential mode each dimension is varied **independently** (all others held at baseline), so combinations add rather than multiply.
@@ -881,13 +894,33 @@ python scripts/run_full_benchmark.py --path <path> --full-run     --hyperparamet
 python scripts/run_full_benchmark.py --path <path> --full-run     --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json     --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json     --meshed
 ```
 
+**Preset comparison flags:**
+
+Run multiple presets in a single benchmark — the preset becomes a full variant dimension (multiplied into the cartesian product), so results can be compared directly.
+
+```bash
+# Compare balanced, fb, and meshed in one run (3× base variant count)
+python scripts/run_full_benchmark.py --path <path> --full-run \
+    --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+    --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+    --compare-presets
+
+# Compare all five presets in one run (5× base variant count)
+python scripts/run_full_benchmark.py --path <path> --full-run \
+    --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+    --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+    --compare-all-presets
+```
+
+`--compare-presets`, `--compare-all-presets`, `--fb`, `--meshed`, and `--hyperparameter-preset` are mutually exclusive.  Results include a `preset_label` column so the Benchmark Results page can group by preset.
+
 **Preset precedence** (highest to lowest):
 
 1. **Variant-level preset** — set directly on an adstock spec in the JSON config:
    ```json
    {"name": "weibull_cdf", "adstock": "weibull_cdf", "hyperparameter_preset": "Meta default"}
    ```
-2. **Benchmark-level preset** — `--hyperparameter-preset` / `--fb` / `--meshed` CLI flag or `"hyperparameter_preset"` key in the benchmark JSON
+2. **Benchmark-level preset** — `--hyperparameter-preset` / `--fb` / `--meshed` / `--compare-presets` / `--compare-all-presets` CLI flag or `"hyperparameter_preset"` key in the benchmark JSON
 3. **Default** — `"balanced"` when nothing is set
 
 When `--hyperparameter-ranges-config` is provided, per-channel ranges are resolved for each variant using that variant's effective preset. After resolution, the preset is set to `"Custom"` and the ranges are embedded directly in the queue entry as `custom_hyperparameters`. The R training script then uses these exact ranges instead of the built-in preset lookup.
