@@ -1,29 +1,26 @@
 # JIRA Response — MMM Benchmarking System
 
-> **Format:** This document is written in Jira-compatible markdown.
-> Copy the content of the relevant section into a Jira comment or description.
+> **Format:** This document uses Jira wiki markup. Copy everything from `h2.` onward into a Jira comment or description field.
 
 ---
 
-## Jira Ticket Response
-
-**h2. ✅ Implemented: MMM Benchmarking System (PR \#182)**
+h2. ✅ Implemented: MMM Benchmarking System (PR #182)
 
 The benchmarking system requested in this ticket is now live on the
 {{copilot/build-benchmarking-script-mmm-configs}} branch.
 Below is a point-by-point response in the same order as the ticket.
 
----
+----
 
-**h3. Problem — addressed**
+h3. Problem — addressed
 
 We now have a fully reproducible, queue-based benchmarking pipeline.
 Every variant is identified by an explicit config label (adstock × split × time-agg × spend-var × window),
 and results are written to a structured CSV so comparisons are objective and repeatable.
 
----
+----
 
-**h3. Idea — what was built**
+h3. Idea — what was built
 
 A single command runs the full sweep end-to-end:
 
@@ -55,11 +52,11 @@ Output table columns per variant:
 
 Documentation: [USAGE_GUIDE.md] · [ANALYSIS_GUIDE.md] · [README.md]
 
----
+----
 
-**h3. Tests Supported**
+h3. Tests Supported
 
-**(1) Paid media: spend → media var mapping**
+*(1) Paid media: spend → media var mapping*
 
 Implemented as the {{spend_var_mapping}} dimension — 5 variants in the fleet marketplace config:
 
@@ -75,9 +72,9 @@ Lower funnel: Google Search Brand/Non-brand, Google PMax, Bing Search.
 
 Evaluation: R², NRMSE, {{decomp_rssd}}, allocator stability. See Workflow 1 in [ANALYSIS_GUIDE.md].
 
----
+----
 
-**(2) Training vs production: train / val / test splits**
+*(2) Training vs production: train / val / test splits*
 
 Implemented as the {{train_splits}} dimension — 3 variants:
 
@@ -89,9 +86,9 @@ Implemented as the {{train_splits}} dimension — 3 variants:
 Primary signal: val/test R² gap and {{decomp_rssd}} stability across splits.
 See Workflow 2 in [ANALYSIS_GUIDE.md].
 
----
+----
 
-**(3) Adstock choice**
+*(3) Adstock choice*
 
 Implemented as the {{adstock}} dimension — 3 variants (add {{--all-adstock}} to enable all three):
 
@@ -106,9 +103,9 @@ Per-channel, per-adstock-type ranges are defined in
 The fleet marketplace config uses {{balanced}} by default.
 See Hyperparameter Presets in [USAGE_GUIDE.md].
 
----
+----
 
-**(4) Time aggregation**
+*(4) Time aggregation*
 
 Implemented as the {{time_aggregation}} dimension — 2 variants:
 
@@ -118,11 +115,11 @@ Implemented as the {{time_aggregation}} dimension — 2 variants:
 
 See Workflow 3 in [ANALYSIS_GUIDE.md] for daily-vs-weekly interpretation guidance.
 
----
+----
 
-**(5) Training start/end date + seasonality window**
+*(5) Training start/end date + seasonality window*
 
-Implemented as the {{seasonality_window}} dimension. **Default:** only the `full` variant (all available history). Add {{--all-windows}} to include {{2y}} and {{3y}} as well.
+Implemented as the {{seasonality_window}} dimension. *Default:* only the {{full}} variant (all available history). Add {{--all-windows}} to include {{2y}} and {{3y}} as well.
 
 || Variant || Lookback || Notes ||
 | {{full}} _(default)_ | all available history | no date override — always included |
@@ -133,9 +130,9 @@ Window offsets are resolved to absolute {{start_date}} / {{end_date}} at submiss
 Evaluation: fit metrics + media contributions stability + {{decomp_rssd}} across windows.
 See Workflow 5 in [ANALYSIS_GUIDE.md].
 
----
+----
 
-**h3. Combination Strategies**
+h3. Combination Strategies
 
 Two modes are available:
 
@@ -170,11 +167,11 @@ Sequential order (from most to least fundamental):
 
 Recommended: run sequential first (~11 variants) to screen dimensions, then cartesian on the top settings.
 
----
+----
 
-**h3. Cost & Time Estimates**
+h3. Cost & Time Estimates
 
-Based on the fleet marketplace config with default `full` window.
+Based on the fleet marketplace config with default {{full}} window.
 
 || Config || Mode || Variants || Time || Cost (USD) ||
 | Default geometric, cartesian | Test | 30 | ~0.5 h | ~$5 |
@@ -194,22 +191,22 @@ Based on the fleet marketplace config with default `full` window.
 
 Full cost table with all flag combinations: [USAGE_GUIDE.md — Cost Estimates].
 
----
+----
 
-**h3. Output — analyzable table + Streamlit page**
+h3. Output — analyzable table + Streamlit page
 
-**(1) Results table**
-- GCS: {{gs://mmm-app-output/benchmarks/<benchmark_id>/results_<timestamp>.csv}}
-- Local: {{./benchmark_analysis/results_*.csv}} + 6 PNG plots (ranking, adstock comparison, split heatmap, spend-var bar, time-agg, window sweep)
+*(1) Results table*
+* GCS: {{gs://mmm-app-output/benchmarks/<benchmark_id>/results_<timestamp>.csv}}
+* Local: {{./benchmark_analysis/results_*.csv}} + 6 PNG plots (ranking, adstock comparison, split heatmap, spend-var bar, time-agg, window sweep)
 
-**(2) Streamlit page**
-A *View Benchmark Results* page is available in the app.
+*(2) Streamlit page*
+A _View Benchmark Results_ page is available in the app.
 Analysis workflows (adstock comparison, split evaluation, spend→var, time aggregation,
 comprehensive ranking) are documented in [ANALYSIS_GUIDE.md].
 
----
+----
 
-**h3. Quick Start**
+h3. Quick Start
 
 {code:bash}
 # Sequential exploration — fastest way to screen all dimensions (11 variants, ~$9, ~45 min)
