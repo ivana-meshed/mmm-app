@@ -40,6 +40,17 @@ SAFE_LAG_SECONDS_AFTER_RUNNING = int(
     os.getenv("SAFE_LAG_SECONDS_AFTER_RUNNING", "5")
 )
 
+# Cloud Tasks configuration for event-driven queue processing
+# When set, queue ticks are triggered via Cloud Tasks instead of a periodic scheduler,
+# eliminating idle costs when the queue is empty.
+CLOUD_TASKS_QUEUE = os.getenv("CLOUD_TASKS_QUEUE")  # full queue path
+WEB_SERVICE_URL = os.getenv("WEB_SERVICE_URL")  # base URL of this service
+CLOUD_TASKS_SA_EMAIL = os.getenv("CLOUD_TASKS_SA_EMAIL")  # SA for OIDC auth
+# How often (seconds) to re-check a running job via Cloud Tasks
+QUEUE_TICK_INTERVAL_SECONDS = int(
+    os.getenv("QUEUE_TICK_INTERVAL_SECONDS", "300")
+)
+
 # Initialize Snowflake query cache
 init_snowflake_cache(GCS_BUCKET)
 
@@ -128,6 +139,53 @@ def _empty_job_history_df() -> pd.DataFrame:
     return pd.DataFrame(columns=cols)
 
 
+def schedule_queue_tick_via_cloud_tasks(
+    queue_name: str,
+    delay_seconds: int = 0,
+) -> bool:
+    """
+    Schedule a queue tick via Cloud Tasks.
+
+    This is the event-driven alternative to the periodic Cloud Scheduler.
+    Returns True if a task was scheduled, False if Cloud Tasks is not
+    configured (CLOUD_TASKS_QUEUE or WEB_SERVICE_URL not set) or on error.
+    """
+    if not CLOUD_TASKS_QUEUE or not WEB_SERVICE_URL:
+        return False
+    try:
+        from datetime import timedelta
+
+        from google.cloud import tasks_v2
+
+        client = tasks_v2.CloudTasksClient()
+        target_url = f"{WEB_SERVICE_URL}?queue_tick=1&name={queue_name}"
+        http_request: dict = {
+            "http_method": tasks_v2.HttpMethod.GET,
+            "url": target_url,
+        }
+        if CLOUD_TASKS_SA_EMAIL:
+            http_request["oidc_token"] = {
+                "service_account_email": CLOUD_TASKS_SA_EMAIL,
+                "audience": WEB_SERVICE_URL,
+            }
+        task: dict = {"http_request": http_request}
+        if delay_seconds > 0:
+            schedule_time = datetime.now(timezone.utc) + timedelta(
+                seconds=delay_seconds
+            )
+            task["schedule_time"] = schedule_time
+        client.create_task(parent=CLOUD_TASKS_QUEUE, task=task)
+        logger.info(
+            "[CLOUD_TASKS] Scheduled queue tick for '%s' delay=%ds",
+            queue_name,
+            delay_seconds,
+        )
+        return True
+    except Exception as e:
+        logger.warning("[CLOUD_TASKS] Failed to schedule task: %s", e)
+        return False
+
+
 def _safe_tick_once(
     queue_name: str,
     bucket_name: Optional[str] = None,
@@ -154,7 +212,19 @@ def _safe_tick_once(
             "queue_running": True,
         }
 
-    for _ in range(max_retries):
+    logger.info(
+        "[QUEUE_TICK] Starting tick for queue '%s' bucket '%s'",
+        queue_name,
+        bucket_name,
+    )
+    for attempt in range(max_retries):
+        if attempt > 0:
+            logger.info(
+                "[QUEUE_TICK] Retry attempt %d/%d for queue '%s'",
+                attempt + 1,
+                max_retries,
+                queue_name,
+            )
         # Ensure the blob exists, then load doc + current generation
         if not blob.exists():
             try:
@@ -163,25 +233,49 @@ def _safe_tick_once(
                     content_type="application/json",
                     if_generation_match=0,  # create-if-not-exists
                 )
+                logger.info(
+                    "[QUEUE] Initialized new queue doc for '%s'", queue_name
+                )
             except PreconditionFailed:
                 # Someone created it concurrently; continue to normal path
-                pass
+                logger.info(
+                    "[QUEUE] Queue doc '%s' created concurrently, loading existing",
+                    queue_name,
+                )
 
         # After creation attempt, verify blob exists before reloading
         if not blob.exists():
-            # Blob still doesn't exist, retry
+            logger.warning(
+                "[QUEUE] Queue doc '%s' still absent after init, retrying",
+                queue_name,
+            )
             continue
 
+        blob._properties.pop("generation", None)  # ensure we fetch latest
         blob.reload()  # get current generation
         gen = int(blob.generation)  # type: ignore
+        logger.debug(
+            "[QUEUE_TICK] Loaded queue doc '%s' generation=%s", queue_name, gen
+        )
         try:
             doc = json.loads(blob.download_as_text())
-        except Exception:
+        except Exception as _parse_exc:
+            logger.warning(
+                "[QUEUE] Queue doc '%s' could not be parsed (%s), re-initializing",
+                queue_name,
+                _parse_exc,
+            )
             doc = _init_doc()
 
         q = doc.get("entries", [])
         running_flag = doc.get("queue_running", True)
 
+        logger.info(
+            "[QUEUE_TICK] Queue '%s': %d entries, running=%s",
+            queue_name,
+            len(q),
+            running_flag,
+        )
         if not q:
             return {"ok": True, "message": "empty queue", "changed": False}
         if not running_flag:
@@ -327,19 +421,29 @@ def _safe_tick_once(
                     f"[QUEUE_ERROR] Execution: {entry.get('execution_name', 'N/A')}"
                 )
 
-            if changed:
-                doc["saved_at"] = get_cet_now().isoformat()
-                try:
-                    blob.upload_from_string(
-                        json.dumps(doc, indent=2),
-                        content_type="application/json",
-                        if_generation_match=gen,  # guarded write
-                    )
-                    return {"ok": True, "message": message, "changed": True}
-                except PreconditionFailed:
-                    # Lost the race; retry with fresh doc/generation
-                    continue
+                if changed:
+                    doc["saved_at"] = get_cet_now().isoformat()
+                    try:
+                        blob.upload_from_string(
+                            json.dumps(doc, indent=2),
+                            content_type="application/json",
+                            if_generation_match=gen,  # guarded write
+                        )
+                        return {"ok": True, "message": message, "changed": True}
+                    except PreconditionFailed:
+                        # Lost the race; retry with fresh doc/generation
+                        logger.info(
+                            "[QUEUE_TICK] Optimistic lock lost writing status update "
+                            "for queue '%s', retrying",
+                            queue_name,
+                        )
+                        continue
 
+            logger.info(
+                "[QUEUE_TICK] Job %s status '%s' unchanged",
+                entry.get("id"),
+                entry.get("status"),
+            )
             return {"ok": True, "message": "no change", "changed": False}
 
         # 2) Lease & launch next PENDING
@@ -358,6 +462,11 @@ def _safe_tick_once(
         entry = q[pend_idx]
 
         # --- Critical section: lease it (LAUNCHING) guarded by generation match ---
+        logger.info(
+            "[QUEUE_TICK] Leasing job %s as LAUNCHING (gen=%s)",
+            entry.get("id"),
+            gen,
+        )
         entry["status"] = "LAUNCHING"
         entry["message"] = "Launching..."
         doc["saved_at"] = get_cet_now().isoformat()
@@ -369,6 +478,11 @@ def _safe_tick_once(
             )
         except PreconditionFailed:
             # Another process leased it; retry from the top
+            logger.info(
+                "[QUEUE_TICK] Optimistic lock lost leasing job %s for queue '%s', retrying",
+                entry.get("id"),
+                queue_name,
+            )
             continue
 
         # --- Outside critical section: perform the actual launch ---
@@ -463,8 +577,14 @@ def _safe_tick_once(
             )
 
         # Persist the post-launch state with another guarded write
+        blob._properties.pop("generation", None)  # ensure we fetch latest
         blob.reload()
         gen2 = int(blob.generation)  # type: ignore
+        logger.debug(
+            "[QUEUE_TICK] Post-launch reload queue '%s' generation=%s",
+            queue_name,
+            gen2,
+        )
         doc["saved_at"] = get_cet_now().isoformat()
         try:
             blob.upload_from_string(
@@ -476,8 +596,18 @@ def _safe_tick_once(
         except PreconditionFailed:
             # A concurrent status update happened (e.g., another tick promoted LAUNCHING→RUNNING).
             # Retry loop merges on next pass.
+            logger.info(
+                "[QUEUE_TICK] Optimistic lock lost on post-launch write "
+                "for queue '%s', retrying",
+                queue_name,
+            )
             continue
 
+    logger.warning(
+        "[QUEUE_TICK] Exhausted %d retries for queue '%s', giving up",
+        max_retries,
+        queue_name,
+    )
     return {"ok": False, "message": "contention: retry later", "changed": False}
 
 
@@ -1448,6 +1578,19 @@ def save_queue_to_gcs(
     if queue_running is None:
         queue_running = st.session_state.get("queue_running", True)
 
+    pending_count = sum(1 for e in entries if e.get("status") == "PENDING")
+    running_count = sum(
+        1 for e in entries if e.get("status") in ("RUNNING", "LAUNCHING")
+    )
+    logger.info(
+        "[QUEUE] Saving queue '%s': %d entries (%d pending, %d running/launching), "
+        "queue_running=%s",
+        queue_name,
+        len(entries),
+        pending_count,
+        running_count,
+        bool(queue_running),
+    )
     saved_at = get_cet_now().isoformat()
     payload = {
         "version": 1,
@@ -1458,6 +1601,23 @@ def save_queue_to_gcs(
     blob.upload_from_string(
         json.dumps(payload, indent=2), content_type="application/json"
     )
+    # Trigger an immediate queue tick via Cloud Tasks whenever there are
+    # pending jobs and the queue is running. This replaces the periodic
+    # Cloud Scheduler and eliminates idle costs when the queue is empty.
+    if bool(queue_running) and pending_count > 0:
+        logger.info(
+            "[QUEUE] %d pending job(s) + running=True → scheduling immediate Cloud Task for '%s'",
+            pending_count,
+            queue_name,
+        )
+        schedule_queue_tick_via_cloud_tasks(queue_name, delay_seconds=0)
+    else:
+        logger.info(
+            "[QUEUE] No Cloud Task triggered for '%s' (pending=%d, running=%s)",
+            queue_name,
+            pending_count,
+            bool(queue_running),
+        )
     return saved_at
 
 
@@ -1511,6 +1671,64 @@ def queue_tick_once_headless(
 # Stateless queue tick endpoint (AFTER defs/constants)
 # ─────────────────────────────
 
+# Messages that indicate the queue has no pending/running work.
+# When the tick result contains one of these messages, we do NOT schedule
+# another Cloud Tasks tick (this breaks the chain and eliminates idle costs).
+_QUEUE_IDLE_MESSAGES = frozenset(
+    {
+        "empty queue",
+        "queue is paused",
+        "no pending",
+        "launcher not provided",
+    }
+)
+
+# Messages that indicate a terminal job state (job just finished).
+# After a terminal state we reschedule immediately so the next pending job
+# starts as soon as possible.
+_TERMINAL_STATES = frozenset(
+    {"succeeded", "failed", "cancelled", "completed", "error"}
+)
+
+
+def _schedule_next_tick_if_needed(queue_name: str, result: dict) -> None:
+    """
+    Decide whether to schedule another queue tick via Cloud Tasks and, if so,
+    with what delay.  Called after every successful headless tick.
+
+    - Idle queue (empty / paused / no pending): no next tick → zero idle cost.
+    - Job completed (terminal state): immediate next tick to start the next job.
+    - Job running / launching / just launched: delayed next tick to poll status.
+    """
+    msg = (result.get("message") or "").lower()
+    if msg in _QUEUE_IDLE_MESSAGES:
+        logger.info(
+            "[CLOUD_TASKS] Queue '%s' idle ('%s') — no next tick scheduled",
+            queue_name,
+            msg,
+        )
+        return  # nothing to do; let the container go idle
+
+    if result.get("changed") and any(s in msg for s in _TERMINAL_STATES):
+        # A job just finished – immediately try to start the next one
+        logger.info(
+            "[CLOUD_TASKS] Queue '%s' job reached terminal state ('%s') — scheduling immediate tick",
+            queue_name,
+            msg,
+        )
+        schedule_queue_tick_via_cloud_tasks(queue_name, delay_seconds=0)
+    else:
+        # A job is running/launching or was just launched – poll again later
+        logger.info(
+            "[CLOUD_TASKS] Queue '%s' has ongoing work ('%s') — scheduling poll in %ds",
+            queue_name,
+            msg,
+            QUEUE_TICK_INTERVAL_SECONDS,
+        )
+        schedule_queue_tick_via_cloud_tasks(
+            queue_name, delay_seconds=QUEUE_TICK_INTERVAL_SECONDS
+        )
+
 
 def handle_queue_tick_from_query_params(
     query_params: Dict[str, Any],
@@ -1544,6 +1762,10 @@ def handle_queue_tick_from_query_params(
     try:
         result = queue_tick_once_headless(qname, bkt, launcher=launcher)
         logger.info(f"[QUEUE_TICK] Completed successfully: {result}")
+        # Self-schedule via Cloud Tasks so the queue is processed without a
+        # periodic scheduler. Only schedule when there is ongoing work;
+        # stop when the queue is empty or paused to eliminate idle costs.
+        _schedule_next_tick_if_needed(qname, result)
         return result
     except Exception as e:
         logger.exception("[QUEUE_TICK] Handler failed: %s", e)

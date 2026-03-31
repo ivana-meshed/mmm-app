@@ -47,6 +47,7 @@ from app_shared import (  # Env / constants (already read from env in app_shared
     run_sql,
     save_job_history_to_gcs,
     save_queue_to_gcs,
+    schedule_queue_tick_via_cloud_tasks,
     timed_step,
     upload_to_gcs,
 )
@@ -82,6 +83,7 @@ __all__ = [
     "queue_tick_once_headless",
     "handle_queue_tick_from_query_params",
     "handle_queue_tick_if_requested",
+    "schedule_queue_tick_via_cloud_tasks",
     "get_job_manager",
     "get_data_processor",
     "_fmt_secs",
@@ -190,7 +192,11 @@ def prepare_and_launch_job(params: dict) -> dict:
     For GCS-based workflows, if data_gcs_path is provided, skip Snowflake query and use existing data.
     Returns exec_info dict with execution_name, timestamp, gcs_prefix, etc.
     """
-    gcs_bucket = params.get("gcs_bucket") or st.session_state["gcs_bucket"]
+    gcs_bucket = (
+        params.get("gcs_bucket")
+        or st.session_state.get("gcs_bucket")
+        or GCS_BUCKET
+    )
     timestamp = format_cet_timestamp(format_str="%m%d_%H%M%S")
     # Support both 'revision' and 'version' keys for backward compatibility
     revision = params.get("revision") or params.get("version") or ""
@@ -1637,7 +1643,7 @@ def ensure_session_defaults():
     ss.setdefault("last_timings", {})  # {'df':..., 'timestamp':...}
 
     # Queue defaults
-    ss.setdefault("queue_name", "default")
+    ss.setdefault("queue_name", DEFAULT_QUEUE_NAME)
     ss.setdefault("job_queue", [])
     ss.setdefault("queue_running", False)
     ss.setdefault("queue_saved_at", None)

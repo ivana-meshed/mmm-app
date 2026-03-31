@@ -65,6 +65,12 @@ model_stability_page = st.Page(
     icon="🛡️",
 )
 
+benchmark_results_page = st.Page(
+    "nav/View_Benchmark_Results.py",
+    title="Benchmark Results",
+    icon="🧪",
+)
+
 
 # Create navigation - this replaces the default sidebar navigation
 pg = st.navigation(
@@ -77,6 +83,7 @@ pg = st.navigation(
         results_page,
         best_results_page,
         model_stability_page,
+        benchmark_results_page,
         # cache_management_page,
     ],
     position="sidebar",

@@ -654,10 +654,19 @@ date_var_name <- cfg$date_var %||% "date" # This is the column name to look for
 iter <- as.numeric(cfg$iterations)
 trials <- as.numeric(cfg$trials)
 train_size <- as.numeric(cfg$train_size)
-timestamp <- cfg$timestamp %||% {
+
+# Use output_timestamp if provided (for consistent result paths)
+# Otherwise fall back to timestamp or generate one
+timestamp <- cfg$output_timestamp %||% cfg$timestamp %||% {
     # Use CET (Central European Time) timezone to match Google Cloud Storage
     cet_time <- as.POSIXlt(Sys.time(), tz = "Europe/Paris")
     format(cet_time, "%m%d_%H%M%S")
+}
+
+if (!is.null(cfg$output_timestamp)) {
+    cat("Using provided output timestamp:", timestamp, "\n")
+} else {
+    cat("Generated timestamp:", timestamp, "\n")
 }
 
 # NEW: Training date range
@@ -1449,11 +1458,26 @@ for (v in hyper_vars_filtered) {
     if (adstock == "geometric") {
         hyperparameters_filtered[[paste0(v, "_gammas")]] <- spec$gammas
         hyperparameters_filtered[[paste0(v, "_thetas")]] <- spec$thetas
+        message(sprintf(
+            "   [%s preset] %s → alphas=[%s], gammas=[%s], thetas=[%s]",
+            hyperparameter_preset, v,
+            paste(round(spec$alphas, 4), collapse = ", "),
+            paste(round(spec$gammas, 4), collapse = ", "),
+            paste(round(spec$thetas, 4), collapse = ", ")
+        ))
     } else {
         # Weibull uses alphas, gammas, shapes and scales (4 params per variable)
         hyperparameters_filtered[[paste0(v, "_gammas")]] <- spec$gammas
         hyperparameters_filtered[[paste0(v, "_shapes")]] <- spec$shapes
         hyperparameters_filtered[[paste0(v, "_scales")]] <- spec$scales
+        message(sprintf(
+            "   [%s preset] %s → alphas=[%s], gammas=[%s], shapes=[%s], scales=[%s]",
+            hyperparameter_preset, v,
+            paste(round(spec$alphas, 4), collapse = ", "),
+            paste(round(spec$gammas, 4), collapse = ", "),
+            paste(round(spec$shapes, 4), collapse = ", "),
+            paste(round(spec$scales, 4), collapse = ", ")
+        ))
     }
 }
 hyperparameters_filtered[["train_size"]] <- train_size

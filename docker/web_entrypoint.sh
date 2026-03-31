@@ -104,11 +104,31 @@ echo "✅ Wrote /app/.streamlit/secrets.toml"
 # Optional: show a redacted preview in logs for debugging
 sed -n '1,80p' /app/.streamlit/secrets.toml | sed -E 's/(client_secret *= *").*/\1***"/; s/(cookie_secret *= *").*/\1***"/'
 
-# Start Streamlit application
-echo "Starting Streamlit on port ${PORT}..."
-exec python3 -m streamlit run streamlit_app.py \
-    --server.address=0.0.0.0 \
-    --server.port=${PORT} \
+# Start Streamlit on an internal port (8501); the queue-tick proxy binds $PORT.
+STREAMLIT_PORT=8501
+echo "Starting Streamlit on internal port ${STREAMLIT_PORT}..."
+python3 -m streamlit run streamlit_app.py \
+    --server.address=127.0.0.1 \
+    --server.port=${STREAMLIT_PORT} \
     --server.headless=true \
     --server.enableCORS=false \
-    --server.enableXsrfProtection=false
+    --server.enableXsrfProtection=false &
+
+STREAMLIT_PID=$!
+
+# Wait for Streamlit to become healthy before accepting external traffic.
+echo "Waiting for Streamlit to be ready..."
+until curl -sf http://127.0.0.1:${STREAMLIT_PORT}/_stcore/health > /dev/null 2>&1; do
+    if ! kill -0 "$STREAMLIT_PID" 2>/dev/null; then
+        echo "ERROR: Streamlit process exited unexpectedly"
+        exit 1
+    fi
+    sleep 1
+done
+echo "✅ Streamlit is ready on port ${STREAMLIT_PORT}"
+
+# Start the queue-tick proxy on $PORT (foreground — keeps the container alive).
+# It handles ?queue_tick=1 directly and TCP-proxies everything else to Streamlit.
+echo "Starting queue-tick proxy on port ${PORT}..."
+export STREAMLIT_PORT
+exec python3 /app/queue_tick_proxy.py

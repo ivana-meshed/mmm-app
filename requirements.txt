@@ -5,6 +5,7 @@ google-cloud-bigquery
 google-cloud-secret-manager
 google-cloud-storage
 google-cloud-run
+google-cloud-tasks
 protobuf<5
 pytz
 db-dtypes

@@ -116,3 +116,21 @@ variable "scheduler_enabled" {
   type        = bool
   default     = true
 }
+
+variable "scheduler_interval_minutes" {
+  description = "Interval in minutes for scheduler to check queue (e.g., 10 for every 10 minutes, 30 for every 30 minutes)"
+  type        = number
+  default     = 10
+}
+
+variable "cloud_tasks_queue_name" {
+  description = "Cloud Tasks queue name used for event-driven queue tick scheduling (replaces the periodic Cloud Scheduler)"
+  type        = string
+  default     = "robyn-queue-tick"
+}
+
+variable "queue_tick_interval_seconds" {
+  description = "How often (in seconds) to re-check a running job via Cloud Tasks polling"
+  type        = number
+  default     = 300
+}

@@ -1,0 +1,100 @@
+{
+  "name": "spend_var_mapping",
+  "description": "Test spend→spend vs spend→proxy (sessions) mapping strategies by channel type",
+  "base_config": {
+    "country": "de",
+    "goal": "N_UPLOADS_WEB",
+    "version": "Latest"
+  },
+  "iterations": 2000,
+  "trials": 5,
+  "max_combinations": 10,
+  "variants": {
+    "spend_var_mapping": [
+      {
+        "name": "spend_to_spend",
+        "description": "All channels: spend → spend (direct cost impact)",
+        "mapping_strategy": "spend_to_spend",
+        "paid_media_vars_override": [
+          "GA_TOTAL_COST_CUSTOM",
+          "GA_SUPPLY_COST",
+          "GA_DEMAND_COST",
+          "GA_BRAND_COST",
+          "BING_TOTAL_COST_CUSTOM",
+          "META_SUPPLY_COST",
+          "BING_BRAND_COST",
+          "TV_COSTS",
+          "TV_COST",
+          "GA_OTHER_COST",
+          "META_TOTAL_COST_CUSTOM",
+          "BING_DEMAND_COST",
+          "BING_SUPPLY_COST",
+          "GA_COMPETITOR_COST",
+          "PARTNERSHIP_COSTS",
+          "META_DEMAND_COST",
+          "BING_COMPETITOR_COST",
+          "BING_OTHER_COST",
+          "GA_APP_COST",
+          "BING_APP_COST",
+          "META_OTHER_COST"
+        ]
+      },
+      {
+        "name": "spend_to_proxy",
+        "description": "All channels: spend → sessions (ad delivery proxy)",
+        "mapping_strategy": "spend_to_proxy",
+        "paid_media_vars_override": [
+          "GA_TOTAL_SESSIONS_CUSTOM",
+          "GA_SUPPLY_SESSIONS",
+          "GA_DEMAND_SESSIONS",
+          "GA_BRAND_SESSIONS",
+          "BING_TOTAL_SESSIONS_CUSTOM",
+          "META_SUPPLY_SESSIONS",
+          "BING_BRAND_SESSIONS",
+          "TV_COSTS",
+          "TV_COST",
+          "GA_OTHER_SESSIONS",
+          "META_TOTAL_SESSIONS_CUSTOM",
+          "BING_DEMAND_SESSIONS",
+          "BING_SUPPLY_SESSIONS",
+          "GA_COMPETITOR_SESSIONS",
+          "PARTNERSHIP_COSTS",
+          "META_DEMAND_SESSIONS",
+          "BING_COMPETITOR_SESSIONS",
+          "BING_OTHER_SESSIONS",
+          "GA_APP_COST",
+          "BING_APP_COST",
+          "META_OTHER_COST"
+        ]
+      },
+      {
+        "name": "mixed_by_funnel",
+        "description": "Upper funnel (brand/supply) → sessions, lower funnel (demand/competitor) → spend",
+        "mapping_strategy": "mixed",
+        "paid_media_vars_override": [
+          "GA_TOTAL_SESSIONS_CUSTOM",
+          "GA_SUPPLY_SESSIONS",
+          "GA_DEMAND_COST",
+          "GA_BRAND_SESSIONS",
+          "BING_TOTAL_SESSIONS_CUSTOM",
+          "META_SUPPLY_SESSIONS",
+          "BING_BRAND_SESSIONS",
+          "TV_COSTS",
+          "TV_COST",
+          "GA_OTHER_SESSIONS",
+          "META_TOTAL_SESSIONS_CUSTOM",
+          "BING_DEMAND_COST",
+          "BING_SUPPLY_SESSIONS",
+          "GA_COMPETITOR_COST",
+          "PARTNERSHIP_COSTS",
+          "META_DEMAND_COST",
+          "BING_COMPETITOR_COST",
+          "BING_OTHER_SESSIONS",
+          "GA_APP_COST",
+          "BING_APP_COST",
+          "META_OTHER_COST"
+        ]
+      }
+    ]
+  }
+}

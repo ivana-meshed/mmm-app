@@ -88,9 +88,7 @@ class TestCostTracking(unittest.TestCase):
         """Test service identification."""
         # Production services
         self.assertEqual(
-            track_daily_costs.identify_service(
-                "mmm-app-web", "Cloud Run CPU"
-            ),
+            track_daily_costs.identify_service("mmm-app-web", "Cloud Run CPU"),
             "mmm-app-web",
         )
         self.assertEqual(
@@ -136,9 +134,7 @@ class TestCostTracking(unittest.TestCase):
             "registry",
         )
         self.assertEqual(
-            track_daily_costs.identify_service(
-                None, "Cloud Storage Standard"
-            ),
+            track_daily_costs.identify_service(None, "Cloud Storage Standard"),
             "storage",
         )
 
