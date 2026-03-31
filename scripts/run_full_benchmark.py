@@ -475,6 +475,111 @@ def generate_benchmark_config(
     return benchmark_config
 
 
+def load_external_benchmark_config(
+    config_path: str,
+    run_mode: str = "test",
+    adstock_types: Optional[List[str]] = None,
+    sequential: bool = False,
+    hyperparameter_ranges_config: Optional[str] = None,
+    channel_type_assignments_config: Optional[str] = None,
+    hyperparameter_preset: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Load an external benchmark config JSON and apply CLI run-mode overrides.
+
+    Iteration and trial counts are always overridden by the ``run_mode`` flag
+    so the same config file can be used for test → production sweeps without
+    manual edits.  All variant dimensions (adstock, train_splits,
+    time_aggregation, spend_var_mapping, seasonality_window) are taken from the
+    config file as-is, with the following exceptions:
+
+    * ``--all-adstock`` / ``--adstock`` replaces the config's adstock list.
+    * ``--sequential`` sets ``combination_mode`` to ``"single"``.
+    * ``--hyperparameter-ranges-config``, ``--channel-type-assignments-config``,
+      and ``--hyperparameter-preset`` are merged into the config when supplied.
+
+    Args:
+        config_path: Path to the benchmark config JSON (relative to repo root
+            or absolute).
+        run_mode: ``"test"``, ``"standard"``, ``"extended"``, or
+            ``"production"``.  Determines iterations and trials.
+        adstock_types: If provided, replaces the config's adstock variant list
+            with the named types from ``ALL_ADSTOCK_VARIANTS``.
+        sequential: If ``True``, sets ``combination_mode`` to ``"single"``
+            (vary one dimension at a time instead of cartesian product).
+        hyperparameter_ranges_config: Optional path to a hyperparameter ranges
+            JSON.  Added to the config when supplied.
+        channel_type_assignments_config: Optional path to a channel-type
+            assignments JSON.  Added to the config when supplied.
+        hyperparameter_preset: Optional preset override
+            (``conservative`` / ``balanced`` / ``exploratory``).
+
+    Returns:
+        Modified benchmark config dict ready to be saved and passed to
+        ``benchmark_mmm.py``.
+    """
+    resolved = Path(config_path)
+    if not resolved.is_absolute():
+        resolved = Path(__file__).parent.parent / config_path
+    if not resolved.exists():
+        raise FileNotFoundError(f"Benchmark config file not found: {resolved}")
+
+    with open(resolved) as f:
+        config = json.load(f)
+
+    # Always override iterations/trials from the run mode flag so the same
+    # config file can be used across test → production without manual edits.
+    iter_map: Dict[str, tuple] = {
+        "test": (10, 1),
+        "standard": (1000, 3),
+        "extended": (2000, 5),
+        "production": (5000, 5),
+    }
+    iterations, trials = iter_map[run_mode]
+    config["iterations"] = iterations
+    config["trials"] = trials
+    logger.info(
+        f"📋 Loaded external config: {resolved.name} "
+        f"(iterations={iterations}, trials={trials} from {run_mode} mode)"
+    )
+
+    # Override adstock variants when --all-adstock or --adstock is given.
+    if adstock_types is not None:
+        adstock_name_map = {v["name"]: v for v in ALL_ADSTOCK_VARIANTS}
+        replaced = [
+            adstock_name_map[t] for t in adstock_types if t in adstock_name_map
+        ]
+        if replaced:
+            config.setdefault("variants", {})["adstock"] = replaced
+            logger.info(
+                f"🎯 Adstock overridden to: " f"{[v['name'] for v in replaced]}"
+            )
+
+    # Sequential mode: vary one dimension at a time.
+    if sequential:
+        config["combination_mode"] = "single"
+        logger.info("🔀 Combination mode set to sequential (single dimension)")
+
+    # Merge hyperparameter config fields when provided.
+    if hyperparameter_ranges_config:
+        config["hyperparameter_ranges_config"] = hyperparameter_ranges_config
+        logger.info(
+            f"🎛️  Hyperparameter ranges config: {hyperparameter_ranges_config}"
+        )
+    if channel_type_assignments_config:
+        config["channel_type_assignments_config"] = (
+            channel_type_assignments_config
+        )
+        logger.info(
+            f"📋 Channel type assignments config: "
+            f"{channel_type_assignments_config}"
+        )
+    if hyperparameter_preset:
+        config["hyperparameter_preset"] = hyperparameter_preset
+        logger.info(f"🔧 Hyperparameter preset: {hyperparameter_preset}")
+
+    return config
+
+
 def save_temp_benchmark_config(config: Dict[str, Any]) -> str:
     """Save benchmark config to temporary file."""
     import tempfile
@@ -644,6 +749,26 @@ Examples:
   # Top-N combinations with extended run
   python scripts/run_full_benchmark.py --path <path> --top-n 10 --extended-run
 
+  # Fleet marketplace config — geometric, test mode (~90 combos, 1.5 h, ~$15)
+  python scripts/run_full_benchmark.py --path <path> \\
+      --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \\
+      --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+      --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json
+
+  # Fleet marketplace config — standard run, geometric only (~90 combos, ~6 h, ~$75)
+  python scripts/run_full_benchmark.py --path <path> \\
+      --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \\
+      --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+      --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \\
+      --full-run
+
+  # Fleet marketplace config — extended run, all adstock (~270 combos, ~40 h, ~$630)
+  python scripts/run_full_benchmark.py --path <path> \\
+      --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \\
+      --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
+      --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \\
+      --extended-run --all-adstock
+
   # With per-channel hyperparameter ranges (balanced preset is the default)
   python scripts/run_full_benchmark.py --path <path> --full-run \\
       --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\
@@ -664,6 +789,23 @@ Examples:
         "--path",
         required=True,
         help="Path to selected_columns.json (GCS path like gs://bucket/path/to/selected_columns.json)",
+    )
+
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Path to an existing benchmark config JSON "
+            "(e.g. benchmarks/comprehensive_benchmark_fleet_marketplace.json). "
+            "When provided, variant dimensions (adstock, splits, time_agg, "
+            "spend_var, windows) are taken directly from that file instead of "
+            "being generated dynamically from selected_columns.json. "
+            "Run-mode flags (--full-run etc.) still override iterations and "
+            "trials, and --all-adstock / --adstock can replace the adstock "
+            "list. --all-windows and --windows are ignored (windows are "
+            "defined in the config file)."
+        ),
     )
 
     run_mode_group = parser.add_mutually_exclusive_group()
@@ -836,13 +978,17 @@ Examples:
     )
     if window_lengths:
         logger.info(f"Windows: {', '.join(window_lengths)}")
+    elif args.config:
+        logger.info("Windows: defined in config file")
     elif run_mode != "test":
         logger.info("Windows: full (default for non-test runs)")
     else:
         logger.info("Windows: none (test mode)")
     if args.top_n is not None:
         logger.info(f"Top-N combinations: {args.top_n}")
-    logger.info(f"Config path: {args.path}")
+    logger.info(f"Data path: {args.path}")
+    if args.config:
+        logger.info(f"Benchmark config: {args.config}")
     logger.info(f"Queue: {args.queue_name}")
     if args.hyperparameter_ranges_config:
         logger.info(
@@ -871,18 +1017,31 @@ Examples:
         logger.info(f"📍 Extracted version from path: {version_from_path}")
         logger.info("")
 
-        # Generate benchmark configuration
-        benchmark_config = generate_benchmark_config(
-            selected_columns,
-            version_from_path=version_from_path,
-            run_mode=run_mode,
-            adstock_types=adstock_types,
-            window_lengths=window_lengths,
-            sequential=sequential,
-            hyperparameter_ranges_config=args.hyperparameter_ranges_config,
-            channel_type_assignments_config=args.channel_type_assignments_config,
-            hyperparameter_preset=args.hyperparameter_preset,
-        )
+        # Generate (or load) benchmark configuration
+        if args.config:
+            # Use an external config file; run mode overrides iterations/trials.
+            benchmark_config = load_external_benchmark_config(
+                args.config,
+                run_mode=run_mode,
+                adstock_types=adstock_types,
+                sequential=sequential,
+                hyperparameter_ranges_config=args.hyperparameter_ranges_config,
+                channel_type_assignments_config=args.channel_type_assignments_config,
+                hyperparameter_preset=args.hyperparameter_preset,
+            )
+        else:
+            # Build config dynamically from selected_columns.json.
+            benchmark_config = generate_benchmark_config(
+                selected_columns,
+                version_from_path=version_from_path,
+                run_mode=run_mode,
+                adstock_types=adstock_types,
+                window_lengths=window_lengths,
+                sequential=sequential,
+                hyperparameter_ranges_config=args.hyperparameter_ranges_config,
+                channel_type_assignments_config=args.channel_type_assignments_config,
+                hyperparameter_preset=args.hyperparameter_preset,
+            )
 
         # Derive top_n: if not specified, submit all generated variants.
         # max_combinations is always set to n_combos + 10, so it safely covers all.
