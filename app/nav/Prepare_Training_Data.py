@@ -2101,6 +2101,17 @@ with st.expander(
     selected_factor_step4 = column_categories_step4.get("factor_vars", [])
     selected_other_step4 = column_categories_step4.get("other", [])
 
+    # "Other" variables are merged into the Context Variables section but
+    # start deselected since they weren't originally chosen as context vars.
+    for _var in selected_other_step4:
+        if _var not in st.session_state["vif_selections"]:
+            st.session_state["vif_selections"][_var] = False
+
+    # Combined context list: original context vars followed by other vars.
+    # The table is labelled "Selected Context Variables" for both groups;
+    # other vars simply begin unchecked.
+    combined_context_step4 = selected_context_step4 + selected_other_step4
+
     # Track all selected variables across tables for VIF
     all_selected_vars_step4: List[str] = []
 
@@ -2124,8 +2135,8 @@ with st.expander(
                 and pd.api.types.is_numeric_dtype(df_r[v])
             ):
                 all_vars.append(v)
-        # Context vars
-        for v in selected_context_step4:
+        # Context vars (includes "other" vars merged in)
+        for v in combined_context_step4:
             if (
                 st.session_state["vif_selections"].get(v, True)
                 and v in df_r.columns
@@ -2134,14 +2145,6 @@ with st.expander(
                 all_vars.append(v)
         # Factor vars
         for v in selected_factor_step4:
-            if (
-                st.session_state["vif_selections"].get(v, True)
-                and v in df_r.columns
-                and pd.api.types.is_numeric_dtype(df_r[v])
-            ):
-                all_vars.append(v)
-        # Other vars
-        for v in selected_other_step4:
             if (
                 st.session_state["vif_selections"].get(v, True)
                 and v in df_r.columns
@@ -2338,15 +2341,15 @@ with st.expander(
                 _get_selected_vars_from_session(selected_organic_step4)
             )
 
-        if selected_context_step4:
+        if combined_context_step4:
             _render_vif_table(
                 "Selected Context Variables",
-                selected_context_step4,
+                combined_context_step4,
                 "context",
                 global_vif_values,
             )
             all_selected_vars_step4.extend(
-                _get_selected_vars_from_session(selected_context_step4)
+                _get_selected_vars_from_session(combined_context_step4)
             )
 
         if selected_factor_step4:
@@ -2358,17 +2361,6 @@ with st.expander(
             )
             all_selected_vars_step4.extend(
                 _get_selected_vars_from_session(selected_factor_step4)
-            )
-
-        if selected_other_step4:
-            _render_vif_table(
-                "Selected Other Variables",
-                selected_other_step4,
-                "other",
-                global_vif_values,
-            )
-            all_selected_vars_step4.extend(
-                _get_selected_vars_from_session(selected_other_step4)
             )
 
         # =====================================================
@@ -2566,7 +2558,9 @@ with st.expander(
                         v for v in selected_organic_step4 if v in final_vars
                     ],
                     "context_vars": [
-                        v for v in selected_context_step4 if v in final_vars
+                        v
+                        for v in combined_context_step4
+                        if v in final_vars
                     ],
                     "factor_vars": [
                         v for v in selected_factor_step4 if v in final_vars
@@ -2671,7 +2665,7 @@ with st.expander(
                     f"**Paid Media Response Vars:** {len(selected_media_response_vars)}\n"
                     f"**Corresponding Paid Media Spends:** {len(selected_spends_from_vif)}\n"
                     f"**Organic Vars:** {len([v for v in selected_organic_step4 if v in final_vars])}\n"
-                    f"**Context Vars:** {len([v for v in selected_context_step4 if v in final_vars])}\n"
+                    f"**Context Vars:** {len([v for v in combined_context_step4 if v in final_vars])}\n"
                     f"**Factor Vars:** {len([v for v in selected_factor_step4 if v in final_vars])}\n\n"
                     "👉 Navigate to **Run Models** page to see prefilled values."
                 )
