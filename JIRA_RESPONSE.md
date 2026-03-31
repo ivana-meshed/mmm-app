@@ -11,143 +11,183 @@
 
 The benchmarking system requested in this ticket is now live on the
 {{copilot/build-benchmarking-script-mmm-configs}} branch.
-Below is a summary of what has been implemented, mapped to each point in the ticket.
+Below is a point-by-point response in the same order as the ticket.
 
 ---
 
-**h3. What Was Built**
+**h3. Problem — addressed**
 
-A fully automated, queue-based benchmarking pipeline that:
-- Runs a configurable set of MMM configs against a {{selected_columns.json}} dataset
-- Writes an analyzable results table (CSV / Parquet) with model config, fit metrics, and decomposition metrics
-- Supports cartesian-product _and_ sequential (one-dimension-at-a-time) test strategies
-- Is driven by a single command: {{python scripts/run_full_benchmark.py --path <gcs-path>}}
-
-Documentation:
-- [USAGE_GUIDE.md] — how to run benchmarks, all CLI flags, cost estimates
-- [ANALYSIS_GUIDE.md] — how to analyze and interpret results
-- [README.md] — quick-start commands with cost/time estimates
+We now have a fully reproducible, queue-based benchmarking pipeline.
+Every variant is identified by an explicit config label (adstock × split × time-agg × spend-var × window),
+and results are written to a structured CSV so comparisons are objective and repeatable.
 
 ---
 
-**h3. Output Table — Metrics Tracked**
+**h3. Idea — what was built**
 
-| Category | Metric | Notes |
-|----------|--------|-------|
-| Model fit | {{rsq_train}}, {{rsq_val}}, {{rsq_test}} | R² on train / val / test splits |
-| Model fit | {{nrmse_train}}, {{nrmse_val}}, {{nrmse_test}} | NRMSE (lower = better) |
-| Decomposition | {{decomp_rssd}} | Decomposition quality (lower = better) |
-| Config | {{adstock}}, {{train_size}}, {{resample_freq}}, {{mapping_strategy}} | Full config captured per variant |
-| Seasonality | {{seasonality_window}} | Training window label (full / 2y / 3y) |
+A single command runs the full sweep end-to-end:
 
-ROAS and driver waterfall are captured from {{model_summary.json}} alongside the metrics above.
+{code:bash}
+python scripts/run_full_benchmark.py \
+  --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  [--full-run | --extended-run | --production-run] [--all-adstock] [--sequential] [--top-n N]
+{code}
+
+The pipeline:
+# Parses {{selected_columns.json}} from GCS to read data metadata
+# Loads the fleet marketplace benchmark config (90 cartesian variants, geometric default)
+# Submits all variants to the Cloud Run Jobs queue
+# Processes the queue until all training jobs complete
+# Writes an analyzable results table (CSV) with model config + all metrics
+
+Output table columns per variant:
+
+|| Category || Metric ||
+| Model fit | {{rsq_train}}, {{rsq_val}}, {{rsq_test}} (R²) |
+| Model fit | {{nrmse_train}}, {{nrmse_val}}, {{nrmse_test}} (NRMSE) |
+| Decomposition | {{decomp_rssd}} — decomposition quality (lower = better) |
+| Media efficiency | ROAS per channel — from {{model_summary.json}} |
+| Driver waterfall | Trend/intercept vs media contributions |
+| Config | {{adstock}}, {{train_size}}, {{resample_freq}}, {{mapping_strategy}}, {{seasonality_window}} |
+
+Documentation: [USAGE_GUIDE.md] · [ANALYSIS_GUIDE.md] · [README.md]
 
 ---
 
 **h3. Tests Supported**
 
-**Paid media: spend → media var mapping**
-Implemented via the {{spend_var_mapping}} dimension:
-- {{spend_to_spend}} — all channels: spend → spend
-- {{spend_to_proxy}} — all channels: spend → sessions / clicks / impressions
-- {{mixed_by_funnel}} — upper-funnel → proxy, lower-funnel → spend
+**(1) Paid media: spend → media var mapping**
 
-The fleet/marketplace benchmark ({{benchmarks/comprehensive_benchmark_fleet_marketplace.json}})
-extends this with two additional variants: {{spend_to_impressions}} and
-{{spend_to_clicks}}, and separate {{mixed_by_funnel_impressions}} /
-{{mixed_by_funnel_clicks}} splits.
-See the *Fleet / Mobility Marketplace Dataset* section in [USAGE_GUIDE.md].
+Implemented as the {{spend_var_mapping}} dimension — 5 variants in the fleet marketplace config:
 
-Evaluation metrics: R², NRMSE, {{decomp_rssd}}, allocator stability.
+|| Variant || {{paid_media_vars}} || Best for ||
+| {{spend_to_spend}} | = paid_media_spends (cost columns) | Direct cost attribution |
+| {{spend_to_impressions}} | impression columns (all channels) | Ad delivery volume signal |
+| {{spend_to_clicks}} | click columns (all channels) | Engagement-weighted signal |
+| {{mixed_by_funnel_impressions}} | upper-funnel → impressions; search/pmax/bing → spend | Funnel-aware hybrid |
+| {{mixed_by_funnel_clicks}} | upper-funnel → clicks; search/pmax/bing → spend | Funnel-aware hybrid |
 
----
+Upper funnel: Meta, Google Display, Google YouTube.
+Lower funnel: Google Search Brand/Non-brand, Google PMax, Bing Search.
 
-**Training vs production: train / val / test splits**
-Implemented via the {{train_splits}} dimension:
-- (0.7, 0.9) — 70% train, 20% val, 10% test
-- (0.75, 0.9) — 75% train, 15% val, 10% test
-- (0.65, 0.8) — 65% train, 15% val, 20% test
-
-Val/test gap is the primary evaluation signal. See Workflow 2 in [ANALYSIS_GUIDE.md].
+Evaluation: R², NRMSE, {{decomp_rssd}}, allocator stability. See Workflow 1 in [ANALYSIS_GUIDE.md].
 
 ---
 
-**Adstock choice**
-Implemented via the {{adstock}} dimension (use {{--all-adstock}} to enable all three):
-- {{geometric}} — with Meshed recommend preset
-- {{weibull_cdf}} — with Meta default preset
-- {{weibull_pdf}} — with Meshed recommend preset
+**(2) Training vs production: train / val / test splits**
 
-Hyperparameter ranges are per-channel and per-adstock-type via
-{{benchmarks/generic_hyperparameter_ranges_v2.json}}.
-See [USAGE_GUIDE.md] for CLI usage and the presets reference.
+Implemented as the {{train_splits}} dimension — 3 variants:
 
----
+|| Split || {{train_size}} || Train % || Val % || Test % ||
+| {{70_90}} | [0.70, 0.90] | 70 | 20 | 10 |
+| {{75_90}} | [0.75, 0.90] | 75 | 15 | 10 |
+| {{65_80}} | [0.65, 0.80] | 65 | 15 | 20 |
 
-**Time aggregation**
-Implemented via the {{time_aggregation}} dimension:
-- {{daily}} ({{resample_freq: none}})
-- {{weekly}} ({{resample_freq: W}})
-
-See Workflow 3 in [ANALYSIS_GUIDE.md] for daily vs weekly interpretation guidance.
+Primary signal: val/test R² gap and {{decomp_rssd}} stability across splits.
+See Workflow 2 in [ANALYSIS_GUIDE.md].
 
 ---
 
-**Training window / seasonality window**
-Implemented via the {{seasonality_window}} dimension (use {{--all-windows}} or
-{{--windows 2y 3y}} to enable):
-- {{full}} — all available history (default for all non-test runs)
-- {{2y}} — last 104 weeks
-- {{3y}} — last 156 weeks
+**(3) Adstock choice**
 
-Window offsets are resolved at runtime from {{end_date}} in {{selected_columns.json}}.
-The default for full/extended/production runs is now {{full}} — this ensures results
-always carry an explicit window label without changing the training data window.
+Implemented as the {{adstock}} dimension — 3 variants (add {{--all-adstock}} to enable all three):
+
+|| Variant || Hyperparameter preset ||
+| {{geometric}} | Meshed recommend |
+| {{weibull_cdf}} | Meta default |
+| {{weibull_pdf}} | Meshed recommend |
+
+Per-channel, per-adstock-type ranges are defined in
+{{benchmarks/generic_hyperparameter_ranges_v2.json}} across three presets
+({{conservative}} / {{balanced}} / {{exploratory}}).
+The fleet marketplace config uses {{balanced}} by default.
+See Hyperparameter Presets in [USAGE_GUIDE.md].
+
+---
+
+**(4) Time aggregation**
+
+Implemented as the {{time_aggregation}} dimension — 2 variants:
+
+|| Variant || {{resample_freq}} ||
+| {{daily}} | none (no resampling) |
+| {{weekly}} | W (ISO weekly) |
+
+See Workflow 3 in [ANALYSIS_GUIDE.md] for daily-vs-weekly interpretation guidance.
+
+---
+
+**(5) Training start/end date + seasonality window**
+
+Implemented as the {{seasonality_window}} dimension — 3 variants (already in the fleet marketplace config, no extra flag needed):
+
+|| Variant || Lookback || Notes ||
+| {{full}} | all available history | no date override — default for all non-test runs |
+| {{2y}} | last 104 weeks | resolved from {{end_date}} in {{selected_columns.json}} |
+| {{3y}} | last 156 weeks | resolved from {{end_date}} in {{selected_columns.json}} |
+
+Window offsets are resolved to absolute {{start_date}} / {{end_date}} at submission time.
+Evaluation: fit metrics + media contributions stability + {{decomp_rssd}} across windows.
+See Workflow 5 in [ANALYSIS_GUIDE.md].
 
 ---
 
 **h3. Combination Strategies**
 
-Two combination modes are available:
+Two modes are available:
 
-|| Mode || Flag || Variants (geometric default) || Use case ||
-| Cartesian (default) | _(none)_ | 18 (1×3×2×3) | Exhaustive cross-dimensional sweep |
-| Sequential | {{--sequential}} | 9 (1+3+2+3) | Fast initial exploration, one dimension at a time |
+|| Mode || Flag || Variants (geometric, fleet config) || Formula ||
+| Cartesian (default) | _(none)_ | 90 | 1×3×2×5×3 |
+| Sequential | {{--sequential}} | 14 | 1+3+2+5+3 |
+
+With {{--all-adstock}} (all 3 adstock types):
+
+|| Mode || Variants ||
+| Cartesian | 270 (3×3×2×5×3) |
+| Sequential | 16 (3+3+2+5+3) |
 
 Sequential order (from most to least fundamental):
 # {{adstock}} — core model transform
 # {{train_splits}} — evaluation methodology
 # {{time_aggregation}} — data granularity
 # {{spend_var_mapping}} — media signal strategy
-# {{seasonality_window}} — training period (if windows specified)
+# {{seasonality_window}} — training period
 
-Use sequential mode first, then run a cartesian sweep on the top-performing dimension settings.
+Recommended: run sequential first (~14 variants) to screen dimensions, then cartesian on the top settings.
 
 ---
 
 **h3. Cost & Time Estimates**
 
-| Config | Mode | Variants | Time | Cost (USD) |
-|--------|------|----------|------|-----------|
-| Default (geometric, cartesian) | Standard | 18 | ~1.5-2 h | ~$14 |
-| Sequential (geometric) | Standard | 9 | ~40-70 min | ~$7 |
-| All adstock, cartesian | Standard | 54 | ~4-6 h | ~$40 |
-| Top-10 | Extended | 10 | ~2-3 h | ~$20 |
-| Top-10 | Production | 10 | ~5-7 h | ~$50 |
+Based on the fleet marketplace config (90 base variants, geometric only).
 
-Full cost table: [README.md — Cost & Time Estimates].
+|| Config || Mode || Variants || Time || Cost (USD) ||
+| Default geometric, cartesian | Test | 90 | ~1.5 h | ~$15 |
+| Default geometric, cartesian | Standard | 90 | ~6 h | ~$75 |
+| All adstock, cartesian | Standard | 270 | ~18 h | ~$225 |
+| Default geometric, cartesian | Extended | 90 | ~12-15 h | ~$210 |
+| All adstock, cartesian | Extended | 270 | ~40 h | ~$630 |
+| Sequential geometric | Standard | 14 | ~1 h | ~$12 |
+| Top-10 | Extended | 10 | ~1.5 h | ~$23 |
+| Top-10 | Production | 10 | ~3-4 h | ~$55 |
 
-*Calculation: 8 vCPU × job_duration_hours × $0.38/vCPU-h + ~10% data/storage overhead*
+Full cost table with all flag combinations: [USAGE_GUIDE.md — Cost Estimates].
+
+*Cost per combo: test ~$0.17 · standard ~$0.83 · extended ~$2.33 · production ~$5.50*
 
 ---
 
-**h3. Output / Streamlit Integration**
+**h3. Output — analyzable table + Streamlit page**
 
-Results are written to:
+**(1) Results table**
 - GCS: {{gs://mmm-app-output/benchmarks/<benchmark_id>/results_<timestamp>.csv}}
-- Local: {{./benchmark_analysis/results_*.csv}} + 6 PNG plots
+- Local: {{./benchmark_analysis/results_*.csv}} + 6 PNG plots (ranking, adstock comparison, split heatmap, spend-var bar, time-agg, window sweep)
 
-A Streamlit results page (View Benchmark Results) is available in the app.
+**(2) Streamlit page**
+A *View Benchmark Results* page is available in the app.
 Analysis workflows (adstock comparison, split evaluation, spend→var, time aggregation,
 comprehensive ranking) are documented in [ANALYSIS_GUIDE.md].
 
@@ -156,18 +196,29 @@ comprehensive ranking) are documented in [ANALYSIS_GUIDE.md].
 **h3. Quick Start**
 
 {code:bash}
-# Sequential exploration — fastest way to learn (9 variants, ~$7, ~1 hour)
+# Sequential exploration — fastest way to screen all dimensions (14 variants, ~$12, ~1 h)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
   --full-run --sequential
 
-# Full cartesian sweep — geometric adstock (18 variants, ~$14, ~2 hours)
+# Full cartesian sweep — geometric adstock (90 variants, ~$75, ~6 h)
 python scripts/run_full_benchmark.py \
-  --path <path> --full-run
+  --path <path> \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --full-run
 
-# All adstock types (54 variants, ~$40, ~4-6 hours)
+# All adstock types (270 variants, ~$225, ~18 h)
 python scripts/run_full_benchmark.py \
-  --path <path> --full-run --all-adstock
+  --path <path> \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --full-run --all-adstock
 {code}
 
-See [USAGE_GUIDE.md] for the complete command reference.
+See [USAGE_GUIDE.md] for the complete command reference and appendix with every combination enumerated.
