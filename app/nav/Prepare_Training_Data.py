@@ -2665,7 +2665,7 @@ with st.expander(
                     f"**Paid Media Response Vars:** {len(selected_media_response_vars)}\n"
                     f"**Corresponding Paid Media Spends:** {len(selected_spends_from_vif)}\n"
                     f"**Organic Vars:** {len([v for v in selected_organic_step4 if v in final_vars])}\n"
-                    f"**Context Vars:** {len([v for v in selected_context_step4 if v in final_vars])}\n"
+                    f"**Context Vars:** {len([v for v in combined_context_step4 if v in final_vars])}\n"
                     f"**Factor Vars:** {len([v for v in selected_factor_step4 if v in final_vars])}\n\n"
                     "👉 Navigate to **Run Models** page to see prefilled values."
                 )
