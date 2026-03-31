@@ -46,6 +46,8 @@ tmp/
 temp/
 *.tmp
 dist/
+*.log
+*.out
 
 # Distribution packages created by prepare_distribution.sh
 # These contain customer-specific license certificates
