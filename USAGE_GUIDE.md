@@ -773,6 +773,42 @@ python scripts/run_full_benchmark.py \
 ### Recommended Quick Starts
 
 ```bash
+# Sequential extended — geometric adstock, full window, all splits + spend-var mappings
+# (11 combos: 1 adstock + 3 splits + 2 time-agg + 5 spend-var, ~$26, ~1.5 h)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --extended-run --sequential
+
+# Sequential production — geometric adstock, full window, all splits + spend-var mappings
+# (11 combos: 1 adstock + 3 splits + 2 time-agg + 5 spend-var, ~$61, ~4 h)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --production-run --sequential
+
+# Cartesian extended — geometric adstock, full window, all combinations
+# (30 combos: 1×3×2×5, ~$70, ~4-5 h)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --extended-run
+
+# Cartesian production — geometric adstock, full window, all combinations
+# (30 combos: 1×3×2×5, ~$165, ~10-12 h)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
+  --production-run
+
 # Thorough analysis — geometric adstock, top-10 variants, extended run (~$35, ~2-3 h)
 python scripts/run_full_benchmark.py \
   --path <path> \
