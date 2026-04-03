@@ -252,36 +252,53 @@ for test_type in df['benchmark_test'].unique():
 
 **Question:** Which preset (`fb`, `meshed`, `balanced`, `conservative`, `exploratory`) produces the best model fit?
 
-Run the same benchmark config twice with different presets and compare:
+The recommended approach is to run a single benchmark with `--compare-presets` (3 presets) or `--compare-all-presets` (all 5). The preset becomes a full variant dimension so all results are directly comparable in one run:
 
 ```bash
-# Run with Meshed recommended preset
-python scripts/run_full_benchmark.py --path <path> --full-run \
+# Compare balanced, fb, and meshed in one run (30 base × 3 presets = 90 variants)
+python scripts/run_full_benchmark.py \
+  --path <path> --full-run \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
-  --meshed
+  --compare-presets
 
-# Run with Facebook/Robyn official preset
-python scripts/run_full_benchmark.py --path <path> --full-run \
+# Or compare all five presets (30 base × 5 = 150 variants)
+python scripts/run_full_benchmark.py \
+  --path <path> --full-run \
+  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
-  --fb
+  --compare-all-presets
 ```
 
-Collect results and compare:
+Collect results and compare — results include a `preset_label` column:
 
 ```python
 import pandas as pd
 
-df_meshed = pd.read_csv('results_meshed.csv')
-df_fb = pd.read_csv('results_fb.csv')
+df = pd.read_csv('results.csv')
 
-df_meshed['preset'] = 'meshed'
-df_fb['preset'] = 'fb'
-df = pd.concat([df_meshed, df_fb], ignore_index=True)
+# Filter preset comparison variants
+preset_df = df[df['benchmark_test'] == 'hyperparameter_preset']
 
-comparison = df.groupby('preset')[['rsq_val', 'nrmse_val', 'decomp_rssd']].mean()
-print(comparison)
+comparison = preset_df.groupby('benchmark_variant')[
+    ['rsq_val', 'nrmse_val', 'decomp_rssd']
+].mean()
+
+print("\nPreset Comparison:")
+print(comparison.sort_values('rsq_val', ascending=False))
+```
+
+When using cartesian mode (default), the `benchmark_test` is `"combination"` and `preset_label` carries the preset name — filter on that instead:
+
+```python
+# Cartesian run: group by preset_label across all combinations
+if 'preset_label' in df.columns:
+    comparison = df.groupby('preset_label')[
+        ['rsq_val', 'nrmse_val', 'decomp_rssd']
+    ].mean()
+    print(comparison.sort_values('rsq_val', ascending=False))
 ```
 
 **Preset guidance:**
@@ -352,12 +369,16 @@ df = pd.read_csv('results.csv')
 # - cartesian (default): adstock=1, train_splits=3, time_aggregation=2,
 #   spend_var_mapping=3, combination=18 (1×3×2×3)
 # - sequential (--sequential): one variant per dimension entry
+# - hyperparameter_preset: number of presets (3 for --compare-presets,
+#   5 for --compare-all-presets) — only present in sequential mode;
+#   in cartesian mode presets appear as combination rows with a preset_label.
 # Adjust to match your actual run configuration.
 expected = {
     'adstock': 3,          # comprehensive_benchmark adstock dim (3 types)
     'train_splits': 3,
     'time_aggregation': 2,
     'spend_var_mapping': 3,
+    'hyperparameter_preset': 3,  # --compare-presets (3) or --compare-all-presets (5)
     'combination': 18,     # cartesian product (default geometric-only run)
 }
 

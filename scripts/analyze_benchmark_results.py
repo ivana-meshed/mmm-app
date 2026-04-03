@@ -370,6 +370,8 @@ class BenchmarkAnalyzer:
             "revision": variant.get("revision", "default"),
             # Hyperparameter preset label (empty when no preset sweep)
             "preset_label": variant.get("preset_label", ""),
+            # Seasonality window label (empty when no window sweep)
+            "window_label": variant.get("window_label", ""),
             # Configuration (from summary primarily)
             "adstock": adstock,
             "train_size": str(train_size),

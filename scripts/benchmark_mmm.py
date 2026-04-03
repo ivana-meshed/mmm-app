@@ -687,6 +687,10 @@ class BenchmarkRunner:
             variant["benchmark_test"] = "seasonality_window"
             variant["benchmark_variant"] = spec.get("name", "unnamed")
             variant["benchmark_description"] = spec.get("description", "")
+            # Preserve the human-readable window name so it survives
+            # cartesian merging and can be tracked in results (mirrors
+            # preset_label used by _generate_preset_variants).
+            variant["window_label"] = spec.get("name", "")
 
             # Resolve weeks_back to absolute start_date
             if "weeks_back" in spec:
