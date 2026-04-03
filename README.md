@@ -159,8 +159,8 @@ python scripts/benchmark_mmm.py --all-benchmarks --test-run-all
 # 2. Process queue
 python scripts/process_queue_simple.py --loop --cleanup
 
-# 3. Analyze results
-python scripts/analyze_benchmark_results.py --benchmark-id <id> --output-dir ./analysis
+# 3. Analyze results (pass --queue-name matching the queue used in step 1)
+python scripts/analyze_benchmark_results.py --benchmark-id <id> --queue-name default-dev --output-dir ./analysis
 ```
 
 See **USAGE_GUIDE.md** for detailed instructions and **ANALYSIS_GUIDE.md** for analysis workflows.

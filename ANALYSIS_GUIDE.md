@@ -6,6 +6,12 @@ This guide explains how to collect, analyze, and interpret benchmark results to 
 
 ## Collecting Results
 
+> **Note:** If you used `run_full_benchmark.py`, analysis runs automatically as the final step and
+> passes the correct `--queue-name` through. For manual collection and analysis with
+> `analyze_benchmark_results.py`, always pass `--queue-name <queue>` matching the queue used during
+> job submission (defaults to `$QUEUE_NAME` env var or `"default-dev"`). This ensures correct
+> variant-to-timestamp mapping; without it, results may fall back to unreliable recency-based search.
+
 ### Step 1: Identify Benchmark ID
 
 ```bash
