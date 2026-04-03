@@ -139,6 +139,24 @@ def load_and_prepare_csv(
         for old, new in rename_applied.items():
             logger.info(f"     {old} → {new}")
 
+    # Clip media/spend columns to 0 — floating-point precision can produce
+    # tiny negative values (e.g. -2.84e-14) that cause Robyn to reject the
+    # data with "Media must be >=0".
+    media_cols = [
+        c
+        for c in df.columns
+        if any(
+            kw in c
+            for kw in ("COST", "SPEND", "CLICKS", "IMPRESSIONS")
+        )
+    ]
+    if media_cols:
+        df[media_cols] = df[media_cols].clip(lower=0)
+        logger.info(
+            f"   Clipped {len(media_cols)} media column(s) to min=0 "
+            f"(removes floating-point noise)"
+        )
+
     # Filter to country
     if "MARKET_NAME" in df.columns:
         original = len(df)
