@@ -785,7 +785,7 @@ def process_queue(queue_name: str):
         )
 
 
-def analyze_results(benchmark_id: str):
+def analyze_results(benchmark_id: str, queue_name: str = DEFAULT_QUEUE):
     """Analyze and visualize benchmark results."""
     logger.info("=" * 80)
     logger.info("STEP 3: ANALYZING RESULTS")
@@ -798,6 +798,8 @@ def analyze_results(benchmark_id: str):
         benchmark_id,
         "--output-dir",
         "./benchmark_analysis",
+        "--queue-name",
+        queue_name,
     ]
 
     logger.info(f"📊 Running analysis: {' '.join(cmd)}")
@@ -809,7 +811,7 @@ def analyze_results(benchmark_id: str):
         logger.error(result.stderr)
         logger.warning("   You can run analysis manually later with:")
         logger.warning(
-            f"   python scripts/analyze_benchmark_results.py --benchmark-id {benchmark_id}"
+            f"   python scripts/analyze_benchmark_results.py --benchmark-id {benchmark_id} --queue-name {queue_name}"
         )
     else:
         logger.info(result.stdout)
@@ -1272,13 +1274,24 @@ Examples:
             logger.info("")
 
         # Step 3: Analyze results (optional)
-        if not args.skip_analysis and not args.skip_queue:
-            analyze_results(benchmark_id)
+        if not args.skip_analysis:
+            if args.skip_queue:
+                logger.info(
+                    "ℹ️  Queue processing was skipped — analyzing any "
+                    "results already available in GCS. "
+                    "Re-run analysis after all jobs complete for full results:"
+                )
+                logger.info(
+                    f"   python scripts/analyze_benchmark_results.py "
+                    f"--benchmark-id {benchmark_id} "
+                    f"--queue-name {args.queue_name}"
+                )
+            analyze_results(benchmark_id, args.queue_name)
             logger.info("")
-        elif args.skip_analysis:
+        else:
             logger.info("⏭️  Skipping analysis (--skip-analysis)")
             logger.info(
-                f"   Run manually: python scripts/analyze_benchmark_results.py --benchmark-id {benchmark_id}"
+                f"   Run manually: python scripts/analyze_benchmark_results.py --benchmark-id {benchmark_id} --queue-name {args.queue_name}"
             )
             logger.info("")
 
@@ -1288,7 +1301,7 @@ Examples:
         logger.info("=" * 80)
         logger.info(f"Benchmark ID: {benchmark_id}")
 
-        if not args.skip_analysis and not args.skip_queue:
+        if not args.skip_analysis:
             logger.info(f"Results: ./benchmark_analysis/")
             logger.info(f"CSV: ./benchmark_analysis/results_*.csv")
             logger.info(f"Plots: ./benchmark_analysis/*.png")

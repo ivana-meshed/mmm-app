@@ -1269,6 +1269,15 @@ def main():
         help="Skip plot generation, only export CSV",
     )
     parser.add_argument(
+        "--queue-name",
+        default=os.getenv("QUEUE_NAME", "default-dev"),
+        help=(
+            "Queue name used for the benchmark run "
+            "(default: $QUEUE_NAME env var or 'default-dev'). "
+            "Used to map variant names to result timestamps."
+        ),
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug logging",
@@ -1295,7 +1304,7 @@ def main():
 
     # Collect results
     logger.info(f"Analyzing benchmark: {args.benchmark_id}")
-    df = analyzer.collect_results(args.benchmark_id)
+    df = analyzer.collect_results(args.benchmark_id, args.queue_name)
 
     if df is None or df.empty:
         logger.error("No results found to analyze")
