@@ -126,6 +126,19 @@ DEFAULT_DK_MAPPING = (
 DK_CONFIG_DIR = REPO_ROOT / "data" / "dk"
 GCS_CONFIG_PREFIX = "benchmarks/dk"
 
+# Column rename map: renames CSV columns so they match the curated DK mapping
+# JSON files (which use supply/CRM terminology that differs from raw export).
+# Applied to the DataFrame BEFORE uploading to GCS and before column
+# classification, so the Parquet and selected_columns.json use consistent names.
+COLUMN_RENAME_MAP: Dict[str, str] = {
+    # Raw export name              →  Mapping JSON name
+    "CRM_REACHABLE_AUDIENCE": "CRM_REACHABLE_USERS",
+    "ACTIVE_VEHICLES": "FLEET_TOTAL_UNITS",
+    "N_PARTNERS": "ACTIVE_PARTNER_COUNT",
+    # Required by dk_context_expanded_test_clean.json (FLEET_AVAILABLE_UNITS)
+    "ACTIVE_INCL_HIDDEN_VEHICLES": "FLEET_AVAILABLE_UNITS",
+}
+
 # Fallback paid-media spend columns used in auto-classify mode (--no-mapping).
 # These are the 10 channels confirmed present in the Denmark CSV.
 PAID_MEDIA_SPENDS: List[str] = [
@@ -587,6 +600,21 @@ def main() -> None:
     logger.info(
         f"   Loaded {len(df):,} rows × {len(df.columns)} columns"
     )
+
+    # Apply column renames so the uploaded Parquet uses the same names as the
+    # curated mapping JSON files (e.g. CRM_REACHABLE_AUDIENCE → CRM_REACHABLE_USERS)
+    rename_applied = {
+        old: new
+        for old, new in COLUMN_RENAME_MAP.items()
+        if old in df.columns
+    }
+    if rename_applied:
+        df.rename(columns=rename_applied, inplace=True)
+        logger.info(
+            f"   Renamed {len(rename_applied)} column(s) to match mapping files:"
+        )
+        for old, new in rename_applied.items():
+            logger.info(f"     {old} → {new}")
 
     # Filter to the requested country
     if "MARKET_NAME" in df.columns:
