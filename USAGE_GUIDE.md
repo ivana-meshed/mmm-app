@@ -264,15 +264,22 @@ python scripts/benchmark_mmm.py --collect-results benchmark_id --export-format p
 # Analyze results and generate plots
 python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id
 
+# Specify queue name (required when queue is not 'default-dev'; also reads $QUEUE_NAME env var)
+python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --queue-name default
+
 # Save plots and CSV locally
-python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --output-dir ./results
+python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --queue-name default --output-dir ./results
 
 # Custom plot format
-python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --format pdf
+python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --queue-name default --format pdf
 
 # CSV only (no plots)
-python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --no-plots
+python scripts/analyze_benchmark_results.py --benchmark-id benchmark_id --queue-name default --no-plots
 ```
+
+> **Note:** `--queue-name` is used to map variant names to result timestamps. If omitted, it
+> defaults to the `$QUEUE_NAME` environment variable or `"default-dev"`. Pass the same queue name
+> that was used when submitting jobs to ensure correct variant-to-timestamp mapping.
 
 **What it generates:**
 - CSV export with all metrics
@@ -330,7 +337,7 @@ python scripts/run_full_benchmark.py \
   --path <path> \
   --queue-name default-dev
 
-# Skip queue processing (submit only)
+# Skip queue processing (submit only) — analysis step still runs on any results already in GCS
 python scripts/run_full_benchmark.py \
   --path <path> \
   --skip-queue
