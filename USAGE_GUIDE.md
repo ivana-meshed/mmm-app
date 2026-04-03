@@ -62,7 +62,8 @@ python scripts/run_full_benchmark.py \
 1. Downloads selected_columns.json from GCS
 2. Generates comprehensive benchmark — default **18 variants** (1 adstock × 3 splits × 2 time_agg × 3 spend_var).
    Non-test runs include the `full` training window by default.
-   Use `--all-adstock` for 54 variants, `--sequential` for 9 variants (per-dimension).
+   Use `--all-adstock` for 54 variants, `--sequential` for 9 variants (per-dimension),
+   `--compare-presets` for 54 variants (18 × 3 presets), `--compare-all-presets` for 90 variants (18 × 5 presets).
 3. Submits all test combinations to queue
 4. Processes queue until complete
 5. Analyzes results and creates visualizations
@@ -353,6 +354,22 @@ python scripts/run_full_benchmark.py \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments.json \
   --hyperparameter-preset exploratory
+
+# Compare 3 presets in one run (balanced / fb / meshed — multiplies base variants by 3)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments.json \
+  --compare-presets
+
+# Compare all 5 presets in one run (multiplies base variants by 5)
+python scripts/run_full_benchmark.py \
+  --path <path> \
+  --full-run \
+  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
+  --channel-type-assignments-config benchmarks/channel_type_assignments.json \
+  --compare-all-presets
 ```
 
 **What it does:**
@@ -360,7 +377,10 @@ python scripts/run_full_benchmark.py \
 2. Generates comprehensive benchmark:
    - Default: **18 variants** cartesian (1 adstock × 3 splits × 2 time_agg × 3 spend_var)
    - `--all-adstock`: 54 variants (3 adstock × 3 × 2 × 3)
+   - `--all-windows`: 54 variants (18 × 3 windows)
    - `--sequential`: 9 variants (each dimension varied independently)
+   - `--compare-presets`: 54 variants (18 × 3 presets — adds preset as a dimension)
+   - `--compare-all-presets`: 90 variants (18 × 5 presets)
    - Non-test runs include `full` training window by default
 3. Submits all jobs to queue
 4. Processes queue until empty
@@ -376,6 +396,7 @@ Testing order is chosen to progressively build on results:
 3. **time_aggregation** — daily vs weekly granularity
 4. **spend_var_mapping** — media signal strategy (spend vs proxy)
 5. **seasonality_window** — training period length (if `--all-windows` or `--windows` given)
+6. **hyperparameter_preset** — preset sweep (if `--compare-presets` or `--compare-all-presets` given)
 
 Use sequential mode for initial exploration before committing to a full cartesian sweep.
 
@@ -823,7 +844,9 @@ python scripts/run_full_benchmark.py \
 
 #### Preset comparison (`--compare-presets` / `--compare-all-presets`)
 
-Adds the hyperparameter preset as an additional variant dimension. Each base combination is run once per preset, multiplying total variant count.
+Adds the hyperparameter preset as an additional variant dimension. Each base combination is run once per preset, multiplying total variant count (cartesian) or adding an independent preset sweep (sequential).
+
+**Cartesian mode:**
 
 | Run mode | Presets | Base variants | Total variants | Approx. time | Approx. cost | Flag(s) to add |
 |----------|---------|--------------|---------------|-------------|-------------|----------------|
@@ -833,6 +856,17 @@ Adds the hyperparameter preset as an additional variant dimension. Each base com
 | Standard, compare all 5 | all 5 | 30 | 150 | ~10 h | ~$125 | `--full-run --compare-all-presets` |
 | Extended, compare 3 presets | balanced/fb/meshed | 30 | 90 | ~12-15 h | ~$210 | `--extended-run --compare-presets` |
 | Extended, compare all 5 | all 5 | 30 | 150 | ~20-25 h | ~$350 | `--extended-run --compare-all-presets` |
+
+**Sequential mode + preset comparison:**
+
+In sequential mode the preset sweep is appended as an independent dimension (adds rather than multiplies). Default sequential (11 variants) + 3 presets = 14; + 5 presets = 16.
+
+| Run mode | Presets | Base variants | Total variants | Approx. time | Approx. cost | Flag(s) to add |
+|----------|---------|--------------|---------------|-------------|-------------|----------------|
+| Sequential standard, compare 3 | balanced/fb/meshed | 11 | 14 | ~1 h | ~$12 | `--full-run --sequential --compare-presets` |
+| Sequential standard, compare all 5 | all 5 | 11 | 16 | ~1.5 h | ~$13 | `--full-run --sequential --compare-all-presets` |
+| Sequential extended, compare 3 | balanced/fb/meshed | 11 | 14 | ~2 h | ~$33 | `--extended-run --sequential --compare-presets` |
+| Sequential extended, compare all 5 | all 5 | 11 | 16 | ~2.5 h | ~$37 | `--extended-run --sequential --compare-all-presets` |
 
 #### Sequential mode (`--sequential`)
 
@@ -1077,11 +1111,14 @@ python scripts/run_full_benchmark.py \
 | Time aggregation | `daily`, `weekly` | 2 | — |
 | Spend-var mapping | `spend_to_spend`, `spend_to_impressions`, `spend_to_clicks`, `mixed_by_funnel_impressions`, `mixed_by_funnel_clicks` | 5 | — |
 | Seasonality window | `full` _(default)_ / `2y` / `3y` | 1 | 3 (`--all-windows`) |
+| Hyperparameter preset | `balanced` _(default single preset)_ / `fb` / `meshed` / `conservative` / `exploratory` | 1 | 3 (`--compare-presets`) / 5 (`--compare-all-presets`) |
 
 **Default (geometric, full window):** 1×3×2×5×**1** = **30 combinations**  
 **With `--all-adstock`:** 3×3×2×5×1 = **90 combinations**  
 **With `--all-windows`:** 1×3×2×5×3 = **90 combinations**  
-**With `--all-adstock --all-windows`:** 3×3×2×5×3 = **270 combinations**
+**With `--all-adstock --all-windows`:** 3×3×2×5×3 = **270 combinations**  
+**With `--compare-presets`:** 1×3×2×5×1×3 = **90 combinations**  
+**With `--compare-all-presets`:** 1×3×2×5×1×5 = **150 combinations**
 
 **Baseline values** (used for the non-varying dimension in sequential mode):
 
@@ -1103,10 +1140,15 @@ python scripts/run_full_benchmark.py \
 | `--all-adstock` | cartesian | all 3 | full | **90** | 3×3×2×5×1 |
 | `--all-windows` | cartesian | geometric | full+2y+3y | **90** | 1×3×2×5×3 |
 | `--all-adstock --all-windows` | cartesian | all 3 | full+2y+3y | **270** | 3×3×2×5×3 |
+| `--compare-presets` | cartesian | geometric | full | **90** | 1×3×2×5×1×3 |
+| `--compare-all-presets` | cartesian | geometric | full | **150** | 1×3×2×5×1×5 |
+| `--all-adstock --compare-presets` | cartesian | all 3 | full | **270** | 3×3×2×5×1×3 |
 | `--full-run` | cartesian | geometric | full | **30** | 1×3×2×5×1 |
 | `--full-run --all-adstock` | cartesian | all 3 | full | **90** | 3×3×2×5×1 |
 | `--full-run --all-windows` | cartesian | geometric | full+2y+3y | **90** | 1×3×2×5×3 |
 | `--full-run --all-adstock --all-windows` | cartesian | all 3 | full+2y+3y | **270** | 3×3×2×5×3 |
+| `--full-run --compare-presets` | cartesian | geometric | full | **90** | 1×3×2×5×1×3 |
+| `--full-run --compare-all-presets` | cartesian | geometric | full | **150** | 1×3×2×5×1×5 |
 | `--extended-run` | cartesian | geometric | full | **30** | 1×3×2×5×1 |
 | `--extended-run --all-adstock` | cartesian | all 3 | full | **90** | 3×3×2×5×1 |
 | `--production-run` | cartesian | geometric | full | **30** | 1×3×2×5×1 |
@@ -1114,6 +1156,8 @@ python scripts/run_full_benchmark.py \
 | `--full-run --sequential` | sequential | geometric | full | **11** | 1+3+2+5 |
 | `--full-run --sequential --all-adstock` | sequential | all 3 | full | **13** | 3+3+2+5 |
 | `--full-run --sequential --all-windows` | sequential | geometric | full+2y+3y | **14** | 1+3+2+5+3 |
+| `--full-run --sequential --compare-presets` | sequential | geometric | full | **14** | 1+3+2+5+3 presets |
+| `--full-run --sequential --compare-all-presets` | sequential | geometric | full | **16** | 1+3+2+5+5 presets |
 | `--top-n 10 --extended-run` | cartesian | geometric | full | **10** | first 10 of 30 |
 | `--top-n 10 --production-run` | cartesian | geometric | full | **10** | first 10 of 30 |
 
