@@ -251,7 +251,7 @@ def classify_columns(
     logger.info(f"   organic_vars      : {len(organic_vars)} columns")
 
     return {
-        "paid_media_spends": paid_media_vars,  # only present cols
+        "paid_media_spends": paid_media_spends,  # filtered to cols present in CSV
         "paid_media_vars": paid_media_vars,
         "context_vars": context_vars,
         "factor_vars": factor_vars,
@@ -434,6 +434,9 @@ def main() -> None:
     # Filter to the requested country
     if "MARKET_NAME" in df.columns:
         original_rows = len(df)
+        available_markets = sorted(
+            df["MARKET_NAME"].dropna().unique().tolist()
+        )
         df = df[
             df["MARKET_NAME"].str.strip().str.upper()
             == args.country_name.upper()
@@ -443,14 +446,9 @@ def main() -> None:
             f"{len(df):,} rows (from {original_rows:,})"
         )
         if df.empty:
-            available = sorted(
-                df["MARKET_NAME"].dropna().unique().tolist()
-                if "MARKET_NAME" in df.columns
-                else []
-            )
             sys.exit(
                 f"❌ No rows found for MARKET_NAME='{args.country_name}'. "
-                f"Available values: {available}"
+                f"Available values: {available_markets}"
             )
     else:
         logger.warning(
