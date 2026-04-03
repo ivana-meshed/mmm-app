@@ -1933,7 +1933,9 @@ def main():
 
                 # Apply CLI preset override before constructing BenchmarkConfig
                 if args.hyperparameter_preset:
-                    config_dict["hyperparameter_preset"] = args.hyperparameter_preset
+                    config_dict["hyperparameter_preset"] = (
+                        args.hyperparameter_preset
+                    )
 
                 benchmark_config = BenchmarkConfig(config_dict)
 
@@ -2065,7 +2067,9 @@ def main():
     # Apply CLI preset override before constructing BenchmarkConfig
     if args.hyperparameter_preset:
         config_dict["hyperparameter_preset"] = args.hyperparameter_preset
-        logger.info(f"�� Hyperparameter preset override: {args.hyperparameter_preset}")
+        logger.info(
+            f"�� Hyperparameter preset override: {args.hyperparameter_preset}"
+        )
 
     benchmark_config = BenchmarkConfig(config_dict)
     logger.info(f"Loaded benchmark: {benchmark_config.name}")

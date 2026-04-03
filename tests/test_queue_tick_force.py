@@ -115,7 +115,7 @@ class TestQueueTickForceLogic(unittest.TestCase):
     def test_force_parameter_truth_table(self):
         """
         Test all combinations of queue_running and force parameters.
-        
+
         Truth table:
         queue_running | force | should_process
         False         | False | False (paused)
@@ -130,10 +130,13 @@ class TestQueueTickForceLogic(unittest.TestCase):
             (True, True, True, "would process queue"),
         ]
 
-        for queue_running, force, should_process, expected_message in test_cases:
-            with self.subTest(
-                queue_running=queue_running, force=force
-            ):
+        for (
+            queue_running,
+            force,
+            should_process,
+            expected_message,
+        ) in test_cases:
+            with self.subTest(queue_running=queue_running, force=force):
                 # Simulate the check
                 if not queue_running and not force:
                     result = {
@@ -164,7 +167,7 @@ class TestQueueTickFunctionSignatures(unittest.TestCase):
         # This is a signature test - we just verify the parameter exists
         # In actual code, this would be:
         # def _safe_tick_once(..., force: bool = False) -> dict:
-        
+
         # Simulate function call with force parameter
         def mock_safe_tick_once(
             queue_name: str,
@@ -187,7 +190,7 @@ class TestQueueTickFunctionSignatures(unittest.TestCase):
 
     def test_queue_tick_once_headless_signature(self):
         """Test that queue_tick_once_headless accepts force parameter."""
-        
+
         def mock_queue_tick_once_headless(
             queue_name: str,
             bucket_name: str = None,
@@ -211,7 +214,7 @@ class TestQueueTickFunctionSignatures(unittest.TestCase):
 
     def test_queue_tick_signature(self):
         """Test that _queue_tick accepts force parameter."""
-        
+
         def mock_queue_tick(force: bool = False):
             # Would call queue_tick_once_headless with force parameter
             return {"ok": True, "force": force}

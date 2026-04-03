@@ -55,15 +55,12 @@ def _ensure_tick_imports() -> None:
     with _tick_imports_lock:
         if _tick_imports_done:
             return
+        from app_shared import DEFAULT_QUEUE_NAME, GCS_BUCKET
         from app_shared import (  # noqa: PLC0415
-            DEFAULT_QUEUE_NAME,
-            GCS_BUCKET,
             _schedule_next_tick_if_needed as _sntin,
-            queue_tick_once_headless,
         )
-        from app_split_helpers import (  # noqa: PLC0415
-            prepare_and_launch_job,
-        )
+        from app_shared import queue_tick_once_headless
+        from app_split_helpers import prepare_and_launch_job  # noqa: PLC0415
 
         _queue_tick_once_headless = queue_tick_once_headless
         _schedule_next_tick_if_needed = _sntin
@@ -142,12 +139,9 @@ class _ProxyHandler(BaseHTTPRequestHandler):
     def _handle_queue_tick(self) -> None:
         qs = parse_qs(urlparse(self.path).query)
         queue_name = (
-            qs.get("name")
-            or [os.environ.get("DEFAULT_QUEUE_NAME", "default")]
+            qs.get("name") or [os.environ.get("DEFAULT_QUEUE_NAME", "default")]
         )[0]
-        logger.info(
-            "[PROXY] queue_tick request for queue '%s'", queue_name
-        )
+        logger.info("[PROXY] queue_tick request for queue '%s'", queue_name)
         try:
             result = _do_queue_tick(queue_name)
             body = json.dumps(result).encode()
@@ -176,8 +170,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             hdrs = {
                 k: v
                 for k, v in self.headers.items()
-                if k.lower()
-                not in ("host", "connection", "transfer-encoding")
+                if k.lower() not in ("host", "connection", "transfer-encoding")
             }
             hdrs["Host"] = f"127.0.0.1:{STREAMLIT_PORT}"
             conn = http.client.HTTPConnection(
@@ -209,9 +202,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 ("127.0.0.1", STREAMLIT_PORT), timeout=10
             )
         except OSError as exc:
-            logger.error(
-                "[PROXY] Cannot connect to Streamlit for WS: %s", exc
-            )
+            logger.error("[PROXY] Cannot connect to Streamlit for WS: %s", exc)
             try:
                 self.send_error(502, "Streamlit unavailable")
             except Exception:

@@ -10,13 +10,14 @@ Displays benchmark results with:
 - Download buttons
 """
 
-import streamlit as st
+import io
+import json
 import sys
 from pathlib import Path
-import json
+
 import pandas as pd
+import streamlit as st
 from google.cloud import storage
-import io
 from PIL import Image
 
 # Add parent directory to path for imports
@@ -265,9 +266,17 @@ if selected_benchmark:
                     "Metrics show the mean across all variants that share the same preset."
                 )
 
-                preset_df = df[df["preset_label"].notna() & (df["preset_label"] != "")].copy()
+                preset_df = df[
+                    df["preset_label"].notna() & (df["preset_label"] != "")
+                ].copy()
                 available_metrics = [
-                    c for c in ["rsq_val", "nrmse_val", "decomp_rssd", "allocator_stability_roas_cv"]
+                    c
+                    for c in [
+                        "rsq_val",
+                        "nrmse_val",
+                        "decomp_rssd",
+                        "allocator_stability_roas_cv",
+                    ]
                     if c in preset_df.columns
                 ]
 
@@ -277,18 +286,28 @@ if selected_benchmark:
                         .mean()
                         .round(4)
                         .reset_index()
-                        .rename(columns={
-                            "preset_label": "Preset",
-                            "rsq_val": "R² (val)",
-                            "nrmse_val": "NRMSE (val)",
-                            "decomp_rssd": "Decomp RSSD",
-                            "allocator_stability_roas_cv": "ROAS CV",
-                        })
+                        .rename(
+                            columns={
+                                "preset_label": "Preset",
+                                "rsq_val": "R² (val)",
+                                "nrmse_val": "NRMSE (val)",
+                                "decomp_rssd": "Decomp RSSD",
+                                "allocator_stability_roas_cv": "ROAS CV",
+                            }
+                        )
                     )
                     # Preset order: conservative → balanced → exploratory → fb → meshed
-                    _preset_order = ["conservative", "balanced", "exploratory", "fb", "meshed"]
+                    _preset_order = [
+                        "conservative",
+                        "balanced",
+                        "exploratory",
+                        "fb",
+                        "meshed",
+                    ]
                     agg["_order"] = agg["Preset"].apply(
-                        lambda p: _preset_order.index(p) if p in _preset_order else 99
+                        lambda p: (
+                            _preset_order.index(p) if p in _preset_order else 99
+                        )
                     )
                     agg = agg.sort_values("_order").drop(columns=["_order"])
 
@@ -301,13 +320,18 @@ if selected_benchmark:
                         "R² (val)": ("Higher is better", False),
                         "NRMSE (val)": ("Lower is better", True),
                         "Decomp RSSD": ("Lower is better", True),
-                        "ROAS CV": ("Lower is better — allocator stability", True),
+                        "ROAS CV": (
+                            "Lower is better — allocator stability",
+                            True,
+                        ),
                     }
                     display_cols = [c for c in agg.columns if c != "Preset"]
                     ncols = min(len(display_cols), 2)
                     cols = st.columns(ncols)
                     for idx, metric in enumerate(display_cols):
-                        note, lower_better = metric_labels.get(metric, ("", False))
+                        note, lower_better = metric_labels.get(
+                            metric, ("", False)
+                        )
                         fig = go.Figure(
                             go.Bar(
                                 x=agg["Preset"],
@@ -346,7 +370,13 @@ if selected_benchmark:
 
                 adstock_df = df[df["adstock"].notna()].copy()
                 available_metrics = [
-                    c for c in ["rsq_val", "nrmse_val", "decomp_rssd", "allocator_stability_roas_cv"]
+                    c
+                    for c in [
+                        "rsq_val",
+                        "nrmse_val",
+                        "decomp_rssd",
+                        "allocator_stability_roas_cv",
+                    ]
                     if c in adstock_df.columns
                 ]
 
@@ -356,22 +386,32 @@ if selected_benchmark:
                         .mean()
                         .round(4)
                         .reset_index()
-                        .rename(columns={
-                            "adstock": "Adstock Type",
-                            "rsq_val": "R² (val)",
-                            "nrmse_val": "NRMSE (val)",
-                            "decomp_rssd": "Decomp RSSD",
-                            "allocator_stability_roas_cv": "ROAS CV",
-                        })
+                        .rename(
+                            columns={
+                                "adstock": "Adstock Type",
+                                "rsq_val": "R² (val)",
+                                "nrmse_val": "NRMSE (val)",
+                                "decomp_rssd": "Decomp RSSD",
+                                "allocator_stability_roas_cv": "ROAS CV",
+                            }
+                        )
                     )
                     # Canonical order: geometric first, then weibull variants
                     _adstock_order = ["geometric", "weibull_cdf", "weibull_pdf"]
                     agg_adstock["_order"] = agg_adstock["Adstock Type"].apply(
-                        lambda a: _adstock_order.index(a) if a in _adstock_order else 99
+                        lambda a: (
+                            _adstock_order.index(a)
+                            if a in _adstock_order
+                            else 99
+                        )
                     )
-                    agg_adstock = agg_adstock.sort_values("_order").drop(columns=["_order"])
+                    agg_adstock = agg_adstock.sort_values("_order").drop(
+                        columns=["_order"]
+                    )
 
-                    st.dataframe(agg_adstock, use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        agg_adstock, use_container_width=True, hide_index=True
+                    )
 
                     import plotly.graph_objects as go  # type: ignore  # noqa: F811
 
@@ -379,13 +419,20 @@ if selected_benchmark:
                         "R² (val)": ("Higher is better", False),
                         "NRMSE (val)": ("Lower is better", True),
                         "Decomp RSSD": ("Lower is better", True),
-                        "ROAS CV": ("Lower is better — allocator stability", True),
+                        "ROAS CV": (
+                            "Lower is better — allocator stability",
+                            True,
+                        ),
                     }
-                    display_cols = [c for c in agg_adstock.columns if c != "Adstock Type"]
+                    display_cols = [
+                        c for c in agg_adstock.columns if c != "Adstock Type"
+                    ]
                     ncols = min(len(display_cols), 2)
                     cols = st.columns(ncols)
                     for idx, metric in enumerate(display_cols):
-                        note, lower_better = metric_labels.get(metric, ("", False))
+                        note, lower_better = metric_labels.get(
+                            metric, ("", False)
+                        )
                         fig = go.Figure(
                             go.Bar(
                                 x=agg_adstock["Adstock Type"],
@@ -423,9 +470,17 @@ if selected_benchmark:
                     "Produced when `--all-windows` is used."
                 )
 
-                window_df = df[df["window_label"].notna() & (df["window_label"] != "")].copy()
+                window_df = df[
+                    df["window_label"].notna() & (df["window_label"] != "")
+                ].copy()
                 available_metrics = [
-                    c for c in ["rsq_val", "nrmse_val", "decomp_rssd", "allocator_stability_roas_cv"]
+                    c
+                    for c in [
+                        "rsq_val",
+                        "nrmse_val",
+                        "decomp_rssd",
+                        "allocator_stability_roas_cv",
+                    ]
                     if c in window_df.columns
                 ]
 
@@ -435,22 +490,30 @@ if selected_benchmark:
                         .mean()
                         .round(4)
                         .reset_index()
-                        .rename(columns={
-                            "window_label": "Window",
-                            "rsq_val": "R² (val)",
-                            "nrmse_val": "NRMSE (val)",
-                            "decomp_rssd": "Decomp RSSD",
-                            "allocator_stability_roas_cv": "ROAS CV",
-                        })
+                        .rename(
+                            columns={
+                                "window_label": "Window",
+                                "rsq_val": "R² (val)",
+                                "nrmse_val": "NRMSE (val)",
+                                "decomp_rssd": "Decomp RSSD",
+                                "allocator_stability_roas_cv": "ROAS CV",
+                            }
+                        )
                     )
                     # Canonical order: full → 3y → 2y (longest to shortest)
                     _window_order = ["full", "3y", "2y"]
                     agg_window["_order"] = agg_window["Window"].apply(
-                        lambda w: _window_order.index(w) if w in _window_order else 99
+                        lambda w: (
+                            _window_order.index(w) if w in _window_order else 99
+                        )
                     )
-                    agg_window = agg_window.sort_values("_order").drop(columns=["_order"])
+                    agg_window = agg_window.sort_values("_order").drop(
+                        columns=["_order"]
+                    )
 
-                    st.dataframe(agg_window, use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        agg_window, use_container_width=True, hide_index=True
+                    )
 
                     import plotly.graph_objects as go  # type: ignore  # noqa: F811
 
@@ -458,13 +521,20 @@ if selected_benchmark:
                         "R² (val)": ("Higher is better", False),
                         "NRMSE (val)": ("Lower is better", True),
                         "Decomp RSSD": ("Lower is better", True),
-                        "ROAS CV": ("Lower is better — allocator stability", True),
+                        "ROAS CV": (
+                            "Lower is better — allocator stability",
+                            True,
+                        ),
                     }
-                    display_cols = [c for c in agg_window.columns if c != "Window"]
+                    display_cols = [
+                        c for c in agg_window.columns if c != "Window"
+                    ]
                     ncols = min(len(display_cols), 2)
                     cols = st.columns(ncols)
                     for idx, metric in enumerate(display_cols):
-                        note, lower_better = metric_labels.get(metric, ("", False))
+                        note, lower_better = metric_labels.get(
+                            metric, ("", False)
+                        )
                         fig = go.Figure(
                             go.Bar(
                                 x=agg_window["Window"],
@@ -571,9 +641,7 @@ if selected_benchmark:
             # Display enrichment plots (silent info if missing — data may not
             # be present for benchmarks run with older training images)
             enrichment_missing = [
-                (n, t, d)
-                for n, t, d in enrichment_plots
-                if n not in plots
+                (n, t, d) for n, t, d in enrichment_plots if n not in plots
             ]
             for plot_name, title, description in enrichment_plots:
                 if plot_name in plots:
@@ -583,9 +651,7 @@ if selected_benchmark:
                     st.divider()
 
             if enrichment_missing:
-                missing_titles = ", ".join(
-                    t for _, t, _ in enrichment_missing
-                )
+                missing_titles = ", ".join(t for _, t, _ in enrichment_missing)
                 st.info(
                     f"ℹ️ **Enrichment plots not available** "
                     f"({missing_titles}). "
