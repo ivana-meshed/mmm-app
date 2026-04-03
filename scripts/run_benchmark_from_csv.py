@@ -806,8 +806,36 @@ def main() -> None:
     # 6. Delegate to run_full_benchmark.py
     # ------------------------------------------------------------------
     script = str(Path(__file__).parent / "run_full_benchmark.py")
+
+    # Automatically inject --hyperparameter-ranges-config and
+    # --channel-type-assignments-config when the repo's standard files
+    # exist and the caller hasn't already supplied those flags.  Without
+    # the ranges config, all preset variants (balanced / fb / meshed) fall
+    # back to the same default ranges in the R script and produce identical
+    # results, making the preset comparison meaningless.
+    auto_flags: list = []
+    HP_RANGES_FLAG = "--hyperparameter-ranges-config"
+    CT_ASSIGNMENTS_FLAG = "--channel-type-assignments-config"
+
+    default_hp_ranges = REPO_ROOT / "benchmarks" / "generic_hyperparameter_ranges_v2.json"
+    default_ct_assign = REPO_ROOT / "benchmarks" / "channel_type_assignments.json"
+
+    if HP_RANGES_FLAG not in extra_args and default_hp_ranges.exists():
+        auto_flags += [HP_RANGES_FLAG, str(default_hp_ranges)]
+        logger.info(
+            f"ℹ️  Auto-injecting {HP_RANGES_FLAG} "
+            f"(ensures presets produce distinct results)"
+        )
+
+    if CT_ASSIGNMENTS_FLAG not in extra_args and default_ct_assign.exists():
+        auto_flags += [CT_ASSIGNMENTS_FLAG, str(default_ct_assign)]
+        logger.info(
+            f"ℹ️  Auto-injecting {CT_ASSIGNMENTS_FLAG}"
+        )
+
     cmd = (
         [sys.executable, script, "--path", gcs_config_path]
+        + auto_flags
         + extra_args
     )
 
