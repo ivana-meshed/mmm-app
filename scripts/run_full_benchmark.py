@@ -1161,7 +1161,7 @@ Examples:
         if _default_hp_ranges.exists():
             args.hyperparameter_ranges_config = str(_default_hp_ranges)
             logger.info(
-                "ℹ️  Auto-injecting --hyperparameter-ranges-config "
+                f"ℹ️  Auto-injecting --hyperparameter-ranges-config "
                 f"(ensures presets produce distinct results): "
                 f"{args.hyperparameter_ranges_config}"
             )
