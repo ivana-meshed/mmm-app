@@ -221,6 +221,12 @@ resource "google_project_iam_member" "deployer_scheduler_admin" {
   member  = "serviceAccount:${var.deployer_sa}"
 }
 
+resource "google_project_iam_member" "deployer_cloudtasks_admin" {
+  project = var.project_id
+  role    = "roles/cloudtasks.admin"
+  member  = "serviceAccount:${var.deployer_sa}"
+}
+
 ##############################################################
 # APIs
 ##############################################################
@@ -251,6 +257,12 @@ resource "google_project_service" "iamcredentials" {
 resource "google_project_service" "scheduler" {
   project            = var.project_id
   service            = "cloudscheduler.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "cloudtasks" {
+  project            = var.project_id
+  service            = "cloudtasks.googleapis.com"
   disable_on_destroy = false
 }
 
@@ -321,26 +333,26 @@ resource "google_cloud_run_service" "web_service" {
   template {
     metadata {
       annotations = {
-        "run.googleapis.com/cpu-throttling" = "false"
-        "run.googleapis.com/min-instances"  = var.min_instances
+        "run.googleapis.com/cpu-throttling" = "true"
+        "run.googleapis.com/min-instances"  = "0"
         "run.googleapis.com/max-instances"  = var.max_instances
-        "run.googleapis.com/timeout"        = "300s"
+        "run.googleapis.com/timeout"        = "120s"
         #"deploy.kubernetes.io/revision-sha" = substr(var.web_image, length(var.web_image) - 40, 40)
       }
     }
 
     spec {
       service_account_name  = google_service_account.web_service_sa.email
-      container_concurrency = 10
-      timeout_seconds       = 300
+      container_concurrency = 5
+      timeout_seconds       = 120
 
       containers {
         image = var.web_image
 
         resources {
           limits = {
-            cpu    = "2.0"
-            memory = "4Gi"
+            cpu    = "1.0"
+            memory = "2Gi"
           }
           requests = {
             cpu    = "1.0"
@@ -450,6 +462,28 @@ resource "google_cloud_run_service" "web_service" {
         env {
           name  = "ALLOWED_DOMAINS"
           value = var.allowed_domains
+        }
+        # Cloud Tasks configuration for event-driven queue processing.
+        # CLOUD_TASKS_QUEUE: full resource path of the queue used to schedule
+        #   queue ticks without a periodic Cloud Scheduler (eliminates idle costs).
+        # WEB_SERVICE_URL: base URL of this service (used as the HTTP target).
+        # CLOUD_TASKS_SA_EMAIL: service account used for OIDC auth on tasks.
+        # QUEUE_TICK_INTERVAL_SECONDS: how often (seconds) to re-check a running job.
+        env {
+          name  = "CLOUD_TASKS_QUEUE"
+          value = "projects/${var.project_id}/locations/${var.region}/queues/${var.cloud_tasks_queue_name}"
+        }
+        env {
+          name  = "WEB_SERVICE_URL"
+          value = local.web_service_url
+        }
+        env {
+          name  = "CLOUD_TASKS_SA_EMAIL"
+          value = google_service_account.scheduler.email
+        }
+        env {
+          name  = "QUEUE_TICK_INTERVAL_SECONDS"
+          value = tostring(var.queue_tick_interval_seconds)
         }
 
       }
@@ -577,6 +611,14 @@ resource "google_service_account_iam_member" "web_can_act_as_training_sa" {
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.web_service_sa.email}"
 }
+
+# Allow the web service SA to impersonate the scheduler SA when attaching OIDC
+# tokens to Cloud Tasks requests (required for iam.serviceAccounts.actAs).
+resource "google_service_account_iam_member" "web_can_act_as_scheduler_sa" {
+  service_account_id = google_service_account.scheduler.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
 resource "google_cloud_run_v2_job_iam_member" "training_job_runner" {
   provider = google-beta
   project  = var.project_id
@@ -592,9 +634,10 @@ resource "google_cloud_run_v2_job_iam_member" "training_job_runner" {
 ###############################################################
 
 resource "google_cloud_scheduler_job" "robyn_queue_tick" {
+  count            = var.scheduler_enabled ? 1 : 0
   name             = var.scheduler_job_name
   description      = "Advance Robyn training queue (headless)"
-  schedule         = "*/1 * * * *" # every minute
+  schedule         = "*/${var.scheduler_interval_minutes} * * * *" # configurable interval for cost optimization
   time_zone        = "Etc/UTC"
   attempt_deadline = "320s"
 
@@ -614,6 +657,41 @@ resource "google_cloud_scheduler_job" "robyn_queue_tick" {
   ]
 }
 
+
+
+###############################################################
+# Cloud Tasks queue for event-driven queue tick processing
+# Replaces the periodic Cloud Scheduler to eliminate idle costs:
+# tasks are only created when there are pending/running jobs.
+###############################################################
+resource "google_cloud_tasks_queue" "robyn_queue_tick" {
+  name     = var.cloud_tasks_queue_name
+  location = var.region
+
+  rate_limits {
+    max_dispatches_per_second = 1
+    max_concurrent_dispatches = 1
+  }
+
+  retry_config {
+    max_attempts  = 3
+    min_backoff   = "10s"
+    max_backoff   = "300s"
+    max_doublings = 3
+  }
+
+  depends_on = [
+    google_project_service.cloudtasks,
+    google_project_iam_member.deployer_cloudtasks_admin,
+  ]
+}
+
+# Allow the web service SA to enqueue tasks into the Cloud Tasks queue
+resource "google_project_iam_member" "web_sa_cloudtasks_enqueuer" {
+  project = var.project_id
+  role    = "roles/cloudtasks.enqueuer"
+  member  = "serviceAccount:${google_service_account.web_service_sa.email}"
+}
 
 
 ##############################################################

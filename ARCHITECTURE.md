@@ -104,16 +104,15 @@ Web UI displays results
 User creates Queue (CSV upload or form)
     ↓
 Queue saved to GCS (robyn-queues/{queue_name}/queue.json)
-    ↓
-User starts queue processing
-    ↓
-Scheduler ticks queue:
+    ↓ (Cloud Task scheduled automatically on save)
+Cloud Tasks triggers queue tick:
   - Lease next PENDING job
   - Execute job (same as single job)
   - Update job status (RUNNING → SUCCEEDED/FAILED)
   - Move finished jobs to job_history.csv
+  - Schedule next Cloud Task (poll running job) OR stop if queue is empty
     ↓
-Repeat until queue empty
+Repeat until queue empty (no Cloud Tasks while idle → zero idle cost)
 ```
 
 ## Storage Structure (GCS)
@@ -209,7 +208,7 @@ Terraform manages:
 - Service accounts and IAM
 - Secret Manager secrets
 - Cloud Storage buckets
-- Cloud Scheduler (for queue ticking)
+- Cloud Tasks queue (event-driven queue tick scheduling)
 
 ## Authentication
 

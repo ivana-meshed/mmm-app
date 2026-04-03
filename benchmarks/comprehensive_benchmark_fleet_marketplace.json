@@ -1,0 +1,142 @@
+{
+  "name": "comprehensive_benchmark_fleet_marketplace",
+  "description": "Comprehensive benchmark for a fleet/mobility marketplace dataset. Default: geometric adstock only. Tests cartesian product of 5 dimensions: adstock × train_splits × time_aggregation × spend_var_mapping × seasonality_window (90 variants). Use run_full_benchmark.py --all-adstock to also sweep weibull_cdf and weibull_pdf (270 variants total). Designed for datasets with Google Search (brand/non-brand/pmax/display/video), Meta, Bing (brand/non-brand/other), Facebook sub-channels (video/static/upper/lower/app), CRM/newsletter organic channels, and context variables such as fleet availability, occupancy and location count. Dependent variable is typically 'bookings', 'gmv_net_eur', or 'gmv_gross_eur'. The spend_var_mapping variants below assume paid_media_spends = [meta_total_spend, google_search_brand_cost, google_search_nonbrand_cost, google_pmax_cost, google_display_cost, google_youtube_cost, bing_search_brand_cost, bing_search_nonbrand_cost, bing_search_other_cost] (priority-1 channels). FB sub-channels and google_*_cost_2 splits do not have impression/click proxies and should use spend_to_spend for those columns.",
+  "base_config": {
+    "country": "FILL_IN_COUNTRY_CODE",
+    "goal": "bookings",
+    "version": "Latest"
+  },
+  "iterations": 1000,
+  "trials": 3,
+  "max_combinations": 300,
+  "combination_mode": "cartesian",
+  "hyperparameter_ranges_config": "benchmarks/generic_hyperparameter_ranges_v2.json",
+  "channel_type_assignments_config": "benchmarks/channel_type_assignments_fleet_marketplace.json",
+  "hyperparameter_preset": "balanced",
+  "variants": {
+    "adstock": [
+      {
+        "name": "geometric",
+        "description": "Geometric adstock (default — use --all-adstock to also test weibull_cdf and weibull_pdf)",
+        "adstock": "geometric",
+        "hyperparameter_preset": "balanced"
+      }
+    ],
+    "train_splits": [
+      {
+        "name": "70_90",
+        "description": "70% train, 20% val, 10% test",
+        "train_size": [0.7, 0.9]
+      },
+      {
+        "name": "75_90",
+        "description": "75% train, 15% val, 10% test",
+        "train_size": [0.75, 0.9]
+      },
+      {
+        "name": "65_80",
+        "description": "65% train, 15% val, 20% test",
+        "train_size": [0.65, 0.8]
+      }
+    ],
+    "time_aggregation": [
+      {
+        "name": "daily",
+        "description": "Daily time aggregation",
+        "resample_freq": "none"
+      },
+      {
+        "name": "weekly",
+        "description": "Weekly time aggregation",
+        "resample_freq": "W"
+      }
+    ],
+    "spend_var_mapping": [
+      {
+        "name": "spend_to_spend",
+        "description": "All channels: spend → spend (direct cost impact). paid_media_vars equals paid_media_spends.",
+        "mapping_strategy": "spend_to_spend"
+      },
+      {
+        "name": "spend_to_impressions",
+        "description": "Priority-1 channels: spend → impressions (ad delivery proxy). Assumes paid_media_spends = [meta, google_brand, google_nonbrand, google_pmax, google_display, google_youtube, bing_brand, bing_nonbrand, bing_other]. Column order must match paid_media_spends in selected_columns.json.",
+        "mapping_strategy": "spend_to_proxy",
+        "paid_media_vars_override": [
+          "meta_total_impressions",
+          "google_search_brand_impressions",
+          "google_search_nonbrand_impressions",
+          "google_pmax_impressions",
+          "google_display_impressions",
+          "google_youtube_impressions",
+          "bing_search_brand_impressions",
+          "bing_search_nonbrand_impressions",
+          "bing_search_other_impressions"
+        ]
+      },
+      {
+        "name": "spend_to_clicks",
+        "description": "Priority-1 channels: spend → clicks (engagement proxy). Assumes paid_media_spends = [meta, google_brand, google_nonbrand, google_pmax, google_display, google_youtube, bing_brand, bing_nonbrand, bing_other]. Column order must match paid_media_spends in selected_columns.json.",
+        "mapping_strategy": "spend_to_proxy",
+        "paid_media_vars_override": [
+          "meta_total_clicks",
+          "google_search_brand_clicks",
+          "google_search_nonbrand_clicks",
+          "google_pmax_clicks",
+          "google_display_clicks",
+          "google_youtube_clicks",
+          "bing_search_brand_clicks",
+          "bing_search_nonbrand_clicks",
+          "bing_search_other_clicks"
+        ]
+      },
+      {
+        "name": "mixed_by_funnel_impressions",
+        "description": "Upper funnel (video, display, social) → impressions; lower funnel (brand/non-brand search, pmax, bing) → spend. Assumes paid_media_spends = [meta, google_brand, google_nonbrand, google_pmax, google_display, google_youtube, bing_brand, bing_nonbrand, bing_other]. Column order must match paid_media_spends in selected_columns.json.",
+        "mapping_strategy": "mixed",
+        "paid_media_vars_override": [
+          "meta_total_impressions",
+          "google_search_brand_cost",
+          "google_search_nonbrand_cost",
+          "google_pmax_cost",
+          "google_display_impressions",
+          "google_youtube_impressions",
+          "bing_search_brand_cost",
+          "bing_search_nonbrand_cost",
+          "bing_search_other_cost"
+        ]
+      },
+      {
+        "name": "mixed_by_funnel_clicks",
+        "description": "Upper funnel (video, display, social) → clicks; lower funnel (brand/non-brand search, pmax, bing) → spend. Assumes paid_media_spends = [meta, google_brand, google_nonbrand, google_pmax, google_display, google_youtube, bing_brand, bing_nonbrand, bing_other]. Column order must match paid_media_spends in selected_columns.json.",
+        "mapping_strategy": "mixed",
+        "paid_media_vars_override": [
+          "meta_total_clicks",
+          "google_search_brand_cost",
+          "google_search_nonbrand_cost",
+          "google_pmax_cost",
+          "google_display_clicks",
+          "google_youtube_clicks",
+          "bing_search_brand_cost",
+          "bing_search_nonbrand_cost",
+          "bing_search_other_cost"
+        ]
+      }
+    ],
+    "seasonality_window": [
+      {
+        "name": "full",
+        "description": "Full data window (all available history — no start_date override)"
+      },
+      {
+        "name": "2y",
+        "description": "Last 2 years (~104 weeks back from end_date)",
+        "weeks_back": 104
+      },
+      {
+        "name": "3y",
+        "description": "Last 3 years (~156 weeks back from end_date)",
+        "weeks_back": 156
+      }
+    ]
+  }
+}
