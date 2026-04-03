@@ -9,15 +9,20 @@ It:
 2. Uploads the data as Parquet to GCS at
    ``mapped-datasets/{country_code}/{timestamp}/raw.parquet``
    (and syncs the ``latest`` pointer).
-3. Auto-classifies columns into the four Robyn variable categories:
+3. Determines column assignments via one of two modes:
 
-   * **paid_media_spends** – hardcoded to the 12 channels specified for this
-     dataset (see ``PAID_MEDIA_SPENDS`` below).
-   * **paid_media_vars** – defaults to the same list as paid_media_spends
-     (spend → spend mapping); the benchmark's ``spend_var_mapping`` dimension
-     will test impressions/clicks proxies as well.
-   * **context_vars** – continuous demand-drivers (weather, fleet, web,
-     pricing, SEO, CRM aggregate metrics).
+   **Mapping-file mode** (default) — reads a curated ``selected_columns.json``-
+   style JSON file (see ``--columns-mapping``).  By default
+   ``data/dk/dk_selected_columns_mapping_v2_clean.json`` is used when the
+   country-code is ``dk``.  These mapping files live in ``data/dk/`` and are
+   also uploaded to GCS under ``benchmarks/dk/`` for reference.
+
+   **Auto-classify mode** (``--no-mapping``) — heuristically classifies all
+   CSV columns into Robyn categories based on naming patterns:
+
+   * **paid_media_spends** – hardcoded 10-channel list for this dataset.
+   * **paid_media_vars** – defaults to the same list as paid_media_spends.
+   * **context_vars** – continuous demand-drivers (weather, fleet, pricing…).
    * **factor_vars** – binary indicator columns (``IS_*``, ``PMAX_LOCAL``).
    * **organic_vars** – CRM email channel metrics (``CRM_EMAIL_*``).
 
@@ -29,19 +34,32 @@ It:
 
 Usage
 -----
-    # Test run (default — 10 iterations, 1 trial)
-    python scripts/run_benchmark_from_csv.py --csv data/dk_data.csv
+    # Test run using default mapping (dk_selected_columns_mapping_v2_clean.json)
+    python scripts/run_benchmark_from_csv.py \\
+        --csv data/dk/mmm_data_with_school_holiday_filled.csv
+
+    # Explicit mapping file
+    python scripts/run_benchmark_from_csv.py \\
+        --csv data/dk/mmm_data_with_school_holiday_filled.csv \\
+        --columns-mapping data/dk/dk_context_supply_plus_occ7d_clean.json
+
+    # Auto-classify columns instead of using a mapping file
+    python scripts/run_benchmark_from_csv.py \\
+        --csv data/dk/mmm_data_with_school_holiday_filled.csv --no-mapping
 
     # Standard run with all extra flags forwarded to run_full_benchmark.py
-    python scripts/run_benchmark_from_csv.py --csv data/dk_data.csv \\
+    python scripts/run_benchmark_from_csv.py \\
+        --csv data/dk/mmm_data_with_school_holiday_filled.csv \\
         --full-run --all-adstock --queue-name default-dev
 
     # Choose a different goal (dependent variable)
-    python scripts/run_benchmark_from_csv.py --csv data/dk_data.csv \\
+    python scripts/run_benchmark_from_csv.py \\
+        --csv data/dk/mmm_data_with_school_holiday_filled.csv \\
         --goal GMV_NET_EUR --dep-var-type revenue --full-run
 
     # Skip queue processing (only submit benchmark, do not wait for results)
-    python scripts/run_benchmark_from_csv.py --csv data/dk_data.csv \\
+    python scripts/run_benchmark_from_csv.py \\
+        --csv data/dk/mmm_data_with_school_holiday_filled.csv \\
         --full-run --skip-queue
 """
 
@@ -94,19 +112,30 @@ logger = logging.getLogger(__name__)
 PROJECT_ID = os.getenv("PROJECT_ID", "datawarehouse-422511")
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 
-# The 12 paid media spend columns for this dataset (uppercase, as they appear
-# in the CSV).  The benchmark's spend_var_mapping dimension will automatically
-# test impression- and click-based proxy variables as well.
+# Repository root (two levels up from this script)
+REPO_ROOT = Path(__file__).parent.parent
+
+# Default mapping file used when country-code is 'dk' and no --columns-mapping
+# flag is given.
+DEFAULT_DK_MAPPING = (
+    REPO_ROOT / "data" / "dk" / "dk_selected_columns_mapping_v2_clean.json"
+)
+
+# Directory that holds all DK column-mapping config files; its contents are
+# uploaded to GCS at the start of every run.
+DK_CONFIG_DIR = REPO_ROOT / "data" / "dk"
+GCS_CONFIG_PREFIX = "benchmarks/dk"
+
+# Fallback paid-media spend columns used in auto-classify mode (--no-mapping).
+# These are the 10 channels confirmed present in the Denmark CSV.
 PAID_MEDIA_SPENDS: List[str] = [
-    "FB_TOTAL_COST",  # Meta (Facebook) total spend
+    "GOOGLE_SEARCH_BRAND_COST",
     "GOOGLE_SEARCH_NONBRAND_COST_2",
     "GOOGLE_PMAX_COST_2",
     "GOOGLE_OTHER_COST_2",
     "BING_SEARCH_BRAND_COST",
-    "BING_SEARCH_NONBRAND_COST",  # bing_search_non_brand_cost
-    "BING_OTHER_COST",  # bing_search_other_cost
-    "FB_VIDEO_COST",
-    "FB_STATIC_COST",
+    "BING_SEARCH_NONBRAND_COST",
+    "BING_OTHER_COST",
     "FB_UPPER_COST",
     "FB_LOWER_COST",
     "FB_APP_COST",
@@ -173,13 +202,14 @@ def _is_organic_var(col: str) -> bool:
     return col.startswith("CRM_EMAIL_")
 
 
-def _is_media_metric(col: str) -> bool:
+def _is_media_metric(col: str, paid_media_spends_set: frozenset) -> bool:
     """Return True for paid-media delivery metrics (impressions / clicks / cost).
 
     Any column ending with ``_COST`` that is not already in
-    ``PAID_MEDIA_SPENDS`` is treated as a redundant spend variant and excluded
-    from context_vars to avoid multicollinearity.  Impression and click columns
-    are reserved for the benchmark's spend_var_mapping proxy tests.
+    ``paid_media_spends_set`` is treated as a redundant spend variant and
+    excluded from context_vars to avoid multicollinearity.  Impression and
+    click columns are reserved for the benchmark's spend_var_mapping proxy
+    tests.
 
     This check must be called AFTER ``_is_organic_var`` so that
     ``CRM_EMAIL_*_CLICKS`` columns are not mis-classified.
@@ -187,7 +217,7 @@ def _is_media_metric(col: str) -> bool:
     if any(col.endswith(s) for s in _MEDIA_METRIC_SUFFIXES):
         return True
     # Exclude non-selected cost variants (e.g. GOOGLE_SEARCH_BRAND_COST)
-    if col.endswith("_COST") and col not in PAID_MEDIA_SPENDS:
+    if col.endswith("_COST") and col not in paid_media_spends_set:
         return True
     return False
 
@@ -197,7 +227,7 @@ def classify_columns(
     paid_media_spends: List[str],
     dep_var: str,
 ) -> Dict[str, List[str]]:
-    """Classify CSV columns into Robyn variable categories.
+    """Classify CSV columns into Robyn variable categories (auto-classify mode).
 
     Parameters
     ----------
@@ -213,7 +243,7 @@ def classify_columns(
     dict with keys: paid_media_spends, paid_media_vars, context_vars,
     factor_vars, organic_vars.
     """
-    spends_set = set(paid_media_spends)
+    spends_set = frozenset(paid_media_spends)
     skip = (
         _NON_MODELLING_COLS
         | _TOTAL_AGG_COLS
@@ -233,7 +263,7 @@ def classify_columns(
             factor_vars.append(col)
         elif _is_organic_var(col):
             organic_vars.append(col)
-        elif _is_media_metric(col):
+        elif _is_media_metric(col, spends_set):
             # Paid-media delivery metrics: reserved for benchmark proxy mapping
             continue
         else:
@@ -241,18 +271,94 @@ def classify_columns(
 
     # paid_media_vars defaults to paid_media_spends (spend→spend);
     # the benchmark's spend_var_mapping dimension tests proxy variants.
-    paid_media_vars = [s for s in paid_media_spends if s in set(all_columns)]
+    present_spends = [s for s in paid_media_spends if s in set(all_columns)]
+    paid_media_vars = present_spends
 
-    logger.info("📊 Column classification summary:")
-    logger.info(f"   paid_media_spends : {len(paid_media_spends)} columns")
+    logger.info("📊 Column classification summary (auto-classify mode):")
+    logger.info(f"   paid_media_spends : {len(present_spends)} columns")
     logger.info(f"   paid_media_vars   : {len(paid_media_vars)} columns")
     logger.info(f"   context_vars      : {len(context_vars)} columns")
     logger.info(f"   factor_vars       : {len(factor_vars)} columns")
     logger.info(f"   organic_vars      : {len(organic_vars)} columns")
 
     return {
-        "paid_media_spends": paid_media_spends,  # filtered to cols present in CSV
+        "paid_media_spends": present_spends,
         "paid_media_vars": paid_media_vars,
+        "var_to_spend_mapping": {},
+        "context_vars": context_vars,
+        "factor_vars": factor_vars,
+        "organic_vars": organic_vars,
+    }
+
+
+def load_columns_from_mapping(
+    mapping_path: Path,
+    all_columns: List[str],
+) -> Dict[str, List[str]]:
+    """Load column assignments from a curated JSON mapping file.
+
+    Parameters
+    ----------
+    mapping_path:
+        Path to a ``selected_columns.json``-style JSON file (e.g.
+        ``data/dk/dk_selected_columns_mapping_v2_clean.json``).
+    all_columns:
+        Column names present in the CSV (uppercase).  Used only for
+        existence-checking and warning about missing columns.
+
+    Returns
+    -------
+    dict with keys: paid_media_spends, paid_media_vars, var_to_spend_mapping,
+    context_vars, factor_vars, organic_vars.
+    """
+    with open(mapping_path) as fh:
+        mapping = json.load(fh)
+
+    col_set = set(all_columns)
+
+    def _filter(key: str) -> List[str]:
+        cols = mapping.get(key) or []
+        present = [c for c in cols if c in col_set]
+        missing = [c for c in cols if c not in col_set]
+        if missing:
+            logger.warning(
+                f"⚠️  {key}: {len(missing)} column(s) from mapping not found "
+                f"in CSV and will be skipped: {missing}"
+            )
+        return present
+
+    paid_media_spends = _filter("paid_media_spends")
+    paid_media_vars = _filter("paid_media_vars")
+    context_vars = _filter("context_vars")
+    factor_vars = _filter("factor_vars")
+    organic_vars = _filter("organic_vars")
+
+    # Preserve var_to_spend_mapping entries only for columns that exist
+    raw_vsm = mapping.get("var_to_spend_mapping") or {}
+    var_to_spend_mapping = {
+        k: v
+        for k, v in raw_vsm.items()
+        if k in col_set and v in col_set
+    }
+
+    logger.info(
+        f"📊 Column classification summary "
+        f"(mapping: {mapping_path.name}):"
+    )
+    logger.info(f"   paid_media_spends : {len(paid_media_spends)} columns")
+    logger.info(f"   paid_media_vars   : {len(paid_media_vars)} columns")
+    logger.info(f"   context_vars      : {len(context_vars)} columns")
+    logger.info(f"   factor_vars       : {len(factor_vars)} columns")
+    logger.info(f"   organic_vars      : {len(organic_vars)} columns")
+    if mapping.get("name"):
+        logger.info(f"   mapping name      : {mapping['name']}")
+    if mapping.get("description"):
+        logger.info(f"   description       : {mapping['description']}")
+
+    return {
+        "paid_media_spends": paid_media_spends,
+        "paid_media_vars": paid_media_vars,
+        "var_to_spend_mapping": var_to_spend_mapping,
         "context_vars": context_vars,
         "factor_vars": factor_vars,
         "organic_vars": organic_vars,
@@ -332,10 +438,36 @@ def upload_selected_columns(
     )
     return f"gs://{bucket_name}/{blob_path}"
 
+def upload_config_files(
+    client: storage.Client,
+    bucket_name: str,
+    config_dir: Path,
+    gcs_prefix: str,
+) -> None:
+    """Upload all JSON mapping files from *config_dir* to GCS.
 
-# ---------------------------------------------------------------------------
-# Timestamp helper (CET, matching the app convention)
-# ---------------------------------------------------------------------------
+    Files are stored at ``{gcs_prefix}/{filename}`` so they can be
+    inspected or reused without checking the repository.
+    """
+    json_files = sorted(config_dir.glob("*.json"))
+    if not json_files:
+        logger.warning(f"⚠️  No JSON files found in {config_dir}")
+        return
+
+    logger.info(
+        f"📤 Uploading {len(json_files)} config file(s) to "
+        f"gs://{bucket_name}/{gcs_prefix}/"
+    )
+    for json_file in json_files:
+        blob_path = f"{gcs_prefix}/{json_file.name}"
+        data = json_file.read_bytes()
+        _gcs_upload_bytes(
+            client, bucket_name, blob_path, data,
+            content_type="application/json",
+        )
+
+
+
 
 
 def _make_timestamp() -> str:
@@ -412,6 +544,31 @@ def main() -> None:
         help=f"GCS bucket name (default: {GCS_BUCKET}).",
     )
 
+    mapping_group = parser.add_mutually_exclusive_group()
+    mapping_group.add_argument(
+        "--columns-mapping",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Path to a JSON mapping file that specifies paid_media_spends, "
+            "paid_media_vars, var_to_spend_mapping, organic_vars, "
+            "context_vars, and factor_vars directly (e.g. "
+            "data/dk/dk_selected_columns_mapping_v2_clean.json). "
+            "When country-code is 'dk' and this flag is omitted, "
+            "data/dk/dk_selected_columns_mapping_v2_clean.json is used "
+            "by default."
+        ),
+    )
+    mapping_group.add_argument(
+        "--no-mapping",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable mapping-file mode and fall back to auto-classifying "
+            "columns from naming patterns."
+        ),
+    )
+
     # Collect any remaining args to forward verbatim to run_full_benchmark.py
     args, extra_args = parser.parse_known_args()
 
@@ -425,7 +582,7 @@ def main() -> None:
     logger.info(f"📂 Loading CSV: {csv_path}")
     df = pd.read_csv(csv_path)
 
-    # Normalise column names to uppercase
+    # Normalize column names to uppercase
     df.columns = [c.upper() for c in df.columns]
     logger.info(
         f"   Loaded {len(df):,} rows × {len(df.columns)} columns"
@@ -464,17 +621,6 @@ def main() -> None:
             f"Available: {sorted(df.columns.tolist())}"
         )
 
-    # Validate paid_media_spends exist
-    missing_spends = [
-        s for s in PAID_MEDIA_SPENDS if s not in df.columns
-    ]
-    if missing_spends:
-        logger.warning(
-            f"⚠️  The following paid_media_spends columns are not present "
-            f"in the CSV and will be skipped: {missing_spends}"
-        )
-    present_spends = [s for s in PAID_MEDIA_SPENDS if s in df.columns]
-
     # ------------------------------------------------------------------
     # 2. Infer date range
     # ------------------------------------------------------------------
@@ -495,12 +641,54 @@ def main() -> None:
     # 3. Classify columns
     # ------------------------------------------------------------------
     all_cols = df.columns.tolist()
-    classification = classify_columns(all_cols, present_spends, dep_var)
+
+    if args.no_mapping:
+        # Explicit auto-classify mode
+        classification = classify_columns(all_cols, PAID_MEDIA_SPENDS, dep_var)
+        mapping_source = "auto-classify"
+    else:
+        # Resolve mapping file path
+        if args.columns_mapping:
+            mapping_path = Path(args.columns_mapping)
+            if not mapping_path.is_absolute():
+                mapping_path = REPO_ROOT / mapping_path
+        elif args.country_code.lower() == "dk" and DEFAULT_DK_MAPPING.exists():
+            mapping_path = DEFAULT_DK_MAPPING
+            logger.info(
+                f"📄 Using default DK mapping: {mapping_path.name}"
+            )
+        else:
+            mapping_path = None
+
+        if mapping_path is not None:
+            if not mapping_path.exists():
+                sys.exit(f"❌ Mapping file not found: {mapping_path}")
+            classification = load_columns_from_mapping(mapping_path, all_cols)
+            mapping_source = str(mapping_path)
+        else:
+            # No mapping file available → fall back to auto-classify
+            logger.info(
+                "ℹ️  No mapping file found; falling back to auto-classify mode."
+            )
+            classification = classify_columns(
+                all_cols, PAID_MEDIA_SPENDS, dep_var
+            )
+            mapping_source = "auto-classify"
 
     # ------------------------------------------------------------------
     # 4. Build selected_columns.json
     # ------------------------------------------------------------------
     timestamp = _make_timestamp()
+
+    all_drivers = list(
+        dict.fromkeys(  # deduplicate while preserving order
+            classification["paid_media_spends"]
+            + classification["paid_media_vars"]
+            + classification["organic_vars"]
+            + classification["context_vars"]
+            + classification["factor_vars"]
+        )
+    )
 
     selected_columns: Dict[str, Any] = {
         "country": args.country_code.lower(),
@@ -510,16 +698,11 @@ def main() -> None:
         "date_var": "date",
         "paid_media_spends": classification["paid_media_spends"],
         "paid_media_vars": classification["paid_media_vars"],
+        "var_to_spend_mapping": classification.get("var_to_spend_mapping", {}),
         "organic_vars": classification["organic_vars"],
         "context_vars": classification["context_vars"],
         "factor_vars": classification["factor_vars"],
-        "all_selected_drivers": (
-            classification["paid_media_spends"]
-            + classification["paid_media_vars"]
-            + classification["organic_vars"]
-            + classification["context_vars"]
-            + classification["factor_vars"]
-        ),
+        "all_selected_drivers": all_drivers,
         "data_version": timestamp,
         "meta_version": "Latest",
         "timestamp": timestamp,
@@ -530,30 +713,37 @@ def main() -> None:
         selected_columns["end_date"] = end_date
 
     logger.info("📋 selected_columns.json preview:")
+    logger.info(f"   country           : {selected_columns['country']}")
+    logger.info(f"   selected_goal     : {selected_columns['selected_goal']}")
     logger.info(
-        f"   country        : {selected_columns['country']}"
+        f"   start_date        : {selected_columns.get('start_date', '(not set)')}"
     )
     logger.info(
-        f"   selected_goal  : {selected_columns['selected_goal']}"
-    )
-    logger.info(
-        f"   start_date     : {selected_columns.get('start_date', '(not set)')}"
-    )
-    logger.info(
-        f"   end_date       : {selected_columns.get('end_date', '(not set)')}"
+        f"   end_date          : {selected_columns.get('end_date', '(not set)')}"
     )
     logger.info(
         f"   paid_media_spends ({len(selected_columns['paid_media_spends'])}): "
         f"{selected_columns['paid_media_spends']}"
     )
+    logger.info(
+        f"   paid_media_vars   ({len(selected_columns['paid_media_vars'])}): "
+        f"{selected_columns['paid_media_vars']}"
+    )
+    logger.info(f"   mapping source    : {mapping_source}")
 
     # ------------------------------------------------------------------
-    # 5. Upload data + config to GCS
+    # 5. Upload data + configs to GCS
     # ------------------------------------------------------------------
     logger.info(
         f"🔗 Connecting to GCS project={PROJECT_ID}, bucket={args.bucket}"
     )
     gcs_client = storage.Client(project=PROJECT_ID)
+
+    # Upload JSON config files from data/dk/ to benchmarks/dk/ in GCS
+    if DK_CONFIG_DIR.exists() and args.country_code.lower() == "dk":
+        upload_config_files(
+            gcs_client, args.bucket, DK_CONFIG_DIR, GCS_CONFIG_PREFIX
+        )
 
     upload_parquet(df, gcs_client, args.bucket, args.country_code, timestamp)
 
