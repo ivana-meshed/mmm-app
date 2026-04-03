@@ -194,7 +194,7 @@ if selected_benchmark:
                         f"For meaningful comparison, consider running with:\n"
                         f"- **1000+ iterations**\n"
                         f"- **3+ trials**\n\n"
-                        f"Use `--full-run` flag for production analysis."
+                        f"Use `--full-run`, `--extended-run`, or `--production-run` flag for production analysis."
                     )
 
             # Show metrics summary
@@ -319,6 +319,163 @@ if selected_benchmark:
                         fig.update_layout(
                             title=f"{metric}<br><sup>{note}</sup>",
                             xaxis_title="Preset",
+                            yaxis_title=metric,
+                            height=320,
+                            margin=dict(t=60, b=30, l=40, r=20),
+                        )
+                        cols[idx % ncols].plotly_chart(
+                            fig, use_container_width=True
+                        )
+
+            # ── Adstock comparison ─────────────────────────────────────
+            # Only shown when the benchmark included multiple adstock types
+            # (i.e. the 'adstock' column has more than one distinct value).
+            if (
+                df is not None
+                and "adstock" in df.columns
+                and df["adstock"].notna().any()
+                and df["adstock"].nunique() > 1
+            ):
+                st.divider()
+                st.subheader("⚗️ Adstock Type Comparison")
+                st.caption(
+                    "Results aggregated by adstock transformation type. "
+                    "Metrics show the mean across all variants that share the same adstock type. "
+                    "Produced when `--all-adstock` is used."
+                )
+
+                adstock_df = df[df["adstock"].notna()].copy()
+                available_metrics = [
+                    c for c in ["rsq_val", "nrmse_val", "decomp_rssd", "allocator_stability_roas_cv"]
+                    if c in adstock_df.columns
+                ]
+
+                if available_metrics and not adstock_df.empty:
+                    agg_adstock = (
+                        adstock_df.groupby("adstock")[available_metrics]
+                        .mean()
+                        .round(4)
+                        .reset_index()
+                        .rename(columns={
+                            "adstock": "Adstock Type",
+                            "rsq_val": "R² (val)",
+                            "nrmse_val": "NRMSE (val)",
+                            "decomp_rssd": "Decomp RSSD",
+                            "allocator_stability_roas_cv": "ROAS CV",
+                        })
+                    )
+                    # Canonical order: geometric first, then weibull variants
+                    _adstock_order = ["geometric", "weibull_cdf", "weibull_pdf"]
+                    agg_adstock["_order"] = agg_adstock["Adstock Type"].apply(
+                        lambda a: _adstock_order.index(a) if a in _adstock_order else 99
+                    )
+                    agg_adstock = agg_adstock.sort_values("_order").drop(columns=["_order"])
+
+                    st.dataframe(agg_adstock, use_container_width=True, hide_index=True)
+
+                    import plotly.graph_objects as go  # type: ignore  # noqa: F811
+
+                    metric_labels = {
+                        "R² (val)": ("Higher is better", False),
+                        "NRMSE (val)": ("Lower is better", True),
+                        "Decomp RSSD": ("Lower is better", True),
+                        "ROAS CV": ("Lower is better — allocator stability", True),
+                    }
+                    display_cols = [c for c in agg_adstock.columns if c != "Adstock Type"]
+                    ncols = min(len(display_cols), 2)
+                    cols = st.columns(ncols)
+                    for idx, metric in enumerate(display_cols):
+                        note, lower_better = metric_labels.get(metric, ("", False))
+                        fig = go.Figure(
+                            go.Bar(
+                                x=agg_adstock["Adstock Type"],
+                                y=agg_adstock[metric],
+                                text=agg_adstock[metric].astype(str),
+                                textposition="outside",
+                            )
+                        )
+                        fig.update_layout(
+                            title=f"{metric}<br><sup>{note}</sup>",
+                            xaxis_title="Adstock Type",
+                            yaxis_title=metric,
+                            height=320,
+                            margin=dict(t=60, b=30, l=40, r=20),
+                        )
+                        cols[idx % ncols].plotly_chart(
+                            fig, use_container_width=True
+                        )
+
+            # ── Window comparison ──────────────────────────────────────
+            # Only shown when the benchmark included multiple seasonality
+            # window lengths (i.e. the 'window_label' column is non-empty).
+            if (
+                df is not None
+                and "window_label" in df.columns
+                and df["window_label"].notna().any()
+                and (df["window_label"] != "").any()
+                and df["window_label"].nunique() > 1
+            ):
+                st.divider()
+                st.subheader("📅 Window Length Comparison")
+                st.caption(
+                    "Results aggregated by seasonality window length. "
+                    "Metrics show the mean across all variants that share the same window. "
+                    "Produced when `--all-windows` is used."
+                )
+
+                window_df = df[df["window_label"].notna() & (df["window_label"] != "")].copy()
+                available_metrics = [
+                    c for c in ["rsq_val", "nrmse_val", "decomp_rssd", "allocator_stability_roas_cv"]
+                    if c in window_df.columns
+                ]
+
+                if available_metrics and not window_df.empty:
+                    agg_window = (
+                        window_df.groupby("window_label")[available_metrics]
+                        .mean()
+                        .round(4)
+                        .reset_index()
+                        .rename(columns={
+                            "window_label": "Window",
+                            "rsq_val": "R² (val)",
+                            "nrmse_val": "NRMSE (val)",
+                            "decomp_rssd": "Decomp RSSD",
+                            "allocator_stability_roas_cv": "ROAS CV",
+                        })
+                    )
+                    # Canonical order: full → 3y → 2y (longest to shortest)
+                    _window_order = ["full", "3y", "2y"]
+                    agg_window["_order"] = agg_window["Window"].apply(
+                        lambda w: _window_order.index(w) if w in _window_order else 99
+                    )
+                    agg_window = agg_window.sort_values("_order").drop(columns=["_order"])
+
+                    st.dataframe(agg_window, use_container_width=True, hide_index=True)
+
+                    import plotly.graph_objects as go  # type: ignore  # noqa: F811
+
+                    metric_labels = {
+                        "R² (val)": ("Higher is better", False),
+                        "NRMSE (val)": ("Lower is better", True),
+                        "Decomp RSSD": ("Lower is better", True),
+                        "ROAS CV": ("Lower is better — allocator stability", True),
+                    }
+                    display_cols = [c for c in agg_window.columns if c != "Window"]
+                    ncols = min(len(display_cols), 2)
+                    cols = st.columns(ncols)
+                    for idx, metric in enumerate(display_cols):
+                        note, lower_better = metric_labels.get(metric, ("", False))
+                        fig = go.Figure(
+                            go.Bar(
+                                x=agg_window["Window"],
+                                y=agg_window[metric],
+                                text=agg_window[metric].astype(str),
+                                textposition="outside",
+                            )
+                        )
+                        fig.update_layout(
+                            title=f"{metric}<br><sup>{note}</sup>",
+                            xaxis_title="Window",
                             yaxis_title=metric,
                             height=320,
                             margin=dict(t=60, b=30, l=40, r=20),
