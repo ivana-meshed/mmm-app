@@ -773,41 +773,41 @@ python scripts/run_full_benchmark.py \
 ### Recommended Quick Starts
 
 ```bash
-# Sequential extended — geometric adstock, full window, all splits + spend-var mappings
-# (11 combos: 1 adstock + 3 splits + 2 time-agg + 5 spend-var, ~$26, ~1.5 h)
+# Sequential extended — geometric adstock, full window, all splits + spend-var mappings + 3 hyperparameter presets
+# (14 combos: 11 base (1+3+2+5) + 3 preset sweep, ~$33, ~2 h)
 python scripts/run_full_benchmark.py \
   --path <path> \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
-  --extended-run --sequential
+  --extended-run --sequential --compare-presets
 
-# Sequential production — geometric adstock, full window, all splits + spend-var mappings
-# (11 combos: 1 adstock + 3 splits + 2 time-agg + 5 spend-var, ~$61, ~4 h)
+# Sequential production — geometric adstock, full window, all splits + spend-var mappings + 3 hyperparameter presets
+# (14 combos: 11 base (1+3+2+5) + 3 preset sweep, ~$78, ~5 h)
 python scripts/run_full_benchmark.py \
   --path <path> \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
-  --production-run --sequential
+  --production-run --sequential --compare-presets
 
-# Cartesian extended — geometric adstock, full window, all combinations
-# (30 combos: 1×3×2×5, ~$70, ~4-5 h)
+# Cartesian extended — geometric adstock, full window, all combinations × 3 hyperparameter presets
+# (90 combos: 30×3, ~$210, ~12-15 h)
 python scripts/run_full_benchmark.py \
   --path <path> \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
-  --extended-run
+  --extended-run --compare-presets
 
-# Cartesian production — geometric adstock, full window, all combinations
-# (30 combos: 1×3×2×5, ~$165, ~10-12 h)
+# Cartesian production — geometric adstock, full window, all combinations × 3 hyperparameter presets
+# (90 combos: 30×3, ~$495, ~30-35 h)
 python scripts/run_full_benchmark.py \
   --path <path> \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json \
-  --production-run
+  --production-run --compare-presets
 
 # Thorough analysis — geometric adstock, top-10 variants, extended run (~$35, ~2-3 h)
 python scripts/run_full_benchmark.py \
