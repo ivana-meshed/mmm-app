@@ -81,15 +81,27 @@ DEFAULT_QUEUE = os.getenv("QUEUE_NAME", "default-dev")
 # --compare-presets: compare the three most common presets
 PRESETS_COMPARE = [
     {"name": "balanced", "description": "General-purpose default preset"},
-    {"name": "fb", "description": "Robyn/Facebook official documentation defaults"},
+    {
+        "name": "fb",
+        "description": "Robyn/Facebook official documentation defaults",
+    },
     {"name": "meshed", "description": "Meshed recommended ranges"},
 ]
 # --compare-all-presets: compare all five built-in presets
 PRESETS_ALL = [
-    {"name": "conservative", "description": "Narrow search space for fast screening"},
+    {
+        "name": "conservative",
+        "description": "Narrow search space for fast screening",
+    },
     {"name": "balanced", "description": "General-purpose default preset"},
-    {"name": "exploratory", "description": "Wide search space for uncertain channels"},
-    {"name": "fb", "description": "Robyn/Facebook official documentation defaults"},
+    {
+        "name": "exploratory",
+        "description": "Wide search space for uncertain channels",
+    },
+    {
+        "name": "fb",
+        "description": "Robyn/Facebook official documentation defaults",
+    },
     {"name": "meshed", "description": "Meshed recommended ranges"},
 ]
 
@@ -219,6 +231,7 @@ _MAX_CARTESIAN_COMBINATIONS = (
     * _NUM_SPEND_VAR_MAPPINGS
     * len(ALL_WINDOW_VARIANTS)
 )
+
 
 def generate_benchmark_config(
     selected_columns: Dict[str, Any],
@@ -519,7 +532,9 @@ def generate_benchmark_config(
         logger.info(f"🔧 Hyperparameter preset: {hyperparameter_preset}")
 
     window_factor = f" × {n_windows}" if selected_window_specs else ""
-    preset_factor = f" × {n_presets}" if compare_presets and n_presets > 1 else ""
+    preset_factor = (
+        f" × {n_presets}" if compare_presets and n_presets > 1 else ""
+    )
     _ns = _NUM_TRAIN_SPLITS
     _nt = _NUM_TIME_AGGREGATIONS
     _nv = _NUM_SPEND_VAR_MAPPINGS
@@ -643,7 +658,11 @@ def load_external_benchmark_config(
             logger.info(
                 f"📅 Seasonality window(s): "
                 f"{[w['name'] for w in filtered]}"
-                + (" (use --all-windows to add 2y / 3y)" if len(filtered) == 1 else "")
+                + (
+                    " (use --all-windows to add 2y / 3y)"
+                    if len(filtered) == 1
+                    else ""
+                )
             )
 
     # Sequential mode: vary one dimension at a time.
@@ -670,9 +689,9 @@ def load_external_benchmark_config(
         logger.info(f"🔧 Hyperparameter preset: {hyperparameter_preset}")
 
     if compare_presets:
-        config.setdefault("variants", {})["hyperparameter_preset"] = (
-            compare_presets
-        )
+        config.setdefault("variants", {})[
+            "hyperparameter_preset"
+        ] = compare_presets
         preset_names = [p["name"] for p in compare_presets]
         logger.info(
             f"🔀 Preset comparison dimension added: {', '.join(preset_names)}"
@@ -1172,7 +1191,9 @@ Examples:
             "Windows: full (default — use --all-windows to add 2y / 3y)"
         )
     else:
-        logger.info("Windows: full (default — use --all-windows to add 2y / 3y)")
+        logger.info(
+            "Windows: full (default — use --all-windows to add 2y / 3y)"
+        )
     if args.top_n is not None:
         logger.info(f"Top-N combinations: {args.top_n}")
     logger.info(f"Data path: {args.path}")

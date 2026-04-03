@@ -2558,9 +2558,7 @@ with st.expander(
                         v for v in selected_organic_step4 if v in final_vars
                     ],
                     "context_vars": [
-                        v
-                        for v in combined_context_step4
-                        if v in final_vars
+                        v for v in combined_context_step4 if v in final_vars
                     ],
                     "factor_vars": [
                         v for v in selected_factor_step4 if v in final_vars
