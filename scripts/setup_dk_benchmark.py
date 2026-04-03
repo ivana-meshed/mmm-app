@@ -480,17 +480,38 @@ def main() -> None:
     for gcs_path in gcs_paths:
         variant_label = gcs_path.split("/")[-2]  # timestamp part
         print(f"# {gcs_path.split('training_data/')[-1].split('/selected')[0]}")
+        print()
+        print(
+            "# Quick test run (geometric adstock, full window, 1 preset):"
+        )
         print(
             f"python scripts/run_full_benchmark.py "
             f"--path {gcs_path}"
         )
         print()
         print(
-            f"# Full production run:"
+            "# Standard full run (geometric adstock, full window, 1 preset):"
         )
         print(
             f"python scripts/run_full_benchmark.py "
             f"--path {gcs_path} --full-run"
+        )
+        print()
+        print(
+            "# Sequential production — geometric adstock, full window,"
+        )
+        print(
+            "# all splits + spend-var mappings + 3 hyperparameter presets"
+        )
+        print(
+            "# (14 combos: 11 base (1+3+2+5) + 3 preset sweep, ~$78, ~5 h):"
+        )
+        print(
+            f"python scripts/run_full_benchmark.py \\\n"
+            f"  --path {gcs_path} \\\n"
+            f"  --full-run \\\n"
+            f"  --sequential \\\n"
+            f"  --compare-presets"
         )
         print()
 
