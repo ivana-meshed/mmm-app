@@ -610,9 +610,30 @@ class BenchmarkRunner:
                         for s in variant.get("paid_media_spends", [])
                     ]
 
-            # Apply explicit override last — always wins over derived values
+            # Apply explicit override last — always wins over derived values.
+            # Also rebuild var_to_spend_mapping so Robyn can trace each proxy
+            # variable back to its spend column.
             if "paid_media_vars_override" in spec:
-                variant["paid_media_vars"] = spec["paid_media_vars_override"]
+                override = spec["paid_media_vars_override"]
+                variant["paid_media_vars"] = override
+                spends = variant.get("paid_media_spends", [])
+                if len(spends) == len(override):
+                    variant["var_to_spend_mapping"] = {
+                        var: spend
+                        for var, spend in zip(override, spends)
+                    }
+                elif spends and override:
+                    # Lengths differ — log a warning and do best-effort
+                    logger.warning(
+                        f"paid_media_vars_override length ({len(override)}) "
+                        f"!= paid_media_spends length ({len(spends)}) for "
+                        f"variant '{spec.get('name', '?')}'. "
+                        f"var_to_spend_mapping will be incomplete."
+                    )
+                    variant["var_to_spend_mapping"] = {
+                        var: spend
+                        for var, spend in zip(override, spends)
+                    }
 
             variants.append(variant)
 
@@ -2170,12 +2191,28 @@ def main():
         paid_spends = v.get("paid_media_spends", [])
         organic = v.get("organic_vars", [])
         context = v.get("context_vars", [])
+        var_to_spend = v.get("var_to_spend_mapping", {})
         custom_hp = v.get("custom_hyperparameters", {})
         logger.info(
             f"  [{idx}] {variant_name}: "
             f"paid_media_vars={paid_vars} | paid_media_spends={paid_spends} | "
             f"organic_vars={organic} | context_vars={context}"
         )
+        # Show var→spend mapping so it is easy to verify proxies are correct
+        if var_to_spend:
+            mapping_lines = []
+            for pvar, pspend in var_to_spend.items():
+                arrow = "→" if pvar != pspend else "="
+                mapping_lines.append(f"{pvar} {arrow} {pspend}")
+            logger.info(
+                f"       var_to_spend_mapping: "
+                + " | ".join(mapping_lines)
+            )
+        else:
+            logger.info(
+                "       var_to_spend_mapping: (none — paid_media_vars "
+                "not remapped from spends)"
+            )
         if custom_hp:
             # Group by variable (strip _alphas/_gammas/_thetas suffix)
             hp_by_var: dict = {}

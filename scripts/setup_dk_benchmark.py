@@ -510,7 +510,10 @@ def main() -> None:
             "# all splits (3) + spend-var mappings (5) + 3 hyperparameter"
         )
         print(
-            "# presets + 1 adstock = 14 combos sequential, ~$78, ~5 h:"
+            "# Sequential: 1 adstock + 3 splits + 2 time-agg + 5 spend-var"
+        )
+        print(
+            "# + 3 hyperparameter presets = 14 combos (~$78, ~5 h):"
         )
         print(
             f"python scripts/run_full_benchmark.py \\\n"
