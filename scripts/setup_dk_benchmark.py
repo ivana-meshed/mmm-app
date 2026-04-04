@@ -511,7 +511,9 @@ def main() -> None:
             f"  --path {gcs_path} \\\n"
             f"  --full-run \\\n"
             f"  --sequential \\\n"
-            f"  --compare-presets"
+            f"  --compare-presets \\\n"
+            f"  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\\n"
+            f"  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json"
         )
         print()
 

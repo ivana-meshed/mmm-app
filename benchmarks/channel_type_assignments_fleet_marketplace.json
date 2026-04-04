@@ -1,61 +1,94 @@
 {
   "name": "channel_type_assignments_fleet_marketplace",
-  "description": "Maps paid media spend and proxy variable names for a fleet/mobility marketplace dataset to channel types defined in generic_hyperparameter_ranges_v2.json. Covers Google Search (brand / non-brand / pmax / display / video), Meta, Bing (brand / non-brand / other), Facebook sub-channels (video / static / upper / lower / app), and owned CRM/newsletter channels.",
-  "version": "1.1",
+  "description": "Maps paid media spend and proxy variable names for a fleet/mobility marketplace dataset (UPPERCASE column schema) to channel types defined in generic_hyperparameter_ranges_v2.json. Covers Google Search (brand / non-brand / pmax / display / YouTube), Facebook sub-channels (lower / upper / app / video / static), Bing (brand / non-brand / other), and owned CRM email channels.",
+  "version": "2.0",
   "assignments": {
-    "meta_total_spend": "paid_social_performance",
-    "meta_total_impressions": "paid_social_performance",
-    "meta_total_clicks": "paid_social_performance",
-    "meta_total_sessions": "paid_social_performance",
+    "FB_LOWER_IMPRESSIONS": "paid_social_performance",
+    "FB_LOWER_CLICKS":      "paid_social_performance",
+    "FB_LOWER_COST":        "paid_social_performance",
 
-    "google_search_brand_cost": "search_brand",
-    "google_search_brand_impressions": "search_brand",
-    "google_search_brand_clicks": "search_brand",
+    "FB_UPPER_IMPRESSIONS": "paid_social_awareness",
+    "FB_UPPER_CLICKS":      "paid_social_awareness",
+    "FB_UPPER_COST":        "paid_social_awareness",
 
-    "google_search_nonbrand_cost": "search_nonbrand",
-    "google_search_nonbrand_impressions": "search_nonbrand",
-    "google_search_nonbrand_clicks": "search_nonbrand",
-    "google_search_nonbrand_cost_2": "search_nonbrand",
+    "FB_APP_IMPRESSIONS":   "app_install",
+    "FB_APP_CLICKS":        "app_install",
+    "FB_APP_COST":          "app_install",
 
-    "google_pmax_cost": "marketplace_pmax",
-    "google_pmax_impressions": "marketplace_pmax",
-    "google_pmax_clicks": "marketplace_pmax",
-    "google_pmax_cost_2": "marketplace_pmax",
+    "FB_VIDEO_IMPRESSIONS": "paid_social_video",
+    "FB_VIDEO_CLICKS":      "paid_social_video",
+    "FB_VIDEO_COST":        "paid_social_video",
 
-    "google_display_cost": "display_prospecting",
-    "google_display_impressions": "display_prospecting",
-    "google_display_clicks": "display_prospecting",
+    "FB_STATIC_IMPRESSIONS": "paid_social_performance",
+    "FB_STATIC_CLICKS":      "paid_social_performance",
+    "FB_STATIC_COST":        "paid_social_performance",
 
-    "google_youtube_cost": "video_online",
-    "google_youtube_impressions": "video_online",
-    "google_youtube_clicks": "video_online",
+    "FB_TOTAL_IMPRESSIONS": "paid_social_performance",
+    "FB_TOTAL_CLICKS":      "paid_social_performance",
+    "FB_TOTAL_COST":        "paid_social_performance",
 
-    "google_other_cost_2": "digital_other_mixed",
+    "PMAX_LOCAL": "marketplace_pmax",
 
-    "bing_search_brand_cost": "search_brand",
-    "bing_search_brand_impressions": "search_brand",
-    "bing_search_brand_clicks": "search_brand",
+    "GOOGLE_SEARCH_BRAND_IMPRESSIONS": "search_brand",
+    "GOOGLE_SEARCH_BRAND_CLICKS":      "search_brand",
+    "GOOGLE_SEARCH_BRAND_COST":        "search_brand",
 
-    "bing_search_nonbrand_cost": "search_nonbrand",
-    "bing_search_nonbrand_impressions": "search_nonbrand",
-    "bing_search_nonbrand_clicks": "search_nonbrand",
+    "GOOGLE_SEARCH_NONBRAND_IMPRESSIONS":   "search_nonbrand",
+    "GOOGLE_SEARCH_NONBRAND_CLICKS":        "search_nonbrand",
+    "GOOGLE_SEARCH_NONBRAND_COST":          "search_nonbrand",
 
-    "bing_search_other_cost": "digital_other_mixed",
-    "bing_search_other_impressions": "digital_other_mixed",
-    "bing_search_other_clicks": "digital_other_mixed",
+    "GOOGLE_SEARCH_NONBRAND_IMPRESSIONS_2": "search_nonbrand",
+    "GOOGLE_SEARCH_NONBRAND_CLICKS_2":      "search_nonbrand",
+    "GOOGLE_SEARCH_NONBRAND_COST_2":        "search_nonbrand",
 
-    "bing_search_cost": "search_nonbrand",
-    "bing_search_impressions": "search_nonbrand",
-    "bing_search_clicks": "search_nonbrand",
+    "GOOGLE_PMAX_IMPRESSIONS":   "marketplace_pmax",
+    "GOOGLE_PMAX_CLICKS":        "marketplace_pmax",
+    "GOOGLE_PMAX_COST":          "marketplace_pmax",
 
-    "fb_video_cost": "paid_social_video",
-    "fb_upper_cost": "paid_social_awareness",
-    "fb_static_cost": "paid_social_performance",
-    "fb_lower_cost": "paid_social_performance",
-    "fb_app_cost": "app_install",
+    "GOOGLE_PMAX_IMPRESSIONS_2": "marketplace_pmax",
+    "GOOGLE_PMAX_CLICKS_2":      "marketplace_pmax",
+    "GOOGLE_PMAX_COST_2":        "marketplace_pmax",
 
-    "crm_email_sends_marketing": "crm_email",
-    "crm_push_sends_marketing": "crm_push_sms",
-    "newsletter_sends_marketing": "newsletter"
+    "GOOGLE_DISPLAY_IMPRESSIONS": "display_prospecting",
+    "GOOGLE_DISPLAY_CLICKS":      "display_prospecting",
+    "GOOGLE_DISPLAY_COST":        "display_prospecting",
+
+    "GOOGLE_YOUTUBE_IMPRESSIONS": "video_online",
+    "GOOGLE_YOUTUBE_CLICKS":      "video_online",
+    "GOOGLE_YOUTUBE_COST":        "video_online",
+
+    "GOOGLE_OTHER_IMPRESSIONS_2": "digital_other_mixed",
+    "GOOGLE_OTHER_CLICKS_2":      "digital_other_mixed",
+    "GOOGLE_OTHER_COST_2":        "digital_other_mixed",
+
+    "GOOGLE_TOTAL_IMPRESSIONS": "search_nonbrand",
+    "GOOGLE_TOTAL_CLICKS":      "search_nonbrand",
+    "GOOGLE_TOTAL_COST":        "search_nonbrand",
+
+    "BING_SEARCH_BRAND_IMPRESSIONS":    "search_brand",
+    "BING_SEARCH_BRAND_CLICKS":         "search_brand",
+    "BING_SEARCH_BRAND_COST":           "search_brand",
+
+    "BING_SEARCH_NONBRAND_IMPRESSIONS": "search_nonbrand",
+    "BING_SEARCH_NONBRAND_CLICKS":      "search_nonbrand",
+    "BING_SEARCH_NONBRAND_COST":        "search_nonbrand",
+
+    "BING_OTHER_IMPRESSIONS": "digital_other_mixed",
+    "BING_OTHER_CLICKS":      "digital_other_mixed",
+    "BING_OTHER_COST":        "digital_other_mixed",
+
+    "BING_TOTAL_IMPRESSIONS": "search_nonbrand",
+    "BING_TOTAL_CLICKS":      "search_nonbrand",
+    "BING_TOTAL_COST":        "search_nonbrand",
+
+    "CRM_EMAIL_NEWSLETTER_SENDS":  "crm_email",
+    "CRM_EMAIL_NEWSLETTER_OPENS":  "crm_email",
+    "CRM_EMAIL_NEWSLETTER_CLICKS": "crm_email",
+    "CRM_EMAIL_JOURNEY_SENDS":     "crm_email",
+    "CRM_EMAIL_JOURNEY_OPENS":     "crm_email",
+    "CRM_EMAIL_JOURNEY_CLICKS":    "crm_email",
+    "CRM_EMAIL_TOTAL_SENDS":       "crm_email",
+    "CRM_EMAIL_TOTAL_OPENS":       "crm_email",
+    "CRM_EMAIL_TOTAL_CLICKS":      "crm_email"
   }
 }

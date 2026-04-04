@@ -1142,43 +1142,6 @@ Examples:
         compare_presets = PRESETS_ALL
         args.hyperparameter_preset = None
 
-    # Auto-inject hyperparameter range configs when a preset comparison or a
-    # named preset is requested but the caller did not supply the config paths.
-    # Without these files every preset falls through to the same Meshed-defaults
-    # branch in the R script and all preset variants produce identical results.
-    _default_hp_ranges = (
-        Path(__file__).parent.parent
-        / "benchmarks"
-        / "generic_hyperparameter_ranges_v2.json"
-    )
-    _default_ct_assign = (
-        Path(__file__).parent.parent
-        / "benchmarks"
-        / "channel_type_assignments.json"
-    )
-    _needs_ranges = compare_presets or args.hyperparameter_preset
-    if _needs_ranges and not args.hyperparameter_ranges_config:
-        if _default_hp_ranges.exists():
-            args.hyperparameter_ranges_config = str(_default_hp_ranges)
-            logger.info(
-                f"ℹ️  Auto-injecting --hyperparameter-ranges-config "
-                f"(ensures presets produce distinct results): "
-                f"{args.hyperparameter_ranges_config}"
-            )
-        else:
-            logger.warning(
-                "⚠️  --compare-presets / --hyperparameter-preset requested "
-                "but benchmarks/generic_hyperparameter_ranges_v2.json not "
-                "found — all presets will use the same default ranges."
-            )
-    if _needs_ranges and not args.channel_type_assignments_config:
-        if _default_ct_assign.exists():
-            args.channel_type_assignments_config = str(_default_ct_assign)
-            logger.info(
-                "ℹ️  Auto-injecting --channel-type-assignments-config: "
-                f"{args.channel_type_assignments_config}"
-            )
-
     # Determine run mode
     if args.production_run:
         run_mode = "production"
