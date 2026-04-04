@@ -40,12 +40,45 @@ extract_model_summary <- function(output_collect, input_collect = NULL,
         result_hyp <- output_collect$resultHypParam
 
         # Identify Pareto front models
-        # In Robyn, Pareto models are typically marked by pareto_optimal flag
-        # or by being in the first N models sorted by some criteria
+        # Robyn uses "robynPareto" (camelCase) as the actual column name;
+        # the snake_case variants are kept as fallbacks for older outputs.
         has_pareto <- FALSE
         pareto_models <- list()
 
-        if ("pareto_optimal" %in% names(result_hyp)) {
+        .make_pareto_entry <- function(row, pareto_front_val) {
+            list(
+                model_id = as.character(row$solID),
+                nrmse = as.numeric(row$nrmse %||% NA),
+                decomp_rssd = as.numeric(row$decomp.rssd %||% NA),
+                rsq_train = as.numeric(row$rsq_train %||% NA),
+                nrmse_train = as.numeric(row$nrmse_train %||% NA),
+                rsq_val = as.numeric(row$rsq_val %||% NA),
+                nrmse_val = as.numeric(row$nrmse_val %||% NA),
+                rsq_test = as.numeric(row$rsq_test %||% NA),
+                nrmse_test = as.numeric(row$nrmse_test %||% NA),
+                mape = as.numeric(row$mape %||% NA),
+                robyn_pareto_front = as.integer(pareto_front_val)
+            )
+        }
+
+        if ("robynPareto" %in% names(result_hyp)) {
+            has_pareto <- any(
+                !is.na(result_hyp$robynPareto) & result_hyp$robynPareto > 0
+            )
+            if (has_pareto) {
+                pareto_df <- result_hyp[
+                    !is.na(result_hyp$robynPareto) &
+                        result_hyp$robynPareto > 0,
+                ]
+                pareto_models <- lapply(
+                    seq_len(min(nrow(pareto_df), 10)),
+                    function(i) {
+                        row <- pareto_df[i, ]
+                        .make_pareto_entry(row, row$robynPareto)
+                    }
+                )
+            }
+        } else if ("pareto_optimal" %in% names(result_hyp)) {
             has_pareto <- any(result_hyp$pareto_optimal == TRUE, na.rm = TRUE)
             if (has_pareto) {
                 pareto_df <- result_hyp[result_hyp$pareto_optimal == TRUE, ]
@@ -53,65 +86,29 @@ extract_model_summary <- function(output_collect, input_collect = NULL,
                     seq_len(min(nrow(pareto_df), 10)),
                     function(i) {
                         row <- pareto_df[i, ]
-                        list(
-                            model_id = as.character(row$solID),
-                            nrmse = as.numeric(row$nrmse %||% NA),
-                            decomp_rssd = as.numeric(row$decomp.rssd %||% NA),
-                            rsq_train = as.numeric(row$rsq_train %||% NA),
-                            nrmse_train = as.numeric(row$nrmse_train %||% NA),
-                            rsq_val = as.numeric(row$rsq_val %||% NA),
-                            nrmse_val = as.numeric(row$nrmse_val %||% NA),
-                            rsq_test = as.numeric(row$rsq_test %||% NA),
-                            nrmse_test = as.numeric(row$nrmse_test %||% NA),
-                            mape = as.numeric(row$mape %||% NA),
-                            robyn_pareto_front = as.integer(
-                                row$robyn_pareto_front %||% NA
-                            )
+                        .make_pareto_entry(
+                            row, row$robyn_pareto_front %||% NA
                         )
                     }
                 )
             }
-        } else {
-            # Fallback: use pareto_fronts or top models
-            # Check if there's a robyn_pareto_front column
-            if ("robyn_pareto_front" %in% names(result_hyp)) {
-                has_pareto <- any(
+        } else if ("robyn_pareto_front" %in% names(result_hyp)) {
+            has_pareto <- any(
+                !is.na(result_hyp$robyn_pareto_front) &
+                    result_hyp$robyn_pareto_front > 0
+            )
+            if (has_pareto) {
+                pareto_df <- result_hyp[
                     !is.na(result_hyp$robyn_pareto_front) &
-                        result_hyp$robyn_pareto_front > 0
+                        result_hyp$robyn_pareto_front > 0,
+                ]
+                pareto_models <- lapply(
+                    seq_len(min(nrow(pareto_df), 10)),
+                    function(i) {
+                        row <- pareto_df[i, ]
+                        .make_pareto_entry(row, row$robyn_pareto_front)
+                    }
                 )
-                if (has_pareto) {
-                    pareto_df <- result_hyp[
-                        !is.na(result_hyp$robyn_pareto_front) &
-                            result_hyp$robyn_pareto_front > 0,
-                    ]
-                    pareto_models <- lapply(
-                        seq_len(min(nrow(pareto_df), 10)),
-                        function(i) {
-                            row <- pareto_df[i, ]
-                            list(
-                                model_id = as.character(row$solID),
-                                nrmse = as.numeric(row$nrmse %||% NA),
-                                decomp_rssd = as.numeric(
-                                    row$decomp.rssd %||% NA
-                                ),
-                                rsq_train = as.numeric(row$rsq_train %||% NA),
-                                nrmse_train = as.numeric(
-                                    row$nrmse_train %||% NA
-                                ),
-                                rsq_val = as.numeric(row$rsq_val %||% NA),
-                                nrmse_val = as.numeric(row$nrmse_val %||% NA),
-                                rsq_test = as.numeric(row$rsq_test %||% NA),
-                                nrmse_test = as.numeric(
-                                    row$nrmse_test %||% NA
-                                ),
-                                mape = as.numeric(row$mape %||% NA),
-                                robyn_pareto_front = as.integer(
-                                    row$robyn_pareto_front %||% NA
-                                )
-                            )
-                        }
-                    )
-                }
             }
         }
 
@@ -134,7 +131,9 @@ extract_model_summary <- function(output_collect, input_collect = NULL,
                 rsq_test = as.numeric(row$rsq_test %||% NA),
                 nrmse_test = as.numeric(row$nrmse_test %||% NA),
                 mape = as.numeric(row$mape %||% NA),
-                is_pareto = if ("robyn_pareto_front" %in% names(row)) {
+                is_pareto = if ("robynPareto" %in% names(row)) {
+                    !is.na(row$robynPareto) && row$robynPareto > 0
+                } else if ("robyn_pareto_front" %in% names(row)) {
                     !is.na(row$robyn_pareto_front) &&
                         row$robyn_pareto_front > 0
                 } else {
@@ -309,10 +308,16 @@ extract_model_summary <- function(output_collect, input_collect = NULL,
         }
 
         # Identify Pareto model IDs
+        # Robyn uses "robynPareto" (camelCase) as the actual column name in
+        # resultHypParam; the snake_case variants are kept as fallbacks.
         pareto_ids <- NULL
         if (!is.null(output_collect$resultHypParam)) {
             rhp <- output_collect$resultHypParam
-            if ("robyn_pareto_front" %in% names(rhp)) {
+            if ("robynPareto" %in% names(rhp)) {
+                pareto_ids <- rhp$solID[
+                    !is.na(rhp$robynPareto) & rhp$robynPareto > 0
+                ]
+            } else if ("robyn_pareto_front" %in% names(rhp)) {
                 pareto_ids <- rhp$solID[
                     !is.na(rhp$robyn_pareto_front) & rhp$robyn_pareto_front > 0
                 ]
