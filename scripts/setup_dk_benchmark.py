@@ -478,7 +478,6 @@ def main() -> None:
     print("=" * 72)
     print()
     for gcs_path in gcs_paths:
-        variant_label = gcs_path.split("/")[-2]  # timestamp part
         print(f"# {gcs_path.split('training_data/')[-1].split('/selected')[0]}")
         print()
         print(
@@ -486,29 +485,37 @@ def main() -> None:
         )
         print(
             f"python scripts/run_full_benchmark.py "
-            f"--path {gcs_path}"
+            f"--path {gcs_path} \\\n"
+            f"  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \\\n"
+            f"  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\\n"
+            f"  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json"
         )
         print()
         print(
             "# Standard full run (geometric adstock, full window, 1 preset):"
         )
         print(
-            f"python scripts/run_full_benchmark.py "
-            f"--path {gcs_path} --full-run"
+            f"python scripts/run_full_benchmark.py \\\n"
+            f"  --path {gcs_path} \\\n"
+            f"  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \\\n"
+            f"  --full-run \\\n"
+            f"  --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \\\n"
+            f"  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json"
         )
         print()
         print(
             "# Sequential production — geometric adstock, full window,"
         )
         print(
-            "# all splits + spend-var mappings + 3 hyperparameter presets"
+            "# all splits (3) + spend-var mappings (5) + 3 hyperparameter"
         )
         print(
-            "# (14 combos: 11 base (1+3+2+5) + 3 preset sweep, ~$78, ~5 h):"
+            "# presets + 1 adstock = 14 combos sequential, ~$78, ~5 h:"
         )
         print(
             f"python scripts/run_full_benchmark.py \\\n"
             f"  --path {gcs_path} \\\n"
+            f"  --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \\\n"
             f"  --full-run \\\n"
             f"  --sequential \\\n"
             f"  --compare-presets \\\n"
