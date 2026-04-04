@@ -46,26 +46,27 @@ def get_storage_client():
 
 
 def list_benchmarks():
-    """List available benchmarks from GCS."""
+    """List benchmarks from GCS that have at least one results CSV file."""
     try:
         client = get_storage_client()
         bucket = client.bucket(GCS_BUCKET)
 
-        # List all benchmark directories
+        # Walk every object under benchmarks/ and collect IDs of directories
+        # that contain a results_*.csv file.  This filters out directories that
+        # only hold config/mapping JSONs (e.g. benchmarks/dk/).
         prefix_to_search = f"{BENCHMARK_ROOT}/"
-        blobs = bucket.list_blobs(prefix=prefix_to_search, delimiter="/")
-        benchmarks = []
+        blobs = bucket.list_blobs(prefix=prefix_to_search)
+        benchmarks = set()
 
-        # GCS iterator pattern: Must consume blobs before accessing prefixes
-        _ = list(blobs)  # Consume iterator to populate prefixes
-        prefixes_list = (
-            list(blobs.prefixes) if hasattr(blobs, "prefixes") else []
-        )
-
-        for prefix in prefixes_list:
-            benchmark_id = prefix.replace(f"{BENCHMARK_ROOT}/", "").rstrip("/")
-            if benchmark_id:  # Skip empty
-                benchmarks.append(benchmark_id)
+        for blob in blobs:
+            # Expected path: benchmarks/{benchmark_id}/results_*.csv
+            parts = blob.name.split("/")
+            if (
+                len(parts) >= 3
+                and parts[2].startswith("results_")
+                and blob.name.endswith(".csv")
+            ):
+                benchmarks.add(parts[1])
 
         return sorted(benchmarks, reverse=True)
 

@@ -416,13 +416,33 @@ class BenchmarkRunner:
                 )
             )
 
-        # Generate seasonality window variants
+        # Generate seasonality window variants.
+        # In sequential mode a single "full" window spec that carries no
+        # date override is equivalent to the base-config default and does
+        # NOT add a meaningful test dimension — skip it so the variant
+        # count stays at 1+3+2+5+3 = 14 for the standard DK benchmark.
         if "seasonality_window" in variant_specs:
-            variants.extend(
-                self._generate_seasonality_variants(
-                    base_config, variant_specs["seasonality_window"]
+            window_specs = variant_specs["seasonality_window"]
+            non_trivial_windows = [
+                w
+                for w in window_specs
+                if "weeks_back" in w
+                or "start_date" in w
+                or "end_date" in w
+            ]
+            if non_trivial_windows:
+                variants.extend(
+                    self._generate_seasonality_variants(
+                        base_config, non_trivial_windows
+                    )
                 )
-            )
+            elif len(window_specs) > 1:
+                # All windows are "full" (no override) — still worth sweeping
+                variants.extend(
+                    self._generate_seasonality_variants(
+                        base_config, window_specs
+                    )
+                )
 
         # Generate hyperparameter preset comparison variants
         if "hyperparameter_preset" in variant_specs:
@@ -590,9 +610,33 @@ class BenchmarkRunner:
                         for s in variant.get("paid_media_spends", [])
                     ]
 
-            # Apply explicit override last — always wins over derived values
+            # Apply explicit override last — always wins over derived values.
+            # Also rebuild var_to_spend_mapping so Robyn can trace each proxy
+            # variable back to its spend column.
             if "paid_media_vars_override" in spec:
-                variant["paid_media_vars"] = spec["paid_media_vars_override"]
+                override = spec["paid_media_vars_override"]
+                variant["paid_media_vars"] = override
+                spends = variant.get("paid_media_spends", [])
+                if len(spends) == len(override):
+                    variant["var_to_spend_mapping"] = {
+                        var: spend
+                        for var, spend in zip(override, spends)
+                    }
+                elif spends and override:
+                    # Lengths differ — create best-effort mapping using the
+                    # shorter of the two lists (zip stops at the shorter one).
+                    min_len = min(len(spends), len(override))
+                    logger.warning(
+                        f"paid_media_vars_override length ({len(override)}) "
+                        f"!= paid_media_spends length ({len(spends)}) for "
+                        f"variant '{spec.get('name', '?')}'. "
+                        f"var_to_spend_mapping will only cover the first "
+                        f"{min_len} pair(s)."
+                    )
+                    variant["var_to_spend_mapping"] = {
+                        var: spend
+                        for var, spend in zip(override, spends)
+                    }
 
             variants.append(variant)
 
@@ -2112,6 +2156,89 @@ def main():
         print("  - Verify the base config exists")
         print(f"  - Config file: {args.config}")
         sys.exit(1)
+
+    # ── Per-variant Robyn parameter summary ──────────────────────────────
+    # Printed immediately after generation so the operator can verify
+    # exactly what will be sent to Robyn before any jobs hit the queue.
+    logger.info("")
+    logger.info("=" * 72)
+    logger.info(
+        f"ROBYN PARAMETER SUMMARY — {len(variants)} variant(s) to submit"
+    )
+    logger.info("=" * 72)
+    logger.info(
+        f"{'#':<4} {'variant':<32} {'adstock':<12} {'freq':<8} "
+        f"{'preset/label':<22} {'custom_hp':<10} {'splits'}"
+    )
+    logger.info("-" * 100)
+    for idx, v in enumerate(variants, 1):
+        variant_name = v.get("benchmark_variant", "—")
+        adstock = v.get("adstock", "geometric")
+        freq = v.get("resample_freq", "none")
+        preset = v.get("hyperparameter_preset", "—")
+        label = v.get("preset_label", "")
+        preset_display = f"{preset}" + (f" ({label})" if label and label != preset else "")
+        hp_keys = len(v.get("custom_hyperparameters", {}))
+        hp_str = f"{hp_keys} keys" if hp_keys else "none"
+        train_size = v.get("train_size", "")
+        splits = f"train_size={train_size}" if train_size else "—"
+        logger.info(
+            f"{idx:<4} {variant_name:<32} {adstock:<12} {freq:<8} "
+            f"{preset_display:<22} {hp_str:<10} {splits}"
+        )
+    logger.info("-" * 100)
+    # Detailed view: paid_media_vars + custom_hyperparameters per variant
+    for idx, v in enumerate(variants, 1):
+        variant_name = v.get("benchmark_variant", f"variant_{idx}")
+        paid_vars = v.get("paid_media_vars", [])
+        paid_spends = v.get("paid_media_spends", [])
+        organic = v.get("organic_vars", [])
+        context = v.get("context_vars", [])
+        var_to_spend = v.get("var_to_spend_mapping", {})
+        custom_hp = v.get("custom_hyperparameters", {})
+        logger.info(
+            f"  [{idx}] {variant_name}: "
+            f"paid_media_vars={paid_vars} | paid_media_spends={paid_spends} | "
+            f"organic_vars={organic} | context_vars={context}"
+        )
+        # Show var→spend mapping so it is easy to verify proxies are correct
+        if var_to_spend:
+            mapping_lines = []
+            for pvar, pspend in var_to_spend.items():
+                arrow = "→" if pvar != pspend else "="
+                mapping_lines.append(f"{pvar} {arrow} {pspend}")
+            logger.info(
+                f"       var_to_spend_mapping: "
+                + " | ".join(mapping_lines)
+            )
+        else:
+            logger.info(
+                "       var_to_spend_mapping: (none — paid_media_vars "
+                "not remapped from spends)"
+            )
+        if custom_hp:
+            # Group by variable (strip _alphas/_gammas/_thetas suffix)
+            hp_by_var: dict = {}
+            for key, val in custom_hp.items():
+                parts = key.rsplit("_", 1)
+                if len(parts) == 2:
+                    var, hp_type = parts
+                else:
+                    var, hp_type = key, "?"
+                hp_by_var.setdefault(var, {})[hp_type] = val
+            for var_name, hp_vals in sorted(hp_by_var.items()):
+                hp_str_detail = ", ".join(
+                    f"{t}={vv}" for t, vv in sorted(hp_vals.items())
+                )
+                logger.info(f"       {var_name}: {hp_str_detail}")
+        else:
+            logger.info(
+                "       ⚠️  no custom_hyperparameters — Robyn will use its "
+                "built-in defaults for this variant"
+            )
+    logger.info("=" * 72)
+    logger.info("")
+    # ─────────────────────────────────────────────────────────────────────
 
     # Apply top-N selection if requested
     if args.top_n < len(variants):

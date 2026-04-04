@@ -16,9 +16,11 @@ st.set_page_config(
 
 from app_split_helpers import *
 
-# Handle queue tick endpoint early (before navigation setup)
-# This needs to be called explicitly, not at module import time
-handle_queue_tick_if_requested()
+# Handle queue tick endpoint early (before navigation setup).
+# Guard against stale deployments where app_split_helpers may not yet
+# expose this function (AttributeError from prior-PR deployment mismatch).
+if callable(globals().get("handle_queue_tick_if_requested")):
+    handle_queue_tick_if_requested()
 
 # Define pages for custom navigation
 connect_page = st.Page(

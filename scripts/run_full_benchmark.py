@@ -1017,11 +1017,12 @@ Examples:
         action="store_true",
         help=(
             "Run tests sequentially per dimension instead of the cartesian product. "
-            "Each dimension (adstock, splits, time_agg, spend_var, windows) is varied "
+            "Each dimension (adstock, splits, time_agg, spend_var) is varied "
             "independently, using base-config defaults for the other dimensions. "
-            "Order: adstock → train_splits → time_aggregation → spend_var_mapping → "
-            "seasonality_window. Reduces combinations from product to sum "
-            "(e.g. 11 vs 30 for geometric-only default; 14 with --all-windows). "
+            "A single 'full' window that carries no date override is skipped as a "
+            "sequential dimension (it is the base default). "
+            "With --config benchmarks/comprehensive_benchmark_fleet_marketplace.json "
+            "and --compare-presets: 1+3+2+5+3 = 14 variants. "
             "Recommended for initial exploration before a full cartesian sweep."
         ),
     )
@@ -1247,6 +1248,22 @@ Examples:
                 hyperparameter_preset=args.hyperparameter_preset,
                 compare_presets=compare_presets,
             )
+            # Always overwrite base_config with the actual country/goal/version
+            # derived from --path.  External configs ship with a placeholder
+            # base_config (e.g. "country": "FILL_IN_COUNTRY_CODE") that must
+            # be replaced before benchmark_mmm.py uses it to fetch the real
+            # selected_columns.json from GCS.
+            country = selected_columns.get("country", "")
+            goal = selected_columns.get("selected_goal", "")
+            benchmark_config["base_config"] = {
+                "country": country,
+                "goal": goal,
+                "version": version_from_path,
+            }
+            logger.info(
+                f"📌 Base config injected from --path: "
+                f"{country}/{goal}/{version_from_path}"
+            )
         else:
             # Build config dynamically from selected_columns.json.
             benchmark_config = generate_benchmark_config(
@@ -1269,6 +1286,45 @@ Examples:
             if args.top_n is not None
             else benchmark_config["max_combinations"]
         )
+
+        # ── Pre-submission variant summary ────────────────────────────────
+        # Log the key Robyn parameters for every variant so the operator
+        # can verify what will be sent before jobs hit the queue.
+        variants_summary = benchmark_config.get("variants", {})
+        combination_mode = benchmark_config.get("combination_mode", "single")
+        logger.info("")
+        logger.info("=" * 72)
+        logger.info("BENCHMARK VARIANT PLAN (what will be sent to Robyn)")
+        logger.info("=" * 72)
+        logger.info(f"  Combination mode : {combination_mode}")
+        logger.info(
+            f"  Iterations       : {benchmark_config.get('iterations')}"
+        )
+        logger.info(f"  Trials           : {benchmark_config.get('trials')}")
+        logger.info(
+            f"  Hyperparameter ranges config : "
+            f"{benchmark_config.get('hyperparameter_ranges_config', '(none)')}"
+        )
+        logger.info(
+            f"  Channel type assignments     : "
+            f"{benchmark_config.get('channel_type_assignments_config', '(none)')}"
+        )
+        logger.info("")
+        for dim_name, dim_variants in variants_summary.items():
+            if not isinstance(dim_variants, list):
+                continue
+            logger.info(
+                f"  Dimension '{dim_name}' — {len(dim_variants)} variant(s):"
+            )
+            for v in dim_variants:
+                name = v.get("name", "?")
+                desc = v.get("description", "")
+                preset = v.get("hyperparameter_preset", "")
+                extra = f"  preset={preset}" if preset else ""
+                logger.info(f"    • {name:<28} {desc[:50]}{extra}")
+        logger.info("=" * 72)
+        logger.info("")
+        # ─────────────────────────────────────────────────────────────────
 
         # Save to temporary file
         config_path = save_temp_benchmark_config(benchmark_config)
