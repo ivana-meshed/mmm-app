@@ -623,12 +623,15 @@ class BenchmarkRunner:
                         for var, spend in zip(override, spends)
                     }
                 elif spends and override:
-                    # Lengths differ — log a warning and do best-effort
+                    # Lengths differ — create best-effort mapping using the
+                    # shorter of the two lists (zip stops at the shorter one).
+                    min_len = min(len(spends), len(override))
                     logger.warning(
                         f"paid_media_vars_override length ({len(override)}) "
                         f"!= paid_media_spends length ({len(spends)}) for "
                         f"variant '{spec.get('name', '?')}'. "
-                        f"var_to_spend_mapping will be incomplete."
+                        f"var_to_spend_mapping will only cover the first "
+                        f"{min_len} pair(s)."
                     )
                     variant["var_to_spend_mapping"] = {
                         var: spend

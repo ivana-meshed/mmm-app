@@ -1253,16 +1253,16 @@ Examples:
             # base_config (e.g. "country": "FILL_IN_COUNTRY_CODE") that must
             # be replaced before benchmark_mmm.py uses it to fetch the real
             # selected_columns.json from GCS.
-            _country = selected_columns.get("country", "")
-            _goal = selected_columns.get("selected_goal", "")
+            country = selected_columns.get("country", "")
+            goal = selected_columns.get("selected_goal", "")
             benchmark_config["base_config"] = {
-                "country": _country,
-                "goal": _goal,
+                "country": country,
+                "goal": goal,
                 "version": version_from_path,
             }
             logger.info(
                 f"📌 Base config injected from --path: "
-                f"{_country}/{_goal}/{version_from_path}"
+                f"{country}/{goal}/{version_from_path}"
             )
         else:
             # Build config dynamically from selected_columns.json.
