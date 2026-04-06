@@ -382,6 +382,7 @@ class BenchmarkAnalyzer:
             "rsq_train": best_model.get("rsq_train"),
             "rsq_val": best_model.get("rsq_val"),
             "rsq_test": best_model.get("rsq_test"),
+            "nrmse": best_model.get("nrmse"),
             "nrmse_train": best_model.get("nrmse_train"),
             "nrmse_val": best_model.get("nrmse_val"),
             "nrmse_test": best_model.get("nrmse_test"),
@@ -788,69 +789,141 @@ class BenchmarkAnalyzer:
         """Plot summary of best models by different criteria."""
         fig, axes = plt.subplots(2, 2, figsize=(16, 14))
 
-        # Best by R² validation
-        if "rsq_val" in df.columns:
-            ax = axes[0, 0]
-            top_models = df.nlargest(10, "rsq_val")[
-                ["benchmark_variant", "rsq_val"]
-            ]
-            ax.barh(top_models["benchmark_variant"], top_models["rsq_val"])
-            ax.set_title(
-                "Top 10 Models by R² Validation", fontsize=14, fontweight="bold"
-            )
-            ax.set_xlabel("R² Validation", fontsize=12)
-            ax.tick_params(axis="y", labelsize=9)
-            ax.grid(axis="x", alpha=0.3)
+        def _has_data(col: str) -> bool:
+            return col in df.columns and df[col].notna().any()
 
-        # Best by NRMSE validation
-        if "nrmse_val" in df.columns:
-            ax = axes[0, 1]
-            top_models = df.nsmallest(10, "nrmse_val")[
-                ["benchmark_variant", "nrmse_val"]
+        def _no_data_label(ax, title: str, note: str = "") -> None:
+            ax.set_title(title, fontsize=14, fontweight="bold")
+            ax.text(
+                0.5,
+                0.5,
+                "No data available" + (f"\n({note})" if note else ""),
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+                fontsize=13,
+                color="gray",
+            )
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.axis("off")
+
+        # ── Subplot 1: Best by R² ─────────────────────────────────────────
+        # Prefer rsq_val; fall back to rsq_train if val metrics are absent.
+        ax = axes[0, 0]
+        rsq_col = (
+            "rsq_val"
+            if _has_data("rsq_val")
+            else ("rsq_train" if _has_data("rsq_train") else None)
+        )
+        rsq_label = (
+            "R² Validation"
+            if rsq_col == "rsq_val"
+            else ("R² Train" if rsq_col else "R²")
+        )
+        if rsq_col:
+            top_models = df.nlargest(10, rsq_col)[
+                ["benchmark_variant", rsq_col]
             ]
-            ax.barh(top_models["benchmark_variant"], top_models["nrmse_val"])
+            ax.barh(top_models["benchmark_variant"], top_models[rsq_col])
             ax.set_title(
-                "Top 10 Models by NRMSE Validation",
+                f"Top 10 Models by {rsq_label}",
                 fontsize=14,
                 fontweight="bold",
             )
-            ax.set_xlabel("NRMSE Validation", fontsize=12)
+            ax.set_xlabel(rsq_label, fontsize=12)
             ax.tick_params(axis="y", labelsize=9)
             ax.grid(axis="x", alpha=0.3)
+        else:
+            _no_data_label(ax, "Top 10 Models by R²", "rsq not available")
 
-        # Best by decomp RSSD
-        if "decomp_rssd" in df.columns:
-            ax = axes[1, 0]
+        # ── Subplot 2: Best by NRMSE ──────────────────────────────────────
+        # Prefer nrmse_val; fall back to plain nrmse.
+        ax = axes[0, 1]
+        nrmse_col = (
+            "nrmse_val"
+            if _has_data("nrmse_val")
+            else ("nrmse" if _has_data("nrmse") else None)
+        )
+        nrmse_label = (
+            "NRMSE Validation"
+            if nrmse_col == "nrmse_val"
+            else ("NRMSE (overall)" if nrmse_col else "NRMSE")
+        )
+        if nrmse_col:
+            top_models = df.nsmallest(10, nrmse_col)[
+                ["benchmark_variant", nrmse_col]
+            ]
+            ax.barh(top_models["benchmark_variant"], top_models[nrmse_col])
+            ax.set_title(
+                f"Top 10 Models by {nrmse_label}",
+                fontsize=14,
+                fontweight="bold",
+            )
+            ax.set_xlabel(nrmse_label, fontsize=12)
+            ax.tick_params(axis="y", labelsize=9)
+            ax.grid(axis="x", alpha=0.3)
+        else:
+            _no_data_label(ax, "Top 10 Models by NRMSE", "nrmse not available")
+
+        # ── Subplot 3: Best by Decomp RSSD ────────────────────────────────
+        ax = axes[1, 0]
+        if _has_data("decomp_rssd"):
             top_models = df.nsmallest(10, "decomp_rssd")[
                 ["benchmark_variant", "decomp_rssd"]
             ]
-            ax.barh(top_models["benchmark_variant"], top_models["decomp_rssd"])
+            ax.barh(
+                top_models["benchmark_variant"], top_models["decomp_rssd"]
+            )
             ax.set_title(
-                "Top 10 Models by Decomp RSSD", fontsize=14, fontweight="bold"
+                "Top 10 Models by Decomp RSSD",
+                fontsize=14,
+                fontweight="bold",
             )
             ax.set_xlabel("Decomp RSSD", fontsize=12)
             ax.tick_params(axis="y", labelsize=9)
             ax.grid(axis="x", alpha=0.3)
+        else:
+            _no_data_label(
+                ax, "Top 10 Models by Decomp RSSD", "decomp_rssd not available"
+            )
 
-        # Generalization (smallest val-test gap)
-        if "rsq_val" in df.columns and "rsq_test" in df.columns:
-            ax = axes[1, 1]
+        # ── Subplot 4: Generalization (val-test gap) ──────────────────────
+        ax = axes[1, 1]
+        if _has_data("rsq_val") and _has_data("rsq_test"):
             df_temp = df.copy()
             df_temp["val_test_gap"] = abs(
                 df_temp["rsq_val"] - df_temp["rsq_test"]
             )
-            top_models = df_temp.nsmallest(10, "val_test_gap")[
-                ["benchmark_variant", "val_test_gap"]
-            ]
-            ax.barh(top_models["benchmark_variant"], top_models["val_test_gap"])
-            ax.set_title(
-                "Top 10 Models by Generalization (Val-Test Gap)",
-                fontsize=14,
-                fontweight="bold",
+            valid = df_temp["val_test_gap"].notna()
+            if valid.any():
+                top_models = df_temp[valid].nsmallest(10, "val_test_gap")[
+                    ["benchmark_variant", "val_test_gap"]
+                ]
+                ax.barh(
+                    top_models["benchmark_variant"],
+                    top_models["val_test_gap"],
+                )
+                ax.set_title(
+                    "Top 10 Models by Generalization (Val-Test Gap)",
+                    fontsize=14,
+                    fontweight="bold",
+                )
+                ax.set_xlabel("Val-Test Gap (R²)", fontsize=12)
+                ax.tick_params(axis="y", labelsize=9)
+                ax.grid(axis="x", alpha=0.3)
+            else:
+                _no_data_label(
+                    ax,
+                    "Top 10 Models by Generalization",
+                    "val/test R² not available",
+                )
+        else:
+            _no_data_label(
+                ax,
+                "Top 10 Models by Generalization",
+                "val/test R² not available",
             )
-            ax.set_xlabel("Val-Test Gap (R²)", fontsize=12)
-            ax.tick_params(axis="y", labelsize=9)
-            ax.grid(axis="x", alpha=0.3)
 
         plt.tight_layout(pad=2.0)  # More padding for readability
         return fig
