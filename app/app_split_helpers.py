@@ -201,7 +201,15 @@ def prepare_and_launch_job(params: dict) -> dict:
     # Support both 'revision' and 'version' keys for backward compatibility
     revision = params.get("revision") or params.get("version") or ""
     country = params.get("country", "")
-    gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
+
+    # For benchmark jobs route outputs under benchmarks/{benchmark_id}/{variant}/
+    # so all variants of the same benchmark land in one shared parent folder.
+    benchmark_id = params.get("benchmark_id")
+    benchmark_variant = params.get("benchmark_variant")
+    if benchmark_id and benchmark_variant:
+        gcs_prefix = f"benchmarks/{benchmark_id}/{benchmark_variant}"
+    else:
+        gcs_prefix = f"robyn/{revision}/{country}/{timestamp}"
 
     # Check if data already exists in GCS (Issue #4 GCS-based workflow)
     data_gcs_path_provided = params.get("data_gcs_path")

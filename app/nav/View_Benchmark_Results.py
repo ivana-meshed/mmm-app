@@ -46,25 +46,37 @@ def get_storage_client():
 
 
 def list_benchmarks():
-    """List benchmarks from GCS that have at least one results CSV file."""
+    """
+    List benchmarks from GCS.
+
+    Detects benchmarks via either:
+    - A pre-aggregated ``results_*.csv`` (produced by collect-results / analyze)
+    - Individual ``model_summary.json`` files written by each variant job
+      (path: benchmarks/{benchmark_id}/{variant}/model_summary.json)
+    """
     try:
         client = get_storage_client()
         bucket = client.bucket(GCS_BUCKET)
 
-        # Walk every object under benchmarks/ and collect IDs of directories
-        # that contain a results_*.csv file.  This filters out directories that
-        # only hold config/mapping JSONs (e.g. benchmarks/dk/).
         prefix_to_search = f"{BENCHMARK_ROOT}/"
         blobs = bucket.list_blobs(prefix=prefix_to_search)
         benchmarks = set()
 
         for blob in blobs:
-            # Expected path: benchmarks/{benchmark_id}/results_*.csv
             parts = blob.name.split("/")
+            if len(parts) < 2:
+                continue
+            # benchmarks/{benchmark_id}/results_*.csv
             if (
                 len(parts) >= 3
                 and parts[2].startswith("results_")
                 and blob.name.endswith(".csv")
+            ):
+                benchmarks.add(parts[1])
+            # benchmarks/{benchmark_id}/{variant}/model_summary.json
+            elif (
+                len(parts) >= 4
+                and parts[3] == "model_summary.json"
             ):
                 benchmarks.add(parts[1])
 
@@ -78,29 +90,111 @@ def list_benchmarks():
         return []
 
 
-def load_benchmark_csv(benchmark_id):
-    """Load the most recent CSV for a benchmark."""
+def _aggregate_variant_summaries(benchmark_id: str):
+    """
+    Aggregate per-variant model_summary.json files into a DataFrame.
+
+    Scans ``benchmarks/{benchmark_id}/{variant}/model_summary.json`` and
+    builds a row per variant with the key metrics used by the results table.
+    Returns (DataFrame, source_description) or (None, reason).
+    """
     client = get_storage_client()
     bucket = client.bucket(GCS_BUCKET)
 
-    # List all CSV files for this benchmark
+    prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/"
+    blobs = list(bucket.list_blobs(prefix=prefix))
+
+    summary_blobs = [
+        b
+        for b in blobs
+        if b.name.endswith("/model_summary.json")
+        and len(b.name.split("/")) == 4  # benchmarks/id/variant/model_summary.json
+    ]
+
+    if not summary_blobs:
+        return None, "no variant model_summary.json found"
+
+    rows = []
+    for blob in summary_blobs:
+        variant_name = blob.name.split("/")[2]
+        try:
+            summary = json.loads(blob.download_as_bytes())
+        except Exception:
+            continue
+
+        best_model = summary.get("best_model", {})
+        decomp = summary.get("decomp_contribution", {}) or {}
+        channel_roas = decomp.get("channel_roas") or {}
+        channel_cpa = decomp.get("channel_cpa") or {}
+
+        row = {
+            "benchmark_variant": variant_name,
+            "country": summary.get("country", ""),
+            "adstock": summary.get("input_metadata", {}).get("adstock", ""),
+            "train_size": str(summary.get("input_metadata", {}).get("train_size", "")),
+            "iterations": summary.get("input_metadata", {}).get("iterations", ""),
+            "trials": summary.get("input_metadata", {}).get("trials", ""),
+            "resample_freq": summary.get("input_metadata", {}).get("resample_freq", "none"),
+            "rsq_train": best_model.get("rsq_train"),
+            "rsq_val": best_model.get("rsq_val"),
+            "rsq_test": best_model.get("rsq_test"),
+            "nrmse_train": best_model.get("nrmse_train"),
+            "nrmse_val": best_model.get("nrmse_val"),
+            "nrmse_test": best_model.get("nrmse_test"),
+            "decomp_rssd": best_model.get("decomp_rssd"),
+            "mape": best_model.get("mape"),
+            "paid_media_share": decomp.get("paid_media_share"),
+            "baseline_share": decomp.get("baseline_share"),
+            "organic_share": decomp.get("organic_share"),
+            "context_share": decomp.get("context_share"),
+            "allocator_stability_roas_cv": decomp.get("allocator_stability_roas_cv"),
+            "channel_roas_json": json.dumps(channel_roas) if channel_roas else "",
+            "channel_cpa_json": json.dumps(channel_cpa) if channel_cpa else "",
+            "model_id": best_model.get("model_id"),
+            "pareto_model_count": summary.get("pareto_model_count", 0),
+            "training_time_mins": summary.get("training_time_mins"),
+            "timestamp": summary.get("timestamp", ""),
+        }
+        rows.append(row)
+
+    if not rows:
+        return None, "could not parse any variant summaries"
+
+    df = pd.DataFrame(rows)
+    source = f"benchmarks/{benchmark_id}/ — {len(rows)} variant(s)"
+    return df, source
+
+
+def load_benchmark_csv(benchmark_id):
+    """
+    Load benchmark results for *benchmark_id*.
+
+    Priority:
+    1. Most recent pre-aggregated ``results_*.csv`` (collect-results output).
+    2. Live aggregation from individual per-variant ``model_summary.json`` files.
+
+    Returns (DataFrame, source_description) or None if nothing is available.
+    """
+    client = get_storage_client()
+    bucket = client.bucket(GCS_BUCKET)
+
+    # 1. Try pre-aggregated CSV
     prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/"
     blobs = bucket.list_blobs(prefix=prefix)
     csv_blobs = [b for b in blobs if b.name.endswith(".csv")]
 
-    if not csv_blobs:
-        return None
+    if csv_blobs:
+        latest_csv = sorted(csv_blobs, key=lambda b: b.time_created, reverse=True)[0]
+        csv_data = latest_csv.download_as_bytes()
+        df = pd.read_csv(io.BytesIO(csv_data))
+        return df, latest_csv.name
 
-    # Get most recent
-    latest_csv = sorted(csv_blobs, key=lambda b: b.time_created, reverse=True)[
-        0
-    ]
+    # 2. Fall back to live aggregation from per-variant summaries
+    df, source = _aggregate_variant_summaries(benchmark_id)
+    if df is not None:
+        return df, source
 
-    # Download and parse
-    csv_data = latest_csv.download_as_bytes()
-    df = pd.read_csv(io.BytesIO(csv_data))
-
-    return df, latest_csv.name
+    return None
 
 
 def load_benchmark_plots(benchmark_id):
@@ -177,7 +271,10 @@ if selected_benchmark:
     try:
         result = load_benchmark_csv(selected_benchmark)
         if result is None:
-            st.warning("No CSV results found for this benchmark")
+            st.warning(
+                "⏳ No results available yet for this benchmark. "
+                "Results will appear automatically as each variant job completes."
+            )
             df = None
         else:
             df, csv_path = result

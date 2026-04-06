@@ -1498,6 +1498,15 @@ def build_job_config_from_params(
     if "channel_budgets" in params:
         config["channel_budgets"] = params["channel_budgets"]
 
+    # Pass benchmark metadata so R can route outputs to the correct GCS path
+    for key in ("benchmark_id", "benchmark_variant", "benchmark_test"):
+        if params.get(key):
+            config[key] = params[key]
+
+    # Pass var_to_spend_mapping if present (used by some benchmark variants)
+    if params.get("var_to_spend_mapping"):
+        config["var_to_spend_mapping"] = params["var_to_spend_mapping"]
+
     return config
 
 

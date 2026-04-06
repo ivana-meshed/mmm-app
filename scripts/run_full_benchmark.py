@@ -1100,6 +1100,26 @@ Examples:
     )
 
     parser.add_argument(
+        "--iterations",
+        type=int,
+        default=None,
+        help=(
+            "Override the number of Robyn iterations (overrides the run-mode default). "
+            "E.g. --iterations 100 for a quick smoke-test."
+        ),
+    )
+
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=None,
+        help=(
+            "Override the number of Robyn trials (overrides the run-mode default). "
+            "E.g. --trials 1 for a quick smoke-test."
+        ),
+    )
+
+    parser.add_argument(
         "--skip-queue",
         action="store_true",
         help="Skip queue processing (only submit benchmark)",
@@ -1402,6 +1422,19 @@ Examples:
                     benchmark_config.get("name", "benchmark")
                     + "__"
                     + cfg_name
+                )
+
+            # Apply explicit --iterations / --trials overrides (highest priority,
+            # supersedes run-mode defaults and anything in the config file).
+            if args.iterations is not None:
+                benchmark_config["iterations"] = args.iterations
+                logger.info(
+                    f"⚙️  Iterations overridden via --iterations: {args.iterations}"
+                )
+            if args.trials is not None:
+                benchmark_config["trials"] = args.trials
+                logger.info(
+                    f"⚙️  Trials overridden via --trials: {args.trials}"
                 )
 
             # Derive top_n: if not specified, submit all generated variants.

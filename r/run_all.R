@@ -738,9 +738,23 @@ context_vars_cfg <- parse_csv_config(cfg$context_vars)
 factor_vars_cfg <- parse_csv_config(cfg$factor_vars)
 organic_vars_cfg <- parse_csv_config(cfg$organic_vars)
 
+# Benchmark metadata (optional – set when the job was submitted via benchmark_mmm.py)
+benchmark_id      <- cfg$benchmark_id      %||% NULL
+benchmark_variant <- cfg$benchmark_variant %||% NULL
+benchmark_test    <- cfg$benchmark_test    %||% NULL
+
 dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
-gcs_prefix <- file.path("robyn", revision, country, timestamp)
+
+# Benchmark jobs route all variant outputs under a shared benchmark parent folder
+# so the Benchmark Results page can aggregate them by benchmark_id.
+if (!is.null(benchmark_id) && nzchar(benchmark_id) &&
+    !is.null(benchmark_variant) && nzchar(benchmark_variant)) {
+    gcs_prefix <- file.path("benchmarks", benchmark_id, benchmark_variant)
+    cat("Benchmark job — gcs_prefix:", gcs_prefix, "\n")
+} else {
+    gcs_prefix <- file.path("robyn", revision, country, timestamp)
+}
 
 # after you set: dir_path, gcs_prefix
 job_started <- Sys.time()
