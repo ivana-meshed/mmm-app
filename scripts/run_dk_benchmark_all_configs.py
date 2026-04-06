@@ -267,6 +267,8 @@ def run_benchmark(
     queue_name: str,
     skip_queue: bool,
     dry_run: bool,
+    iterations: Optional[int] = None,
+    trials: Optional[int] = None,
 ) -> bool:
     """
     Invoke run_full_benchmark.py for a single config GCS path.
@@ -290,6 +292,10 @@ def run_benchmark(
     ]
     if skip_queue:
         cmd += ["--skip-queue", "--skip-analysis"]
+    if iterations is not None:
+        cmd += ["--iterations", str(iterations)]
+    if trials is not None:
+        cmd += ["--trials", str(trials)]
 
     logger.info(f"  Running: {' '.join(cmd)}")
 
@@ -428,6 +434,28 @@ Examples:
         ),
     )
 
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=None,
+        help=(
+            "Override the number of Robyn iterations for every variant "
+            "(overrides the --full-run default of 1000). "
+            "E.g. --iterations 100 for a quick smoke-test."
+        ),
+    )
+
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=None,
+        help=(
+            "Override the number of Robyn trials for every variant "
+            "(overrides the --full-run default of 3). "
+            "E.g. --trials 1 for a quick smoke-test."
+        ),
+    )
+
     args = parser.parse_args()
 
     # Resolve the list of config files to process
@@ -466,6 +494,10 @@ Examples:
     logger.info(f"Skip upload     : {args.skip_upload}")
     logger.info(f"Process queue   : {args.process_queue}")
     logger.info(f"Dry run         : {args.dry_run}")
+    if args.iterations is not None:
+        logger.info(f"Iterations      : {args.iterations} (override)")
+    if args.trials is not None:
+        logger.info(f"Trials          : {args.trials} (override)")
     logger.info("=" * 80)
     logger.info("")
 
@@ -504,6 +536,8 @@ Examples:
             queue_name=args.queue_name,
             skip_queue=not args.process_queue,
             dry_run=args.dry_run,
+            iterations=args.iterations,
+            trials=args.trials,
         )
         if not ok:
             failed.append(filename)
