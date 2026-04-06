@@ -987,21 +987,35 @@ class BenchmarkRunner:
             f"Created  : {plan['created_at']}",
             "",
             f"{'#':<4}  {'variant':<52}  {'adstock':<14}  "
-            f"{'train_size':<14}  {'resample_freq':<14}  "
-            f"{'paid_media_vars (first 3)'}",
-            "-" * 140,
+            f"{'train_size':<14}  {'resample_freq':<10}  "
+            f"{'paid_media_vars':<36}  {'organic_vars':<28}  "
+            f"{'context_vars':<36}  factor_vars",
+            "-" * 200,
         ]
+
+        def _preview(lst: list, n: int = 3) -> str:
+            """Comma-joined first *n* items with overflow indicator."""
+            if not lst:
+                return "(none)"
+            preview = ", ".join(lst[:n])
+            if len(lst) > n:
+                preview += f" … (+{len(lst) - n})"
+            return preview
+
         for idx, v in enumerate(variants, 1):
             pmv = v.get("paid_media_vars") or []
-            pmv_preview = ", ".join(pmv[:3])
-            if len(pmv) > 3:
-                pmv_preview += f" … (+{len(pmv) - 3})"
+            ctx = v.get("context_vars") or []
+            factor = v.get("factor_vars") or []
+            organic = v.get("organic_vars") or []
             lines.append(
                 f"{idx:<4}  {v.get('benchmark_variant', ''):<52}  "
                 f"{str(v.get('adstock', '')):<14}  "
                 f"{str(v.get('train_size', '')):<14}  "
-                f"{str(v.get('resample_freq', 'none')):<14}  "
-                f"{pmv_preview}"
+                f"{str(v.get('resample_freq', 'none')):<10}  "
+                f"{_preview(pmv):<36}  "
+                f"{_preview(organic):<28}  "
+                f"{_preview(ctx):<36}  "
+                f"{_preview(factor)}"
             )
 
         log_text = "\n".join(lines) + "\n"
@@ -2029,6 +2043,19 @@ def main():
                 # Override iterations/trials
                 base_config["iterations"] = benchmark_config.iterations
                 base_config["trials"] = benchmark_config.trials
+
+                # Apply any field overrides embedded in the benchmark config's
+                # base_config section.  This allows run_full_benchmark.py to
+                # substitute context_vars, factor_vars, organic_vars, and
+                # paid_media_vars from a local config file without re-uploading
+                # selected_columns.json to GCS.
+                overrides = base_cfg.get("overrides", {})
+                if overrides:
+                    base_config.update(overrides)
+                    logger.info(
+                        f"Applied {len(overrides)} base_config override(s): "
+                        f"{list(overrides.keys())}"
+                    )
 
                 # Generate variants
                 variants = runner.generate_variants(
