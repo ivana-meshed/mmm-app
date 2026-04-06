@@ -21,7 +21,8 @@ suppressPackageStartupMessages({
 extract_model_summary <- function(output_collect, input_collect = NULL,
                                    country = NULL, revision = NULL,
                                    timestamp = NULL,
-                                   training_time_mins = NULL) {
+                                   training_time_mins = NULL,
+                                   resample_freq = NULL) {
     if (is.null(output_collect)) {
         stop("output_collect cannot be NULL")
     }
@@ -32,7 +33,8 @@ extract_model_summary <- function(output_collect, input_collect = NULL,
         revision = revision,
         timestamp = timestamp,
         created_at = as.character(Sys.time()),
-        training_time_mins = training_time_mins
+        training_time_mins = training_time_mins,
+        resample_freq = if (is.null(resample_freq)) "none" else resample_freq
     )
 
     # Extract candidate models information

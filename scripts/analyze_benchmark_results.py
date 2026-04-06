@@ -312,6 +312,27 @@ class BenchmarkAnalyzer:
             if int(variant_iter) != int(summary_iter):
                 return False
 
+        # Match on resample_freq (weekly vs daily) when present in summary
+        variant_freq = variant.get("resample_freq", "")
+        summary_freq = summary.get("resample_freq", "")
+        if variant_freq and summary_freq:
+            # Normalise: treat empty / "none" / None as equivalent
+            def _norm_freq(f: str) -> str:
+                return (f or "none").strip().lower()
+
+            if _norm_freq(variant_freq) != _norm_freq(summary_freq):
+                return False
+
+        # Match on paid_media_vars (distinguishes spend_to_clicks vs
+        # mixed_by_funnel etc.) when available in both plan and summary
+        variant_pmv = variant.get("paid_media_vars") or []
+        summary_pmv = (
+            (summary.get("input_metadata") or {}).get("paid_media_vars") or []
+        )
+        if variant_pmv and summary_pmv:
+            if sorted(variant_pmv) != sorted(summary_pmv):
+                return False
+
         return True
 
     def _extract_metrics(

@@ -957,7 +957,7 @@ class BenchmarkRunner:
         benchmark_config: BenchmarkConfig,
         variants: List[Dict[str, Any]],
     ):
-        """Save benchmark execution plan to GCS."""
+        """Save benchmark execution plan and combinations log to GCS."""
         plan = {
             "benchmark_id": benchmark_id,
             "name": benchmark_config.name,
@@ -976,6 +976,41 @@ class BenchmarkRunner:
 
         logger.info(
             f"Saved benchmark plan: " f"gs://{self.bucket_name}/{blob_path}"
+        )
+
+        # Write a human-readable combinations log alongside plan.json so
+        # operators can quickly verify which configs will be trained.
+        lines = [
+            f"Benchmark: {benchmark_id}",
+            f"Name     : {benchmark_config.name}",
+            f"Variants : {len(variants)}",
+            f"Created  : {plan['created_at']}",
+            "",
+            f"{'#':<4}  {'variant':<52}  {'adstock':<14}  "
+            f"{'train_size':<14}  {'resample_freq':<14}  "
+            f"{'paid_media_vars (first 3)'}",
+            "-" * 140,
+        ]
+        for idx, v in enumerate(variants, 1):
+            pmv = v.get("paid_media_vars") or []
+            pmv_preview = ", ".join(pmv[:3])
+            if len(pmv) > 3:
+                pmv_preview += f" … (+{len(pmv) - 3})"
+            lines.append(
+                f"{idx:<4}  {v.get('benchmark_variant', ''):<52}  "
+                f"{str(v.get('adstock', '')):<14}  "
+                f"{str(v.get('train_size', '')):<14}  "
+                f"{str(v.get('resample_freq', 'none')):<14}  "
+                f"{pmv_preview}"
+            )
+
+        log_text = "\n".join(lines) + "\n"
+        log_path = f"{BENCHMARK_ROOT}/{benchmark_id}/combinations.log"
+        log_blob = self.bucket.blob(log_path)
+        log_blob.upload_from_string(log_text, content_type="text/plain")
+
+        logger.info(
+            f"Saved combinations log: gs://{self.bucket_name}/{log_path}"
         )
 
     def submit_variants_to_queue(

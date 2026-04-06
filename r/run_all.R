@@ -2460,7 +2460,8 @@ if (exists("extract_model_summary")) {
                 country = country,
                 revision = revision,
                 timestamp = timestamp,
-                training_time_mins = round(training_time, 2)
+                training_time_mins = round(training_time, 2),
+                resample_freq = resample_freq
             )
             summary_path <- file.path(dir_path, "model_summary.json")
             save_model_summary(model_summary, summary_path)
