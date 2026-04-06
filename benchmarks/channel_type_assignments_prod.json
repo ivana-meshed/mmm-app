@@ -1,0 +1,16 @@
+{
+  "name": "channel_type_assignments_prod",
+  "description": "Cleaned production channel mapping aligned with funnel logic.",
+  "assignments": {
+    "GOOGLE_SEARCH_BRAND_COST": "search_brand",
+    "GOOGLE_SEARCH_NONBRAND_COST_2": "search_nonbrand",
+    "GOOGLE_PMAX_COST_2": "marketplace_pmax",
+    "GOOGLE_OTHER_COST_2": "display_prospecting",
+    "BING_SEARCH_BRAND_COST": "search_brand",
+    "BING_SEARCH_NONBRAND_COST": "search_nonbrand",
+    "BING_OTHER_COST": "display_prospecting",
+    "FB_UPPER_COST": "paid_social_awareness",
+    "FB_LOWER_COST": "paid_social_performance",
+    "FB_APP_COST": "app_install"
+  }
+}

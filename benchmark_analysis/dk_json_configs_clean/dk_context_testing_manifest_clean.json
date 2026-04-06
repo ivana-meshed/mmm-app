@@ -1,0 +1,25 @@
+{
+  "base_mapping": "dk_selected_columns_mapping_v2.json",
+  "test_variants": [
+    "dk_context_minimal.json",
+    "dk_context_supply.json",
+    "dk_context_supply_plus_occ7d.json",
+    "dk_context_occ_current_test.json",
+    "dk_context_expanded_test.json",
+    "dk_context_occ30d_test.json"
+  ],
+  "recommended_order": [
+    "dk_context_minimal.json",
+    "dk_context_supply.json",
+    "dk_context_supply_plus_occ7d.json",
+    "dk_context_occ_current_test.json",
+    "dk_context_expanded_test.json",
+    "dk_context_occ30d_test.json"
+  ],
+  "notes": [
+    "Start with dk_context_minimal as the baseline.",
+    "dk_context_supply_plus_occ7d is the recommended balanced production candidate.",
+    "Use current occupancy and 30-day occupancy only as sensitivity tests due to leakage/smoothing risk.",
+    "Expanded context is a stress test for over-control and multicollinearity."
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "name": "generic_hyperparameter_ranges_v2_prod",
+  "description": "Production constrained hyperparameters focusing on stability and reduced carryover.",
+  "version": "2.1_prod",
+  "overrides": {
+    "lower_funnel": {
+      "theta": [
+        0.0,
+        0.04
+      ],
+      "alpha": [
+        0.5,
+        2.0
+      ],
+      "gamma": [
+        0.3,
+        0.7
+      ]
+    },
+    "upper_funnel": {
+      "theta": [
+        0.05,
+        0.15
+      ],
+      "alpha": [
+        0.7,
+        2.5
+      ],
+      "gamma": [
+        0.4,
+        1.0
+      ]
+    },
+    "crm": {
+      "theta": [
+        0.0,
+        0.05
+      ],
+      "alpha": [
+        0.5,
+        1.5
+      ],
+      "gamma": [
+        0.3,
+        0.7
+      ]
+    }
+  }
+}

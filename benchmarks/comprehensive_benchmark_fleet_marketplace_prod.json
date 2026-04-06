@@ -1,0 +1,43 @@
+{
+  "name": "comprehensive_benchmark_fleet_marketplace_prod",
+  "description": "Production-ready reduced benchmark focusing on stable high-performing variants.",
+  "iterations": 1000,
+  "trials": 3,
+  "combination_mode": "cartesian",
+  "hyperparameter_preset": "custom_balanced_constrained",
+  "variants": {
+    "adstock": [
+      {
+        "name": "geometric",
+        "adstock": "geometric"
+      }
+    ],
+    "train_splits": [
+      {
+        "name": "75_90",
+        "train_size": [
+          0.75,
+          0.9
+        ]
+      }
+    ],
+    "time_aggregation": [
+      {
+        "name": "weekly",
+        "resample_freq": "W"
+      },
+      {
+        "name": "daily",
+        "resample_freq": "none"
+      }
+    ],
+    "spend_var_mapping": [
+      {
+        "name": "mixed_by_funnel_clicks"
+      },
+      {
+        "name": "spend_to_clicks"
+      }
+    ]
+  }
+}
