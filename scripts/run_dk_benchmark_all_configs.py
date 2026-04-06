@@ -7,13 +7,18 @@ benchmark_analysis/dk_json_configs_clean/, using the production benchmark
 settings.
 
 For each configuration the script:
-  1. Uploads the local config JSON to GCS as ``selected_columns.json`` at
-     the path derived from the config's own ``country``, ``selected_goal``,
-     and ``timestamp`` fields.
-  2. Invokes ``run_full_benchmark.py`` with ``--skip-queue`` so that all
+  1. Enriches the local config with the fields required by benchmark_mmm.py
+     (``dep_var``, ``dep_var_type``, ``date_var``) that are absent from the
+     raw config files but needed for the training jobs to work correctly.
+  2. Validates the enriched config has all required fields before uploading.
+  3. Uploads the enriched config to GCS as ``selected_columns.json`` at the
+     path derived from the config's ``country``, ``selected_goal``, and
+     ``timestamp`` fields:
+         gs://<bucket>/training_data/<country>/<goal>/<timestamp>/selected_columns.json
+  4. Invokes ``run_full_benchmark.py`` with ``--skip-queue`` so that all
      variants are submitted to the queue in one sweep without waiting for
      each config to finish before the next starts.
-  3. After all submissions, optionally processes the queue once so that
+  5. After all submissions, optionally processes the queue once so that
      results from every config are produced together.
 
 Results land in GCS under ``benchmarks/<benchmark_id>/`` and are
@@ -24,7 +29,7 @@ Usage (final command):
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default-dev
 
-Dry-run (prints commands without executing them):
+Dry-run (prints commands and enriched configs without executing):
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default-dev \\
@@ -85,6 +90,25 @@ CHANNEL_TYPE_ASSIGNMENTS_CONFIG = (
     "benchmarks/channel_type_assignments_prod.json"
 )
 
+# Fields that every selected_columns.json uploaded to GCS must contain.
+# benchmark_mmm.py reads all of these from the base config.
+REQUIRED_UPLOAD_FIELDS = [
+    "country",
+    "selected_goal",
+    "paid_media_spends",
+    "paid_media_vars",
+    "var_to_spend_mapping",
+    "organic_vars",
+    "context_vars",
+    "factor_vars",
+    "all_selected_drivers",
+    "data_version",
+    "dep_var",
+    "dep_var_type",
+    "date_var",
+    "timestamp",
+]
+
 # Configs to run in recommended order (names without the _clean.json suffix).
 # Derived from the manifest's recommended_order; the manifest uses the
 # original filenames (without "_clean"), so we map them here.
@@ -105,38 +129,67 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Config enrichment & validation
 # ---------------------------------------------------------------------------
 
 
-def load_manifest() -> Dict:
-    """Load the DK testing manifest."""
-    with open(MANIFEST_FILE) as f:
-        return json.load(f)
+def enrich_config_for_upload(config: Dict) -> Dict:
+    """
+    Return a copy of ``config`` enriched with fields required by
+    benchmark_mmm.py that may be absent from the raw local config files.
+
+    Fields added (only when not already present):
+    - ``dep_var``      – set to ``selected_goal`` (e.g. "BOOKINGS")
+    - ``dep_var_type`` – set to "revenue" (Robyn default for booking metrics)
+    - ``date_var``     – set to "date" (standard date column name in DK data)
+
+    All other existing fields are preserved unchanged.
+    """
+    enriched = dict(config)
+
+    # dep_var: benchmark_mmm.py falls back to selected_goal, but it is
+    # cleaner to set it explicitly so it appears in the uploaded file.
+    if not enriched.get("dep_var"):
+        enriched["dep_var"] = enriched.get("selected_goal", "")
+
+    # dep_var_type: Robyn uses "revenue" for continuous booking metrics.
+    if not enriched.get("dep_var_type"):
+        enriched["dep_var_type"] = "revenue"
+
+    # date_var: name of the date column in the training data.
+    if not enriched.get("date_var"):
+        enriched["date_var"] = "date"
+
+    return enriched
 
 
-def ordered_config_files() -> List[str]:
-    """Return clean config filenames in the manifest's recommended order."""
-    manifest = load_manifest()
-    ordered = []
-    for name in manifest.get("recommended_order", []):
-        clean = _MANIFEST_TO_CLEAN.get(name)
-        if clean:
-            ordered.append(clean)
-    return ordered
+def validate_config_for_upload(config: Dict) -> List[str]:
+    """
+    Validate that ``config`` contains all fields required for a
+    selected_columns.json upload.
+
+    Returns a list of missing field names (empty list = valid).
+    """
+    missing = []
+    for field in REQUIRED_UPLOAD_FIELDS:
+        value = config.get(field)
+        # Consider empty string / empty list as missing
+        if value is None or value == "" or value == []:
+            missing.append(field)
+    return missing
 
 
-def load_config(filename: str) -> Dict:
-    """Load a JSON config from the DK configs directory."""
-    with open(DK_CONFIGS_DIR / filename) as f:
-        return json.load(f)
+# ---------------------------------------------------------------------------
+# GCS helpers
+# ---------------------------------------------------------------------------
 
 
 def gcs_path_for_config(config: Dict) -> str:
     """
     Build the GCS path where this config should live as selected_columns.json.
 
-    Format: gs://<bucket>/training_data/<country>/<goal>/<timestamp>/selected_columns.json
+    Format:
+        gs://<bucket>/training_data/<country>/<goal>/<timestamp>/selected_columns.json
     """
     country = config["country"].lower()
     goal = config["selected_goal"]
@@ -147,14 +200,32 @@ def gcs_path_for_config(config: Dict) -> str:
     )
 
 
-def upload_config_to_gcs(config: Dict, gcs_path: str, dry_run: bool) -> bool:
+def upload_config_to_gcs(
+    config: Dict, gcs_path: str, dry_run: bool
+) -> bool:
     """
-    Upload the config dict to GCS as selected_columns.json.
+    Enrich, validate, and upload ``config`` to GCS as selected_columns.json.
 
     Returns True on success (or in dry-run mode), False on error.
     """
+    enriched = enrich_config_for_upload(config)
+
+    # Validate before uploading
+    missing = validate_config_for_upload(enriched)
+    if missing:
+        logger.error(
+            f"  ❌ Config validation failed — missing fields: {missing}"
+        )
+        return False
+
     if dry_run:
         logger.info(f"  [dry-run] Would upload to: {gcs_path}")
+        logger.info(
+            f"  [dry-run] Enriched fields: "
+            f"dep_var={enriched['dep_var']!r}, "
+            f"dep_var_type={enriched['dep_var_type']!r}, "
+            f"date_var={enriched['date_var']!r}"
+        )
         return True
 
     try:
@@ -168,7 +239,7 @@ def upload_config_to_gcs(config: Dict, gcs_path: str, dry_run: bool) -> bool:
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".json", delete=False
         ) as tmp:
-            json.dump(config, tmp, indent=2)
+            json.dump(enriched, tmp, indent=2)
             tmp_path = tmp.name
 
         try:
@@ -184,6 +255,11 @@ def upload_config_to_gcs(config: Dict, gcs_path: str, dry_run: bool) -> bool:
     except Exception as exc:
         logger.error(f"  ❌ Upload failed: {exc}")
         return False
+
+
+# ---------------------------------------------------------------------------
+# Benchmark runner
+# ---------------------------------------------------------------------------
 
 
 def run_benchmark(
@@ -224,7 +300,8 @@ def run_benchmark(
     result = subprocess.run(cmd, cwd=str(REPO_ROOT))
     if result.returncode != 0:
         logger.error(
-            f"  ❌ run_full_benchmark.py exited with code {result.returncode}"
+            f"  ❌ run_full_benchmark.py exited with code "
+            f"{result.returncode}"
         )
         return False
     return True
@@ -248,6 +325,34 @@ def process_queue(queue_name: str, dry_run: bool) -> None:
         logger.info("[dry-run] Command not executed.")
         return
     subprocess.run(cmd, cwd=str(REPO_ROOT))
+
+
+# ---------------------------------------------------------------------------
+# Manifest helpers
+# ---------------------------------------------------------------------------
+
+
+def load_manifest() -> Dict:
+    """Load the DK testing manifest."""
+    with open(MANIFEST_FILE) as f:
+        return json.load(f)
+
+
+def ordered_config_files() -> List[str]:
+    """Return clean config filenames in the manifest's recommended order."""
+    manifest = load_manifest()
+    ordered = []
+    for name in manifest.get("recommended_order", []):
+        clean = _MANIFEST_TO_CLEAN.get(name)
+        if clean:
+            ordered.append(clean)
+    return ordered
+
+
+def load_config(filename: str) -> Dict:
+    """Load a JSON config from the DK configs directory."""
+    with open(DK_CONFIGS_DIR / filename) as f:
+        return json.load(f)
 
 
 # ---------------------------------------------------------------------------
@@ -288,15 +393,17 @@ Examples:
         action="store_true",
         help=(
             "Print every GCS upload and benchmark command without executing "
-            "them. Useful for verifying paths before a live run."
+            "them. Useful for verifying paths and enriched config fields "
+            "before a live run."
         ),
     )
     parser.add_argument(
         "--skip-upload",
         action="store_true",
         help=(
-            "Skip uploading configs to GCS. Use when the selected_columns.json "
-            "files already exist at the expected GCS paths."
+            "Skip uploading configs to GCS. Use when the "
+            "selected_columns.json files already exist at the expected "
+            "GCS paths."
         ),
     )
     parser.add_argument(
@@ -314,9 +421,10 @@ Examples:
         metavar="NAME",
         default=None,
         help=(
-            "Run a single config by its short name, e.g. 'dk_context_minimal' "
-            "or 'dk_context_supply_plus_occ7d'. When omitted all configs in "
-            "the manifest's recommended_order are processed."
+            "Run a single config by its short name, e.g. "
+            "'dk_context_minimal' or 'dk_context_supply_plus_occ7d'. "
+            "When omitted all configs in the manifest's "
+            "recommended_order are processed."
         ),
     )
 
@@ -367,22 +475,30 @@ Examples:
         config = load_config(filename)
         gcs_path = gcs_path_for_config(config)
 
-        config_name = config.get("name") or filename.replace("_clean.json", "")
+        config_name = (
+            config.get("name") or filename.replace("_clean.json", "")
+        )
         description = config.get("description", "")
 
         logger.info(f"[{idx}/{len(config_files)}] {config_name}")
         logger.info(f"  Description : {description}")
         logger.info(f"  GCS path    : {gcs_path}")
 
-        # Step 1: Upload config to GCS
+        # Step 1: Upload enriched config to GCS
         if not args.skip_upload:
-            ok = upload_config_to_gcs(config, gcs_path, dry_run=args.dry_run)
+            ok = upload_config_to_gcs(
+                config, gcs_path, dry_run=args.dry_run
+            )
             if not ok:
-                logger.error(f"  Skipping benchmark for {filename} due to upload failure.")
+                logger.error(
+                    f"  Skipping benchmark for {filename} due to "
+                    f"upload failure."
+                )
                 failed.append(filename)
                 continue
 
-        # Step 2: Submit benchmark (skip_queue=True so we batch all submissions)
+        # Step 2: Submit benchmark
+        # Use --skip-queue to batch all submissions; process queue at the end.
         ok = run_benchmark(
             gcs_path=gcs_path,
             queue_name=args.queue_name,
@@ -394,11 +510,9 @@ Examples:
 
         logger.info("")
 
-    # Step 3: Process queue (if requested and submissions were batched)
-    if args.process_queue and not args.dry_run:
-        process_queue(args.queue_name, dry_run=False)
-    elif args.process_queue and args.dry_run:
-        process_queue(args.queue_name, dry_run=True)
+    # Step 3: Process queue (if requested)
+    if args.process_queue:
+        process_queue(args.queue_name, dry_run=args.dry_run)
 
     # Summary
     logger.info("=" * 80)
