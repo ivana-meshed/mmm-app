@@ -152,9 +152,9 @@ def enrich_config_for_upload(config: Dict) -> Dict:
     if not enriched.get("dep_var"):
         enriched["dep_var"] = enriched.get("selected_goal", "")
 
-    # dep_var_type: Robyn uses "revenue" for continuous booking metrics.
+    # dep_var_type: DK BOOKINGS is a conversion (count) metric.
     if not enriched.get("dep_var_type"):
-        enriched["dep_var_type"] = "revenue"
+        enriched["dep_var_type"] = "conversion"
 
     # date_var: name of the date column in the training data.
     if not enriched.get("date_var"):
