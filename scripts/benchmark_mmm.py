@@ -1094,11 +1094,42 @@ class BenchmarkRunner:
         # This is required for queue processing to work
         data_version = variant.get("data_version", "")
         if data_version:
-            # Path format: gs://{bucket}/mapped-datasets/{country}/{version}/raw.parquet
-            data_gcs_path = (
-                f"gs://{self.bucket_name}/mapped-datasets/"
-                f"{country.lower()}/{data_version}/raw.parquet"
-            )
+            # Resolve the special "Latest" sentinel to the actual most-recent
+            # version timestamp so the container downloads a real GCS path.
+            # Without this, the training container gets a literal path like
+            # "…/mapped-datasets/dk/Latest/raw.parquet" which doesn't exist
+            # and causes an immediate container exit.
+            if data_version.lower() == "latest":
+                goal = variant.get("selected_goal", "")
+                if goal:
+                    try:
+                        data_version = self._find_latest_version(
+                            country, goal
+                        )
+                        logger.info(
+                            f"Resolved 'Latest' data_version for "
+                            f"{country}/{goal} → {data_version}"
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            f"Could not resolve 'Latest' for "
+                            f"{country}/{goal}: {exc}; job may fail"
+                        )
+                        data_gcs_path = None
+                else:
+                    logger.warning(
+                        f"data_version is 'Latest' but selected_goal is "
+                        f"missing for variant "
+                        f"'{variant.get('benchmark_variant')}'; job may fail"
+                    )
+                    data_gcs_path = None
+
+            if data_version and data_version.lower() != "latest":
+                # Path format: gs://{bucket}/mapped-datasets/{country}/{version}/raw.parquet
+                data_gcs_path = (
+                    f"gs://{self.bucket_name}/mapped-datasets/"
+                    f"{country.lower()}/{data_version}/raw.parquet"
+                )
         else:
             # Fallback: try to infer from meta_version or fail
             logger.warning(
