@@ -104,11 +104,14 @@ def _aggregate_variant_summaries(benchmark_id: str):
     prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/"
     blobs = list(bucket.list_blobs(prefix=prefix))
 
+    # Expected path depth: benchmarks/{benchmark_id}/{variant}/model_summary.json
+    # Parts: ["benchmarks", benchmark_id, variant, "model_summary.json"] → depth 4
+    SUMMARY_PATH_DEPTH = 4
     summary_blobs = [
         b
         for b in blobs
         if b.name.endswith("/model_summary.json")
-        and len(b.name.split("/")) == 4  # benchmarks/id/variant/model_summary.json
+        and len(b.name.split("/")) == SUMMARY_PATH_DEPTH
     ]
 
     if not summary_blobs:

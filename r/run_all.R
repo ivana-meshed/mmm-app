@@ -753,6 +753,17 @@ if (!is.null(benchmark_id) && nzchar(benchmark_id) &&
     gcs_prefix <- file.path("benchmarks", benchmark_id, benchmark_variant)
     cat("Benchmark job — gcs_prefix:", gcs_prefix, "\n")
 } else {
+    if (xor(
+        !is.null(benchmark_id) && nzchar(benchmark_id),
+        !is.null(benchmark_variant) && nzchar(benchmark_variant)
+    )) {
+        warning(
+            "Partial benchmark metadata: benchmark_id=", benchmark_id,
+            " benchmark_variant=", benchmark_variant,
+            " — falling back to default robyn/ path. ",
+            "Check that both fields are set in the job config."
+        )
+    }
     gcs_prefix <- file.path("robyn", revision, country, timestamp)
 }
 
