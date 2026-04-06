@@ -715,7 +715,9 @@ def save_temp_benchmark_config(config: Dict[str, Any]) -> str:
 
 
 def run_benchmark_submission(
-    config_path: str, queue_name: str = DEFAULT_QUEUE, top_n: int = 54
+    config_path: str,
+    queue_name: str = DEFAULT_QUEUE,
+    top_n: Optional[int] = 54,
 ) -> str:
     """
     Submit benchmark to queue.
@@ -734,7 +736,7 @@ def run_benchmark_submission(
         queue_name,
     ]
 
-    if top_n < _MAX_CARTESIAN_COMBINATIONS:
+    if top_n is not None and top_n < _MAX_CARTESIAN_COMBINATIONS:
         cmd.extend(["--top-n", str(top_n)])
 
     logger.info(f"🚀 Running: {' '.join(cmd)}")
@@ -1280,11 +1282,13 @@ Examples:
             )
 
         # Derive top_n: if not specified, submit all generated variants.
-        # max_combinations is always set to n_combos + 10, so it safely covers all.
+        # max_combinations is always set to n_combos + 10 when generated
+        # dynamically; external configs may omit it, in which case we fall
+        # back to None (submit all variants).
         top_n = (
             args.top_n
             if args.top_n is not None
-            else benchmark_config["max_combinations"]
+            else benchmark_config.get("max_combinations")
         )
 
         # ── Pre-submission variant summary ────────────────────────────────
