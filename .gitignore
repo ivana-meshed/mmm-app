@@ -48,6 +48,9 @@ temp/
 dist/
 *.log
 *.out
+*.png
+*.csv
+*.txt
 
 # Distribution packages created by prepare_distribution.sh
 # These contain customer-specific license certificates
