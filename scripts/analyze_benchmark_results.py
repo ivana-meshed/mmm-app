@@ -194,6 +194,114 @@ class BenchmarkAnalyzer:
         logger.info(f"Collected {len(df)} results")
         return df
 
+    def collect_results_from_gcs_scan(
+        self, benchmark_id: str
+    ) -> Optional[pd.DataFrame]:
+        """
+        Collect results by scanning GCS directly.
+
+        Reads every ``benchmarks/{benchmark_id}/{variant}/model_summary.json``
+        without requiring a plan.json or queue entries.  This is the primary
+        collection strategy for multi-config runs where plan.json would only
+        contain the last config's variants.
+
+        Returns a DataFrame or None when no results are found.
+        """
+        prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/"
+        logger.info(f"Scanning GCS for results under: gs://{self.bucket_name}/{prefix}")
+
+        try:
+            blobs = list(self.bucket.list_blobs(prefix=prefix))
+        except Exception as e:
+            logger.error(f"Failed to list GCS blobs: {e}")
+            return None
+
+        # Only depth-4 paths: benchmarks/{id}/{variant}/model_summary.json
+        summary_blobs = [
+            b for b in blobs
+            if b.name.endswith("/model_summary.json")
+            and len(b.name.split("/")) == 4
+        ]
+
+        if not summary_blobs:
+            logger.warning(f"No model_summary.json files found under {prefix}")
+            return None
+
+        logger.info(f"Found {len(summary_blobs)} model_summary.json file(s)")
+
+        rows = []
+        for blob in summary_blobs:
+            variant_name = blob.name.split("/")[2]
+            try:
+                summary = json.loads(blob.download_as_bytes())
+            except Exception as e:
+                logger.warning(f"Could not read {blob.name}: {e}")
+                continue
+
+            best_model = summary.get("best_model", {})
+            decomp = summary.get("decomp_contribution", {}) or {}
+            input_meta = summary.get("input_metadata", {}) or {}
+            channel_roas = decomp.get("channel_roas") or {}
+            channel_cpa = decomp.get("channel_cpa") or {}
+
+            # Prefer fields from summary; fall back to input_metadata
+            adstock = summary.get("adstock") or input_meta.get("adstock", "")
+            train_size = summary.get("train_size") or input_meta.get("train_size", "")
+            resample_freq = summary.get("resample_freq") or input_meta.get("resample_freq", "none")
+
+            iterations_raw = summary.get("iterations") or input_meta.get("iterations", 0)
+            trials_raw = summary.get("trials") or input_meta.get("trials", 0)
+            try:
+                iterations = int(iterations_raw) if iterations_raw else 0
+            except (ValueError, TypeError):
+                iterations = 0
+            try:
+                trials = int(trials_raw) if trials_raw else 0
+            except (ValueError, TypeError):
+                trials = 0
+
+            row = {
+                "benchmark_test": summary.get("benchmark_test", ""),
+                "benchmark_variant": variant_name,
+                "country": summary.get("country") or input_meta.get("country", ""),
+                "revision": summary.get("revision", "default"),
+                "preset_label": summary.get("preset_label", ""),
+                "window_label": summary.get("window_label", ""),
+                "adstock": adstock,
+                "train_size": str(train_size),
+                "iterations": iterations,
+                "trials": trials,
+                "resample_freq": resample_freq,
+                "rsq_train": best_model.get("rsq_train"),
+                "rsq_val": best_model.get("rsq_val"),
+                "rsq_test": best_model.get("rsq_test"),
+                "nrmse": best_model.get("nrmse"),
+                "nrmse_train": best_model.get("nrmse_train"),
+                "nrmse_val": best_model.get("nrmse_val"),
+                "nrmse_test": best_model.get("nrmse_test"),
+                "decomp_rssd": best_model.get("decomp_rssd"),
+                "mape": best_model.get("mape"),
+                "paid_media_share": decomp.get("paid_media_share"),
+                "baseline_share": decomp.get("baseline_share"),
+                "organic_share": decomp.get("organic_share"),
+                "context_share": decomp.get("context_share"),
+                "allocator_stability_roas_cv": decomp.get("allocator_stability_roas_cv"),
+                "channel_roas_json": json.dumps(channel_roas) if channel_roas else "",
+                "channel_cpa_json": json.dumps(channel_cpa) if channel_cpa else "",
+                "model_id": best_model.get("model_id"),
+                "timestamp": summary.get("timestamp", ""),
+            }
+            rows.append(row)
+            logger.debug(f"  ✓ {variant_name}")
+
+        if not rows:
+            logger.warning("Could not parse any model_summary.json files")
+            return None
+
+        df = pd.DataFrame(rows)
+        logger.info(f"Collected {len(df)} result(s) via GCS scan")
+        return df
+
     def _collect_variant_result(
         self,
         variant: Dict[str, Any],
@@ -1376,6 +1484,17 @@ def main():
         action="store_true",
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--scan-gcs",
+        dest="scan_gcs",
+        action="store_true",
+        help=(
+            "Collect results by scanning benchmarks/{id}/{variant}/model_summary.json "
+            "directly in GCS instead of using plan.json + robyn/ paths. "
+            "Required for multi-config runs where plan.json only contains the "
+            "last config's variants."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1396,9 +1515,16 @@ def main():
     # Initialize analyzer
     analyzer = BenchmarkAnalyzer()
 
-    # Collect results
+    # Collect results — prefer direct GCS scan for multi-config runs
     logger.info(f"Analyzing benchmark: {args.benchmark_id}")
-    df = analyzer.collect_results(args.benchmark_id, args.queue_name)
+    if args.scan_gcs:
+        logger.info("Using direct GCS scan (--scan-gcs)")
+        df = analyzer.collect_results_from_gcs_scan(args.benchmark_id)
+        if df is None or df.empty:
+            logger.warning("GCS scan returned no results; falling back to plan.json method")
+            df = analyzer.collect_results(args.benchmark_id, args.queue_name)
+    else:
+        df = analyzer.collect_results(args.benchmark_id, args.queue_name)
 
     if df is None or df.empty:
         logger.error("No results found to analyze")

@@ -265,7 +265,6 @@ def upload_config_to_gcs(
 def run_benchmark(
     gcs_path: str,
     queue_name: str,
-    skip_queue: bool,
     dry_run: bool,
     iterations: Optional[int] = None,
     trials: Optional[int] = None,
@@ -274,6 +273,10 @@ def run_benchmark(
 ) -> bool:
     """
     Invoke run_full_benchmark.py for a single config GCS path.
+
+    Always passes --skip-queue and --skip-analysis so that queue processing
+    and result collection happen once (globally) after all configs are
+    submitted, rather than per-config.
 
     Returns True on success (returncode == 0), False otherwise.
     """
@@ -291,9 +294,11 @@ def run_benchmark(
         CHANNEL_TYPE_ASSIGNMENTS_CONFIG,
         "--queue-name",
         queue_name,
+        # Always skip per-config queue processing and analysis; these run
+        # once globally after all configs are submitted.
+        "--skip-queue",
+        "--skip-analysis",
     ]
-    if skip_queue:
-        cmd += ["--skip-queue", "--skip-analysis"]
     if iterations is not None:
         cmd += ["--iterations", str(iterations)]
     if trials is not None:
@@ -317,6 +322,34 @@ def run_benchmark(
         )
         return False
     return True
+
+
+def run_analysis(
+    benchmark_id: str, queue_name: str, dry_run: bool
+) -> None:
+    """
+    Run analyze_benchmark_results.py with --scan-gcs to collect ALL variant
+    results from benchmarks/{benchmark_id}/{variant}/model_summary.json.
+    Generates the aggregated results_*.csv visible on the Benchmark page.
+    """
+    cmd = [
+        sys.executable,
+        "scripts/analyze_benchmark_results.py",
+        "--benchmark-id",
+        benchmark_id,
+        "--queue-name",
+        queue_name,
+        "--scan-gcs",
+        "--no-plots",
+    ]
+    logger.info(f"\n{'='*80}")
+    logger.info("COLLECTING RESULTS (building combined CSV for Benchmark page) …")
+    logger.info(f"{'='*80}")
+    logger.info(f"Running: {' '.join(cmd)}")
+    if dry_run:
+        logger.info("[dry-run] Command not executed.")
+        return
+    subprocess.run(cmd, cwd=str(REPO_ROOT))
 
 
 def process_queue(queue_name: str, dry_run: bool) -> None:
@@ -561,14 +594,11 @@ Examples:
                 failed.append(filename)
                 continue
 
-        # Step 2: Submit benchmark
-        # All configs share shared_benchmark_id; variant names are prefixed
-        # with config_name to avoid GCS path collisions between configs.
-        # Use --skip-queue to batch all submissions; process queue at the end.
+        # Step 2: Submit benchmark variants to queue.
+        # Queue processing and analysis happen once globally after all configs.
         ok = run_benchmark(
             gcs_path=gcs_path,
             queue_name=args.queue_name,
-            skip_queue=not args.process_queue,
             dry_run=args.dry_run,
             iterations=args.iterations,
             trials=args.trials,
@@ -583,6 +613,13 @@ Examples:
     # Step 3: Process queue (if requested)
     if args.process_queue:
         process_queue(args.queue_name, dry_run=args.dry_run)
+        # Step 4: Collect all results into one CSV for the Benchmark Results page.
+        # Uses --scan-gcs to scan benchmarks/{id}/{variant}/model_summary.json
+        # directly, so results from ALL configs are included regardless of which
+        # config last wrote plan.json.
+        run_analysis(
+            shared_benchmark_id, args.queue_name, dry_run=args.dry_run
+        )
 
     # Summary
     logger.info("=" * 80)
@@ -606,11 +643,16 @@ Examples:
         if not args.process_queue:
             logger.info("")
             logger.info(
-                "📋 Next step: process the queue to run the training jobs:"
+                "📋 Next steps: process the queue, then collect results:"
             )
             logger.info(
                 f"   python scripts/process_queue_simple.py "
                 f"--loop --cleanup --queue-name {args.queue_name}"
+            )
+            logger.info(
+                f"   python scripts/analyze_benchmark_results.py "
+                f"--benchmark-id {shared_benchmark_id} "
+                f"--queue-name {args.queue_name} --scan-gcs --no-plots"
             )
         logger.info("")
         logger.info(
