@@ -340,7 +340,6 @@ def run_analysis(
         "--queue-name",
         queue_name,
         "--scan-gcs",
-        "--no-plots",
     ]
     logger.info(f"\n{'='*80}")
     logger.info("COLLECTING RESULTS (building combined CSV for Benchmark page) …")
@@ -652,7 +651,7 @@ Examples:
             logger.info(
                 f"   python scripts/analyze_benchmark_results.py "
                 f"--benchmark-id {shared_benchmark_id} "
-                f"--queue-name {args.queue_name} --scan-gcs --no-plots"
+                f"--queue-name {args.queue_name} --scan-gcs"
             )
         logger.info("")
         logger.info(
