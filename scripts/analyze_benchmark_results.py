@@ -251,16 +251,16 @@ class BenchmarkAnalyzer:
             train_size = summary.get("train_size") or input_meta.get("train_size", "")
             resample_freq = summary.get("resample_freq") or input_meta.get("resample_freq", "none")
 
-            iterations_raw = summary.get("iterations") or input_meta.get("iterations", 0)
-            trials_raw = summary.get("trials") or input_meta.get("trials", 0)
+            iterations_raw = summary.get("iterations") or input_meta.get("iterations")
+            trials_raw = summary.get("trials") or input_meta.get("trials")
             try:
-                iterations = int(iterations_raw) if iterations_raw else 0
+                iterations = int(iterations_raw) if iterations_raw else None
             except (ValueError, TypeError):
-                iterations = 0
+                iterations = None
             try:
-                trials = int(trials_raw) if trials_raw else 0
+                trials = int(trials_raw) if trials_raw else None
             except (ValueError, TypeError):
-                trials = 0
+                trials = None
 
             row = {
                 "benchmark_test": summary.get("benchmark_test", ""),

@@ -287,7 +287,7 @@ if selected_benchmark:
             test_run_warning = False
             if "iterations" in df.columns:
                 avg_iterations = df["iterations"].mean()
-                if avg_iterations < 100:
+                if pd.notna(avg_iterations) and avg_iterations < 100:
                     test_run_warning = True
                     st.warning(
                         f"⚠️ **Test Run Results Detected**\n\n"
