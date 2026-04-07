@@ -269,6 +269,8 @@ def run_benchmark(
     dry_run: bool,
     iterations: Optional[int] = None,
     trials: Optional[int] = None,
+    benchmark_id: Optional[str] = None,
+    variant_prefix: Optional[str] = None,
 ) -> bool:
     """
     Invoke run_full_benchmark.py for a single config GCS path.
@@ -296,6 +298,10 @@ def run_benchmark(
         cmd += ["--iterations", str(iterations)]
     if trials is not None:
         cmd += ["--trials", str(trials)]
+    if benchmark_id:
+        cmd += ["--benchmark-id", benchmark_id]
+    if variant_prefix:
+        cmd += ["--variant-prefix", variant_prefix]
 
     logger.info(f"  Running: {' '.join(cmd)}")
 
@@ -456,7 +462,31 @@ Examples:
         ),
     )
 
+    parser.add_argument(
+        "--benchmark-id",
+        dest="benchmark_id",
+        default=None,
+        help=(
+            "Use this value as the shared benchmark ID for all configs in "
+            "this run. When omitted a new ID is generated at start-up. "
+            "Pass an existing ID to add more configs to a previous run."
+        ),
+    )
+
     args = parser.parse_args()
+
+    # ── Shared benchmark ID ───────────────────────────────────────────────────
+    # All configs submitted by this invocation share ONE benchmark_id so they
+    # appear as a single entry on the Benchmark Results page.
+    # Variant names are prefixed with the config's short name so GCS paths
+    # remain unique: benchmarks/{benchmark_id}/{config_name}_{variant}/
+    from datetime import datetime, timezone
+
+    shared_benchmark_id = (
+        args.benchmark_id
+        if args.benchmark_id
+        else f"dk_benchmark_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    )
 
     # Resolve the list of config files to process
     all_configs = ordered_config_files()
@@ -491,6 +521,7 @@ Examples:
     logger.info(f"Benchmark config: {BENCHMARK_CONFIG}")
     logger.info(f"HP ranges config: {HYPERPARAMETER_RANGES_CONFIG}")
     logger.info(f"Channel types   : {CHANNEL_TYPE_ASSIGNMENTS_CONFIG}")
+    logger.info(f"Shared benchmark: {shared_benchmark_id}")
     logger.info(f"Skip upload     : {args.skip_upload}")
     logger.info(f"Process queue   : {args.process_queue}")
     logger.info(f"Dry run         : {args.dry_run}")
@@ -513,8 +544,9 @@ Examples:
         description = config.get("description", "")
 
         logger.info(f"[{idx}/{len(config_files)}] {config_name}")
-        logger.info(f"  Description : {description}")
-        logger.info(f"  GCS path    : {gcs_path}")
+        logger.info(f"  Description    : {description}")
+        logger.info(f"  GCS path       : {gcs_path}")
+        logger.info(f"  Variant prefix : {config_name}")
 
         # Step 1: Upload enriched config to GCS
         if not args.skip_upload:
@@ -530,6 +562,8 @@ Examples:
                 continue
 
         # Step 2: Submit benchmark
+        # All configs share shared_benchmark_id; variant names are prefixed
+        # with config_name to avoid GCS path collisions between configs.
         # Use --skip-queue to batch all submissions; process queue at the end.
         ok = run_benchmark(
             gcs_path=gcs_path,
@@ -538,6 +572,8 @@ Examples:
             dry_run=args.dry_run,
             iterations=args.iterations,
             trials=args.trials,
+            benchmark_id=shared_benchmark_id,
+            variant_prefix=config_name,
         )
         if not ok:
             failed.append(filename)
@@ -562,6 +598,11 @@ Examples:
     else:
         n = len(config_files)
         logger.info(f"✅ All {n} config(s) submitted successfully.")
+        logger.info(f"📌 Shared benchmark ID : {shared_benchmark_id}")
+        logger.info(
+            f"   GCS location       : "
+            f"gs://{GCS_BUCKET}/benchmarks/{shared_benchmark_id}/"
+        )
         if not args.process_queue:
             logger.info("")
             logger.info(
@@ -573,8 +614,8 @@ Examples:
             )
         logger.info("")
         logger.info(
-            "📊 Results will appear on the Benchmark Results page once "
-            "jobs complete."
+            "📊 Results will appear on the Benchmark Results page under "
+            f"benchmark ID '{shared_benchmark_id}' once jobs complete."
         )
         logger.info("=" * 80)
 

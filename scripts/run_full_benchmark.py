@@ -782,6 +782,8 @@ def run_benchmark_submission(
     config_path: str,
     queue_name: str = DEFAULT_QUEUE,
     top_n: Optional[int] = 54,
+    benchmark_id: Optional[str] = None,
+    variant_prefix: Optional[str] = None,
 ) -> str:
     """
     Submit benchmark to queue.
@@ -802,6 +804,10 @@ def run_benchmark_submission(
 
     if top_n is not None and top_n < _MAX_CARTESIAN_COMBINATIONS:
         cmd.extend(["--top-n", str(top_n)])
+    if benchmark_id:
+        cmd.extend(["--benchmark-id", benchmark_id])
+    if variant_prefix:
+        cmd.extend(["--variant-prefix", variant_prefix])
 
     logger.info(f"🚀 Running: {' '.join(cmd)}")
 
@@ -1129,6 +1135,27 @@ Examples:
         "--skip-analysis",
         action="store_true",
         help="Skip analysis (only submit and process queue)",
+    )
+
+    parser.add_argument(
+        "--benchmark-id",
+        dest="benchmark_id",
+        default=None,
+        help=(
+            "Use this value as the benchmark ID instead of generating one. "
+            "Pass the same ID to all configs in a multi-config run so that "
+            "results land under a single benchmarks/{id}/ folder."
+        ),
+    )
+    parser.add_argument(
+        "--variant-prefix",
+        dest="variant_prefix",
+        default=None,
+        help=(
+            "Prefix to prepend to every benchmark_variant name "
+            "(e.g. 'dk_context_minimal'). "
+            "Required when sharing a benchmark ID across multiple configs."
+        ),
     )
 
     parser.add_argument(
@@ -1496,7 +1523,11 @@ Examples:
 
             # Step 1: Submit benchmark
             benchmark_id = run_benchmark_submission(
-                config_path, args.queue_name, top_n=top_n
+                config_path,
+                args.queue_name,
+                top_n=top_n,
+                benchmark_id=getattr(args, "benchmark_id", None),
+                variant_prefix=getattr(args, "variant_prefix", None),
             )
             all_benchmark_ids.append(benchmark_id)
             logger.info("")

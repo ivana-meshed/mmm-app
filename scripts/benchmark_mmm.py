@@ -1877,6 +1877,29 @@ def main():
         ),
     )
 
+    parser.add_argument(
+        "--benchmark-id",
+        dest="benchmark_id",
+        default=None,
+        help=(
+            "Use this value as the benchmark ID instead of generating one. "
+            "Pass the same ID for all configs in a multi-config run so that "
+            "results land under a single benchmarks/{id}/ folder and appear "
+            "as one entry on the Benchmark Results page."
+        ),
+    )
+    parser.add_argument(
+        "--variant-prefix",
+        dest="variant_prefix",
+        default=None,
+        help=(
+            "Prefix to prepend to every benchmark_variant name "
+            "(e.g. 'dk_context_minimal'). "
+            "Required when multiple configs share the same benchmark ID to "
+            "avoid variant-name collisions in GCS."
+        ),
+    )
+
     args = parser.parse_args()
 
     # Resolve shorthand preset flags
@@ -2120,16 +2143,26 @@ def main():
                         f"  🧪 TEST MODE: All {len(variants)} variants with reduced resources"
                     )
 
-                # Generate benchmark ID
-                benchmark_id = (
-                    f"{benchmark_config.name}_"
-                    f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-                )
+                # Generate benchmark ID (or reuse supplied one)
+                if args.benchmark_id:
+                    benchmark_id = args.benchmark_id
+                else:
+                    benchmark_id = (
+                        f"{benchmark_config.name}_"
+                        f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+                    )
 
                 if args.test_run:
                     benchmark_id = f"{benchmark_id}_test"
                 elif args.test_run_all:
                     benchmark_id = f"{benchmark_id}_testall"
+
+                # Prefix variant names when sharing a benchmark_id
+                if args.variant_prefix:
+                    prefix = args.variant_prefix.rstrip("_")
+                    for variant in variants:
+                        existing = variant.get("benchmark_variant", "")
+                        variant["benchmark_variant"] = f"{prefix}_{existing}" if existing else prefix
 
                 # Save plan
                 runner.save_benchmark_plan(
@@ -2342,11 +2375,26 @@ def main():
         variants = select_top_combinations(variants, n=args.top_n)
         logger.info(f"   Selected {len(variants)} combinations")
 
-    # Generate benchmark ID
-    benchmark_id = (
-        f"{benchmark_config.name}_"
-        f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-    )
+    # Generate benchmark ID (or use the supplied one for grouped runs)
+    if args.benchmark_id:
+        benchmark_id = args.benchmark_id
+        logger.info(f"Using supplied benchmark ID: {benchmark_id}")
+    else:
+        benchmark_id = (
+            f"{benchmark_config.name}_"
+            f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        )
+
+    # Prefix variant names when sharing a benchmark_id across multiple configs
+    # so GCS paths remain unique: benchmarks/{id}/{prefix}_{variant}/
+    if args.variant_prefix:
+        prefix = args.variant_prefix.rstrip("_")
+        for variant in variants:
+            existing = variant.get("benchmark_variant", "")
+            variant["benchmark_variant"] = f"{prefix}_{existing}" if existing else prefix
+        logger.info(
+            f"Applied variant prefix '{prefix}' to {len(variants)} variant(s)"
+        )
 
     # Save benchmark plan
     runner.save_benchmark_plan(benchmark_id, benchmark_config, variants)
