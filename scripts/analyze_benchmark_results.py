@@ -37,6 +37,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
 from google.cloud import storage
 
 try:
+    import matplotlib
+    matplotlib.use("Agg")  # non-interactive backend for headless environments
     import matplotlib.pyplot as plt
     import numpy as np
     import pandas as pd

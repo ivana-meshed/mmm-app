@@ -2486,7 +2486,14 @@ if (exists("extract_model_summary")) {
                 revision = revision,
                 timestamp = timestamp,
                 training_time_mins = round(training_time, 2),
-                resample_freq = resample_freq
+                resample_freq = resample_freq,
+                iterations = iter,
+                trials = trials,
+                adstock = adstock,
+                train_size = train_size,
+                benchmark_test = benchmark_test,
+                benchmark_variant = benchmark_variant,
+                benchmark_id = benchmark_id
             )
             summary_path <- file.path(dir_path, "model_summary.json")
             save_model_summary(model_summary, summary_path)
