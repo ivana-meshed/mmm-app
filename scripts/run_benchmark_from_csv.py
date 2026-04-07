@@ -36,30 +36,30 @@ Usage
 -----
     # Test run using default mapping (dk_selected_columns_mapping_v2_clean.json)
     python scripts/run_benchmark_from_csv.py \\
-        --csv data/dk/mmm_data_with_school_holiday_filled.csv
+        --csv data/dk/mmm_data_v2.csv
 
     # Explicit mapping file
     python scripts/run_benchmark_from_csv.py \\
-        --csv data/dk/mmm_data_with_school_holiday_filled.csv \\
+        --csv data/dk/mmm_data_v2.csv \\
         --columns-mapping data/dk/dk_context_supply_plus_occ7d_clean.json
 
     # Auto-classify columns instead of using a mapping file
     python scripts/run_benchmark_from_csv.py \\
-        --csv data/dk/mmm_data_with_school_holiday_filled.csv --no-mapping
+        --csv data/dk/mmm_data_v2.csv --no-mapping
 
     # Standard run with all extra flags forwarded to run_full_benchmark.py
     python scripts/run_benchmark_from_csv.py \\
-        --csv data/dk/mmm_data_with_school_holiday_filled.csv \\
+        --csv data/dk/mmm_data_v2.csv \\
         --full-run --all-adstock --queue-name default-dev
 
     # Choose a different goal (dependent variable)
     python scripts/run_benchmark_from_csv.py \\
-        --csv data/dk/mmm_data_with_school_holiday_filled.csv \\
+        --csv data/dk/mmm_data_v2.csv \\
         --goal GMV_NET_EUR --dep-var-type revenue --full-run
 
     # Skip queue processing (only submit benchmark, do not wait for results)
     python scripts/run_benchmark_from_csv.py \\
-        --csv data/dk/mmm_data_with_school_holiday_filled.csv \\
+        --csv data/dk/mmm_data_v2.csv \\
         --full-run --skip-queue
 """
 
