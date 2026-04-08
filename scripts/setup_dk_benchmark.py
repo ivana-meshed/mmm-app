@@ -4,7 +4,7 @@
 This script is the minimal setup step you need to run before calling
 ``run_full_benchmark.py --path``.  It:
 
-1. Reads and filters ``mmm_data_v2.csv`` for Denmark.
+1. Reads and filters ``mmm_data_v2_final_holidays_and_school.csv`` for Denmark.
 2. Renames columns so they match the curated JSON mapping files.
 3. Uploads the data as Parquet to GCS at
    ``mapped-datasets/dk/{timestamp}/raw.parquet`` (and ``latest`` pointer).
@@ -70,7 +70,7 @@ REPO_ROOT = Path(__file__).parent.parent
 PROJECT_ID = os.getenv("PROJECT_ID", "datawarehouse-422511")
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 
-DEFAULT_CSV = REPO_ROOT / "data" / "dk" / "mmm_data_v2.csv"
+DEFAULT_CSV = REPO_ROOT / "data" / "dk" / "mmm_data_v2_final_holidays_and_school.csv"
 DK_CONFIG_DIR = REPO_ROOT / "data" / "dk"
 DEFAULT_MAPPING = DK_CONFIG_DIR / "dk_selected_columns_mapping_v2_clean.json"
 
