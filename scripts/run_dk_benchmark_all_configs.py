@@ -24,10 +24,23 @@ For each configuration the script:
 Results land in GCS under ``benchmarks/<benchmark_id>/`` and are
 immediately visible on the **Benchmark Results** page of the Streamlit app.
 
+Two manifests are available in benchmark_analysis/dk_json_configs_clean/:
+
+  dk_context_testing_manifest_clean.json   – original 6-config test set
+  dk_context_reduced_manifest_clean.json   – reduced 4-config set
+                                             (core / supply / structured /
+                                              occ30d)
+
 Usage (final command):
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default-dev
+
+Run the reduced-config set:
+
+    python scripts/run_dk_benchmark_all_configs.py \\
+        --queue-name default-dev \\
+        --manifest dk_context_reduced_manifest_clean.json
 
 Dry-run (prints commands and enriched configs without executing):
 
@@ -73,7 +86,9 @@ sys.path.insert(0, str(REPO_ROOT / "app"))
 DK_CONFIGS_DIR = (
     REPO_ROOT / "benchmark_analysis" / "dk_json_configs_clean"
 )
-MANIFEST_FILE = DK_CONFIGS_DIR / "dk_context_testing_manifest_clean.json"
+DEFAULT_MANIFEST_FILE = (
+    DK_CONFIGS_DIR / "dk_context_testing_manifest_clean.json"
+)
 
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 GCS_BASE = f"gs://{GCS_BUCKET}"
@@ -112,6 +127,8 @@ REQUIRED_UPLOAD_FIELDS = [
 # Configs to run in recommended order (names without the _clean.json suffix).
 # Derived from the manifest's recommended_order; the manifest uses the
 # original filenames (without "_clean"), so we map them here.
+# New-style manifests (e.g. dk_context_reduced_manifest_clean.json) list
+# the _clean.json filenames directly under "files" and need no mapping.
 _MANIFEST_TO_CLEAN = {
     "dk_context_minimal.json": "dk_context_minimal_clean.json",
     "dk_context_supply.json": "dk_context_supply_clean.json",
@@ -119,6 +136,11 @@ _MANIFEST_TO_CLEAN = {
     "dk_context_occ_current_test.json": "dk_context_occ_current_test_clean.json",
     "dk_context_expanded_test.json": "dk_context_expanded_test_clean.json",
     "dk_context_occ30d_test.json": "dk_context_occ30d_test_clean.json",
+    # Reduced config set (new-style; already _clean filenames)
+    "dk_context_reduced_core_clean.json": "dk_context_reduced_core_clean.json",
+    "dk_context_reduced_supply_clean.json": "dk_context_reduced_supply_clean.json",
+    "dk_context_structured_clean.json": "dk_context_structured_clean.json",
+    "dk_context_occ30d_reduced_clean.json": "dk_context_occ30d_reduced_clean.json",
 }
 
 logging.basicConfig(
@@ -376,17 +398,44 @@ def process_queue(queue_name: str, dry_run: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
-def load_manifest() -> Dict:
-    """Load the DK testing manifest."""
-    with open(MANIFEST_FILE) as f:
+def load_manifest(manifest_file: Optional[Path] = None) -> Dict:
+    """Load a DK testing manifest.
+
+    ``manifest_file`` defaults to ``DEFAULT_MANIFEST_FILE`` when omitted.
+    """
+    path = manifest_file or DEFAULT_MANIFEST_FILE
+    with open(path) as f:
         return json.load(f)
 
 
-def ordered_config_files() -> List[str]:
-    """Return clean config filenames in the manifest's recommended order."""
-    manifest = load_manifest()
+def ordered_config_files(
+    manifest_file: Optional[Path] = None,
+) -> List[str]:
+    """Return clean config filenames in the manifest's recommended order.
+
+    Supports two manifest formats:
+
+    - **Old style** (``dk_context_testing_manifest_clean.json``): uses
+      ``recommended_order`` / ``test_variants`` containing bare filenames
+      (e.g. ``"dk_context_minimal.json"``) that are mapped to their
+      ``_clean`` equivalents via ``_MANIFEST_TO_CLEAN``.
+    - **New style** (``dk_context_reduced_manifest_clean.json``): uses
+      ``"files"`` listing the ``_clean.json`` filenames directly.
+    """
+    manifest = load_manifest(manifest_file)
     ordered = []
-    for name in manifest.get("recommended_order", []):
+
+    # New-style manifest: filenames already in "files"
+    if "files" in manifest:
+        for name in manifest["files"]:
+            clean = _MANIFEST_TO_CLEAN.get(name, name)
+            ordered.append(clean)
+        return ordered
+
+    # Old-style manifest: "recommended_order" with bare filenames
+    for name in manifest.get(
+        "recommended_order", manifest.get("test_variants", [])
+    ):
         clean = _MANIFEST_TO_CLEAN.get(name)
         if clean:
             ordered.append(clean)
@@ -416,6 +465,10 @@ Examples:
   # Full run — upload configs, submit all to queue, then process:
   python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev --process-queue
 
+  # Run the reduced config set:
+  python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev \\
+      --manifest dk_context_reduced_manifest_clean.json
+
   # Dry-run — print commands without executing:
   python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev --dry-run
 
@@ -427,6 +480,18 @@ Examples:
         """,
     )
 
+    parser.add_argument(
+        "--manifest",
+        metavar="FILENAME",
+        default=None,
+        help=(
+            "Manifest filename (relative to benchmark_analysis/"
+            "dk_json_configs_clean/) that lists the configs to run. "
+            "Defaults to dk_context_testing_manifest_clean.json. "
+            "Use 'dk_context_reduced_manifest_clean.json' for the "
+            "reduced config set."
+        ),
+    )
     parser.add_argument(
         "--queue-name",
         default="default-dev",
@@ -507,6 +572,21 @@ Examples:
 
     args = parser.parse_args()
 
+    # ── Resolve manifest path ─────────────────────────────────────────────────
+    manifest_path: Optional[Path] = None
+    if args.manifest:
+        manifest_path = DK_CONFIGS_DIR / args.manifest
+        if not manifest_path.exists():
+            logger.error(
+                f"Manifest file not found: {manifest_path}. "
+                f"Available manifests: "
+                + ", ".join(
+                    p.name
+                    for p in DK_CONFIGS_DIR.glob("*manifest*.json")
+                )
+            )
+            sys.exit(1)
+
     # ── Shared benchmark ID ───────────────────────────────────────────────────
     # All configs submitted by this invocation share ONE benchmark_id so they
     # appear as a single entry on the Benchmark Results page.
@@ -521,11 +601,12 @@ Examples:
     )
 
     # Resolve the list of config files to process
-    all_configs = ordered_config_files()
+    effective_manifest = manifest_path or DEFAULT_MANIFEST_FILE
+    all_configs = ordered_config_files(manifest_path)
     if not all_configs:
         logger.error(
             "No configs found. Check that the manifest exists at "
-            f"{MANIFEST_FILE}"
+            f"{effective_manifest}"
         )
         sys.exit(1)
 
@@ -548,6 +629,7 @@ Examples:
     logger.info("=" * 80)
     logger.info("DK COMPREHENSIVE BENCHMARK TEST")
     logger.info("=" * 80)
+    logger.info(f"Manifest        : {effective_manifest.name}")
     logger.info(f"Configs to test : {len(config_files)}")
     logger.info(f"Queue           : {args.queue_name}")
     logger.info(f"Benchmark config: {BENCHMARK_CONFIG}")

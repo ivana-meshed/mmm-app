@@ -1,0 +1,17 @@
+{
+  "base_style": "Selected-columns config akin to the uploaded DK clean context JSON files",
+  "dataset_target": "mmm_data_v2_final_holidays_and_school",
+  "notes": [
+    "Uses the corrected holiday flags: is_holiday, is_bridge_day, is_long_weekend, and IS_SCHOOL_HOLIDAY.",
+    "Uses actual dataset columns present in the latest CSV, including CRM_REACHABLE_AUDIENCE and ACTIVE_VEHICLES.",
+    "Recommended first run: dk_context_reduced_core_clean.json",
+    "Recommended second run: dk_context_structured_clean.json",
+    "Use dk_context_occ30d_reduced_clean.json only as a smoothing sensitivity test."
+  ],
+  "files": [
+    "dk_context_reduced_core_clean.json",
+    "dk_context_reduced_supply_clean.json",
+    "dk_context_structured_clean.json",
+    "dk_context_occ30d_reduced_clean.json"
+  ]
+}
