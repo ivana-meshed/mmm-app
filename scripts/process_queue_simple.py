@@ -233,6 +233,19 @@ def launch_cloud_run_job(
                 "column_agg_strategies"
             ]
 
+        # Pass benchmark metadata so R routes outputs to
+        # benchmarks/{benchmark_id}/{benchmark_variant}/ instead of
+        # robyn/{revision}/{country}/{timestamp}/
+        for key in ("benchmark_id", "benchmark_variant", "benchmark_test"):
+            if params.get(key):
+                job_config[key] = params[key]
+
+        # Pass var_to_spend_mapping if present (used by some benchmark variants)
+        if params.get("var_to_spend_mapping"):
+            job_config["var_to_spend_mapping"] = params[
+                "var_to_spend_mapping"
+            ]
+
         # Upload job config to GCS
         import tempfile
 
@@ -426,6 +439,7 @@ def process_one_job(
     revision = params.get("revision", "unknown")
     benchmark_variant = params.get("benchmark_variant", "")
     benchmark_test = params.get("benchmark_test", "")
+    benchmark_id = params.get("benchmark_id", "")
 
     # Generate unique timestamp for this job
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")[
@@ -441,8 +455,17 @@ def process_one_job(
         logger.info(f"  Benchmark test: {benchmark_test}")
     logger.info(f"  Job ID: {pending_job.get('job_id', 'N/A')}")
 
-    # Log expected result location
-    result_path = f"gs://{bucket_name}/robyn/{revision}/{country}/{timestamp}/"
+    # Result path depends on whether this is a benchmark job.
+    # Benchmark jobs: R routes outputs to benchmarks/{id}/{variant}/
+    # Regular jobs:   R writes to robyn/{revision}/{country}/{timestamp}/
+    if benchmark_id and benchmark_variant:
+        result_path = (
+            f"gs://{bucket_name}/benchmarks/{benchmark_id}/{benchmark_variant}/"
+        )
+    else:
+        result_path = (
+            f"gs://{bucket_name}/robyn/{revision}/{country}/{timestamp}/"
+        )
     logger.info(f"📂 Results will be saved to:")
     logger.info(f"   {result_path}")
     logger.info(f"   Key files: model_summary.json, console.log")

@@ -957,7 +957,7 @@ class BenchmarkRunner:
         benchmark_config: BenchmarkConfig,
         variants: List[Dict[str, Any]],
     ):
-        """Save benchmark execution plan to GCS."""
+        """Save benchmark execution plan and combinations log to GCS."""
         plan = {
             "benchmark_id": benchmark_id,
             "name": benchmark_config.name,
@@ -976,6 +976,55 @@ class BenchmarkRunner:
 
         logger.info(
             f"Saved benchmark plan: " f"gs://{self.bucket_name}/{blob_path}"
+        )
+
+        # Write a human-readable combinations log alongside plan.json so
+        # operators can quickly verify which configs will be trained.
+        lines = [
+            f"Benchmark: {benchmark_id}",
+            f"Name     : {benchmark_config.name}",
+            f"Variants : {len(variants)}",
+            f"Created  : {plan['created_at']}",
+            "",
+            f"{'#':<4}  {'variant':<52}  {'adstock':<14}  "
+            f"{'train_size':<14}  {'resample_freq':<10}  "
+            f"{'paid_media_vars':<36}  {'organic_vars':<28}  "
+            f"{'context_vars':<36}  factor_vars",
+            "-" * 200,
+        ]
+
+        def _preview(lst: list, n: int = 3) -> str:
+            """Comma-joined first *n* items with overflow indicator."""
+            if not lst:
+                return "(none)"
+            preview = ", ".join(lst[:n])
+            if len(lst) > n:
+                preview += f" … (+{len(lst) - n})"
+            return preview
+
+        for idx, v in enumerate(variants, 1):
+            pmv = v.get("paid_media_vars") or []
+            ctx = v.get("context_vars") or []
+            factor = v.get("factor_vars") or []
+            organic = v.get("organic_vars") or []
+            lines.append(
+                f"{idx:<4}  {v.get('benchmark_variant', ''):<52}  "
+                f"{str(v.get('adstock', '')):<14}  "
+                f"{str(v.get('train_size', '')):<14}  "
+                f"{str(v.get('resample_freq', 'none')):<10}  "
+                f"{_preview(pmv):<36}  "
+                f"{_preview(organic):<28}  "
+                f"{_preview(ctx):<36}  "
+                f"{_preview(factor)}"
+            )
+
+        log_text = "\n".join(lines) + "\n"
+        log_path = f"{BENCHMARK_ROOT}/{benchmark_id}/combinations.log"
+        log_blob = self.bucket.blob(log_path)
+        log_blob.upload_from_string(log_text, content_type="text/plain")
+
+        logger.info(
+            f"Saved combinations log: gs://{self.bucket_name}/{log_path}"
         )
 
     def submit_variants_to_queue(
@@ -1045,11 +1094,42 @@ class BenchmarkRunner:
         # This is required for queue processing to work
         data_version = variant.get("data_version", "")
         if data_version:
-            # Path format: gs://{bucket}/mapped-datasets/{country}/{version}/raw.parquet
-            data_gcs_path = (
-                f"gs://{self.bucket_name}/mapped-datasets/"
-                f"{country.lower()}/{data_version}/raw.parquet"
-            )
+            # Resolve the special "Latest" sentinel to the actual most-recent
+            # version timestamp so the container downloads a real GCS path.
+            # Without this, the training container gets a literal path like
+            # "…/mapped-datasets/dk/Latest/raw.parquet" which doesn't exist
+            # and causes an immediate container exit.
+            if data_version.lower() == "latest":
+                goal = variant.get("selected_goal", "")
+                if goal:
+                    try:
+                        data_version = self._find_latest_version(
+                            country, goal
+                        )
+                        logger.info(
+                            f"Resolved 'Latest' data_version for "
+                            f"{country}/{goal} → {data_version}"
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            f"Could not resolve 'Latest' for "
+                            f"{country}/{goal}: {exc}; job may fail"
+                        )
+                        data_gcs_path = None
+                else:
+                    logger.warning(
+                        f"data_version is 'Latest' but selected_goal is "
+                        f"missing for variant "
+                        f"'{variant.get('benchmark_variant')}'; job may fail"
+                    )
+                    data_gcs_path = None
+
+            if data_version and data_version.lower() != "latest":
+                # Path format: gs://{bucket}/mapped-datasets/{country}/{version}/raw.parquet
+                data_gcs_path = (
+                    f"gs://{self.bucket_name}/mapped-datasets/"
+                    f"{country.lower()}/{data_version}/raw.parquet"
+                )
         else:
             # Fallback: try to infer from meta_version or fail
             logger.warning(
@@ -1439,8 +1519,14 @@ class ResultsCollector:
             "channel_cpa_json": (
                 json.dumps(channel_cpa) if channel_cpa else ""
             ),
-            # Model metadata
-            "model_id": best_model.get("model_id"),
+            # Model metadata — unique per variant × run: use benchmark_variant
+            # + timestamp so the ID is human-readable and never clashes across
+            # variants (Robyn's own IDs like 1_2_5 repeat between runs).
+            "model_id": (
+                f"{variant.get('benchmark_variant', '')}_{summary.get('timestamp', '')}"
+                if summary.get("timestamp")
+                else variant.get("benchmark_variant", "")
+            ),
             "pareto_model_count": summary.get("pareto_model_count", 0),
             "candidate_model_count": summary.get("candidate_model_count", 0),
             # Execution metadata
@@ -1797,6 +1883,29 @@ def main():
         ),
     )
 
+    parser.add_argument(
+        "--benchmark-id",
+        dest="benchmark_id",
+        default=None,
+        help=(
+            "Use this value as the benchmark ID instead of generating one. "
+            "Pass the same ID for all configs in a multi-config run so that "
+            "results land under a single benchmarks/{id}/ folder and appear "
+            "as one entry on the Benchmark Results page."
+        ),
+    )
+    parser.add_argument(
+        "--variant-prefix",
+        dest="variant_prefix",
+        default=None,
+        help=(
+            "Prefix to prepend to every benchmark_variant name "
+            "(e.g. 'dk_context_minimal'). "
+            "Required when multiple configs share the same benchmark ID to "
+            "avoid variant-name collisions in GCS."
+        ),
+    )
+
     args = parser.parse_args()
 
     # Resolve shorthand preset flags
@@ -1995,6 +2104,19 @@ def main():
                 base_config["iterations"] = benchmark_config.iterations
                 base_config["trials"] = benchmark_config.trials
 
+                # Apply any field overrides embedded in the benchmark config's
+                # base_config section.  This allows run_full_benchmark.py to
+                # substitute context_vars, factor_vars, organic_vars, and
+                # paid_media_vars from a local config file without re-uploading
+                # selected_columns.json to GCS.
+                overrides = base_cfg.get("overrides", {})
+                if overrides:
+                    base_config.update(overrides)
+                    logger.info(
+                        f"Applied {len(overrides)} base_config override(s): "
+                        f"{list(overrides.keys())}"
+                    )
+
                 # Generate variants
                 variants = runner.generate_variants(
                     base_config, benchmark_config
@@ -2027,16 +2149,26 @@ def main():
                         f"  🧪 TEST MODE: All {len(variants)} variants with reduced resources"
                     )
 
-                # Generate benchmark ID
-                benchmark_id = (
-                    f"{benchmark_config.name}_"
-                    f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-                )
+                # Generate benchmark ID (or reuse supplied one)
+                if args.benchmark_id:
+                    benchmark_id = args.benchmark_id
+                else:
+                    benchmark_id = (
+                        f"{benchmark_config.name}_"
+                        f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+                    )
 
                 if args.test_run:
                     benchmark_id = f"{benchmark_id}_test"
                 elif args.test_run_all:
                     benchmark_id = f"{benchmark_id}_testall"
+
+                # Prefix variant names when sharing a benchmark_id
+                if args.variant_prefix:
+                    prefix = args.variant_prefix.rstrip("_")
+                    for variant in variants:
+                        existing = variant.get("benchmark_variant", "")
+                        variant["benchmark_variant"] = f"{prefix}_{existing}" if existing else prefix
 
                 # Save plan
                 runner.save_benchmark_plan(
@@ -2249,11 +2381,26 @@ def main():
         variants = select_top_combinations(variants, n=args.top_n)
         logger.info(f"   Selected {len(variants)} combinations")
 
-    # Generate benchmark ID
-    benchmark_id = (
-        f"{benchmark_config.name}_"
-        f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-    )
+    # Generate benchmark ID (or use the supplied one for grouped runs)
+    if args.benchmark_id:
+        benchmark_id = args.benchmark_id
+        logger.info(f"Using supplied benchmark ID: {benchmark_id}")
+    else:
+        benchmark_id = (
+            f"{benchmark_config.name}_"
+            f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        )
+
+    # Prefix variant names when sharing a benchmark_id across multiple configs
+    # so GCS paths remain unique: benchmarks/{id}/{prefix}_{variant}/
+    if args.variant_prefix:
+        prefix = args.variant_prefix.rstrip("_")
+        for variant in variants:
+            existing = variant.get("benchmark_variant", "")
+            variant["benchmark_variant"] = f"{prefix}_{existing}" if existing else prefix
+        logger.info(
+            f"Applied variant prefix '{prefix}' to {len(variants)} variant(s)"
+        )
 
     # Save benchmark plan
     runner.save_benchmark_plan(benchmark_id, benchmark_config, variants)

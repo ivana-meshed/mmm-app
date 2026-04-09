@@ -33,10 +33,38 @@
     ],
     "spend_var_mapping": [
       {
-        "name": "mixed_by_funnel_clicks"
+        "name": "mixed_by_funnel_clicks",
+        "description": "Upper funnel (FB) → impressions; search/other → spend. Column order matches paid_media_spends.",
+        "mapping_strategy": "mixed",
+        "paid_media_vars_override": [
+          "GOOGLE_SEARCH_BRAND_COST",
+          "GOOGLE_SEARCH_NONBRAND_COST_2",
+          "GOOGLE_PMAX_COST_2",
+          "GOOGLE_OTHER_COST_2",
+          "BING_SEARCH_BRAND_COST",
+          "BING_SEARCH_NONBRAND_COST",
+          "BING_OTHER_COST",
+          "FB_UPPER_IMPRESSIONS",
+          "FB_LOWER_COST",
+          "FB_APP_COST"
+        ]
       },
       {
-        "name": "spend_to_clicks"
+        "name": "spend_to_clicks",
+        "description": "All channels: spend → clicks/impressions proxy. Column order matches paid_media_spends.",
+        "mapping_strategy": "spend_to_proxy",
+        "paid_media_vars_override": [
+          "GOOGLE_SEARCH_BRAND_CLICKS",
+          "GOOGLE_SEARCH_NONBRAND_CLICKS_2",
+          "GOOGLE_PMAX_CLICKS_2",
+          "GOOGLE_OTHER_IMPRESSIONS_2",
+          "BING_SEARCH_BRAND_CLICKS",
+          "BING_SEARCH_NONBRAND_CLICKS",
+          "BING_OTHER_CLICKS",
+          "FB_UPPER_IMPRESSIONS",
+          "FB_LOWER_CLICKS",
+          "FB_APP_CLICKS"
+        ]
       }
     ]
   }

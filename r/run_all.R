@@ -738,9 +738,34 @@ context_vars_cfg <- parse_csv_config(cfg$context_vars)
 factor_vars_cfg <- parse_csv_config(cfg$factor_vars)
 organic_vars_cfg <- parse_csv_config(cfg$organic_vars)
 
+# Benchmark metadata (optional – set when the job was submitted via benchmark_mmm.py)
+benchmark_id      <- cfg$benchmark_id      %||% NULL
+benchmark_variant <- cfg$benchmark_variant %||% NULL
+benchmark_test    <- cfg$benchmark_test    %||% NULL
+
 dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
-gcs_prefix <- file.path("robyn", revision, country, timestamp)
+
+# Benchmark jobs route all variant outputs under a shared benchmark parent folder
+# so the Benchmark Results page can aggregate them by benchmark_id.
+if (!is.null(benchmark_id) && nzchar(benchmark_id) &&
+    !is.null(benchmark_variant) && nzchar(benchmark_variant)) {
+    gcs_prefix <- file.path("benchmarks", benchmark_id, benchmark_variant)
+    cat("Benchmark job — gcs_prefix:", gcs_prefix, "\n")
+} else {
+    if (xor(
+        !is.null(benchmark_id) && nzchar(benchmark_id),
+        !is.null(benchmark_variant) && nzchar(benchmark_variant)
+    )) {
+        warning(
+            "Partial benchmark metadata: benchmark_id=", benchmark_id,
+            " benchmark_variant=", benchmark_variant,
+            " — falling back to default robyn/ path. ",
+            "Check that both fields are set in the job config."
+        )
+    }
+    gcs_prefix <- file.path("robyn", revision, country, timestamp)
+}
 
 # after you set: dir_path, gcs_prefix
 job_started <- Sys.time()
@@ -2460,7 +2485,15 @@ if (exists("extract_model_summary")) {
                 country = country,
                 revision = revision,
                 timestamp = timestamp,
-                training_time_mins = round(training_time, 2)
+                training_time_mins = round(training_time, 2),
+                resample_freq = resample_freq,
+                iterations = iter,
+                trials = trials,
+                adstock = adstock,
+                train_size = train_size,
+                benchmark_test = benchmark_test,
+                benchmark_variant = benchmark_variant,
+                benchmark_id = benchmark_id
             )
             summary_path <- file.path(dir_path, "model_summary.json")
             save_model_summary(model_summary, summary_path)

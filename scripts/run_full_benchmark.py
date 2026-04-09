@@ -122,6 +122,50 @@ def parse_gcs_path(path: str) -> tuple:
         return parts[0], ""
 
 
+def is_gcs_directory_path(path: str) -> bool:
+    """Return True when path is a GCS directory (no .json file at the end)."""
+    clean = path.rstrip("/")
+    return path.startswith("gs://") and not clean.endswith(".json")
+
+
+def extract_country_from_gcs_path(path: str) -> str:
+    """
+    Extract country code from a GCS training-data path.
+
+    Example: gs://mmm-app-output/training_data/dk/ → 'dk'
+    """
+    clean = path.rstrip("/")
+    if clean.startswith("gs://"):
+        clean = clean[5:]
+    parts = clean.split("/")
+    for i, part in enumerate(parts):
+        if part == "training_data" and i + 1 < len(parts):
+            return parts[i + 1].lower()
+    return ""
+
+
+def find_local_context_configs(country: str) -> List[Path]:
+    """
+    Return all JSON files in benchmark_analysis/{country}_json_configs_clean/.
+
+    Files are returned in sorted order so execution order is deterministic.
+    Returns an empty list when the directory does not exist.
+    """
+    configs_dir = (
+        Path(__file__).parent.parent
+        / "benchmark_analysis"
+        / f"{country.lower()}_json_configs_clean"
+    )
+    if not configs_dir.is_dir():
+        logger.warning(f"Local context-config dir not found: {configs_dir}")
+        return []
+    files = sorted(configs_dir.glob("*.json"))
+    logger.info(
+        f"Found {len(files)} local context config(s) in {configs_dir}"
+    )
+    return files
+
+
 def extract_version_from_path(gcs_path: str) -> str:
     """
     Extract version (timestamp) from GCS path.
@@ -300,11 +344,31 @@ def generate_benchmark_config(
     )
 
     # Base configuration - use version from GCS path, not data_version from JSON
-    base_config = {
+    base_config: Dict[str, Any] = {
         "country": country,
         "goal": goal,
         "version": version_from_path,  # Use the timestamp from GCS path
     }
+
+    # Embed field overrides so benchmark_mmm.py can substitute context_vars,
+    # factor_vars, organic_vars, and paid_media_vars from this local config
+    # file without needing to re-upload selected_columns.json to GCS.
+    _OVERRIDE_FIELDS = [
+        "context_vars",
+        "factor_vars",
+        "organic_vars",
+        "paid_media_spends",
+        "paid_media_vars",
+        "var_to_spend_mapping",
+        "all_selected_drivers",
+    ]
+    overrides = {
+        k: selected_columns[k]
+        for k in _OVERRIDE_FIELDS
+        if k in selected_columns
+    }
+    if overrides:
+        base_config["overrides"] = overrides
 
     # Iterations and trials based on run mode
     mode_config = {
@@ -715,7 +779,11 @@ def save_temp_benchmark_config(config: Dict[str, Any]) -> str:
 
 
 def run_benchmark_submission(
-    config_path: str, queue_name: str = DEFAULT_QUEUE, top_n: int = 54
+    config_path: str,
+    queue_name: str = DEFAULT_QUEUE,
+    top_n: Optional[int] = 54,
+    benchmark_id: Optional[str] = None,
+    variant_prefix: Optional[str] = None,
 ) -> str:
     """
     Submit benchmark to queue.
@@ -734,8 +802,12 @@ def run_benchmark_submission(
         queue_name,
     ]
 
-    if top_n < _MAX_CARTESIAN_COMBINATIONS:
+    if top_n is not None and top_n < _MAX_CARTESIAN_COMBINATIONS:
         cmd.extend(["--top-n", str(top_n)])
+    if benchmark_id:
+        cmd.extend(["--benchmark-id", benchmark_id])
+    if variant_prefix:
+        cmd.extend(["--variant-prefix", variant_prefix])
 
     logger.info(f"🚀 Running: {' '.join(cmd)}")
 
@@ -1034,6 +1106,26 @@ Examples:
     )
 
     parser.add_argument(
+        "--iterations",
+        type=int,
+        default=None,
+        help=(
+            "Override the number of Robyn iterations (overrides the run-mode default). "
+            "E.g. --iterations 100 for a quick smoke-test."
+        ),
+    )
+
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=None,
+        help=(
+            "Override the number of Robyn trials (overrides the run-mode default). "
+            "E.g. --trials 1 for a quick smoke-test."
+        ),
+    )
+
+    parser.add_argument(
         "--skip-queue",
         action="store_true",
         help="Skip queue processing (only submit benchmark)",
@@ -1043,6 +1135,27 @@ Examples:
         "--skip-analysis",
         action="store_true",
         help="Skip analysis (only submit and process queue)",
+    )
+
+    parser.add_argument(
+        "--benchmark-id",
+        dest="benchmark_id",
+        default=None,
+        help=(
+            "Use this value as the benchmark ID instead of generating one. "
+            "Pass the same ID to all configs in a multi-config run so that "
+            "results land under a single benchmarks/{id}/ folder."
+        ),
+    )
+    parser.add_argument(
+        "--variant-prefix",
+        dest="variant_prefix",
+        default=None,
+        help=(
+            "Prefix to prepend to every benchmark_variant name "
+            "(e.g. 'dk_context_minimal'). "
+            "Required when sharing a benchmark ID across multiple configs."
+        ),
     )
 
     parser.add_argument(
@@ -1224,159 +1337,252 @@ Examples:
     logger.info("")
 
     try:
-        # Step 0: Download and parse selected_columns.json
-        logger.info("STEP 0: LOADING CONFIGURATION")
-        logger.info("=" * 80)
-        selected_columns = download_selected_columns(args.path)
+        # ── Determine whether --path is a single file or a directory ──────────
+        path_is_dir = is_gcs_directory_path(args.path)
 
-        # Extract version (timestamp) from GCS path
-        version_from_path = extract_version_from_path(args.path)
-        logger.info(f"📍 Extracted version from path: {version_from_path}")
-        logger.info("")
-
-        # Generate (or load) benchmark configuration
-        if args.config:
-            # Use an external config file; run mode overrides iterations/trials.
-            benchmark_config = load_external_benchmark_config(
-                args.config,
-                run_mode=run_mode,
-                adstock_types=adstock_types,
-                window_lengths=window_lengths,
-                sequential=sequential,
-                hyperparameter_ranges_config=args.hyperparameter_ranges_config,
-                channel_type_assignments_config=args.channel_type_assignments_config,
-                hyperparameter_preset=args.hyperparameter_preset,
-                compare_presets=compare_presets,
-            )
-            # Always overwrite base_config with the actual country/goal/version
-            # derived from --path.  External configs ship with a placeholder
-            # base_config (e.g. "country": "FILL_IN_COUNTRY_CODE") that must
-            # be replaced before benchmark_mmm.py uses it to fetch the real
-            # selected_columns.json from GCS.
-            country = selected_columns.get("country", "")
-            goal = selected_columns.get("selected_goal", "")
-            benchmark_config["base_config"] = {
-                "country": country,
-                "goal": goal,
-                "version": version_from_path,
-            }
+        if path_is_dir:
+            # Directory path → iterate over all local context configs for
+            # the detected country (benchmark_analysis/{country}_json_configs_clean/)
+            country_from_path = extract_country_from_gcs_path(args.path)
             logger.info(
-                f"📌 Base config injected from --path: "
-                f"{country}/{goal}/{version_from_path}"
+                f"📂 Directory path detected — country: '{country_from_path}'"
             )
+            local_configs = find_local_context_configs(country_from_path)
+
+            if not local_configs:
+                logger.error(
+                    f"No local context configs found for country "
+                    f"'{country_from_path}'. "
+                    f"Expected directory: benchmark_analysis/"
+                    f"{country_from_path}_json_configs_clean/"
+                )
+                sys.exit(1)
+
+            logger.info(
+                f"Will submit {len(local_configs)} benchmark(s), "
+                f"one per context config:\n"
+                + "\n".join(f"  • {p.name}" for p in local_configs)
+            )
+
+            # version_from_path: directory has no timestamp → use "Latest"
+            version_from_path = "Latest"
+            logger.info(f"📍 Version: {version_from_path}")
+
+            selected_columns_list = [
+                json.loads(p.read_text()) for p in local_configs
+            ]
+            config_names = [p.stem for p in local_configs]
         else:
-            # Build config dynamically from selected_columns.json.
-            benchmark_config = generate_benchmark_config(
-                selected_columns,
-                version_from_path=version_from_path,
-                run_mode=run_mode,
-                adstock_types=adstock_types,
-                window_lengths=window_lengths,
-                sequential=sequential,
-                hyperparameter_ranges_config=args.hyperparameter_ranges_config,
-                channel_type_assignments_config=args.channel_type_assignments_config,
-                hyperparameter_preset=args.hyperparameter_preset,
-                compare_presets=compare_presets,
+            # Single selected_columns.json file — original behaviour
+            logger.info("STEP 0: LOADING CONFIGURATION")
+            logger.info("=" * 80)
+            selected_columns_list = [download_selected_columns(args.path)]
+            config_names = [None]
+            version_from_path = extract_version_from_path(args.path)
+            logger.info(f"📍 Extracted version from path: {version_from_path}")
+
+        logger.info("")
+
+        # ── Loop: one benchmark submission per selected_columns entry ─────────
+        all_benchmark_ids: List[str] = []
+
+        for loop_idx, (selected_columns, cfg_name) in enumerate(
+            zip(selected_columns_list, config_names), 1
+        ):
+            if len(selected_columns_list) > 1:
+                logger.info("=" * 80)
+                logger.info(
+                    f"CONFIG {loop_idx}/{len(selected_columns_list)}: "
+                    f"{cfg_name}"
+                )
+                logger.info("=" * 80)
+
+            # Generate (or load) benchmark configuration
+            if args.config:
+                # Use an external config file; run mode overrides iterations/trials.
+                benchmark_config = load_external_benchmark_config(
+                    args.config,
+                    run_mode=run_mode,
+                    adstock_types=adstock_types,
+                    window_lengths=window_lengths,
+                    sequential=sequential,
+                    hyperparameter_ranges_config=args.hyperparameter_ranges_config,
+                    channel_type_assignments_config=args.channel_type_assignments_config,
+                    hyperparameter_preset=args.hyperparameter_preset,
+                    compare_presets=compare_presets,
+                )
+                # Always overwrite base_config with the actual country/goal/version
+                # derived from --path.  External configs ship with a placeholder
+                # base_config (e.g. "country": "FILL_IN_COUNTRY_CODE") that must
+                # be replaced before benchmark_mmm.py uses it to fetch the real
+                # selected_columns.json from GCS.
+                country = selected_columns.get("country", "")
+                goal = selected_columns.get("selected_goal", "")
+                benchmark_config["base_config"] = {
+                    "country": country,
+                    "goal": goal,
+                    "version": version_from_path,
+                }
+                logger.info(
+                    f"📌 Base config injected from --path: "
+                    f"{country}/{goal}/{version_from_path}"
+                )
+            else:
+                # Build config dynamically from selected_columns.json.
+                benchmark_config = generate_benchmark_config(
+                    selected_columns,
+                    version_from_path=version_from_path,
+                    run_mode=run_mode,
+                    adstock_types=adstock_types,
+                    window_lengths=window_lengths,
+                    sequential=sequential,
+                    hyperparameter_ranges_config=args.hyperparameter_ranges_config,
+                    channel_type_assignments_config=args.channel_type_assignments_config,
+                    hyperparameter_preset=args.hyperparameter_preset,
+                    compare_presets=compare_presets,
+                )
+
+            # Append context-config name to benchmark name so each run has a
+            # unique, human-readable ID when iterating over multiple configs.
+            if cfg_name:
+                benchmark_config["name"] = (
+                    benchmark_config.get("name", "benchmark")
+                    + "__"
+                    + cfg_name
+                )
+
+            # Apply explicit --iterations / --trials overrides (highest priority,
+            # supersedes run-mode defaults and anything in the config file).
+            if args.iterations is not None:
+                benchmark_config["iterations"] = args.iterations
+                logger.info(
+                    f"⚙️  Iterations overridden via --iterations: {args.iterations}"
+                )
+            if args.trials is not None:
+                benchmark_config["trials"] = args.trials
+                logger.info(
+                    f"⚙️  Trials overridden via --trials: {args.trials}"
+                )
+
+            # Derive top_n: if not specified, submit all generated variants.
+            # max_combinations is always set to n_combos + 10 when generated
+            # dynamically; external configs may omit it, in which case we fall
+            # back to None (submit all variants).
+            top_n = (
+                args.top_n
+                if args.top_n is not None
+                else benchmark_config.get("max_combinations")
             )
 
-        # Derive top_n: if not specified, submit all generated variants.
-        # max_combinations is always set to n_combos + 10, so it safely covers all.
-        top_n = (
-            args.top_n
-            if args.top_n is not None
-            else benchmark_config["max_combinations"]
-        )
-
-        # ── Pre-submission variant summary ────────────────────────────────
-        # Log the key Robyn parameters for every variant so the operator
-        # can verify what will be sent before jobs hit the queue.
-        variants_summary = benchmark_config.get("variants", {})
-        combination_mode = benchmark_config.get("combination_mode", "single")
-        logger.info("")
-        logger.info("=" * 72)
-        logger.info("BENCHMARK VARIANT PLAN (what will be sent to Robyn)")
-        logger.info("=" * 72)
-        logger.info(f"  Combination mode : {combination_mode}")
-        logger.info(
-            f"  Iterations       : {benchmark_config.get('iterations')}"
-        )
-        logger.info(f"  Trials           : {benchmark_config.get('trials')}")
-        logger.info(
-            f"  Hyperparameter ranges config : "
-            f"{benchmark_config.get('hyperparameter_ranges_config', '(none)')}"
-        )
-        logger.info(
-            f"  Channel type assignments     : "
-            f"{benchmark_config.get('channel_type_assignments_config', '(none)')}"
-        )
-        logger.info("")
-        for dim_name, dim_variants in variants_summary.items():
-            if not isinstance(dim_variants, list):
-                continue
+            # ── Pre-submission variant summary ────────────────────────────────
+            # Log the key Robyn parameters for every variant so the operator
+            # can verify what will be sent before jobs hit the queue.
+            variants_summary = benchmark_config.get("variants", {})
+            combination_mode = benchmark_config.get(
+                "combination_mode", "single"
+            )
+            logger.info("")
+            logger.info("=" * 72)
+            logger.info("BENCHMARK VARIANT PLAN (what will be sent to Robyn)")
+            logger.info("=" * 72)
+            logger.info(f"  Combination mode : {combination_mode}")
             logger.info(
-                f"  Dimension '{dim_name}' — {len(dim_variants)} variant(s):"
+                f"  Iterations       : {benchmark_config.get('iterations')}"
             )
-            for v in dim_variants:
-                name = v.get("name", "?")
-                desc = v.get("description", "")
-                preset = v.get("hyperparameter_preset", "")
-                extra = f"  preset={preset}" if preset else ""
-                logger.info(f"    • {name:<28} {desc[:50]}{extra}")
-        logger.info("=" * 72)
-        logger.info("")
-        # ─────────────────────────────────────────────────────────────────
+            logger.info(
+                f"  Trials           : {benchmark_config.get('trials')}"
+            )
+            logger.info(
+                f"  Hyperparameter ranges config : "
+                f"{benchmark_config.get('hyperparameter_ranges_config', '(none)')}"
+            )
+            logger.info(
+                f"  Channel type assignments     : "
+                f"{benchmark_config.get('channel_type_assignments_config', '(none)')}"
+            )
+            logger.info("")
+            for dim_name, dim_variants in variants_summary.items():
+                if not isinstance(dim_variants, list):
+                    continue
+                logger.info(
+                    f"  Dimension '{dim_name}' — {len(dim_variants)} variant(s):"
+                )
+                for v in dim_variants:
+                    name = v.get("name", "?")
+                    desc = v.get("description", "")
+                    preset = v.get("hyperparameter_preset", "")
+                    extra = f"  preset={preset}" if preset else ""
+                    logger.info(f"    • {name:<28} {desc[:50]}{extra}")
+            logger.info("=" * 72)
+            logger.info("")
+            # ─────────────────────────────────────────────────────────────────
 
-        # Save to temporary file
-        config_path = save_temp_benchmark_config(benchmark_config)
-        logger.info("")
+            # Save to temporary file
+            config_path = save_temp_benchmark_config(benchmark_config)
+            logger.info("")
 
-        # Step 1: Submit benchmark
-        benchmark_id = run_benchmark_submission(
-            config_path, args.queue_name, top_n=top_n
-        )
-        logger.info("")
+            # Step 1: Submit benchmark
+            benchmark_id = run_benchmark_submission(
+                config_path,
+                args.queue_name,
+                top_n=top_n,
+                benchmark_id=getattr(args, "benchmark_id", None),
+                variant_prefix=getattr(args, "variant_prefix", None),
+            )
+            all_benchmark_ids.append(benchmark_id)
+            logger.info("")
 
-        # Clean up temp file
-        os.unlink(config_path)
+            # Clean up temp file
+            os.unlink(config_path)
 
-        # Step 2: Process queue (optional)
+        # ── Queue processing (once, after all submissions) ────────────────────
         if not args.skip_queue:
             process_queue(args.queue_name)
             logger.info("")
         else:
             logger.info("⏭️  Skipping queue processing (--skip-queue)")
             logger.info(
-                f"   Run manually: python scripts/process_queue_simple.py --loop --queue-name {args.queue_name}"
+                f"   Run manually: python scripts/process_queue_simple.py "
+                f"--loop --queue-name {args.queue_name}"
             )
             logger.info("")
 
-        # Step 3: Analyze results (optional)
-        if not args.skip_analysis:
-            if args.skip_queue:
+        # ── Analysis (once per benchmark ID) ─────────────────────────────────
+        for benchmark_id in all_benchmark_ids:
+            if not args.skip_analysis:
+                if args.skip_queue:
+                    logger.info(
+                        "ℹ️  Queue processing was skipped — analyzing any "
+                        "results already available in GCS. "
+                        "Re-run analysis after all jobs complete for full results:"
+                    )
+                    logger.info(
+                        f"   python scripts/analyze_benchmark_results.py "
+                        f"--benchmark-id {benchmark_id} "
+                        f"--queue-name {args.queue_name}"
+                    )
+                analyze_results(benchmark_id, args.queue_name)
+                logger.info("")
+            else:
+                logger.info("⏭️  Skipping analysis (--skip-analysis)")
                 logger.info(
-                    "ℹ️  Queue processing was skipped — analyzing any "
-                    "results already available in GCS. "
-                    "Re-run analysis after all jobs complete for full results:"
+                    f"   Run manually: python scripts/analyze_benchmark_results.py "
+                    f"--benchmark-id {benchmark_id} --queue-name {args.queue_name}"
                 )
-                logger.info(
-                    f"   python scripts/analyze_benchmark_results.py "
-                    f"--benchmark-id {benchmark_id} "
-                    f"--queue-name {args.queue_name}"
-                )
-            analyze_results(benchmark_id, args.queue_name)
-            logger.info("")
-        else:
-            logger.info("⏭️  Skipping analysis (--skip-analysis)")
-            logger.info(
-                f"   Run manually: python scripts/analyze_benchmark_results.py --benchmark-id {benchmark_id} --queue-name {args.queue_name}"
-            )
-            logger.info("")
+                logger.info("")
 
-        # Final summary
+        # ── Final summary ─────────────────────────────────────────────────────
         logger.info("=" * 80)
         logger.info("✅ WORKFLOW COMPLETE!")
         logger.info("=" * 80)
-        logger.info(f"Benchmark ID: {benchmark_id}")
+        logger.info(
+            f"Benchmark ID(s): "
+            + (
+                all_benchmark_ids[0]
+                if len(all_benchmark_ids) == 1
+                else ", ".join(all_benchmark_ids)
+            )
+        )
 
         if not args.skip_analysis:
             logger.info(f"Results: ./benchmark_analysis/")

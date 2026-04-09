@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import sys
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -37,6 +38,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
 from google.cloud import storage
 
 try:
+    import matplotlib
+    matplotlib.use("Agg")  # non-interactive backend for headless environments
     import matplotlib.pyplot as plt
     import numpy as np
     import pandas as pd
@@ -194,6 +197,118 @@ class BenchmarkAnalyzer:
         logger.info(f"Collected {len(df)} results")
         return df
 
+    def collect_results_from_gcs_scan(
+        self, benchmark_id: str
+    ) -> Optional[pd.DataFrame]:
+        """
+        Collect results by scanning GCS directly.
+
+        Reads every ``benchmarks/{benchmark_id}/{variant}/model_summary.json``
+        without requiring a plan.json or queue entries.  This is the primary
+        collection strategy for multi-config runs where plan.json would only
+        contain the last config's variants.
+
+        Returns a DataFrame or None when no results are found.
+        """
+        prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/"
+        logger.info(f"Scanning GCS for results under: gs://{self.bucket_name}/{prefix}")
+
+        try:
+            blobs = list(self.bucket.list_blobs(prefix=prefix))
+        except Exception as e:
+            logger.error(f"Failed to list GCS blobs: {e}")
+            return None
+
+        # Only depth-4 paths: benchmarks/{id}/{variant}/model_summary.json
+        summary_blobs = [
+            b for b in blobs
+            if b.name.endswith("/model_summary.json")
+            and len(b.name.split("/")) == 4
+        ]
+
+        if not summary_blobs:
+            logger.warning(f"No model_summary.json files found under {prefix}")
+            return None
+
+        logger.info(f"Found {len(summary_blobs)} model_summary.json file(s)")
+
+        rows = []
+        for blob in summary_blobs:
+            variant_name = blob.name.split("/")[2]
+            try:
+                summary = json.loads(blob.download_as_bytes())
+            except Exception as e:
+                logger.warning(f"Could not read {blob.name}: {e}")
+                continue
+
+            best_model = summary.get("best_model", {})
+            decomp = summary.get("decomp_contribution", {}) or {}
+            input_meta = summary.get("input_metadata", {}) or {}
+            channel_roas = decomp.get("channel_roas") or {}
+            channel_cpa = decomp.get("channel_cpa") or {}
+
+            # Prefer fields from summary; fall back to input_metadata
+            adstock = summary.get("adstock") or input_meta.get("adstock", "")
+            train_size = summary.get("train_size") or input_meta.get("train_size", "")
+            resample_freq = summary.get("resample_freq") or input_meta.get("resample_freq", "none")
+
+            iterations_raw = summary.get("iterations") or input_meta.get("iterations")
+            trials_raw = summary.get("trials") or input_meta.get("trials")
+            try:
+                iterations = int(iterations_raw) if iterations_raw else None
+            except (ValueError, TypeError):
+                iterations = None
+            try:
+                trials = int(trials_raw) if trials_raw else None
+            except (ValueError, TypeError):
+                trials = None
+
+            row = {
+                "benchmark_test": summary.get("benchmark_test", ""),
+                "benchmark_variant": variant_name,
+                "country": summary.get("country") or input_meta.get("country", ""),
+                "revision": summary.get("revision", "default"),
+                "preset_label": summary.get("preset_label", ""),
+                "window_label": summary.get("window_label", ""),
+                "adstock": adstock,
+                "train_size": str(train_size),
+                "iterations": iterations,
+                "trials": trials,
+                "resample_freq": resample_freq,
+                "rsq_train": best_model.get("rsq_train"),
+                "rsq_val": best_model.get("rsq_val"),
+                "rsq_test": best_model.get("rsq_test"),
+                "nrmse": best_model.get("nrmse"),
+                "nrmse_train": best_model.get("nrmse_train"),
+                "nrmse_val": best_model.get("nrmse_val"),
+                "nrmse_test": best_model.get("nrmse_test"),
+                "decomp_rssd": best_model.get("decomp_rssd"),
+                "mape": best_model.get("mape"),
+                "paid_media_share": decomp.get("paid_media_share"),
+                "baseline_share": decomp.get("baseline_share"),
+                "organic_share": decomp.get("organic_share"),
+                "context_share": decomp.get("context_share"),
+                "allocator_stability_roas_cv": decomp.get("allocator_stability_roas_cv"),
+                "channel_roas_json": json.dumps(channel_roas) if channel_roas else "",
+                "channel_cpa_json": json.dumps(channel_cpa) if channel_cpa else "",
+                "model_id": (
+                    f"{variant_name}_{summary.get('timestamp', '')}"
+                    if summary.get("timestamp")
+                    else variant_name
+                ),
+                "timestamp": summary.get("timestamp", ""),
+            }
+            rows.append(row)
+            logger.debug(f"  ✓ {variant_name}")
+
+        if not rows:
+            logger.warning("Could not parse any model_summary.json files")
+            return None
+
+        df = pd.DataFrame(rows)
+        logger.info(f"Collected {len(df)} result(s) via GCS scan")
+        return df
+
     def _collect_variant_result(
         self,
         variant: Dict[str, Any],
@@ -312,6 +427,27 @@ class BenchmarkAnalyzer:
             if int(variant_iter) != int(summary_iter):
                 return False
 
+        # Match on resample_freq (weekly vs daily) when present in summary
+        variant_freq = variant.get("resample_freq", "")
+        summary_freq = summary.get("resample_freq", "")
+        if variant_freq and summary_freq:
+            # Normalise: treat empty / "none" / None as equivalent
+            def _norm_freq(f: str) -> str:
+                return (f or "none").strip().lower()
+
+            if _norm_freq(variant_freq) != _norm_freq(summary_freq):
+                return False
+
+        # Match on paid_media_vars (distinguishes spend_to_clicks vs
+        # mixed_by_funnel etc.) when available in both plan and summary
+        variant_pmv = variant.get("paid_media_vars") or []
+        summary_pmv = (
+            (summary.get("input_metadata") or {}).get("paid_media_vars") or []
+        )
+        if variant_pmv and summary_pmv:
+            if sorted(variant_pmv) != sorted(summary_pmv):
+                return False
+
         return True
 
     def _extract_metrics(
@@ -382,6 +518,7 @@ class BenchmarkAnalyzer:
             "rsq_train": best_model.get("rsq_train"),
             "rsq_val": best_model.get("rsq_val"),
             "rsq_test": best_model.get("rsq_test"),
+            "nrmse": best_model.get("nrmse"),
             "nrmse_train": best_model.get("nrmse_train"),
             "nrmse_val": best_model.get("nrmse_val"),
             "nrmse_test": best_model.get("nrmse_test"),
@@ -404,8 +541,14 @@ class BenchmarkAnalyzer:
             "channel_cpa_json": (
                 json.dumps(channel_cpa) if channel_cpa else ""
             ),
-            # Model metadata
-            "model_id": best_model.get("model_id"),
+            # Model metadata — unique per variant × run using variant name +
+            # timestamp so the ID is human-readable and never clashes across
+            # variants (Robyn's own IDs like 1_2_5 repeat between runs).
+            "model_id": (
+                f"{variant_name}_{summary.get('timestamp', '')}"
+                if summary.get("timestamp")
+                else variant_name
+            ),
             "timestamp": summary.get("timestamp", ""),
         }
 
@@ -473,13 +616,21 @@ class BenchmarkAnalyzer:
         for plot_name, plot_func in plots:
             try:
                 fig = plot_func(df)
-                if fig:
+                if fig is not None:
                     self._save_plot(
                         fig, plot_name, plots_dir, output_dir, format
                     )
                     plt.close(fig)
             except Exception as e:
-                logger.error(f"Error generating {plot_name}: {e}")
+                logger.error(
+                    f"Error generating {plot_name}: {e}\n"
+                    f"{traceback.format_exc()}"
+                )
+                # Ensure any partially-created figure is closed
+                try:
+                    plt.close("all")
+                except Exception:
+                    pass
 
         logger.info(f"Plots saved to: gs://{self.bucket_name}/{plots_dir}/")
         if output_dir:
@@ -519,9 +670,11 @@ class BenchmarkAnalyzer:
 
     def _plot_rsq_comparison(self, df: pd.DataFrame):
         """Plot R² comparison across variants."""
-        # Adjust figure size based on number of variants
+        # Scale width by variants × hue groups so all bars are comfortably
+        # visible.  3 hue categories (train/val/test) means each variant
+        # occupies roughly 3× the x-space of a single bar.
         n_variants = len(df)
-        fig_width = max(14, n_variants * 0.4)
+        fig_width = max(14, n_variants * 1.2)
         fig, ax = plt.subplots(figsize=(fig_width, 8))
 
         # Prepare data
@@ -550,7 +703,11 @@ class BenchmarkAnalyzer:
         )
         ax.set_xlabel("Variant", fontsize=12)
         ax.set_ylabel("R²", fontsize=12)
-        ax.set_ylim(0, 1)
+        # Dynamic y-axis: include 0 as baseline, show negative values
+        y_min = min(0.0, float(melted["R²"].min(skipna=True)) * 1.05)
+        y_max = max(1.0, float(melted["R²"].max(skipna=True)) * 1.05)
+        ax.set_ylim(y_min, y_max)
+        ax.axhline(y=0, color="black", linestyle="--", alpha=0.3, linewidth=0.8)
 
         # Rotate labels if many variants
         if n_variants > 15:
@@ -565,9 +722,9 @@ class BenchmarkAnalyzer:
 
     def _plot_nrmse_comparison(self, df: pd.DataFrame):
         """Plot NRMSE comparison across variants."""
-        # Adjust figure size based on number of variants
+        # Scale width like rsq_comparison: 3 hue groups need more x-space.
         n_variants = len(df)
-        fig_width = max(14, n_variants * 0.4)
+        fig_width = max(14, n_variants * 1.2)
         fig, ax = plt.subplots(figsize=(fig_width, 8))
 
         # Prepare data
@@ -788,71 +945,146 @@ class BenchmarkAnalyzer:
         """Plot summary of best models by different criteria."""
         fig, axes = plt.subplots(2, 2, figsize=(16, 14))
 
-        # Best by R² validation
-        if "rsq_val" in df.columns:
-            ax = axes[0, 0]
-            top_models = df.nlargest(10, "rsq_val")[
-                ["benchmark_variant", "rsq_val"]
-            ]
-            ax.barh(top_models["benchmark_variant"], top_models["rsq_val"])
-            ax.set_title(
-                "Top 10 Models by R² Validation", fontsize=14, fontweight="bold"
-            )
-            ax.set_xlabel("R² Validation", fontsize=12)
-            ax.tick_params(axis="y", labelsize=9)
-            ax.grid(axis="x", alpha=0.3)
+        def _has_data(col: str) -> bool:
+            return col in df.columns and df[col].notna().any()
 
-        # Best by NRMSE validation
-        if "nrmse_val" in df.columns:
-            ax = axes[0, 1]
-            top_models = df.nsmallest(10, "nrmse_val")[
-                ["benchmark_variant", "nrmse_val"]
+        def _no_data_label(ax, title: str, note: str = "") -> None:
+            ax.set_title(title, fontsize=14, fontweight="bold")
+            ax.text(
+                0.5,
+                0.5,
+                "No data available" + (f"\n({note})" if note else ""),
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+                fontsize=13,
+                color="gray",
+            )
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.axis("off")
+
+        # ── Subplot 1: Best by R² ─────────────────────────────────────────
+        # Prefer rsq_val; fall back to rsq_train if val metrics are absent.
+        ax = axes[0, 0]
+        rsq_col = (
+            "rsq_val"
+            if _has_data("rsq_val")
+            else ("rsq_train" if _has_data("rsq_train") else None)
+        )
+        rsq_label = (
+            "R² Validation"
+            if rsq_col == "rsq_val"
+            else ("R² Train" if rsq_col else "R²")
+        )
+        if rsq_col:
+            top_models = df.nlargest(10, rsq_col)[
+                ["benchmark_variant", rsq_col]
             ]
-            ax.barh(top_models["benchmark_variant"], top_models["nrmse_val"])
+            ax.barh(top_models["benchmark_variant"], top_models[rsq_col])
             ax.set_title(
-                "Top 10 Models by NRMSE Validation",
+                f"Top 10 Models by {rsq_label}",
                 fontsize=14,
                 fontweight="bold",
             )
-            ax.set_xlabel("NRMSE Validation", fontsize=12)
+            ax.set_xlabel(rsq_label, fontsize=12)
             ax.tick_params(axis="y", labelsize=9)
             ax.grid(axis="x", alpha=0.3)
+        else:
+            _no_data_label(ax, "Top 10 Models by R²", "rsq not available")
 
-        # Best by decomp RSSD
-        if "decomp_rssd" in df.columns:
-            ax = axes[1, 0]
+        # ── Subplot 2: Best by NRMSE ──────────────────────────────────────
+        # Prefer nrmse_val; fall back to plain nrmse.
+        ax = axes[0, 1]
+        nrmse_col = (
+            "nrmse_val"
+            if _has_data("nrmse_val")
+            else ("nrmse" if _has_data("nrmse") else None)
+        )
+        nrmse_label = (
+            "NRMSE Validation"
+            if nrmse_col == "nrmse_val"
+            else ("NRMSE (overall)" if nrmse_col else "NRMSE")
+        )
+        if nrmse_col:
+            top_models = df.nsmallest(10, nrmse_col)[
+                ["benchmark_variant", nrmse_col]
+            ]
+            ax.barh(top_models["benchmark_variant"], top_models[nrmse_col])
+            ax.set_title(
+                f"Top 10 Models by {nrmse_label}",
+                fontsize=14,
+                fontweight="bold",
+            )
+            ax.set_xlabel(nrmse_label, fontsize=12)
+            ax.tick_params(axis="y", labelsize=9)
+            ax.grid(axis="x", alpha=0.3)
+        else:
+            _no_data_label(ax, "Top 10 Models by NRMSE", "nrmse not available")
+
+        # ── Subplot 3: Best by Decomp RSSD ────────────────────────────────
+        ax = axes[1, 0]
+        if _has_data("decomp_rssd"):
             top_models = df.nsmallest(10, "decomp_rssd")[
                 ["benchmark_variant", "decomp_rssd"]
             ]
-            ax.barh(top_models["benchmark_variant"], top_models["decomp_rssd"])
+            ax.barh(
+                top_models["benchmark_variant"], top_models["decomp_rssd"]
+            )
             ax.set_title(
-                "Top 10 Models by Decomp RSSD", fontsize=14, fontweight="bold"
+                "Top 10 Models by Decomp RSSD",
+                fontsize=14,
+                fontweight="bold",
             )
             ax.set_xlabel("Decomp RSSD", fontsize=12)
             ax.tick_params(axis="y", labelsize=9)
             ax.grid(axis="x", alpha=0.3)
+        else:
+            _no_data_label(
+                ax, "Top 10 Models by Decomp RSSD", "decomp_rssd not available"
+            )
 
-        # Generalization (smallest val-test gap)
-        if "rsq_val" in df.columns and "rsq_test" in df.columns:
-            ax = axes[1, 1]
+        # ── Subplot 4: Generalization (val-test gap) ──────────────────────
+        ax = axes[1, 1]
+        if _has_data("rsq_val") and _has_data("rsq_test"):
             df_temp = df.copy()
             df_temp["val_test_gap"] = abs(
                 df_temp["rsq_val"] - df_temp["rsq_test"]
             )
-            top_models = df_temp.nsmallest(10, "val_test_gap")[
-                ["benchmark_variant", "val_test_gap"]
-            ]
-            ax.barh(top_models["benchmark_variant"], top_models["val_test_gap"])
-            ax.set_title(
-                "Top 10 Models by Generalization (Val-Test Gap)",
-                fontsize=14,
-                fontweight="bold",
+            valid = df_temp["val_test_gap"].notna()
+            if valid.any():
+                top_models = df_temp[valid].nsmallest(10, "val_test_gap")[
+                    ["benchmark_variant", "val_test_gap"]
+                ]
+                ax.barh(
+                    top_models["benchmark_variant"],
+                    top_models["val_test_gap"],
+                )
+                ax.set_title(
+                    "Top 10 Models by Generalization (Val-Test Gap)",
+                    fontsize=14,
+                    fontweight="bold",
+                )
+                ax.set_xlabel("Val-Test Gap (R²)", fontsize=12)
+                ax.tick_params(axis="y", labelsize=9)
+                ax.grid(axis="x", alpha=0.3)
+            else:
+                _no_data_label(
+                    ax,
+                    "Top 10 Models by Generalization",
+                    "val/test R² not available",
+                )
+        else:
+            _no_data_label(
+                ax,
+                "Top 10 Models by Generalization",
+                "val/test R² not available",
             )
-            ax.set_xlabel("Val-Test Gap (R²)", fontsize=12)
-            ax.tick_params(axis="y", labelsize=9)
-            ax.grid(axis="x", alpha=0.3)
 
-        plt.tight_layout(pad=2.0)  # More padding for readability
+        try:
+            plt.tight_layout(pad=2.0)  # More padding for readability
+        except Exception as e:
+            logger.warning(f"tight_layout failed for best_models_summary: {e}")
         return fig
 
     def _plot_driver_waterfall(self, df: pd.DataFrame):
@@ -1105,7 +1337,8 @@ class BenchmarkAnalyzer:
             hue="Channel",
             ax=ax,
         )
-        ax.set_ylim(0, y_ceiling)
+        if y_ceiling > 0:
+            ax.set_ylim(0, y_ceiling)
 
         title = "CPA by Channel and Variant"
         if actual_max > y_ceiling:
@@ -1282,6 +1515,17 @@ def main():
         action="store_true",
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--scan-gcs",
+        dest="scan_gcs",
+        action="store_true",
+        help=(
+            "Collect results by scanning benchmarks/{id}/{variant}/model_summary.json "
+            "directly in GCS instead of using plan.json + robyn/ paths. "
+            "Required for multi-config runs where plan.json only contains the "
+            "last config's variants."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1302,9 +1546,16 @@ def main():
     # Initialize analyzer
     analyzer = BenchmarkAnalyzer()
 
-    # Collect results
+    # Collect results — prefer direct GCS scan for multi-config runs
     logger.info(f"Analyzing benchmark: {args.benchmark_id}")
-    df = analyzer.collect_results(args.benchmark_id, args.queue_name)
+    if args.scan_gcs:
+        logger.info("Using direct GCS scan (--scan-gcs)")
+        df = analyzer.collect_results_from_gcs_scan(args.benchmark_id)
+        if df is None or df.empty:
+            logger.warning("GCS scan returned no results; falling back to plan.json method")
+            df = analyzer.collect_results(args.benchmark_id, args.queue_name)
+    else:
+        df = analyzer.collect_results(args.benchmark_id, args.queue_name)
 
     if df is None or df.empty:
         logger.error("No results found to analyze")
