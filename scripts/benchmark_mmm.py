@@ -1520,7 +1520,11 @@ class ResultsCollector:
                 json.dumps(channel_cpa) if channel_cpa else ""
             ),
             # Model metadata
-            "model_id": best_model.get("model_id"),
+            "model_id": (
+                f"{summary.get('timestamp', '')}_{best_model.get('model_id', '')}"
+                if best_model.get("model_id") and summary.get("timestamp")
+                else best_model.get("model_id") or ""
+            ),
             "pareto_model_count": summary.get("pareto_model_count", 0),
             "candidate_model_count": summary.get("candidate_model_count", 0),
             # Execution metadata

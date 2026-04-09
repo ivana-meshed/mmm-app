@@ -153,7 +153,11 @@ def _aggregate_variant_summaries(benchmark_id: str):
             "allocator_stability_roas_cv": decomp.get("allocator_stability_roas_cv"),
             "channel_roas_json": json.dumps(channel_roas) if channel_roas else "",
             "channel_cpa_json": json.dumps(channel_cpa) if channel_cpa else "",
-            "model_id": best_model.get("model_id"),
+            "model_id": (
+                f"{summary.get('timestamp', '')}_{best_model.get('model_id', '')}"
+                if best_model.get("model_id") and summary.get("timestamp")
+                else best_model.get("model_id") or ""
+            ),
             "pareto_model_count": summary.get("pareto_model_count", 0),
             "training_time_mins": summary.get("training_time_mins"),
             "timestamp": summary.get("timestamp", ""),

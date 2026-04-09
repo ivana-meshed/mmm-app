@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import sys
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -290,7 +291,11 @@ class BenchmarkAnalyzer:
                 "allocator_stability_roas_cv": decomp.get("allocator_stability_roas_cv"),
                 "channel_roas_json": json.dumps(channel_roas) if channel_roas else "",
                 "channel_cpa_json": json.dumps(channel_cpa) if channel_cpa else "",
-                "model_id": best_model.get("model_id"),
+                "model_id": (
+                    f"{summary.get('timestamp', '')}_{best_model.get('model_id', '')}"
+                    if best_model.get("model_id") and summary.get("timestamp")
+                    else best_model.get("model_id") or ""
+                ),
                 "timestamp": summary.get("timestamp", ""),
             }
             rows.append(row)
@@ -537,7 +542,11 @@ class BenchmarkAnalyzer:
                 json.dumps(channel_cpa) if channel_cpa else ""
             ),
             # Model metadata
-            "model_id": best_model.get("model_id"),
+            "model_id": (
+                f"{summary.get('timestamp', '')}_{best_model.get('model_id', '')}"
+                if best_model.get("model_id") and summary.get("timestamp")
+                else best_model.get("model_id") or ""
+            ),
             "timestamp": summary.get("timestamp", ""),
         }
 
@@ -605,13 +614,21 @@ class BenchmarkAnalyzer:
         for plot_name, plot_func in plots:
             try:
                 fig = plot_func(df)
-                if fig:
+                if fig is not None:
                     self._save_plot(
                         fig, plot_name, plots_dir, output_dir, format
                     )
                     plt.close(fig)
             except Exception as e:
-                logger.error(f"Error generating {plot_name}: {e}")
+                logger.error(
+                    f"Error generating {plot_name}: {e}\n"
+                    f"{traceback.format_exc()}"
+                )
+                # Ensure any partially-created figure is closed
+                try:
+                    plt.close("all")
+                except Exception:
+                    pass
 
         logger.info(f"Plots saved to: gs://{self.bucket_name}/{plots_dir}/")
         if output_dir:
@@ -682,7 +699,11 @@ class BenchmarkAnalyzer:
         )
         ax.set_xlabel("Variant", fontsize=12)
         ax.set_ylabel("R²", fontsize=12)
-        ax.set_ylim(0, 1)
+        # Dynamic y-axis: include 0 as baseline, show negative values
+        y_min = min(0.0, float(melted["R²"].min(skipna=True)) * 1.05)
+        y_max = max(1.0, float(melted["R²"].max(skipna=True)) * 1.05)
+        ax.set_ylim(y_min, y_max)
+        ax.axhline(y=0, color="black", linestyle="--", alpha=0.3, linewidth=0.8)
 
         # Rotate labels if many variants
         if n_variants > 15:
@@ -1056,7 +1077,10 @@ class BenchmarkAnalyzer:
                 "val/test R² not available",
             )
 
-        plt.tight_layout(pad=2.0)  # More padding for readability
+        try:
+            plt.tight_layout(pad=2.0)  # More padding for readability
+        except Exception as e:
+            logger.warning(f"tight_layout failed for best_models_summary: {e}")
         return fig
 
     def _plot_driver_waterfall(self, df: pd.DataFrame):
@@ -1309,7 +1333,8 @@ class BenchmarkAnalyzer:
             hue="Channel",
             ax=ax,
         )
-        ax.set_ylim(0, y_ceiling)
+        if y_ceiling > 0:
+            ax.set_ylim(0, y_ceiling)
 
         title = "CPA by Channel and Variant"
         if actual_max > y_ceiling:
