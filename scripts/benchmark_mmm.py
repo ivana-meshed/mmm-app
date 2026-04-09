@@ -1519,11 +1519,13 @@ class ResultsCollector:
             "channel_cpa_json": (
                 json.dumps(channel_cpa) if channel_cpa else ""
             ),
-            # Model metadata
+            # Model metadata — unique per variant × run: use benchmark_variant
+            # + timestamp so the ID is human-readable and never clashes across
+            # variants (Robyn's own IDs like 1_2_5 repeat between runs).
             "model_id": (
-                f"{summary.get('timestamp', '')}_{best_model.get('model_id', '')}"
-                if best_model.get("model_id") and summary.get("timestamp")
-                else best_model.get("model_id") or ""
+                f"{variant.get('benchmark_variant', '')}_{summary.get('timestamp', '')}"
+                if summary.get("timestamp")
+                else variant.get("benchmark_variant", "")
             ),
             "pareto_model_count": summary.get("pareto_model_count", 0),
             "candidate_model_count": summary.get("candidate_model_count", 0),

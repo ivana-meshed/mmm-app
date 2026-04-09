@@ -292,9 +292,9 @@ class BenchmarkAnalyzer:
                 "channel_roas_json": json.dumps(channel_roas) if channel_roas else "",
                 "channel_cpa_json": json.dumps(channel_cpa) if channel_cpa else "",
                 "model_id": (
-                    f"{summary.get('timestamp', '')}_{best_model.get('model_id', '')}"
-                    if best_model.get("model_id") and summary.get("timestamp")
-                    else best_model.get("model_id") or ""
+                    f"{variant_name}_{summary.get('timestamp', '')}"
+                    if summary.get("timestamp")
+                    else variant_name
                 ),
                 "timestamp": summary.get("timestamp", ""),
             }
@@ -541,11 +541,13 @@ class BenchmarkAnalyzer:
             "channel_cpa_json": (
                 json.dumps(channel_cpa) if channel_cpa else ""
             ),
-            # Model metadata
+            # Model metadata — unique per variant × run using variant name +
+            # timestamp so the ID is human-readable and never clashes across
+            # variants (Robyn's own IDs like 1_2_5 repeat between runs).
             "model_id": (
-                f"{summary.get('timestamp', '')}_{best_model.get('model_id', '')}"
-                if best_model.get("model_id") and summary.get("timestamp")
-                else best_model.get("model_id") or ""
+                f"{variant_name}_{summary.get('timestamp', '')}"
+                if summary.get("timestamp")
+                else variant_name
             ),
             "timestamp": summary.get("timestamp", ""),
         }
@@ -668,9 +670,11 @@ class BenchmarkAnalyzer:
 
     def _plot_rsq_comparison(self, df: pd.DataFrame):
         """Plot R² comparison across variants."""
-        # Adjust figure size based on number of variants
+        # Scale width by variants × hue groups so all bars are comfortably
+        # visible.  3 hue categories (train/val/test) means each variant
+        # occupies roughly 3× the x-space of a single bar.
         n_variants = len(df)
-        fig_width = max(14, n_variants * 0.4)
+        fig_width = max(14, n_variants * 1.2)
         fig, ax = plt.subplots(figsize=(fig_width, 8))
 
         # Prepare data
@@ -718,9 +722,9 @@ class BenchmarkAnalyzer:
 
     def _plot_nrmse_comparison(self, df: pd.DataFrame):
         """Plot NRMSE comparison across variants."""
-        # Adjust figure size based on number of variants
+        # Scale width like rsq_comparison: 3 hue groups need more x-space.
         n_variants = len(df)
-        fig_width = max(14, n_variants * 0.4)
+        fig_width = max(14, n_variants * 1.2)
         fig, ax = plt.subplots(figsize=(fig_width, 8))
 
         # Prepare data
