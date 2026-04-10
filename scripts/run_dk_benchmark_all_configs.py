@@ -26,21 +26,21 @@ immediately visible on the **Benchmark Results** page of the Streamlit app.
 
 Two manifests are available in benchmark_analysis/dk_json_configs_clean/:
 
-  dk_context_testing_manifest_clean.json   – original 6-config test set
-  dk_context_reduced_manifest_clean.json   – reduced 4-config set
+  dk_context_reduced_manifest_clean.json   – production 4-config set
                                              (core / supply / structured /
-                                              occ30d)
+                                              occ30d)  [DEFAULT]
+  dk_context_testing_manifest_clean.json   – original 6-config test set
 
-Usage (final command):
+Usage (production run — all 4 configs):
 
     python scripts/run_dk_benchmark_all_configs.py \\
-        --queue-name default-dev
+        --queue-name default
 
-Run the reduced-config set:
+Run the original test set instead:
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default-dev \\
-        --manifest dk_context_reduced_manifest_clean.json
+        --manifest dk_context_testing_manifest_clean.json
 
 Dry-run (prints commands and enriched configs without executing):
 
@@ -87,7 +87,7 @@ DK_CONFIGS_DIR = (
     REPO_ROOT / "benchmark_analysis" / "dk_json_configs_clean"
 )
 DEFAULT_MANIFEST_FILE = (
-    DK_CONFIGS_DIR / "dk_context_testing_manifest_clean.json"
+    DK_CONFIGS_DIR / "dk_context_reduced_manifest_clean.json"
 )
 
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
@@ -462,21 +462,21 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Full run — upload configs, submit all to queue, then process:
-  python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev --process-queue
+  # Production run — all 4 configs, upload, submit and process queue:
+  python scripts/run_dk_benchmark_all_configs.py --queue-name default --process-queue
 
-  # Run the reduced config set:
+  # Run the original 6-config test set instead:
   python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev \\
-      --manifest dk_context_reduced_manifest_clean.json
+      --manifest dk_context_testing_manifest_clean.json
 
   # Dry-run — print commands without executing:
-  python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev --dry-run
+  python scripts/run_dk_benchmark_all_configs.py --queue-name default --dry-run
 
   # Skip GCS upload (configs already uploaded):
-  python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev --skip-upload
+  python scripts/run_dk_benchmark_all_configs.py --queue-name default --skip-upload
 
   # Run a single config:
-  python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev --only dk_context_minimal
+  python scripts/run_dk_benchmark_all_configs.py --queue-name default --only dk_context_reduced_core
         """,
     )
 
@@ -487,9 +487,10 @@ Examples:
         help=(
             "Manifest filename (relative to benchmark_analysis/"
             "dk_json_configs_clean/) that lists the configs to run. "
-            "Defaults to dk_context_testing_manifest_clean.json. "
-            "Use 'dk_context_reduced_manifest_clean.json' for the "
-            "reduced config set."
+            "Defaults to dk_context_reduced_manifest_clean.json "
+            "(4 production configs). "
+            "Use 'dk_context_testing_manifest_clean.json' for the "
+            "original 6-config test set."
         ),
     )
     parser.add_argument(
