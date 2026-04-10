@@ -131,6 +131,17 @@ def load_and_prepare_csv(
     df.columns = [c.upper() for c in df.columns]
     logger.info(f"   Raw: {len(df):,} rows × {len(df.columns)} columns")
 
+    # Drop any duplicate column names present in the raw CSV (keep last
+    # occurrence so the most-recently-added column wins).
+    dupes = [c for c in df.columns if df.columns.tolist().count(c) > 1]
+    if dupes:
+        unique_dupes = sorted(set(dupes))
+        logger.warning(
+            f"   ⚠️  Duplicate column(s) in raw CSV: {unique_dupes} — "
+            "keeping last occurrence of each"
+        )
+        df = df.loc[:, ~df.columns.duplicated(keep="last")]
+
     # Apply column renames — skip if target already exists (new CSV has both
     # old and new names; prefer the already-correctly-named column and drop
     # the legacy one to avoid duplicate column errors in PyArrow).
