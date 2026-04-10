@@ -1177,8 +1177,13 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
             agg_summary <- list()
 
             for (col in numeric_cols) {
-                # Get aggregation strategy from metadata, default to "sum"
-                agg_strategy <- column_agg_strategies[[col]] %||% "sum"
+                # Get aggregation strategy from metadata.
+                # Factor variables (binary indicators like is_holiday) default to "max"
+                # so they stay binary (0/1) after resampling rather than being summed
+                # to values that would create unseen factor levels in the test set.
+                # All other numeric columns default to "sum".
+                agg_strategy <- column_agg_strategies[[col]] %||%
+                    (if (col %in% factor_vars_cfg) "max" else "sum")
 
                 # Map aggregation strategy to R function
                 agg_func <- switch(agg_strategy,
