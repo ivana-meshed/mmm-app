@@ -131,8 +131,36 @@ def load_and_prepare_csv(
     df.columns = [c.upper() for c in df.columns]
     logger.info(f"   Raw: {len(df):,} rows × {len(df.columns)} columns")
 
-    # Apply column renames
-    rename_applied = {k: v for k, v in COLUMN_RENAME_MAP.items() if k in df.columns}
+    # Drop any duplicate column names present in the raw CSV (keep last
+    # occurrence so the most-recently-added column wins).
+    dupes = [c for c in df.columns if df.columns.tolist().count(c) > 1]
+    if dupes:
+        unique_dupes = sorted(set(dupes))
+        logger.warning(
+            f"   ⚠️  Duplicate column(s) in raw CSV: {unique_dupes} — "
+            "keeping last occurrence of each"
+        )
+        df = df.loc[:, ~df.columns.duplicated(keep="last")]
+
+    # Apply column renames — skip if target already exists (new CSV has both
+    # old and new names; prefer the already-correctly-named column and drop
+    # the legacy one to avoid duplicate column errors in PyArrow).
+    rename_applied: Dict[str, str] = {}
+    drop_legacy: List[str] = []
+    for old, new in COLUMN_RENAME_MAP.items():
+        if old not in df.columns:
+            continue
+        if new in df.columns:
+            # Target already present — drop the legacy column instead
+            drop_legacy.append(old)
+            logger.info(
+                f"   Skipping rename {old} → {new} (target already exists);"
+                f" dropping legacy column '{old}'"
+            )
+        else:
+            rename_applied[old] = new
+    if drop_legacy:
+        df.drop(columns=drop_legacy, inplace=True)
     if rename_applied:
         df.rename(columns=rename_applied, inplace=True)
         logger.info(f"   Renamed {len(rename_applied)} column(s):")
