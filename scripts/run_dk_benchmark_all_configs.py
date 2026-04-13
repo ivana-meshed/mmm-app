@@ -581,7 +581,14 @@ Examples:
     # ── Resolve manifest path ─────────────────────────────────────────────────
     manifest_path: Optional[Path] = None
     if args.manifest:
-        manifest_path = DK_CONFIGS_DIR / args.manifest
+        candidate = Path(args.manifest)
+        # If the user supplied an absolute path or a path that resolves from
+        # cwd, use it as-is; otherwise treat it as a bare filename and look
+        # it up inside DK_CONFIGS_DIR.
+        if candidate.exists():
+            manifest_path = candidate.resolve()
+        else:
+            manifest_path = DK_CONFIGS_DIR / candidate.name
         if not manifest_path.exists():
             logger.error(
                 f"Manifest file not found: {manifest_path}. "
