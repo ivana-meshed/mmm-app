@@ -1080,6 +1080,27 @@ class BenchmarkRunner:
             f"'{queue_name}'"
         )
 
+        # Persist the queue_name into plan.json so the UI can identify
+        # which queue to trigger when showing the "PENDING" diagnostic panel.
+        plan_blob_path = f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
+        plan_blob = self.bucket.blob(plan_blob_path)
+        try:
+            plan_doc = json.loads(plan_blob.download_as_text())
+            plan_doc["queue_name"] = queue_name
+            plan_doc["status"] = "queued"
+            plan_blob.upload_from_string(
+                json.dumps(plan_doc, indent=2),
+                content_type="application/json",
+            )
+        except Exception as e:
+            logger.warning(
+                "Could not update plan.json with queue_name: %s", e
+            )
+
+        # Kick the web app so it starts processing immediately (Cloud Tasks).
+        # Falls back gracefully when env vars are not set (e.g. local runs).
+        self._trigger_queue_tick(queue_name)
+
         return len(new_entries)
 
     def _variant_to_queue_params(
@@ -1233,6 +1254,66 @@ class BenchmarkRunner:
         )
 
         logger.info(f"Saved queue: gs://{self.bucket_name}/{blob_path}")
+
+    def _trigger_queue_tick(self, queue_name: str) -> bool:
+        """
+        Schedule an immediate queue tick via Cloud Tasks so the web app
+        picks up and runs newly-submitted jobs without requiring a periodic
+        Cloud Scheduler.
+
+        Uses the same env vars as app_shared.schedule_queue_tick_via_cloud_tasks:
+          CLOUD_TASKS_QUEUE   – full Cloud Tasks queue resource path
+          WEB_SERVICE_URL     – base URL of the web service
+          CLOUD_TASKS_SA_EMAIL – optional OIDC service-account email
+
+        Returns True if a task was scheduled, False otherwise (e.g. when
+        running locally without these env vars set).
+        """
+        cloud_tasks_queue = os.getenv("CLOUD_TASKS_QUEUE")
+        web_service_url = os.getenv("WEB_SERVICE_URL")
+        cloud_tasks_sa = os.getenv("CLOUD_TASKS_SA_EMAIL")
+
+        if not cloud_tasks_queue or not web_service_url:
+            logger.info(
+                "CLOUD_TASKS_QUEUE / WEB_SERVICE_URL not set — "
+                "queue tick not auto-triggered. "
+                "Process the queue manually: "
+                "python scripts/process_queue_simple.py "
+                "--loop --queue-name %s",
+                queue_name,
+            )
+            return False
+
+        try:
+            from google.cloud import tasks_v2  # type: ignore
+
+            client = tasks_v2.CloudTasksClient()
+            target_url = (
+                f"{web_service_url}?queue_tick=1&name={queue_name}"
+            )
+            http_request: dict = {
+                "http_method": tasks_v2.HttpMethod.GET,
+                "url": target_url,
+            }
+            if cloud_tasks_sa:
+                http_request["oidc_token"] = {
+                    "service_account_email": cloud_tasks_sa,
+                    "audience": web_service_url,
+                }
+            task: dict = {"http_request": http_request}
+            client.create_task(
+                parent=cloud_tasks_queue, task=task
+            )
+            logger.info(
+                "Scheduled immediate queue tick for '%s' via Cloud Tasks",
+                queue_name,
+            )
+            return True
+        except Exception as exc:
+            logger.warning(
+                "Failed to schedule Cloud Tasks queue tick: %s", exc
+            )
+            return False
 
     def list_benchmarks(self) -> List[Dict[str, Any]]:
         """List all benchmark runs."""

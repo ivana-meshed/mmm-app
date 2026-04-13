@@ -45,6 +45,31 @@ def get_storage_client():
     return storage.Client()
 
 
+def _trigger_queue_tick(queue_name: str) -> bool:
+    """
+    Trigger an immediate queue tick via Cloud Tasks (if configured)
+    or fall back to a direct in-process tick.
+
+    Returns True if processing was triggered successfully.
+    """
+    try:
+        from app_shared import (  # type: ignore
+            schedule_queue_tick_via_cloud_tasks,
+            queue_tick_once_headless,
+        )
+
+        # Try Cloud Tasks first (event-driven, preferred)
+        if schedule_queue_tick_via_cloud_tasks(queue_name, delay_seconds=0):
+            return True
+
+        # Fall back to direct in-process tick if Cloud Tasks isn't configured
+        result = queue_tick_once_headless(queue_name)
+        return result.get("ok", False)
+    except Exception as exc:
+        st.warning(f"Could not trigger queue tick: {exc}")
+        return False
+
+
 def list_benchmarks():
     """
     List benchmarks from GCS.
@@ -95,25 +120,30 @@ def list_benchmarks():
         return []
 
 
-def _load_variant_statuses(benchmark_id: str) -> list:
+def _load_variant_statuses(benchmark_id: str) -> tuple:
     """
-    Return per-variant job status by reading plan.json and status.json files.
+    Return (rows, queue_name) where rows is a per-variant status list.
 
-    Each entry is a dict with keys:
+    Each row dict has keys:
       - variant: str
       - status: str  ("PENDING" / "RUNNING" / "SUCCEEDED" / "FAILED" / "SKIPPED")
       - has_summary: bool
       - message: str (human-readable note)
+
+    queue_name is the queue the benchmark was submitted to (from plan.json),
+    or None if not recorded.
     """
     client = get_storage_client()
     bucket = client.bucket(GCS_BUCKET)
 
-    # Load plan to get expected variants
+    # Load plan to get expected variants and queue name
     plan_blob = bucket.blob(f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json")
     try:
         plan = json.loads(plan_blob.download_as_bytes())
     except Exception:
-        return []
+        return [], None
+
+    queue_name = plan.get("queue_name")  # set by submit_variants_to_queue
 
     variants = [
         v.get("benchmark_variant", "")
@@ -144,7 +174,6 @@ def _load_variant_statuses(benchmark_id: str) -> list:
             start = status_data.get("start_time", "")
             message = f"Running since {start}" if start else "Running…"
         elif state == "SUCCEEDED":
-            end = status_data.get("end_time", "")
             dur = status_data.get("duration_minutes")
             if has_summary:
                 message = f"Done in {dur:.1f} min" if dur else "Done"
@@ -170,7 +199,7 @@ def _load_variant_statuses(benchmark_id: str) -> list:
             }
         )
 
-    return rows
+    return rows, queue_name
 
 
 def _aggregate_variant_summaries(benchmark_id: str):
@@ -370,7 +399,9 @@ if selected_benchmark:
             # without generating model_summary.json).
             with st.expander("🔍 Variant job status (click to expand)", expanded=True):
                 try:
-                    status_rows = _load_variant_statuses(selected_benchmark)
+                    status_rows, queue_name = _load_variant_statuses(
+                        selected_benchmark
+                    )
                     if status_rows:
                         status_df = pd.DataFrame(status_rows)
                         # Color-code Status column
@@ -397,6 +428,45 @@ if selected_benchmark:
                         cols = st.columns(len(counts))
                         for col, (status, cnt) in zip(cols, counts.items()):
                             col.metric(status, cnt)
+
+                        # "Trigger queue" button when there are pending jobs
+                        pending_count = counts.get("PENDING", 0)
+                        if pending_count > 0:
+                            st.divider()
+                            q_label = (
+                                f"`{queue_name}`"
+                                if queue_name
+                                else "the queue"
+                            )
+                            st.warning(
+                                f"**{pending_count} job(s) are PENDING** in {q_label}. "
+                                "They have been submitted but not yet picked up by the "
+                                "queue processor. Click the button below to trigger "
+                                "processing now."
+                            )
+                            if st.button(
+                                f"▶ Trigger queue processing ({queue_name or 'default'})",
+                                type="primary",
+                                key="trigger_queue_btn",
+                            ):
+                                triggered_queue = queue_name or "default"
+                                with st.spinner(
+                                    f"Triggering queue `{triggered_queue}`…"
+                                ):
+                                    ok = _trigger_queue_tick(triggered_queue)
+                                if ok:
+                                    st.success(
+                                        "✅ Queue processing triggered. "
+                                        "Jobs will start shortly — "
+                                        "refresh this page in a few minutes."
+                                    )
+                                else:
+                                    st.info(
+                                        "Queue tick sent. If jobs don't start, "
+                                        "go to **Run Experiment → Queue Monitor** "
+                                        f"and select queue `{triggered_queue}` "
+                                        "to start processing manually."
+                                    )
                     else:
                         st.info(
                             "No variant information found. "
