@@ -1261,7 +1261,12 @@ class BenchmarkRunner:
         picks up and runs newly-submitted jobs without requiring a periodic
         Cloud Scheduler.
 
-        Uses the same env vars as app_shared.schedule_queue_tick_via_cloud_tasks:
+        The logic mirrors app_shared.schedule_queue_tick_via_cloud_tasks.
+        It is intentionally duplicated here so that this CLI script has no
+        dependency on app_shared (which imports ``streamlit`` and cannot be
+        imported outside a Streamlit runtime).
+
+        Uses the same env vars:
           CLOUD_TASKS_QUEUE   – full Cloud Tasks queue resource path
           WEB_SERVICE_URL     – base URL of the web service
           CLOUD_TASKS_SA_EMAIL – optional OIDC service-account email
@@ -1285,7 +1290,7 @@ class BenchmarkRunner:
             return False
 
         try:
-            from google.cloud import tasks_v2  # type: ignore
+            from google.cloud import tasks_v2  # type: ignore[import-untyped]
 
             client = tasks_v2.CloudTasksClient()
             target_url = (

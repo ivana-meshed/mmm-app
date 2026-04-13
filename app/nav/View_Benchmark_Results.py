@@ -53,7 +53,7 @@ def _trigger_queue_tick(queue_name: str) -> bool:
     Returns True if processing was triggered successfully.
     """
     try:
-        from app_shared import (  # type: ignore
+        from app_shared import (  # type: ignore[import-untyped]
             schedule_queue_tick_via_cloud_tasks,
             queue_tick_once_headless,
         )
