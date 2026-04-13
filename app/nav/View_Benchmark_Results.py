@@ -95,6 +95,84 @@ def list_benchmarks():
         return []
 
 
+def _load_variant_statuses(benchmark_id: str) -> list:
+    """
+    Return per-variant job status by reading plan.json and status.json files.
+
+    Each entry is a dict with keys:
+      - variant: str
+      - status: str  ("PENDING" / "RUNNING" / "SUCCEEDED" / "FAILED" / "SKIPPED")
+      - has_summary: bool
+      - message: str (human-readable note)
+    """
+    client = get_storage_client()
+    bucket = client.bucket(GCS_BUCKET)
+
+    # Load plan to get expected variants
+    plan_blob = bucket.blob(f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json")
+    try:
+        plan = json.loads(plan_blob.download_as_bytes())
+    except Exception:
+        return []
+
+    variants = [
+        v.get("benchmark_variant", "")
+        for v in plan.get("variants", [])
+        if v.get("benchmark_variant")
+    ]
+
+    rows = []
+    for variant in variants:
+        prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/{variant}"
+
+        # Check status.json
+        status_blob = bucket.blob(f"{prefix}/status.json")
+        try:
+            status_data = json.loads(status_blob.download_as_bytes())
+            state = status_data.get("state", "UNKNOWN")
+        except Exception:
+            state = "PENDING"
+            status_data = {}
+
+        # Check model_summary.json
+        summary_blob = bucket.blob(f"{prefix}/model_summary.json")
+        has_summary = summary_blob.exists()
+
+        if state == "PENDING":
+            message = "Job not started yet"
+        elif state == "RUNNING":
+            start = status_data.get("start_time", "")
+            message = f"Running since {start}" if start else "Running…"
+        elif state == "SUCCEEDED":
+            end = status_data.get("end_time", "")
+            dur = status_data.get("duration_minutes")
+            if has_summary:
+                message = f"Done in {dur:.1f} min" if dur else "Done"
+            else:
+                message = (
+                    "⚠️ Completed but model_summary.json missing "
+                    "(extract_model_summary.R may have failed — check console.log)"
+                )
+        elif state in ("FAILED", "ERROR"):
+            err = status_data.get("error", status_data.get("message", ""))
+            message = f"Failed: {err}" if err else "Failed"
+        elif state == "SKIPPED":
+            message = "Skipped"
+        else:
+            message = state
+
+        rows.append(
+            {
+                "Variant": variant,
+                "Status": state,
+                "Summary": "✅" if has_summary else "—",
+                "Note": message,
+            }
+        )
+
+    return rows
+
+
 def _aggregate_variant_summaries(benchmark_id: str):
     """
     Aggregate per-variant model_summary.json files into a DataFrame.
@@ -287,6 +365,45 @@ if selected_benchmark:
                 "⏳ No results available yet for this benchmark. "
                 "Results will appear automatically as each variant job completes."
             )
+            # Show per-variant job status to help diagnose why results
+            # are missing (jobs pending, running, failed, or succeeded
+            # without generating model_summary.json).
+            with st.expander("🔍 Variant job status (click to expand)", expanded=True):
+                try:
+                    status_rows = _load_variant_statuses(selected_benchmark)
+                    if status_rows:
+                        status_df = pd.DataFrame(status_rows)
+                        # Colour-code Status column
+                        def _style_status(val: str) -> str:
+                            colours = {
+                                "SUCCEEDED": "color: green",
+                                "RUNNING": "color: orange",
+                                "FAILED": "color: red",
+                                "ERROR": "color: red",
+                                "PENDING": "color: grey",
+                                "SKIPPED": "color: grey",
+                            }
+                            return colours.get(val, "")
+
+                        st.dataframe(
+                            status_df.style.map(
+                                _style_status, subset=["Status"]
+                            ),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                        # Summary counts
+                        counts = status_df["Status"].value_counts().to_dict()
+                        cols = st.columns(len(counts))
+                        for col, (status, cnt) in zip(cols, counts.items()):
+                            col.metric(status, cnt)
+                    else:
+                        st.info(
+                            "No variant information found. "
+                            "plan.json may be missing or unreadable."
+                        )
+                except Exception as diag_err:
+                    st.warning(f"Could not load variant status: {diag_err}")
             df = None
         else:
             df, csv_path = result
