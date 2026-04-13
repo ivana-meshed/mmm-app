@@ -373,9 +373,9 @@ if selected_benchmark:
                     status_rows = _load_variant_statuses(selected_benchmark)
                     if status_rows:
                         status_df = pd.DataFrame(status_rows)
-                        # Colour-code Status column
+                        # Color-code Status column
                         def _style_status(val: str) -> str:
-                            colours = {
+                            colors = {
                                 "SUCCEEDED": "color: green",
                                 "RUNNING": "color: orange",
                                 "FAILED": "color: red",
@@ -383,7 +383,7 @@ if selected_benchmark:
                                 "PENDING": "color: grey",
                                 "SKIPPED": "color: grey",
                             }
-                            return colours.get(val, "")
+                            return colors.get(val, "")
 
                         st.dataframe(
                             status_df.style.map(
