@@ -49,7 +49,9 @@ def list_benchmarks():
     """
     List benchmarks from GCS.
 
-    Detects benchmarks via either:
+    Detects benchmarks via any of:
+    - A ``plan.json`` file written immediately on submission
+      (path: benchmarks/{benchmark_id}/plan.json)
     - A pre-aggregated ``results_*.csv`` (produced by collect-results / analyze)
     - Individual ``model_summary.json`` files written by each variant job
       (path: benchmarks/{benchmark_id}/{variant}/model_summary.json)
@@ -66,8 +68,11 @@ def list_benchmarks():
             parts = blob.name.split("/")
             if len(parts) < 2:
                 continue
+            # benchmarks/{benchmark_id}/plan.json  (submitted, may still be queued)
+            if len(parts) == 3 and parts[2] == "plan.json":
+                benchmarks.add(parts[1])
             # benchmarks/{benchmark_id}/results_*.csv
-            if (
+            elif (
                 len(parts) >= 3
                 and parts[2].startswith("results_")
                 and blob.name.endswith(".csv")
