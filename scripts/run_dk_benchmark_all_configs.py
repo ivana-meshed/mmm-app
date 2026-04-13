@@ -491,13 +491,6 @@ Examples:
   # Production run — all 4 manifest configs, upload, submit and process queue:
   python scripts/run_dk_benchmark_all_configs.py --queue-name default --process-queue
 
-  # TV config only — quick smoke-test (skip the 4 manifest configs):
-  python scripts/run_dk_benchmark_all_configs.py \\
-      --queue-name default-dev \\
-      --extra-config dk_final_with_tv_config.json \\
-      --skip-manifest \\
-      --iterations 100 --trials 1 --process-queue
-
   # All 5 configs (4 manifest + TV) — dev/test run (100 iterations, 1 trial):
   python scripts/run_dk_benchmark_all_configs.py \\
       --queue-name default-dev \\
@@ -632,16 +625,6 @@ Examples:
         ),
     )
 
-    parser.add_argument(
-        "--skip-manifest",
-        action="store_true",
-        help=(
-            "Skip all manifest configs and run only the configs supplied via "
-            "--extra-config. Useful for quickly testing a single new config "
-            "without running the full manifest."
-        ),
-    )
-
     args = parser.parse_args()
 
     # ── Resolve manifest path ─────────────────────────────────────────────────
@@ -689,14 +672,7 @@ Examples:
         )
         sys.exit(1)
 
-    if args.skip_manifest:
-        if not args.extra_configs:
-            logger.error(
-                "--skip-manifest requires at least one --extra-config."
-            )
-            sys.exit(1)
-        config_files = []
-    elif args.only:
+    if args.only:
         # Accept either the short name or the full filename
         target = args.only
         if not target.endswith(".json"):
