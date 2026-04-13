@@ -827,6 +827,8 @@ install_panic_trap <- function() {
         try(gcs_put_safe(pjson, file.path(gcs_prefix, "panic_error.json")), silent = TRUE)
         try(gcs_put_safe(status_json, file.path(gcs_prefix, "status.json")), silent = TRUE)
         try(gcs_put_safe(log_file, file.path(gcs_prefix, "console.log")), silent = TRUE)
+        # Exit immediately so R does not continue executing with corrupted state
+        quit(save = "no", status = 1)
     })
 }
 
@@ -872,10 +874,29 @@ if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
     temp_data <- tempfile(fileext = ".parquet")
 
     ensure_gcs_auth()
-    gcs_download(cfg$data_gcs_path, temp_data)
-    df <- arrow::read_parquet(temp_data, as_data_frame = TRUE)
+    tryCatch(
+        gcs_download(cfg$data_gcs_path, temp_data),
+        error = function(e) {
+            stop(
+                "FATAL: Training data not found at '", cfg$data_gcs_path,
+                "'. Please re-map your data in the Streamlit app to upload a ",
+                "fresh parquet, then resubmit the job. Original error: ",
+                conditionMessage(e)
+            )
+        }
+    )
+    df <- tryCatch(
+        arrow::read_parquet(temp_data, as_data_frame = TRUE),
+        error = function(e) {
+            stop(
+                "FATAL: Failed to parse parquet downloaded from '",
+                cfg$data_gcs_path, "'. File may be corrupt. Original error: ",
+                conditionMessage(e)
+            )
+        }
+    )
     if (!is.data.frame(df) || nrow(df) == 0) {
-        stop("Failed to load data from parquet file: ", cfg$data_gcs_path)
+        stop("FATAL: Parquet loaded from '", cfg$data_gcs_path, "' is empty.")
     }
     unlink(temp_data)
     message(sprintf("✅ Data loaded: %s rows, %s columns", format(nrow(df), big.mark = ","), ncol(df)))
