@@ -366,9 +366,11 @@ def load_benchmark_plots(benchmark_id):
 with st.sidebar:
     st.header("Select Benchmark")
 
+    _available_benchmarks = list_benchmarks() or BEST_BENCHMARKS
+
     selected_benchmark = st.radio(
         "Benchmark ID",
-        options=BEST_BENCHMARKS,
+        options=_available_benchmarks,
         help="Select a benchmark to visualize",
     )
 
