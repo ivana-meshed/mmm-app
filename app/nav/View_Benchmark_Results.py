@@ -39,6 +39,14 @@ PROJECT_ID = "datawarehouse-422511"
 GCS_BUCKET = "mmm-app-output"
 BENCHMARK_ROOT = "benchmarks"
 
+# The 4 best benchmark configurations available for quick selection
+BEST_BENCHMARKS = [
+    "dk_context_supply_geometric_75_90_daily_spend_to_clicks",
+    "dk_context_supply_geometric_75_90_daily_mixed_by_funnel_clicks",
+    "dk_context_expanded_test_geometric_75_90_daily_mixed_by_funnel_clicks",
+    "dk_context_supply_plus_occ7d_geometric_75_90_daily_mixed_by_funnel_clicks",
+]
+
 
 @st.cache_resource
 def get_storage_client():
@@ -358,27 +366,15 @@ def load_benchmark_plots(benchmark_id):
 with st.sidebar:
     st.header("Select Benchmark")
 
-    # List benchmarks
-    try:
-        benchmarks = list_benchmarks()
+    selected_benchmark = st.radio(
+        "Benchmark ID",
+        options=BEST_BENCHMARKS,
+        help="Select a benchmark to visualize",
+    )
 
-        if not benchmarks:
-            st.warning("No benchmarks found")
-            st.stop()
-
-        selected_benchmark = st.radio(
-            "Benchmark ID",
-            options=benchmarks,
-            help="Select a benchmark to visualize",
-        )
-
-        if st.button("🔄 Refresh List"):
-            st.cache_resource.clear()
-            st.rerun()
-
-    except Exception as e:
-        st.error(f"Error loading benchmarks: {e}")
-        st.stop()
+    if st.button("🔄 Refresh"):
+        st.cache_resource.clear()
+        st.rerun()
 
 # Main content
 if selected_benchmark:
