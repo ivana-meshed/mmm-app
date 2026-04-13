@@ -26,21 +26,21 @@ immediately visible on the **Benchmark Results** page of the Streamlit app.
 
 Two manifests are available in benchmark_analysis/dk_json_configs_clean/:
 
-  dk_context_testing_manifest_clean.json   – original 6-config test set
-  dk_context_reduced_manifest_clean.json   – reduced 4-config set
+  dk_context_reduced_manifest_clean.json   – production 4-config set
                                              (core / supply / structured /
-                                              occ30d)
+                                              occ30d)  [DEFAULT]
+  dk_context_testing_manifest_clean.json   – original 6-config test set
 
-Usage (final command):
+Usage (production run — all 4 configs):
 
     python scripts/run_dk_benchmark_all_configs.py \\
-        --queue-name default-dev
+        --queue-name default
 
-Run the reduced-config set:
+Run the original test set instead:
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default-dev \\
-        --manifest dk_context_reduced_manifest_clean.json
+        --manifest dk_context_testing_manifest_clean.json
 
 Dry-run (prints commands and enriched configs without executing):
 
@@ -87,7 +87,7 @@ DK_CONFIGS_DIR = (
     REPO_ROOT / "benchmark_analysis" / "dk_json_configs_clean"
 )
 DEFAULT_MANIFEST_FILE = (
-    DK_CONFIGS_DIR / "dk_context_testing_manifest_clean.json"
+    DK_CONFIGS_DIR / "dk_context_reduced_manifest_clean.json"
 )
 
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
@@ -161,16 +161,21 @@ def enrich_config_for_upload(config: Dict) -> Dict:
     benchmark_mmm.py that may be absent from the raw local config files.
 
     Fields added (only when not already present):
-    - ``dep_var``      – set to ``selected_goal`` (e.g. "BOOKINGS")
-    - ``dep_var_type`` – set to "revenue" (Robyn default for booking metrics)
+    - ``dep_var``      – set to ``selected_goal`` (e.g. "BOOKINGS").  The R
+                         script renames the parquet's "UPLOAD_VALUE" column
+                         to this name before training, so Robyn sees the real
+                         metric name in all output artefacts and plots.
+    - ``dep_var_type`` – set to "conversion" (count-based metric; applies to DK BOOKINGS)
     - ``date_var``     – set to "date" (standard date column name in DK data)
 
     All other existing fields are preserved unchanged.
     """
     enriched = dict(config)
 
-    # dep_var: benchmark_mmm.py falls back to selected_goal, but it is
-    # cleaner to set it explicitly so it appears in the uploaded file.
+    # dep_var: use the business metric name from selected_goal (e.g. "BOOKINGS").
+    # The Streamlit upload pipeline stores the KPI column as "UPLOAD_VALUE" in
+    # the mapped parquet, but run_all.R renames it to dep_var before training so
+    # Robyn outputs use the real metric name throughout.
     if not enriched.get("dep_var"):
         enriched["dep_var"] = enriched.get("selected_goal", "")
 
@@ -462,21 +467,21 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Full run — upload configs, submit all to queue, then process:
-  python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev --process-queue
+  # Production run — all 4 configs, upload, submit and process queue:
+  python scripts/run_dk_benchmark_all_configs.py --queue-name default --process-queue
 
-  # Run the reduced config set:
+  # Run the original 6-config test set instead:
   python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev \\
-      --manifest dk_context_reduced_manifest_clean.json
+      --manifest dk_context_testing_manifest_clean.json
 
   # Dry-run — print commands without executing:
-  python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev --dry-run
+  python scripts/run_dk_benchmark_all_configs.py --queue-name default --dry-run
 
   # Skip GCS upload (configs already uploaded):
-  python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev --skip-upload
+  python scripts/run_dk_benchmark_all_configs.py --queue-name default --skip-upload
 
   # Run a single config:
-  python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev --only dk_context_minimal
+  python scripts/run_dk_benchmark_all_configs.py --queue-name default --only dk_context_reduced_core
         """,
     )
 
@@ -487,9 +492,10 @@ Examples:
         help=(
             "Manifest filename (relative to benchmark_analysis/"
             "dk_json_configs_clean/) that lists the configs to run. "
-            "Defaults to dk_context_testing_manifest_clean.json. "
-            "Use 'dk_context_reduced_manifest_clean.json' for the "
-            "reduced config set."
+            "Defaults to dk_context_reduced_manifest_clean.json "
+            "(4 production configs). "
+            "Use 'dk_context_testing_manifest_clean.json' for the "
+            "original 6-config test set."
         ),
     )
     parser.add_argument(
@@ -575,7 +581,14 @@ Examples:
     # ── Resolve manifest path ─────────────────────────────────────────────────
     manifest_path: Optional[Path] = None
     if args.manifest:
-        manifest_path = DK_CONFIGS_DIR / args.manifest
+        candidate = Path(args.manifest)
+        # If the user supplied an absolute path or a path that resolves from
+        # cwd, use it as-is; otherwise treat it as a bare filename and look
+        # it up inside DK_CONFIGS_DIR.
+        if candidate.exists():
+            manifest_path = candidate.resolve()
+        else:
+            manifest_path = DK_CONFIGS_DIR / candidate.name
         if not manifest_path.exists():
             logger.error(
                 f"Manifest file not found: {manifest_path}. "

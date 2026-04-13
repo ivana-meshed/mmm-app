@@ -827,6 +827,8 @@ install_panic_trap <- function() {
         try(gcs_put_safe(pjson, file.path(gcs_prefix, "panic_error.json")), silent = TRUE)
         try(gcs_put_safe(status_json, file.path(gcs_prefix, "status.json")), silent = TRUE)
         try(gcs_put_safe(log_file, file.path(gcs_prefix, "console.log")), silent = TRUE)
+        # Exit immediately so R does not continue executing with corrupted state
+        quit(save = "no", status = 1)
     })
 }
 
@@ -872,10 +874,29 @@ if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
     temp_data <- tempfile(fileext = ".parquet")
 
     ensure_gcs_auth()
-    gcs_download(cfg$data_gcs_path, temp_data)
-    df <- arrow::read_parquet(temp_data, as_data_frame = TRUE)
+    tryCatch(
+        gcs_download(cfg$data_gcs_path, temp_data),
+        error = function(e) {
+            stop(
+                "FATAL: Training data not found at '", cfg$data_gcs_path,
+                "'. Please re-map your data in the Streamlit app to upload a ",
+                "fresh parquet, then resubmit the job. Original error: ",
+                conditionMessage(e)
+            )
+        }
+    )
+    df <- tryCatch(
+        arrow::read_parquet(temp_data, as_data_frame = TRUE),
+        error = function(e) {
+            stop(
+                "FATAL: Failed to parse parquet downloaded from '",
+                cfg$data_gcs_path, "'. File may be corrupt. Original error: ",
+                conditionMessage(e)
+            )
+        }
+    )
     if (!is.data.frame(df) || nrow(df) == 0) {
-        stop("Failed to load data from parquet file: ", cfg$data_gcs_path)
+        stop("FATAL: Parquet loaded from '", cfg$data_gcs_path, "' is empty.")
     }
     unlink(temp_data)
     message(sprintf("✅ Data loaded: %s rows, %s columns", format(nrow(df), big.mark = ","), ncol(df)))
@@ -1031,6 +1052,28 @@ df <- df %>% filter(date >= start_data_date, date <= end_data_date)
 df$DOW <- wday(df$date, label = TRUE)
 df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
+# Rename UPLOAD_VALUE → dep_var if the config specifies a different name.
+# The Streamlit upload pipeline always stores the KPI as "UPLOAD_VALUE" in
+# the mapped parquet. When dep_var is set to e.g. "BOOKINGS" the column must
+# be renamed before the skip check and before Robyn sees the data, so that
+# all output artefacts and plots carry the real metric name.
+if (!dep_var_from_cfg %in% names(df) && "UPLOAD_VALUE" %in% names(df)) {
+    message(
+        "→ Renaming 'UPLOAD_VALUE' → '", dep_var_from_cfg,
+        "' to match configured dep_var"
+    )
+    names(df)[names(df) == "UPLOAD_VALUE"] <- dep_var_from_cfg
+    message(
+        "   Verification: '", dep_var_from_cfg,
+        "' in names(df) = ", dep_var_from_cfg %in% names(df)
+    )
+} else if (dep_var_from_cfg %in% names(df) && "UPLOAD_VALUE" %in% names(df)) {
+    message(
+        "⚠️  Both '", dep_var_from_cfg, "' and 'UPLOAD_VALUE' found in data. ",
+        "Using '", dep_var_from_cfg, "' as dep_var; 'UPLOAD_VALUE' column is ignored."
+    )
+}
+
 # CHECK: Skip country if critical columns have no data in the training window
 # A country should be skipped if:
 # 1. The dependent variable has zero variance (all zeros or all same value)
@@ -1177,8 +1220,13 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
             agg_summary <- list()
 
             for (col in numeric_cols) {
-                # Get aggregation strategy from metadata, default to "sum"
-                agg_strategy <- column_agg_strategies[[col]] %||% "sum"
+                # Get aggregation strategy from metadata.
+                # Factor variables (binary indicators like is_holiday) default to "max"
+                # so they stay binary (0/1) after resampling rather than being summed
+                # to values that would create unseen factor levels in the test set.
+                # All other numeric columns default to "sum".
+                agg_strategy <- column_agg_strategies[[col]] %||%
+                    (if (col %in% factor_vars_cfg) "max" else "sum")
 
                 # Map aggregation strategy to R function
                 agg_func <- switch(agg_strategy,
@@ -2312,7 +2360,7 @@ OutputCollect <- tryCatch(
             pareto_fronts = 2, csv_out = "pareto",
             min_candidates = 5, clusters = FALSE,
             export = TRUE, plot_folder = dir_path,
-            plot_pareto = FALSE, cores = NULL
+            plot_pareto = TRUE, cores = NULL
         )
     },
     error = function(e) {

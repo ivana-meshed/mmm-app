@@ -59,6 +59,17 @@
     "ACTIVE_VEHICLES",
     "N_LOCATIONS"
   ],
+  "column_agg_strategies": {
+    "is_holiday": "max",
+    "IS_SCHOOL_HOLIDAY": "max",
+    "is_long_weekend": "max",
+    "is_bridge_day": "max",
+    "CRM_REACHABLE_AUDIENCE": "mean",
+    "AVAILABILITY_RATE": "mean",
+    "OCCUPANCY_RATE_7D": "mean",
+    "ACTIVE_VEHICLES": "mean",
+    "N_LOCATIONS": "mean"
+  },
   "all_selected_drivers": [
     "GOOGLE_SEARCH_BRAND_CLICKS",
     "GOOGLE_SEARCH_NONBRAND_CLICKS_2",
