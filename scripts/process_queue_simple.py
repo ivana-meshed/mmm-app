@@ -490,10 +490,70 @@ def process_one_job(
         return False
 
     # Launch job with explicit timestamp
+    data_gcs_path = params.get("data_gcs_path")
+
+    # Validate that the mapped dataset blob still exists.  Queue entries
+    # submitted before a mapped-dataset was deleted will carry a stale path
+    # that causes the R container to crash with a 404.  Fall back to the
+    # newest available version for the same country to avoid that failure.
+    if data_gcs_path and data_gcs_path.startswith("gs://"):
+        try:
+            from google.cloud import storage as _storage
+
+            _client = _storage.Client(credentials=credentials)
+            # Strip "gs://<bucket>/" prefix to get the blob path
+            _blob_key = data_gcs_path.removeprefix(f"gs://{bucket_name}/")
+            _bucket = _client.bucket(bucket_name)
+            if not _bucket.blob(_blob_key).exists():
+                logger.warning(
+                    f"Mapped dataset blob not found: {data_gcs_path}"
+                )
+                logger.warning(
+                    "Scanning for the latest available mapped dataset "
+                    f"for country '{country}'…"
+                )
+                _prefix = f"mapped-datasets/{country.lower()}/"
+                _blobs = list(
+                    _client.list_blobs(bucket_name, prefix=_prefix)
+                )
+                _versions = set()
+                for _b in _blobs:
+                    _parts = _b.name.split("/")
+                    if len(_parts) == 4 and _parts[-1] == "raw.parquet":
+                        _ts = _parts[2]
+                        if _ts != "latest" and len(_ts) == 15 and "_" in _ts:
+                            _versions.add(_ts)
+                if _versions:
+                    _latest_ts = sorted(_versions, reverse=True)[0]
+                    _new_path = (
+                        f"gs://{bucket_name}/mapped-datasets/"
+                        f"{country.lower()}/{_latest_ts}/raw.parquet"
+                    )
+                    logger.warning(
+                        f"Falling back to latest mapped dataset: {_new_path} "
+                        f"(original path '{data_gcs_path}' was missing)"
+                    )
+                    data_gcs_path = _new_path
+                    # Patch the queue entry so the UI reflects the real path
+                    entries[pending_idx]["params"]["data_gcs_path"] = _new_path
+                    save_queue_to_gcs(
+                        bucket_name, queue_name, queue_doc,
+                        credentials=credentials
+                    )
+                else:
+                    logger.error(
+                        f"No mapped dataset found for country '{country}'. "
+                        "The R job will fail at data-load time."
+                    )
+        except Exception as _exc:
+            logger.warning(
+                f"Could not validate data_gcs_path ({data_gcs_path}): {_exc}"
+            )
+
     config = {
         "country": params.get("country"),
         "revision": params.get("revision"),
-        "data_gcs_path": params.get("data_gcs_path"),
+        "data_gcs_path": data_gcs_path,
         "gcs_bucket": bucket_name,
         "timestamp": timestamp,  # Pass explicit timestamp to R script
         "output_timestamp": timestamp,  # Pass for consistent result paths

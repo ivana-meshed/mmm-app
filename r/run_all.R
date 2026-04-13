@@ -549,16 +549,39 @@ gcs_put_safe <- function(...) {
 
 filter_by_country <- function(dx, country) {
     cn <- toupper(country)
-    for (col in c("COUNTRY", "COUNTRY_CODE", "MARKET", "COUNTRY_ISO", "LOCALE")) {
-        if (col %in% names(dx)) {
-            vals <- unique(toupper(dx[[col]]))
-            if (cn %in% vals) {
-                message("→ Filtering by ", col, " == ", cn)
-                dx <- dx[toupper(dx[[col]]) == cn, , drop = FALSE]
-                break
-            }
+
+    # Mapping from 2-letter ISO codes to common full country names.
+    # Used when the country column contains full names rather than codes.
+    iso_to_name <- c(
+        AT = "AUSTRIA", BE = "BELGIUM", CH = "SWITZERLAND", CZ = "CZECH REPUBLIC",
+        DE = "GERMANY", DK = "DENMARK", ES = "SPAIN", FI = "FINLAND",
+        FR = "FRANCE", GB = "UNITED KINGDOM", IE = "IRELAND", IT = "ITALY",
+        NL = "NETHERLANDS", NO = "NORWAY", PL = "POLAND", PT = "PORTUGAL",
+        SE = "SWEDEN", SK = "SLOVAKIA", US = "UNITED STATES"
+    )
+    # Also map the full name back to itself for when cn IS already a full name
+    cn_as_name <- iso_to_name[[cn]]
+
+    for (col in c("COUNTRY", "COUNTRY_CODE", "MARKET", "COUNTRY_ISO", "LOCALE", "MARKET_NAME")) {
+        if (!col %in% names(dx)) next
+        vals <- unique(toupper(dx[[col]]))
+
+        # Try exact match with code first
+        if (cn %in% vals) {
+            message("→ Filtering by ", col, " == ", cn)
+            dx <- dx[toupper(dx[[col]]) == cn, , drop = FALSE]
+            return(dx)
+        }
+
+        # Try match using the full country name derived from the ISO code
+        if (!is.null(cn_as_name) && cn_as_name %in% vals) {
+            message("→ Filtering by ", col, " == ", cn_as_name, " (mapped from ISO code '", cn, "')")
+            dx <- dx[toupper(dx[[col]]) == cn_as_name, , drop = FALSE]
+            return(dx)
         }
     }
+
+    message("⚠️  No country column matched '", cn, "' — returning unfiltered data")
     dx
 }
 
@@ -1367,6 +1390,27 @@ zero_var_check <- function(var_list, data) {
 context_vars <- zero_var_check(context_vars, df)
 factor_vars <- zero_var_check(factor_vars, df)
 organic_vars <- zero_var_check(organic_vars, df)
+
+# Clip negative values in paid media columns to 0.
+# Robyn requires paid_media_vars and paid_media_spends to be >= 0.
+# Negative values can appear from refunds/credits in raw data or when
+# country filtering failed and multi-country data was summed incorrectly.
+media_cols_to_clip <- unique(c(paid_media_spends, paid_media_vars))
+media_cols_to_clip <- intersect(media_cols_to_clip, names(df))
+if (length(media_cols_to_clip) > 0) {
+    clipped_summary <- character(0)
+    for (cl in media_cols_to_clip) {
+        neg_count <- sum(df[[cl]] < 0, na.rm = TRUE)
+        if (neg_count > 0) {
+            df[[cl]] <- pmax(df[[cl]], 0, na.rm = FALSE)
+            clipped_summary <- c(clipped_summary, paste0(cl, " (", neg_count, " rows)"))
+        }
+    }
+    if (length(clipped_summary) > 0) {
+        message("⚠️  Clipped negative values to 0 in paid media columns: ",
+                paste(clipped_summary, collapse = ", "))
+    }
+}
 
 adstock <- cfg$adstock %||% "geometric"
 
