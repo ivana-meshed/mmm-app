@@ -45,11 +45,38 @@ def get_storage_client():
     return storage.Client()
 
 
+def _trigger_queue_tick(queue_name: str) -> bool:
+    """
+    Trigger an immediate queue tick via Cloud Tasks (if configured)
+    or fall back to a direct in-process tick.
+
+    Returns True if processing was triggered successfully.
+    """
+    try:
+        from app_shared import (  # type: ignore[import-untyped]
+            schedule_queue_tick_via_cloud_tasks,
+            queue_tick_once_headless,
+        )
+
+        # Try Cloud Tasks first (event-driven, preferred)
+        if schedule_queue_tick_via_cloud_tasks(queue_name, delay_seconds=0):
+            return True
+
+        # Fall back to direct in-process tick if Cloud Tasks isn't configured
+        result = queue_tick_once_headless(queue_name)
+        return result.get("ok", False)
+    except Exception as exc:
+        st.warning(f"Could not trigger queue tick: {exc}")
+        return False
+
+
 def list_benchmarks():
     """
     List benchmarks from GCS.
 
-    Detects benchmarks via either:
+    Detects benchmarks via any of:
+    - A ``plan.json`` file written immediately on submission
+      (path: benchmarks/{benchmark_id}/plan.json)
     - A pre-aggregated ``results_*.csv`` (produced by collect-results / analyze)
     - Individual ``model_summary.json`` files written by each variant job
       (path: benchmarks/{benchmark_id}/{variant}/model_summary.json)
@@ -66,8 +93,11 @@ def list_benchmarks():
             parts = blob.name.split("/")
             if len(parts) < 2:
                 continue
+            # benchmarks/{benchmark_id}/plan.json  (submitted, may still be queued)
+            if len(parts) == 3 and parts[2] == "plan.json":
+                benchmarks.add(parts[1])
             # benchmarks/{benchmark_id}/results_*.csv
-            if (
+            elif (
                 len(parts) >= 3
                 and parts[2].startswith("results_")
                 and blob.name.endswith(".csv")
@@ -88,6 +118,88 @@ def list_benchmarks():
 
         st.code(traceback.format_exc())
         return []
+
+
+def _load_variant_statuses(benchmark_id: str) -> tuple:
+    """
+    Return (rows, queue_name) where rows is a per-variant status list.
+
+    Each row dict has keys:
+      - variant: str
+      - status: str  ("PENDING" / "RUNNING" / "SUCCEEDED" / "FAILED" / "SKIPPED")
+      - has_summary: bool
+      - message: str (human-readable note)
+
+    queue_name is the queue the benchmark was submitted to (from plan.json),
+    or None if not recorded.
+    """
+    client = get_storage_client()
+    bucket = client.bucket(GCS_BUCKET)
+
+    # Load plan to get expected variants and queue name
+    plan_blob = bucket.blob(f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json")
+    try:
+        plan = json.loads(plan_blob.download_as_bytes())
+    except Exception:
+        return [], None
+
+    queue_name = plan.get("queue_name")  # set by submit_variants_to_queue
+
+    variants = [
+        v.get("benchmark_variant", "")
+        for v in plan.get("variants", [])
+        if v.get("benchmark_variant")
+    ]
+
+    rows = []
+    for variant in variants:
+        prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/{variant}"
+
+        # Check status.json
+        status_blob = bucket.blob(f"{prefix}/status.json")
+        try:
+            status_data = json.loads(status_blob.download_as_bytes())
+            state = status_data.get("state", "UNKNOWN")
+        except Exception:
+            state = "PENDING"
+            status_data = {}
+
+        # Check model_summary.json
+        summary_blob = bucket.blob(f"{prefix}/model_summary.json")
+        has_summary = summary_blob.exists()
+
+        if state == "PENDING":
+            message = "Job not started yet"
+        elif state == "RUNNING":
+            start = status_data.get("start_time", "")
+            message = f"Running since {start}" if start else "Running…"
+        elif state == "SUCCEEDED":
+            dur = status_data.get("duration_minutes")
+            if has_summary:
+                message = f"Done in {dur:.1f} min" if dur else "Done"
+            else:
+                message = (
+                    "⚠️ Completed but model_summary.json missing "
+                    "(extract_model_summary.R may have failed — check console.log)"
+                )
+        elif state in ("FAILED", "ERROR"):
+            err = status_data.get("error", status_data.get("message", ""))
+            message = f"Failed: {err}" if err else "Failed"
+        elif state == "SKIPPED":
+            message = "Skipped"
+        else:
+            message = state
+
+        rows.append(
+            {
+                "Variant": variant,
+                "Status": state,
+                "Summary": "✅" if has_summary else "—",
+                "Note": message,
+            }
+        )
+
+    return rows, queue_name
 
 
 def _aggregate_variant_summaries(benchmark_id: str):
@@ -282,6 +394,86 @@ if selected_benchmark:
                 "⏳ No results available yet for this benchmark. "
                 "Results will appear automatically as each variant job completes."
             )
+            # Show per-variant job status to help diagnose why results
+            # are missing (jobs pending, running, failed, or succeeded
+            # without generating model_summary.json).
+            with st.expander("🔍 Variant job status (click to expand)", expanded=True):
+                try:
+                    status_rows, queue_name = _load_variant_statuses(
+                        selected_benchmark
+                    )
+                    if status_rows:
+                        status_df = pd.DataFrame(status_rows)
+                        # Color-code Status column
+                        def _style_status(val: str) -> str:
+                            colors = {
+                                "SUCCEEDED": "color: green",
+                                "RUNNING": "color: orange",
+                                "FAILED": "color: red",
+                                "ERROR": "color: red",
+                                "PENDING": "color: grey",
+                                "SKIPPED": "color: grey",
+                            }
+                            return colors.get(val, "")
+
+                        st.dataframe(
+                            status_df.style.map(
+                                _style_status, subset=["Status"]
+                            ),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                        # Summary counts
+                        counts = status_df["Status"].value_counts().to_dict()
+                        cols = st.columns(len(counts))
+                        for col, (status, cnt) in zip(cols, counts.items()):
+                            col.metric(status, cnt)
+
+                        # "Trigger queue" button when there are pending jobs
+                        pending_count = counts.get("PENDING", 0)
+                        if pending_count > 0:
+                            st.divider()
+                            q_label = (
+                                f"`{queue_name}`"
+                                if queue_name
+                                else "the queue"
+                            )
+                            st.warning(
+                                f"**{pending_count} job(s) are PENDING** in {q_label}. "
+                                "They have been submitted but not yet picked up by the "
+                                "queue processor. Click the button below to trigger "
+                                "processing now."
+                            )
+                            if st.button(
+                                f"▶ Trigger queue processing ({queue_name or 'default'})",
+                                type="primary",
+                                key="trigger_queue_btn",
+                            ):
+                                triggered_queue = queue_name or "default"
+                                with st.spinner(
+                                    f"Triggering queue `{triggered_queue}`…"
+                                ):
+                                    ok = _trigger_queue_tick(triggered_queue)
+                                if ok:
+                                    st.success(
+                                        "✅ Queue processing triggered. "
+                                        "Jobs will start shortly — "
+                                        "refresh this page in a few minutes."
+                                    )
+                                else:
+                                    st.info(
+                                        "Queue tick sent. If jobs don't start, "
+                                        "go to **Run Experiment → Queue Monitor** "
+                                        f"and select queue `{triggered_queue}` "
+                                        "to start processing manually."
+                                    )
+                    else:
+                        st.info(
+                            "No variant information found. "
+                            "plan.json may be missing or unreadable."
+                        )
+                except Exception as diag_err:
+                    st.warning(f"Could not load variant status: {diag_err}")
             df = None
         else:
             df, csv_path = result
