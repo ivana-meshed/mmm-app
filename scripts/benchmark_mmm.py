@@ -291,6 +291,30 @@ class BenchmarkRunner:
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
 
+    def _find_latest_mapped_version(self, country: str) -> Optional[str]:
+        """Find the most recent mapped-dataset version for a country.
+
+        Scans ``mapped-datasets/{country}/`` and returns the newest timestamp
+        folder that contains a ``raw.parquet`` blob, or *None* if none exist.
+        """
+        prefix = f"mapped-datasets/{country.lower()}/"
+        blobs = list(self.bucket.list_blobs(prefix=prefix))
+        versions = set()
+        for blob in blobs:
+            parts = blob.name.split("/")
+            # mapped-datasets/<country>/<ts>/raw.parquet  → 4 parts
+            if len(parts) == 4 and parts[-1] == "raw.parquet":
+                ts = parts[2]
+                if ts != "latest" and len(ts) == 15 and "_" in ts:
+                    try:
+                        datetime.strptime(ts, "%Y%m%d_%H%M%S")
+                        versions.add(ts)
+                    except ValueError:
+                        continue
+        if not versions:
+            return None
+        return sorted(versions, reverse=True)[0]
+
     def _find_latest_version(self, country: str, goal: str) -> str:
         """Find the most recent version (timestamp) for a country/goal combination."""
         prefix = f"training_data/{country.lower()}/{goal}/"
@@ -1147,10 +1171,37 @@ class BenchmarkRunner:
 
             if data_version and data_version.lower() != "latest":
                 # Path format: gs://{bucket}/mapped-datasets/{country}/{version}/raw.parquet
-                data_gcs_path = (
+                candidate = (
                     f"gs://{self.bucket_name}/mapped-datasets/"
                     f"{country.lower()}/{data_version}/raw.parquet"
                 )
+                blob_path = (
+                    f"mapped-datasets/{country.lower()}/{data_version}/raw.parquet"
+                )
+                if self.bucket.blob(blob_path).exists():
+                    data_gcs_path = candidate
+                else:
+                    logger.warning(
+                        f"Mapped dataset not found at {candidate}; "
+                        f"attempting to fall back to the latest available version."
+                    )
+                    latest_ts = self._find_latest_mapped_version(country)
+                    if latest_ts:
+                        data_gcs_path = (
+                            f"gs://{self.bucket_name}/mapped-datasets/"
+                            f"{country.lower()}/{latest_ts}/raw.parquet"
+                        )
+                        logger.warning(
+                            f"Falling back to latest mapped dataset: "
+                            f"{data_gcs_path} "
+                            f"(original data_version={data_version!r} was missing)"
+                        )
+                    else:
+                        logger.error(
+                            f"No mapped dataset found for country '{country}'. "
+                            f"Please re-map and save your data, then resubmit."
+                        )
+                        data_gcs_path = None
         else:
             # Fallback: try to infer from meta_version or fail
             logger.warning(
