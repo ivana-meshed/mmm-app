@@ -161,24 +161,23 @@ def enrich_config_for_upload(config: Dict) -> Dict:
     benchmark_mmm.py that may be absent from the raw local config files.
 
     Fields added (only when not already present):
-    - ``dep_var``      – set to ``"UPLOAD_VALUE"`` (the standard column name
-                         produced by the Streamlit upload pipeline in every
-                         mapped-datasets parquet file)
-    - ``dep_var_type`` – set to "conversion" (DK BOOKINGS is a count metric)
+    - ``dep_var``      – set to ``selected_goal`` (e.g. "BOOKINGS").  The R
+                         script renames the parquet's "UPLOAD_VALUE" column
+                         to this name before training, so Robyn sees the real
+                         metric name in all output artefacts and plots.
+    - ``dep_var_type`` – set to "conversion" (count-based metric; applies to DK BOOKINGS)
     - ``date_var``     – set to "date" (standard date column name in DK data)
 
     All other existing fields are preserved unchanged.
     """
     enriched = dict(config)
 
-    # dep_var: The Streamlit upload pipeline always stores the KPI column
-    # as "UPLOAD_VALUE" in the mapped parquet (mapped-datasets/…/raw.parquet).
-    # R's run_all.R already defaults to "UPLOAD_VALUE" when dep_var is absent,
-    # so we set it explicitly here to ensure consistency.
-    # Using selected_goal (e.g. "BOOKINGS") would cause R to skip the job
-    # because that column name does not exist in the mapped parquet.
+    # dep_var: use the business metric name from selected_goal (e.g. "BOOKINGS").
+    # The Streamlit upload pipeline stores the KPI column as "UPLOAD_VALUE" in
+    # the mapped parquet, but run_all.R renames it to dep_var before training so
+    # Robyn outputs use the real metric name throughout.
     if not enriched.get("dep_var"):
-        enriched["dep_var"] = "UPLOAD_VALUE"
+        enriched["dep_var"] = enriched.get("selected_goal", "")
 
     # dep_var_type: DK BOOKINGS is a conversion (count) metric.
     if not enriched.get("dep_var_type"):

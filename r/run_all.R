@@ -1031,6 +1031,28 @@ df <- df %>% filter(date >= start_data_date, date <= end_data_date)
 df$DOW <- wday(df$date, label = TRUE)
 df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
 
+# Rename UPLOAD_VALUE → dep_var if the config specifies a different name.
+# The Streamlit upload pipeline always stores the KPI as "UPLOAD_VALUE" in
+# the mapped parquet. When dep_var is set to e.g. "BOOKINGS" the column must
+# be renamed before the skip check and before Robyn sees the data, so that
+# all output artefacts and plots carry the real metric name.
+if (!dep_var_from_cfg %in% names(df) && "UPLOAD_VALUE" %in% names(df)) {
+    message(
+        "→ Renaming 'UPLOAD_VALUE' → '", dep_var_from_cfg,
+        "' to match configured dep_var"
+    )
+    names(df)[names(df) == "UPLOAD_VALUE"] <- dep_var_from_cfg
+    message(
+        "   Verification: '", dep_var_from_cfg,
+        "' in names(df) = ", dep_var_from_cfg %in% names(df)
+    )
+} else if (dep_var_from_cfg %in% names(df) && "UPLOAD_VALUE" %in% names(df)) {
+    message(
+        "⚠️  Both '", dep_var_from_cfg, "' and 'UPLOAD_VALUE' found in data. ",
+        "Using '", dep_var_from_cfg, "' as dep_var; 'UPLOAD_VALUE' column is ignored."
+    )
+}
+
 # CHECK: Skip country if critical columns have no data in the training window
 # A country should be skipped if:
 # 1. The dependent variable has zero variance (all zeros or all same value)
@@ -2317,7 +2339,7 @@ OutputCollect <- tryCatch(
             pareto_fronts = 2, csv_out = "pareto",
             min_candidates = 5, clusters = FALSE,
             export = TRUE, plot_folder = dir_path,
-            plot_pareto = FALSE, cores = NULL
+            plot_pareto = TRUE, cores = NULL
         )
     },
     error = function(e) {
