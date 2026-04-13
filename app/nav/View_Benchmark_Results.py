@@ -366,7 +366,7 @@ with st.sidebar:
             st.warning("No benchmarks found")
             st.stop()
 
-        selected_benchmark = st.selectbox(
+        selected_benchmark = st.radio(
             "Benchmark ID",
             options=benchmarks,
             help="Select a benchmark to visualize",
