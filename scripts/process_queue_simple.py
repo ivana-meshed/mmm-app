@@ -521,6 +521,7 @@ def process_one_job(
                     _parts = _b.name.split("/")
                     if len(_parts) == 4 and _parts[-1] == "raw.parquet":
                         _ts = _parts[2]
+                        # Timestamp format is YYYYMMDD_HHMMSS (15 chars)
                         if _ts != "latest" and len(_ts) == 15 and "_" in _ts:
                             _versions.add(_ts)
                 if _versions:

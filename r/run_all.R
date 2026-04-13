@@ -562,11 +562,15 @@ filter_by_country <- function(dx, country) {
     # Also map the full name back to itself for when cn IS already a full name
     cn_as_name <- iso_to_name[[cn]]
 
+    # Columns are checked in priority order; the first column that contains a
+    # matching value is used and we return immediately.  This means COUNTRY
+    # takes precedence over MARKET_NAME, which is intentional: explicit ISO
+    # code columns should win over free-text name columns.
     for (col in c("COUNTRY", "COUNTRY_CODE", "MARKET", "COUNTRY_ISO", "LOCALE", "MARKET_NAME")) {
         if (!col %in% names(dx)) next
         vals <- unique(toupper(dx[[col]]))
 
-        # Try exact match with code first
+        # Try exact match with the code/abbreviation first (e.g. "DK")
         if (cn %in% vals) {
             message("→ Filtering by ", col, " == ", cn)
             dx <- dx[toupper(dx[[col]]) == cn, , drop = FALSE]
@@ -574,6 +578,7 @@ filter_by_country <- function(dx, country) {
         }
 
         # Try match using the full country name derived from the ISO code
+        # (e.g. "DK" → "DENMARK") for columns that store full names
         if (!is.null(cn_as_name) && cn_as_name %in% vals) {
             message("→ Filtering by ", col, " == ", cn_as_name, " (mapped from ISO code '", cn, "')")
             dx <- dx[toupper(dx[[col]]) == cn_as_name, , drop = FALSE]
@@ -1402,7 +1407,7 @@ if (length(media_cols_to_clip) > 0) {
     for (cl in media_cols_to_clip) {
         neg_count <- sum(df[[cl]] < 0, na.rm = TRUE)
         if (neg_count > 0) {
-            df[[cl]] <- pmax(df[[cl]], 0, na.rm = FALSE)
+            df[[cl]] <- pmax(df[[cl]], 0)  # na.rm defaults to FALSE, preserving NAs
             clipped_summary <- c(clipped_summary, paste0(cl, " (", neg_count, " rows)"))
         }
     }
