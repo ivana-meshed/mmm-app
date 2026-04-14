@@ -1351,8 +1351,32 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
 }
 
 ## ---------- DRIVERS ----------
-paid_media_spends <- intersect(paid_media_spends_cfg, names(df))
-paid_media_vars <- intersect(paid_media_vars_cfg, names(df))
+# paid_media_spends_cfg and paid_media_vars_cfg are parallel arrays: element i
+# of spends corresponds to element i of vars.  When they are different columns
+# (spend_to_proxy / mixed_by_funnel strategies use proxy click/impression columns
+# as vars) we must filter them as *pairs* — not independently — otherwise
+# intersect() can drop different elements from each list and produce lists of
+# different lengths, which causes the stopifnot below to fire.
+if (length(paid_media_spends_cfg) == length(paid_media_vars_cfg)) {
+    pair_ok <- paid_media_spends_cfg %in% names(df) & paid_media_vars_cfg %in% names(df)
+    if (any(!pair_ok)) {
+        dropped <- paste(
+            paid_media_spends_cfg[!pair_ok],
+            "→",
+            paid_media_vars_cfg[!pair_ok],
+            collapse = ", "
+        )
+        message("ℹ️ Dropping spend/var pairs where a column is absent from data: ", dropped)
+    }
+    paid_media_spends <- paid_media_spends_cfg[pair_ok]
+    paid_media_vars   <- paid_media_vars_cfg[pair_ok]
+} else {
+    # Config lengths already differ — fall back to independent intersection.
+    # The stopifnot below will fire if lengths remain unequal, which is the
+    # correct behaviour for a genuinely misconfigured variant.
+    paid_media_spends <- intersect(paid_media_spends_cfg, names(df))
+    paid_media_vars   <- intersect(paid_media_vars_cfg, names(df))
+}
 stopifnot(length(paid_media_spends) == length(paid_media_vars))
 
 keep_idx <- vapply(seq_along(paid_media_spends), function(i) sum(df[[paid_media_spends[i]]], na.rm = TRUE) > 0, logical(1))
