@@ -654,19 +654,23 @@ class BenchmarkAnalyzer:
             fig.savefig(tmp.name, bbox_inches="tight", dpi=150)
             tmp_path = tmp.name
 
-        # Upload to GCS
-        gcs_path = f"{gcs_dir}/{name}.{format}"
-        blob = self.bucket.blob(gcs_path)
-        blob.upload_from_filename(tmp_path)
+        try:
+            # Upload to GCS
+            gcs_path = f"{gcs_dir}/{name}.{format}"
+            blob = self.bucket.blob(gcs_path)
+            blob.upload_from_filename(tmp_path)
 
-        # Save to local if requested
-        if local_dir:
-            local_path = Path(local_dir) / f"{name}.{format}"
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-            fig.savefig(local_path, bbox_inches="tight", dpi=150)
-
-        # Clean up temp file
-        os.unlink(tmp_path)
+            # Save to local if requested
+            if local_dir:
+                local_path = Path(local_dir) / f"{name}.{format}"
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                fig.savefig(local_path, bbox_inches="tight", dpi=150)
+        finally:
+            # Always remove the temp file, even when the upload fails
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     def _plot_rsq_comparison(self, df: pd.DataFrame):
         """Plot R² comparison across variants."""

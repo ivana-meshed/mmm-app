@@ -325,39 +325,39 @@ def load_benchmark_csv(benchmark_id):
 
 
 def load_benchmark_plots(benchmark_id):
-    """Load all plots for a benchmark."""
+    """Load all plots for a benchmark.
+
+    Merges plots from all analyze-run directories so that a partially-failed
+    run (which only uploaded some plots before encountering a GCS error) does
+    not hide plots that were successfully uploaded in a previous run.  For
+    each plot name the most-recently-created file is used.
+    """
     client = get_storage_client()
     bucket = client.bucket(GCS_BUCKET)
 
-    # Find the most recent plots directory
     prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/"
-    blobs = bucket.list_blobs(prefix=prefix)
+    blobs = list(bucket.list_blobs(prefix=prefix))
 
-    # Find plot directories
-    plot_dirs = set()
+    # Collect one blob per plot name; prefer the most recently created one.
+    plot_blobs: dict = {}  # plot_name -> blob
     for blob in blobs:
-        if "plots_" in blob.name and blob.name.endswith(".png"):
-            # Extract plot directory
-            parts = blob.name.split("/")
-            if len(parts) >= 3:
-                plot_dir = "/".join(parts[:3])  # benchmarks/id/plots_timestamp
-                plot_dirs.add(plot_dir)
+        if "plots_" not in blob.name or not blob.name.endswith(".png"):
+            continue
+        plot_name = blob.name.split("/")[-1].replace(".png", "")
+        existing = plot_blobs.get(plot_name)
+        if existing is None or blob.time_created > existing.time_created:
+            plot_blobs[plot_name] = blob
 
-    if not plot_dirs:
+    if not plot_blobs:
         return {}
 
-    # Use most recent plot directory
-    latest_plot_dir = sorted(list(plot_dirs), reverse=True)[0]
-
-    # Load all plots from that directory
     plots = {}
-    plot_blobs = bucket.list_blobs(prefix=latest_plot_dir + "/")
-
-    for blob in plot_blobs:
-        if blob.name.endswith(".png"):
-            plot_name = blob.name.split("/")[-1].replace(".png", "")
+    for plot_name, blob in plot_blobs.items():
+        try:
             img_data = blob.download_as_bytes()
             plots[plot_name] = Image.open(io.BytesIO(img_data))
+        except Exception:
+            pass
 
     return plots
 
@@ -523,6 +523,26 @@ for selected_benchmark in selected_benchmarks:
                             f"- **1000+ iterations**\n"
                             f"- **3+ trials**\n\n"
                             f"Use `--full-run`, `--extended-run`, or `--production-run` flag for production analysis."
+                        )
+
+                # Check for poor generalization (negative test R²)
+                if "rsq_test" in df.columns:
+                    bad_test = df[
+                        df["rsq_test"].notna() & (df["rsq_test"] < 0)
+                    ]
+                    if not bad_test.empty:
+                        bad_names = ", ".join(
+                            f"`{v}`" for v in bad_test["benchmark_variant"].tolist()
+                        )
+                        st.warning(
+                            f"⚠️ **Poor Test Generalization Detected**\n\n"
+                            f"{len(bad_test)} variant(s) have **negative R² on the test split** "
+                            f"(worse than a simple mean predictor): {bad_names}.\n\n"
+                            "This usually indicates overfitting to the train/val period or a "
+                            "structural break in the test data. Consider:\n"
+                            "- Reviewing the date window and train/val/test split boundaries\n"
+                            "- Trying different adstock and hyperparameter ranges\n"
+                            "- Checking for outliers or anomalies in the test period"
                         )
 
                 # Show metrics summary
