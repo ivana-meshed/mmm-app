@@ -1004,6 +1004,59 @@ for selected_benchmark in selected_benchmarks:
         # Load and display plots
         st.subheader("📈 Visualization Plots")
 
+        # Allow the user to (re-)generate the enrichment plots on demand.
+        # This calls BenchmarkAnalyzer from scripts/analyze_benchmark_results.py
+        # in-process so no CLI invocation is needed.
+        col_btn, col_status = st.columns([1, 3])
+        with col_btn:
+            run_analysis = st.button(
+                "🔄 Generate / Refresh Analysis Plots",
+                help=(
+                    "Scans all variant model_summary.json files for this benchmark "
+                    "and (re-)generates the enrichment plots (Driver Contribution "
+                    "Shares, ROAS by Channel, CPA by Channel). Safe to run at any "
+                    "time — only completed variants are included."
+                ),
+            )
+        if run_analysis:
+            with col_status:
+                with st.spinner("Running analysis…"):
+                    try:
+                        import importlib.util
+                        import os
+
+                        _script_path = os.path.join(
+                            os.path.dirname(__file__),
+                            "..",
+                            "..",
+                            "scripts",
+                            "analyze_benchmark_results.py",
+                        )
+                        _spec = importlib.util.spec_from_file_location(
+                            "analyze_benchmark_results", _script_path
+                        )
+                        _mod = importlib.util.module_from_spec(_spec)  # type: ignore
+                        _spec.loader.exec_module(_mod)  # type: ignore
+
+                        _analyzer = _mod.BenchmarkAnalyzer(bucket_name=GCS_BUCKET)
+                        _df = _analyzer.collect_results_from_gcs_scan(
+                            selected_benchmark
+                        )
+                        if _df is None or _df.empty:
+                            st.warning(
+                                "No completed variant results found yet. "
+                                "Wait for jobs to finish and try again."
+                            )
+                        else:
+                            _analyzer.generate_plots(_df, selected_benchmark)
+                            st.success(
+                                f"✅ Analysis complete — {len(_df)} variant(s) "
+                                "included. Plots uploaded to GCS. Scroll down to view."
+                            )
+                    except Exception as _exc:
+                        st.error(f"Analysis failed: {_exc}")
+                        st.exception(_exc)
+
         try:
             plots = load_benchmark_plots(selected_benchmark)
 
