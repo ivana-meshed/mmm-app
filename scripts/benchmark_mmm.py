@@ -982,12 +982,26 @@ class BenchmarkRunner:
         variants: List[Dict[str, Any]],
     ):
         """Save benchmark execution plan and combinations log to GCS."""
+        # Infer run_mode from iteration count so the UI can display a badge
+        _iters = benchmark_config.iterations
+        if _iters < 100:
+            _run_mode = "test"
+        elif _iters < 1500:
+            _run_mode = "standard"
+        elif _iters < 3500:
+            _run_mode = "extended"
+        else:
+            _run_mode = "production"
+
         plan = {
             "benchmark_id": benchmark_id,
             "name": benchmark_config.name,
             "description": benchmark_config.description,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "status": "planned",
+            "run_mode": _run_mode,
+            "iterations": benchmark_config.iterations,
+            "trials": benchmark_config.trials,
             "variant_count": len(variants),
             "variants": variants,
         }

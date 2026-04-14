@@ -556,7 +556,7 @@ def generate_benchmark_config(
     )
     window_dim = f" × {n_windows} windows" if selected_window_specs else ""
     benchmark_config = {
-        "name": f"comprehensive_benchmark_{timestamp}",
+        "name": f"comprehensive_benchmark_{run_mode}_{timestamp}",
         "description": (
             f"Complete {mode_label} benchmark: "
             f"adstock × train_splits × time_agg × spend_var_mapping"

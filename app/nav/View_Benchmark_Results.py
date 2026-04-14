@@ -53,6 +53,67 @@ def get_storage_client():
     return storage.Client()
 
 
+def _infer_run_mode(iterations: int) -> str:
+    """Infer run mode label from iteration count."""
+    if iterations < 100:
+        return "test"
+    elif iterations < 1500:
+        return "standard"
+    elif iterations < 3500:
+        return "extended"
+    else:
+        return "production"
+
+
+_RUN_MODE_BADGE = {
+    "test": "🧪 TEST",
+    "standard": "🚀 STANDARD",
+    "extended": "🔵 EXTENDED",
+    "production": "⚡ PRODUCTION",
+}
+
+
+@st.cache_data(ttl=300)
+def _get_benchmark_run_mode(benchmark_id: str) -> str:
+    """
+    Read plan.json for *benchmark_id* and return the run mode string.
+
+    Falls back to checking the benchmark_id name for mode keywords, then
+    returns ``"unknown"`` if neither source is available.
+    """
+    try:
+        client = get_storage_client()
+        bucket = client.bucket(GCS_BUCKET)
+        plan_blob = bucket.blob(
+            f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
+        )
+        plan = json.loads(plan_blob.download_as_bytes())
+        # Prefer explicit run_mode field (set by newer submissions)
+        if "run_mode" in plan:
+            return plan["run_mode"]
+        # Fall back to inferring from first variant's iterations
+        variants = plan.get("variants", [])
+        if variants:
+            iters = variants[0].get("iterations", 0)
+            return _infer_run_mode(int(iters))
+    except Exception:
+        pass
+
+    # Last resort: parse the benchmark_id name itself
+    bid_lower = benchmark_id.lower()
+    for mode in ("production", "extended", "standard", "test"):
+        if f"_{mode}_" in bid_lower or bid_lower.endswith(f"_{mode}"):
+            return mode
+    return "unknown"
+
+
+def _format_benchmark_option(benchmark_id: str) -> str:
+    """Return a display label for a benchmark option in the sidebar."""
+    mode = _get_benchmark_run_mode(benchmark_id)
+    badge = _RUN_MODE_BADGE.get(mode, f"❓ {mode.upper()}")
+    return f"{badge} — {benchmark_id}"
+
+
 def _trigger_queue_tick(queue_name: str) -> bool:
     """
     Trigger an immediate queue tick via Cloud Tasks (if configured)
@@ -376,15 +437,35 @@ with st.sidebar:
 
     _available_benchmarks = list_benchmarks() or BEST_BENCHMARKS
 
+    # Run-type filter
+    _run_type_filter = st.radio(
+        "Filter by run type",
+        options=["All", "test", "standard", "extended", "production"],
+        format_func=lambda x: "All" if x == "All" else _RUN_MODE_BADGE.get(x, x),
+        horizontal=False,
+    )
+
+    # Apply filter
+    if _run_type_filter != "All":
+        _filtered_benchmarks = [
+            bid
+            for bid in _available_benchmarks
+            if _get_benchmark_run_mode(bid) == _run_type_filter
+        ]
+    else:
+        _filtered_benchmarks = _available_benchmarks
+
     selected_benchmarks = st.multiselect(
         "Benchmark ID(s)",
-        options=_available_benchmarks,
-        default=_available_benchmarks[:1] if _available_benchmarks else [],
+        options=_filtered_benchmarks,
+        default=_filtered_benchmarks[:1] if _filtered_benchmarks else [],
+        format_func=_format_benchmark_option,
         help="Select one or more benchmarks to visualize",
     )
 
     if st.button("🔄 Refresh"):
         st.cache_resource.clear()
+        st.cache_data.clear()
         st.rerun()
 
 # ── Combined results table (shown when >1 benchmark selected) ──────────────
@@ -418,9 +499,14 @@ if len(selected_benchmarks) > 1:
 
 # ── Per-benchmark detail ───────────────────────────────────────────────────
 for selected_benchmark in selected_benchmarks:
-    _expander_label = f"📁 {selected_benchmark}"
+    _run_mode = _get_benchmark_run_mode(selected_benchmark)
+    _run_badge = _RUN_MODE_BADGE.get(_run_mode, f"❓ {_run_mode.upper()}")
+    _expander_label = f"{_run_badge} — {selected_benchmark}"
     with st.expander(_expander_label, expanded=len(selected_benchmarks) == 1):
-        st.info(f"**Selected Benchmark:** `{selected_benchmark}`")
+        st.info(
+            f"**Selected Benchmark:** `{selected_benchmark}`  |  "
+            f"**Run type:** {_run_badge}"
+        )
 
         # Load CSV data
         st.subheader("📊 Results Data")
