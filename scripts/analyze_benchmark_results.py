@@ -722,6 +722,7 @@ class BenchmarkAnalyzer:
         ax.legend(title="Data Split")
         ax.grid(axis="y", alpha=0.3)
 
+        fig.tight_layout()
         return fig
 
     def _plot_nrmse_comparison(self, df: pd.DataFrame):
@@ -767,6 +768,7 @@ class BenchmarkAnalyzer:
         ax.legend(title="Data Split")
         ax.grid(axis="y", alpha=0.3)
 
+        fig.tight_layout()
         return fig
 
     def _plot_decomp_rssd(self, df: pd.DataFrame):
@@ -800,6 +802,7 @@ class BenchmarkAnalyzer:
 
         ax.grid(axis="x", alpha=0.3)
 
+        fig.tight_layout()
         return fig
 
     def _plot_train_val_test_gap(self, df: pd.DataFrame):
@@ -943,6 +946,7 @@ class BenchmarkAnalyzer:
         )
         ax.set_title("Metric Correlations", fontsize=16, fontweight="bold")
 
+        fig.tight_layout()
         return fig
 
     def _plot_best_models_summary(self, df: pd.DataFrame):
@@ -1530,6 +1534,18 @@ def main():
             "last config's variants."
         ),
     )
+    parser.add_argument(
+        "--min-r2",
+        dest="min_r2",
+        type=float,
+        default=0.7,
+        help=(
+            "Minimum R² threshold to include a result (default: 0.7). "
+            "Uses rsq_val when available, otherwise rsq_train. "
+            "Results below this threshold are excluded before plotting and "
+            "summary statistics."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1564,6 +1580,45 @@ def main():
     if df is None or df.empty:
         logger.error("No results found to analyze")
         return 1
+
+    # Filter out low-quality results below the R² threshold
+    if args.min_r2 is not None:
+        # Prefer rsq_val; fall back to rsq_train when val is absent
+        if "rsq_val" in df.columns and df["rsq_val"].notna().any():
+            r2_col = "rsq_val"
+        elif "rsq_train" in df.columns and df["rsq_train"].notna().any():
+            r2_col = "rsq_train"
+        else:
+            r2_col = None
+
+        if r2_col:
+            before = len(df)
+            df = df[
+                df[r2_col].isna() | (df[r2_col] >= args.min_r2)
+            ].copy()
+            removed = before - len(df)
+            if removed:
+                logger.info(
+                    f"Filtered out {removed} result(s) with {r2_col} < "
+                    f"{args.min_r2} (kept {len(df)} of {before})"
+                )
+            else:
+                logger.info(
+                    f"All {before} result(s) meet the R² threshold "
+                    f"({r2_col} >= {args.min_r2})"
+                )
+        else:
+            logger.warning(
+                "No R² columns found; skipping quality filter"
+            )
+
+        if df.empty:
+            logger.error(
+                f"No results remaining after applying R² filter "
+                f"(min_r2={args.min_r2}). "
+                "Use --min-r2 0 to disable filtering."
+            )
+            return 1
 
     logger.info(f"Collected {len(df)} results")
 
