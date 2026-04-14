@@ -10,6 +10,7 @@ Displays benchmark results with:
 - Download buttons
 """
 
+import base64
 import io
 import json
 import sys
@@ -18,7 +19,6 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from google.cloud import storage
-from PIL import Image
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -356,7 +356,7 @@ def load_benchmark_plots(benchmark_id):
     for plot_name, blob in plot_blobs.items():
         try:
             img_data = blob.download_as_bytes()
-            plots[plot_name] = Image.open(io.BytesIO(img_data))
+            plots[plot_name] = img_data  # store raw bytes; rendered via base64
         except Exception as exc:  # noqa: BLE001
             failed.append(f"{plot_name}: {exc}")
 
@@ -988,7 +988,13 @@ for selected_benchmark in selected_benchmarks:
                     if plot_name in plots:
                         st.markdown(f"### {title}")
                         st.caption(description)
-                        st.image(plots[plot_name], use_container_width=True)
+                        b64 = base64.b64encode(plots[plot_name]).decode()
+                        st.markdown(
+                            f'<img src="data:image/png;base64,{b64}" '
+                            f'style="width: 100%; height: auto;" '
+                            f'alt="{title}">',
+                            unsafe_allow_html=True,
+                        )
                         st.divider()
                     else:
                         st.warning(f"Plot not available: {plot_name}")
@@ -1002,7 +1008,13 @@ for selected_benchmark in selected_benchmarks:
                     if plot_name in plots:
                         st.markdown(f"### {title}")
                         st.caption(description)
-                        st.image(plots[plot_name], use_container_width=True)
+                        b64 = base64.b64encode(plots[plot_name]).decode()
+                        st.markdown(
+                            f'<img src="data:image/png;base64,{b64}" '
+                            f'style="width: 100%; height: auto;" '
+                            f'alt="{title}">',
+                            unsafe_allow_html=True,
+                        )
                         st.divider()
 
                 if enrichment_missing:
