@@ -339,7 +339,7 @@ def load_benchmark_plots(benchmark_id):
     blobs = list(bucket.list_blobs(prefix=prefix))
 
     # Collect one blob per plot name; prefer the most recently created one.
-    plot_blobs: dict = {}  # plot_name -> blob
+    plot_blobs: dict = {}  # plot_name (str) -> GCS blob
     for blob in blobs:
         if "plots_" not in blob.name or not blob.name.endswith(".png"):
             continue
@@ -352,12 +352,20 @@ def load_benchmark_plots(benchmark_id):
         return {}
 
     plots = {}
+    failed = []
     for plot_name, blob in plot_blobs.items():
         try:
             img_data = blob.download_as_bytes()
             plots[plot_name] = Image.open(io.BytesIO(img_data))
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            failed.append(f"{plot_name}: {exc}")
+
+    if failed:
+        print(
+            f"[View_Benchmark_Results] Warning: failed to load "
+            f"{len(failed)} plot(s): {'; '.join(failed)}",
+            file=sys.stderr,
+        )
 
     return plots
 
