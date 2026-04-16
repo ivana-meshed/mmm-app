@@ -37,6 +37,7 @@ from run_benchmark_from_csv import (  # noqa: E402
 # Fixtures
 # ---------------------------------------------------------------------------
 DK_CSV_PATH = REPO_ROOT / "data" / "dk" / "mmm_data_v2_final_holidays_and_school.csv"
+DK_TV_CSV_PATH = REPO_ROOT / "data" / "dk" / "mmm_data_v2_with_tv.csv"
 TV_CONFIG_PATH = (
     REPO_ROOT
     / "benchmark_analysis"
@@ -123,6 +124,42 @@ def _load_dk_df() -> pd.DataFrame:
         c
         for c in df.columns
         if any(kw in c for kw in ("COST", "SPEND", "CLICKS", "IMPRESSIONS"))
+    ]
+    if media_cols:
+        df[media_cols] = df[media_cols].clip(lower=0)
+
+    return df
+
+
+def _load_dk_tv_df() -> pd.DataFrame:
+    """Load the TV-merged DK CSV (mmm_data_v2_with_tv.csv), filtered to Denmark.
+
+    This mirrors _load_dk_df() but uses the dataset that includes TV and radio
+    spend/GRP columns from TV_DATA.xlsx.
+    """
+    df = pd.read_csv(DK_TV_CSV_PATH)
+    df.columns = [c.upper() for c in df.columns]
+
+    # Drop duplicate columns introduced by uppercasing (mirrors main())
+    df = df.loc[:, ~df.columns.duplicated()]
+
+    # Apply the same renames that main() performs
+    rename_applied = {
+        old: new for old, new in COLUMN_RENAME_MAP.items() if old in df.columns
+    }
+    if rename_applied:
+        df.rename(columns=rename_applied, inplace=True)
+
+    # Filter to Denmark only
+    df = df[
+        df["MARKET_NAME"].str.strip().str.upper() == "DENMARK"
+    ].copy()
+
+    # Clip media columns to 0 (mirrors main())
+    media_cols = [
+        c
+        for c in df.columns
+        if any(kw in c for kw in ("COST", "SPEND", "CLICKS", "IMPRESSIONS", "GRP"))
     ]
     if media_cols:
         df[media_cols] = df[media_cols].clip(lower=0)
@@ -612,6 +649,143 @@ class TestEndToEndPipelineComparison(unittest.TestCase):
                 json.dumps(sc)
             except (TypeError, ValueError) as exc:
                 self.fail(f"[{label}] selected_columns not JSON-serializable: {exc}")
+
+
+class TestTvConfigWithTvData(unittest.TestCase):
+    """
+    Integration tests for the TV config paired with the TV-merged CSV fixture.
+
+    mmm_data_v2_with_tv.csv is the standard DK dataset with TV and radio
+    spend/GRP columns merged in from TV_DATA.xlsx.  Unlike TestTvConfigAsMappingFile
+    (which uses the CSV without TV columns and verifies graceful degradation),
+    these tests verify that TV channels are fully present and correctly mapped
+    when the right source data is available.
+    """
+
+    def setUp(self):
+        self.df = _load_dk_tv_df()
+        self.all_cols = self.df.columns.tolist()
+        self.result = load_columns_from_mapping(TV_CONFIG_PATH, self.all_cols)
+
+    # ── Fixture checks ───────────────────────────────────────────────────────
+
+    def test_tv_csv_fixture_exists(self):
+        self.assertTrue(
+            DK_TV_CSV_PATH.exists(),
+            f"TV-merged CSV not found: {DK_TV_CSV_PATH}",
+        )
+
+    def test_tv_csv_contains_wbr_total_grp(self):
+        self.assertIn("WBR_TOTAL_GRP", self.all_cols)
+
+    def test_tv_csv_contains_wbr_total_spend(self):
+        self.assertIn("WBR_TOTAL_SPEND", self.all_cols)
+
+    def test_tv_csv_contains_bauer_grp_flow_radio(self):
+        self.assertIn("BAUER_GRP_FLOW_RADIO", self.all_cols)
+
+    def test_tv_csv_contains_bauer_spend_flow_radio(self):
+        self.assertIn("BAUER_SPEND_FLOW_RADIO", self.all_cols)
+
+    def test_tv_csv_filtered_to_denmark(self):
+        markets = self.df["MARKET_NAME"].str.strip().str.upper().unique().tolist()
+        self.assertEqual(markets, ["DENMARK"])
+
+    def test_tv_grp_column_has_nonzero_values(self):
+        """WBR_TOTAL_GRP must have actual TV data, not all zeros."""
+        self.assertGreater(self.df["WBR_TOTAL_GRP"].sum(), 0)
+
+    def test_radio_grp_column_has_nonzero_values(self):
+        """BAUER_GRP_FLOW_RADIO must have actual radio data, not all zeros."""
+        self.assertGreater(self.df["BAUER_GRP_FLOW_RADIO"].sum(), 0)
+
+    # ── Mapping result checks ────────────────────────────────────────────────
+
+    def test_tv_grp_in_paid_media_vars(self):
+        """WBR_TOTAL_GRP must appear in paid_media_vars when data is present."""
+        self.assertIn("WBR_TOTAL_GRP", self.result["paid_media_vars"])
+
+    def test_tv_spend_in_paid_media_spends(self):
+        """WBR_TOTAL_SPEND must appear in paid_media_spends when data is present."""
+        self.assertIn("WBR_TOTAL_SPEND", self.result["paid_media_spends"])
+
+    def test_radio_grp_in_paid_media_vars(self):
+        """BAUER_GRP_FLOW_RADIO must appear in paid_media_vars when data is present."""
+        self.assertIn("BAUER_GRP_FLOW_RADIO", self.result["paid_media_vars"])
+
+    def test_radio_spend_in_paid_media_spends(self):
+        """BAUER_SPEND_FLOW_RADIO must appear in paid_media_spends when data is present."""
+        self.assertIn("BAUER_SPEND_FLOW_RADIO", self.result["paid_media_spends"])
+
+    def test_paid_media_spends_and_vars_same_length(self):
+        self.assertEqual(
+            len(self.result["paid_media_spends"]),
+            len(self.result["paid_media_vars"]),
+        )
+
+    def test_var_to_spend_mapping_covers_tv_and_radio(self):
+        mapping = self.result["var_to_spend_mapping"]
+        self.assertIn("WBR_TOTAL_GRP", mapping)
+        self.assertEqual(mapping["WBR_TOTAL_GRP"], "WBR_TOTAL_SPEND")
+        self.assertIn("BAUER_GRP_FLOW_RADIO", mapping)
+        self.assertEqual(mapping["BAUER_GRP_FLOW_RADIO"], "BAUER_SPEND_FLOW_RADIO")
+
+    def test_all_paid_media_vars_exist_in_csv(self):
+        col_set = set(self.all_cols)
+        for col in self.result["paid_media_vars"]:
+            self.assertIn(col, col_set, f"paid_media_vars column '{col}' not in CSV")
+
+    def test_all_paid_media_spends_exist_in_csv(self):
+        col_set = set(self.all_cols)
+        for col in self.result["paid_media_spends"]:
+            self.assertIn(col, col_set, f"paid_media_spends column '{col}' not in CSV")
+
+    # ── selected_columns construction ────────────────────────────────────────
+
+    def test_selected_columns_json_construction(self):
+        sc = _build_selected_columns(
+            self.result, dep_var="BOOKINGS", dep_var_type="conversion"
+        )
+        for key in REQUIRED_SELECTED_COLUMNS_KEYS:
+            self.assertIn(key, sc)
+
+    def test_selected_columns_all_drivers_includes_tv_and_radio(self):
+        sc = _build_selected_columns(self.result, dep_var="BOOKINGS")
+        drivers = set(sc["all_selected_drivers"])
+        self.assertIn("WBR_TOTAL_GRP", drivers)
+        self.assertIn("BAUER_GRP_FLOW_RADIO", drivers)
+
+    def test_dep_var_not_in_predictors(self):
+        sc = _build_selected_columns(self.result, dep_var="BOOKINGS")
+        all_pred = set(
+            sc["paid_media_spends"]
+            + sc["paid_media_vars"]
+            + sc["context_vars"]
+            + sc["factor_vars"]
+            + sc["organic_vars"]
+        )
+        self.assertNotIn("BOOKINGS", all_pred)
+
+    # ── Parquet serialisation ────────────────────────────────────────────────
+
+    def test_tv_dataframe_serialises_to_parquet(self):
+        """TV-merged DK DataFrame must convert to Parquet without error."""
+        import io
+
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        buf = io.BytesIO()
+        table = pa.Table.from_pandas(self.df, preserve_index=False)
+        pq.write_table(table, buf)
+        self.assertGreater(buf.tell(), 0, "Parquet output is empty")
+
+    def test_selected_columns_is_json_serialisable(self):
+        sc = _build_selected_columns(self.result, dep_var="BOOKINGS")
+        serialised = json.dumps(sc)
+        deserialised = json.loads(serialised)
+        self.assertIsInstance(deserialised["paid_media_spends"], list)
+        self.assertIn("WBR_TOTAL_SPEND", deserialised["paid_media_spends"])
 
 
 if __name__ == "__main__":
