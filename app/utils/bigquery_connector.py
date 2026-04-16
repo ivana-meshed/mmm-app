@@ -7,13 +7,17 @@ Provides secure connection management with support for:
 - Query execution with pandas integration
 """
 
+from __future__ import annotations
+
 import json
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-import pandas as pd
 from google.cloud import bigquery, secretmanager
 from google.oauth2 import service_account
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # Import from parent config module (app.config)
 try:

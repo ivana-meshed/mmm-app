@@ -9,11 +9,10 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-# Mock google-cloud-bigquery, pandas, and related packages before importing
-# the module under test, so that tests can run in environments where these
-# are not installed (e.g. CI with only requirements-ci.txt).
+# Mock google-cloud-bigquery and related packages before importing the module
+# under test, so that tests can run in environments where these are not
+# installed (e.g. CI with only requirements-ci.txt).
 # This follows the same pattern used in test_track_daily_costs.py.
-sys.modules.setdefault("pandas", MagicMock())
 sys.modules.setdefault("google.cloud", MagicMock())
 sys.modules.setdefault("google.cloud.bigquery", MagicMock())
 sys.modules.setdefault("google.cloud.secretmanager", MagicMock())

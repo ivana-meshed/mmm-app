@@ -5,9 +5,11 @@ Tests for validation utilities.
 import unittest
 from datetime import datetime
 
-import pandas as pd
+import pytest
 
-from app.utils.validation import (
+pd = pytest.importorskip("pandas")
+
+from app.utils.validation import (  # noqa: E402
     validate_column_types,
     validate_data_completeness,
     validate_dataframe_schema,
