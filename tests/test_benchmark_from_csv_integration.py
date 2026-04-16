@@ -103,6 +103,9 @@ def _load_dk_df() -> pd.DataFrame:
     df = pd.read_csv(DK_CSV_PATH)
     df.columns = [c.upper() for c in df.columns]
 
+    # Drop duplicate columns introduced by uppercasing (mirrors main())
+    df = df.loc[:, ~df.columns.duplicated()]
+
     # Apply the same renames that main() performs
     rename_applied = {
         old: new for old, new in COLUMN_RENAME_MAP.items() if old in df.columns
@@ -186,6 +189,22 @@ class TestCsvLoading(unittest.TestCase):
         dates = pd.to_datetime(self.df["DATE"], errors="coerce").dropna()
         self.assertGreater(len(dates), 0)
         self.assertLessEqual(dates.min(), dates.max())
+
+    def test_dataframe_serializes_to_parquet(self):
+        """The filtered DK DataFrame must convert to a Parquet table without error.
+
+        This guards against the crash reported in run_benchmark_from_csv.py where
+        pa.Table.from_pandas() raises before the GCS upload log line appears.
+        """
+        import io
+
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        table = pa.Table.from_pandas(self.df, preserve_index=False)
+        buf = io.BytesIO()
+        pq.write_table(table, buf)
+        self.assertGreater(buf.tell(), 0, "Parquet buffer is empty after write")
 
 
 class TestColumnClassifiers(unittest.TestCase):

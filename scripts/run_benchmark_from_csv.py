@@ -597,6 +597,19 @@ def main() -> None:
 
     # Normalize column names to uppercase
     df.columns = [c.upper() for c in df.columns]
+
+    # Drop duplicate columns introduced by uppercasing (e.g. a CSV may contain
+    # both 'IS_HOLIDAY' and 'is_holiday' which collapse to the same name).
+    # pyarrow raises ValueError on duplicate column names, so we keep the first
+    # occurrence of each name.
+    n_before = len(df.columns)
+    df = df.loc[:, ~df.columns.duplicated()]
+    n_dropped = n_before - len(df.columns)
+    if n_dropped:
+        logger.info(
+            f"   Dropped {n_dropped} duplicate column(s) after uppercasing"
+        )
+
     logger.info(
         f"   Loaded {len(df):,} rows × {len(df.columns)} columns"
     )
