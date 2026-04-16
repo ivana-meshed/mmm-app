@@ -12,9 +12,11 @@ from unittest.mock import MagicMock, patch
 
 # Mock google packages before importing scripts that use them,
 # so tests run in environments where google-cloud-storage is not installed.
-sys.modules.setdefault("google", MagicMock())
-sys.modules.setdefault("google.cloud", MagicMock())
-sys.modules.setdefault("google.cloud.storage", MagicMock())
+# Use direct assignment (not setdefault) so the mock always takes effect even
+# when real google packages are installed (e.g. on a developer's macOS machine).
+sys.modules["google"] = MagicMock()
+sys.modules["google.cloud"] = MagicMock()
+sys.modules["google.cloud.storage"] = MagicMock()
 
 from scripts.copy_test_to_root import TestFolderCopier  # noqa: E402
 from scripts.delete_bucket_data import BucketDataCleaner  # noqa: E402

@@ -12,12 +12,14 @@ from unittest.mock import MagicMock, patch
 # Mock google-cloud-bigquery and related packages before importing the module
 # under test, so that tests can run in environments where these are not
 # installed (e.g. CI with only requirements-ci.txt).
+# Use direct assignment (not setdefault) so the mock always takes effect even
+# when real google packages are installed (e.g. on a developer's macOS machine).
 # This follows the same pattern used in test_track_daily_costs.py.
-sys.modules.setdefault("google.cloud", MagicMock())
-sys.modules.setdefault("google.cloud.bigquery", MagicMock())
-sys.modules.setdefault("google.cloud.secretmanager", MagicMock())
-sys.modules.setdefault("google.oauth2", MagicMock())
-sys.modules.setdefault("google.oauth2.service_account", MagicMock())
+sys.modules["google.cloud"] = MagicMock()
+sys.modules["google.cloud.bigquery"] = MagicMock()
+sys.modules["google.cloud.secretmanager"] = MagicMock()
+sys.modules["google.oauth2"] = MagicMock()
+sys.modules["google.oauth2.service_account"] = MagicMock()
 
 from app.utils.bigquery_connector import (  # noqa: E402
     create_bigquery_client,
