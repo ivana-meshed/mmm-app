@@ -788,5 +788,75 @@ class TestTvConfigWithTvData(unittest.TestCase):
         self.assertIn("WBR_TOTAL_SPEND", deserialised["paid_media_spends"])
 
 
+class TestTvEndToEnd(unittest.TestCase):
+    """
+    One comprehensive end-to-end integration test per dataset variant.
+
+    test_without_tv_data — standard DK CSV (no TV/radio columns) + TV config.
+        The TV channels must be silently dropped; the remaining channels must
+        produce a valid, JSON-serialisable selected_columns structure.
+
+    test_with_tv_data — TV-merged DK CSV (includes WBR/BAUER columns) + TV config.
+        All TV and radio channels must be fully present and correctly mapped.
+    """
+
+    def _assert_selected_columns_valid(
+        self, sc: dict, label: str, expected_in_spends=None, not_expected_in_spends=None
+    ) -> None:
+        for key in REQUIRED_SELECTED_COLUMNS_KEYS:
+            self.assertIn(key, sc, f"[{label}] Missing key: {key}")
+        self.assertGreater(
+            len(sc["paid_media_spends"]), 0, f"[{label}] paid_media_spends empty"
+        )
+        self.assertGreater(
+            len(sc["all_selected_drivers"]), 0, f"[{label}] all_selected_drivers empty"
+        )
+        drivers = set(sc["all_selected_drivers"])
+        for col in sc["paid_media_spends"]:
+            self.assertIn(col, drivers, f"[{label}] spend '{col}' missing from all_selected_drivers")
+        self.assertNotIn(sc["dep_var"], set(sc["paid_media_spends"] + sc["paid_media_vars"]))
+        # JSON-serialisable
+        json.dumps(sc)
+        if expected_in_spends:
+            for col in expected_in_spends:
+                self.assertIn(col, sc["paid_media_spends"], f"[{label}] '{col}' not in paid_media_spends")
+        if not_expected_in_spends:
+            for col in not_expected_in_spends:
+                self.assertNotIn(col, sc["paid_media_spends"], f"[{label}] TV-only '{col}' should not be in paid_media_spends")
+
+    def test_without_tv_data(self):
+        """Standard DK CSV + TV config: TV columns absent → graceful degradation."""
+        df = _load_dk_df()
+        result = load_columns_from_mapping(TV_CONFIG_PATH, df.columns.tolist())
+        sc = _build_selected_columns(result, dep_var="BOOKINGS", dep_var_type="conversion")
+        tv_only_spends = ["WBR_TOTAL_SPEND", "BAUER_SPEND_FLOW_RADIO"]
+        standard_spends = ["GOOGLE_SEARCH_BRAND_COST", "FB_UPPER_COST"]
+        self._assert_selected_columns_valid(
+            sc,
+            label="without-tv-data",
+            expected_in_spends=standard_spends,
+            not_expected_in_spends=tv_only_spends,
+        )
+
+    def test_with_tv_data(self):
+        """TV-merged DK CSV + TV config: TV and radio channels fully present."""
+        df = _load_dk_tv_df()
+        result = load_columns_from_mapping(TV_CONFIG_PATH, df.columns.tolist())
+        sc = _build_selected_columns(result, dep_var="BOOKINGS", dep_var_type="conversion")
+        tv_spends = ["WBR_TOTAL_SPEND", "BAUER_SPEND_FLOW_RADIO"]
+        tv_vars = ["WBR_TOTAL_GRP", "BAUER_GRP_FLOW_RADIO"]
+        self._assert_selected_columns_valid(
+            sc,
+            label="with-tv-data",
+            expected_in_spends=tv_spends,
+        )
+        drivers = set(sc["all_selected_drivers"])
+        for col in tv_vars:
+            self.assertIn(col, drivers, f"[with-tv-data] TV var '{col}' missing from all_selected_drivers")
+        mapping = sc["var_to_spend_mapping"]
+        self.assertEqual(mapping.get("WBR_TOTAL_GRP"), "WBR_TOTAL_SPEND")
+        self.assertEqual(mapping.get("BAUER_GRP_FLOW_RADIO"), "BAUER_SPEND_FLOW_RADIO")
+
+
 if __name__ == "__main__":
     unittest.main()
