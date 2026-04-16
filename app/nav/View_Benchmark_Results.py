@@ -1011,6 +1011,7 @@ for selected_benchmark in selected_benchmarks:
         with col_btn:
             run_analysis = st.button(
                 "🔄 Generate / Refresh Analysis Plots",
+                key=f"run_analysis_{selected_benchmark}",
                 help=(
                     "Scans all variant model_summary.json files for this benchmark "
                     "and (re-)generates the enrichment plots (Driver Contribution "
