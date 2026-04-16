@@ -70,7 +70,7 @@ model_stability_page = st.Page(
 benchmark_results_page = st.Page(
     "nav/View_Benchmark_Results.py",
     title="Benchmark Results",
-    icon="🧪",
+    icon="📋",
 )
 
 
