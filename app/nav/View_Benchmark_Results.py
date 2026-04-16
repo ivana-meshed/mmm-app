@@ -1028,7 +1028,6 @@ for selected_benchmark in selected_benchmarks:
                         _script_path = os.path.join(
                             os.path.dirname(__file__),
                             "..",
-                            "..",
                             "scripts",
                             "analyze_benchmark_results.py",
                         )
