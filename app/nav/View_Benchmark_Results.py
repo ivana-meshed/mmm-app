@@ -308,20 +308,46 @@ def _aggregate_variant_summaries(benchmark_id: str):
 
         best_model = summary.get("best_model", {})
         decomp = summary.get("decomp_contribution", {}) or {}
+        input_meta = summary.get("input_metadata", {}) or {}
         channel_roas = decomp.get("channel_roas") or {}
         channel_cpa = decomp.get("channel_cpa") or {}
 
+        # Prefer top-level summary fields; fall back to input_metadata
+        adstock = summary.get("adstock") or input_meta.get("adstock", "")
+        train_size = summary.get("train_size") or input_meta.get("train_size", "")
+        resample_freq = (
+            summary.get("resample_freq")
+            or input_meta.get("resample_freq", "none")
+        )
+        iterations_raw = summary.get("iterations") or input_meta.get("iterations")
+        trials_raw = summary.get("trials") or input_meta.get("trials")
+        try:
+            iterations = int(iterations_raw) if iterations_raw else None
+        except (ValueError, TypeError):
+            iterations = None
+        try:
+            trials = int(trials_raw) if trials_raw else None
+        except (ValueError, TypeError):
+            trials = None
+
         row = {
+            "benchmark_test": summary.get("benchmark_test", ""),
             "benchmark_variant": variant_name,
-            "country": summary.get("country", ""),
-            "adstock": summary.get("input_metadata", {}).get("adstock", ""),
-            "train_size": str(summary.get("input_metadata", {}).get("train_size", "")),
-            "iterations": summary.get("input_metadata", {}).get("iterations", ""),
-            "trials": summary.get("input_metadata", {}).get("trials", ""),
-            "resample_freq": summary.get("input_metadata", {}).get("resample_freq", "none"),
+            "country": summary.get("country") or input_meta.get("country", ""),
+            "revision": summary.get("revision", "default"),
+            # Preset / window sweep labels (populated by analyze script or
+            # written directly into model_summary.json by newer training jobs)
+            "preset_label": summary.get("preset_label", ""),
+            "window_label": summary.get("window_label", ""),
+            "adstock": adstock,
+            "train_size": str(train_size),
+            "iterations": iterations,
+            "trials": trials,
+            "resample_freq": resample_freq,
             "rsq_train": best_model.get("rsq_train"),
             "rsq_val": best_model.get("rsq_val"),
             "rsq_test": best_model.get("rsq_test"),
+            "nrmse": best_model.get("nrmse"),
             "nrmse_train": best_model.get("nrmse_train"),
             "nrmse_val": best_model.get("nrmse_val"),
             "nrmse_test": best_model.get("nrmse_test"),
