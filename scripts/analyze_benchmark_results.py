@@ -327,6 +327,28 @@ class BenchmarkAnalyzer:
             f"  Variant config: adstock={variant.get('adstock')}, train_size={variant.get('train_size')}"
         )
 
+        # PRIMARY: Check benchmark-specific path first.
+        # When a job is submitted with benchmark_id + benchmark_variant, the R
+        # training script stores results at benchmarks/{benchmark_id}/{variant}/
+        # (see r/run_all.R). This is the canonical location for benchmark jobs.
+        if benchmark_id and variant_name:
+            benchmark_path = (
+                f"benchmarks/{benchmark_id}/{variant_name}/model_summary.json"
+            )
+            logger.info(f"  Trying benchmark path: {benchmark_path}")
+            try:
+                blob = self.bucket.blob(benchmark_path)
+                if blob.exists():
+                    summary = json.loads(blob.download_as_bytes())
+                    logger.info(f"  ✓ Found result at benchmark path")
+                    return self._extract_metrics(summary, variant)
+                else:
+                    logger.debug(f"  ✗ Benchmark path not found: {benchmark_path}")
+            except Exception as e:
+                logger.error(
+                    f"  ✗ Error loading benchmark path {benchmark_path}: {e}"
+                )
+
         # Get timestamp from map (actual execution timestamp)
         timestamp = None
         if timestamp_map:
@@ -358,7 +380,7 @@ class BenchmarkAnalyzer:
             except Exception as e:
                 logger.error(f"  ✗ Error loading exact path {exact_path}: {e}")
 
-        # Fallback: Search for model_summary.json in expected location
+        # Last resort: Search for model_summary.json in legacy location
         prefix = f"robyn/{revision}/{country}/"
         logger.info(f"  Falling back to search in: {prefix}")
 
