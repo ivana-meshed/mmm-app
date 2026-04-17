@@ -943,7 +943,7 @@ class BenchmarkAnalyzer:
             ax.text(
                 0.5,
                 0.5,
-                "⚠️ No Correlation Data\n\n"
+                "[!] No Correlation Data\n\n"
                 "Metrics show no variation across variants.\n"
                 "This typically happens in test runs with low iterations.\n\n"
                 "Consider using --full-run for meaningful comparison.",
