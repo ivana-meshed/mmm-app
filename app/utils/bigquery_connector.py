@@ -13,8 +13,13 @@ import json
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from google.cloud import bigquery, secretmanager
-from google.oauth2 import service_account
+try:
+    from google.cloud import bigquery, secretmanager
+    from google.oauth2 import service_account
+except ImportError:
+    bigquery = None  # type: ignore[assignment]
+    secretmanager = None  # type: ignore[assignment]
+    service_account = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     import pandas as pd
