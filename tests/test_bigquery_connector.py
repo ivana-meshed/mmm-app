@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 # Use direct assignment (not setdefault) so the mock always takes effect even
 # when real google packages are installed (e.g. on a developer's macOS machine).
 # This follows the same pattern used in test_track_daily_costs.py.
+sys.modules["google"] = MagicMock()
 sys.modules["google.cloud"] = MagicMock()
 sys.modules["google.cloud.bigquery"] = MagicMock()
 sys.modules["google.cloud.secretmanager"] = MagicMock()
