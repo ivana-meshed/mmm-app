@@ -91,7 +91,10 @@ class BenchmarkAnalyzer:
         return []
 
     def map_variants_to_timestamps(
-        self, variants: List[Dict], queue_entries: List[Dict]
+        self,
+        variants: List[Dict],
+        queue_entries: List[Dict],
+        benchmark_id: str = "",
     ) -> Dict[str, str]:
         """
         Map variant names to their actual result timestamps from queue.
@@ -105,6 +108,13 @@ class BenchmarkAnalyzer:
         while jobs are still in progress (useful for partial analysis).
         Variants whose entry has none of these path fields are not mapped and
         will fall back to recency-based search in ``_collect_variant_result``.
+
+        When ``benchmark_id`` is provided only queue entries whose
+        ``params.benchmark_id`` matches are considered.  Without this guard
+        the lookup can return a stale timestamp from a *previous* benchmark
+        run for the same variant name, causing the exact-path lookup to fail
+        (benchmark jobs write to ``benchmarks/{id}/{variant}/`` not to
+        ``robyn/{revision}/{country}/{timestamp}/``).
         """
         timestamp_map = {}
 
@@ -117,6 +127,13 @@ class BenchmarkAnalyzer:
             for entry in queue_entries:
                 params = entry.get("params", {})
                 entry_variant = params.get("benchmark_variant", "")
+
+                # Skip entries from other benchmark runs to avoid using stale
+                # timestamps from previous runs of the same variant name.
+                if benchmark_id:
+                    entry_benchmark_id = params.get("benchmark_id", "")
+                    if entry_benchmark_id != benchmark_id:
+                        continue
 
                 if entry_variant == variant_name and entry.get("status") in (
                     "COMPLETED",
@@ -180,7 +197,9 @@ class BenchmarkAnalyzer:
 
         # Load queue entries to find actual timestamps
         queue_entries = self.load_queue_entries(queue_name)
-        timestamp_map = self.map_variants_to_timestamps(variants, queue_entries)
+        timestamp_map = self.map_variants_to_timestamps(
+            variants, queue_entries, benchmark_id=benchmark_id
+        )
 
         # Collect results for each variant
         results = []
