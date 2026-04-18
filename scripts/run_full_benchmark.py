@@ -794,7 +794,7 @@ def run_benchmark_submission(
     logger.info("=" * 80)
 
     cmd = [
-        "python3",
+        sys.executable,
         "scripts/benchmark_mmm.py",
         "--config",
         config_path,
@@ -846,7 +846,7 @@ def process_queue(queue_name: str):
     logger.info("=" * 80)
 
     cmd = [
-        "python3",
+        sys.executable,
         "scripts/process_queue_simple.py",
         "--loop",
         "--cleanup",
@@ -883,7 +883,7 @@ def analyze_results(benchmark_id: str, queue_name: str = DEFAULT_QUEUE):
     logger.info("=" * 80)
 
     cmd = [
-        "python3",
+        sys.executable,
         "scripts/analyze_benchmark_results.py",
         "--benchmark-id",
         benchmark_id,
@@ -904,7 +904,7 @@ def analyze_results(benchmark_id: str, queue_name: str = DEFAULT_QUEUE):
         logger.error(result.stderr)
         logger.warning("   You can run analysis manually later with:")
         logger.warning(
-            f"   python scripts/analyze_benchmark_results.py --benchmark-id {benchmark_id} --queue-name {queue_name}"
+            f"   python scripts/analyze_benchmark_results.py --benchmark-id {benchmark_id} --queue-name {queue_name} --min-r2 0"
         )
     else:
         logger.info(result.stdout)
