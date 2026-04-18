@@ -891,6 +891,8 @@ def analyze_results(benchmark_id: str, queue_name: str = DEFAULT_QUEUE):
         "./benchmark_analysis",
         "--queue-name",
         queue_name,
+        "--min-r2",
+        "0",
     ]
 
     logger.info(f"📊 Running analysis: {' '.join(cmd)}")
