@@ -37,7 +37,7 @@ sf_role      = "ACCOUNTADMIN"
 # 8 vCPU / 32Gi is the maximum available tier on Cloud Run Jobs
 training_cpu       = "8.0"
 training_memory    = "32Gi"
-training_max_cores = "8"
+training_max_cores = "5"
 
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"
