@@ -31,14 +31,12 @@ sf_schema    = "GROWTH"
 sf_role      = "ACCOUNTADMIN"
 
 # Training job resource sizing
-# Using 8 vCPU to bypass Cloud Run platform quotas that affect lower tiers
-# With strong override fix (PR #161), now consistently uses all 8 cores
-# Higher vCPU tiers are scheduled onto less-constrained host pools
-# Cost: ~$0.98/hour = ~$0.20 per 12-min benchmark job (vs $2.92 at 4 vCPU, 30-min)
-# Performance: 2.5× faster than original 30-min runs = significant cost savings
-training_cpu       = "8.0"
-training_memory    = "32Gi"
-training_max_cores = "8"  # Now consistently provides all 8 cores
+# 16 vCPU unlocks the 64Gi memory tier on Cloud Run Jobs (8 vCPU is hard-capped
+# at 32Gi which caused OOM failures with 8 parallel Robyn workers).
+# Cloud Run Jobs pricing: 16 vCPU / 64Gi ≈ $2.0/hour
+training_cpu       = "16.0"
+training_memory    = "64Gi"
+training_max_cores = "16"
 
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"
