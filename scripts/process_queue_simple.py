@@ -813,9 +813,17 @@ def process_queue(
     region: str = "europe-west1",
     training_job_name: str = "mmm-app-training",
     credentials=None,
+    max_concurrent: int = 3,
 ) -> int:
     """
     Process jobs from the queue.
+
+    Args:
+        max_concurrent: Maximum number of Cloud Run Job executions to run
+            simultaneously.  Launching more than ~3-5 at once risks OOM
+            within individual containers (each shares the same 32 Gi budget
+            across its 5 R workers) and can saturate Cloud Run vCPU quotas.
+            Defaults to 3.
 
     Returns:
         Number of jobs processed
@@ -894,6 +902,15 @@ def process_queue(
             time.sleep(RUNNING_JOBS_POLL_INTERVAL)
             continue
 
+        # Enforce concurrent job limit before launching another
+        if running_count >= max_concurrent:
+            logger.info(
+                f"⏸️  Concurrent limit reached ({running_count}/{max_concurrent})"
+                " - waiting for a slot..."
+            )
+            time.sleep(RUNNING_JOBS_POLL_INTERVAL)
+            continue
+
         # Process one job
         success = process_one_job(
             queue_doc=queue_doc,
@@ -962,6 +979,16 @@ def main():
         help="Cloud Run training job name (default: mmm-app-dev-training)",
     )
     parser.add_argument(
+        "--max-concurrent",
+        type=int,
+        default=3,
+        help=(
+            "Maximum number of Cloud Run Job executions to run simultaneously "
+            "(default: 3). Increase for faster throughput; decrease if jobs "
+            "OOM or hit Cloud Run vCPU quotas."
+        ),
+    )
+    parser.add_argument(
         "--cleanup",
         action="store_true",
         help="Clean up old completed/failed jobs from queue",
@@ -989,6 +1016,7 @@ def main():
     logger.info(
         f"Mode: {'loop until empty' if args.loop else f'process {args.count} job(s)'}"
     )
+    logger.info(f"Max concurrent jobs: {args.max_concurrent}")
     if args.cleanup:
         logger.info(
             f"Cleanup: Yes (keep {args.keep_completed} recent completed jobs)"
@@ -1023,6 +1051,7 @@ def main():
             region=args.region,
             training_job_name=args.training_job_name,
             credentials=credentials,
+            max_concurrent=args.max_concurrent,
         )
 
         logger.info("=" * 60)
