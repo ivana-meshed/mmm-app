@@ -31,12 +31,11 @@ sf_schema    = "GROWTH"
 sf_role      = "ACCOUNTADMIN"
 
 # Training job resource sizing
-# 16 vCPU unlocks the 64Gi memory tier on Cloud Run Jobs (8 vCPU is hard-capped
-# at 32Gi which caused OOM failures with 8 parallel Robyn workers).
-# Cloud Run Jobs pricing: 16 vCPU / 64Gi ≈ $2.0/hour
-training_cpu       = "16.0"
-training_memory    = "64Gi"
-training_max_cores = "16"
+# Cloud Run Jobs valid CPU values: .08-1, 1.0, 2.0, 4.0, 6.0, 8.0 (16+ not supported)
+# 8 vCPU / 32Gi is the maximum available tier on Cloud Run Jobs
+training_cpu       = "8.0"
+training_memory    = "32Gi"
+training_max_cores = "8"
 
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"
