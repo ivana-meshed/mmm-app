@@ -819,6 +819,16 @@ def process_queue(
     Process jobs from the queue.
 
     Args:
+        bucket_name: GCS bucket that holds the queue document.
+        queue_name: Name of the queue to process.
+        max_jobs: Maximum number of jobs to launch (ignored when
+            loop_until_empty=True).
+        loop_until_empty: When True, keep running until no pending or
+            running jobs remain.
+        project_id: GCP project ID (defaults to PROJECT_ID env var).
+        region: Cloud Run region (default: europe-west1).
+        training_job_name: Name of the Cloud Run Job resource to execute.
+        credentials: GCP credentials to use for API calls.
         max_concurrent: Maximum number of Cloud Run Job executions to run
             simultaneously.  Launching more than ~3-5 at once risks OOM
             within individual containers (each shares the same 32 Gi budget
