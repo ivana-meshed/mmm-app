@@ -1037,7 +1037,7 @@ class BenchmarkRunner:
                 return "(none)"
             preview = ", ".join(lst[:n])
             if len(lst) > n:
-                preview += f" … (+{len(lst) - n})"
+                preview += f" ... (+{len(lst) - n})"
             return preview
 
         for idx, v in enumerate(variants, 1):

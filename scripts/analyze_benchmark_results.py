@@ -431,8 +431,67 @@ class BenchmarkAnalyzer:
         except Exception as e:
             logger.error(f"  ✗ Error searching for results: {e}")
 
+        # Before giving up, check for failure artifacts written by the R panic
+        # trap (panic_error.json / status.json).  These are uploaded even when
+        # the training job crashes, so their presence tells us *why* the job
+        # failed.
+        if benchmark_id and variant_name:
+            self._log_failure_diagnostics(benchmark_id, variant_name)
+
         logger.error(f"❌ NO RESULTS FOUND for variant: {variant_name}")
         return None
+
+    def _log_failure_diagnostics(
+        self, benchmark_id: str, variant_name: str
+    ) -> None:
+        """Log failure diagnostics from panic_error.json / status.json.
+
+        The R training script uploads these artifacts to
+        ``benchmarks/{id}/{variant}/`` whenever the job exits abnormally
+        (via the panic trap installed in run_all.R).  Reading them here
+        surfaces the root-cause error message without requiring access to
+        Cloud Run logs.
+        """
+        prefix = f"benchmarks/{benchmark_id}/{variant_name}"
+
+        for artifact in ("panic_error.json", "status.json"):
+            blob_path = f"{prefix}/{artifact}"
+            try:
+                blob = self.bucket.blob(blob_path)
+                if not blob.exists():
+                    continue
+                payload = json.loads(blob.download_as_bytes())
+                state = payload.get("state", "")
+                if artifact == "panic_error.json":
+                    msg = payload.get("message", "")
+                    step = payload.get("step", "")
+                    logger.warning(
+                        f"  💥 {variant_name} crashed"
+                        + (f" at step '{step}'" if step else "")
+                        + (f": {msg}" if msg else "")
+                    )
+                    return  # panic_error.json is more informative; stop here
+                elif state and state != "RUNNING":
+                    # status.json present but no panic_error.json means the job
+                    # completed without writing a panic payload (e.g. an early
+                    # crash before the panic trap was installed, or a successful
+                    # run that simply produced no model_summary.json).
+                    logger.warning(
+                        f"  ⚠️  {variant_name} status.json shows state={state!r}"
+                        " (no panic_error.json found)"
+                    )
+                    return
+                elif state == "RUNNING":
+                    logger.warning(
+                        f"  ⚠️  {variant_name} status.json still shows"
+                        " state='RUNNING' — job may have been killed without"
+                        " writing failure artifacts"
+                    )
+                    return
+            except Exception as exc:
+                logger.debug(
+                    f"  Could not read {blob_path}: {exc}"
+                )
 
     def _matches_variant(
         self, summary: Dict[str, Any], variant: Dict[str, Any]
@@ -1621,8 +1680,15 @@ def main():
         df = analyzer.collect_results(args.benchmark_id, args.queue_name)
 
     if df is None or df.empty:
-        logger.error("No results found to analyze")
-        return 1
+        logger.warning(
+            "No results found to analyze — all benchmark jobs may have failed. "
+            "Check the variant diagnostics logged above for crash details."
+        )
+        logger.warning(
+            "Tip: check GCS for panic_error.json / console.log under "
+            f"benchmarks/{args.benchmark_id}/<variant>/"
+        )
+        return 0
 
     # Filter out low-quality results below the R² threshold
     if args.min_r2 is not None:
