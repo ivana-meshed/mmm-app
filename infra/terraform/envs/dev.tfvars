@@ -36,10 +36,8 @@ sf_role      = "ACCOUNTADMIN"
 # Testing with 8 vCPU to bypass Cloud Run platform quotas that affect lower tiers
 # With strong override fix (PR #161), now consistently uses all 8 cores
 # Higher vCPU tiers are scheduled onto less-constrained host pools
-# Memory increased to 64Gi to prevent OOM kills during parallel training
-# (8 workers × ~6-7GB each peak usage during nevergrad optimization)
 training_cpu       = "8.0"
-training_memory    = "64Gi"
+training_memory    = "32Gi"
 training_max_cores = "8"  # Now consistently provides all 8 cores
 
 # Google OAuth allowed domains (comma-separated)

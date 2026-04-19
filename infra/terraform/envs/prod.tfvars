@@ -36,10 +36,8 @@ sf_role      = "ACCOUNTADMIN"
 # Higher vCPU tiers are scheduled onto less-constrained host pools
 # Cost: ~$0.98/hour = ~$0.20 per 12-min benchmark job (vs $2.92 at 4 vCPU, 30-min)
 # Performance: 2.5× faster than original 30-min runs = significant cost savings
-# Memory increased to 64Gi to prevent OOM kills during parallel training
-# (8 workers × ~6-7GB each peak usage during nevergrad optimization)
 training_cpu       = "8.0"
-training_memory    = "64Gi"
+training_memory    = "32Gi"
 training_max_cores = "8"  # Now consistently provides all 8 cores
 
 # Google OAuth allowed domains (comma-separated)
