@@ -1373,11 +1373,38 @@ if (length(paid_media_spends_cfg) == length(paid_media_vars_cfg)) {
     paid_media_spends <- paid_media_spends_cfg[pair_ok]
     paid_media_vars   <- paid_media_vars_cfg[pair_ok]
 } else {
-    # Config lengths already differ — fall back to independent intersection.
-    # The stopifnot below will fire if lengths remain unequal, which is the
-    # correct behaviour for a genuinely misconfigured variant.
-    paid_media_spends <- intersect(paid_media_spends_cfg, names(df))
-    paid_media_vars   <- intersect(paid_media_vars_cfg, names(df))
+    # Config lengths differ — align by padding the shorter list.
+    # If spends has more entries than vars, use the spend column itself as the
+    # fallback var for the extra positions (the user left them blank in the UI).
+    # If vars has more entries, truncate to match spends (no spend ⇒ no pair).
+    n_spends <- length(paid_media_spends_cfg)
+    n_vars   <- length(paid_media_vars_cfg)
+    if (n_spends > n_vars) {
+        message("ℹ️ paid_media_spends has more entries than paid_media_vars (",
+                n_spends, " vs ", n_vars, "); using spend column as fallback var ",
+                "for positions ", (n_vars + 1), " to ", n_spends)
+        paid_media_vars_cfg <- c(
+            paid_media_vars_cfg,
+            paid_media_spends_cfg[(n_vars + 1):n_spends]
+        )
+    } else {
+        message("ℹ️ paid_media_vars has more entries than paid_media_spends (",
+                n_vars, " vs ", n_spends, "); truncating vars to match spends length")
+        paid_media_vars_cfg <- paid_media_vars_cfg[seq_len(n_spends)]
+    }
+    # Now lengths match — apply the same pair-based filtering as the normal path.
+    pair_ok <- paid_media_spends_cfg %in% names(df) & paid_media_vars_cfg %in% names(df)
+    if (any(!pair_ok)) {
+        dropped <- paste(
+            paid_media_spends_cfg[!pair_ok],
+            "→",
+            paid_media_vars_cfg[!pair_ok],
+            collapse = ", "
+        )
+        message("ℹ️ Dropping spend/var pairs where a column is absent from data: ", dropped)
+    }
+    paid_media_spends <- paid_media_spends_cfg[pair_ok]
+    paid_media_vars   <- paid_media_vars_cfg[pair_ok]
 }
 if (length(paid_media_spends) != length(paid_media_vars)) {
     pm_skip_msg <- sprintf(
