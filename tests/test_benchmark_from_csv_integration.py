@@ -13,6 +13,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pandas as pd
 
@@ -21,6 +22,14 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+# Mock google packages before importing scripts that use them,
+# so tests run in environments where google-cloud-storage is not installed.
+# Use direct assignment (not setdefault) so the mock always takes effect even
+# when real google packages are installed (e.g. on a developer's macOS machine).
+sys.modules["google"] = MagicMock()
+sys.modules["google.cloud"] = MagicMock()
+sys.modules["google.cloud.storage"] = MagicMock()
 
 import argparse
 
@@ -868,11 +877,14 @@ class TestArgParsingTvDevRun(unittest.TestCase):
             --csv data/dk/mmm_data_v2_with_tv.csv \\
             --columns-mapping benchmark_analysis/dk_json_configs_clean/dk_final_with_tv_config.json \\
             --full-run --queue-name default-dev \\
-            --iterations 100 --trials 1
+            --iterations 100 --trials 1 --sequential
 
-    ``--full-run``, ``--queue-name``, ``--iterations``, and ``--trials`` are
-    not defined in run_benchmark_from_csv.py's parser; they must appear verbatim
-    in ``extra_args`` so they are forwarded to run_full_benchmark.py.
+    ``--full-run``, ``--queue-name``, ``--iterations``, ``--trials``, and
+    ``--sequential`` are not defined in run_benchmark_from_csv.py's parser;
+    they must appear verbatim in ``extra_args`` so they are forwarded to
+    run_full_benchmark.py.  ``--sequential`` switches combination mode from
+    the default cartesian product to sequential (one dimension at a time),
+    which avoids OOM kills on smaller Cloud Run memory tiers.
     """
 
     # Simulate the argv for the exact problem-statement command
@@ -893,6 +905,7 @@ class TestArgParsingTvDevRun(unittest.TestCase):
         "100",
         "--trials",
         "1",
+        "--sequential",
     ]
 
     def _parse(self):
@@ -965,6 +978,11 @@ class TestArgParsingTvDevRun(unittest.TestCase):
         """Without --skip-queue the queue is processed after submission."""
         _, extra_args = self._parse()
         self.assertNotIn("--skip-queue", extra_args)
+
+    def test_sequential_in_extra_args(self):
+        """--sequential must be forwarded to run_full_benchmark.py."""
+        _, extra_args = self._parse()
+        self.assertIn("--sequential", extra_args)
 
     def test_no_mapping_flag_not_set(self):
         args, _ = self._parse()
