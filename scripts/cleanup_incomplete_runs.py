@@ -77,7 +77,15 @@ def _has_plots(blobs) -> bool:
 
 
 def _has_r2(blobs) -> bool:
-    """Return True if any blob looks like it contains r2 metrics."""
+    """Return True if any blob looks like it contains r2 metrics or spend output.
+
+    Accepted signals (any one is sufficient):
+    1. model_summary.json with r2/rsq fields.
+    2. Any CSV whose column names contain 'r2' or 'rsq'.
+    3. allocator_metrics.csv with a non-null, non-zero ``allocator_total_spend``
+       value — a reliable sign that the model ran to completion and the budget
+       allocator succeeded even when r2 values happen to be NA/missing.
+    """
     for b in blobs:
         name_l = b.name.lower()
         # model_summary.json is the canonical source
@@ -89,16 +97,32 @@ def _has_r2(blobs) -> bool:
                     return True
             except Exception:
                 pass
-        # Also check allocator_metrics.csv / any CSV that has r2 columns
         if _PANDAS_AVAILABLE and name_l.endswith(".csv"):
             try:
                 raw = b.download_as_bytes()
                 df = pd.read_csv(io.BytesIO(raw), nrows=5)
                 cols_l = [c.lower() for c in df.columns]
+                # Primary check: column names contain r2 or rsq
                 if any("r2" in c or "rsq" in c for c in cols_l):
+                    return True
+                # Fallback: allocator_metrics.csv with a real spend value
+                if name_l.endswith("allocator_metrics.csv") and _has_spend_value(df):
                     return True
             except Exception:
                 pass
+    return False
+
+
+def _has_spend_value(df) -> bool:
+    """Return True if the dataframe has a numeric spend column with a positive value."""
+    spend_cols = [c for c in df.columns if "spend" in c.lower()]
+    for col in spend_cols:
+        try:
+            val = pd.to_numeric(df[col].iloc[0], errors="coerce")
+            if val is not None and val > 0:
+                return True
+        except Exception:
+            pass
     return False
 
 
