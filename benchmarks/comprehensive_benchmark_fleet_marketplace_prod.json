@@ -34,7 +34,7 @@
     "spend_var_mapping": [
       {
         "name": "mixed_by_funnel_clicks",
-        "description": "Upper funnel (FB) → impressions; search/other → spend. Column order matches paid_media_spends.",
+        "description": "Upper funnel (FB/TV/radio) → impressions/GRP; search/other → spend. Column order matches paid_media_spends.",
         "mapping_strategy": "mixed",
         "paid_media_vars_override": [
           "GOOGLE_SEARCH_BRAND_COST",
@@ -46,12 +46,14 @@
           "BING_OTHER_COST",
           "FB_UPPER_IMPRESSIONS",
           "FB_LOWER_COST",
-          "FB_APP_COST"
+          "FB_APP_COST",
+          "WBR_TOTAL_GRP",
+          "BAUER_GRP_FLOW_RADIO"
         ]
       },
       {
         "name": "spend_to_clicks",
-        "description": "All channels: spend → clicks/impressions proxy. Column order matches paid_media_spends.",
+        "description": "All channels: spend → clicks/impressions/GRP proxy. Column order matches paid_media_spends.",
         "mapping_strategy": "spend_to_proxy",
         "paid_media_vars_override": [
           "GOOGLE_SEARCH_BRAND_CLICKS",
@@ -63,7 +65,9 @@
           "BING_OTHER_CLICKS",
           "FB_UPPER_IMPRESSIONS",
           "FB_LOWER_CLICKS",
-          "FB_APP_CLICKS"
+          "FB_APP_CLICKS",
+          "WBR_TOTAL_GRP",
+          "BAUER_GRP_FLOW_RADIO"
         ]
       }
     ]
