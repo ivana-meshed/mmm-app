@@ -1389,8 +1389,12 @@ if (length(paid_media_spends_cfg) == length(paid_media_vars_cfg)) {
         )
     } else {
         message("ℹ️ paid_media_vars has more entries than paid_media_spends (",
-                n_vars, " vs ", n_spends, "); truncating vars to match spends length")
-        paid_media_vars_cfg <- paid_media_vars_cfg[seq_len(n_spends)]
+                n_vars, " vs ", n_spends, "); using var column as fallback spend ",
+                "for positions ", (n_spends + 1), " to ", n_vars)
+        paid_media_spends_cfg <- c(
+            paid_media_spends_cfg,
+            paid_media_vars_cfg[(n_spends + 1):n_vars]
+        )
     }
     # Now lengths match — apply the same pair-based filtering as the normal path.
     pair_ok <- paid_media_spends_cfg %in% names(df) & paid_media_vars_cfg %in% names(df)
