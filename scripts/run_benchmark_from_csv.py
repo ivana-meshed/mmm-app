@@ -69,6 +69,13 @@ Usage
         --full-run --queue-name default-dev \\
         --iterations 100 --trials 1 --skip-queue
 
+    # TV + radio channels — dev run, submit and wait for results (100 iter, 1 trial)
+    python scripts/run_benchmark_from_csv.py \\
+        --csv data/dk/mmm_data_v2_with_tv.csv \\
+        --columns-mapping benchmark_analysis/dk_json_configs_clean/dk_final_with_tv_config.json \\
+        --full-run --queue-name default-dev \\
+        --iterations 100 --trials 1
+
     # TV + radio channels — full production run
     python scripts/run_benchmark_from_csv.py \\
         --csv data/dk/mmm_data_v2_with_tv.csv \\

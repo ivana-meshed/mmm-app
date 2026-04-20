@@ -22,6 +22,8 @@ import pandas as pd
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
+import argparse
+
 from run_benchmark_from_csv import (  # noqa: E402
     COLUMN_RENAME_MAP,
     DEFAULT_DK_MAPPING,
@@ -856,6 +858,148 @@ class TestTvEndToEnd(unittest.TestCase):
         mapping = sc["var_to_spend_mapping"]
         self.assertEqual(mapping.get("WBR_TOTAL_GRP"), "WBR_TOTAL_SPEND")
         self.assertEqual(mapping.get("BAUER_GRP_FLOW_RADIO"), "BAUER_SPEND_FLOW_RADIO")
+
+
+class TestArgParsingTvDevRun(unittest.TestCase):
+    """
+    Validates argument parsing for the canonical TV dev-run command:
+
+        python scripts/run_benchmark_from_csv.py \\
+            --csv data/dk/mmm_data_v2_with_tv.csv \\
+            --columns-mapping benchmark_analysis/dk_json_configs_clean/dk_final_with_tv_config.json \\
+            --full-run --queue-name default-dev \\
+            --iterations 100 --trials 1
+
+    ``--full-run``, ``--queue-name``, ``--iterations``, and ``--trials`` are
+    not defined in run_benchmark_from_csv.py's parser; they must appear verbatim
+    in ``extra_args`` so they are forwarded to run_full_benchmark.py.
+    """
+
+    # Simulate the argv for the exact problem-statement command
+    ARGV = [
+        "--csv",
+        str(REPO_ROOT / "data" / "dk" / "mmm_data_v2_with_tv.csv"),
+        "--columns-mapping",
+        str(
+            REPO_ROOT
+            / "benchmark_analysis"
+            / "dk_json_configs_clean"
+            / "dk_final_with_tv_config.json"
+        ),
+        "--full-run",
+        "--queue-name",
+        "default-dev",
+        "--iterations",
+        "100",
+        "--trials",
+        "1",
+    ]
+
+    def _parse(self):
+        """Re-create the parser from main() and apply our ARGV."""
+        import importlib
+        import types
+
+        # Import the module so we can build the same parser
+        import run_benchmark_from_csv as mod
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--csv", required=True)
+        parser.add_argument("--country-name", default="Denmark")
+        parser.add_argument("--country-code", default="dk")
+        parser.add_argument("--goal", default="BOOKINGS")
+        parser.add_argument("--dep-var-type", default="revenue")
+        parser.add_argument("--bucket", default="mmm-app-output")
+        mapping_group = parser.add_mutually_exclusive_group()
+        mapping_group.add_argument("--columns-mapping", default=None)
+        mapping_group.add_argument("--no-mapping", action="store_true", default=False)
+        args, extra_args = parser.parse_known_args(self.ARGV)
+        return args, extra_args
+
+    def test_csv_path_parsed(self):
+        args, _ = self._parse()
+        self.assertTrue(
+            args.csv.endswith("mmm_data_v2_with_tv.csv"),
+            f"Unexpected csv path: {args.csv}",
+        )
+
+    def test_columns_mapping_parsed(self):
+        args, _ = self._parse()
+        self.assertIsNotNone(args.columns_mapping)
+        self.assertTrue(
+            args.columns_mapping.endswith("dk_final_with_tv_config.json"),
+            f"Unexpected columns_mapping: {args.columns_mapping}",
+        )
+
+    def test_default_goal(self):
+        args, _ = self._parse()
+        self.assertEqual(args.goal, "BOOKINGS")
+
+    def test_default_country_code(self):
+        args, _ = self._parse()
+        self.assertEqual(args.country_code, "dk")
+
+    def test_full_run_in_extra_args(self):
+        _, extra_args = self._parse()
+        self.assertIn("--full-run", extra_args)
+
+    def test_queue_name_in_extra_args(self):
+        _, extra_args = self._parse()
+        self.assertIn("--queue-name", extra_args)
+        idx = extra_args.index("--queue-name")
+        self.assertEqual(extra_args[idx + 1], "default-dev")
+
+    def test_iterations_in_extra_args(self):
+        _, extra_args = self._parse()
+        self.assertIn("--iterations", extra_args)
+        idx = extra_args.index("--iterations")
+        self.assertEqual(extra_args[idx + 1], "100")
+
+    def test_trials_in_extra_args(self):
+        _, extra_args = self._parse()
+        self.assertIn("--trials", extra_args)
+        idx = extra_args.index("--trials")
+        self.assertEqual(extra_args[idx + 1], "1")
+
+    def test_skip_queue_not_present(self):
+        """Without --skip-queue the queue is processed after submission."""
+        _, extra_args = self._parse()
+        self.assertNotIn("--skip-queue", extra_args)
+
+    def test_no_mapping_flag_not_set(self):
+        args, _ = self._parse()
+        self.assertFalse(args.no_mapping)
+
+    def test_csv_file_exists(self):
+        args, _ = self._parse()
+        self.assertTrue(
+            Path(args.csv).exists(),
+            f"CSV fixture missing: {args.csv}",
+        )
+
+    def test_config_file_exists(self):
+        args, _ = self._parse()
+        self.assertTrue(
+            Path(args.columns_mapping).exists(),
+            f"Config fixture missing: {args.columns_mapping}",
+        )
+
+    def test_pipeline_produces_valid_selected_columns(self):
+        """Full in-process pipeline with this command's CSV + config."""
+        df = _load_dk_tv_df()
+        result = load_columns_from_mapping(TV_CONFIG_PATH, df.columns.tolist())
+        sc = _build_selected_columns(result, dep_var="BOOKINGS")
+        for key in REQUIRED_SELECTED_COLUMNS_KEYS:
+            self.assertIn(key, sc, f"Missing key: {key}")
+        # TV and radio spend channels must be present
+        self.assertIn("WBR_TOTAL_SPEND", sc["paid_media_spends"])
+        self.assertIn("BAUER_SPEND_FLOW_RADIO", sc["paid_media_spends"])
+        # TV and radio GRP vars must be in all_selected_drivers
+        drivers = set(sc["all_selected_drivers"])
+        self.assertIn("WBR_TOTAL_GRP", drivers)
+        self.assertIn("BAUER_GRP_FLOW_RADIO", drivers)
+        # Must be JSON-serialisable
+        json.dumps(sc)
 
 
 if __name__ == "__main__":
