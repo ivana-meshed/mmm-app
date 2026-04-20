@@ -1078,7 +1078,9 @@ df <- safe_parse_numbers(df, cost_cols)
 # Dates are now sourced from config (start_data_date, end_data_date); previous hardcoded assignments have been removed.
 df <- df %>% filter(date >= start_data_date, date <= end_data_date)
 df$DOW <- wday(df$date, label = TRUE)
-df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
+# Use numeric day index (1=Sunday, 7=Saturday in lubridate) to avoid ordered-
+# factor / locale issues with %in% on label-based factors.
+df$IS_WEEKEND <- as.integer(wday(df$date) %in% c(1L, 7L))
 
 # Rename UPLOAD_VALUE → dep_var if the config specifies a different name.
 # The Streamlit upload pipeline always stores the KPI as "UPLOAD_VALUE" in
@@ -1377,7 +1379,38 @@ if (length(paid_media_spends_cfg) == length(paid_media_vars_cfg)) {
     paid_media_spends <- intersect(paid_media_spends_cfg, names(df))
     paid_media_vars   <- intersect(paid_media_vars_cfg, names(df))
 }
-stopifnot(length(paid_media_spends) == length(paid_media_vars))
+if (length(paid_media_spends) != length(paid_media_vars)) {
+    pm_skip_msg <- sprintf(
+        "paid_media_spends (%d) and paid_media_vars (%d) have unequal lengths after filtering to available columns",
+        length(paid_media_spends), length(paid_media_vars)
+    )
+    message("⏭️ SKIPPING: ", pm_skip_msg)
+    skip_file <- file.path(dir_path, "SKIPPED.txt")
+    writeLines(c(
+        paste0("Country: ", country),
+        paste0("Revision: ", revision),
+        "",
+        "Skip reason(s):",
+        paste0("  - ", pm_skip_msg)
+    ), skip_file)
+    gcs_put_safe(skip_file, file.path(gcs_prefix, "SKIPPED.txt"))
+    writeLines(
+        jsonlite::toJSON(
+            list(
+                state = "SKIPPED",
+                start_time = as.character(job_started),
+                end_time = as.character(Sys.time()),
+                skip_reason = pm_skip_msg
+            ),
+            auto_unbox = TRUE, pretty = TRUE
+        ),
+        status_json
+    )
+    gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+    flush_and_ship_log("skipped - paid_media_spends/vars length mismatch")
+    message("✅ Skipped successfully. Exiting without error.")
+    quit(save = "no", status = 0)
+}
 
 keep_idx <- vapply(seq_along(paid_media_spends), function(i) sum(df[[paid_media_spends[i]]], na.rm = TRUE) > 0, logical(1))
 paid_media_spends <- paid_media_spends[keep_idx]
