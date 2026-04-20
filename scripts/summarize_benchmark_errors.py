@@ -10,8 +10,8 @@ optionally writes CSV / JSON output files.
 Usage:
     python scripts/summarize_benchmark_errors.py \\
         --file-list benchmark_files_last7days.txt \\
-        --output-csv  /tmp/benchmark_errors.csv \\
-        --output-json /tmp/benchmark_errors.json
+        --output-csv  benchmark_errors.csv \\
+        --output-json benchmark_errors.json
 
     # dry-run (parse the listing, do NOT download from GCS):
     python scripts/summarize_benchmark_errors.py \\
