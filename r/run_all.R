@@ -495,10 +495,7 @@ cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━�
 # Set max_cores for use in robyn_run()
 max_cores <- safe_cores
 
-# Set up future plan for parallel processing
-plan(multisession, workers = max_cores)
-
-cat(sprintf("✅ Parallel processing initialized with %d workers\n\n", max_cores))
+cat(sprintf("Parallel processing will use %d workers (initialized just before robyn_run)\n\n", max_cores))
 
 ## ---------- HELPERS ----------
 should_add_n_searches <- function(dtf, spend_cols, thr = 0.15) {
@@ -878,28 +875,29 @@ run_report_file <- file.path(dir_path, "run_report.txt")
 }
 
 # Write the report header (once at startup)
+# Note: plain ASCII is used deliberately so the file renders correctly in any
+# viewer (avoids garbled UTF-8 box-drawing characters in non-UTF-8 terminals).
+report_bucket <- cfg$gcs_bucket %||% Sys.getenv("GCS_BUCKET", "mmm-app-output")
 report_header <- c(
-    "════════════════════════════════════════════════════════════",
+    "============================================================",
     "                  MMM TRAINING  RUN REPORT",
-    "════════════════════════════════════════════════════════════",
+    "============================================================",
     sprintf("Run ID       : %s / %s / %s", revision, country, timestamp),
     sprintf("Started      : %s", format(job_started, "%Y-%m-%d %H:%M:%S %Z")),
-    sprintf("GCS prefix   : gs://%s/%s",
-            tryCatch(googleCloudStorageR::gcs_get_global_bucket(), error = function(e) "<unknown>"),
-            gcs_prefix),
+    sprintf("GCS prefix   : gs://%s/%s", report_bucket, gcs_prefix),
     sprintf("Dir path     : %s", dir_path),
     sprintf("Job config   : %s", Sys.getenv("JOB_CONFIG_GCS_PATH", "<not set>")),
     sprintf("RUN_WORKSPACE: %s", Sys.getenv("RUN_WORKSPACE", "<local>")),
     sprintf("TMPDIR       : %s", Sys.getenv("TMPDIR", "/tmp")),
     "",
-    "── System ──────────────────────────────────────────────────",
+    "-- System --------------------------------------------------",
     sprintf("R version    : %s", R.version$version.string),
     sprintf("Platform     : %s", R.version$platform),
     sprintf("CPU cores    : %d available, %d requested, %d for training",
             available_cores_parallelly, requested_cores, max_cores),
     sprintf("Memory       : %s", .mem_snapshot()),
     "",
-    "── Job Config ──────────────────────────────────────────────",
+    "-- Job Config ----------------------------------------------",
     sprintf("Country      : %s", country),
     sprintf("Revision     : %s", revision),
     sprintf("Iterations   : %d", iter),
@@ -909,23 +907,24 @@ report_header <- c(
     sprintf("HP preset    : %s", hyperparameter_preset),
     sprintf("Resample     : %s", resample_freq),
     sprintf("Dep var      : %s (%s)", dep_var_from_cfg, dep_var_type_from_cfg),
-    sprintf("Date range   : %s → %s", start_data_date, end_data_date),
+    sprintf("Date range   : %s to %s", start_data_date, end_data_date),
     "",
-    "── Steps ───────────────────────────────────────────────────",
+    "-- Steps ---------------------------------------------------",
     ""
 )
 writeLines(report_header, run_report_file)
 gcs_put_safe(run_report_file, file.path(gcs_prefix, "run_report.txt"))
 
 # Helper: append one step record to run_report.txt and push to GCS
+# Uses plain ASCII status markers so the file renders correctly in any viewer.
 report_step <- function(step_name, status = "OK", details = NULL, t_start = NULL) {
     ts     <- format(Sys.time(), "%H:%M:%S")
     icon   <- switch(status,
-        "OK"   = "✅",
-        "FAIL" = "❌",
-        "WARN" = "⚠️ ",
-        "SKIP" = "⏭️ ",
-        "ℹ️ "   # default for any unrecognised status
+        "OK"   = "[OK]  ",
+        "FAIL" = "[FAIL]",
+        "WARN" = "[WARN]",
+        "SKIP" = "[SKIP]",
+        "[INFO]"   # default for any unrecognised status
     )
     elapsed_str <- if (!is.null(t_start)) {
         sprintf(" [%.1fs]", as.numeric(difftime(Sys.time(), t_start, units = "secs")))
@@ -2267,11 +2266,16 @@ robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
 
 # Helper function to attempt robyn_run with specified cores
 .try_robyn_run <- function(cores_to_use, attempt_number = 1) {
-    cat(sprintf("\n🔄 Attempt %d: Running with %d cores...\n", attempt_number, cores_to_use))
-    
-    # Update future plan with new core count
+    cat(sprintf("\nAttempt %d: Running with %d cores...\n", attempt_number, cores_to_use))
+
+    # Run garbage collection before spawning workers to minimise peak RAM
+    invisible(gc(verbose = FALSE, full = TRUE))
+    cat(sprintf("Memory before plan(): %s\n", .mem_snapshot()))
+
+    # Set up future plan with the requested number of workers
     plan(multisession, workers = cores_to_use)
-    
+    cat(sprintf("Parallel workers initialised: %d\n", cores_to_use))
+
     tryCatch(
         withCallingHandlers(
             robyn_run(
@@ -2295,6 +2299,10 @@ robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
 }
 
 flush_and_ship_log("before robyn_run")
+
+# Force GC to reclaim any unused memory before spawning parallel workers
+invisible(gc(verbose = FALSE, full = TRUE))
+message("Memory before training: ", .mem_snapshot())
 
 # Try with full cores first
 OutputModels <- .try_robyn_run(max_cores, attempt_number = 1)
