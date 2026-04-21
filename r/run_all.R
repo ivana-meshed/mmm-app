@@ -14,8 +14,8 @@ Sys.setenv(
     RETICULATE_AUTOCONFIGURE = "0",
     TZ = "Europe/Berlin",
     R_MAX_CORES = Sys.getenv("R_MAX_CORES", "32"),
-    OMP_NUM_THREADS = Sys.getenv("OMP_NUM_THREADS", "32"),
-    OPENBLAS_NUM_THREADS = Sys.getenv("OPENBLAS_NUM_THREADS", "32")
+    OMP_NUM_THREADS = Sys.getenv("OMP_NUM_THREADS", "8"),
+    OPENBLAS_NUM_THREADS = Sys.getenv("OPENBLAS_NUM_THREADS", "8")
 )
 
 # Force rebuild timestamp: 2025-12-17T10:18
@@ -1925,6 +1925,10 @@ message("Pre-built hyperparameters (", hyperparameter_preset, " preset): ", leng
 log_hyperparameters(hyperparameters, dir_path)
 flush_and_ship_log("after hyperparameters build")
 
+# Free preflight InputCollect before building the final one to cut peak RSS.
+# Both objects would otherwise coexist in memory during the second robyn_inputs() call.
+rm(InputCollect); gc(verbose = FALSE, full = TRUE)
+message("Memory after freeing preflight InputCollect: ", .mem_snapshot())
 
 ## ---------- NOW CALL robyn_inputs WITH hyperparameters ----------
 InputCollect <- tryCatch(
@@ -1972,6 +1976,11 @@ InputCollect <- tryCatch(
 # Already prints a textual snapshot; also persist files to debug/
 log_ic_snapshot_files(InputCollect, dir_path, tag = "with_hp")
 flush_and_ship_log("after robyn_inputs with hyperparameters")
+
+# df is now fully duplicated inside InputCollect$dt_input — free the original.
+# This is typically the largest single object in memory at this point.
+rm(df); gc(verbose = FALSE, full = TRUE)
+message("Memory after freeing df: ", .mem_snapshot())
 
 # Check if robyn_inputs succeeded
 if (is.null(InputCollect)) {
@@ -2646,6 +2655,12 @@ saveRDS(InputCollect, file.path(dir_path, "InputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputModels.RDS"), file.path(gcs_prefix, "OutputModels.RDS"))
 gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "InputCollect.RDS"))
 
+# Close the multisession workers (3 × ~6 GiB) and run a full GC before
+# robyn_outputs(), which is single-threaded (cores = NULL).
+plan(sequential)
+gc(verbose = FALSE, full = TRUE)
+message("Memory after closing parallel workers: ", .mem_snapshot())
+
 ## ---------- OUTPUTS & ONEPAGERS ----------
 flush_and_ship_log("before robyn_outputs")
 OutputCollect <- tryCatch(
@@ -2725,6 +2740,11 @@ if (!is.null(OutputCollect$xDecompAgg)) {
 
 saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
+
+# robyn_onepagers() only needs InputCollect + OutputCollect, not OutputModels.
+# Free it now to reclaim several GiB before the plotting phase.
+rm(OutputModels); gc(verbose = FALSE, full = TRUE)
+message("Memory after freeing OutputModels: ", .mem_snapshot())
 
 ## ---------- EXTRACT PARQUET DATA FROM OUTPUTCOLLECT ----------
 message("→ Extracting compressed data from OutputCollect.RDS to parquet files...")
