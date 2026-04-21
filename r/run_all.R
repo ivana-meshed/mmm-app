@@ -1445,6 +1445,12 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
             # Replace original dataframe
             df <- df_resampled
 
+            # Free the intermediate objects now that df holds the result.
+            rm(df_resampled)
+            if (exists("df_non_numeric")) rm(df_non_numeric)
+            gc(verbose = FALSE, full = TRUE)
+            message("Memory after freeing resampled intermediates: ", .mem_snapshot())
+
             # Log post-resample state
             post_resample_rows <- nrow(df)
             post_resample_date_range <- paste(min(df$date), "to", max(df$date))
@@ -1763,6 +1769,29 @@ get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
         list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.5))
     }
 }
+
+# Narrow df to only the columns Robyn needs.  The raw dataframe can carry
+# dozens of source columns (country codes, raw impressions, …) that are never
+# passed to robyn_inputs().  Dropping them here shrinks the object that is
+# duplicated inside InputCollect$dt_input and reduces peak RSS during both
+# the preflight and final robyn_inputs() calls.
+robyn_needed_cols <- unique(c(
+    "date", dep_var_from_cfg,
+    paid_media_spends, paid_media_vars,
+    context_vars, factor_vars, organic_vars
+))
+robyn_needed_cols <- intersect(robyn_needed_cols, names(df))
+cols_before <- ncol(df)
+df <- df[, robyn_needed_cols, drop = FALSE]
+cols_after <- ncol(df)
+if (cols_before > cols_after) {
+    message(sprintf(
+        "ℹ️  Narrowed df from %d to %d columns before robyn_inputs() (%d dropped)",
+        cols_before, cols_after, cols_before - cols_after
+    ))
+}
+gc(verbose = FALSE, full = TRUE)
+message("Memory after narrowing df: ", .mem_snapshot())
 
 # Log data dimensions before robyn_inputs
 message("→ Data ready for robyn_inputs:")
