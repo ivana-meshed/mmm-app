@@ -849,22 +849,32 @@ cleanup <- function() {
 
 run_report_file <- file.path(dir_path, "run_report.txt")
 
-# Helper: return current RSS or cgroup memory usage as a readable string
+# Helper: return current RSS or cgroup memory usage as a readable string.
+# Tries cgroup v1 first (/sys/fs/cgroup/memory/…), falls back to cgroup v2
+# (/sys/fs/cgroup/memory.current + memory.max), then gives up gracefully.
 .mem_snapshot <- function() {
-    used_str <- tryCatch({
-        cg_usage <- "/sys/fs/cgroup/memory/memory.usage_in_bytes"
-        cg_limit <- "/sys/fs/cgroup/memory/memory.limit_in_bytes"
-        if (file.exists(cg_usage) && file.exists(cg_limit)) {
-            used_bytes <- as.numeric(readLines(cg_usage, warn = FALSE)[1])
-            limit_bytes <- as.numeric(readLines(cg_limit, warn = FALSE)[1])
-            used_gb  <- round(used_bytes  / 1024^3, 2)
-            limit_gb <- round(limit_bytes / 1024^3, 2)
-            sprintf("%.2f / %.2f GiB", used_gb, limit_gb)
+    tryCatch({
+        cg1_usage <- "/sys/fs/cgroup/memory/memory.usage_in_bytes"
+        cg1_limit <- "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+        cg2_usage <- "/sys/fs/cgroup/memory.current"
+        cg2_limit <- "/sys/fs/cgroup/memory.max"
+
+        if (file.exists(cg1_usage) && file.exists(cg1_limit)) {
+            # cgroup v1
+            used_bytes  <- as.numeric(readLines(cg1_usage, warn = FALSE)[1])
+            limit_bytes <- as.numeric(readLines(cg1_limit, warn = FALSE)[1])
+        } else if (file.exists(cg2_usage) && file.exists(cg2_limit)) {
+            # cgroup v2
+            used_bytes  <- as.numeric(readLines(cg2_usage, warn = FALSE)[1])
+            limit_raw   <- readLines(cg2_limit, warn = FALSE)[1]
+            limit_bytes <- if (limit_raw == "max") Inf else as.numeric(limit_raw)
         } else {
-            "unavailable"
+            return("unavailable")
         }
+        used_gb  <- round(used_bytes  / 1024^3, 2)
+        limit_gb <- if (is.infinite(limit_bytes)) "∞" else sprintf("%.2f", limit_bytes / 1024^3)
+        sprintf("%.2f / %s GiB", used_gb, limit_gb)
     }, error = function(e) "unavailable")
-    used_str
 }
 
 # Write the report header (once at startup)
@@ -910,7 +920,13 @@ gcs_put_safe(run_report_file, file.path(gcs_prefix, "run_report.txt"))
 # Helper: append one step record to run_report.txt and push to GCS
 report_step <- function(step_name, status = "OK", details = NULL, t_start = NULL) {
     ts     <- format(Sys.time(), "%H:%M:%S")
-    icon   <- switch(status, "OK" = "✅", "FAIL" = "❌", "WARN" = "⚠️ ", "SKIP" = "⏭️ ", "ℹ️ ")
+    icon   <- switch(status,
+        "OK"   = "✅",
+        "FAIL" = "❌",
+        "WARN" = "⚠️ ",
+        "SKIP" = "⏭️ ",
+        "ℹ️ "   # default for any unrecognised status
+    )
     elapsed_str <- if (!is.null(t_start)) {
         sprintf(" [%.1fs]", as.numeric(difftime(Sys.time(), t_start, units = "secs")))
     } else ""
