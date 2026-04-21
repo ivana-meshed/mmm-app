@@ -14,8 +14,8 @@ Sys.setenv(
     RETICULATE_AUTOCONFIGURE = "0",
     TZ = "Europe/Berlin",
     R_MAX_CORES = Sys.getenv("R_MAX_CORES", "32"),
-    OMP_NUM_THREADS = Sys.getenv("OMP_NUM_THREADS", "32"),
-    OPENBLAS_NUM_THREADS = Sys.getenv("OPENBLAS_NUM_THREADS", "32")
+    OMP_NUM_THREADS = Sys.getenv("OMP_NUM_THREADS", "8"),
+    OPENBLAS_NUM_THREADS = Sys.getenv("OPENBLAS_NUM_THREADS", "8")
 )
 
 # Force rebuild timestamp: 2025-12-17T10:18
@@ -495,10 +495,7 @@ cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━�
 # Set max_cores for use in robyn_run()
 max_cores <- safe_cores
 
-# Set up future plan for parallel processing
-plan(multisession, workers = max_cores)
-
-cat(sprintf("✅ Parallel processing initialized with %d workers\n\n", max_cores))
+cat(sprintf("Parallel processing will use %d workers (initialized just before robyn_run)\n\n", max_cores))
 
 ## ---------- HELPERS ----------
 should_add_n_searches <- function(dtf, spend_cols, thr = 0.15) {
@@ -549,16 +546,44 @@ gcs_put_safe <- function(...) {
 
 filter_by_country <- function(dx, country) {
     cn <- toupper(country)
-    for (col in c("COUNTRY", "COUNTRY_CODE", "MARKET", "COUNTRY_ISO", "LOCALE")) {
-        if (col %in% names(dx)) {
-            vals <- unique(toupper(dx[[col]]))
-            if (cn %in% vals) {
-                message("→ Filtering by ", col, " == ", cn)
-                dx <- dx[toupper(dx[[col]]) == cn, , drop = FALSE]
-                break
-            }
+
+    # Mapping from 2-letter ISO codes to common full country names.
+    # Used when the country column contains full names rather than codes.
+    iso_to_name <- c(
+        AT = "AUSTRIA", BE = "BELGIUM", CH = "SWITZERLAND", CZ = "CZECH REPUBLIC",
+        DE = "GERMANY", DK = "DENMARK", ES = "SPAIN", FI = "FINLAND",
+        FR = "FRANCE", GB = "UNITED KINGDOM", IE = "IRELAND", IT = "ITALY",
+        NL = "NETHERLANDS", NO = "NORWAY", PL = "POLAND", PT = "PORTUGAL",
+        SE = "SWEDEN", SK = "SLOVAKIA", US = "UNITED STATES"
+    )
+    # Also map the full name back to itself for when cn IS already a full name
+    cn_as_name <- iso_to_name[[cn]]
+
+    # Columns are checked in priority order; the first column that contains a
+    # matching value is used and we return immediately.  This means COUNTRY
+    # takes precedence over MARKET_NAME, which is intentional: explicit ISO
+    # code columns should win over free-text name columns.
+    for (col in c("COUNTRY", "COUNTRY_CODE", "MARKET", "COUNTRY_ISO", "LOCALE", "MARKET_NAME")) {
+        if (!col %in% names(dx)) next
+        vals <- unique(toupper(dx[[col]]))
+
+        # Try exact match with the code/abbreviation first (e.g. "DK")
+        if (cn %in% vals) {
+            message("→ Filtering by ", col, " == ", cn)
+            dx <- dx[toupper(dx[[col]]) == cn, , drop = FALSE]
+            return(dx)
+        }
+
+        # Try match using the full country name derived from the ISO code
+        # (e.g. "DK" → "DENMARK") for columns that store full names
+        if (!is.null(cn_as_name) && cn_as_name %in% vals) {
+            message("→ Filtering by ", col, " == ", cn_as_name, " (mapped from ISO code '", cn, "')")
+            dx <- dx[toupper(dx[[col]]) == cn_as_name, , drop = FALSE]
+            return(dx)
         }
     }
+
+    message("⚠️  No country column matched '", cn, "' — returning unfiltered data")
     dx
 }
 
@@ -743,7 +768,17 @@ benchmark_id      <- cfg$benchmark_id      %||% NULL
 benchmark_variant <- cfg$benchmark_variant %||% NULL
 benchmark_test    <- cfg$benchmark_test    %||% NULL
 
-dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
+# Use RUN_WORKSPACE env var if set by training_entrypoint.sh so that output
+# files land on the real filesystem (not on the in-memory /tmp tmpfs).
+# Falls back to the original ~/budget/datasets path for local development.
+run_workspace <- Sys.getenv("RUN_WORKSPACE", "")
+if (nzchar(run_workspace)) {
+    dir_path <- file.path(run_workspace, revision, country, timestamp)
+    cat(sprintf("📁 Using RUN_WORKSPACE dir_path: %s\n", dir_path))
+} else {
+    dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
+    cat(sprintf("📁 Using default dir_path: %s\n", dir_path))
+}
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
 
 # Benchmark jobs route all variant outputs under a shared benchmark parent folder
@@ -800,7 +835,121 @@ cleanup <- function() {
     try(close(log_con_err), silent = TRUE)
     try(close(log_con_out), silent = TRUE)
     try(gcs_put_safe(log_file, file.path(gcs_prefix, "console.log")), silent = TRUE)
+    # Upload final run report on exit
+    try(gcs_put_safe(run_report_file, file.path(gcs_prefix, "run_report.txt")), silent = TRUE)
 }
+
+## ---------- RUN REPORT ----------
+# run_report.txt: a human-readable chronological record of every major step.
+# It is written incrementally so that even a hard OOM kill leaves a partial
+# record of what happened before the crash.
+
+run_report_file <- file.path(dir_path, "run_report.txt")
+
+# Helper: return current RSS or cgroup memory usage as a readable string.
+# Tries cgroup v1 first (/sys/fs/cgroup/memory/…), falls back to cgroup v2
+# (/sys/fs/cgroup/memory.current + memory.max), then gives up gracefully.
+.mem_snapshot <- function() {
+    tryCatch({
+        cg1_usage <- "/sys/fs/cgroup/memory/memory.usage_in_bytes"
+        cg1_limit <- "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+        cg2_usage <- "/sys/fs/cgroup/memory.current"
+        cg2_limit <- "/sys/fs/cgroup/memory.max"
+
+        if (file.exists(cg1_usage) && file.exists(cg1_limit)) {
+            # cgroup v1
+            used_bytes  <- as.numeric(readLines(cg1_usage, warn = FALSE)[1])
+            limit_bytes <- as.numeric(readLines(cg1_limit, warn = FALSE)[1])
+        } else if (file.exists(cg2_usage) && file.exists(cg2_limit)) {
+            # cgroup v2
+            used_bytes  <- as.numeric(readLines(cg2_usage, warn = FALSE)[1])
+            limit_raw   <- readLines(cg2_limit, warn = FALSE)[1]
+            limit_bytes <- if (limit_raw == "max") Inf else as.numeric(limit_raw)
+        } else {
+            return("unavailable")
+        }
+        used_gb  <- round(used_bytes  / 1024^3, 2)
+        limit_gb <- if (is.infinite(limit_bytes)) "∞" else sprintf("%.2f", limit_bytes / 1024^3)
+        sprintf("%.2f / %s GiB", used_gb, limit_gb)
+    }, error = function(e) "unavailable")
+}
+
+# Write the report header (once at startup)
+# Note: plain ASCII is used deliberately so the file renders correctly in any
+# viewer (avoids garbled UTF-8 box-drawing characters in non-UTF-8 terminals).
+report_bucket <- cfg$gcs_bucket %||% Sys.getenv("GCS_BUCKET", "mmm-app-output")
+report_header <- c(
+    "============================================================",
+    "                  MMM TRAINING  RUN REPORT",
+    "============================================================",
+    sprintf("Run ID       : %s / %s / %s", revision, country, timestamp),
+    sprintf("Started      : %s", format(job_started, "%Y-%m-%d %H:%M:%S %Z")),
+    sprintf("GCS prefix   : gs://%s/%s", report_bucket, gcs_prefix),
+    sprintf("Dir path     : %s", dir_path),
+    sprintf("Job config   : %s", Sys.getenv("JOB_CONFIG_GCS_PATH", "<not set>")),
+    sprintf("RUN_WORKSPACE: %s", Sys.getenv("RUN_WORKSPACE", "<local>")),
+    sprintf("TMPDIR       : %s", Sys.getenv("TMPDIR", "/tmp")),
+    "",
+    "-- System --------------------------------------------------",
+    sprintf("R version    : %s", R.version$version.string),
+    sprintf("Platform     : %s", R.version$platform),
+    sprintf("CPU cores    : %d available, %d requested, %d for training",
+            available_cores_parallelly, requested_cores, max_cores),
+    sprintf("Memory       : %s", .mem_snapshot()),
+    "",
+    "-- Job Config ----------------------------------------------",
+    sprintf("Country      : %s", country),
+    sprintf("Revision     : %s", revision),
+    sprintf("Iterations   : %d", iter),
+    sprintf("Trials       : %d", trials),
+    sprintf("Train size   : %s", paste(train_size, collapse = ",")),
+    sprintf("Adstock      : %s", cfg$adstock %||% "<from cfg>"),
+    sprintf("HP preset    : %s", hyperparameter_preset),
+    sprintf("Resample     : %s", resample_freq),
+    sprintf("Dep var      : %s (%s)", dep_var_from_cfg, dep_var_type_from_cfg),
+    sprintf("Date range   : %s to %s", start_data_date, end_data_date),
+    "",
+    "-- Steps ---------------------------------------------------",
+    ""
+)
+writeLines(report_header, run_report_file)
+gcs_put_safe(run_report_file, file.path(gcs_prefix, "run_report.txt"))
+
+# Helper: append one step record to run_report.txt and push to GCS
+# Uses plain ASCII status markers so the file renders correctly in any viewer.
+report_step <- function(step_name, status = "OK", details = NULL, t_start = NULL) {
+    ts     <- format(Sys.time(), "%H:%M:%S")
+    icon   <- switch(status,
+        "OK"   = "[OK]  ",
+        "FAIL" = "[FAIL]",
+        "WARN" = "[WARN]",
+        "SKIP" = "[SKIP]",
+        "[INFO]"   # default for any unrecognised status
+    )
+    elapsed_str <- if (!is.null(t_start)) {
+        sprintf(" [%.1fs]", as.numeric(difftime(Sys.time(), t_start, units = "secs")))
+    } else ""
+    header  <- sprintf("[%s]%s %s %s", ts, elapsed_str, icon, step_name)
+    mem_str <- sprintf("         memory: %s", .mem_snapshot())
+    lines   <- c(header, mem_str)
+    if (!is.null(details) && length(details) > 0) {
+        for (k in names(details)) {
+            lines <- c(lines, sprintf("         %-18s: %s", k, as.character(details[[k]])))
+        }
+    }
+    lines <- c(lines, "")
+    # Print to console (visible in Cloud Logging) and append to report file
+    message(paste(lines, collapse = "\n"))
+    cat(paste(lines, collapse = "\n"), "\n", sep = "", file = run_report_file, append = TRUE)
+    gcs_put_safe(run_report_file, file.path(gcs_prefix, "run_report.txt"))
+    invisible(NULL)
+}
+
+report_step("job_start", "OK", details = list(
+    workspace = Sys.getenv("RUN_WORKSPACE", "<local>"),
+    dir_path  = dir_path,
+    gcs_prefix = gcs_prefix
+))
 
 ## Global panic trap: log any uncaught error before the process exits
 install_panic_trap <- function() {
@@ -817,6 +966,8 @@ install_panic_trap <- function() {
         pjson <- file.path(dir_path, "panic_error.json")
         safe_write(c("UNCAUGHT ERROR", as.character(Sys.time()), err), ptxt)
         writeLines(jsonlite::toJSON(payload, auto_unbox = TRUE, pretty = TRUE), pjson)
+        # record in run report (best-effort)
+        try(report_step("uncaught_error", "FAIL", details = list(message = err)), silent = TRUE)
         # status.json best-effort
         try(writeLines(jsonlite::toJSON(
             c(list(state = "FAILED"), payload),
@@ -904,6 +1055,11 @@ if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
     log_cfg_copy(cfg, dir_path)
     log_df_snapshot(df, dir_path)
     flush_and_ship_log("after data load")
+    report_step("data_load", "OK", details = list(
+        source   = cfg$data_gcs_path,
+        rows     = nrow(df),
+        columns  = ncol(df)
+    ))
 } else {
     stop("No data_gcs_path provided in configuration.")
 }
@@ -1050,7 +1206,9 @@ df <- safe_parse_numbers(df, cost_cols)
 # Dates are now sourced from config (start_data_date, end_data_date); previous hardcoded assignments have been removed.
 df <- df %>% filter(date >= start_data_date, date <= end_data_date)
 df$DOW <- wday(df$date, label = TRUE)
-df$IS_WEEKEND <- ifelse(df$DOW %in% c("Sat", "Sun"), 1, 0)
+# Use numeric day index (1=Sunday, 7=Saturday in lubridate) to avoid ordered-
+# factor / locale issues with %in% on label-based factors.
+df$IS_WEEKEND <- as.integer(wday(df$date) %in% c(1L, 7L))
 
 # Rename UPLOAD_VALUE → dep_var if the config specifies a different name.
 # The Streamlit upload pipeline always stores the KPI as "UPLOAD_VALUE" in
@@ -1149,6 +1307,10 @@ if (skip_country) {
     gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
 
     flush_and_ship_log("country skipped - no usable data")
+    report_step("country_skip", "SKIP", details = list(
+        country = country,
+        reason  = paste(skip_reason, collapse = "; ")
+    ))
     message("✅ Country skipped successfully. Exiting without error.")
     quit(save = "no", status = 0)
 }
@@ -1283,6 +1445,12 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
             # Replace original dataframe
             df <- df_resampled
 
+            # Free the intermediate objects now that df holds the result.
+            rm(df_resampled)
+            if (exists("df_non_numeric")) rm(df_non_numeric)
+            gc(verbose = FALSE, full = TRUE)
+            message("Memory after freeing resampled intermediates: ", .mem_snapshot())
+
             # Log post-resample state
             post_resample_rows <- nrow(df)
             post_resample_date_range <- paste(min(df$date), "to", max(df$date))
@@ -1323,9 +1491,95 @@ if (resample_freq != "none" && resample_freq %in% c("W", "M")) {
 }
 
 ## ---------- DRIVERS ----------
-paid_media_spends <- intersect(paid_media_spends_cfg, names(df))
-paid_media_vars <- intersect(paid_media_vars_cfg, names(df))
-stopifnot(length(paid_media_spends) == length(paid_media_vars))
+# paid_media_spends_cfg and paid_media_vars_cfg are parallel arrays: element i
+# of spends corresponds to element i of vars.  When they are different columns
+# (spend_to_proxy / mixed_by_funnel strategies use proxy click/impression columns
+# as vars) we must filter them as *pairs* — not independently — otherwise
+# intersect() can drop different elements from each list and produce lists of
+# different lengths, which causes the stopifnot below to fire.
+if (length(paid_media_spends_cfg) == length(paid_media_vars_cfg)) {
+    pair_ok <- paid_media_spends_cfg %in% names(df) & paid_media_vars_cfg %in% names(df)
+    if (any(!pair_ok)) {
+        dropped <- paste(
+            paid_media_spends_cfg[!pair_ok],
+            "→",
+            paid_media_vars_cfg[!pair_ok],
+            collapse = ", "
+        )
+        message("ℹ️ Dropping spend/var pairs where a column is absent from data: ", dropped)
+    }
+    paid_media_spends <- paid_media_spends_cfg[pair_ok]
+    paid_media_vars   <- paid_media_vars_cfg[pair_ok]
+} else {
+    # Config lengths differ — align by padding the shorter list.
+    # If spends has more entries than vars, use the spend column itself as the
+    # fallback var for the extra positions (the user left them blank in the UI).
+    # If vars has more entries, truncate to match spends (no spend ⇒ no pair).
+    n_spends <- length(paid_media_spends_cfg)
+    n_vars   <- length(paid_media_vars_cfg)
+    if (n_spends > n_vars) {
+        message("ℹ️ paid_media_spends has more entries than paid_media_vars (",
+                n_spends, " vs ", n_vars, "); using spend column as fallback var ",
+                "for positions ", (n_vars + 1), " to ", n_spends)
+        paid_media_vars_cfg <- c(
+            paid_media_vars_cfg,
+            paid_media_spends_cfg[(n_vars + 1):n_spends]
+        )
+    } else {
+        message("ℹ️ paid_media_vars has more entries than paid_media_spends (",
+                n_vars, " vs ", n_spends, "); using var column as fallback spend ",
+                "for positions ", (n_spends + 1), " to ", n_vars)
+        paid_media_spends_cfg <- c(
+            paid_media_spends_cfg,
+            paid_media_vars_cfg[(n_spends + 1):n_vars]
+        )
+    }
+    # Now lengths match — apply the same pair-based filtering as the normal path.
+    pair_ok <- paid_media_spends_cfg %in% names(df) & paid_media_vars_cfg %in% names(df)
+    if (any(!pair_ok)) {
+        dropped <- paste(
+            paid_media_spends_cfg[!pair_ok],
+            "→",
+            paid_media_vars_cfg[!pair_ok],
+            collapse = ", "
+        )
+        message("ℹ️ Dropping spend/var pairs where a column is absent from data: ", dropped)
+    }
+    paid_media_spends <- paid_media_spends_cfg[pair_ok]
+    paid_media_vars   <- paid_media_vars_cfg[pair_ok]
+}
+if (length(paid_media_spends) != length(paid_media_vars)) {
+    pm_skip_msg <- sprintf(
+        "paid_media_spends (%d) and paid_media_vars (%d) have unequal lengths after filtering to available columns",
+        length(paid_media_spends), length(paid_media_vars)
+    )
+    message("⏭️ SKIPPING: ", pm_skip_msg)
+    skip_file <- file.path(dir_path, "SKIPPED.txt")
+    writeLines(c(
+        paste0("Country: ", country),
+        paste0("Revision: ", revision),
+        "",
+        "Skip reason(s):",
+        paste0("  - ", pm_skip_msg)
+    ), skip_file)
+    gcs_put_safe(skip_file, file.path(gcs_prefix, "SKIPPED.txt"))
+    writeLines(
+        jsonlite::toJSON(
+            list(
+                state = "SKIPPED",
+                start_time = as.character(job_started),
+                end_time = as.character(Sys.time()),
+                skip_reason = pm_skip_msg
+            ),
+            auto_unbox = TRUE, pretty = TRUE
+        ),
+        status_json
+    )
+    gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
+    flush_and_ship_log("skipped - paid_media_spends/vars length mismatch")
+    message("✅ Skipped successfully. Exiting without error.")
+    quit(save = "no", status = 0)
+}
 
 keep_idx <- vapply(seq_along(paid_media_spends), function(i) sum(df[[paid_media_spends[i]]], na.rm = TRUE) > 0, logical(1))
 paid_media_spends <- paid_media_spends[keep_idx]
@@ -1367,6 +1621,27 @@ zero_var_check <- function(var_list, data) {
 context_vars <- zero_var_check(context_vars, df)
 factor_vars <- zero_var_check(factor_vars, df)
 organic_vars <- zero_var_check(organic_vars, df)
+
+# Clip negative values in paid media columns to 0.
+# Robyn requires paid_media_vars and paid_media_spends to be >= 0.
+# Negative values can appear from refunds/credits in raw data or when
+# country filtering failed and multi-country data was summed incorrectly.
+media_cols_to_clip <- unique(c(paid_media_spends, paid_media_vars))
+media_cols_to_clip <- intersect(media_cols_to_clip, names(df))
+if (length(media_cols_to_clip) > 0) {
+    clipped_summary <- character(0)
+    for (cl in media_cols_to_clip) {
+        neg_count <- sum(df[[cl]] < 0, na.rm = TRUE)
+        if (neg_count > 0) {
+            df[[cl]] <- pmax(df[[cl]], 0)  # na.rm defaults to FALSE, preserving NAs
+            clipped_summary <- c(clipped_summary, paste0(cl, " (", neg_count, " rows)"))
+        }
+    }
+    if (length(clipped_summary) > 0) {
+        message("⚠️  Clipped negative values to 0 in paid media columns: ",
+                paste(clipped_summary, collapse = ", "))
+    }
+}
 
 adstock <- cfg$adstock %||% "geometric"
 
@@ -1494,6 +1769,29 @@ get_hyperparameter_ranges <- function(preset, adstock_type, var_name) {
         list(alphas = c(0.5, 3), gammas = c(0.3, 1), thetas = c(0, 0.5))
     }
 }
+
+# Narrow df to only the columns Robyn needs.  The raw dataframe can carry
+# dozens of source columns (country codes, raw impressions, …) that are never
+# passed to robyn_inputs().  Dropping them here shrinks the object that is
+# duplicated inside InputCollect$dt_input and reduces peak RSS during both
+# the preflight and final robyn_inputs() calls.
+robyn_needed_cols <- unique(c(
+    "date", dep_var_from_cfg,
+    paid_media_spends, paid_media_vars,
+    context_vars, factor_vars, organic_vars
+))
+robyn_needed_cols <- intersect(robyn_needed_cols, names(df))
+cols_before <- ncol(df)
+df <- df[, robyn_needed_cols, drop = FALSE]
+cols_after <- ncol(df)
+if (cols_before > cols_after) {
+    message(sprintf(
+        "ℹ️  Narrowed df from %d to %d columns before robyn_inputs() (%d dropped)",
+        cols_before, cols_after, cols_before - cols_after
+    ))
+}
+gc(verbose = FALSE, full = TRUE)
+message("Memory after narrowing df: ", .mem_snapshot())
 
 # Log data dimensions before robyn_inputs
 message("→ Data ready for robyn_inputs:")
@@ -1656,6 +1954,10 @@ message("Pre-built hyperparameters (", hyperparameter_preset, " preset): ", leng
 log_hyperparameters(hyperparameters, dir_path)
 flush_and_ship_log("after hyperparameters build")
 
+# Free preflight InputCollect before building the final one to cut peak RSS.
+# Both objects would otherwise coexist in memory during the second robyn_inputs() call.
+rm(InputCollect); gc(verbose = FALSE, full = TRUE)
+message("Memory after freeing preflight InputCollect: ", .mem_snapshot())
 
 ## ---------- NOW CALL robyn_inputs WITH hyperparameters ----------
 InputCollect <- tryCatch(
@@ -1703,6 +2005,11 @@ InputCollect <- tryCatch(
 # Already prints a textual snapshot; also persist files to debug/
 log_ic_snapshot_files(InputCollect, dir_path, tag = "with_hp")
 flush_and_ship_log("after robyn_inputs with hyperparameters")
+
+# df is now fully duplicated inside InputCollect$dt_input — free the original.
+# This is typically the largest single object in memory at this point.
+rm(df); gc(verbose = FALSE, full = TRUE)
+message("Memory after freeing df: ", .mem_snapshot())
 
 # Check if robyn_inputs succeeded
 if (is.null(InputCollect)) {
@@ -1853,6 +2160,14 @@ log_InputCollect <- function(ic) {
     cat("=========================================================\n\n")
 }
 log_InputCollect(InputCollect)
+report_step("robyn_inputs", "OK", details = list(
+    dt_input_rows   = nrow(InputCollect$dt_input),
+    dt_input_cols   = ncol(InputCollect$dt_input),
+    date_range      = paste(min(InputCollect$dt_input$date), "→", max(InputCollect$dt_input$date)),
+    paid_media_vars = length(InputCollect$paid_media_vars),
+    organic_vars    = length(InputCollect$organic_vars %||% character()),
+    hp_keys         = length(InputCollect$hyperparameters)
+))
 
 # --- Sanity guards so robyn_run never starts with a bad InputCollect ---
 if (is.null(InputCollect) || !is.list(InputCollect)) {
@@ -1970,6 +2285,11 @@ cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━�
 
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
 t0 <- Sys.time()
+report_step("robyn_run_start", "OK", details = list(
+    iterations = iter,
+    trials     = trials,
+    cores      = max_cores
+))
 
 robyn_err_txt <- file.path(dir_path, "robyn_run_error.txt")
 robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
@@ -1984,11 +2304,16 @@ robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
 
 # Helper function to attempt robyn_run with specified cores
 .try_robyn_run <- function(cores_to_use, attempt_number = 1) {
-    cat(sprintf("\n🔄 Attempt %d: Running with %d cores...\n", attempt_number, cores_to_use))
-    
-    # Update future plan with new core count
+    cat(sprintf("\nAttempt %d: Running with %d cores...\n", attempt_number, cores_to_use))
+
+    # Run garbage collection before spawning workers to minimise peak RAM
+    invisible(gc(verbose = FALSE, full = TRUE))
+    cat(sprintf("Memory before plan(): %s\n", .mem_snapshot()))
+
+    # Set up future plan with the requested number of workers
     plan(multisession, workers = cores_to_use)
-    
+    cat(sprintf("Parallel workers initialised: %d\n", cores_to_use))
+
     tryCatch(
         withCallingHandlers(
             robyn_run(
@@ -2012,6 +2337,10 @@ robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
 }
 
 flush_and_ship_log("before robyn_run")
+
+# Force GC to reclaim any unused memory before spawning parallel workers
+invisible(gc(verbose = FALSE, full = TRUE))
+message("Memory before training: ", .mem_snapshot())
 
 # Try with full cores first
 OutputModels <- .try_robyn_run(max_cores, attempt_number = 1)
@@ -2270,6 +2599,10 @@ if (is.null(OutputModels)) {
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
 message("✅ OutputModels object created with class: ", class(OutputModels)[1])
+report_step("robyn_run_done", "OK", t_start = t0, details = list(
+    training_mins  = round(training_time, 2),
+    models_class   = class(OutputModels)[1]
+))
 
 ## ---------- APPEND R TRAINING TIME TO timings.csv --
 
@@ -2351,6 +2684,12 @@ saveRDS(InputCollect, file.path(dir_path, "InputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputModels.RDS"), file.path(gcs_prefix, "OutputModels.RDS"))
 gcs_put_safe(file.path(dir_path, "InputCollect.RDS"), file.path(gcs_prefix, "InputCollect.RDS"))
 
+# Close the multisession workers (3 × ~6 GiB) and run a full GC before
+# robyn_outputs(), which is single-threaded (cores = NULL).
+plan(sequential)
+gc(verbose = FALSE, full = TRUE)
+message("Memory after closing parallel workers: ", .mem_snapshot())
+
 ## ---------- OUTPUTS & ONEPAGERS ----------
 flush_and_ship_log("before robyn_outputs")
 OutputCollect <- tryCatch(
@@ -2384,6 +2723,7 @@ OutputCollect <- tryCatch(
     }
 )
 flush_and_ship_log("after robyn_outputs")
+report_step("robyn_outputs", if (is.null(OutputCollect)) "FAIL" else "OK")
 
 # Check if robyn_outputs succeeded
 if (is.null(OutputCollect)) {
@@ -2429,6 +2769,11 @@ if (!is.null(OutputCollect$xDecompAgg)) {
 
 saveRDS(OutputCollect, file.path(dir_path, "OutputCollect.RDS"))
 gcs_put_safe(file.path(dir_path, "OutputCollect.RDS"), file.path(gcs_prefix, "OutputCollect.RDS"))
+
+# robyn_onepagers() only needs InputCollect + OutputCollect, not OutputModels.
+# Free it now to reclaim several GiB before the plotting phase.
+rm(OutputModels); gc(verbose = FALSE, full = TRUE)
+message("Memory after freeing OutputModels: ", .mem_snapshot())
 
 ## ---------- EXTRACT PARQUET DATA FROM OUTPUTCOLLECT ----------
 message("→ Extracting compressed data from OutputCollect.RDS to parquet files...")
@@ -2850,6 +3195,7 @@ AllocatorCollect <- try(
     silent = TRUE
 )
 flush_and_ship_log("after robyn_allocator")
+report_step("robyn_allocator", if (inherits(AllocatorCollect, "try-error")) "WARN" else "OK")
 
 # Log allocator error if it failed
 if (inherits(AllocatorCollect, "try-error")) {
@@ -3005,13 +3351,23 @@ cat(
 )
 
 job_finished <- Sys.time()
+total_mins   <- round(as.numeric(difftime(job_finished, job_started, units = "mins")), 2)
+
+report_step("job_done", "OK", t_start = job_started, details = list(
+    total_mins   = total_mins,
+    best_model   = best_id,
+    gcs_outputs  = sprintf("gs://%s/%s/",
+                           googleCloudStorageR::gcs_get_global_bucket(),
+                           gcs_prefix)
+))
+
 writeLines(
     jsonlite::toJSON(
         list(
             state = "SUCCEEDED",
             start_time = as.character(job_started),
             end_time = as.character(job_finished),
-            duration_minutes = round(as.numeric(difftime(job_finished, job_started, units = "mins")), 2) # nolint
+            duration_minutes = total_mins
         ),
         auto_unbox = TRUE
     ),

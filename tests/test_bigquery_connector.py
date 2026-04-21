@@ -5,10 +5,24 @@ This module tests the BigQuery connection and query functionality.
 """
 
 import json
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-from app.utils.bigquery_connector import (
+# Mock google-cloud-bigquery and related packages before importing the module
+# under test, so that tests can run in environments where these are not
+# installed (e.g. CI with only requirements-ci.txt).
+# Use direct assignment (not setdefault) so the mock always takes effect even
+# when real google packages are installed (e.g. on a developer's macOS machine).
+# This follows the same pattern used in test_track_daily_costs.py.
+sys.modules["google"] = MagicMock()
+sys.modules["google.cloud"] = MagicMock()
+sys.modules["google.cloud.bigquery"] = MagicMock()
+sys.modules["google.cloud.secretmanager"] = MagicMock()
+sys.modules["google.oauth2"] = MagicMock()
+sys.modules["google.oauth2.service_account"] = MagicMock()
+
+from app.utils.bigquery_connector import (  # noqa: E402
     create_bigquery_client,
     execute_query,
     load_credentials_from_secret_manager,

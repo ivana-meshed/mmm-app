@@ -9,3 +9,5 @@ google-cloud-tasks
 protobuf<5
 pytz
 db-dtypes
+matplotlib
+seaborn

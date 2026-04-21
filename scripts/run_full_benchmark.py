@@ -556,7 +556,7 @@ def generate_benchmark_config(
     )
     window_dim = f" × {n_windows} windows" if selected_window_specs else ""
     benchmark_config = {
-        "name": f"comprehensive_benchmark_{timestamp}",
+        "name": f"comprehensive_benchmark_{run_mode}_{timestamp}",
         "description": (
             f"Complete {mode_label} benchmark: "
             f"adstock × train_splits × time_agg × spend_var_mapping"
@@ -794,7 +794,7 @@ def run_benchmark_submission(
     logger.info("=" * 80)
 
     cmd = [
-        "python3",
+        sys.executable,
         "scripts/benchmark_mmm.py",
         "--config",
         config_path,
@@ -846,7 +846,7 @@ def process_queue(queue_name: str):
     logger.info("=" * 80)
 
     cmd = [
-        "python3",
+        sys.executable,
         "scripts/process_queue_simple.py",
         "--loop",
         "--cleanup",
@@ -883,7 +883,7 @@ def analyze_results(benchmark_id: str, queue_name: str = DEFAULT_QUEUE):
     logger.info("=" * 80)
 
     cmd = [
-        "python3",
+        sys.executable,
         "scripts/analyze_benchmark_results.py",
         "--benchmark-id",
         benchmark_id,
@@ -891,6 +891,8 @@ def analyze_results(benchmark_id: str, queue_name: str = DEFAULT_QUEUE):
         "./benchmark_analysis",
         "--queue-name",
         queue_name,
+        "--min-r2",
+        "0",
     ]
 
     logger.info(f"📊 Running analysis: {' '.join(cmd)}")
@@ -902,7 +904,7 @@ def analyze_results(benchmark_id: str, queue_name: str = DEFAULT_QUEUE):
         logger.error(result.stderr)
         logger.warning("   You can run analysis manually later with:")
         logger.warning(
-            f"   python scripts/analyze_benchmark_results.py --benchmark-id {benchmark_id} --queue-name {queue_name}"
+            f"   python scripts/analyze_benchmark_results.py --benchmark-id {benchmark_id} --queue-name {queue_name} --min-r2 0"
         )
     else:
         logger.info(result.stdout)
@@ -919,17 +921,17 @@ Examples:
   # Test run (default - geometric only, 10 combos, reduced iterations/trials)
   python scripts/run_full_benchmark.py --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
 
-  # Standard run, geometric only (18 combos cartesian, full window default, 1000 iterations, 3 trials)
+  # Standard run, sequential by default (9 combos, full window, 1000 iterations, 3 trials)
   python scripts/run_full_benchmark.py --path <path> --full-run
 
-  # Sequential run — each dimension tested independently (9 combos, faster exploration)
-  python scripts/run_full_benchmark.py --path <path> --full-run --sequential
+  # Cartesian run — all dimension combinations (18 combos, 1000 iterations, 3 trials)
+  python scripts/run_full_benchmark.py --path <path> --full-run --cartesian
 
-  # Standard run, all adstock types (54 combos cartesian)
-  python scripts/run_full_benchmark.py --path <path> --full-run --all-adstock --top-n 54
+  # Cartesian run, all adstock types (54 combos cartesian)
+  python scripts/run_full_benchmark.py --path <path> --full-run --cartesian --all-adstock --top-n 54
 
   # Standard run, window-length sweep (54 combos: 1 adstock × 3 × 2 × 3 × 3 windows)
-  python scripts/run_full_benchmark.py --path <path> --full-run --all-windows --top-n 54
+  python scripts/run_full_benchmark.py --path <path> --full-run --cartesian --all-windows --top-n 54
 
   # Extended run, specific adstock types
   python scripts/run_full_benchmark.py --path <path> --extended-run --adstock geometric weibull_cdf
@@ -1087,15 +1089,29 @@ Examples:
     parser.add_argument(
         "--sequential",
         action="store_true",
+        default=True,
         help=(
-            "Run tests sequentially per dimension instead of the cartesian product. "
+            "Run tests sequentially per dimension instead of the cartesian product "
+            "(default). "
             "Each dimension (adstock, splits, time_agg, spend_var) is varied "
             "independently, using base-config defaults for the other dimensions. "
             "A single 'full' window that carries no date override is skipped as a "
             "sequential dimension (it is the base default). "
             "With --config benchmarks/comprehensive_benchmark_fleet_marketplace.json "
-            "and --compare-presets: 1+3+2+5+3 = 14 variants. "
-            "Recommended for initial exploration before a full cartesian sweep."
+            "and --compare-presets: 1+3+2+5+3 = 14 variants."
+        ),
+    )
+    parser.add_argument(
+        "--cartesian",
+        action="store_true",
+        default=False,
+        help=(
+            "Run tests as a cartesian product of all dimension variants instead of "
+            "the default sequential (per-dimension) mode. "
+            "Each dimension (adstock, splits, time_agg, spend_var) is combined with "
+            "every other dimension value, producing N_adstock × N_splits × N_time_agg "
+            "× N_spend_var combinations. Use --all-adstock to include all 3 adstock "
+            "types (default: geometric only)."
         ),
     )
 
@@ -1285,7 +1301,7 @@ Examples:
             None  # generate_benchmark_config applies "full" for non-test
         )
 
-    sequential = args.sequential
+    sequential = args.sequential and not args.cartesian
 
     # Print header
     logger.info("=" * 80)

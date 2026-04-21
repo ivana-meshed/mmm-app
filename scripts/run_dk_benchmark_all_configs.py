@@ -36,6 +36,20 @@ Usage (production run — all 4 configs):
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default
 
+Run all 5 configs (4 production + TV config) — test/dev run (100 iter, 1 trial):
+
+    python scripts/run_dk_benchmark_all_configs.py \\
+        --queue-name default-dev \\
+        --extra-config dk_final_with_tv_config.json \\
+        --iterations 100 --trials 1 --process-queue
+
+Run all 5 configs (4 production + TV config) — full production run:
+
+    python scripts/run_dk_benchmark_all_configs.py \\
+        --queue-name default \\
+        --extra-config dk_final_with_tv_config.json \\
+        --process-queue
+
 Run the original test set instead:
 
     python scripts/run_dk_benchmark_all_configs.py \\
@@ -46,6 +60,7 @@ Dry-run (prints commands and enriched configs without executing):
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default-dev \\
+        --extra-config dk_final_with_tv_config.json \\
         --dry-run
 
 Skip uploading configs to GCS (use when they are already there):
@@ -453,6 +468,12 @@ def load_config(filename: str) -> Dict:
         return json.load(f)
 
 
+def load_config_from_path(path: Path) -> Dict:
+    """Load a JSON config from an arbitrary filesystem path."""
+    with open(path) as f:
+        return json.load(f)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -467,8 +488,20 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Production run — all 4 configs, upload, submit and process queue:
+  # Production run — all 4 manifest configs, upload, submit and process queue:
   python scripts/run_dk_benchmark_all_configs.py --queue-name default --process-queue
+
+  # All 5 configs (4 manifest + TV) — dev/test run (100 iterations, 1 trial):
+  python scripts/run_dk_benchmark_all_configs.py \\
+      --queue-name default-dev \\
+      --extra-config dk_final_with_tv_config.json \\
+      --iterations 100 --trials 1 --process-queue
+
+  # All 5 configs (4 manifest + TV) — full production run:
+  python scripts/run_dk_benchmark_all_configs.py \\
+      --queue-name default \\
+      --extra-config dk_final_with_tv_config.json \\
+      --process-queue
 
   # Run the original 6-config test set instead:
   python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev \\
@@ -576,6 +609,22 @@ Examples:
         ),
     )
 
+    parser.add_argument(
+        "--extra-config",
+        dest="extra_configs",
+        metavar="FILENAME",
+        action="append",
+        default=[],
+        help=(
+            "Additional JSON config file to include alongside the manifest "
+            "configs. Can be a bare filename (looked up in "
+            "benchmark_analysis/dk_json_configs_clean/) or an absolute path. "
+            "May be specified multiple times, e.g. "
+            "--extra-config dk_final_with_tv_config.json "
+            "--extra-config my_other_config.json"
+        ),
+    )
+
     args = parser.parse_args()
 
     # ── Resolve manifest path ─────────────────────────────────────────────────
@@ -638,12 +687,46 @@ Examples:
     else:
         config_files = all_configs
 
+    # ── Resolve extra configs ─────────────────────────────────────────────────
+    # Each extra config is loaded from either the DK configs dir (bare
+    # filename) or from an absolute/relative path given directly by the user.
+    # They are appended to config_files as (config_dict, label) tuples so the
+    # main loop can distinguish them from manifest filenames.
+    extra_config_entries: List[tuple] = []
+    for raw in args.extra_configs:
+        candidate = Path(raw)
+        # Resolve: prefer absolute/cwd-relative path; fall back to configs dir
+        if candidate.exists():
+            config_path = candidate.resolve()
+        else:
+            config_path = DK_CONFIGS_DIR / candidate.name
+        if not config_path.exists():
+            logger.error(
+                f"Extra config not found: {raw!r}. "
+                f"Looked in: {DK_CONFIGS_DIR}"
+            )
+            sys.exit(1)
+        extra_cfg = load_config_from_path(config_path)
+        label = extra_cfg.get("name") or config_path.stem
+        extra_config_entries.append((extra_cfg, label, config_path.name))
+        logger.info(f"Extra config    : {config_path.name} ({label})")
+
+    total_configs = len(config_files) + len(extra_config_entries)
+
     # Print header
     logger.info("=" * 80)
     logger.info("DK COMPREHENSIVE BENCHMARK TEST")
     logger.info("=" * 80)
     logger.info(f"Manifest        : {effective_manifest.name}")
-    logger.info(f"Configs to test : {len(config_files)}")
+    logger.info(
+        f"Configs to test : {total_configs}"
+        + (
+            f" ({len(config_files)} manifest + "
+            f"{len(extra_config_entries)} extra)"
+            if extra_config_entries
+            else ""
+        )
+    )
     logger.info(f"Queue           : {args.queue_name}")
     logger.info(f"Benchmark config: {BENCHMARK_CONFIG}")
     logger.info(f"HP ranges config: {HYPERPARAMETER_RANGES_CONFIG}")
@@ -661,6 +744,7 @@ Examples:
 
     failed: List[str] = []
 
+    # ── Process manifest configs ──────────────────────────────────────────────
     for idx, filename in enumerate(config_files, start=1):
         config = load_config(filename)
         gcs_path = gcs_path_for_config(config)
@@ -670,7 +754,7 @@ Examples:
         )
         description = config.get("description", "")
 
-        logger.info(f"[{idx}/{len(config_files)}] {config_name}")
+        logger.info(f"[{idx}/{total_configs}] {config_name}")
         logger.info(f"  Description    : {description}")
         logger.info(f"  GCS path       : {gcs_path}")
         logger.info(f"  Variant prefix : {config_name}")
@@ -704,6 +788,45 @@ Examples:
 
         logger.info("")
 
+    # ── Process extra configs ─────────────────────────────────────────────────
+    for extra_idx, (config, config_name, src_name) in enumerate(
+        extra_config_entries, start=len(config_files) + 1
+    ):
+        gcs_path = gcs_path_for_config(config)
+        description = config.get("description", "")
+
+        logger.info(f"[{extra_idx}/{total_configs}] {config_name} (extra)")
+        logger.info(f"  Source         : {src_name}")
+        logger.info(f"  Description    : {description}")
+        logger.info(f"  GCS path       : {gcs_path}")
+        logger.info(f"  Variant prefix : {config_name}")
+
+        if not args.skip_upload:
+            ok = upload_config_to_gcs(
+                config, gcs_path, dry_run=args.dry_run
+            )
+            if not ok:
+                logger.error(
+                    f"  Skipping benchmark for {src_name} due to "
+                    f"upload failure."
+                )
+                failed.append(src_name)
+                continue
+
+        ok = run_benchmark(
+            gcs_path=gcs_path,
+            queue_name=args.queue_name,
+            dry_run=args.dry_run,
+            iterations=args.iterations,
+            trials=args.trials,
+            benchmark_id=shared_benchmark_id,
+            variant_prefix=config_name,
+        )
+        if not ok:
+            failed.append(src_name)
+
+        logger.info("")
+
     # Step 3: Process queue (if requested)
     if args.process_queue:
         process_queue(args.queue_name, dry_run=args.dry_run)
@@ -727,7 +850,7 @@ Examples:
         )
         sys.exit(1)
     else:
-        n = len(config_files)
+        n = total_configs
         logger.info(f"✅ All {n} config(s) submitted successfully.")
         logger.info(f"📌 Shared benchmark ID : {shared_benchmark_id}")
         logger.info(

@@ -61,6 +61,34 @@ Usage
     python scripts/run_benchmark_from_csv.py \\
         --csv data/dk/mmm_data_v2_final_holidays_and_school.csv \\
         --full-run --skip-queue
+
+    # TV + radio channels — test/dev run (fast: 100 iter, 1 trial, submit only)
+    # --sequential varies one dimension at a time instead of the cartesian
+    # product, which avoids OOM kills on smaller Cloud Run memory tiers.
+    python scripts/run_benchmark_from_csv.py \\
+        --csv data/dk/mmm_data_v2_with_tv.csv \\
+        --columns-mapping benchmark_analysis/dk_json_configs_clean/dk_final_with_tv_config.json \\
+        --full-run --queue-name default-dev \\
+        --iterations 100 --trials 1 --sequential --skip-queue
+
+    # TV + radio channels — dev run, submit and wait for results (100 iter, 1 trial)
+    python scripts/run_benchmark_from_csv.py \\
+        --csv data/dk/mmm_data_v2_with_tv.csv \\
+        --columns-mapping benchmark_analysis/dk_json_configs_clean/dk_final_with_tv_config.json \\
+        --full-run --queue-name default-dev \\
+        --iterations 100 --trials 1 --sequential
+
+    # TV + radio channels — full production run
+    python scripts/run_benchmark_from_csv.py \\
+        --csv data/dk/mmm_data_v2_with_tv.csv \\
+        --columns-mapping benchmark_analysis/dk_json_configs_clean/dk_final_with_tv_config.json \\
+        --full-run --queue-name default
+
+    # TV + radio channels — submit without waiting for results
+    python scripts/run_benchmark_from_csv.py \\
+        --csv data/dk/mmm_data_v2_with_tv.csv \\
+        --columns-mapping benchmark_analysis/dk_json_configs_clean/dk_final_with_tv_config.json \\
+        --full-run --queue-name default-dev --skip-queue
 """
 
 import argparse
@@ -597,6 +625,19 @@ def main() -> None:
 
     # Normalize column names to uppercase
     df.columns = [c.upper() for c in df.columns]
+
+    # Drop duplicate columns introduced by uppercasing (e.g. a CSV may contain
+    # both 'IS_HOLIDAY' and 'is_holiday' which collapse to the same name).
+    # pyarrow raises ValueError on duplicate column names, so we keep the first
+    # occurrence of each name.
+    n_before = len(df.columns)
+    df = df.loc[:, ~df.columns.duplicated()]
+    n_dropped = n_before - len(df.columns)
+    if n_dropped:
+        logger.info(
+            f"   Dropped {n_dropped} duplicate column(s) after uppercasing"
+        )
+
     logger.info(
         f"   Loaded {len(df):,} rows × {len(df.columns)} columns"
     )

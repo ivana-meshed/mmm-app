@@ -67,23 +67,23 @@ Complete end-to-end workflow - submit, process, and analyze:
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
 
-# Standard run, geometric only (18 combos cartesian, 1000 iterations, 3 trials, ~4-6 hours, ~$14)
+# Standard run, sequential by default (9 combos, 1000 iterations, 3 trials, ~2-3 hours, ~$7)
 python scripts/run_full_benchmark.py \
   --path <path> --full-run
 
-# Sequential run — each dimension independently (9 combos, ~2-3 hours, ~$7)
+# Cartesian run, geometric only (18 combos, 1000 iterations, 3 trials, ~4-6 hours, ~$14)
 python scripts/run_full_benchmark.py \
-  --path <path> --full-run --sequential
+  --path <path> --full-run --cartesian
 
-# Standard run, all adstock types (54 combos cartesian, ~4-6 hours, ~$40)
+# Cartesian run, all adstock types (54 combos cartesian, ~4-6 hours, ~$40)
 python scripts/run_full_benchmark.py \
-  --path <path> --full-run --all-adstock
+  --path <path> --full-run --cartesian --all-adstock
 
 # Extended run (2000 iterations, 5 trials per variant, ~10-15 hours, ~$110)
 python scripts/run_full_benchmark.py \
   --path <path> --extended-run
 
-# Production run (5000 iterations, 5 trials per variant, ~25-35 hours, ~$260)
+# Production run (5000 iterations, 5 trials per variant, ~3-4 hours, ~$45)
 python scripts/run_full_benchmark.py \
   --path <path> --production-run
 
@@ -94,8 +94,8 @@ python scripts/run_full_benchmark.py \
 
 This single command:
 1. Loads your selected_columns.json configuration
-2. Generates comprehensive benchmark — default **18 variants** (cartesian: 1 adstock × 3 splits × 2 time_agg × 3 spend_var).
-   Use `--all-adstock` for 54, `--sequential` for 9 (independent per-dimension), `--all-windows` to add a window sweep.
+2. Generates comprehensive benchmark — default **9 variants** (sequential: each of 4 dimensions varied independently: adstock, splits, time_agg, spend_var).
+   Use `--cartesian` for 18 combinations (product of all dimensions), `--all-adstock` for all 3 adstock types, `--all-windows` to add a window sweep.
    Non-test runs default to the `full` training window; use `--all-windows` or `--windows 2y 3y` to compare shorter windows.
 3. Optionally selects top-N combinations via `--top-n`
 4. Submits all jobs to queue
@@ -112,8 +112,8 @@ This single command:
 # Quick validation (~$1, ~10 min)
 python scripts/run_full_benchmark.py --path <path> --top-n 5
 
-# Sequential sweep — fast exploration of all dimensions (~$7, ~2-3 hours)
-python scripts/run_full_benchmark.py --path <path> --full-run --sequential
+# Sequential sweep — default, fast exploration of all dimensions (~$7, ~2-3 hours)
+python scripts/run_full_benchmark.py --path <path> --full-run
 
 # Thorough analysis - recommended (~$41, ~2-3 hours)
 python scripts/run_full_benchmark.py --path <path> --top-n 10 --extended-run
@@ -122,7 +122,7 @@ python scripts/run_full_benchmark.py --path <path> --top-n 10 --extended-run
 python scripts/run_full_benchmark.py --path <path> --top-n 10 --production-run
 
 # Complete cartesian benchmark standard mode (~$40, ~4-6 hours)
-python scripts/run_full_benchmark.py --path <path> --full-run --all-adstock
+python scripts/run_full_benchmark.py --path <path> --full-run --cartesian --all-adstock
 
 # With per-channel hyperparameter ranges (balanced preset is the default)
 python scripts/run_full_benchmark.py --path <path> --full-run \
@@ -173,26 +173,27 @@ All estimates based on GCP Cloud Run Jobs (n2-standard-8: 8 vCPU, 32GB RAM) in e
 - Time per job: Iterations × Trials × ~0.15 seconds per iteration + ~30 seconds startup
 - Cost per job: 8 vCPU × job duration × $0.38/vCPU-hour + ~10% data/storage overhead
 
-### Default Cartesian Benchmark (geometric adstock only)
+### Default Sequential Benchmark (geometric adstock only)
+
+Sequential mode varies one dimension at a time — 9 variants (default):
 
 | Combinations | Run Mode | Iterations × Trials | Time Estimate | Cost Estimate (USD) |
 |-------------|----------|---------------------|---------------|---------------------|
-| **18 (default)** | Test | 10 × 1 | ~15-30 min | ~$2 |
-| **18 (default)** | Standard (`--full-run`) | 1000 × 3 | ~1.5-2 hours | ~$14 |
-| **18 (default)** | Extended (`--extended-run`) | 2000 × 5 | ~3-4 hours | ~$40 |
-| **18 (default)** | Production (`--production-run`) | 5000 × 5 | ~7-10 hours | ~$90 |
+| **9 (default)** | Test | 10 × 1 | ~8-15 min | ~$1 |
+| **9 (default)** | Standard (`--full-run`) | 1000 × 3 | ~40-70 min | ~$7 |
+| **9 (default)** | Extended (`--extended-run`) | 2000 × 5 | ~1.5-2 hours | ~$20 |
+| **9 (default)** | Production (`--production-run`) | 5000 × 5 | ~3-4 hours | ~$45 |
 
-### Sequential Benchmark (`--sequential`, geometric adstock only)
-
-Sequential mode varies one dimension at a time — 9 variants instead of 18:
+### Cartesian Benchmark (`--cartesian`, geometric adstock only)
 
 | Combinations | Run Mode | Iterations × Trials | Time Estimate | Cost Estimate (USD) |
 |-------------|----------|---------------------|---------------|---------------------|
-| **9 (sequential)** | Standard | 1000 × 3 | ~40-70 min | ~$7 |
-| **9 (sequential)** | Extended | 2000 × 5 | ~1.5-2 hours | ~$20 |
-| **9 (sequential)** | Production | 5000 × 5 | ~3-4 hours | ~$45 |
+| **18 (cartesian)** | Test | 10 × 1 | ~15-30 min | ~$2 |
+| **18 (cartesian)** | Standard (`--full-run --cartesian`) | 1000 × 3 | ~1.5-2 hours | ~$14 |
+| **18 (cartesian)** | Extended (`--extended-run --cartesian`) | 2000 × 5 | ~3-4 hours | ~$40 |
+| **18 (cartesian)** | Production (`--production-run --cartesian`) | 5000 × 5 | ~7-10 hours | ~$90 |
 
-### Full Cartesian Benchmark (`--all-adstock`, all 3 adstock types)
+### Full Cartesian Benchmark (`--cartesian --all-adstock`, all 3 adstock types)
 
 | Combinations | Run Mode | Iterations × Trials | Time Estimate | Cost Estimate (USD) |
 |-------------|----------|---------------------|---------------|---------------------|
@@ -216,9 +217,9 @@ Sequential mode varies one dimension at a time — 9 variants instead of 18:
 
 **Recommendations:**
 - **Quick validation:** 5 combinations, test mode (~$1, 10 min)
-- **Fast exploration:** 9 combinations, sequential + standard mode (~$7, 1 hour)
+- **Fast exploration:** 9 combinations, sequential standard mode — default (~$7, 1 hour)
 - **Thorough analysis:** 10 combinations, extended mode (~$20, 2-3 hours)
-- **Complete benchmark:** 54 combinations (all adstock), standard mode (~$40, 4-6 hours)
+- **Complete benchmark:** 54 combinations (all adstock, cartesian), standard mode (~$40, 4-6 hours)
 - **Production quality:** 10 combinations, production mode (~$50, 5-7 hours)
 
 ## Hyperparameter Presets & Window Length

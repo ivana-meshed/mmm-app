@@ -33,12 +33,13 @@ sf_schema    = "GROWTH"
 sf_role      = "ACCOUNTADMIN"
 
 # Training job resource sizing
-# Testing with 8 vCPU to bypass Cloud Run platform quotas that affect lower tiers
-# With strong override fix (PR #161), now consistently uses all 8 cores
-# Higher vCPU tiers are scheduled onto less-constrained host pools
+# Cloud Run Jobs valid CPU values: .08-1, 1.0, 2.0, 4.0, 6.0, 8.0 (16+ not supported)
+# 8 vCPU / 32Gi is the maximum available tier on Cloud Run Jobs
+# training_max_cores = 3: main R process (~10 Gi) + 3 workers (~6 Gi each) ≈ 28 Gi.
+# 5 workers pushed total over 32 Gi and caused SIGKILL (OOM).
 training_cpu       = "8.0"
 training_memory    = "32Gi"
-training_max_cores = "8"  # Now consistently provides all 8 cores
+training_max_cores = "3"
 
 # Google OAuth allowed domains (comma-separated)
 # Example: allowed_domains = "mesheddata.com,example.com"

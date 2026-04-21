@@ -5,16 +5,23 @@ These tests validate the logic of download, delete, and upload scripts
 without requiring actual GCS access (using mocking).
 """
 
+import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-# We'll import the classes after mocking storage.Client
-with patch("google.cloud.storage.Client"):
-    from scripts.copy_test_to_root import TestFolderCopier
-    from scripts.delete_bucket_data import BucketDataCleaner
-    from scripts.download_test_data import TestDataDownloader
-    from scripts.upload_test_data import TestDataUploader
+# Mock google packages before importing scripts that use them,
+# so tests run in environments where google-cloud-storage is not installed.
+# Use direct assignment (not setdefault) so the mock always takes effect even
+# when real google packages are installed (e.g. on a developer's macOS machine).
+sys.modules["google"] = MagicMock()
+sys.modules["google.cloud"] = MagicMock()
+sys.modules["google.cloud.storage"] = MagicMock()
+
+from scripts.copy_test_to_root import TestFolderCopier  # noqa: E402
+from scripts.delete_bucket_data import BucketDataCleaner  # noqa: E402
+from scripts.download_test_data import TestDataDownloader  # noqa: E402
+from scripts.upload_test_data import TestDataUploader  # noqa: E402
 
 
 class TestDownloadScript(unittest.TestCase):

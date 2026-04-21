@@ -32,6 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
+
 # Add app directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
 
@@ -89,7 +91,10 @@ class BenchmarkAnalyzer:
         return []
 
     def map_variants_to_timestamps(
-        self, variants: List[Dict], queue_entries: List[Dict]
+        self,
+        variants: List[Dict],
+        queue_entries: List[Dict],
+        benchmark_id: str = "",
     ) -> Dict[str, str]:
         """
         Map variant names to their actual result timestamps from queue.
@@ -103,6 +108,13 @@ class BenchmarkAnalyzer:
         while jobs are still in progress (useful for partial analysis).
         Variants whose entry has none of these path fields are not mapped and
         will fall back to recency-based search in ``_collect_variant_result``.
+
+        When ``benchmark_id`` is provided only queue entries whose
+        ``params.benchmark_id`` matches are considered.  Without this guard
+        the lookup can return a stale timestamp from a *previous* benchmark
+        run for the same variant name, causing the exact-path lookup to fail
+        (benchmark jobs write to ``benchmarks/{id}/{variant}/`` not to
+        ``robyn/{revision}/{country}/{timestamp}/``).
         """
         timestamp_map = {}
 
@@ -115,6 +127,13 @@ class BenchmarkAnalyzer:
             for entry in queue_entries:
                 params = entry.get("params", {})
                 entry_variant = params.get("benchmark_variant", "")
+
+                # Skip entries from other benchmark runs to avoid using stale
+                # timestamps from previous runs of the same variant name.
+                if benchmark_id:
+                    entry_benchmark_id = params.get("benchmark_id", "")
+                    if entry_benchmark_id != benchmark_id:
+                        continue
 
                 if entry_variant == variant_name and entry.get("status") in (
                     "COMPLETED",
@@ -178,7 +197,9 @@ class BenchmarkAnalyzer:
 
         # Load queue entries to find actual timestamps
         queue_entries = self.load_queue_entries(queue_name)
-        timestamp_map = self.map_variants_to_timestamps(variants, queue_entries)
+        timestamp_map = self.map_variants_to_timestamps(
+            variants, queue_entries, benchmark_id=benchmark_id
+        )
 
         # Collect results for each variant
         results = []
@@ -325,6 +346,28 @@ class BenchmarkAnalyzer:
             f"  Variant config: adstock={variant.get('adstock')}, train_size={variant.get('train_size')}"
         )
 
+        # PRIMARY: Check benchmark-specific path first.
+        # When a job is submitted with benchmark_id + benchmark_variant, the R
+        # training script stores results at benchmarks/{benchmark_id}/{variant}/
+        # (see r/run_all.R). This is the canonical location for benchmark jobs.
+        if benchmark_id and variant_name:
+            benchmark_path = (
+                f"benchmarks/{benchmark_id}/{variant_name}/model_summary.json"
+            )
+            logger.info(f"  Trying benchmark path: {benchmark_path}")
+            try:
+                blob = self.bucket.blob(benchmark_path)
+                if blob.exists():
+                    summary = json.loads(blob.download_as_bytes())
+                    logger.info(f"  ✓ Found result at benchmark path")
+                    return self._extract_metrics(summary, variant)
+                else:
+                    logger.debug(f"  ✗ Benchmark path not found: {benchmark_path}")
+            except Exception as e:
+                logger.error(
+                    f"  ✗ Error loading benchmark path {benchmark_path}: {e}"
+                )
+
         # Get timestamp from map (actual execution timestamp)
         timestamp = None
         if timestamp_map:
@@ -356,7 +399,7 @@ class BenchmarkAnalyzer:
             except Exception as e:
                 logger.error(f"  ✗ Error loading exact path {exact_path}: {e}")
 
-        # Fallback: Search for model_summary.json in expected location
+        # Last resort: Search for model_summary.json in legacy location
         prefix = f"robyn/{revision}/{country}/"
         logger.info(f"  Falling back to search in: {prefix}")
 
@@ -388,8 +431,67 @@ class BenchmarkAnalyzer:
         except Exception as e:
             logger.error(f"  ✗ Error searching for results: {e}")
 
+        # Before giving up, check for failure artifacts written by the R panic
+        # trap (panic_error.json / status.json).  These are uploaded even when
+        # the training job crashes, so their presence tells us *why* the job
+        # failed.
+        if benchmark_id and variant_name:
+            self._log_failure_diagnostics(benchmark_id, variant_name)
+
         logger.error(f"❌ NO RESULTS FOUND for variant: {variant_name}")
         return None
+
+    def _log_failure_diagnostics(
+        self, benchmark_id: str, variant_name: str
+    ) -> None:
+        """Log failure diagnostics from panic_error.json / status.json.
+
+        The R training script uploads these artifacts to
+        ``benchmarks/{id}/{variant}/`` whenever the job exits abnormally
+        (via the panic trap installed in run_all.R).  Reading them here
+        surfaces the root-cause error message without requiring access to
+        Cloud Run logs.
+        """
+        prefix = f"benchmarks/{benchmark_id}/{variant_name}"
+
+        for artifact in ("panic_error.json", "status.json"):
+            blob_path = f"{prefix}/{artifact}"
+            try:
+                blob = self.bucket.blob(blob_path)
+                if not blob.exists():
+                    continue
+                payload = json.loads(blob.download_as_bytes())
+                state = payload.get("state", "")
+                if artifact == "panic_error.json":
+                    msg = payload.get("message", "")
+                    step = payload.get("step", "")
+                    logger.warning(
+                        f"  💥 {variant_name} crashed"
+                        + (f" at step '{step}'" if step else "")
+                        + (f": {msg}" if msg else "")
+                    )
+                    return  # panic_error.json is more informative; stop here
+                elif state and state != "RUNNING":
+                    # status.json present but no panic_error.json means the job
+                    # completed without writing a panic payload (e.g. an early
+                    # crash before the panic trap was installed, or a successful
+                    # run that simply produced no model_summary.json).
+                    logger.warning(
+                        f"  ⚠️  {variant_name} status.json shows state={state!r}"
+                        " (no panic_error.json found)"
+                    )
+                    return
+                elif state == "RUNNING":
+                    logger.warning(
+                        f"  ⚠️  {variant_name} status.json still shows"
+                        " state='RUNNING' — job may have been killed without"
+                        " writing failure artifacts"
+                    )
+                    return
+            except Exception as exc:
+                logger.debug(
+                    f"  Could not read {blob_path}: {exc}"
+                )
 
     def _matches_variant(
         self, summary: Dict[str, Any], variant: Dict[str, Any]
@@ -654,19 +756,23 @@ class BenchmarkAnalyzer:
             fig.savefig(tmp.name, bbox_inches="tight", dpi=150)
             tmp_path = tmp.name
 
-        # Upload to GCS
-        gcs_path = f"{gcs_dir}/{name}.{format}"
-        blob = self.bucket.blob(gcs_path)
-        blob.upload_from_filename(tmp_path)
+        try:
+            # Upload to GCS
+            gcs_path = f"{gcs_dir}/{name}.{format}"
+            blob = self.bucket.blob(gcs_path)
+            blob.upload_from_filename(tmp_path)
 
-        # Save to local if requested
-        if local_dir:
-            local_path = Path(local_dir) / f"{name}.{format}"
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-            fig.savefig(local_path, bbox_inches="tight", dpi=150)
-
-        # Clean up temp file
-        os.unlink(tmp_path)
+            # Save to local if requested
+            if local_dir:
+                local_path = Path(local_dir) / f"{name}.{format}"
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                fig.savefig(local_path, bbox_inches="tight", dpi=150)
+        finally:
+            # Always remove the temp file, even when the upload fails
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     def _plot_rsq_comparison(self, df: pd.DataFrame):
         """Plot R² comparison across variants."""
@@ -718,6 +824,7 @@ class BenchmarkAnalyzer:
         ax.legend(title="Data Split")
         ax.grid(axis="y", alpha=0.3)
 
+        fig.tight_layout()
         return fig
 
     def _plot_nrmse_comparison(self, df: pd.DataFrame):
@@ -763,6 +870,7 @@ class BenchmarkAnalyzer:
         ax.legend(title="Data Split")
         ax.grid(axis="y", alpha=0.3)
 
+        fig.tight_layout()
         return fig
 
     def _plot_decomp_rssd(self, df: pd.DataFrame):
@@ -796,6 +904,7 @@ class BenchmarkAnalyzer:
 
         ax.grid(axis="x", alpha=0.3)
 
+        fig.tight_layout()
         return fig
 
     def _plot_train_val_test_gap(self, df: pd.DataFrame):
@@ -912,7 +1021,7 @@ class BenchmarkAnalyzer:
             ax.text(
                 0.5,
                 0.5,
-                "⚠️ No Correlation Data\n\n"
+                "[!] No Correlation Data\n\n"
                 "Metrics show no variation across variants.\n"
                 "This typically happens in test runs with low iterations.\n\n"
                 "Consider using --full-run for meaningful comparison.",
@@ -939,6 +1048,7 @@ class BenchmarkAnalyzer:
         )
         ax.set_title("Metric Correlations", fontsize=16, fontweight="bold")
 
+        fig.tight_layout()
         return fig
 
     def _plot_best_models_summary(self, df: pd.DataFrame):
@@ -1526,6 +1636,18 @@ def main():
             "last config's variants."
         ),
     )
+    parser.add_argument(
+        "--min-r2",
+        dest="min_r2",
+        type=float,
+        default=0.7,
+        help=(
+            "Minimum R² threshold to include a result (default: 0.7). "
+            "Uses rsq_val when available, otherwise rsq_train. "
+            "Results below this threshold are excluded before plotting and "
+            "summary statistics."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1558,8 +1680,54 @@ def main():
         df = analyzer.collect_results(args.benchmark_id, args.queue_name)
 
     if df is None or df.empty:
-        logger.error("No results found to analyze")
-        return 1
+        logger.warning(
+            "No results found to analyze — all benchmark jobs may have failed. "
+            "Check the variant diagnostics logged above for crash details."
+        )
+        logger.warning(
+            "Tip: check GCS for panic_error.json / console.log under "
+            f"benchmarks/{args.benchmark_id}/<variant>/"
+        )
+        return 0
+
+    # Filter out low-quality results below the R² threshold
+    if args.min_r2 is not None:
+        # Prefer rsq_val; fall back to rsq_train when val is absent
+        if "rsq_val" in df.columns and df["rsq_val"].notna().any():
+            r2_col = "rsq_val"
+        elif "rsq_train" in df.columns and df["rsq_train"].notna().any():
+            r2_col = "rsq_train"
+        else:
+            r2_col = None
+
+        if r2_col:
+            before = len(df)
+            df = df[
+                df[r2_col].isna() | (df[r2_col] >= args.min_r2)
+            ].copy()
+            removed = before - len(df)
+            if removed:
+                logger.info(
+                    f"Filtered out {removed} result(s) with {r2_col} < "
+                    f"{args.min_r2} (kept {len(df)} of {before})"
+                )
+            else:
+                logger.info(
+                    f"All {before} result(s) meet the R² threshold "
+                    f"({r2_col} >= {args.min_r2})"
+                )
+        else:
+            logger.warning(
+                "No R² columns found; skipping quality filter"
+            )
+
+        if df.empty:
+            logger.error(
+                f"No results remaining after applying R² filter "
+                f"(min_r2={args.min_r2}). "
+                "Use --min-r2 0 to disable filtering."
+            )
+            return 1
 
     logger.info(f"Collected {len(df)} results")
 
