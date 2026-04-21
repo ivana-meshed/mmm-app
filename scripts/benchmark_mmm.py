@@ -317,7 +317,7 @@ class BenchmarkRunner:
 
     def _find_latest_version(self, country: str, goal: str) -> str:
         """Find the most recent version (timestamp) for a country/goal combination."""
-        prefix = f"training_data/{country.lower()}/{goal.lower()}/"
+        prefix = f"training_data/{country.lower()}/{goal}/"
 
         # List all "folders" (prefixes) under this path
         blobs = self.bucket.list_blobs(prefix=prefix, delimiter="/")
@@ -359,7 +359,7 @@ class BenchmarkRunner:
             version = self._find_latest_version(country, goal)
 
         blob_path = (
-            f"training_data/{country.lower()}/{goal.lower()}/{version}/"
+            f"training_data/{country.lower()}/{goal}/{version}/"
             f"selected_columns.json"
         )
         blob = self.bucket.blob(blob_path)
