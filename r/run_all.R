@@ -771,7 +771,17 @@ benchmark_id      <- cfg$benchmark_id      %||% NULL
 benchmark_variant <- cfg$benchmark_variant %||% NULL
 benchmark_test    <- cfg$benchmark_test    %||% NULL
 
-dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
+# Use RUN_WORKSPACE env var if set by training_entrypoint.sh so that output
+# files land on the real filesystem (not on the in-memory /tmp tmpfs).
+# Falls back to the original ~/budget/datasets path for local development.
+run_workspace <- Sys.getenv("RUN_WORKSPACE", "")
+if (nzchar(run_workspace)) {
+    dir_path <- file.path(run_workspace, revision, country, timestamp)
+    cat(sprintf("📁 Using RUN_WORKSPACE dir_path: %s\n", dir_path))
+} else {
+    dir_path <- path.expand(file.path("~/budget/datasets", revision, country, timestamp))
+    cat(sprintf("📁 Using default dir_path: %s\n", dir_path))
+}
 dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
 
 # Benchmark jobs route all variant outputs under a shared benchmark parent folder
@@ -828,7 +838,103 @@ cleanup <- function() {
     try(close(log_con_err), silent = TRUE)
     try(close(log_con_out), silent = TRUE)
     try(gcs_put_safe(log_file, file.path(gcs_prefix, "console.log")), silent = TRUE)
+    # Upload final run report on exit
+    try(gcs_put_safe(run_report_file, file.path(gcs_prefix, "run_report.txt")), silent = TRUE)
 }
+
+## ---------- RUN REPORT ----------
+# run_report.txt: a human-readable chronological record of every major step.
+# It is written incrementally so that even a hard OOM kill leaves a partial
+# record of what happened before the crash.
+
+run_report_file <- file.path(dir_path, "run_report.txt")
+
+# Helper: return current RSS or cgroup memory usage as a readable string
+.mem_snapshot <- function() {
+    used_str <- tryCatch({
+        cg_usage <- "/sys/fs/cgroup/memory/memory.usage_in_bytes"
+        cg_limit <- "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+        if (file.exists(cg_usage) && file.exists(cg_limit)) {
+            used_bytes <- as.numeric(readLines(cg_usage, warn = FALSE)[1])
+            limit_bytes <- as.numeric(readLines(cg_limit, warn = FALSE)[1])
+            used_gb  <- round(used_bytes  / 1024^3, 2)
+            limit_gb <- round(limit_bytes / 1024^3, 2)
+            sprintf("%.2f / %.2f GiB", used_gb, limit_gb)
+        } else {
+            "unavailable"
+        }
+    }, error = function(e) "unavailable")
+    used_str
+}
+
+# Write the report header (once at startup)
+report_header <- c(
+    "════════════════════════════════════════════════════════════",
+    "                  MMM TRAINING  RUN REPORT",
+    "════════════════════════════════════════════════════════════",
+    sprintf("Run ID       : %s / %s / %s", revision, country, timestamp),
+    sprintf("Started      : %s", format(job_started, "%Y-%m-%d %H:%M:%S %Z")),
+    sprintf("GCS prefix   : gs://%s/%s",
+            tryCatch(googleCloudStorageR::gcs_get_global_bucket(), error = function(e) "<unknown>"),
+            gcs_prefix),
+    sprintf("Dir path     : %s", dir_path),
+    sprintf("Job config   : %s", Sys.getenv("JOB_CONFIG_GCS_PATH", "<not set>")),
+    sprintf("RUN_WORKSPACE: %s", Sys.getenv("RUN_WORKSPACE", "<local>")),
+    sprintf("TMPDIR       : %s", Sys.getenv("TMPDIR", "/tmp")),
+    "",
+    "── System ──────────────────────────────────────────────────",
+    sprintf("R version    : %s", R.version$version.string),
+    sprintf("Platform     : %s", R.version$platform),
+    sprintf("CPU cores    : %d available, %d requested, %d for training",
+            available_cores_parallelly, requested_cores, max_cores),
+    sprintf("Memory       : %s", .mem_snapshot()),
+    "",
+    "── Job Config ──────────────────────────────────────────────",
+    sprintf("Country      : %s", country),
+    sprintf("Revision     : %s", revision),
+    sprintf("Iterations   : %d", iter),
+    sprintf("Trials       : %d", trials),
+    sprintf("Train size   : %s", paste(train_size, collapse = ",")),
+    sprintf("Adstock      : %s", cfg$adstock %||% "<from cfg>"),
+    sprintf("HP preset    : %s", hyperparameter_preset),
+    sprintf("Resample     : %s", resample_freq),
+    sprintf("Dep var      : %s (%s)", dep_var_from_cfg, dep_var_type_from_cfg),
+    sprintf("Date range   : %s → %s", start_data_date, end_data_date),
+    "",
+    "── Steps ───────────────────────────────────────────────────",
+    ""
+)
+writeLines(report_header, run_report_file)
+gcs_put_safe(run_report_file, file.path(gcs_prefix, "run_report.txt"))
+
+# Helper: append one step record to run_report.txt and push to GCS
+report_step <- function(step_name, status = "OK", details = NULL, t_start = NULL) {
+    ts     <- format(Sys.time(), "%H:%M:%S")
+    icon   <- switch(status, "OK" = "✅", "FAIL" = "❌", "WARN" = "⚠️ ", "SKIP" = "⏭️ ", "ℹ️ ")
+    elapsed_str <- if (!is.null(t_start)) {
+        sprintf(" [%.1fs]", as.numeric(difftime(Sys.time(), t_start, units = "secs")))
+    } else ""
+    header  <- sprintf("[%s]%s %s %s", ts, elapsed_str, icon, step_name)
+    mem_str <- sprintf("         memory: %s", .mem_snapshot())
+    lines   <- c(header, mem_str)
+    if (!is.null(details) && length(details) > 0) {
+        for (k in names(details)) {
+            lines <- c(lines, sprintf("         %-18s: %s", k, as.character(details[[k]])))
+        }
+    }
+    lines <- c(lines, "")
+    # Print to console (visible in Cloud Logging) and append to report file
+    message(paste(lines, collapse = "\n"))
+    cat(paste(lines, collapse = "\n"), "\n", sep = "", file = run_report_file, append = TRUE)
+    gcs_put_safe(run_report_file, file.path(gcs_prefix, "run_report.txt"))
+    invisible(NULL)
+}
+
+report_step("job_start", "OK", details = list(
+    workspace = Sys.getenv("RUN_WORKSPACE", "<local>"),
+    dir_path  = dir_path,
+    gcs_prefix = gcs_prefix
+))
 
 ## Global panic trap: log any uncaught error before the process exits
 install_panic_trap <- function() {
@@ -845,6 +951,8 @@ install_panic_trap <- function() {
         pjson <- file.path(dir_path, "panic_error.json")
         safe_write(c("UNCAUGHT ERROR", as.character(Sys.time()), err), ptxt)
         writeLines(jsonlite::toJSON(payload, auto_unbox = TRUE, pretty = TRUE), pjson)
+        # record in run report (best-effort)
+        try(report_step("uncaught_error", "FAIL", details = list(message = err)), silent = TRUE)
         # status.json best-effort
         try(writeLines(jsonlite::toJSON(
             c(list(state = "FAILED"), payload),
@@ -932,6 +1040,11 @@ if (!is.null(cfg$data_gcs_path) && nzchar(cfg$data_gcs_path)) {
     log_cfg_copy(cfg, dir_path)
     log_df_snapshot(df, dir_path)
     flush_and_ship_log("after data load")
+    report_step("data_load", "OK", details = list(
+        source   = cfg$data_gcs_path,
+        rows     = nrow(df),
+        columns  = ncol(df)
+    ))
 } else {
     stop("No data_gcs_path provided in configuration.")
 }
@@ -1179,6 +1292,10 @@ if (skip_country) {
     gcs_put_safe(status_json, file.path(gcs_prefix, "status.json"))
 
     flush_and_ship_log("country skipped - no usable data")
+    report_step("country_skip", "SKIP", details = list(
+        country = country,
+        reason  = paste(skip_reason, collapse = "; ")
+    ))
     message("✅ Country skipped successfully. Exiting without error.")
     quit(save = "no", status = 0)
 }
@@ -1990,6 +2107,14 @@ log_InputCollect <- function(ic) {
     cat("=========================================================\n\n")
 }
 log_InputCollect(InputCollect)
+report_step("robyn_inputs", "OK", details = list(
+    dt_input_rows   = nrow(InputCollect$dt_input),
+    dt_input_cols   = ncol(InputCollect$dt_input),
+    date_range      = paste(min(InputCollect$dt_input$date), "→", max(InputCollect$dt_input$date)),
+    paid_media_vars = length(InputCollect$paid_media_vars),
+    organic_vars    = length(InputCollect$organic_vars %||% character()),
+    hp_keys         = length(InputCollect$hyperparameters)
+))
 
 # --- Sanity guards so robyn_run never starts with a bad InputCollect ---
 if (is.null(InputCollect) || !is.list(InputCollect)) {
@@ -2107,6 +2232,11 @@ cat(sprintf("━━━━━━━━━━━━━━━━━━━━━━�
 
 message("→ Starting Robyn training with ", max_cores, " cores on Cloud Run Jobs...")
 t0 <- Sys.time()
+report_step("robyn_run_start", "OK", details = list(
+    iterations = iter,
+    trials     = trials,
+    cores      = max_cores
+))
 
 robyn_err_txt <- file.path(dir_path, "robyn_run_error.txt")
 robyn_err_json <- file.path(dir_path, "robyn_run_error.json")
@@ -2407,6 +2537,10 @@ if (is.null(OutputModels)) {
 training_time <- as.numeric(difftime(Sys.time(), t0, units = "mins"))
 message("✅ Training completed in ", round(training_time, 2), " minutes")
 message("✅ OutputModels object created with class: ", class(OutputModels)[1])
+report_step("robyn_run_done", "OK", t_start = t0, details = list(
+    training_mins  = round(training_time, 2),
+    models_class   = class(OutputModels)[1]
+))
 
 ## ---------- APPEND R TRAINING TIME TO timings.csv --
 
@@ -2521,6 +2655,7 @@ OutputCollect <- tryCatch(
     }
 )
 flush_and_ship_log("after robyn_outputs")
+report_step("robyn_outputs", if (is.null(OutputCollect)) "FAIL" else "OK")
 
 # Check if robyn_outputs succeeded
 if (is.null(OutputCollect)) {
@@ -2987,6 +3122,7 @@ AllocatorCollect <- try(
     silent = TRUE
 )
 flush_and_ship_log("after robyn_allocator")
+report_step("robyn_allocator", if (inherits(AllocatorCollect, "try-error")) "WARN" else "OK")
 
 # Log allocator error if it failed
 if (inherits(AllocatorCollect, "try-error")) {
@@ -3142,13 +3278,23 @@ cat(
 )
 
 job_finished <- Sys.time()
+total_mins   <- round(as.numeric(difftime(job_finished, job_started, units = "mins")), 2)
+
+report_step("job_done", "OK", t_start = job_started, details = list(
+    total_mins   = total_mins,
+    best_model   = best_id,
+    gcs_outputs  = sprintf("gs://%s/%s/",
+                           googleCloudStorageR::gcs_get_global_bucket(),
+                           gcs_prefix)
+))
+
 writeLines(
     jsonlite::toJSON(
         list(
             state = "SUCCEEDED",
             start_time = as.character(job_started),
             end_time = as.character(job_finished),
-            duration_minutes = round(as.numeric(difftime(job_finished, job_started, units = "mins")), 2) # nolint
+            duration_minutes = total_mins
         ),
         auto_unbox = TRUE
     ),
