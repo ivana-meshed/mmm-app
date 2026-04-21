@@ -16,17 +16,25 @@ Usage:
     # List the 10 most-recent benchmarks, then analyse the newest
     python scripts/download_and_analyze_results.py --list-recent 10
 
-    # Save files locally and write a CSV / JSON report
+    # Save files locally and write a CSV / JSON / text report
     python scripts/download_and_analyze_results.py \\
         --benchmark-id dk_benchmark_20260420_123456 \\
         --output-dir /tmp/benchmark_results \\
-        --output-csv  /tmp/benchmark_results/report.csv \\
-        --output-json /tmp/benchmark_results/report.json
+        --output-csv    /tmp/benchmark_results/report.csv \\
+        --output-json   /tmp/benchmark_results/report.json \\
+        --report-file   /tmp/benchmark_results/report.txt \\
+        --log-file      /tmp/benchmark_results/run.log
 
     # Analyse without downloading (re-use previously downloaded files)
     python scripts/download_and_analyze_results.py \\
         --benchmark-id dk_benchmark_20260420_123456 \\
         --local-dir /tmp/benchmark_results --skip-download
+
+    # Auto-generate log / report filenames inside --output-dir
+    python scripts/download_and_analyze_results.py \\
+        --benchmark-id dk_benchmark_20260420_123456 \\
+        --output-dir /tmp/benchmark_results \\
+        --auto-save
 
 Prerequisites:
     pip install google-cloud-storage
@@ -34,10 +42,12 @@ Prerequisites:
 """
 
 import argparse
+import io
 import json
 import logging
 import os
 import sys
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,11 +56,24 @@ from typing import Any, Dict, List, Optional, Tuple
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
+LOG_FORMAT = "%(asctime)s  %(levelname)-8s  %(message)s"
+LOG_DATE_FMT = "%Y-%m-%d %H:%M:%S"
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format=LOG_FORMAT,
+    datefmt=LOG_DATE_FMT,
 )
 logger = logging.getLogger(__name__)
+
+
+def _add_file_handler(path: Path) -> logging.FileHandler:
+    """Attach a file handler to the root logger and return it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = logging.FileHandler(str(path), encoding="utf-8")
+    fh.setFormatter(logging.Formatter(fmt=LOG_FORMAT, datefmt=LOG_DATE_FMT))
+    logging.getLogger().addHandler(fh)
+    return fh
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -111,8 +134,16 @@ def _read_blob_text(bucket, blob_path: str) -> Optional[str]:
     try:
         blob = bucket.blob(blob_path)
         if not blob.exists():
+            logger.debug("Blob not found: gs://%s/%s", bucket.name, blob_path)
             return None
-        return blob.download_as_text(encoding="utf-8")
+        text = blob.download_as_text(encoding="utf-8")
+        logger.debug(
+            "Downloaded gs://%s/%s (%d bytes)",
+            bucket.name,
+            blob_path,
+            len(text),
+        )
+        return text
     except Exception as exc:  # pylint: disable=broad-except
         logger.debug("Could not read gs://%s/%s: %s", bucket.name, blob_path, exc)
         return None
@@ -191,6 +222,7 @@ def download_benchmark(
     prefix = f"{BENCHMARK_PREFIX}{benchmark_id}/"
     logger.info("Listing blobs under gs://%s/%s", bucket.name, prefix)
 
+    t0 = time.monotonic()
     try:
         all_blobs = list(bucket.list_blobs(prefix=prefix))
     except Exception as exc:  # pylint: disable=broad-except
@@ -201,9 +233,11 @@ def download_benchmark(
         logger.warning("No blobs found under gs://%s/%s", bucket.name, prefix)
         return {}
 
-    logger.info("Found %d blob(s) total", len(all_blobs))
+    logger.info("Found %d blob(s) total — starting download…", len(all_blobs))
 
     data: Dict[str, Dict[str, Optional[str]]] = {}
+    downloaded = 0
+    skipped = 0
 
     for blob in all_blobs:
         # blob.name = benchmarks/{benchmark_id}/...
@@ -221,10 +255,12 @@ def download_benchmark(
 
         if filename not in ARTIFACTS and filename != "plan.json":
             logger.debug("Skipping non-artifact blob: %s", blob.name)
+            skipped += 1
             continue
 
         try:
             text = blob.download_as_text(encoding="utf-8")
+            downloaded += 1
         except Exception as exc:  # pylint: disable=broad-except
             logger.warning("Could not download %s: %s", blob.name, exc)
             text = None
@@ -236,9 +272,15 @@ def download_benchmark(
         _save_locally(text, local_path)
         logger.debug("  ✓ saved %s", local_path)
 
+    elapsed = time.monotonic() - t0
+    n_variants = len([k for k in data if k != "_plan"])
     logger.info(
-        "Downloaded artifacts for %d variant(s) (+ plan)",
-        len([k for k in data if k != "_plan"]),
+        "Download complete in %.1fs — %d artifact(s) saved across %d variant(s)"
+        " (%d blob(s) skipped as non-artifact)",
+        elapsed,
+        downloaded,
+        n_variants,
+        skipped,
     )
     return data
 
@@ -403,17 +445,33 @@ def analyse(
             name = v.get("benchmark_variant") or v.get("variant_name", "")
             if name:
                 plan_variants[name] = v
+        logger.info(
+            "plan.json loaded — %d planned variant(s)", len(plan_variants)
+        )
+    else:
+        logger.warning("plan.json not found or unparseable — variant list from GCS only")
 
     # All keys except _plan are variant names
     variant_keys = sorted(k for k in data if k != "_plan")
 
     # Include variants listed in plan but absent from GCS (never started)
+    pending_names = []
     for name in plan_variants:
         if name not in variant_keys:
             variant_keys.append(name)
+            pending_names.append(name)
+
+    if pending_names:
+        logger.info(
+            "%d variant(s) in plan but not yet in GCS (PENDING): %s",
+            len(pending_names),
+            ", ".join(pending_names),
+        )
+
+    logger.info("Analysing %d variant(s)…", len(variant_keys))
 
     records = []
-    for variant in variant_keys:
+    for i, variant in enumerate(variant_keys, 1):
         files = data.get(variant, {})
         status_text = files.get("status.json")
         panic_json_text = files.get("panic_error.json")
@@ -450,6 +508,33 @@ def analyse(
         else:
             derived_status = "FAILED" if error_message else "UNKNOWN"
 
+        _status_icon = {
+            "SUCCEEDED": "✓",
+            "FAILED": "✗",
+            "OOM": "💀",
+            "SKIPPED": "–",
+            "PENDING": "…",
+            "RUNNING": "▶",
+        }.get(derived_status, "?")
+        rsq_str = (
+            f"  R²={metrics['rsq_train']:.3f}" if metrics.get("rsq_train") else ""
+        )
+        logger.info(
+            "[%d/%d] %s %-40s  %s%s",
+            i,
+            len(variant_keys),
+            _status_icon,
+            variant,
+            derived_status,
+            rsq_str,
+        )
+        if oom:
+            logger.warning("        ↳ OOM suspected — no panic_error written")
+        if error_message:
+            logger.debug(
+                "        ↳ error: %s", error_message.replace("\n", " ")[:120]
+            )
+
         # Console-log tail for quick inspection (last 30 lines)
         console_tail = ""
         if console_text:
@@ -479,47 +564,58 @@ def analyse(
 # ---------------------------------------------------------------------------
 
 def print_report(
-    benchmark_id: str, records: List[Dict[str, Any]]
+    benchmark_id: str,
+    records: List[Dict[str, Any]],
+    report_file: Optional[Path] = None,
 ) -> None:
-    """Print a human-readable in-depth report to stdout."""
+    """Print a human-readable in-depth report to stdout and optionally to a file."""
+    # Capture output so we can tee it to a file if requested
+    buf = io.StringIO()
+
+    def _p(*args, **kwargs):  # thin wrapper to write to both buf and stdout
+        print(*args, **kwargs)
+        kwargs.pop("file", None)
+        print(*args, file=buf, **kwargs)
+
     total = len(records)
     status_counts: Counter = Counter(r["derived_status"] for r in records)
     oom_count = sum(1 for r in records if r["oom"])
 
-    print()
-    print("=" * 72)
-    print(f"BENCHMARK ANALYSIS  —  {benchmark_id}")
-    print("=" * 72)
-    print(f"\nTotal variants : {total}")
-    print("\nStatus breakdown:")
+    _p()
+    _p("=" * 72)
+    _p(f"BENCHMARK ANALYSIS  —  {benchmark_id}")
+    _p(f"Generated : {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+    _p("=" * 72)
+    _p(f"\nTotal variants : {total}")
+    _p("\nStatus breakdown:")
     for status, count in status_counts.most_common():
         pct = 100.0 * count / total if total else 0
         marker = "  ⚠ OOM" if status == "OOM" else ""
-        print(f"  {status:<20} {count:>4}  ({pct:.0f}%){marker}")
+        _p(f"  {status:<20} {count:>4}  ({pct:.0f}%){marker}")
 
     if oom_count:
-        print(f"\n{'─'*72}")
-        print(
+        _p(f"\n{'─'*72}")
+        _p(
             f"⚠  {oom_count} variant(s) appear to have been OOM-killed "
             f"(Container terminated on signal 9 / SIGKILL)."
         )
-        print(
+        _p(
             "   Symptoms: no panic_error.json written, console.log "
             "truncated or absent,\n"
             "   status.json missing or shows no final state.\n"
             "   Fix: reduce --iterations / --trials, increase Cloud Run "
             "memory allocation,\n"
-            "   or split large configs into smaller batches."
+            "   or use --sequential to avoid the cartesian combination explosion."
         )
 
     # Succeeded variants — metrics overview
     succeeded = [r for r in records if r["derived_status"] == "SUCCEEDED"]
     if succeeded:
-        print(f"\n{'─'*72}")
-        print(f"SUCCEEDED variants ({len(succeeded)}):")
+        _p(f"\n{'─'*72}")
+        _p(f"SUCCEEDED variants ({len(succeeded)}):")
         header = f"  {'Variant':<35} {'R²trn':>6} {'R²val':>6} {'NRMSE':>7} {'RSSD':>7} {'sec':>6}"
-        print(header)
-        print("  " + "-" * (len(header) - 2))
+        _p(header)
+        _p("  " + "-" * (len(header) - 2))
         for r in sorted(succeeded, key=lambda x: x["variant"]):
             rsq_train = (
                 f"{r['rsq_train']:.3f}" if r["rsq_train"] is not None else "  —  "
@@ -538,7 +634,7 @@ def print_report(
             elapsed = (
                 f"{int(r['elapsed_sec'])}" if r.get("elapsed_sec") else "  —  "
             )
-            print(
+            _p(
                 f"  {r['variant']:<35} {rsq_train:>6} {rsq_val:>6} "
                 f"{nrmse:>7} {rssd:>7} {elapsed:>6}"
             )
@@ -548,32 +644,37 @@ def print_report(
         r for r in records if r["derived_status"] in ("FAILED", "OOM", "UNKNOWN")
     ]
     if bad:
-        print(f"\n{'─'*72}")
-        print(f"FAILED / OOM variants ({len(bad)}):")
+        _p(f"\n{'─'*72}")
+        _p(f"FAILED / OOM variants ({len(bad)}):")
         for r in sorted(bad, key=lambda x: x["variant"]):
-            print(f"\n  Variant : {r['variant']}")
-            print(f"  Status  : {r['derived_status']}  (raw state: {r['status_state']})")
+            _p(f"\n  Variant : {r['variant']}")
+            _p(f"  Status  : {r['derived_status']}  (raw state: {r['status_state']})")
             if r["oom"]:
-                print("  OOM     : YES — container was likely killed by SIGKILL")
+                _p("  OOM     : YES — container was likely killed by SIGKILL")
             if r["error_type"]:
-                print(f"  ErrType : {r['error_type']}")
+                _p(f"  ErrType : {r['error_type']}")
             if r["error_message"]:
                 short = r["error_message"].replace("\n", " ")[:160]
-                print(f"  Message : {short}")
+                _p(f"  Message : {short}")
             if r["console_tail"]:
-                print("  Console (last 30 lines):")
+                _p("  Console (last 30 lines):")
                 for line in r["console_tail"].splitlines():
-                    print(f"    {line}")
+                    _p(f"    {line}")
 
     # Pending variants
     pending = [r for r in records if r["derived_status"] == "PENDING"]
     if pending:
-        print(f"\n{'─'*72}")
-        print(f"PENDING variants ({len(pending)}) — not yet started:")
+        _p(f"\n{'─'*72}")
+        _p(f"PENDING variants ({len(pending)}) — not yet started:")
         for r in pending:
-            print(f"  {r['variant']}")
+            _p(f"  {r['variant']}")
 
-    print("\n" + "=" * 72)
+    _p("\n" + "=" * 72)
+
+    if report_file:
+        report_file.parent.mkdir(parents=True, exist_ok=True)
+        report_file.write_text(buf.getvalue(), encoding="utf-8")
+        logger.info("Text report written to %s", report_file)
 
 
 def write_csv(records: List[Dict[str, Any]], path: str) -> None:
@@ -641,6 +742,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path for the JSON report (e.g. /tmp/report.json)",
     )
     parser.add_argument(
+        "--report-file",
+        default=None,
+        help="Path to save the full text report (e.g. /tmp/report.txt). "
+        "Use --auto-save to generate the name automatically.",
+    )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Path to write all log messages for this run "
+        "(e.g. /tmp/benchmark_results/run.log). "
+        "Use --auto-save to generate the name automatically.",
+    )
+    parser.add_argument(
+        "--auto-save",
+        action="store_true",
+        help="Automatically write log, text report, CSV, and JSON into "
+        "--output-dir using the benchmark-id and timestamp as filename.",
+    )
+    parser.add_argument(
         "--skip-download",
         action="store_true",
         help="Skip GCS download and load from --local-dir instead.",
@@ -667,6 +787,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:  # noqa: C901 — intentionally linear
+    run_start = time.monotonic()
     parser = build_parser()
     args = parser.parse_args()
 
@@ -699,6 +820,59 @@ def main() -> int:  # noqa: C901 — intentionally linear
     output_dir = Path(args.output_dir)
 
     # ------------------------------------------------------------------ #
+    # Auto-generate output filenames when --auto-save is set              #
+    # ------------------------------------------------------------------ #
+    run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    stem = f"{benchmark_id}_{run_ts}"
+
+    log_file_path: Optional[Path] = None
+    report_file_path: Optional[Path] = None
+    csv_path: Optional[str] = args.output_csv
+    json_path: Optional[str] = args.output_json
+
+    if args.log_file:
+        log_file_path = Path(args.log_file)
+    elif args.auto_save:
+        log_file_path = output_dir / f"{stem}.log"
+
+    if args.report_file:
+        report_file_path = Path(args.report_file)
+    elif args.auto_save:
+        report_file_path = output_dir / f"{stem}_report.txt"
+
+    if args.auto_save:
+        if not csv_path:
+            csv_path = str(output_dir / f"{stem}_report.csv")
+        if not json_path:
+            json_path = str(output_dir / f"{stem}_report.json")
+
+    # Attach file handler as early as possible so all subsequent log
+    # messages are captured.
+    if log_file_path:
+        _add_file_handler(log_file_path)
+        logger.info("Log file: %s", log_file_path)
+
+    # ------------------------------------------------------------------ #
+    # Log run configuration                                               #
+    # ------------------------------------------------------------------ #
+    logger.info("=" * 60)
+    logger.info("download_and_analyze_results.py")
+    logger.info("  benchmark_id : %s", benchmark_id)
+    logger.info("  bucket       : %s", args.bucket)
+    logger.info("  output_dir   : %s", output_dir)
+    logger.info("  skip_download: %s", args.skip_download)
+    logger.info("  auto_save    : %s", args.auto_save)
+    if log_file_path:
+        logger.info("  log_file     : %s", log_file_path)
+    if report_file_path:
+        logger.info("  report_file  : %s", report_file_path)
+    if csv_path:
+        logger.info("  csv          : %s", csv_path)
+    if json_path:
+        logger.info("  json         : %s", json_path)
+    logger.info("=" * 60)
+
+    # ------------------------------------------------------------------ #
     # Load data                                                           #
     # ------------------------------------------------------------------ #
     if args.skip_download:
@@ -722,7 +896,10 @@ def main() -> int:  # noqa: C901 — intentionally linear
     # ------------------------------------------------------------------ #
     # Analyse                                                             #
     # ------------------------------------------------------------------ #
+    logger.info("Starting analysis…")
+    t_analyse = time.monotonic()
     records = analyse(benchmark_id, data)
+    logger.info("Analysis complete in %.2fs", time.monotonic() - t_analyse)
 
     if not records:
         logger.warning("No variants to report on.")
@@ -731,14 +908,16 @@ def main() -> int:  # noqa: C901 — intentionally linear
     # ------------------------------------------------------------------ #
     # Report                                                              #
     # ------------------------------------------------------------------ #
-    print_report(benchmark_id, records)
+    print_report(benchmark_id, records, report_file=report_file_path)
 
-    if args.output_csv:
-        write_csv(records, args.output_csv)
+    if csv_path:
+        write_csv(records, csv_path)
 
-    if args.output_json:
-        write_json(records, args.output_json)
+    if json_path:
+        write_json(records, json_path)
 
+    elapsed_total = time.monotonic() - run_start
+    logger.info("Total run time: %.1fs", elapsed_total)
     return 0
 
 
