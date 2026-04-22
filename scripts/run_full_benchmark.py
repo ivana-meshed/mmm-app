@@ -563,6 +563,7 @@ def generate_benchmark_config(
             f"{window_dim}{preset_dim}"
         ),
         "base_config": base_config,
+        "run_mode": run_mode,
         "iterations": iterations,
         "trials": trials,
         "max_combinations": max_combinations,
@@ -691,6 +692,7 @@ def load_external_benchmark_config(
     iterations, trials = iter_map[run_mode]
     config["iterations"] = iterations
     config["trials"] = trials
+    config["run_mode"] = run_mode
     logger.info(
         f"📋 Loaded external config: {resolved.name} "
         f"(iterations={iterations}, trials={trials} from {run_mode} mode)"

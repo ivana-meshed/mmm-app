@@ -215,6 +215,16 @@ class BenchmarkConfig:
         return self.config.get("max_combinations", 50)
 
     @property
+    def run_mode(self) -> Optional[str]:
+        """Explicit run mode label (e.g. 'standard', 'extended', 'production').
+
+        When present in the config, used verbatim in plan.json so the UI
+        can display the correct badge.  Falls back to ``None`` when not set,
+        in which case ``save_benchmark_plan`` infers it from iteration count.
+        """
+        return self.config.get("run_mode")
+
+    @property
     def iterations(self) -> int:
         """Robyn iterations per config."""
         return self.config.get("iterations", 2000)
@@ -982,16 +992,20 @@ class BenchmarkRunner:
         variants: List[Dict[str, Any]],
     ):
         """Save benchmark execution plan and combinations log to GCS."""
-        # Infer run_mode from iteration count so the UI can display a badge
-        _iters = benchmark_config.iterations
-        if _iters < 100:
-            _run_mode = "test"
-        elif _iters < 1500:
-            _run_mode = "standard"
-        elif _iters < 3500:
-            _run_mode = "extended"
+        # Use explicit run_mode from config when available; otherwise infer
+        # from iteration count so the UI can display the correct badge.
+        if benchmark_config.run_mode:
+            _run_mode = benchmark_config.run_mode
         else:
-            _run_mode = "production"
+            _iters = benchmark_config.iterations
+            if _iters < 100:
+                _run_mode = "test"
+            elif _iters < 1500:
+                _run_mode = "standard"
+            elif _iters < 3500:
+                _run_mode = "extended"
+            else:
+                _run_mode = "production"
 
         plan = {
             "benchmark_id": benchmark_id,

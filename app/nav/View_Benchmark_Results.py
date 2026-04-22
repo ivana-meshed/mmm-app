@@ -62,7 +62,9 @@ def _infer_run_mode(iterations: int) -> str:
     elif iterations < 3500:
         return "extended"
     else:
-        return "production"
+        # ≥3500 iterations — standard (5k) and production (5k) are identical;
+        # default to "standard" since --full-run is now the primary 5k mode.
+        return "standard"
 
 
 _RUN_MODE_BADGE = {
