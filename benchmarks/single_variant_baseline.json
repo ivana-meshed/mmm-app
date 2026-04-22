@@ -1,0 +1,49 @@
+{
+  "name": "single_variant_baseline",
+  "description": "Minimal single-variant config: one job per data config (weekly, geometric, 75/90 split, mixed-by-funnel spend mapping). Use this to test or compare data configs without variant explosion.",
+  "iterations": 5000,
+  "trials": 5,
+  "combination_mode": "cartesian",
+  "hyperparameter_preset": "custom_balanced_constrained",
+  "variants": {
+    "adstock": [
+      {
+        "name": "geometric",
+        "adstock": "geometric"
+      }
+    ],
+    "train_splits": [
+      {
+        "name": "75_90",
+        "train_size": [0.75, 0.9]
+      }
+    ],
+    "time_aggregation": [
+      {
+        "name": "weekly",
+        "resample_freq": "W"
+      }
+    ],
+    "spend_var_mapping": [
+      {
+        "name": "mixed_by_funnel_clicks",
+        "description": "Upper funnel (FB/TV/radio) \u2192 impressions/GRP; search/other \u2192 spend. Column order matches paid_media_spends.",
+        "mapping_strategy": "mixed",
+        "paid_media_vars_override": [
+          "GOOGLE_SEARCH_BRAND_COST",
+          "GOOGLE_SEARCH_NONBRAND_COST_2",
+          "GOOGLE_PMAX_COST_2",
+          "GOOGLE_OTHER_COST_2",
+          "BING_SEARCH_BRAND_COST",
+          "BING_SEARCH_NONBRAND_COST",
+          "BING_OTHER_COST",
+          "FB_UPPER_IMPRESSIONS",
+          "FB_LOWER_COST",
+          "FB_APP_COST",
+          "WBR_TOTAL_GRP",
+          "BAUER_GRP_FLOW_RADIO"
+        ]
+      }
+    ]
+  }
+}

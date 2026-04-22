@@ -31,7 +31,47 @@ Two manifests are available in benchmark_analysis/dk_json_configs_clean/:
                                               occ30d)  [DEFAULT]
   dk_context_testing_manifest_clean.json   – original 6-config test set
 
-Usage (production run — all 4 configs):
+Usage:
+
+─── ONE JOB PER CONFIG (--single-variant) ───────────────────────────────────
+
+Test run — 6 configs, 1 job each (6 total), 100 iterations, 1 trial:
+
+    python scripts/run_dk_benchmark_all_configs.py \\
+        --queue-name default-dev \\
+        --manifest dk_context_testing_manifest_clean.json \\
+        --single-variant \\
+        --iterations 100 --trials 1 \\
+        --process-queue
+
+Production run — 6 configs, 1 job each (6 total), full iterations/trials:
+
+    python scripts/run_dk_benchmark_all_configs.py \\
+        --queue-name default \\
+        --manifest dk_context_testing_manifest_clean.json \\
+        --single-variant \\
+        --process-queue
+
+─── WITH BENCHMARK VARIANTS (default — multiple jobs per config) ────────────
+
+Test run — 6 configs × benchmark variants (dev queue, 100 iterations, 1 trial):
+
+    python scripts/run_dk_benchmark_all_configs.py \\
+        --queue-name default-dev \\
+        --manifest dk_context_testing_manifest_clean.json \\
+        --iterations 100 --trials 1 \\
+        --process-queue
+
+Production run — 6 configs × benchmark variants (full iterations/trials):
+
+    python scripts/run_dk_benchmark_all_configs.py \\
+        --queue-name default \\
+        --manifest dk_context_testing_manifest_clean.json \\
+        --process-queue
+
+─── OTHER EXAMPLES ──────────────────────────────────────────────────────────
+
+Production run — default 4-config manifest:
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default
@@ -43,24 +83,12 @@ Run all 5 configs (4 production + TV config) — test/dev run (100 iter, 1 trial
         --extra-config dk_final_with_tv_config.json \\
         --iterations 100 --trials 1 --process-queue
 
-Run all 5 configs (4 production + TV config) — full production run:
-
-    python scripts/run_dk_benchmark_all_configs.py \\
-        --queue-name default \\
-        --extra-config dk_final_with_tv_config.json \\
-        --process-queue
-
-Run the original test set instead:
-
-    python scripts/run_dk_benchmark_all_configs.py \\
-        --queue-name default-dev \\
-        --manifest dk_context_testing_manifest_clean.json
-
 Dry-run (prints commands and enriched configs without executing):
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default-dev \\
-        --extra-config dk_final_with_tv_config.json \\
+        --manifest dk_context_testing_manifest_clean.json \\
+        --single-variant \\
         --dry-run
 
 Skip uploading configs to GCS (use when they are already there):
@@ -112,6 +140,11 @@ PROJECT_ID = os.getenv("PROJECT_ID", "datawarehouse-422511")
 # Fixed benchmark / hyperparameter config paths (relative to repo root)
 BENCHMARK_CONFIG = (
     "benchmarks/comprehensive_benchmark_fleet_marketplace_prod.json"
+)
+# Single-variant config: 1 job per data config (weekly + geometric + 75/90 +
+# mixed_by_funnel_clicks). Used with --single-variant to avoid variant explosion.
+SINGLE_VARIANT_BENCHMARK_CONFIG = (
+    "benchmarks/single_variant_baseline.json"
 )
 HYPERPARAMETER_RANGES_CONFIG = (
     "benchmarks/generic_hyperparameter_ranges_v2_prod.json"
@@ -312,6 +345,7 @@ def run_benchmark(
     trials: Optional[int] = None,
     benchmark_id: Optional[str] = None,
     variant_prefix: Optional[str] = None,
+    single_variant: bool = False,
 ) -> bool:
     """
     Invoke run_full_benchmark.py for a single config GCS path.
@@ -320,15 +354,22 @@ def run_benchmark(
     and result collection happen once (globally) after all configs are
     submitted, rather than per-config.
 
+    When ``single_variant=True`` the ``single_variant_baseline.json`` benchmark
+    config is used instead of the full grid config, resulting in exactly 1 job
+    per data config (weekly + geometric + 75/90 + mixed_by_funnel_clicks).
+
     Returns True on success (returncode == 0), False otherwise.
     """
+    benchmark_config = (
+        SINGLE_VARIANT_BENCHMARK_CONFIG if single_variant else BENCHMARK_CONFIG
+    )
     cmd = [
         sys.executable,
         "scripts/run_full_benchmark.py",
         "--path",
         gcs_path,
         "--config",
-        BENCHMARK_CONFIG,
+        benchmark_config,
         "--full-run",
         "--hyperparameter-ranges-config",
         HYPERPARAMETER_RANGES_CONFIG,
@@ -493,21 +534,37 @@ Examples:
   # Production run — all 4 manifest configs, upload, submit and process queue:
   python scripts/run_dk_benchmark_all_configs.py --queue-name default --process-queue
 
+  # 6 configs, 1 job each — test run (100 iterations, 1 trial):
+  python scripts/run_dk_benchmark_all_configs.py \\
+      --queue-name default-dev \\
+      --manifest dk_context_testing_manifest_clean.json \\
+      --single-variant \\
+      --iterations 100 --trials 1 --process-queue
+
+  # 6 configs, 1 job each — full production run:
+  python scripts/run_dk_benchmark_all_configs.py \\
+      --queue-name default \\
+      --manifest dk_context_testing_manifest_clean.json \\
+      --single-variant \\
+      --process-queue
+
+  # 6 configs × benchmark variants — test run (100 iterations, 1 trial):
+  python scripts/run_dk_benchmark_all_configs.py \\
+      --queue-name default-dev \\
+      --manifest dk_context_testing_manifest_clean.json \\
+      --iterations 100 --trials 1 --process-queue
+
+  # 6 configs × benchmark variants — full production run:
+  python scripts/run_dk_benchmark_all_configs.py \\
+      --queue-name default \\
+      --manifest dk_context_testing_manifest_clean.json \\
+      --process-queue
+
   # All 5 configs (4 manifest + TV) — dev/test run (100 iterations, 1 trial):
   python scripts/run_dk_benchmark_all_configs.py \\
       --queue-name default-dev \\
       --extra-config dk_final_with_tv_config.json \\
       --iterations 100 --trials 1 --process-queue
-
-  # All 5 configs (4 manifest + TV) — full production run:
-  python scripts/run_dk_benchmark_all_configs.py \\
-      --queue-name default \\
-      --extra-config dk_final_with_tv_config.json \\
-      --process-queue
-
-  # Run the original 6-config test set instead:
-  python scripts/run_dk_benchmark_all_configs.py --queue-name default-dev \\
-      --manifest dk_context_testing_manifest_clean.json
 
   # Dry-run — print commands without executing:
   python scripts/run_dk_benchmark_all_configs.py --queue-name default --dry-run
@@ -578,6 +635,19 @@ Examples:
         ),
     )
 
+    parser.add_argument(
+        "--single-variant",
+        dest="single_variant",
+        action="store_true",
+        help=(
+            "Submit exactly 1 job per data config instead of expanding the "
+            "full benchmark variant grid. Uses the single_variant_baseline "
+            "config (weekly, geometric, 75/90 split, mixed_by_funnel_clicks). "
+            "Results in N_configs jobs total rather than N_configs × variants. "
+            "Useful for a quick comparison of data configs before committing "
+            "to a full benchmark sweep."
+        ),
+    )
     parser.add_argument(
         "--iterations",
         type=int,
@@ -736,6 +806,7 @@ Examples:
     logger.info(f"Shared benchmark: {shared_benchmark_id}")
     logger.info(f"Skip upload     : {args.skip_upload}")
     logger.info(f"Process queue   : {args.process_queue}")
+    logger.info(f"Single variant  : {args.single_variant}")
     logger.info(f"Dry run         : {args.dry_run}")
     if args.iterations is not None:
         logger.info(f"Iterations      : {args.iterations} (override)")
@@ -784,6 +855,7 @@ Examples:
             trials=args.trials,
             benchmark_id=shared_benchmark_id,
             variant_prefix=config_name,
+            single_variant=args.single_variant,
         )
         if not ok:
             failed.append(filename)
@@ -823,6 +895,7 @@ Examples:
             trials=args.trials,
             benchmark_id=shared_benchmark_id,
             variant_prefix=config_name,
+            single_variant=args.single_variant,
         )
         if not ok:
             failed.append(src_name)
