@@ -382,6 +382,8 @@ def run_analysis(
         "--queue-name",
         queue_name,
         "--scan-gcs",
+        "--min-r2",
+        "0",
     ]
     logger.info(f"\n{'='*80}")
     logger.info("COLLECTING RESULTS (building combined CSV for Benchmark page) …")
