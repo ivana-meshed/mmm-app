@@ -26,10 +26,10 @@ immediately visible on the **Benchmark Results** page of the Streamlit app.
 
 Two manifests are available in benchmark_analysis/dk_json_configs_clean/:
 
+  dk_context_testing_manifest_clean.json   – original 6-config test set  [DEFAULT]
   dk_context_reduced_manifest_clean.json   – production 4-config set
                                              (core / supply / structured /
-                                              occ30d)  [DEFAULT]
-  dk_context_testing_manifest_clean.json   – original 6-config test set
+                                              occ30d)
 
 Usage:
 
@@ -71,7 +71,7 @@ Production run — 6 configs × benchmark variants (full iterations/trials):
 
 ─── OTHER EXAMPLES ──────────────────────────────────────────────────────────
 
-Production run — default 4-config manifest:
+Production run — default 6-config manifest:
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default
@@ -130,7 +130,7 @@ DK_CONFIGS_DIR = (
     REPO_ROOT / "benchmark_analysis" / "dk_json_configs_clean"
 )
 DEFAULT_MANIFEST_FILE = (
-    DK_CONFIGS_DIR / "dk_context_reduced_manifest_clean.json"
+    DK_CONFIGS_DIR / "dk_context_testing_manifest_clean.json"
 )
 
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
@@ -531,36 +531,38 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Production run — all 4 manifest configs, upload, submit and process queue:
+  # Production run — all 6 manifest configs (default), upload, submit and process queue:
   python scripts/run_dk_benchmark_all_configs.py --queue-name default --process-queue
 
   # 6 configs, 1 job each — test run (100 iterations, 1 trial):
   python scripts/run_dk_benchmark_all_configs.py \\
       --queue-name default-dev \\
-      --manifest dk_context_testing_manifest_clean.json \\
       --single-variant \\
       --iterations 100 --trials 1 --process-queue
 
   # 6 configs, 1 job each — full production run:
   python scripts/run_dk_benchmark_all_configs.py \\
       --queue-name default \\
-      --manifest dk_context_testing_manifest_clean.json \\
       --single-variant \\
       --process-queue
 
   # 6 configs × benchmark variants — test run (100 iterations, 1 trial):
   python scripts/run_dk_benchmark_all_configs.py \\
       --queue-name default-dev \\
-      --manifest dk_context_testing_manifest_clean.json \\
       --iterations 100 --trials 1 --process-queue
 
   # 6 configs × benchmark variants — full production run:
   python scripts/run_dk_benchmark_all_configs.py \\
       --queue-name default \\
-      --manifest dk_context_testing_manifest_clean.json \\
       --process-queue
 
-  # All 5 configs (4 manifest + TV) — dev/test run (100 iterations, 1 trial):
+  # 4-config production manifest — full production run:
+  python scripts/run_dk_benchmark_all_configs.py \\
+      --queue-name default \\
+      --manifest dk_context_reduced_manifest_clean.json \\
+      --process-queue
+
+  # All 7 configs (6 manifest + TV) — dev/test run (100 iterations, 1 trial):
   python scripts/run_dk_benchmark_all_configs.py \\
       --queue-name default-dev \\
       --extra-config dk_final_with_tv_config.json \\
@@ -584,10 +586,10 @@ Examples:
         help=(
             "Manifest filename (relative to benchmark_analysis/"
             "dk_json_configs_clean/) that lists the configs to run. "
-            "Defaults to dk_context_reduced_manifest_clean.json "
-            "(4 production configs). "
-            "Use 'dk_context_testing_manifest_clean.json' for the "
-            "original 6-config test set."
+            "Defaults to dk_context_testing_manifest_clean.json "
+            "(6-config test set). "
+            "Use 'dk_context_reduced_manifest_clean.json' for the "
+            "4-config production set."
         ),
     )
     parser.add_argument(
