@@ -4196,7 +4196,7 @@ with tab_status:
                 )  # type: ignore
 
                 delete_queue_clicked = st.form_submit_button(
-                    "🗑 Delete selected (PENDING/ERROR only)"
+                    "🗑 Delete selected (not RUNNING)"
                 )
 
             # Deletion logic identical to before, but reading from the form-edited frame
@@ -4212,13 +4212,11 @@ with tab_status:
                 new_q, blocked = [], []
                 for e in st.session_state.job_queue:
                     if e["id"] in ids_to_delete:
-                        if e.get("status") in (
-                            "PENDING",
-                            "ERROR",
-                            "CANCELLED",
-                            "FAILED",
+                        if e.get("status") not in (
+                            "RUNNING",
+                            "LAUNCHING",
                         ):
-                            continue  #
+                            continue  # delete it
                         else:
                             blocked.append(e["id"])
                             new_q.append(e)
@@ -4233,7 +4231,7 @@ with tab_status:
                 )
                 if blocked:
                     st.warning(
-                        f"Did not delete non-deletable entries: {sorted(blocked)}"
+                        f"Cannot delete active jobs (RUNNING/LAUNCHING): {sorted(blocked)}"
                     )
                 st.success("Queue updated.")
                 st.rerun()
