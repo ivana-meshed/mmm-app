@@ -2404,11 +2404,35 @@ def main():
 
     # Load base configuration
     base_cfg = benchmark_config.base_config
-    base_config = runner.load_base_config(
-        country=base_cfg["country"],
-        goal=base_cfg["goal"],
-        version=base_cfg["version"],
-    )
+    try:
+        base_config = runner.load_base_config(
+            country=base_cfg["country"],
+            goal=base_cfg["goal"],
+            version=base_cfg["version"],
+        )
+    except FileNotFoundError as e:
+        logger.error(f"Base config not found in GCS: {e}")
+        print(f"\n❌ Error loading base config: {e}")
+        print(f"\nExpected selected_columns.json at:")
+        print(
+            f"  gs://{runner.bucket_name}/training_data/"
+            f"{base_cfg.get('country', '').lower()}/"
+            f"{base_cfg.get('goal', '')}/"
+            f"{base_cfg.get('version', '')}/selected_columns.json"
+        )
+        print("\nPlease check:")
+        print(
+            "  - The config was uploaded to GCS before running this script"
+        )
+        print(
+            "  - country/goal/version in base_config match the GCS path"
+        )
+        print(f"  - Config file: {args.config}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Failed to load base config: {e}", exc_info=True)
+        print(f"\n❌ Error loading base config: {e}")
+        sys.exit(1)
     logger.info(f"Loaded base config: {base_cfg['country']}/{base_cfg['goal']}")
 
     # Override iterations/trials in base config
