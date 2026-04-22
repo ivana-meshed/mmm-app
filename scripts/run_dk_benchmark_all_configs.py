@@ -582,7 +582,7 @@ Examples:
         default=None,
         help=(
             "Override the number of Robyn iterations for every variant "
-            "(overrides the --full-run default of 1000). "
+            "(overrides the --full-run default of 5000). "
             "E.g. --iterations 100 for a quick smoke-test."
         ),
     )
@@ -593,7 +593,7 @@ Examples:
         default=None,
         help=(
             "Override the number of Robyn trials for every variant "
-            "(overrides the --full-run default of 3). "
+            "(overrides the --full-run default of 5). "
             "E.g. --trials 1 for a quick smoke-test."
         ),
     )

@@ -10,7 +10,7 @@ python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json \
   --sequential
 
-# Sequential full run (9 combos, 1000 iterations, 3 trials, ~40-70 min, ~$7)
+# Sequential full run (9 combos, 5000 iterations, 5 trials, ~3-4 hours, ~$45)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json \
   --full-run --sequential
@@ -75,7 +75,7 @@ python scripts/run_full_benchmark.py \
 
 **Expected time:**
 - Sequential test run (default): ~8-15 min for 9 variants
-- Sequential full run: ~40-70 min for 9 variants
+- Sequential full run: ~3-4 hours for 9 variants
 
 ---
 
@@ -299,12 +299,12 @@ python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json \
   --sequential
 
-# Sequential full run (9 combos, 1000 iterations, 3 trials, ~40-70 min)
+# Sequential full run (9 combos, 5000 iterations, 5 trials, ~3-4 hours, ~$45)
 python scripts/run_full_benchmark.py \
   --path <path_to_selected_columns.json> \
   --full-run --sequential
 
-# Standard run, cartesian (18 combos, geometric only, 1000 iterations, 3 trials)
+# Standard run, cartesian (18 combos, geometric only, 5000 iterations, 5 trials)
 python scripts/run_full_benchmark.py \
   --path <path_to_selected_columns.json> \
   --full-run --cartesian
@@ -722,7 +722,7 @@ python scripts/run_full_benchmark.py \
   --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
   --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json
 
-# Standard run — geometric only (1000 iterations, 3 trials, ~2 h, ~$25)
+# Standard run — geometric only (5000 iterations, 5 trials, ~10-12 h, ~$165)
 python scripts/run_full_benchmark.py \
   --path gs://mmm-app-output/training_data/<country>/<goal>/<version>/selected_columns.json \
   --config benchmarks/comprehensive_benchmark_fleet_marketplace.json \
@@ -873,10 +873,10 @@ python scripts/run_full_benchmark.py \
 | Test (all adstock) | all 3 | full | 90 | ~1.5 h | ~$15 | `--all-adstock` |
 | Test (all windows) | geometric | full+2y+3y | 90 | ~1.5 h | ~$15 | `--all-windows` |
 | Test (all adstock + windows) | all 3 | full+2y+3y | 270 | ~4.5 h | ~$45 | `--all-adstock --all-windows` |
-| Standard | geometric | full | 30 | ~2 h | ~$25 | `--full-run` |
-| Standard (all adstock) | all 3 | full | 90 | ~6 h | ~$75 | `--full-run --all-adstock` |
-| Standard (all windows) | geometric | full+2y+3y | 90 | ~6 h | ~$75 | `--full-run --all-windows` |
-| Standard (all adstock + windows) | all 3 | full+2y+3y | 270 | ~18 h | ~$225 | `--full-run --all-adstock --all-windows` |
+| Standard | geometric | full | 30 | ~10-12 h | ~$165 | `--full-run` |
+| Standard (all adstock) | all 3 | full | 90 | ~30-35 h | ~$495 | `--full-run --all-adstock` |
+| Standard (all windows) | geometric | full+2y+3y | 90 | ~30-35 h | ~$495 | `--full-run --all-windows` |
+| Standard (all adstock + windows) | all 3 | full+2y+3y | 270 | ~90-100 h | ~$1,485 | `--full-run --all-adstock --all-windows` |
 | Extended | geometric | full | 30 | ~4-5 h | ~$70 | `--extended-run` |
 | Extended (all adstock) | all 3 | full | 90 | ~12-15 h | ~$210 | `--extended-run --all-adstock` |
 | Extended (all windows) | geometric | full+2y+3y | 90 | ~12-15 h | ~$210 | `--extended-run --all-windows` |
@@ -898,8 +898,8 @@ Adds the hyperparameter preset as an additional variant dimension. Each base com
 |----------|---------|--------------|---------------|-------------|-------------|----------------|
 | Test, compare 3 presets | balanced/fb/meshed | 30 | 90 | ~1.5 h | ~$15 | `--compare-presets` |
 | Test, compare all 5 | all 5 | 30 | 150 | ~2.5 h | ~$25 | `--compare-all-presets` |
-| Standard, compare 3 presets | balanced/fb/meshed | 30 | 90 | ~6 h | ~$75 | `--full-run --compare-presets` |
-| Standard, compare all 5 | all 5 | 30 | 150 | ~10 h | ~$125 | `--full-run --compare-all-presets` |
+| Standard, compare 3 presets | balanced/fb/meshed | 30 | 90 | ~30-35 h | ~$495 | `--full-run --compare-presets` |
+| Standard, compare all 5 | all 5 | 30 | 150 | ~50-60 h | ~$825 | `--full-run --compare-all-presets` |
 | Extended, compare 3 presets | balanced/fb/meshed | 30 | 90 | ~12-15 h | ~$210 | `--extended-run --compare-presets` |
 | Extended, compare all 5 | all 5 | 30 | 150 | ~20-25 h | ~$350 | `--extended-run --compare-all-presets` |
 
@@ -909,8 +909,8 @@ In sequential mode the preset sweep is appended as an independent dimension (add
 
 | Run mode | Presets | Base variants | Total variants | Approx. time | Approx. cost | Flag(s) to add |
 |----------|---------|--------------|---------------|-------------|-------------|----------------|
-| Sequential standard, compare 3 | balanced/fb/meshed | 11 | 14 | ~1 h | ~$12 | `--full-run --sequential --compare-presets` |
-| Sequential standard, compare all 5 | all 5 | 11 | 16 | ~1.5 h | ~$13 | `--full-run --sequential --compare-all-presets` |
+| Sequential standard, compare 3 | balanced/fb/meshed | 11 | 14 | ~5-6 h | ~$58 | `--full-run --sequential --compare-presets` |
+| Sequential standard, compare all 5 | all 5 | 11 | 16 | ~6-7 h | ~$66 | `--full-run --sequential --compare-all-presets` |
 | Sequential extended, compare 3 | balanced/fb/meshed | 11 | 14 | ~2 h | ~$33 | `--extended-run --sequential --compare-presets` |
 | Sequential extended, compare all 5 | all 5 | 11 | 16 | ~2.5 h | ~$37 | `--extended-run --sequential --compare-all-presets` |
 
@@ -923,9 +923,9 @@ With `--all-windows`: `1 + 3 + 2 + 5 + 3 windows = 14`.
 
 | Run mode | Adstock | Windows | Variants | Approx. time | Approx. cost | Flag(s) to add |
 |----------|---------|---------|----------|-------------|-------------|----------------|
-| Sequential standard | geometric | full | 11 | ~45 min | ~$9 | `--full-run --sequential` |
-| Sequential standard (all adstock) | all 3 | full | 13 | ~1 h | ~$11 | `--full-run --sequential --all-adstock` |
-| Sequential standard (all windows) | geometric | full+2y+3y | 14 | ~1 h | ~$12 | `--full-run --sequential --all-windows` |
+| Sequential standard | geometric | full | 11 | ~4-5 h | ~$50 | `--full-run --sequential` |
+| Sequential standard (all adstock) | all 3 | full | 13 | ~5-6 h | ~$59 | `--full-run --sequential --all-adstock` |
+| Sequential standard (all windows) | geometric | full+2y+3y | 14 | ~6-7 h | ~$64 | `--full-run --sequential --all-windows` |
 | Sequential extended | geometric | full | 11 | ~1.5 h | ~$26 | `--extended-run --sequential` |
 | Sequential production | geometric | full | 11 | ~4 h | ~$61 | `--production-run --sequential` |
 

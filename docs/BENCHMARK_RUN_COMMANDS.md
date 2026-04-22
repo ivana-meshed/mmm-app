@@ -44,8 +44,8 @@ file and optionally drains the resulting queue.
 | `--skip-upload` | off | Skip uploading configs to GCS (use when configs are already uploaded) |
 | `--process-queue` | off | After submitting all benchmarks, run `process_queue_simple.py --loop` to drain the queue. Without this flag you must process the queue separately |
 | `--only NAME` | all | Run a single config by its short name, e.g. `dk_context_reduced_core` |
-| `--iterations N` | 1000 | Override Robyn iterations for every variant (e.g. `100` for a smoke test) |
-| `--trials N` | 3 | Override Robyn trials for every variant (e.g. `1` for a smoke test) |
+| `--iterations N` | 5000 (from `--full-run`) | Override Robyn iterations for every variant (e.g. `100` for a smoke test) |
+| `--trials N` | 5 (from `--full-run`) | Override Robyn trials for every variant (e.g. `1` for a smoke test) |
 | `--benchmark-id ID` | auto-generated | Shared benchmark ID. Pass an existing ID to add more configs to a previous run |
 | `--extra-config FILENAME` | none | Additional config file(s) alongside the manifest. May be repeated: `--extra-config dk_final_with_tv_config.json --extra-config other.json` |
 
@@ -104,7 +104,7 @@ Lower-level script that generates benchmark variant combinations for a single
 | Flag | Iterations | Trials | Approximate duration |
 |------|-----------|--------|----------------------|
 | *(default / test)* | 10 | 1 | minutes — ~9 combos sequential |
-| `--full-run` | 1000 | 3 | standard production run (~40-70 min sequential) |
+| `--full-run` | 5000 | 5 | standard production run (~4-5 h sequential) |
 | `--extended-run` | 2000 | 5 | ~10–15 hours |
 | `--production-run` | 5000 | 5 | ~25–35 hours |
 
@@ -174,7 +174,7 @@ python scripts/run_full_benchmark.py \
     --path gs://mmm-app-output/training_data/dk/N_UPLOADS_WEB/<timestamp>/selected_columns.json \
     --sequential
 
-# Sequential full run (9 combos, 1000 iterations, 3 trials, ~40-70 min)
+# Sequential full run (9 combos, 5000 iterations, 5 trials, ~4-5 h)
 python scripts/run_full_benchmark.py \
     --path <path> --full-run --sequential
 
