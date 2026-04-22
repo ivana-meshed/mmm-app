@@ -103,8 +103,8 @@ Lower-level script that generates benchmark variant combinations for a single
 
 | Flag | Iterations | Trials | Approximate duration |
 |------|-----------|--------|----------------------|
-| *(default / test)* | 100 | 1 | minutes — ~10 combos |
-| `--full-run` | 1000 | 3 | standard production run |
+| *(default / test)* | 10 | 1 | minutes — ~9 combos sequential |
+| `--full-run` | 1000 | 3 | standard production run (~40-70 min sequential) |
 | `--extended-run` | 2000 | 5 | ~10–15 hours |
 | `--production-run` | 5000 | 5 | ~25–35 hours |
 
@@ -169,13 +169,18 @@ Lower-level script that generates benchmark variant combinations for a single
 ### Examples
 
 ```bash
-# Test run (default — geometric only, ~10 combos, reduced iterations/trials)
+# Sequential test run (default — 9 combos, 10 iterations, 1 trial, ~8-15 min)
 python scripts/run_full_benchmark.py \
-    --path gs://mmm-app-output/training_data/dk/N_UPLOADS_WEB/<timestamp>/selected_columns.json
+    --path gs://mmm-app-output/training_data/dk/N_UPLOADS_WEB/<timestamp>/selected_columns.json \
+    --sequential
 
-# Standard sequential production run
+# Sequential full run (9 combos, 1000 iterations, 3 trials, ~40-70 min)
 python scripts/run_full_benchmark.py \
-    --path <path> --full-run --queue-name default
+    --path <path> --full-run --sequential
+
+# Standard sequential production run (same as above, production queue)
+python scripts/run_full_benchmark.py \
+    --path <path> --full-run --sequential --queue-name default
 
 # Cartesian run — all dimension combinations
 python scripts/run_full_benchmark.py --path <path> --full-run --cartesian
