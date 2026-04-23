@@ -35,14 +35,25 @@ predictable.
 
 With the production benchmark config
 (``benchmarks/comprehensive_benchmark_fleet_marketplace_prod.json``) and the
-default 6-config testing manifest, sequential mode produces roughly:
-  • 1 base variant (weekly + geometric + mixed_by_funnel_clicks)
-  • 1 time_agg variant (daily)
-  • 1 spend_var variant (spend_to_clicks)
-  → ~3 jobs per config × 6 configs ≈ 18 total Cloud Run executions
+default 6-config testing manifest, sequential mode generates **one job per
+entry in each dimension**:
+  • 2 spend_var_mapping jobs (mixed_by_funnel_clicks, spend_to_clicks)
+  • 1 adstock job (geometric)
+  • 1 train_splits job (75_90)
+  • 2 time_aggregation jobs (weekly, daily)
+  → 6 jobs per config × 6 configs = **36 total Cloud Run executions**
 
-Use ``--single-variant`` to further reduce to exactly 1 job per config
-(weekly + geometric + mixed_by_funnel_clicks only).
+Note: the queue (``default`` or ``default-dev``) is persistent in GCS and
+accumulates jobs from every invocation.  If there are stale jobs from earlier
+runs, overwrite the queue file before starting a fresh sweep:
+
+    gsutil cp /dev/null gs://mmm-app-output/robyn-queues/default/queue.json
+
+Or use a fresh queue name (e.g. ``--queue-name default-2``) to avoid mixing
+results across runs.
+
+Use ``--single-variant`` to reduce to exactly 1 job per config
+(weekly + geometric + mixed_by_funnel_clicks only, 6 total).
 
 Two manifests are available in benchmark_analysis/dk_json_configs_clean/:
 
@@ -70,9 +81,9 @@ Production run — 6 configs, 1 job each (6 total), 5000 iterations, 5 trials:
         --single-variant \\
         --process-queue
 
-─── SEQUENTIAL VARIANT SWEEP (default — ~3 sequential variants per config) ──
+─── SEQUENTIAL VARIANT SWEEP (default — 6 sequential variants per config) ───
 
-Test run — 6 configs × ~3 sequential variants each ≈ 18 total jobs,
+Test run — 6 configs × 6 sequential variants each = 36 total jobs,
 100 iterations, 1 trial:
 
     python scripts/run_dk_benchmark_all_configs.py \\
@@ -80,7 +91,7 @@ Test run — 6 configs × ~3 sequential variants each ≈ 18 total jobs,
         --iterations 100 --trials 1 \\
         --process-queue
 
-Production run — 6 configs × ~3 sequential variants each ≈ 18 total jobs,
+Production run — 6 configs × 6 sequential variants each = 36 total jobs,
 5000 iterations, 5 trials (--full-run default):
 
     python scripts/run_dk_benchmark_all_configs.py \\
