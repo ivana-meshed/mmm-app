@@ -564,7 +564,11 @@ def render_model_config_section(blobs, country, stamp, bucket_name):
 
 @st.cache_data(ttl=3600, show_spinner="Loading metrics...")
 def _extract_cached_metrics(blob_names_key, _blobs):
-    """Extract metrics from blobs with caching. _blobs is not hashed."""
+    """Extract metrics from blobs with caching.
+
+    blob_names_key is a tuple of blob names used as the Streamlit cache key.
+    _blobs (underscore prefix) holds the actual blob objects and is not hashed.
+    """
     return extract_core_metrics_from_blobs(_blobs)
 
 
@@ -1590,17 +1594,17 @@ else:
         if isinstance(current_countries, str):
             current_countries = [current_countries]
         valid_countries = [c for c in current_countries if c in all_countries]
-        default_countries_all = (
+        default_countries = (
             valid_countries if valid_countries else all_countries[:1]
         )
     else:
-        default_countries_all = all_countries[:1]
+        default_countries = all_countries[:1]
 
     with col1:
         countries_sel = st.multiselect(
             "Country",
             all_countries,
-            default=default_countries_all,
+            default=default_countries,
         )
 
         # Store selection in persistent session state key

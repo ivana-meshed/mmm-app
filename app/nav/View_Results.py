@@ -769,7 +769,11 @@ def render_model_config_section(blobs, country, stamp, bucket_name):
 
 @st.cache_data(ttl=3600, show_spinner="Loading metrics...")
 def _extract_cached_metrics(blob_names_key, _blobs):
-    """Extract metrics from blobs with caching. _blobs is not hashed."""
+    """Extract metrics from blobs with caching.
+
+    blob_names_key is a tuple of blob names used as the Streamlit cache key.
+    _blobs (underscore prefix) holds the actual blob objects and is not hashed.
+    """
     return extract_core_metrics_from_blobs(_blobs)
 
 
