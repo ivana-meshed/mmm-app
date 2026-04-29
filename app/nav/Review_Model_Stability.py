@@ -38,8 +38,6 @@ RAW_SPEND_PARQUET = os.getenv(
     "RAW_SPEND_PARQUET",
     "",  # Empty by default - user must configure via env var or GCS
 )
-
-st.set_page_config(page_title="Review Model Stability", layout="wide")
 st.title("Review Model Stability")
 
 # Add helpful documentation at the top

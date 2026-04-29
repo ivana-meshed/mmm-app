@@ -322,11 +322,9 @@ def download_bytes_safe(blob):
     try:
         data = blob.download_as_bytes()
         if not data:
-            st.warning(f"Downloaded file is empty: {blob.name}")
             return None
         return data
-    except Exception as e:
-        st.error(f"Download failed for {blob.name}: {e}")
+    except Exception:
         return None
 
 
@@ -769,6 +767,12 @@ def render_model_config_section(blobs, country, stamp, bucket_name):
                 st.json(config)
 
 
+@st.cache_data(ttl=3600, show_spinner="Loading metrics...")
+def _extract_cached_metrics(blob_names_key, _blobs):
+    """Extract metrics from blobs with caching. _blobs is not hashed."""
+    return extract_core_metrics_from_blobs(_blobs)
+
+
 def render_model_metrics_table(blobs, country, stamp):
     """Render model metrics in a formatted table with color coding"""
     st.subheader("Model Performance Overview")
@@ -776,13 +780,7 @@ def render_model_metrics_table(blobs, country, stamp):
     # Create a cache key from blob names
     blob_names = tuple(sorted([b.name for b in blobs]))
 
-    # Extract metrics from blobs (with caching)
-    @st.cache_data(ttl=3600, show_spinner="Loading metrics...")
-    def _extract_cached_metrics(blob_names_key):
-        # Re-extract metrics (blobs aren't directly cacheable, but results are)
-        return extract_core_metrics_from_blobs(blobs)
-
-    metrics = _extract_cached_metrics(blob_names)
+    metrics = _extract_cached_metrics(blob_names, blobs)
 
     if not metrics:
         st.info("No model metrics found.")
@@ -1373,49 +1371,46 @@ best_country_key = next(
 )
 default_country_in_rev = best_country_key[1]
 
-# Determine default country for selectbox
+# Determine default countries for multiselect
 # Use separate session state key that persists across navigation
-if "view_results_country_value" in st.session_state:
-    # User has saved selection - validate and preserve
-    current_country = st.session_state["view_results_country_value"]
-    if current_country in rev_countries:
-        # Has valid selection - use it
-        default_country = current_country
+if "view_results_countries_value" in st.session_state:
+    # User has saved selections - validate and preserve
+    current_countries = st.session_state["view_results_countries_value"]
+    if isinstance(current_countries, str):
+        current_countries = [current_countries]
+    valid_countries = [c for c in current_countries if c in rev_countries]
+    if valid_countries:
+        default_countries = valid_countries
     else:
-        # Selection is invalid - use default
-        default_country = (
-            default_country_in_rev
+        default_countries = (
+            [default_country_in_rev]
             if default_country_in_rev in rev_countries
-            else rev_countries[0] if rev_countries else None
+            else rev_countries[:1]
         )
 else:
     # First time - use default
-    default_country = default_country_in_rev
+    default_countries = (
+        [default_country_in_rev]
+        if default_country_in_rev in rev_countries
+        else rev_countries[:1]
+    )
 
 # Column 2: Country
 with col2:
-    country_index = (
-        rev_countries.index(default_country)
-        if default_country in rev_countries
-        else 0
-    )
-    countries_sel = st.selectbox(
+    countries_sel = st.multiselect(
         "Country",
         rev_countries,
-        index=country_index,
+        default=default_countries,
     )
 
 # Store selection in persistent session state key (not widget key)
-if countries_sel != st.session_state.get("view_results_country_value"):
-    st.session_state["view_results_country_value"] = countries_sel
+if countries_sel != st.session_state.get("view_results_countries_value"):
+    st.session_state["view_results_countries_value"] = countries_sel
 
 # Check country selection before proceeding
 if not countries_sel:
-    st.info("Select a country.")
+    st.info("Select at least one country.")
     st.stop()
-
-# Convert to list for compatibility with rest of code
-countries_sel = [countries_sel]
 
 # Goals available for selected revision and country
 # Extract goals from configs for the filtered runs

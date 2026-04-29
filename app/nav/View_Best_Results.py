@@ -320,11 +320,9 @@ def download_bytes_safe(blob):
     try:
         data = blob.download_as_bytes()
         if not data:
-            st.warning(f"Downloaded file is empty: {blob.name}")
             return None
         return data
-    except Exception as e:
-        st.error(f"Download failed for {blob.name}: {e}")
+    except Exception:
         return None
 
 
@@ -564,6 +562,12 @@ def render_model_config_section(blobs, country, stamp, bucket_name):
                 st.json(config)
 
 
+@st.cache_data(ttl=3600, show_spinner="Loading metrics...")
+def _extract_cached_metrics(blob_names_key, _blobs):
+    """Extract metrics from blobs with caching. _blobs is not hashed."""
+    return extract_core_metrics_from_blobs(_blobs)
+
+
 def render_model_metrics_table(blobs, country, stamp):
     """Render model metrics in a formatted table with color coding"""
     st.subheader("Model Performance Overview")
@@ -571,13 +575,7 @@ def render_model_metrics_table(blobs, country, stamp):
     # Create a cache key from blob names
     blob_names = tuple(sorted([b.name for b in blobs]))
 
-    # Extract metrics from blobs (with caching)
-    @st.cache_data(ttl=3600, show_spinner="Loading metrics...")
-    def _extract_cached_metrics(blob_names_key):
-        # Re-extract metrics (blobs aren't directly cacheable, but results are)
-        return extract_core_metrics_from_blobs(blobs)
-
-    metrics = _extract_cached_metrics(blob_names)
+    metrics = _extract_cached_metrics(blob_names, blobs)
 
     if not metrics:
         st.info("No model metrics found.")
@@ -1429,46 +1427,25 @@ if not auto_best:
     # Create two-column layout for Countries and Goal filters
     col1, col2 = st.columns(2)
 
-    # Determine default country for selectbox
-    if "view_best_results_country_rev_value" in st.session_state:
-        current_country = st.session_state[
-            "view_best_results_country_rev_value"
-        ]
-        default_country = (
-            current_country
-            if current_country in rev_countries
-            else (rev_countries[0] if rev_countries else None)
-        )
-    else:
-        default_country = rev_countries[0] if rev_countries else None
-
     with col1:
-        country_index = (
-            rev_countries.index(default_country)
-            if default_country in rev_countries
-            else 0
-        )
-        countries_sel = st.selectbox(
+        countries_sel = st.multiselect(
             "Country",
             rev_countries,
-            index=country_index,
+            default=default_countries,
         )
 
         # Store selection in persistent session state key (not widget key)
         if countries_sel != st.session_state.get(
-            "view_best_results_country_rev_value"
+            "view_best_results_countries_rev_value"
         ):
-            st.session_state["view_best_results_country_rev_value"] = (
+            st.session_state["view_best_results_countries_rev_value"] = (
                 countries_sel
             )
 
     # Check country selection before proceeding
     if not countries_sel:
-        st.info("Select a country.")
+        st.info("Select at least one country.")
         st.stop()
-
-    # Convert to list for compatibility
-    countries_sel = [countries_sel]
 
     # Goals available for selected revision and country
     # Extract goals from configs for the filtered runs
@@ -1605,53 +1582,46 @@ else:
     # Create 2-column layout for Country and Goal filters
     col1, col2 = st.columns(2)
 
-    # Determine default country for selectbox
-    if "view_best_results_country_all_value" in st.session_state:
-        current_country = st.session_state[
-            "view_best_results_country_all_value"
+    # Determine default countries for multiselect
+    if "view_best_results_countries_all_value" in st.session_state:
+        current_countries = st.session_state[
+            "view_best_results_countries_all_value"
         ]
-        default_country = (
-            current_country
-            if current_country in all_countries
-            else (all_countries[0] if all_countries else None)
+        if isinstance(current_countries, str):
+            current_countries = [current_countries]
+        valid_countries = [c for c in current_countries if c in all_countries]
+        default_countries_all = (
+            valid_countries if valid_countries else all_countries[:1]
         )
     else:
-        default_country = all_countries[0] if all_countries else None
+        default_countries_all = all_countries[:1]
 
     with col1:
-        country_index = (
-            all_countries.index(default_country)
-            if default_country in all_countries
-            else 0
-        )
-        country_sel = st.selectbox(
+        countries_sel = st.multiselect(
             "Country",
             all_countries,
-            index=country_index,
+            default=default_countries_all,
         )
 
         # Store selection in persistent session state key
-        if country_sel != st.session_state.get(
-            "view_best_results_country_all_value"
+        if countries_sel != st.session_state.get(
+            "view_best_results_countries_all_value"
         ):
-            st.session_state["view_best_results_country_all_value"] = (
-                country_sel
+            st.session_state["view_best_results_countries_all_value"] = (
+                countries_sel
             )
 
     # Check country selection before proceeding
-    if not country_sel:
-        st.info("Select a country.")
+    if not countries_sel:
+        st.info("Select at least one country.")
         st.stop()
 
-    # Convert to list for compatibility with existing code
-    countries_sel = [country_sel]
-
-    # Goals available for selected country
+    # Goals available for selected countries
     # Extract goals from configs for the filtered runs
-    all_country_keys = [k for k in runs.keys() if k[1] == country_sel]
+    all_country_keys = [k for k in runs.keys() if k[1] in countries_sel]
 
     # Get goals for all runs (cached in session state to avoid repeated GCS calls)
-    cache_key = f"goals_cache_all_{country_sel}"
+    cache_key = f"goals_cache_all_{'_'.join(sorted(countries_sel))}"
     if cache_key not in st.session_state:
         with st.spinner("Loading goal information..."):
             goals_map = get_goals_for_runs(bucket_name, all_country_keys)
