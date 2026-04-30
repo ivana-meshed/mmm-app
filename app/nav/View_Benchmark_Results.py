@@ -257,7 +257,10 @@ def _load_variant_statuses(benchmark_id: str) -> tuple:
             err = status_data.get("error", status_data.get("message", ""))
             message = f"Failed: {err}" if err else "Failed"
         elif state == "SKIPPED":
-            message = "Skipped"
+            skip_reason = status_data.get("skip_reason", "")
+            message = (
+                f"Skipped: {skip_reason}" if skip_reason else "Skipped"
+            )
         else:
             message = state
 

@@ -1416,6 +1416,25 @@ def _normalize_gs_uri(uri: str) -> str:
 
 
 @st.cache_resource
+def _parse_list_field(val) -> list:
+    """Parse a parameter that may be a list or a comma-separated string.
+
+    The UI serialises multiselect values as comma-separated strings before
+    storing them in queue entries, so ``str(val).split(",")`` works there.
+    Benchmark queue entries (submitted by benchmark_mmm.py) store these
+    fields as Python lists.  Calling ``str(list)`` produces
+    ``"['col1', 'col2', ...]"`` and splitting by comma yields column names
+    wrapped in bracket/quote artefacts (``"['col1'"`` etc.) that R cannot
+    match against data column names, causing all jobs to be SKIPPED with
+    "no paid_media_spends columns found in data".
+    """
+    if isinstance(val, list):
+        return [str(s).strip() for s in val if str(s).strip()]
+    if not val:
+        return []
+    return [s.strip() for s in str(val).split(",") if s.strip()]
+
+
 def build_job_config_from_params(
     params: dict,
     data_gcs_path: str,
@@ -1441,31 +1460,21 @@ def build_job_config_from_params(
         or st.session_state["gcs_bucket"],
         "data_gcs_path": _normalize_gs_uri(data_gcs_path),
         "annotations_gcs_path": _normalize_gs_uri(annotations_gcs_path),  # type: ignore
-        "paid_media_spends": [
-            s.strip()
-            for s in str(params.get("paid_media_spends", "")).split(",")
-            if s.strip()
-        ],
-        "paid_media_vars": [
-            s.strip()
-            for s in str(params.get("paid_media_vars", "")).split(",")
-            if s.strip()
-        ],
-        "context_vars": [
-            s.strip()
-            for s in str(params.get("context_vars", "")).split(",")
-            if s.strip()
-        ],
-        "factor_vars": [
-            s.strip()
-            for s in str(params.get("factor_vars", "")).split(",")
-            if s.strip()
-        ],
-        "organic_vars": [
-            s.strip()
-            for s in str(params.get("organic_vars", "")).split(",")
-            if s.strip()
-        ],
+        "paid_media_spends": _parse_list_field(
+            params.get("paid_media_spends", "")
+        ),
+        "paid_media_vars": _parse_list_field(
+            params.get("paid_media_vars", "")
+        ),
+        "context_vars": _parse_list_field(
+            params.get("context_vars", "")
+        ),
+        "factor_vars": _parse_list_field(
+            params.get("factor_vars", "")
+        ),
+        "organic_vars": _parse_list_field(
+            params.get("organic_vars", "")
+        ),
         "timestamp": timestamp,
         "dep_var": str(params.get("dep_var", "UPLOAD_VALUE")),  # NEW
         "dep_var_type": str(params.get("dep_var_type", "revenue")),  # NEW
