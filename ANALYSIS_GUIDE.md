@@ -296,7 +296,7 @@ print("\nPreset Comparison:")
 print(comparison.sort_values('rsq_val', ascending=False))
 ```
 
-When using cartesian mode (default), the `benchmark_test` is `"combination"` and `preset_label` carries the preset name — filter on that instead:
+When using cartesian mode (`--cartesian`), the `benchmark_test` is `"combination"` and `preset_label` carries the preset name — filter on that instead:
 
 ```python
 # Cartesian run: group by preset_label across all combinations
@@ -372,9 +372,9 @@ import pandas as pd
 df = pd.read_csv('results.csv')
 
 # Expected counts per benchmark type depend on combination mode:
-# - cartesian (default): adstock=1, train_splits=3, time_aggregation=2,
+# - sequential (default, --sequential): one variant per dimension entry
+# - cartesian (--cartesian): adstock=1, train_splits=3, time_aggregation=2,
 #   spend_var_mapping=3, combination=18 (1×3×2×3)
-# - sequential (--sequential): one variant per dimension entry
 # - hyperparameter_preset: number of presets (3 for --compare-presets,
 #   5 for --compare-all-presets) — only present in sequential mode;
 #   in cartesian mode presets appear as combination rows with a preset_label.
@@ -385,7 +385,7 @@ expected = {
     'time_aggregation': 2,
     'spend_var_mapping': 3,
     'hyperparameter_preset': 3,  # --compare-presets (3) or --compare-all-presets (5)
-    'combination': 18,     # cartesian product (default geometric-only run)
+    'combination': 18,     # cartesian product (--cartesian, geometric-only run)
 }
 
 actual = df.groupby('benchmark_test')['benchmark_variant'].nunique()

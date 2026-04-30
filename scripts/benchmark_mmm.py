@@ -215,6 +215,16 @@ class BenchmarkConfig:
         return self.config.get("max_combinations", 50)
 
     @property
+    def run_mode(self) -> Optional[str]:
+        """Explicit run mode label (e.g. 'standard', 'extended', 'production').
+
+        When present in the config, used verbatim in plan.json so the UI
+        can display the correct badge.  Falls back to ``None`` when not set,
+        in which case ``save_benchmark_plan`` infers it from iteration count.
+        """
+        return self.config.get("run_mode")
+
+    @property
     def iterations(self) -> int:
         """Robyn iterations per config."""
         return self.config.get("iterations", 2000)
@@ -982,16 +992,20 @@ class BenchmarkRunner:
         variants: List[Dict[str, Any]],
     ):
         """Save benchmark execution plan and combinations log to GCS."""
-        # Infer run_mode from iteration count so the UI can display a badge
-        _iters = benchmark_config.iterations
-        if _iters < 100:
-            _run_mode = "test"
-        elif _iters < 1500:
-            _run_mode = "standard"
-        elif _iters < 3500:
-            _run_mode = "extended"
+        # Use explicit run_mode from config when available; otherwise infer
+        # from iteration count so the UI can display the correct badge.
+        if benchmark_config.run_mode:
+            _run_mode = benchmark_config.run_mode
         else:
-            _run_mode = "production"
+            _iters = benchmark_config.iterations
+            if _iters < 100:
+                _run_mode = "test"
+            elif _iters < 1500:
+                _run_mode = "standard"
+            elif _iters < 3500:
+                _run_mode = "extended"
+            else:
+                _run_mode = "production"
 
         plan = {
             "benchmark_id": benchmark_id,
@@ -2404,11 +2418,35 @@ def main():
 
     # Load base configuration
     base_cfg = benchmark_config.base_config
-    base_config = runner.load_base_config(
-        country=base_cfg["country"],
-        goal=base_cfg["goal"],
-        version=base_cfg["version"],
-    )
+    try:
+        base_config = runner.load_base_config(
+            country=base_cfg["country"],
+            goal=base_cfg["goal"],
+            version=base_cfg["version"],
+        )
+    except FileNotFoundError as e:
+        logger.error(f"Base config not found in GCS: {e}")
+        print(f"\n❌ Error loading base config: {e}")
+        print(f"\nExpected selected_columns.json at:")
+        print(
+            f"  gs://{runner.bucket_name}/training_data/"
+            f"{base_cfg.get('country', '').lower()}/"
+            f"{base_cfg.get('goal', '')}/"
+            f"{base_cfg.get('version', '')}/selected_columns.json"
+        )
+        print("\nPlease check:")
+        print(
+            "  - The config was uploaded to GCS before running this script"
+        )
+        print(
+            "  - country/goal/version in base_config match the GCS path"
+        )
+        print(f"  - Config file: {args.config}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Failed to load base config: {e}", exc_info=True)
+        print(f"\n❌ Error loading base config: {e}")
+        sys.exit(1)
     logger.info(f"Loaded base config: {base_cfg['country']}/{base_cfg['goal']}")
 
     # Override iterations/trials in base config

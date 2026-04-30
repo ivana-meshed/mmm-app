@@ -62,7 +62,9 @@ def _infer_run_mode(iterations: int) -> str:
     elif iterations < 3500:
         return "extended"
     else:
-        return "production"
+        # ≥3500 iterations — standard (5k) and production (5k) are identical;
+        # default to "standard" since --full-run is now the primary 5k mode.
+        return "standard"
 
 
 _RUN_MODE_BADGE = {
@@ -393,9 +395,18 @@ def load_benchmark_csv(benchmark_id):
     bucket = client.bucket(GCS_BUCKET)
 
     # 1. Try pre-aggregated CSV
+    # Only match CSVs at the top level (benchmarks/{id}/*.csv) — depth 3.
+    # Deeper paths (depth 4+) are per-variant Robyn output files such as
+    # raw_data.csv, pareto_aggregated.csv, allocator_metrics.csv, etc.
+    # Loading those by mistake would return completely wrong columns and
+    # hide all 40-variant comparison data from the user.
     prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/"
     blobs = bucket.list_blobs(prefix=prefix)
-    csv_blobs = [b for b in blobs if b.name.endswith(".csv")]
+    csv_blobs = [
+        b
+        for b in blobs
+        if b.name.endswith(".csv") and len(b.name.split("/")) == 3
+    ]
 
     if csv_blobs:
         latest_csv = sorted(csv_blobs, key=lambda b: b.time_created, reverse=True)[0]

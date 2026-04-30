@@ -311,7 +311,7 @@ def generate_benchmark_config(
 
     run_mode options:
     - "test": 10 iterations, 1 trial (no window sweep by default)
-    - "standard": 1000 iterations, 3 trials (full window by default)
+    - "standard": 5000 iterations, 5 trials (full window by default)
     - "extended": 2000 iterations, 5 trials (full window by default)
     - "production": 5000 iterations, 5 trials (full window by default)
 
@@ -373,7 +373,7 @@ def generate_benchmark_config(
     # Iterations and trials based on run mode
     mode_config = {
         "test": {"iterations": 10, "trials": 1},
-        "standard": {"iterations": 1000, "trials": 3},
+        "standard": {"iterations": 5000, "trials": 5},
         "extended": {"iterations": 2000, "trials": 5},
         "production": {"iterations": 5000, "trials": 5},
     }
@@ -383,7 +383,7 @@ def generate_benchmark_config(
 
     mode_labels = {
         "test": "🧪 TEST RUN MODE - Using reduced iterations (10) and trials (1)",
-        "standard": "🚀 STANDARD RUN MODE - Using full iterations (1000) and trials (3)",
+        "standard": "🚀 STANDARD RUN MODE - Using full iterations (5000) and trials (5)",
         "extended": "🚀 EXTENDED RUN MODE - Using extended iterations (2000) and trials (5)",
         "production": "🚀 PRODUCTION RUN MODE - Using production iterations (5000) and trials (5)",
     }
@@ -563,6 +563,7 @@ def generate_benchmark_config(
             f"{window_dim}{preset_dim}"
         ),
         "base_config": base_config,
+        "run_mode": run_mode,
         "iterations": iterations,
         "trials": trials,
         "max_combinations": max_combinations,
@@ -684,13 +685,14 @@ def load_external_benchmark_config(
     # config file can be used across test → production without manual edits.
     iter_map: Dict[str, tuple] = {
         "test": (10, 1),
-        "standard": (1000, 3),
+        "standard": (5000, 5),
         "extended": (2000, 5),
         "production": (5000, 5),
     }
     iterations, trials = iter_map[run_mode]
     config["iterations"] = iterations
     config["trials"] = trials
+    config["run_mode"] = run_mode
     logger.info(
         f"📋 Loaded external config: {resolved.name} "
         f"(iterations={iterations}, trials={trials} from {run_mode} mode)"
@@ -921,10 +923,10 @@ Examples:
   # Test run (default - geometric only, 10 combos, reduced iterations/trials)
   python scripts/run_full_benchmark.py --path gs://mmm-app-output/training_data/de/N_UPLOADS_WEB/20260122_113141/selected_columns.json
 
-  # Standard run, sequential by default (9 combos, full window, 1000 iterations, 3 trials)
+  # Standard run, sequential by default (9 combos, full window, 5000 iterations, 5 trials)
   python scripts/run_full_benchmark.py --path <path> --full-run
 
-  # Cartesian run — all dimension combinations (18 combos, 1000 iterations, 3 trials)
+  # Cartesian run — all dimension combinations (18 combos, 5000 iterations, 5 trials)
   python scripts/run_full_benchmark.py --path <path> --full-run --cartesian
 
   # Cartesian run, all adstock types (54 combos cartesian)
@@ -1031,7 +1033,7 @@ Examples:
     run_mode_group.add_argument(
         "--full-run",
         action="store_true",
-        help="Standard run (1000 iterations, 3 trials)",
+        help="Standard run (5000 iterations, 5 trials)",
     )
     run_mode_group.add_argument(
         "--extended-run",
