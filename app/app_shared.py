@@ -1415,7 +1415,6 @@ def _normalize_gs_uri(uri: str) -> str:
     return f"gs://{bucket}/{obj}"
 
 
-@st.cache_resource
 def _parse_list_field(val) -> list:
     """Parse a parameter that may be a list or a comma-separated string.
 
@@ -1435,6 +1434,7 @@ def _parse_list_field(val) -> list:
     return [s.strip() for s in str(val).split(",") if s.strip()]
 
 
+@st.cache_resource
 def build_job_config_from_params(
     params: dict,
     data_gcs_path: str,
