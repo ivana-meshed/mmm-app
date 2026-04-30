@@ -26,17 +26,19 @@ immediately visible on the **Benchmark Results** page of the Streamlit app.
 
 Combination mode
 ----------------
-By default ``run_full_benchmark.py`` uses **sequential** mode (``--sequential``
-is the default): each benchmark dimension (adstock, time_aggregation,
-spend_var_mapping, …) is varied independently while the other dimensions
-stay at their base values.  This is safer than cartesian mode — it avoids
-OOM kills on daily-granularity configs and keeps the total job count
-predictable.
+By default this script runs in **single-variant** mode: exactly 1 job per data
+config (weekly + geometric + 75/90 split + mixed_by_funnel_clicks), giving
+**6 total jobs** for the default 6-config manifest.  This is the right choice
+for quick data-config comparisons before committing to a heavier grid.
 
-With the production benchmark config
+Use ``--full-benchmark`` to expand to the full sequential variant grid.
+``run_full_benchmark.py`` then runs in **sequential** mode (``--sequential``
+is its default): each benchmark dimension (adstock, time_aggregation,
+spend_var_mapping, …) is varied independently while the other dimensions
+stay at their base values.  With the production benchmark config
 (``benchmarks/comprehensive_benchmark_fleet_marketplace_prod.json``) and the
-default 6-config testing manifest, sequential mode generates **one job per
-entry in each dimension**:
+default 6-config testing manifest, this generates **one job per entry in each
+dimension**:
   • 2 spend_var_mapping jobs (mixed_by_funnel_clicks, spend_to_clicks)
   • 1 adstock job (geometric)
   • 1 train_splits job (75_90)
@@ -52,9 +54,6 @@ runs, overwrite the queue file before starting a fresh sweep:
 Or use a fresh queue name (e.g. ``--queue-name default-2``) to avoid mixing
 results across runs.
 
-Use ``--single-variant`` to reduce to exactly 1 job per config
-(weekly + geometric + mixed_by_funnel_clicks only, 6 total).
-
 Two manifests are available in benchmark_analysis/dk_json_configs_clean/:
 
   dk_context_testing_manifest_clean.json   – original 6-config test set  [DEFAULT]
@@ -64,13 +63,12 @@ Two manifests are available in benchmark_analysis/dk_json_configs_clean/:
 
 Usage:
 
-─── ONE JOB PER CONFIG (--single-variant) ───────────────────────────────────
+─── ONE JOB PER CONFIG (default) ────────────────────────────────────────────
 
 Test run — 6 configs, 1 job each (6 total), 100 iterations, 1 trial:
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default-dev \\
-        --single-variant \\
         --iterations 100 --trials 1 \\
         --process-queue
 
@@ -78,34 +76,35 @@ Production run — 6 configs, 1 job each (6 total), 5000 iterations, 5 trials:
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default \\
-        --single-variant \\
         --process-queue
 
-─── SEQUENTIAL VARIANT SWEEP (default — 6 sequential variants per config) ───
+─── SEQUENTIAL VARIANT SWEEP (--full-benchmark, 36 jobs) ────────────────────
 
 Test run — 6 configs × 6 sequential variants each = 36 total jobs,
 100 iterations, 1 trial:
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default-dev \\
+        --full-benchmark \\
         --iterations 100 --trials 1 \\
         --process-queue
 
 Production run — 6 configs × 6 sequential variants each = 36 total jobs,
-5000 iterations, 5 trials (--full-run default):
+5000 iterations, 5 trials:
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default \\
+        --full-benchmark \\
         --process-queue
 
 ─── OTHER EXAMPLES ──────────────────────────────────────────────────────────
 
-Production run — default 6-config manifest (submit only, no queue processing):
+Submit only (no queue processing), 6 jobs — default 6-config manifest:
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default
 
-4-config production manifest — full production run:
+4-config production manifest — full production run (4 jobs):
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default \\
@@ -123,7 +122,6 @@ Dry-run (prints commands and enriched configs without executing):
 
     python scripts/run_dk_benchmark_all_configs.py \\
         --queue-name default-dev \\
-        --single-variant \\
         --dry-run
 
 Skip uploading configs to GCS (use when they are already there):
@@ -565,40 +563,35 @@ def main() -> None:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Default combination mode: SEQUENTIAL (each dimension varied independently,
-not the full cartesian product). With the production benchmark config this
-produces ~3 jobs per data config. Use --single-variant for exactly 1 job per
-config. Pass --cartesian to run_full_benchmark.py via --extra-args if you
-need the full grid (risk: daily×spend_to_clicks combos may OOM on 32 GiB).
+Default mode: SINGLE-VARIANT (1 job per data config — 6 jobs total for the
+default 6-config manifest).  Use --full-benchmark to expand to the full
+sequential variant grid (~36 jobs). Pass --cartesian via --extra-args for the
+complete cartesian product (risk: daily×spend_to_clicks combos may OOM on
+32 GiB).
 
 --full-run default: 5000 iterations × 5 trials (Robyn standard mode).
 Override with --iterations / --trials for a quick smoke-test.
 
 Examples:
-  # Production run — all 6 manifest configs (default), upload, submit and
-  # process queue (~18 jobs, sequential, 5000 iter × 5 trials):
-  python scripts/run_dk_benchmark_all_configs.py --queue-name default --process-queue
-
-  # 6 configs, 1 job each — test run (100 iterations, 1 trial):
-  python scripts/run_dk_benchmark_all_configs.py \\
-      --queue-name default-dev \\
-      --single-variant \\
-      --iterations 100 --trials 1 --process-queue
-
-  # 6 configs, 1 job each — full production run (5000 iter, 5 trials):
-  python scripts/run_dk_benchmark_all_configs.py \\
-      --queue-name default \\
-      --single-variant \\
-      --process-queue
-
-  # 6 configs × ~3 sequential variants each ≈ 18 jobs — test run:
+  # 6 configs, 1 job each (default) — test run (100 iterations, 1 trial):
   python scripts/run_dk_benchmark_all_configs.py \\
       --queue-name default-dev \\
       --iterations 100 --trials 1 --process-queue
 
-  # 6 configs × ~3 sequential variants each ≈ 18 jobs — full production run:
+  # 6 configs, 1 job each (default) — full production run (5000 iter, 5 trials):
+  python scripts/run_dk_benchmark_all_configs.py \\
+      --queue-name default --process-queue
+
+  # Full benchmark grid (36 jobs) — test run:
+  python scripts/run_dk_benchmark_all_configs.py \\
+      --queue-name default-dev \\
+      --full-benchmark \\
+      --iterations 100 --trials 1 --process-queue
+
+  # Full benchmark grid (36 jobs) — production run:
   python scripts/run_dk_benchmark_all_configs.py \\
       --queue-name default \\
+      --full-benchmark \\
       --process-queue
 
   # 4-config production manifest — full production run:
@@ -682,19 +675,32 @@ Examples:
         ),
     )
 
-    parser.add_argument(
+    variant_group = parser.add_mutually_exclusive_group()
+    variant_group.add_argument(
         "--single-variant",
         dest="single_variant",
         action="store_true",
         help=(
-            "Submit exactly 1 job per data config instead of expanding the "
-            "full benchmark variant grid. Uses the single_variant_baseline "
-            "config (weekly, geometric, 75/90 split, mixed_by_funnel_clicks). "
-            "Results in N_configs jobs total rather than N_configs × variants. "
+            "(default) Submit exactly 1 job per data config using the "
+            "single_variant_baseline config (weekly, geometric, 75/90 split, "
+            "mixed_by_funnel_clicks). Results in N_configs jobs total. "
             "Useful for a quick comparison of data configs before committing "
             "to a full benchmark sweep."
         ),
     )
+    variant_group.add_argument(
+        "--full-benchmark",
+        dest="single_variant",
+        action="store_false",
+        help=(
+            "Expand the full sequential benchmark variant grid instead of the "
+            "default single-variant mode. Produces N_configs × variants jobs "
+            "(~36 jobs for the default 6-config manifest). Use when you want "
+            "to sweep all benchmark dimensions (adstock, splits, time_agg, "
+            "spend_var_mapping) across every data config."
+        ),
+    )
+    parser.set_defaults(single_variant=True)
     parser.add_argument(
         "--iterations",
         type=int,
@@ -853,7 +859,10 @@ Examples:
     logger.info(f"Shared benchmark: {shared_benchmark_id}")
     logger.info(f"Skip upload     : {args.skip_upload}")
     logger.info(f"Process queue   : {args.process_queue}")
-    logger.info(f"Single variant  : {args.single_variant}")
+    logger.info(
+        f"Variant mode    : "
+        f"{'single-variant (1 job/config)' if args.single_variant else 'full-benchmark (~6 variants/config)'}"
+    )
     logger.info(f"Dry run         : {args.dry_run}")
     if args.iterations is not None:
         logger.info(f"Iterations      : {args.iterations} (override)")
