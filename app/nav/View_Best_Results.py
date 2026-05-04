@@ -585,7 +585,7 @@ def render_model_metrics_table(blobs, country, stamp):
 
     # Define thresholds based on Robyn documentation
     # R2: higher is better (0-1 scale)
-    r2_thresholds = {"good": 0.7, "acceptable": 0.5}
+    r2_thresholds = {"good": 0.75, "acceptable": 0.6}
     # NRMSE: lower is better (percentage)
     nrmse_thresholds = {"good": 0.15, "acceptable": 0.25}
     # DECOMP.RSSD: lower is better

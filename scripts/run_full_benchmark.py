@@ -892,7 +892,7 @@ def analyze_results(benchmark_id: str, queue_name: str = DEFAULT_QUEUE):
         "--queue-name",
         queue_name,
         "--min-r2",
-        "0",
+        "0.75",
     ]
 
     logger.info(f"📊 Running analysis: {' '.join(cmd)}")
@@ -904,7 +904,7 @@ def analyze_results(benchmark_id: str, queue_name: str = DEFAULT_QUEUE):
         logger.error(result.stderr)
         logger.warning("   You can run analysis manually later with:")
         logger.warning(
-            f"   python scripts/analyze_benchmark_results.py --benchmark-id {benchmark_id} --queue-name {queue_name} --min-r2 0"
+            f"   python scripts/analyze_benchmark_results.py --benchmark-id {benchmark_id} --queue-name {queue_name} --min-r2 0.75"
         )
     else:
         logger.info(result.stdout)
