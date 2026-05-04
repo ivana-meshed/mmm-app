@@ -8,7 +8,12 @@ a complete flag reference for each script.
 
 ## Quick start
 
-### Sequential production run (4 manifest configs + TV, full iterations)
+### Single-variant production run (default — 1 job per config, full iterations)
+
+By default `run_dk_benchmark_all_configs.py` runs in **single-variant** mode:
+exactly one job per config using the `single_variant_baseline.json` dimensions
+(weekly, geometric, 75/90 train split, mixed-by-funnel clicks). This is the
+recommended starting point.
 
 ```bash
 python scripts/run_dk_benchmark_all_configs.py \
@@ -17,7 +22,20 @@ python scripts/run_dk_benchmark_all_configs.py \
     --process-queue
 ```
 
-### Sequential test / smoke run (same 5 configs, 100 iterations, 1 trial)
+### Full benchmark sweep (--full-benchmark, ~6 variants per config)
+
+Add `--full-benchmark` to expand each config into the sequential variant grid
+(~6 jobs per config, ~36 total for 6 configs):
+
+```bash
+python scripts/run_dk_benchmark_all_configs.py \
+    --queue-name default \
+    --extra-config dk_final_with_tv_config.json \
+    --full-benchmark \
+    --process-queue
+```
+
+### Sequential test / smoke run (100 iterations, 1 trial)
 
 ```bash
 python scripts/run_dk_benchmark_all_configs.py \
@@ -34,12 +52,18 @@ python scripts/run_dk_benchmark_all_configs.py \
 Orchestrates `run_full_benchmark.py` for every config listed in a manifest
 file and optionally drains the resulting queue.
 
+**Default mode: single-variant** — 1 job per config using
+`single_variant_baseline.json` dimensions. Use `--full-benchmark` to expand
+to the full sequential variant grid (~6 jobs per config).
+
 ### Flag reference
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--manifest FILENAME` | `dk_context_reduced_manifest_clean.json` | Manifest file (relative to `benchmark_analysis/dk_json_configs_clean/`). Use `dk_context_testing_manifest_clean.json` for the original 6-config test set |
 | `--queue-name NAME` | `default-dev` | Cloud Tasks queue name. Use `default` for production |
+| `--single-variant` | **on** | *(default)* Submit exactly 1 job per config using the `single_variant_baseline.json` dimensions (weekly, geometric, 75/90, mixed-by-funnel clicks). Produces N_configs jobs total |
+| `--full-benchmark` | off | Expand each config to the full sequential variant grid (~6 variants per config). Produces N_configs × ~6 jobs total |
 | `--dry-run` | off | Print GCS uploads and commands without executing |
 | `--skip-upload` | off | Skip uploading configs to GCS (use when configs are already uploaded) |
 | `--process-queue` | off | After submitting all benchmarks, run `process_queue_simple.py --loop` to drain the queue. Without this flag you must process the queue separately |
@@ -52,25 +76,44 @@ file and optionally drains the resulting queue.
 ### Examples
 
 ```bash
-# Production run — all 4 manifest configs, upload, submit and process queue
+# Single-variant production run (default) — N configs × 1 job each
 python scripts/run_dk_benchmark_all_configs.py --queue-name default --process-queue
 
-# All 5 configs (4 manifest + TV) — dev/test run (100 iterations, 1 trial)
+# Full benchmark sweep — N configs × ~6 jobs each (~36 total for 6 configs)
+python scripts/run_dk_benchmark_all_configs.py \
+    --queue-name default \
+    --full-benchmark \
+    --process-queue
+
+# All 5 configs (4 manifest + TV) — single-variant test run (100 iterations, 1 trial)
 python scripts/run_dk_benchmark_all_configs.py \
     --queue-name default-dev \
     --extra-config dk_final_with_tv_config.json \
     --iterations 100 --trials 1 --process-queue
 
-# All 5 configs (4 manifest + TV) — full production run
+# All 5 configs (4 manifest + TV) — single-variant full production run
 python scripts/run_dk_benchmark_all_configs.py \
     --queue-name default \
     --extra-config dk_final_with_tv_config.json \
     --process-queue
 
-# Run the original 6-config test set
+# All 5 configs (4 manifest + TV) — full benchmark sweep
+python scripts/run_dk_benchmark_all_configs.py \
+    --queue-name default \
+    --extra-config dk_final_with_tv_config.json \
+    --full-benchmark \
+    --process-queue
+
+# Run the original 6-config test set (single-variant)
 python scripts/run_dk_benchmark_all_configs.py \
     --queue-name default-dev \
     --manifest dk_context_testing_manifest_clean.json
+
+# Run the original 6-config test set (full sweep)
+python scripts/run_dk_benchmark_all_configs.py \
+    --queue-name default-dev \
+    --manifest dk_context_testing_manifest_clean.json \
+    --full-benchmark
 
 # Dry-run — print commands without executing
 python scripts/run_dk_benchmark_all_configs.py --queue-name default --dry-run
@@ -218,6 +261,53 @@ python scripts/run_full_benchmark.py \
     --hyperparameter-ranges-config benchmarks/generic_hyperparameter_ranges_v2.json \
     --channel-type-assignments-config benchmarks/channel_type_assignments.json \
     --compare-all-presets
+```
+
+---
+
+## `analyze_benchmark_results.py`
+
+Collects per-variant `model_summary.json` files, builds the aggregated
+`results_*.csv` visible on the Benchmark Results page, and generates
+comparison plots.
+
+This script runs automatically as the final step of `run_full_benchmark.py`
+and `run_dk_benchmark_all_configs.py`. Call it manually if you need to
+regenerate the CSV or plots after the fact.
+
+### Key flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--benchmark-id ID` | **required** | Benchmark ID to collect results for |
+| `--queue-name NAME` | `default-dev` | Queue used during submission — needed for correct variant→timestamp mapping |
+| `--scan-gcs` | off | Scan GCS for all variant `model_summary.json` files instead of reading `plan.json`. Recommended when configs were submitted in multiple batches |
+| `--min-r2 N` | `0` (no filtering) | Exclude variants with R² below *N* **from plots only**. The CSV always contains all variants regardless of this value |
+| `--no-plots` | off | Skip plot generation (CSV-only output) |
+| `--output-dir DIR` | none | Save CSV and plots to a local directory in addition to GCS |
+
+### Examples
+
+```bash
+# Collect results and generate CSV + plots (typical after a run)
+python scripts/analyze_benchmark_results.py \
+    --benchmark-id my_benchmark_20260504_123456 \
+    --queue-name default \
+    --scan-gcs
+
+# Regenerate plots only for well-fitting models (R² > 0.7) without touching CSV
+python scripts/analyze_benchmark_results.py \
+    --benchmark-id my_benchmark_20260504_123456 \
+    --queue-name default \
+    --scan-gcs \
+    --min-r2 0.7
+
+# CSV only, no plots
+python scripts/analyze_benchmark_results.py \
+    --benchmark-id my_benchmark_20260504_123456 \
+    --queue-name default \
+    --scan-gcs \
+    --no-plots
 ```
 
 ---

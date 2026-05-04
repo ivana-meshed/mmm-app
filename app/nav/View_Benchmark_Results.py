@@ -109,6 +109,18 @@ def _get_benchmark_run_mode(benchmark_id: str) -> str:
     return "unknown"
 
 
+@st.cache_data(ttl=300)
+def _get_all_run_modes(benchmark_ids: tuple) -> dict:
+    """
+    Return ``{benchmark_id: run_mode}`` for every ID in *benchmark_ids*.
+
+    Cached as a single unit so the full map is computed once per 5-minute
+    window and subsequent filter/label calls are pure dict lookups — avoiding
+    N individual GCS calls in the sidebar on every Streamlit rerun.
+    """
+    return {bid: _get_benchmark_run_mode(bid) for bid in benchmark_ids}
+
+
 def _format_benchmark_option(benchmark_id: str) -> str:
     """Return a display label for a benchmark option in the sidebar."""
     mode = _get_benchmark_run_mode(benchmark_id)
@@ -477,34 +489,72 @@ with st.sidebar:
 
     _available_benchmarks = list_benchmarks() or BEST_BENCHMARKS
 
+    # Batch-load all run modes in one cached call to avoid N GCS round-trips
+    # on each Streamlit rerun.
+    _run_mode_map = _get_all_run_modes(tuple(_available_benchmarks))
+
+    # Count benchmarks per run type for the radio labels.
+    _type_counts: dict = {}
+    for _bid in _available_benchmarks:
+        _m = _run_mode_map.get(_bid, "unknown")
+        _type_counts[_m] = _type_counts.get(_m, 0) + 1
+
+    def _run_type_label(x: str) -> str:
+        if x == "All":
+            return f"All ({len(_available_benchmarks)})"
+        badge = _RUN_MODE_BADGE.get(x, x)
+        cnt = _type_counts.get(x, 0)
+        return f"{badge} ({cnt})"
+
     # Run-type filter
     _run_type_filter = st.radio(
         "Filter by run type",
         options=["All", "test", "standard", "extended", "production"],
-        format_func=lambda x: "All" if x == "All" else _RUN_MODE_BADGE.get(x, x),
+        format_func=_run_type_label,
         horizontal=False,
     )
 
-    # Apply filter
+    # Apply filter using the pre-loaded run mode map (pure dict lookup).
     if _run_type_filter != "All":
         _filtered_benchmarks = [
             bid
             for bid in _available_benchmarks
-            if _get_benchmark_run_mode(bid) == _run_type_filter
+            if _run_mode_map.get(bid) == _run_type_filter
         ]
     else:
         _filtered_benchmarks = _available_benchmarks
 
+    # Manage multiselect selection via session state so that:
+    #  • switching the filter pre-selects the first benchmark in the new list
+    #  • stale selections (after a Refresh) are dropped gracefully
+    # This is more reliable than relying on the deprecated `default=` param.
+    _filter_key = f"benchmark_select_{_run_type_filter}"
+    _prior = st.session_state.get(_filter_key)
+    if _prior is None:
+        # First time this filter value is selected → pre-select first item.
+        st.session_state[_filter_key] = (
+            _filtered_benchmarks[:1] if _filtered_benchmarks else []
+        )
+    else:
+        # Drop any stale items that are no longer in the current options.
+        _valid = [b for b in _prior if b in _filtered_benchmarks]
+        if not _valid and _filtered_benchmarks:
+            _valid = _filtered_benchmarks[:1]
+        st.session_state[_filter_key] = _valid
+
     selected_benchmarks = st.multiselect(
         "Benchmark ID(s)",
         options=_filtered_benchmarks,
-        default=_filtered_benchmarks[:1] if _filtered_benchmarks else [],
         format_func=_format_benchmark_option,
         help="Select one or more benchmarks to visualize",
-        # Key includes the filter value so the widget resets (and re-applies
-        # default) whenever the run-type filter changes.
-        key=f"benchmark_select_{_run_type_filter}",
+        key=_filter_key,
     )
+
+    if not _filtered_benchmarks and _run_type_filter != "All":
+        st.caption(
+            f"No **{_run_type_filter}** benchmarks found. "
+            "Select **All** to see every benchmark."
+        )
 
     if st.button("🔄 Refresh"):
         st.cache_resource.clear()
