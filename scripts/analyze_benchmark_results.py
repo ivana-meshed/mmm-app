@@ -1640,12 +1640,12 @@ def main():
         "--min-r2",
         dest="min_r2",
         type=float,
-        default=0.7,
+        default=0,
         help=(
-            "Minimum R² threshold to include a result (default: 0.7). "
-            "Uses rsq_val when available, otherwise rsq_train. "
-            "Results below this threshold are excluded before plotting and "
-            "summary statistics."
+            "Minimum R² threshold to include a result in plots (default: 0, "
+            "i.e. no filtering). Uses rsq_val when available, otherwise "
+            "rsq_train. The CSV is always exported with all results regardless "
+            "of this threshold."
         ),
     )
 
@@ -1690,8 +1690,16 @@ def main():
         )
         return 0
 
-    # Filter out low-quality results below the R² threshold
-    if args.min_r2 is not None:
+    logger.info(f"Collected {len(df)} results")
+
+    # Export CSV with ALL variants — no R² filtering here so the results
+    # page always shows the complete picture including low-quality runs.
+    csv_path = analyzer.export_csv(df, args.benchmark_id, args.output_dir)
+    logger.info(f"Results exported to CSV: {csv_path}")
+
+    # Apply R² filter ONLY for plot generation so plots stay readable.
+    # The CSV written above already contains every variant.
+    if args.min_r2 is not None and args.min_r2 > 0:
         # Prefer rsq_val; fall back to rsq_train when val is absent
         if "rsq_val" in df.columns and df["rsq_val"].notna().any():
             r2_col = "rsq_val"
@@ -1708,32 +1716,20 @@ def main():
             removed = before - len(df)
             if removed:
                 logger.info(
-                    f"Filtered out {removed} result(s) with {r2_col} < "
-                    f"{args.min_r2} (kept {len(df)} of {before})"
-                )
-            else:
-                logger.info(
-                    f"All {before} result(s) meet the R² threshold "
-                    f"({r2_col} >= {args.min_r2})"
+                    f"Excluding {removed} result(s) with {r2_col} < "
+                    f"{args.min_r2} from plots (kept {len(df)} of {before})"
                 )
         else:
             logger.warning(
-                "No R² columns found; skipping quality filter"
+                "No R² columns found; skipping plot quality filter"
             )
 
         if df.empty:
-            logger.error(
-                f"No results remaining after applying R² filter "
-                f"(min_r2={args.min_r2}). "
-                "Use --min-r2 0 to disable filtering."
+            logger.warning(
+                f"No results remaining for plots after R² filter "
+                f"(min_r2={args.min_r2}); skipping plot generation."
             )
-            return 1
-
-    logger.info(f"Collected {len(df)} results")
-
-    # Export CSV
-    csv_path = analyzer.export_csv(df, args.benchmark_id, args.output_dir)
-    logger.info(f"Results exported to CSV: {csv_path}")
+            return 0
 
     # Generate summary statistics
     summary = analyzer.generate_summary_stats(df)

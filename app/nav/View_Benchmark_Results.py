@@ -754,46 +754,6 @@ for selected_benchmark in selected_benchmarks:
                     mime="text/csv",
                 )
 
-                # ── High Quality Variants (R² > 0.8) ──────────────────────
-                _r2_col = next(
-                    (
-                        c
-                        for c in ["rsq_train", "rsq_val"]
-                        if c in df.columns
-                    ),
-                    None,
-                )
-                if _r2_col is not None:
-                    _hq_df = df[
-                        df[_r2_col].notna() & (df[_r2_col] > 0.8)
-                    ].copy()
-                    if not _hq_df.empty:
-                        st.divider()
-                        st.subheader(
-                            f"🏆 High Quality Variants ({_r2_col.replace('rsq_', 'R² ')} > 0.8)"
-                        )
-                        st.caption(
-                            f"{len(_hq_df)} out of {len(df)} variant(s) whose best "
-                            f"model has {_r2_col.replace('rsq_', 'R² ')} > 0.8 — "
-                            "sorted by R² descending."
-                        )
-                        _hq_df = _hq_df.sort_values(
-                            _r2_col, ascending=False
-                        )
-                        st.dataframe(
-                            _hq_df,
-                            use_container_width=True,
-                            height=min(400, 40 + len(_hq_df) * 35),
-                        )
-                        _hq_csv = _hq_df.to_csv(index=False).encode("utf-8")
-                        st.download_button(
-                            label="📥 Download High Quality CSV",
-                            data=_hq_csv,
-                            file_name=f"{selected_benchmark}_r2_above_0.8.csv",
-                            mime="text/csv",
-                            key=f"dl_hq_{selected_benchmark}",
-                        )
-
                 # ── Preset comparison ──────────────────────────────────────
                 # Only shown when the benchmark included a preset-comparison
                 # sweep (i.e. the 'preset_label' column is non-empty).
