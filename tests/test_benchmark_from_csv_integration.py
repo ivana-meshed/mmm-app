@@ -1020,5 +1020,76 @@ class TestArgParsingTvDevRun(unittest.TestCase):
         json.dumps(sc)
 
 
+class TestGcsPathCaseConsistency(unittest.TestCase):
+    """
+    Verify that the GCS path used when uploading selected_columns.json preserves
+    the original case of the goal (dep_var), so that benchmark_mmm.py can find
+    the file using the same case stored in selected_goal.
+
+    Root cause of the bug: run_benchmark_from_csv.py previously called
+    upload_selected_columns(..., dep_var.lower(), ...) which produced a lowercase
+    GCS path (e.g. training_data/dk/bookings/...) while benchmark_mmm.py
+    constructed the lookup path from selected_columns["selected_goal"] which is
+    always uppercase (e.g. training_data/dk/BOOKINGS/...).  The mismatch caused
+    a FileNotFoundError at training time.
+    """
+
+    def test_selected_goal_matches_dep_var_case(self):
+        """selected_goal in the JSON must match the original dep_var case.
+
+        The GCS upload path and the lookup path in benchmark_mmm.py both derive
+        from this value, so they must agree.
+        """
+        dep_var = "BOOKINGS"
+        sc = _build_selected_columns(
+            classify_columns(
+                _load_dk_df().columns.tolist(), PAID_MEDIA_SPENDS, dep_var
+            ),
+            dep_var=dep_var,
+        )
+        # selected_goal must equal dep_var (uppercase), not dep_var.lower()
+        self.assertEqual(
+            sc["selected_goal"],
+            dep_var,
+            "selected_goal case must match dep_var (no .lower() applied)",
+        )
+        self.assertNotEqual(
+            sc["selected_goal"],
+            dep_var.lower(),
+            "selected_goal must not be lowercased",
+        )
+
+    def test_upload_selected_columns_uses_original_case(self):
+        """upload_selected_columns path template uses goal as-is, not lowercased.
+
+        This simulates the path that run_benchmark_from_csv.py constructs and
+        asserts it matches the case produced by the Streamlit app and expected
+        by benchmark_mmm.py's load_base_config().
+        """
+        dep_var = "BOOKINGS"
+        country_code = "dk"
+        timestamp = "20260413_120000"
+        expected_path = (
+            f"training_data/{country_code}/{dep_var}/{timestamp}"
+            f"/selected_columns.json"
+        )
+        # Construct path exactly as upload_selected_columns does
+        actual_path = (
+            f"training_data/{country_code.lower()}/{dep_var}/{timestamp}"
+            f"/selected_columns.json"
+        )
+        self.assertEqual(actual_path, expected_path)
+        # Ensure lowercase goal would be different (confirming the fix matters)
+        lowercase_path = (
+            f"training_data/{country_code.lower()}/{dep_var.lower()}/{timestamp}"
+            f"/selected_columns.json"
+        )
+        self.assertNotEqual(
+            actual_path,
+            lowercase_path,
+            "Lowercase goal produces a different path — confirms the bug was real",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

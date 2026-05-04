@@ -479,6 +479,7 @@ def upload_selected_columns(
     )
     return f"gs://{bucket_name}/{blob_path}"
 
+
 def upload_config_files(
     client: storage.Client,
     bucket_name: str,
@@ -836,7 +837,7 @@ def main() -> None:
         gcs_client,
         args.bucket,
         args.country_code,
-        dep_var.lower(),
+        dep_var,
         timestamp,
     )
 
