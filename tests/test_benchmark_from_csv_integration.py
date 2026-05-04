@@ -42,6 +42,7 @@ from run_benchmark_from_csv import (  # noqa: E402
     _is_organic_var,
     classify_columns,
     load_columns_from_mapping,
+    upload_selected_columns,
 )
 
 # ---------------------------------------------------------------------------
@@ -1018,6 +1019,88 @@ class TestArgParsingTvDevRun(unittest.TestCase):
         self.assertIn("BAUER_GRP_FLOW_RADIO", drivers)
         # Must be JSON-serialisable
         json.dumps(sc)
+
+
+class TestGcsPathCaseConsistency(unittest.TestCase):
+    """
+    Verify that the GCS path used when uploading selected_columns.json preserves
+    the original case of the goal (dep_var), so that benchmark_mmm.py can find
+    the file using the same case stored in selected_goal.
+
+    Root cause of the bug: run_benchmark_from_csv.py previously called
+    upload_selected_columns(..., dep_var.lower(), ...) which produced a lowercase
+    GCS path (e.g. training_data/dk/bookings/...) while benchmark_mmm.py
+    constructed the lookup path from selected_columns["selected_goal"] which is
+    always uppercase (e.g. training_data/dk/BOOKINGS/...).  The mismatch caused
+    a FileNotFoundError at training time.
+    """
+
+    def test_selected_goal_matches_dep_var_case(self):
+        """selected_goal in the JSON must match the original dep_var case.
+
+        The GCS upload path and the lookup path in benchmark_mmm.py both derive
+        from this value, so they must agree.
+        """
+        dep_var = "BOOKINGS"
+        sc = _build_selected_columns(
+            classify_columns(
+                _load_dk_df().columns.tolist(), PAID_MEDIA_SPENDS, dep_var
+            ),
+            dep_var=dep_var,
+        )
+        # selected_goal must equal dep_var (uppercase), not dep_var.lower()
+        self.assertEqual(
+            sc["selected_goal"],
+            dep_var,
+            "selected_goal case must match dep_var (no .lower() applied)",
+        )
+
+    def test_upload_preserves_goal_case(self):
+        """upload_selected_columns() must return a GCS path using the original
+        goal case, not a lowercased version.
+
+        This directly tests the fix: passing dep_var (uppercase) instead of
+        dep_var.lower() to upload_selected_columns so that the GCS path
+        matches what benchmark_mmm.py's load_base_config() will look up.
+        """
+        dep_var = "BOOKINGS"
+        bucket = "mmm-app-output"
+        country = "dk"
+        timestamp = "20260413_120000"
+
+        # Mock the GCS client — upload_selected_columns calls
+        # client.bucket(name).blob(path).upload_from_string(...)
+        mock_client = MagicMock()
+
+        returned_path = upload_selected_columns(
+            config={"selected_goal": dep_var},
+            client=mock_client,
+            bucket_name=bucket,
+            country_code=country,
+            goal=dep_var,
+            timestamp=timestamp,
+        )
+
+        expected = (
+            f"gs://{bucket}/training_data/{country}/{dep_var}/{timestamp}"
+            f"/selected_columns.json"
+        )
+        self.assertEqual(
+            returned_path,
+            expected,
+            f"GCS path uses wrong case: {returned_path!r} != {expected!r}",
+        )
+        # Confirm the path contains the uppercase goal segment, not lowercase
+        self.assertIn(
+            f"/{dep_var}/",
+            returned_path,
+            "Path must contain uppercase goal segment",
+        )
+        self.assertNotIn(
+            f"/{dep_var.lower()}/",
+            returned_path,
+            "Path must not contain lowercased goal segment",
+        )
 
 
 if __name__ == "__main__":

@@ -1640,12 +1640,21 @@ def main():
         "--min-r2",
         dest="min_r2",
         type=float,
+<<<<<<< copilot/fix-pr-196-issues
         default=0,
         help=(
             "Minimum R² threshold to include a result in plots (default: 0, "
             "i.e. no filtering). Uses rsq_val when available, otherwise "
             "rsq_train. The CSV is always exported with all results regardless "
             "of this threshold."
+=======
+        default=0.75,
+        help=(
+            "Minimum R² threshold to include a result (default: 0.75). "
+            "Uses rsq_val when available, otherwise rsq_train. "
+            "Results below this threshold are excluded before plotting and "
+            "summary statistics."
+>>>>>>> dev
         ),
     )
 

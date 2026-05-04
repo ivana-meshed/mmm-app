@@ -39,6 +39,10 @@ PROJECT_ID = "datawarehouse-422511"
 GCS_BUCKET = "mmm-app-output"
 BENCHMARK_ROOT = "benchmarks"
 
+# Minimum R² threshold used to filter low-quality results from plots and
+# analysis.  Must match the --min-r2 default in analyze_benchmark_results.py.
+MIN_R2_THRESHOLD = 0.75
+
 # The 4 best benchmark configurations available for quick selection
 BEST_BENCHMARKS = [
     "dk_context_supply_geometric_75_90_daily_spend_to_clicks",
@@ -1164,11 +1168,47 @@ for selected_benchmark in selected_benchmarks:
                                 "Wait for jobs to finish and try again."
                             )
                         else:
-                            _analyzer.generate_plots(_df, selected_benchmark)
-                            st.success(
-                                f"✅ Analysis complete — {len(_df)} variant(s) "
-                                "included. Plots uploaded to GCS. Scroll down to view."
-                            )
+                            # Apply the standard R² quality filter so the
+                            # generated plots only include well-fitting models —
+                            # consistent with the CLI analysis.
+                            _total = len(_df)
+                            if (
+                                "rsq_val" in _df.columns
+                                and _df["rsq_val"].notna().any()
+                            ):
+                                _r2_col = "rsq_val"
+                            elif (
+                                "rsq_train" in _df.columns
+                                and _df["rsq_train"].notna().any()
+                            ):
+                                _r2_col = "rsq_train"
+                            else:
+                                _r2_col = None
+                            if _r2_col:
+                                _df = _df[
+                                    _df[_r2_col].isna()
+                                    | (_df[_r2_col] >= MIN_R2_THRESHOLD)
+                                ].copy()
+                            if _df.empty:
+                                st.warning(
+                                    f"No variants meet the R² ≥ {MIN_R2_THRESHOLD} threshold. "
+                                    "All results are below the quality bar."
+                                )
+                            else:
+                                _filtered = _total - len(_df)
+                                _analyzer.generate_plots(
+                                    _df, selected_benchmark
+                                )
+                                _filter_note = (
+                                    f" ({_filtered} below R² {MIN_R2_THRESHOLD} excluded)"
+                                    if _filtered
+                                    else ""
+                                )
+                                st.success(
+                                    f"✅ Analysis complete — {len(_df)} variant(s) "
+                                    f"included{_filter_note}. "
+                                    "Plots uploaded to GCS. Scroll down to view."
+                                )
                     except Exception as _exc:
                         st.error(f"Analysis failed: {_exc}")
                         st.exception(_exc)

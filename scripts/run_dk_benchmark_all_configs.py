@@ -457,7 +457,11 @@ def run_analysis(
         queue_name,
         "--scan-gcs",
         "--min-r2",
+<<<<<<< copilot/fix-pr-196-issues
         "0",
+=======
+        "0.75",
+>>>>>>> dev
     ]
     logger.info(f"\n{'='*80}")
     logger.info("COLLECTING RESULTS (building combined CSV for Benchmark page) …")
