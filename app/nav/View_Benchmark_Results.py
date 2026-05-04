@@ -680,7 +680,7 @@ for selected_benchmark in selected_benchmarks:
                         )
 
                 # Show metrics summary
-                col1, col2, col3, col4, col5 = st.columns(5)
+                col1, col2, col3, col4, col5, col6 = st.columns(6)
                 with col1:
                     st.metric("Total Variants", len(df))
                 with col2:
@@ -712,6 +712,29 @@ for selected_benchmark in selected_benchmarks:
                             f"{avg_cv:.3f}" if pd.notna(avg_cv) else "N/A",
                             help="Lower is better. CV of ROAS across Pareto-optimal models — measures how stable channel ROAS estimates are.",
                         )
+                with col6:
+                    _r2_col = next(
+                        (
+                            c
+                            for c in ["rsq_train", "rsq_val"]
+                            if c in df.columns
+                        ),
+                        None,
+                    )
+                    if _r2_col is not None:
+                        _high_r2_count = int(
+                            (df[_r2_col].notna() & (df[_r2_col] > 0.8)).sum()
+                        )
+                        _r2_label = (
+                            "R² train > 0.8"
+                            if _r2_col == "rsq_train"
+                            else "R² val > 0.8"
+                        )
+                        st.metric(
+                            _r2_label,
+                            f"{_high_r2_count} / {len(df)}",
+                            help="Variants whose best model exceeds R² 0.8 on the train split.",
+                        )
 
                 st.divider()
 
@@ -730,6 +753,46 @@ for selected_benchmark in selected_benchmarks:
                     file_name=f"{selected_benchmark}_results.csv",
                     mime="text/csv",
                 )
+
+                # ── High Quality Variants (R² > 0.8) ──────────────────────
+                _r2_col = next(
+                    (
+                        c
+                        for c in ["rsq_train", "rsq_val"]
+                        if c in df.columns
+                    ),
+                    None,
+                )
+                if _r2_col is not None:
+                    _hq_df = df[
+                        df[_r2_col].notna() & (df[_r2_col] > 0.8)
+                    ].copy()
+                    if not _hq_df.empty:
+                        st.divider()
+                        st.subheader(
+                            f"🏆 High Quality Variants ({_r2_col.replace('rsq_', 'R² ')} > 0.8)"
+                        )
+                        st.caption(
+                            f"{len(_hq_df)} out of {len(df)} variant(s) whose best "
+                            f"model has {_r2_col.replace('rsq_', 'R² ')} > 0.8 — "
+                            "sorted by R² descending."
+                        )
+                        _hq_df = _hq_df.sort_values(
+                            _r2_col, ascending=False
+                        )
+                        st.dataframe(
+                            _hq_df,
+                            use_container_width=True,
+                            height=min(400, 40 + len(_hq_df) * 35),
+                        )
+                        _hq_csv = _hq_df.to_csv(index=False).encode("utf-8")
+                        st.download_button(
+                            label="📥 Download High Quality CSV",
+                            data=_hq_csv,
+                            file_name=f"{selected_benchmark}_r2_above_0.8.csv",
+                            mime="text/csv",
+                            key=f"dl_hq_{selected_benchmark}",
+                        )
 
                 # ── Preset comparison ──────────────────────────────────────
                 # Only shown when the benchmark included a preset-comparison
@@ -1207,6 +1270,31 @@ for selected_benchmark in selected_benchmarks:
                         "training image, or when `analyze_benchmark_results.py` "
                         "is run once the jobs complete."
                     )
+
+                # Display any extra plots not in the named lists above
+                _known_plot_names = {
+                    n for n, _, _ in core_plots + enrichment_plots
+                }
+                _extra_plots = {
+                    k: v
+                    for k, v in plots.items()
+                    if k not in _known_plot_names
+                }
+                if _extra_plots:
+                    st.markdown("### Additional Plots")
+                    for plot_name, img_data in sorted(
+                        _extra_plots.items()
+                    ):
+                        title = plot_name.replace("_", " ").title()
+                        st.markdown(f"#### {title}")
+                        b64 = base64.b64encode(img_data).decode()
+                        st.markdown(
+                            f'<img src="data:image/png;base64,{b64}" '
+                            f'style="width: 100%; height: auto;" '
+                            f'alt="{title}">',
+                            unsafe_allow_html=True,
+                        )
+                        st.divider()
 
         except Exception as e:
             st.error(f"Error loading plots: {e}")
