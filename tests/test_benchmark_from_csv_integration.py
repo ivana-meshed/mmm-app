@@ -42,6 +42,7 @@ from run_benchmark_from_csv import (  # noqa: E402
     _is_organic_var,
     classify_columns,
     load_columns_from_mapping,
+    upload_selected_columns,
 )
 
 # ---------------------------------------------------------------------------
@@ -1053,41 +1054,47 @@ class TestGcsPathCaseConsistency(unittest.TestCase):
             dep_var,
             "selected_goal case must match dep_var (no .lower() applied)",
         )
-        self.assertNotEqual(
-            sc["selected_goal"],
-            dep_var.lower(),
-            "selected_goal must not be lowercased",
-        )
 
-    def test_upload_selected_columns_uses_original_case(self):
-        """upload_selected_columns path template uses goal as-is, not lowercased.
+    def test_upload_selected_columns_returns_path_with_original_goal_case(self):
+        """upload_selected_columns() must return a GCS path using the original
+        goal case, not a lowercased version.
 
-        This simulates the path that run_benchmark_from_csv.py constructs and
-        asserts it matches the case produced by the Streamlit app and expected
-        by benchmark_mmm.py's load_base_config().
+        This directly tests the fix: passing dep_var (uppercase) instead of
+        dep_var.lower() to upload_selected_columns so that the GCS path
+        matches what benchmark_mmm.py's load_base_config() will look up.
         """
         dep_var = "BOOKINGS"
-        country_code = "dk"
+        bucket = "mmm-app-output"
+        country = "dk"
         timestamp = "20260413_120000"
-        expected_path = (
-            f"training_data/{country_code}/{dep_var}/{timestamp}"
+
+        # Mock the GCS client — upload_selected_columns calls
+        # client.bucket(name).blob(path).upload_from_string(...)
+        mock_client = MagicMock()
+
+        returned_path = upload_selected_columns(
+            config={"selected_goal": dep_var},
+            client=mock_client,
+            bucket_name=bucket,
+            country_code=country,
+            goal=dep_var,
+            timestamp=timestamp,
+        )
+
+        expected = (
+            f"gs://{bucket}/training_data/{country}/{dep_var}/{timestamp}"
             f"/selected_columns.json"
         )
-        # Construct path exactly as upload_selected_columns does
-        actual_path = (
-            f"training_data/{country_code.lower()}/{dep_var}/{timestamp}"
-            f"/selected_columns.json"
+        self.assertEqual(
+            returned_path,
+            expected,
+            f"GCS path uses wrong case: {returned_path!r} != {expected!r}",
         )
-        self.assertEqual(actual_path, expected_path)
-        # Ensure lowercase goal would be different (confirming the fix matters)
-        lowercase_path = (
-            f"training_data/{country_code.lower()}/{dep_var.lower()}/{timestamp}"
-            f"/selected_columns.json"
-        )
-        self.assertNotEqual(
-            actual_path,
-            lowercase_path,
-            "Lowercase goal produces a different path — confirms the bug was real",
+        # Confirm the lowercase variant would differ (regression guard)
+        self.assertNotIn(
+            dep_var.lower(),
+            returned_path,
+            "Path must not contain lowercased goal",
         )
 
 
