@@ -1055,7 +1055,7 @@ class TestGcsPathCaseConsistency(unittest.TestCase):
             "selected_goal case must match dep_var (no .lower() applied)",
         )
 
-    def test_upload_selected_columns_returns_path_with_original_goal_case(self):
+    def test_upload_preserves_goal_case(self):
         """upload_selected_columns() must return a GCS path using the original
         goal case, not a lowercased version.
 
@@ -1090,11 +1090,16 @@ class TestGcsPathCaseConsistency(unittest.TestCase):
             expected,
             f"GCS path uses wrong case: {returned_path!r} != {expected!r}",
         )
-        # Confirm the lowercase variant would differ (regression guard)
-        self.assertNotIn(
-            dep_var.lower(),
+        # Confirm the path contains the uppercase goal segment, not lowercase
+        self.assertIn(
+            f"/{dep_var}/",
             returned_path,
-            "Path must not contain lowercased goal",
+            "Path must contain uppercase goal segment",
+        )
+        self.assertNotIn(
+            f"/{dep_var.lower()}/",
+            returned_path,
+            "Path must not contain lowercased goal segment",
         )
 
 
