@@ -501,6 +501,9 @@ with st.sidebar:
         default=_filtered_benchmarks[:1] if _filtered_benchmarks else [],
         format_func=_format_benchmark_option,
         help="Select one or more benchmarks to visualize",
+        # Key includes the filter value so the widget resets (and re-applies
+        # default) whenever the run-type filter changes.
+        key=f"benchmark_select_{_run_type_filter}",
     )
 
     if st.button("🔄 Refresh"):
