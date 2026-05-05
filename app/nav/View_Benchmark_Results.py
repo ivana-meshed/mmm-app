@@ -41,7 +41,7 @@ BENCHMARK_ROOT = "benchmarks"
 
 # Minimum R² threshold used to filter low-quality results from plots and
 # analysis.  Must match the --min-r2 default in analyze_benchmark_results.py.
-MIN_R2_THRESHOLD = 0.75
+MIN_R2_THRESHOLD = 0.70
 
 # The 4 best benchmark configurations available for quick selection
 BEST_BENCHMARKS = [

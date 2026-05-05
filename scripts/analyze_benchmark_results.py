@@ -1655,9 +1655,9 @@ def main():
         "--min-r2",
         dest="min_r2",
         type=float,
-        default=0.75,
+        default=0.70,
         help=(
-            "Minimum R² threshold to include a result (default: 0.75). "
+            "Minimum R² threshold to include a result (default: 0.70). "
             "Uses rsq_val when available, otherwise rsq_train. "
             "Results below this threshold are excluded before plotting and "
             "summary statistics."
