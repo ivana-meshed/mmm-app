@@ -88,9 +88,7 @@ def _get_benchmark_run_mode(benchmark_id: str) -> str:
     try:
         client = get_storage_client()
         bucket = client.bucket(GCS_BUCKET)
-        plan_blob = bucket.blob(
-            f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json"
-        )
+        plan_blob = bucket.blob(f"{BENCHMARK_ROOT}/{benchmark_id}/plan.json")
         plan = json.loads(plan_blob.download_as_bytes())
         # Prefer explicit run_mode field (set by newer submissions)
         if "run_mode" in plan:
@@ -127,8 +125,8 @@ def _trigger_queue_tick(queue_name: str) -> bool:
     """
     try:
         from app_shared import (  # type: ignore[import-untyped]
-            schedule_queue_tick_via_cloud_tasks,
             queue_tick_once_headless,
+            schedule_queue_tick_via_cloud_tasks,
         )
 
         # Try Cloud Tasks first (event-driven, preferred)
@@ -177,10 +175,7 @@ def list_benchmarks():
             ):
                 benchmarks.add(parts[1])
             # benchmarks/{benchmark_id}/{variant}/model_summary.json
-            elif (
-                len(parts) >= 4
-                and parts[3] == "model_summary.json"
-            ):
+            elif len(parts) >= 4 and parts[3] == "model_summary.json":
                 benchmarks.add(parts[1])
 
         return sorted(benchmarks, reverse=True)
@@ -318,12 +313,15 @@ def _aggregate_variant_summaries(benchmark_id: str):
 
         # Prefer top-level summary fields; fall back to input_metadata
         adstock = summary.get("adstock") or input_meta.get("adstock", "")
-        train_size = summary.get("train_size") or input_meta.get("train_size", "")
-        resample_freq = (
-            summary.get("resample_freq")
-            or input_meta.get("resample_freq", "none")
+        train_size = summary.get("train_size") or input_meta.get(
+            "train_size", ""
         )
-        iterations_raw = summary.get("iterations") or input_meta.get("iterations")
+        resample_freq = summary.get("resample_freq") or input_meta.get(
+            "resample_freq", "none"
+        )
+        iterations_raw = summary.get("iterations") or input_meta.get(
+            "iterations"
+        )
         trials_raw = summary.get("trials") or input_meta.get("trials")
         try:
             iterations = int(iterations_raw) if iterations_raw else None
@@ -361,8 +359,12 @@ def _aggregate_variant_summaries(benchmark_id: str):
             "baseline_share": decomp.get("baseline_share"),
             "organic_share": decomp.get("organic_share"),
             "context_share": decomp.get("context_share"),
-            "allocator_stability_roas_cv": decomp.get("allocator_stability_roas_cv"),
-            "channel_roas_json": json.dumps(channel_roas) if channel_roas else "",
+            "allocator_stability_roas_cv": decomp.get(
+                "allocator_stability_roas_cv"
+            ),
+            "channel_roas_json": (
+                json.dumps(channel_roas) if channel_roas else ""
+            ),
             "channel_cpa_json": json.dumps(channel_cpa) if channel_cpa else "",
             "model_id": (
                 f"{variant_name}_{summary.get('timestamp', '')}"
@@ -402,7 +404,9 @@ def load_benchmark_csv(benchmark_id):
     csv_blobs = [b for b in blobs if b.name.endswith(".csv")]
 
     if csv_blobs:
-        latest_csv = sorted(csv_blobs, key=lambda b: b.time_created, reverse=True)[0]
+        latest_csv = sorted(
+            csv_blobs, key=lambda b: b.time_created, reverse=True
+        )[0]
         csv_data = latest_csv.download_as_bytes()
         df = pd.read_csv(io.BytesIO(csv_data))
         return df, latest_csv.name
@@ -471,7 +475,9 @@ with st.sidebar:
     _run_type_filter = st.radio(
         "Filter by run type",
         options=["All", "test", "standard", "extended", "production"],
-        format_func=lambda x: "All" if x == "All" else _RUN_MODE_BADGE.get(x, x),
+        format_func=lambda x: (
+            "All" if x == "All" else _RUN_MODE_BADGE.get(x, x)
+        ),
         horizontal=False,
     )
 
@@ -551,13 +557,16 @@ for selected_benchmark in selected_benchmarks:
                 # Show per-variant job status to help diagnose why results
                 # are missing (jobs pending, running, failed, or succeeded
                 # without generating model_summary.json).
-                with st.expander("🔍 Variant job status (click to expand)", expanded=True):
+                with st.expander(
+                    "🔍 Variant job status (click to expand)", expanded=True
+                ):
                     try:
                         status_rows, queue_name = _load_variant_statuses(
                             selected_benchmark
                         )
                         if status_rows:
                             status_df = pd.DataFrame(status_rows)
+
                             # Color-code Status column
                             def _style_status(val: str) -> str:
                                 colors = {
@@ -578,7 +587,9 @@ for selected_benchmark in selected_benchmarks:
                                 hide_index=True,
                             )
                             # Summary counts
-                            counts = status_df["Status"].value_counts().to_dict()
+                            counts = (
+                                status_df["Status"].value_counts().to_dict()
+                            )
                             cols = st.columns(len(counts))
                             for col, (status, cnt) in zip(cols, counts.items()):
                                 col.metric(status, cnt)
@@ -607,7 +618,9 @@ for selected_benchmark in selected_benchmarks:
                                     with st.spinner(
                                         f"Triggering queue `{triggered_queue}`…"
                                     ):
-                                        ok = _trigger_queue_tick(triggered_queue)
+                                        ok = _trigger_queue_tick(
+                                            triggered_queue
+                                        )
                                     if ok:
                                         st.success(
                                             "✅ Queue processing triggered. "
@@ -651,12 +664,11 @@ for selected_benchmark in selected_benchmarks:
 
                 # Check for poor generalization (negative test R²)
                 if "rsq_test" in df.columns:
-                    bad_test = df[
-                        df["rsq_test"].notna() & (df["rsq_test"] < 0)
-                    ]
+                    bad_test = df[df["rsq_test"].notna() & (df["rsq_test"] < 0)]
                     if not bad_test.empty:
                         bad_names = ", ".join(
-                            f"`{v}`" for v in bad_test["benchmark_variant"].tolist()
+                            f"`{v}`"
+                            for v in bad_test["benchmark_variant"].tolist()
                         )
                         st.warning(
                             f"⚠️ **Poor Test Generalization Detected**\n\n"
@@ -685,7 +697,11 @@ for selected_benchmark in selected_benchmarks:
                         avg_nrmse = df["nrmse_val"].mean()
                         st.metric(
                             "Avg NRMSE (val)",
-                            f"{avg_nrmse:.3f}" if pd.notna(avg_nrmse) else "N/A",
+                            (
+                                f"{avg_nrmse:.3f}"
+                                if pd.notna(avg_nrmse)
+                                else "N/A"
+                            ),
                         )
                 with col4:
                     if "decomp_rssd" in df.columns:
@@ -777,12 +793,16 @@ for selected_benchmark in selected_benchmarks:
                         ]
                         agg["_order"] = agg["Preset"].apply(
                             lambda p: (
-                                _preset_order.index(p) if p in _preset_order else 99
+                                _preset_order.index(p)
+                                if p in _preset_order
+                                else 99
                             )
                         )
                         agg = agg.sort_values("_order").drop(columns=["_order"])
 
-                        st.dataframe(agg, use_container_width=True, hide_index=True)
+                        st.dataframe(
+                            agg, use_container_width=True, hide_index=True
+                        )
 
                         # Bar charts for each available metric
                         import plotly.graph_objects as go  # type: ignore
@@ -868,8 +888,14 @@ for selected_benchmark in selected_benchmarks:
                             )
                         )
                         # Canonical order: geometric first, then weibull variants
-                        _adstock_order = ["geometric", "weibull_cdf", "weibull_pdf"]
-                        agg_adstock["_order"] = agg_adstock["Adstock Type"].apply(
+                        _adstock_order = [
+                            "geometric",
+                            "weibull_cdf",
+                            "weibull_pdf",
+                        ]
+                        agg_adstock["_order"] = agg_adstock[
+                            "Adstock Type"
+                        ].apply(
                             lambda a: (
                                 _adstock_order.index(a)
                                 if a in _adstock_order
@@ -881,7 +907,9 @@ for selected_benchmark in selected_benchmarks:
                         )
 
                         st.dataframe(
-                            agg_adstock, use_container_width=True, hide_index=True
+                            agg_adstock,
+                            use_container_width=True,
+                            hide_index=True,
                         )
 
                         import plotly.graph_objects as go  # type: ignore  # noqa: F811
@@ -896,7 +924,9 @@ for selected_benchmark in selected_benchmarks:
                             ),
                         }
                         display_cols = [
-                            c for c in agg_adstock.columns if c != "Adstock Type"
+                            c
+                            for c in agg_adstock.columns
+                            if c != "Adstock Type"
                         ]
                         ncols = min(len(display_cols), 2)
                         cols = st.columns(ncols)
@@ -975,7 +1005,9 @@ for selected_benchmark in selected_benchmarks:
                         _window_order = ["full", "3y", "2y"]
                         agg_window["_order"] = agg_window["Window"].apply(
                             lambda w: (
-                                _window_order.index(w) if w in _window_order else 99
+                                _window_order.index(w)
+                                if w in _window_order
+                                else 99
                             )
                         )
                         agg_window = agg_window.sort_values("_order").drop(
@@ -983,7 +1015,9 @@ for selected_benchmark in selected_benchmarks:
                         )
 
                         st.dataframe(
-                            agg_window, use_container_width=True, hide_index=True
+                            agg_window,
+                            use_container_width=True,
+                            hide_index=True,
                         )
 
                         import plotly.graph_objects as go  # type: ignore  # noqa: F811
@@ -1068,7 +1102,9 @@ for selected_benchmark in selected_benchmarks:
                         _mod = importlib.util.module_from_spec(_spec)  # type: ignore
                         _spec.loader.exec_module(_mod)  # type: ignore
 
-                        _analyzer = _mod.BenchmarkAnalyzer(bucket_name=GCS_BUCKET)
+                        _analyzer = _mod.BenchmarkAnalyzer(
+                            bucket_name=GCS_BUCKET
+                        )
                         _df = _analyzer.collect_results_from_gcs_scan(
                             selected_benchmark
                         )
@@ -1223,7 +1259,9 @@ for selected_benchmark in selected_benchmarks:
                         st.divider()
 
                 if enrichment_missing:
-                    missing_titles = ", ".join(t for _, t, _ in enrichment_missing)
+                    missing_titles = ", ".join(
+                        t for _, t, _ in enrichment_missing
+                    )
                     st.info(
                         f"ℹ️ **Enrichment plots not available** "
                         f"({missing_titles}). "

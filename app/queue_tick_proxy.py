@@ -55,11 +55,16 @@ def _ensure_tick_imports() -> None:
     with _tick_imports_lock:
         if _tick_imports_done:
             return
-        from app_shared import DEFAULT_QUEUE_NAME, GCS_BUCKET
+        from app_shared import (
+            DEFAULT_QUEUE_NAME,
+            GCS_BUCKET,
+        )
         from app_shared import (  # noqa: PLC0415
             _schedule_next_tick_if_needed as _sntin,
         )
-        from app_shared import queue_tick_once_headless
+        from app_shared import (
+            queue_tick_once_headless,
+        )
         from app_split_helpers import prepare_and_launch_job  # noqa: PLC0415
 
         _queue_tick_once_headless = queue_tick_once_headless

@@ -160,9 +160,7 @@ def find_local_context_configs(country: str) -> List[Path]:
         logger.warning(f"Local context-config dir not found: {configs_dir}")
         return []
     files = sorted(configs_dir.glob("*.json"))
-    logger.info(
-        f"Found {len(files)} local context config(s) in {configs_dir}"
-    )
+    logger.info(f"Found {len(files)} local context config(s) in {configs_dir}")
     return files
 
 
@@ -1462,9 +1460,7 @@ Examples:
             # unique, human-readable ID when iterating over multiple configs.
             if cfg_name:
                 benchmark_config["name"] = (
-                    benchmark_config.get("name", "benchmark")
-                    + "__"
-                    + cfg_name
+                    benchmark_config.get("name", "benchmark") + "__" + cfg_name
                 )
 
             # Apply explicit --iterations / --trials overrides (highest priority,

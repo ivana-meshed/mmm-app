@@ -98,9 +98,7 @@ from typing import Dict, List, Optional
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "app"))
 
-DK_CONFIGS_DIR = (
-    REPO_ROOT / "benchmark_analysis" / "dk_json_configs_clean"
-)
+DK_CONFIGS_DIR = REPO_ROOT / "benchmark_analysis" / "dk_json_configs_clean"
 DEFAULT_MANIFEST_FILE = (
     DK_CONFIGS_DIR / "dk_context_reduced_manifest_clean.json"
 )
@@ -242,9 +240,7 @@ def gcs_path_for_config(config: Dict) -> str:
     )
 
 
-def upload_config_to_gcs(
-    config: Dict, gcs_path: str, dry_run: bool
-) -> bool:
+def upload_config_to_gcs(config: Dict, gcs_path: str, dry_run: bool) -> bool:
     """
     Enrich, validate, and upload ``config`` to GCS as selected_columns.json.
 
@@ -274,9 +270,7 @@ def upload_config_to_gcs(
         from google.cloud import storage
 
         bucket_name = gcs_path.replace("gs://", "").split("/")[0]
-        blob_path = "/".join(
-            gcs_path.replace("gs://", "").split("/")[1:]
-        )
+        blob_path = "/".join(gcs_path.replace("gs://", "").split("/")[1:])
 
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".json", delete=False
@@ -366,9 +360,7 @@ def run_benchmark(
     return True
 
 
-def run_analysis(
-    benchmark_id: str, queue_name: str, dry_run: bool
-) -> None:
+def run_analysis(benchmark_id: str, queue_name: str, dry_run: bool) -> None:
     """
     Run analyze_benchmark_results.py with --scan-gcs to collect ALL variant
     results from benchmarks/{benchmark_id}/{variant}/model_summary.json.
@@ -386,7 +378,9 @@ def run_analysis(
         "0.75",
     ]
     logger.info(f"\n{'='*80}")
-    logger.info("COLLECTING RESULTS (building combined CSV for Benchmark page) …")
+    logger.info(
+        "COLLECTING RESULTS (building combined CSV for Benchmark page) …"
+    )
     logger.info(f"{'='*80}")
     logger.info(f"Running: {' '.join(cmd)}")
     if dry_run:
@@ -645,8 +639,7 @@ Examples:
                 f"Manifest file not found: {manifest_path}. "
                 f"Available manifests: "
                 + ", ".join(
-                    p.name
-                    for p in DK_CONFIGS_DIR.glob("*manifest*.json")
+                    p.name for p in DK_CONFIGS_DIR.glob("*manifest*.json")
                 )
             )
             sys.exit(1)
@@ -751,9 +744,7 @@ Examples:
         config = load_config(filename)
         gcs_path = gcs_path_for_config(config)
 
-        config_name = (
-            config.get("name") or filename.replace("_clean.json", "")
-        )
+        config_name = config.get("name") or filename.replace("_clean.json", "")
         description = config.get("description", "")
 
         logger.info(f"[{idx}/{total_configs}] {config_name}")
@@ -763,9 +754,7 @@ Examples:
 
         # Step 1: Upload enriched config to GCS
         if not args.skip_upload:
-            ok = upload_config_to_gcs(
-                config, gcs_path, dry_run=args.dry_run
-            )
+            ok = upload_config_to_gcs(config, gcs_path, dry_run=args.dry_run)
             if not ok:
                 logger.error(
                     f"  Skipping benchmark for {filename} due to "
@@ -804,9 +793,7 @@ Examples:
         logger.info(f"  Variant prefix : {config_name}")
 
         if not args.skip_upload:
-            ok = upload_config_to_gcs(
-                config, gcs_path, dry_run=args.dry_run
-            )
+            ok = upload_config_to_gcs(config, gcs_path, dry_run=args.dry_run)
             if not ok:
                 logger.error(
                     f"  Skipping benchmark for {src_name} due to "
@@ -836,16 +823,12 @@ Examples:
         # Uses --scan-gcs to scan benchmarks/{id}/{variant}/model_summary.json
         # directly, so results from ALL configs are included regardless of which
         # config last wrote plan.json.
-        run_analysis(
-            shared_benchmark_id, args.queue_name, dry_run=args.dry_run
-        )
+        run_analysis(shared_benchmark_id, args.queue_name, dry_run=args.dry_run)
 
     # Summary
     logger.info("=" * 80)
     if failed:
-        logger.error(
-            f"❌ {len(failed)} config(s) failed: {', '.join(failed)}"
-        )
+        logger.error(f"❌ {len(failed)} config(s) failed: {', '.join(failed)}")
         logger.error(
             "   Re-run with --skip-upload to retry failed benchmarks "
             "if the upload step already succeeded."

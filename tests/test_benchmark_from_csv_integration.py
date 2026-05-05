@@ -48,7 +48,9 @@ from run_benchmark_from_csv import (  # noqa: E402
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-DK_CSV_PATH = REPO_ROOT / "data" / "dk" / "mmm_data_v2_final_holidays_and_school.csv"
+DK_CSV_PATH = (
+    REPO_ROOT / "data" / "dk" / "mmm_data_v2_final_holidays_and_school.csv"
+)
 DK_TV_CSV_PATH = REPO_ROOT / "data" / "dk" / "mmm_data_v2_with_tv.csv"
 TV_CONFIG_PATH = (
     REPO_ROOT
@@ -127,9 +129,7 @@ def _load_dk_df() -> pd.DataFrame:
         df.rename(columns=rename_applied, inplace=True)
 
     # Filter to Denmark only
-    df = df[
-        df["MARKET_NAME"].str.strip().str.upper() == "DENMARK"
-    ].copy()
+    df = df[df["MARKET_NAME"].str.strip().str.upper() == "DENMARK"].copy()
 
     # Clip media columns to 0 (mirrors main())
     media_cols = [
@@ -163,15 +163,15 @@ def _load_dk_tv_df() -> pd.DataFrame:
         df.rename(columns=rename_applied, inplace=True)
 
     # Filter to Denmark only
-    df = df[
-        df["MARKET_NAME"].str.strip().str.upper() == "DENMARK"
-    ].copy()
+    df = df[df["MARKET_NAME"].str.strip().str.upper() == "DENMARK"].copy()
 
     # Clip media columns to 0 (mirrors main())
     media_cols = [
         c
         for c in df.columns
-        if any(kw in c for kw in ("COST", "SPEND", "CLICKS", "IMPRESSIONS", "GRP"))
+        if any(
+            kw in c for kw in ("COST", "SPEND", "CLICKS", "IMPRESSIONS", "GRP")
+        )
     ]
     if media_cols:
         df[media_cols] = df[media_cols].clip(lower=0)
@@ -186,7 +186,9 @@ class TestCsvLoading(unittest.TestCase):
         self.df = _load_dk_df()
 
     def test_fixture_file_exists(self):
-        self.assertTrue(DK_CSV_PATH.exists(), f"CSV fixture not found: {DK_CSV_PATH}")
+        self.assertTrue(
+            DK_CSV_PATH.exists(), f"CSV fixture not found: {DK_CSV_PATH}"
+        )
 
     def test_loads_non_empty_dataframe(self):
         self.assertGreater(len(self.df), 0)
@@ -197,7 +199,9 @@ class TestCsvLoading(unittest.TestCase):
 
     def test_only_denmark_rows(self):
         """After filtering, every row must be Denmark."""
-        markets = self.df["MARKET_NAME"].str.strip().str.upper().unique().tolist()
+        markets = (
+            self.df["MARKET_NAME"].str.strip().str.upper().unique().tolist()
+        )
         self.assertEqual(markets, ["DENMARK"])
 
     def test_date_column_present(self):
@@ -225,7 +229,9 @@ class TestCsvLoading(unittest.TestCase):
             for c in self.df.columns
             if any(kw in c for kw in ("COST", "SPEND", "CLICKS", "IMPRESSIONS"))
         ]
-        self.assertGreater(len(media_cols), 0, "Expected at least one media column")
+        self.assertGreater(
+            len(media_cols), 0, "Expected at least one media column"
+        )
         for col in media_cols:
             min_val = self.df[col].min(skipna=True)
             self.assertGreaterEqual(
@@ -282,7 +288,9 @@ class TestColumnClassifiers(unittest.TestCase):
         self.assertTrue(_is_media_metric("FB_UPPER_IMPRESSIONS", frozenset()))
 
     def test_is_media_metric_clicks(self):
-        self.assertTrue(_is_media_metric("GOOGLE_SEARCH_BRAND_CLICKS", frozenset()))
+        self.assertTrue(
+            _is_media_metric("GOOGLE_SEARCH_BRAND_CLICKS", frozenset())
+        )
 
     def test_is_media_metric_non_selected_cost(self):
         """A cost column NOT in paid_media_spends_set should be a media metric."""
@@ -311,7 +319,9 @@ class TestAutoClassifyMode(unittest.TestCase):
         df = _load_dk_df()
         self.all_cols = df.columns.tolist()
         self.dep_var = "BOOKINGS"
-        self.result = classify_columns(self.all_cols, PAID_MEDIA_SPENDS, self.dep_var)
+        self.result = classify_columns(
+            self.all_cols, PAID_MEDIA_SPENDS, self.dep_var
+        )
 
     def test_returns_required_keys(self):
         for key in (
@@ -369,7 +379,12 @@ class TestAutoClassifyMode(unittest.TestCase):
         """
         categories = {
             key: set(self.result[key])
-            for key in ("paid_media_spends", "context_vars", "factor_vars", "organic_vars")
+            for key in (
+                "paid_media_spends",
+                "context_vars",
+                "factor_vars",
+                "organic_vars",
+            )
         }
         keys = list(categories)
         for i, k1 in enumerate(keys):
@@ -416,7 +431,9 @@ class TestDefaultDkMappingMode(unittest.TestCase):
     def setUp(self):
         df = _load_dk_df()
         self.all_cols = df.columns.tolist()
-        self.result = load_columns_from_mapping(DEFAULT_DK_MAPPING, self.all_cols)
+        self.result = load_columns_from_mapping(
+            DEFAULT_DK_MAPPING, self.all_cols
+        )
 
     def test_default_mapping_file_exists(self):
         self.assertTrue(
@@ -439,10 +456,14 @@ class TestDefaultDkMappingMode(unittest.TestCase):
         self.assertGreater(len(self.result["paid_media_spends"]), 0)
 
     def test_known_spend_channel_present(self):
-        self.assertIn("GOOGLE_SEARCH_BRAND_COST", self.result["paid_media_spends"])
+        self.assertIn(
+            "GOOGLE_SEARCH_BRAND_COST", self.result["paid_media_spends"]
+        )
 
     def test_known_media_var_present(self):
-        self.assertIn("GOOGLE_SEARCH_BRAND_CLICKS", self.result["paid_media_vars"])
+        self.assertIn(
+            "GOOGLE_SEARCH_BRAND_CLICKS", self.result["paid_media_vars"]
+        )
 
     def test_organic_vars_include_crm_channels(self):
         self.assertIn("CRM_EMAIL_NEWSLETTER_SENDS", self.result["organic_vars"])
@@ -512,7 +533,9 @@ class TestTvConfigAsMappingFile(unittest.TestCase):
         self.tv_config_path = TV_CONFIG_PATH
         df = _load_dk_df()
         self.all_cols = df.columns.tolist()
-        self.result = load_columns_from_mapping(self.tv_config_path, self.all_cols)
+        self.result = load_columns_from_mapping(
+            self.tv_config_path, self.all_cols
+        )
 
     def test_tv_config_file_exists(self):
         self.assertTrue(
@@ -540,7 +563,12 @@ class TestTvConfigAsMappingFile(unittest.TestCase):
         """TV-only columns (WBR_TOTAL_GRP, BAUER_GRP_FLOW_RADIO, etc.) must be
         filtered out since they don't exist in the CSV fixture."""
         col_set = set(self.all_cols)
-        tv_only = {"WBR_TOTAL_GRP", "BAUER_GRP_FLOW_RADIO", "WBR_TOTAL_SPEND", "BAUER_SPEND_FLOW_RADIO"}
+        tv_only = {
+            "WBR_TOTAL_GRP",
+            "BAUER_GRP_FLOW_RADIO",
+            "WBR_TOTAL_SPEND",
+            "BAUER_SPEND_FLOW_RADIO",
+        }
         for key in ("paid_media_spends", "paid_media_vars"):
             for col in self.result[key]:
                 self.assertNotIn(
@@ -552,7 +580,9 @@ class TestTvConfigAsMappingFile(unittest.TestCase):
 
     def test_common_channels_still_present(self):
         """Channels shared with the standard config must still be returned."""
-        self.assertIn("GOOGLE_SEARCH_BRAND_COST", self.result["paid_media_spends"])
+        self.assertIn(
+            "GOOGLE_SEARCH_BRAND_COST", self.result["paid_media_spends"]
+        )
         self.assertIn("FB_UPPER_COST", self.result["paid_media_spends"])
 
     def test_organic_vars_present(self):
@@ -570,7 +600,9 @@ class TestTvConfigAsMappingFile(unittest.TestCase):
         )
 
     def test_selected_columns_json_construction(self):
-        sc = _build_selected_columns(self.result, dep_var="BOOKINGS", dep_var_type="conversion")
+        sc = _build_selected_columns(
+            self.result, dep_var="BOOKINGS", dep_var_type="conversion"
+        )
         for key in REQUIRED_SELECTED_COLUMNS_KEYS:
             self.assertIn(key, sc)
         self.assertEqual(sc["dep_var_type"], "conversion")
@@ -614,15 +646,21 @@ class TestEndToEndPipelineComparison(unittest.TestCase):
         for key in REQUIRED_SELECTED_COLUMNS_KEYS:
             self.assertIn(key, sc, f"[{label}] Missing key: {key}")
         self.assertGreater(
-            len(sc["paid_media_spends"]), 0, f"[{label}] paid_media_spends empty"
+            len(sc["paid_media_spends"]),
+            0,
+            f"[{label}] paid_media_spends empty",
         )
         self.assertGreater(
-            len(sc["all_selected_drivers"]), 0, f"[{label}] all_selected_drivers empty"
+            len(sc["all_selected_drivers"]),
+            0,
+            f"[{label}] all_selected_drivers empty",
         )
         # all_selected_drivers must be a proper superset of paid_media_spends
         drivers = set(sc["all_selected_drivers"])
         for col in sc["paid_media_spends"]:
-            self.assertIn(col, drivers, f"[{label}] spend '{col}' missing from drivers")
+            self.assertIn(
+                col, drivers, f"[{label}] spend '{col}' missing from drivers"
+            )
         # dep_var must not appear in predictors
         all_pred = set(
             sc["paid_media_spends"]
@@ -660,7 +698,9 @@ class TestEndToEndPipelineComparison(unittest.TestCase):
             try:
                 json.dumps(sc)
             except (TypeError, ValueError) as exc:
-                self.fail(f"[{label}] selected_columns not JSON-serializable: {exc}")
+                self.fail(
+                    f"[{label}] selected_columns not JSON-serializable: {exc}"
+                )
 
 
 class TestTvConfigWithTvData(unittest.TestCase):
@@ -700,7 +740,9 @@ class TestTvConfigWithTvData(unittest.TestCase):
         self.assertIn("BAUER_SPEND_FLOW_RADIO", self.all_cols)
 
     def test_tv_csv_filtered_to_denmark(self):
-        markets = self.df["MARKET_NAME"].str.strip().str.upper().unique().tolist()
+        markets = (
+            self.df["MARKET_NAME"].str.strip().str.upper().unique().tolist()
+        )
         self.assertEqual(markets, ["DENMARK"])
 
     def test_tv_grp_column_has_nonzero_values(self):
@@ -727,7 +769,9 @@ class TestTvConfigWithTvData(unittest.TestCase):
 
     def test_radio_spend_in_paid_media_spends(self):
         """BAUER_SPEND_FLOW_RADIO must appear in paid_media_spends when data is present."""
-        self.assertIn("BAUER_SPEND_FLOW_RADIO", self.result["paid_media_spends"])
+        self.assertIn(
+            "BAUER_SPEND_FLOW_RADIO", self.result["paid_media_spends"]
+        )
 
     def test_paid_media_spends_and_vars_same_length(self):
         self.assertEqual(
@@ -740,17 +784,23 @@ class TestTvConfigWithTvData(unittest.TestCase):
         self.assertIn("WBR_TOTAL_GRP", mapping)
         self.assertEqual(mapping["WBR_TOTAL_GRP"], "WBR_TOTAL_SPEND")
         self.assertIn("BAUER_GRP_FLOW_RADIO", mapping)
-        self.assertEqual(mapping["BAUER_GRP_FLOW_RADIO"], "BAUER_SPEND_FLOW_RADIO")
+        self.assertEqual(
+            mapping["BAUER_GRP_FLOW_RADIO"], "BAUER_SPEND_FLOW_RADIO"
+        )
 
     def test_all_paid_media_vars_exist_in_csv(self):
         col_set = set(self.all_cols)
         for col in self.result["paid_media_vars"]:
-            self.assertIn(col, col_set, f"paid_media_vars column '{col}' not in CSV")
+            self.assertIn(
+                col, col_set, f"paid_media_vars column '{col}' not in CSV"
+            )
 
     def test_all_paid_media_spends_exist_in_csv(self):
         col_set = set(self.all_cols)
         for col in self.result["paid_media_spends"]:
-            self.assertIn(col, col_set, f"paid_media_spends column '{col}' not in CSV")
+            self.assertIn(
+                col, col_set, f"paid_media_spends column '{col}' not in CSV"
+            )
 
     # ── selected_columns construction ────────────────────────────────────────
 
@@ -813,34 +863,58 @@ class TestTvEndToEnd(unittest.TestCase):
     """
 
     def _assert_selected_columns_valid(
-        self, sc: dict, label: str, expected_in_spends=None, not_expected_in_spends=None
+        self,
+        sc: dict,
+        label: str,
+        expected_in_spends=None,
+        not_expected_in_spends=None,
     ) -> None:
         for key in REQUIRED_SELECTED_COLUMNS_KEYS:
             self.assertIn(key, sc, f"[{label}] Missing key: {key}")
         self.assertGreater(
-            len(sc["paid_media_spends"]), 0, f"[{label}] paid_media_spends empty"
+            len(sc["paid_media_spends"]),
+            0,
+            f"[{label}] paid_media_spends empty",
         )
         self.assertGreater(
-            len(sc["all_selected_drivers"]), 0, f"[{label}] all_selected_drivers empty"
+            len(sc["all_selected_drivers"]),
+            0,
+            f"[{label}] all_selected_drivers empty",
         )
         drivers = set(sc["all_selected_drivers"])
         for col in sc["paid_media_spends"]:
-            self.assertIn(col, drivers, f"[{label}] spend '{col}' missing from all_selected_drivers")
-        self.assertNotIn(sc["dep_var"], set(sc["paid_media_spends"] + sc["paid_media_vars"]))
+            self.assertIn(
+                col,
+                drivers,
+                f"[{label}] spend '{col}' missing from all_selected_drivers",
+            )
+        self.assertNotIn(
+            sc["dep_var"], set(sc["paid_media_spends"] + sc["paid_media_vars"])
+        )
         # JSON-serialisable
         json.dumps(sc)
         if expected_in_spends:
             for col in expected_in_spends:
-                self.assertIn(col, sc["paid_media_spends"], f"[{label}] '{col}' not in paid_media_spends")
+                self.assertIn(
+                    col,
+                    sc["paid_media_spends"],
+                    f"[{label}] '{col}' not in paid_media_spends",
+                )
         if not_expected_in_spends:
             for col in not_expected_in_spends:
-                self.assertNotIn(col, sc["paid_media_spends"], f"[{label}] TV-only '{col}' should not be in paid_media_spends")
+                self.assertNotIn(
+                    col,
+                    sc["paid_media_spends"],
+                    f"[{label}] TV-only '{col}' should not be in paid_media_spends",
+                )
 
     def test_without_tv_data(self):
         """Standard DK CSV + TV config: TV columns absent → graceful degradation."""
         df = _load_dk_df()
         result = load_columns_from_mapping(TV_CONFIG_PATH, df.columns.tolist())
-        sc = _build_selected_columns(result, dep_var="BOOKINGS", dep_var_type="conversion")
+        sc = _build_selected_columns(
+            result, dep_var="BOOKINGS", dep_var_type="conversion"
+        )
         tv_only_spends = ["WBR_TOTAL_SPEND", "BAUER_SPEND_FLOW_RADIO"]
         standard_spends = ["GOOGLE_SEARCH_BRAND_COST", "FB_UPPER_COST"]
         self._assert_selected_columns_valid(
@@ -854,7 +928,9 @@ class TestTvEndToEnd(unittest.TestCase):
         """TV-merged DK CSV + TV config: TV and radio channels fully present."""
         df = _load_dk_tv_df()
         result = load_columns_from_mapping(TV_CONFIG_PATH, df.columns.tolist())
-        sc = _build_selected_columns(result, dep_var="BOOKINGS", dep_var_type="conversion")
+        sc = _build_selected_columns(
+            result, dep_var="BOOKINGS", dep_var_type="conversion"
+        )
         tv_spends = ["WBR_TOTAL_SPEND", "BAUER_SPEND_FLOW_RADIO"]
         tv_vars = ["WBR_TOTAL_GRP", "BAUER_GRP_FLOW_RADIO"]
         self._assert_selected_columns_valid(
@@ -864,10 +940,16 @@ class TestTvEndToEnd(unittest.TestCase):
         )
         drivers = set(sc["all_selected_drivers"])
         for col in tv_vars:
-            self.assertIn(col, drivers, f"[with-tv-data] TV var '{col}' missing from all_selected_drivers")
+            self.assertIn(
+                col,
+                drivers,
+                f"[with-tv-data] TV var '{col}' missing from all_selected_drivers",
+            )
         mapping = sc["var_to_spend_mapping"]
         self.assertEqual(mapping.get("WBR_TOTAL_GRP"), "WBR_TOTAL_SPEND")
-        self.assertEqual(mapping.get("BAUER_GRP_FLOW_RADIO"), "BAUER_SPEND_FLOW_RADIO")
+        self.assertEqual(
+            mapping.get("BAUER_GRP_FLOW_RADIO"), "BAUER_SPEND_FLOW_RADIO"
+        )
 
 
 class TestArgParsingTvDevRun(unittest.TestCase):
@@ -926,7 +1008,9 @@ class TestArgParsingTvDevRun(unittest.TestCase):
         parser.add_argument("--bucket", default="mmm-app-output")
         mapping_group = parser.add_mutually_exclusive_group()
         mapping_group.add_argument("--columns-mapping", default=None)
-        mapping_group.add_argument("--no-mapping", action="store_true", default=False)
+        mapping_group.add_argument(
+            "--no-mapping", action="store_true", default=False
+        )
         args, extra_args = parser.parse_known_args(self.ARGV)
         return args, extra_args
 

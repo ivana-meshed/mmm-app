@@ -242,9 +242,7 @@ def launch_cloud_run_job(
 
         # Pass var_to_spend_mapping if present (used by some benchmark variants)
         if params.get("var_to_spend_mapping"):
-            job_config["var_to_spend_mapping"] = params[
-                "var_to_spend_mapping"
-            ]
+            job_config["var_to_spend_mapping"] = params["var_to_spend_mapping"]
 
         # Upload job config to GCS
         import tempfile
@@ -513,9 +511,7 @@ def process_one_job(
                     f"for country '{country}'…"
                 )
                 _prefix = f"mapped-datasets/{country.lower()}/"
-                _blobs = list(
-                    _client.list_blobs(bucket_name, prefix=_prefix)
-                )
+                _blobs = list(_client.list_blobs(bucket_name, prefix=_prefix))
                 _versions = set()
                 for _b in _blobs:
                     _parts = _b.name.split("/")
@@ -538,8 +534,10 @@ def process_one_job(
                     # Patch the queue entry so the UI reflects the real path
                     entries[pending_idx]["params"]["data_gcs_path"] = _new_path
                     save_queue_to_gcs(
-                        bucket_name, queue_name, queue_doc,
-                        credentials=credentials
+                        bucket_name,
+                        queue_name,
+                        queue_doc,
+                        credentials=credentials,
                     )
                 else:
                     logger.error(
