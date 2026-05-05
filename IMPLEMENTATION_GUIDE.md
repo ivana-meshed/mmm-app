@@ -2,7 +2,10 @@
 
 ## Overview
 
-This PR implements a comprehensive benchmarking system for systematically testing Marketing Mix Modeling (MMM) configurations. The system allows testing different configurations (adstock types, train/test splits, time aggregation, spend→variable mappings) to identify optimal setups for MMM models.
+This guide documents the comprehensive benchmarking system for systematically testing Marketing Mix
+Modeling (MMM) configurations. The system allows testing different configurations (adstock types,
+train/test splits, time aggregation, spend→variable mappings, training window lengths, and
+hyperparameter presets) to identify optimal setups for MMM models.
 
 ## What Was Implemented
 
@@ -12,14 +15,17 @@ This PR implements a comprehensive benchmarking system for systematically testin
 
 **Key Features:**
 - Generates test variants based on configuration files
+- Supports sequential (default) and cartesian combination modes
 - Submits jobs to Cloud Run queue
-- Collects and exports results
-- Supports multiple benchmark types
+- Per-variant `status.json` tracking in GCS
+- Collects and exports results (CSV / Parquet)
+- Supports multiple benchmark types and preset comparison as a dimension
 
 **Components:**
 - `BenchmarkConfig` class - Configuration validation
 - `BenchmarkRunner` class - Variant generation and submission
 - `ResultsCollector` class - Result gathering and export
+- `HyperparameterRangesConfig` class - Per-channel hyperparameter range resolution
 
 ### 2. Queue Processor (`scripts/process_queue_simple.py`)
 
@@ -42,15 +48,16 @@ This PR implements a comprehensive benchmarking system for systematically testin
 **Purpose:** Prioritizes `output_timestamp` from config for consistent result paths.
 
 **Key Changes:**
-- Lines 658-670: Timestamp priority logic
+- Timestamp priority logic:
   1. First: `cfg$output_timestamp` (from Python)
   2. Fallback: `cfg$timestamp`
   3. Last resort: Generate new timestamp
 - Ensures results match logged paths
+- Writes `allocator_stability_roas_cv` to `model_summary.json` (CV of ROAS across Pareto-optimal models)
 
 ### 4. Benchmark Configurations (`benchmarks/`)
 
-Six benchmark types for systematic testing:
+Eight benchmark types for systematic testing:
 
 1. **adstock_comparison.json** - Test adstock types
    - Geometric
@@ -69,14 +76,64 @@ Six benchmark types for systematic testing:
    - All spend→proxy (sessions)
    - Mixed by funnel type
 
-5. **comprehensive_benchmark.json** - Cartesian combinations
+5. **comprehensive_benchmark.json** - Cartesian combinations (generic dataset)
 
-6. **generic_hyperparameter_ranges_v2.json** - Per-channel hyperparameter ranges
+6. **comprehensive_benchmark_fleet_marketplace.json** - Fleet/mobility marketplace cartesian
+   benchmark: 5 dimensions (adstock × train_splits × time_aggregation × spend_var_mapping ×
+   seasonality_window). Default geometric adstock gives 30 variants (1 × 3 × 2 × 5 × 1 — `full`
+   window). Use `--all-adstock` for 90; `--all-windows` for 90; both for 270.
+
+7. **generic_hyperparameter_ranges_v2.json** - Per-channel, per-frequency hyperparameter ranges
    - 20 channel types (search_brand, tv_offline, paid_social_video, …)
    - Three frequencies: daily, weekly, monthly
    - Three adstock types: geometric (per-channel), weibull_cdf / weibull_pdf (`_default`)
-   - Three presets per combination: `conservative`, `balanced` (default), `exploratory`
+   - Five presets per combination: `conservative`, `balanced` (default), `exploratory`, `fb`, `meshed`
    - Referenced by other benchmark configs via the `hyperparameter_ranges_config` field
+
+8. **channel_type_assignments.json** / **channel_type_assignments_fleet_marketplace.json** -
+   Variable name → channel type mapping
+   - Maps spend/media variable names to the channel types in `generic_hyperparameter_ranges_v2.json`
+   - Maintained once and shared across benchmark configs
+   - Referenced by other benchmark configs via the `channel_type_assignments_config` field
+
+### 5. End-to-End Runner (`scripts/run_full_benchmark.py`)
+
+**Purpose:** Single command to submit → process → analyze a benchmark.
+
+**Key Features:**
+- Sequential (default) or cartesian combination mode
+- Window-length sweep (`--all-windows`: full / 2y / 3y)
+- Preset comparison as a dimension (`--compare-presets` / `--compare-all-presets`)
+- Shorthand flags `--fb` / `--meshed` for common preset choices
+- Top-N variant limiting via `--top-n`
+- Multi-config (directory) mode: submits one benchmark per context config file
+
+**Combination modes:**
+
+| Mode | Flag | Variants (generic, geometric) |
+|------|------|-------------------------------|
+| Sequential (default) | _(none)_ | 9 (1+3+2+3) |
+| Cartesian | `--cartesian` | 18 (1×3×2×3) |
+| + all adstock | `--all-adstock` | ×3 |
+| + all windows | `--all-windows` | ×3 |
+| + compare 3 presets | `--compare-presets` | ×3 (cartesian) or +3 (sequential) |
+| + compare all 5 presets | `--compare-all-presets` | ×5 (cartesian) or +5 (sequential) |
+
+### 6. Benchmark Results UI (`app/nav/View_Benchmark_Results.py`)
+
+**Purpose:** Visualize and compare benchmark results from GCS in the Streamlit app.
+
+**Key Features:**
+- Loads benchmark CSV from GCS (`benchmarks/{id}/results_*.csv`)
+- Preset comparison chart: groups variants by `preset_label` when column is present
+- Adstock type comparison chart: groups by `adstock` column (shown when > 1 distinct value)
+- Window length comparison chart: groups by `window_label` column (shown when > 1 distinct value)
+- Core metric plots (R², NRMSE, Decomp RSSD, Train/Val/Test Gap, Metric Correlations, Best Models)
+- Enrichment plots (Driver Contribution Shares, ROAS by Channel, CPA by Channel) — generated by
+  `analyze_benchmark_results.py` from per-variant `model_summary.json` decomposition data
+- R² quality filter: excludes variants below `MIN_R2_THRESHOLD` (0.75) before rendering charts
+- "Generate / Refresh Analysis Plots" button: runs `BenchmarkAnalyzer.generate_plots()` in-process
+  to regenerate enrichment plots on demand without CLI access
 
 7. **channel_type_assignments.json** - Variable name → channel type mapping
    - Maps spend/media variable names to the channel types in `generic_hyperparameter_ranges_v2.json`
@@ -88,20 +145,26 @@ Six benchmark types for systematic testing:
 ### Data Flow
 
 ```
-1. User runs benchmark_mmm.py with config
-2. Script generates variants based on test dimensions
-3. Variants submitted to GCS queue (robyn-queues/default-dev/)
-4. process_queue_simple.py monitors queue
-5. For each job:
+1. User runs run_full_benchmark.py (or benchmark_mmm.py) with config
+2. Script generates variants based on test dimensions:
+   - Sequential mode (default): each dimension varied independently (sum of sizes)
+   - Cartesian mode (--cartesian): product of all dimension sizes
+   - Optional: window sweep (--all-windows), preset comparison (--compare-presets)
+3. Variants submitted to GCS queue (robyn-queues/{queue-name}/)
+4. Per-variant status.json written to benchmarks/{id}/{variant}/status.json
+5. process_queue_simple.py monitors queue
+6. For each job:
    a. Build complete job config JSON
    b. Upload to GCS: training-configs/{timestamp}/job_config.json
    c. Set JOB_CONFIG_GCS_PATH env var
    d. Launch Cloud Run Job with config path
-6. R script downloads config from GCS path
-7. R uses output_timestamp from config
-8. Results saved to: robyn/default/{country}/{timestamp}/
-9. Python verifies results exist
-10. Results collected and exported
+7. R script downloads config from GCS path
+8. R uses output_timestamp from config
+9. R extracts decomposition data and writes model_summary.json (includes allocator_stability_roas_cv)
+10. Results saved to: robyn/{queue}/{country}/{timestamp}/
+11. Python verifies results exist
+12. analyze_benchmark_results.py collects results, applies R² ≥ 0.75 quality filter,
+    generates 6 core plots + 3 enrichment plots, uploads to benchmarks/{id}/plots_*/
 ```
 
 ### Result Path Consistency
@@ -152,7 +215,7 @@ ranges = hp_config.get_ranges(
     frequency="weekly",        # "daily" | "weekly" | "monthly"
     adstock_type="geometric",  # "geometric" | "weibull_cdf" | "weibull_pdf"
     channel_type="tv_offline", # channel type key, or None for _default fallback
-    preset="balanced"          # "conservative" | "balanced" | "exploratory"
+    preset="balanced"          # "conservative" | "balanced" | "exploratory" | "fb" | "meshed"
 )
 # => {"theta": [0.3, 0.8], "alpha": [0.5, 3.0], "gamma": [0.35, 1.0]}
 
@@ -203,13 +266,23 @@ def verify_results_exist(gcs_path, timeout=10)
   },
   "iterations": 2000,
   "trials": 5,
+  "combination_mode": "single",  // "single" = sequential (default); "cartesian" = product
   "variants": {
-    "dimension_name": [
-      {
-        "name": "variant_name",
-        "description": "What this variant does",
-        "parameter": "value"
-      }
+    "adstock": [
+      {"name": "geometric", "description": "Geometric adstock", "adstock": "geometric"}
+    ],
+    "train_splits": [
+      {"name": "70_90", "description": "70/90 split", "train_size": [0.7, 0.9]}
+    ],
+    "seasonality_window": [
+      {"name": "full",  "description": "Full window", "weeks_back": null},
+      {"name": "2y",    "description": "Last 2 years", "weeks_back": 104},
+      {"name": "3y",    "description": "Last 3 years", "weeks_back": 156}
+    ],
+    "hyperparameter_preset": [
+      {"name": "balanced", "description": "General-purpose default preset"},
+      {"name": "fb",       "description": "Robyn/Facebook official documentation defaults"},
+      {"name": "meshed",   "description": "Meshed recommended ranges"}
     ]
   },
 
@@ -225,7 +298,8 @@ def verify_results_exist(gcs_path, timeout=10)
   "channel_type_assignments_config": "benchmarks/channel_type_assignments.json",
 
   // Optional: which preset to use when looking up ranges.
-  // One of "conservative", "balanced" (default), or "exploratory".
+  // One of "conservative", "balanced" (default), "exploratory", "fb", or "meshed".
+  // Ignored when hyperparameter_preset dimension is set as a variants key above.
   "hyperparameter_preset": "balanced"
 }
 ```
@@ -243,10 +317,12 @@ def verify_results_exist(gcs_path, timeout=10)
   "train_size": [0.7, 0.9],
   "adstock": "geometric",
   "hyperparameter_preset": "Meshed recommend",
-  "paid_media_spends": ["GA_TOTAL_COST_CUSTOM", ...],
-  "paid_media_vars": ["GA_TOTAL_SESSIONS_CUSTOM", ...],
+  "start_date": "2023-10-05",   // set when weeks_back window variant is used
+  "end_date": "2026-01-22",     // set when weeks_back window variant is used
+  "paid_media_spends": ["GA_TOTAL_COST_CUSTOM", "..."],
+  "paid_media_vars": ["GA_TOTAL_SESSIONS_CUSTOM", "..."],
   "context_vars": ["TV_IS_ON"],
-  "organic_vars": ["SEO_DAILY_SESSIONS", ...],
+  "organic_vars": ["SEO_DAILY_SESSIONS", "..."],
   "factor_vars": ["TV_IS_ON"],
   "dep_var": "N_UPLOADS_WEB",
   "data_gcs_path": "gs://bucket/path/to/data.parquet",
@@ -366,21 +442,30 @@ python scripts/process_queue_simple.py --cleanup
 ```
 mmm-app/
 ├── scripts/
-│   ├── benchmark_mmm.py         # Main benchmarking script
-│   └── process_queue_simple.py  # Queue processor
+│   ├── benchmark_mmm.py                  # Main benchmarking script
+│   ├── run_full_benchmark.py             # End-to-end workflow runner
+│   ├── analyze_benchmark_results.py      # Result analysis and plot generation
+│   └── process_queue_simple.py           # Queue processor
 ├── r/
-│   └── run_all.R                # R training script
+│   └── run_all.R                         # R training script
 ├── benchmarks/
 │   ├── adstock_comparison.json
 │   ├── train_val_test_splits.json
 │   ├── time_aggregation.json
 │   ├── spend_var_mapping.json
-│   └── comprehensive_benchmark.json
-├── README.md                     # PR overview
-├── IMPLEMENTATION_GUIDE.md       # This file
-├── USAGE_GUIDE.md               # How to use
-├── ANALYSIS_GUIDE.md            # How to analyze
-└── ARCHITECTURE.md              # System architecture
+│   ├── comprehensive_benchmark.json
+│   ├── comprehensive_benchmark_fleet_marketplace.json
+│   ├── generic_hyperparameter_ranges_v2.json
+│   ├── channel_type_assignments.json
+│   └── channel_type_assignments_fleet_marketplace.json
+├── app/
+│   └── nav/
+│       └── View_Benchmark_Results.py     # Benchmark results Streamlit page
+├── README.md                             # PR overview
+├── IMPLEMENTATION_GUIDE.md              # This file
+├── USAGE_GUIDE.md                       # How to use
+├── ANALYSIS_GUIDE.md                    # How to analyze
+└── ARCHITECTURE.md                      # System architecture
 ```
 
 ## GCS Structure
@@ -388,7 +473,7 @@ mmm-app/
 ```
 mmm-app-output/
 ├── robyn-queues/
-│   └── default-dev/
+│   └── {queue-name}/
 │       └── queue.json           # Job queue
 ├── training-configs/
 │   ├── {timestamp}/
@@ -396,17 +481,29 @@ mmm-app-output/
 │   └── latest/
 │       └── job_config.json     # Fallback config
 ├── robyn/
-│   └── default/
+│   └── {queue}/
 │       └── {country}/
 │           └── {timestamp}/     # Results folder
-│               ├── model_summary.json
+│               ├── model_summary.json   # Includes allocator_stability_roas_cv
 │               ├── console.log
 │               ├── best_model_plots.png
 │               └── ...
 └── benchmarks/
     └── {benchmark_id}/
-        ├── plan.json            # Benchmark plan
-        └── results.csv          # Collected results
+        ├── plan.json                      # Benchmark plan
+        ├── results_{timestamp}.csv        # Collected results
+        ├── plots_{timestamp}/             # Analysis plots
+        │   ├── rsq_comparison.png
+        │   ├── nrmse_comparison.png
+        │   ├── decomp_rssd.png
+        │   ├── train_val_test_gap.png
+        │   ├── metric_correlations.png
+        │   ├── best_models_summary.png
+        │   ├── driver_waterfall.png       # Enrichment (decomp data required)
+        │   ├── roas_by_channel.png        # Enrichment
+        │   └── cpa_by_channel.png         # Enrichment
+        └── {variant_name}/
+            └── status.json               # Per-variant tracking (queued/running/completed/failed)
 ```
 
 ## Implementation Timeline
@@ -422,11 +519,26 @@ mmm-app-output/
    - Result collection and export
    - Comprehensive documentation
 
+3. **Phase 3:** Advanced features
+   - Sequential (default) and cartesian combination modes
+   - Window-length sweep (`--all-windows`)
+   - Preset comparison as a dimension (`--compare-presets` / `--compare-all-presets`)
+   - `fb` and `meshed` shorthand preset flags
+   - `allocator_stability_roas_cv` metric in model_summary.json
+   - Enrichment plots (Driver Contribution Shares, ROAS by Channel, CPA by Channel)
+   - R² quality filter (≥ 0.75) applied before plot generation
+   - View_Benchmark_Results page: preset / adstock / window comparison charts
+   - "Generate / Refresh Analysis Plots" button in Streamlit UI
+   - Multi-config (directory) mode for bulk benchmarking
+
 ## Success Metrics
 
 - ✅ Results appear at logged paths
-- ✅ All 5 test types supported
-- ✅ Single command execution (--all-benchmarks)
+- ✅ All test dimensions supported (adstock, splits, time_agg, spend_var, window, preset)
+- ✅ Single command execution (run_full_benchmark.py)
 - ✅ Result verification works
 - ✅ Queue processing stable
+- ✅ Per-variant status tracking in GCS
+- ✅ R² quality filter applied consistently
+- ✅ Enrichment plots generated from decomp data
 - ✅ Documentation complete

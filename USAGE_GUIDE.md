@@ -60,21 +60,23 @@ python scripts/run_full_benchmark.py \
 
 **What it does:**
 1. Downloads selected_columns.json from GCS
-2. Generates comprehensive benchmark — default **18 variants** (1 adstock × 3 splits × 2 time_agg × 3 spend_var).
-   Non-test runs include the `full` training window by default.
-   Use `--all-adstock` for 54 variants, `--sequential` for 9 variants (per-dimension),
-   `--compare-presets` for 54 variants (18 × 3 presets), `--compare-all-presets` for 90 variants (18 × 5 presets).
+2. Generates comprehensive benchmark — default **9 variants** (sequential: each of 4 dimensions varied
+   independently: adstock, splits, time_agg, spend_var). Use `--cartesian` for 18 combinations
+   (product of all dimensions), `--all-adstock` for all 3 adstock types, `--all-windows` to add a
+   window sweep. Non-test runs include the `full` training window by default.
+   `--compare-presets` adds 3 preset variants as an independent sweep (sequential) or multiplier
+   (cartesian); `--compare-all-presets` uses all 5 presets.
 3. Submits all test combinations to queue
 4. Processes queue until complete
 5. Analyzes results and creates visualizations
 
 **Output:**
 - CSV: `./benchmark_analysis/results_{timestamp}.csv`
-- Plots: `./benchmark_analysis/*.png` (6 plots)
+- Plots: `./benchmark_analysis/*.png` (6 core plots + enrichment plots when decomp data available)
 
 **Expected time:**
-- Test run: ~1-2 hours for 54 variants
-- Full run: ~4-6 hours for 54 variants
+- Test run: ~15-30 min for 9 variants (sequential default)
+- Standard run (`--full-run`): ~40-70 min for 9 variants (sequential), ~1.5-2 h for 18 (cartesian)
 
 ---
 

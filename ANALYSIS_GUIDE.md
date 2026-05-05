@@ -66,6 +66,8 @@ python3 -c "import pandas as pd; df = pd.read_csv('results.csv'); print(df.colum
 **Decomposition Metrics:**
 - `decomp_rssd` - Decomposition quality (lower better)
 - `mape` - Mean Absolute Percentage Error
+- `allocator_stability_roas_cv` - Coefficient of Variation of ROAS across Pareto-optimal models
+  (lower = more stable allocator; measures how consistent ROAS estimates are across models)
 
 **Model Configuration:**
 - `benchmark_test` - Test type (adstock, train_splits, etc.)
@@ -316,6 +318,86 @@ if 'preset_label' in df.columns:
 
 ---
 
+### Workflow 7: Analyze Allocator Stability (ROAS CV)
+
+**Question:** How stable are the ROAS estimates across models? Is the budget allocator reliable?
+
+`allocator_stability_roas_cv` is the Coefficient of Variation (CV = std / mean) of ROAS across
+Pareto-optimal models. A low CV means different well-fitting models agree on channel effectiveness,
+which gives confidence in the allocator output.
+
+```python
+import pandas as pd
+
+df = pd.read_csv('results.csv')
+
+# Check allocator stability across variants
+if 'allocator_stability_roas_cv' in df.columns:
+    stability = df[['benchmark_variant', 'rsq_val', 'nrmse_val',
+                     'allocator_stability_roas_cv']].sort_values(
+        'allocator_stability_roas_cv'
+    )
+    print("Variants ranked by allocator stability (lower CV = more stable):")
+    print(stability)
+
+    # Flag high-instability variants
+    threshold = 0.5  # 50% CV is a warning sign
+    unstable = df[df['allocator_stability_roas_cv'] > threshold]
+    if not unstable.empty:
+        print(f"\n⚠️ {len(unstable)} variant(s) with ROAS CV > {threshold} (high instability):")
+        print(unstable[['benchmark_variant', 'allocator_stability_roas_cv']])
+    else:
+        print(f"\n✅ All variants have ROAS CV ≤ {threshold}")
+```
+
+**Interpretation:**
+- **CV < 0.2** — Excellent stability; models agree strongly on channel ROAS
+- **CV 0.2–0.5** — Acceptable; some spread in ROAS estimates across Pareto models
+- **CV > 0.5** — High instability; allocator recommendations may vary significantly
+  - Consider increasing iterations/trials for more convergence
+  - Or narrow the hyperparameter search space with `conservative` preset
+
+**What to look for in the Benchmark Results UI:**
+
+The Benchmark Results page automatically shows a "ROAS CV (Allocator Stability)" column in the
+metrics summary and includes it in the comparison charts when preset, adstock, or window comparison
+data is available. Lower bars in the chart indicate a more stable allocator.
+
+---
+
+### Workflow 8: Compare Training Window Lengths
+
+**Question:** Does using only the last 2 or 3 years of data improve generalization?
+
+```python
+import pandas as pd
+
+df = pd.read_csv('results.csv')
+
+# Window comparison (produced by --all-windows or --windows)
+if 'window_label' in df.columns and df['window_label'].notna().any():
+    window_df = df[df['window_label'].notna() & (df['window_label'] != '')]
+    comparison = window_df.groupby('window_label')[
+        ['rsq_val', 'nrmse_val', 'decomp_rssd', 'allocator_stability_roas_cv']
+    ].mean().round(4)
+
+    # Canonical order: longest to shortest
+    order = ['full', '3y', '2y']
+    comparison = comparison.reindex(
+        [w for w in order if w in comparison.index]
+    )
+    print("\nWindow Length Comparison:")
+    print(comparison)
+```
+
+**Interpretation:**
+- **`full`** — Maximum data, but older patterns may hurt fit if market changed
+- **`3y`** — Drops data older than 3 years; balances history vs. recent relevance
+- **`2y`** — Most recent data; useful when the market has changed significantly
+- Prefer the window with the **smallest val→test gap** and stable decomp_rssd
+
+---
+
 ## Quality Checks
 
 ### Check 1: Reasonable Metrics
@@ -371,21 +453,25 @@ import pandas as pd
 
 df = pd.read_csv('results.csv')
 
-# Expected counts per benchmark type depend on combination mode:
-# - cartesian (default): adstock=1, train_splits=3, time_aggregation=2,
-#   spend_var_mapping=3, combination=18 (1×3×2×3)
-# - sequential (--sequential): one variant per dimension entry
-# - hyperparameter_preset: number of presets (3 for --compare-presets,
-#   5 for --compare-all-presets) — only present in sequential mode;
-#   in cartesian mode presets appear as combination rows with a preset_label.
+# Expected counts depend on combination mode and flags used.
+# Sequential mode (default): dimensions are varied independently.
+# Cartesian mode (--cartesian): product of all dimension sizes.
 # Adjust to match your actual run configuration.
+#
+# Sequential defaults (generic benchmark, geometric only):
+#   adstock=1, train_splits=3, time_aggregation=2, spend_var_mapping=3 → 9 total
+# Cartesian defaults (generic benchmark, geometric only):
+#   1×3×2×3 = 18 total
+# With --compare-presets (sequential): adds 3 preset sweep variants
+# With --compare-all-presets (sequential): adds 5 preset sweep variants
 expected = {
-    'adstock': 3,          # comprehensive_benchmark adstock dim (3 types)
+    'adstock': 1,          # geometric only by default (3 with --all-adstock)
     'train_splits': 3,
     'time_aggregation': 2,
     'spend_var_mapping': 3,
-    'hyperparameter_preset': 3,  # --compare-presets (3) or --compare-all-presets (5)
-    'combination': 18,     # cartesian product (default geometric-only run)
+    'seasonality_window': 3,   # only present with --all-windows
+    'hyperparameter_preset': 3,  # only in sequential --compare-presets (5 for --compare-all-presets)
+    'combination': 18,     # cartesian product with --cartesian (geometric only, full window)
 }
 
 actual = df.groupby('benchmark_test')['benchmark_variant'].nunique()

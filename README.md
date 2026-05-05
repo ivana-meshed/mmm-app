@@ -104,7 +104,7 @@ This single command:
 
 **Output:**
 - CSV: `./benchmark_analysis/results_*.csv`
-- Plots: `./benchmark_analysis/*.png` (6 visualization plots)
+- Plots: `./benchmark_analysis/*.png` (6 core plots; enrichment plots when decomp data is available)
 
 ### Common Use Cases
 
@@ -278,11 +278,19 @@ Located in `benchmarks/` directory:
 - `train_val_test_splits.json` - Test split ratios
 - `time_aggregation.json` - Test daily vs weekly
 - `spend_var_mapping.json` - Test spend→var mappings
-- `comprehensive_benchmark.json` - Cartesian combinations
-- `comprehensive_benchmark_fleet_marketplace.json` - Fleet/mobility marketplace cartesian benchmark: 5 dimensions (adstock × train_splits × time_aggregation × spend_var_mapping × seasonality_window). Default geometric adstock gives 90 variants (1 × 3 × 2 × 5 × 3 — including full, 2y, and 3y training windows). Use `--all-adstock` for 270 variants. The `seasonality_window` variants use `weeks_back` offsets resolved at runtime against the dataset's `end_date`.
-- `channel_type_assignments_fleet_marketplace.json` - Channel-type assignments for the fleet marketplace dataset (referenced via `channel_type_assignments_config`)
-- `generic_hyperparameter_ranges_v2.json` - Per-channel, per-frequency hyperparameter ranges (referenced by other configs via `hyperparameter_ranges_config`)
-- `channel_type_assignments.json` - Maps variable names to channel types (referenced via `channel_type_assignments_config`)
+- `comprehensive_benchmark.json` - Cartesian combinations (generic dataset)
+- `comprehensive_benchmark_fleet_marketplace.json` - Fleet/mobility marketplace benchmark: 5 dimensions
+  (adstock × train_splits × time_aggregation × spend_var_mapping × seasonality_window). Default
+  geometric adstock gives 30 variants (1 × 3 × 2 × 5 × 1 — `full` window only). Use `--all-adstock`
+  for 90 variants, `--all-windows` to add 2y/3y training windows, or both for 270 variants. The
+  `seasonality_window` variants use `weeks_back` offsets resolved at runtime against `end_date`.
+- `channel_type_assignments_fleet_marketplace.json` - Channel-type assignments for the fleet
+  marketplace dataset (referenced via `channel_type_assignments_config`)
+- `generic_hyperparameter_ranges_v2.json` - Per-channel, per-frequency hyperparameter ranges
+  (referenced by other configs via `hyperparameter_ranges_config`); supports 5 presets:
+  `conservative`, `balanced`, `exploratory`, `fb`, `meshed`
+- `channel_type_assignments.json` - Maps variable names to channel types (referenced via
+  `channel_type_assignments_config`)
 
 ## Cost Monitoring and Optimization
 

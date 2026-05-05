@@ -1560,14 +1560,19 @@ def render_run_for_country(
     # Render model metrics first
     render_model_metrics_table(blobs, country, stamp)
 
-    # Create tabs for Model Performance and Budget Allocator
-    tab1, tab2 = st.tabs(["Model Performance", "Budget Allocator"])
+    # Create tabs for Model Performance, Budget Allocator, and Forecast
+    tab1, tab2, tab3 = st.tabs(
+        ["Model Performance", "Budget Allocator", "📅 Forecast"]
+    )
 
     with tab1:
         render_onepager_section(blobs, best_id, country, stamp)
 
     with tab2:
         render_allocator_section(blobs, country, stamp)
+
+    with tab3:
+        render_forecast_allocator_section(blobs, country, stamp)
 
     # Model Configuration in its own expander (just above All Files)
     with st.expander("**Model Configuration**", expanded=False):
