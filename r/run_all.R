@@ -3337,8 +3337,8 @@ if (!inherits(AllocatorCollect, "try-error")) {
     message("⚠️ Skipping allocator plot - AllocatorCollect failed: ", conditionMessage(attr(AllocatorCollect, "condition")))
 }
 
-# Allocator plots for models 2 and 3 (best model already handled above)
-flush_and_ship_log("before allocator for top models 2-3")
+# Allocator plots for 2nd best model (best model already handled above)
+flush_and_ship_log("before allocator for 2nd best model")
 for (m_id in top_models) {
     if (m_id == best_id) next  # already handled above
     message("🔄 Running allocator for model ", m_id)
@@ -3372,7 +3372,7 @@ for (m_id in top_models) {
                 conditionMessage(attr(alloc_i, "condition")))
     }
 }
-flush_and_ship_log("after allocator for top models 2-3")
+flush_and_ship_log("after allocator for 2nd best model")
 
 ## ---------- UPLOAD EVERYTHING ----------
 flush_and_ship_log("before final upload")
