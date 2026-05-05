@@ -181,7 +181,9 @@ class TestOrganicVarConfig(unittest.TestCase):
 
         # Simulate the R backup logic: pad spends with extra var columns
         if n_vars > n_spends:
-            paid_media_spends_cfg = paid_media_spends_cfg + paid_media_vars_cfg[n_spends:]
+            paid_media_spends_cfg = (
+                paid_media_spends_cfg + paid_media_vars_cfg[n_spends:]
+            )
 
         # After backup, lengths must match
         self.assertEqual(len(paid_media_spends_cfg), len(paid_media_vars_cfg))
@@ -207,7 +209,9 @@ class TestOrganicVarConfig(unittest.TestCase):
 
         # Simulate the R backup logic: pad vars with extra spend columns
         if n_spends > n_vars:
-            paid_media_vars_cfg = paid_media_vars_cfg + paid_media_spends_cfg[n_vars:]
+            paid_media_vars_cfg = (
+                paid_media_vars_cfg + paid_media_spends_cfg[n_vars:]
+            )
 
         # After backup, lengths must match
         self.assertEqual(len(paid_media_spends_cfg), len(paid_media_vars_cfg))

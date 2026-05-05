@@ -13,8 +13,8 @@ REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from run_dk_benchmark_all_configs import (  # noqa: E402
-    DK_CONFIGS_DIR,
     DEFAULT_MANIFEST_FILE,
+    DK_CONFIGS_DIR,
     REQUIRED_UPLOAD_FIELDS,
     enrich_config_for_upload,
     load_config,
@@ -66,9 +66,7 @@ class TestDkFinalWithTvConfig(unittest.TestCase):
 
     def test_var_to_spend_mapping_keys_match_paid_media_vars(self):
         mapping = self.raw["var_to_spend_mapping"]
-        self.assertEqual(
-            set(mapping.keys()), set(self.raw["paid_media_vars"])
-        )
+        self.assertEqual(set(mapping.keys()), set(self.raw["paid_media_vars"]))
 
     def test_var_to_spend_mapping_values_match_paid_media_spends(self):
         mapping = self.raw["var_to_spend_mapping"]
@@ -95,9 +93,7 @@ class TestDkFinalWithTvConfig(unittest.TestCase):
     # ── Config enrichment ────────────────────────────────────────────────────
 
     def test_enrich_adds_dep_var_from_selected_goal(self):
-        self.assertEqual(
-            self.enriched["dep_var"], self.raw["selected_goal"]
-        )
+        self.assertEqual(self.enriched["dep_var"], self.raw["selected_goal"])
 
     def test_enrich_adds_dep_var_type_conversion(self):
         self.assertEqual(self.enriched["dep_var_type"], "conversion")

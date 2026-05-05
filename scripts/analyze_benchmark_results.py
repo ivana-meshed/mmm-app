@@ -41,6 +41,7 @@ from google.cloud import storage
 
 try:
     import matplotlib
+
     matplotlib.use("Agg")  # non-interactive backend for headless environments
     import matplotlib.pyplot as plt
     import numpy as np
@@ -232,7 +233,9 @@ class BenchmarkAnalyzer:
         Returns a DataFrame or None when no results are found.
         """
         prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/"
-        logger.info(f"Scanning GCS for results under: gs://{self.bucket_name}/{prefix}")
+        logger.info(
+            f"Scanning GCS for results under: gs://{self.bucket_name}/{prefix}"
+        )
 
         try:
             blobs = list(self.bucket.list_blobs(prefix=prefix))
@@ -242,7 +245,8 @@ class BenchmarkAnalyzer:
 
         # Only depth-4 paths: benchmarks/{id}/{variant}/model_summary.json
         summary_blobs = [
-            b for b in blobs
+            b
+            for b in blobs
             if b.name.endswith("/model_summary.json")
             and len(b.name.split("/")) == 4
         ]
@@ -270,10 +274,16 @@ class BenchmarkAnalyzer:
 
             # Prefer fields from summary; fall back to input_metadata
             adstock = summary.get("adstock") or input_meta.get("adstock", "")
-            train_size = summary.get("train_size") or input_meta.get("train_size", "")
-            resample_freq = summary.get("resample_freq") or input_meta.get("resample_freq", "none")
+            train_size = summary.get("train_size") or input_meta.get(
+                "train_size", ""
+            )
+            resample_freq = summary.get("resample_freq") or input_meta.get(
+                "resample_freq", "none"
+            )
 
-            iterations_raw = summary.get("iterations") or input_meta.get("iterations")
+            iterations_raw = summary.get("iterations") or input_meta.get(
+                "iterations"
+            )
             trials_raw = summary.get("trials") or input_meta.get("trials")
             try:
                 iterations = int(iterations_raw) if iterations_raw else None
@@ -287,7 +297,8 @@ class BenchmarkAnalyzer:
             row = {
                 "benchmark_test": summary.get("benchmark_test", ""),
                 "benchmark_variant": variant_name,
-                "country": summary.get("country") or input_meta.get("country", ""),
+                "country": summary.get("country")
+                or input_meta.get("country", ""),
                 "revision": summary.get("revision", "default"),
                 "preset_label": summary.get("preset_label", ""),
                 "window_label": summary.get("window_label", ""),
@@ -309,9 +320,15 @@ class BenchmarkAnalyzer:
                 "baseline_share": decomp.get("baseline_share"),
                 "organic_share": decomp.get("organic_share"),
                 "context_share": decomp.get("context_share"),
-                "allocator_stability_roas_cv": decomp.get("allocator_stability_roas_cv"),
-                "channel_roas_json": json.dumps(channel_roas) if channel_roas else "",
-                "channel_cpa_json": json.dumps(channel_cpa) if channel_cpa else "",
+                "allocator_stability_roas_cv": decomp.get(
+                    "allocator_stability_roas_cv"
+                ),
+                "channel_roas_json": (
+                    json.dumps(channel_roas) if channel_roas else ""
+                ),
+                "channel_cpa_json": (
+                    json.dumps(channel_cpa) if channel_cpa else ""
+                ),
                 "model_id": (
                     f"{variant_name}_{summary.get('timestamp', '')}"
                     if summary.get("timestamp")
@@ -362,7 +379,9 @@ class BenchmarkAnalyzer:
                     logger.info(f"  ✓ Found result at benchmark path")
                     return self._extract_metrics(summary, variant)
                 else:
-                    logger.debug(f"  ✗ Benchmark path not found: {benchmark_path}")
+                    logger.debug(
+                        f"  ✗ Benchmark path not found: {benchmark_path}"
+                    )
             except Exception as e:
                 logger.error(
                     f"  ✗ Error loading benchmark path {benchmark_path}: {e}"
@@ -489,9 +508,7 @@ class BenchmarkAnalyzer:
                     )
                     return
             except Exception as exc:
-                logger.debug(
-                    f"  Could not read {blob_path}: {exc}"
-                )
+                logger.debug(f"  Could not read {blob_path}: {exc}")
 
     def _matches_variant(
         self, summary: Dict[str, Any], variant: Dict[str, Any]
@@ -543,9 +560,9 @@ class BenchmarkAnalyzer:
         # Match on paid_media_vars (distinguishes spend_to_clicks vs
         # mixed_by_funnel etc.) when available in both plan and summary
         variant_pmv = variant.get("paid_media_vars") or []
-        summary_pmv = (
-            (summary.get("input_metadata") or {}).get("paid_media_vars") or []
-        )
+        summary_pmv = (summary.get("input_metadata") or {}).get(
+            "paid_media_vars"
+        ) or []
         if variant_pmv and summary_pmv:
             if sorted(variant_pmv) != sorted(summary_pmv):
                 return False
@@ -1138,9 +1155,7 @@ class BenchmarkAnalyzer:
             top_models = df.nsmallest(10, "decomp_rssd")[
                 ["benchmark_variant", "decomp_rssd"]
             ]
-            ax.barh(
-                top_models["benchmark_variant"], top_models["decomp_rssd"]
-            )
+            ax.barh(top_models["benchmark_variant"], top_models["decomp_rssd"])
             ax.set_title(
                 "Top 10 Models by Decomp RSSD",
                 fontsize=14,
@@ -1674,7 +1689,9 @@ def main():
         logger.info("Using direct GCS scan (--scan-gcs)")
         df = analyzer.collect_results_from_gcs_scan(args.benchmark_id)
         if df is None or df.empty:
-            logger.warning("GCS scan returned no results; falling back to plan.json method")
+            logger.warning(
+                "GCS scan returned no results; falling back to plan.json method"
+            )
             df = analyzer.collect_results(args.benchmark_id, args.queue_name)
     else:
         df = analyzer.collect_results(args.benchmark_id, args.queue_name)
@@ -1702,9 +1719,7 @@ def main():
 
         if r2_col:
             before = len(df)
-            df = df[
-                df[r2_col].isna() | (df[r2_col] >= args.min_r2)
-            ].copy()
+            df = df[df[r2_col].isna() | (df[r2_col] >= args.min_r2)].copy()
             removed = before - len(df)
             if removed:
                 logger.info(
@@ -1717,9 +1732,7 @@ def main():
                     f"({r2_col} >= {args.min_r2})"
                 )
         else:
-            logger.warning(
-                "No R² columns found; skipping quality filter"
-            )
+            logger.warning("No R² columns found; skipping quality filter")
 
         if df.empty:
             logger.error(

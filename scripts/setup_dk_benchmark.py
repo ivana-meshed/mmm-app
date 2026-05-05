@@ -70,7 +70,9 @@ REPO_ROOT = Path(__file__).parent.parent
 PROJECT_ID = os.getenv("PROJECT_ID", "datawarehouse-422511")
 GCS_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 
-DEFAULT_CSV = REPO_ROOT / "data" / "dk" / "mmm_data_v2_final_holidays_and_school.csv"
+DEFAULT_CSV = (
+    REPO_ROOT / "data" / "dk" / "mmm_data_v2_final_holidays_and_school.csv"
+)
 DK_CONFIG_DIR = REPO_ROOT / "data" / "dk"
 DEFAULT_MAPPING = DK_CONFIG_DIR / "dk_selected_columns_mapping_v2_clean.json"
 
@@ -173,10 +175,7 @@ def load_and_prepare_csv(
     media_cols = [
         c
         for c in df.columns
-        if any(
-            kw in c
-            for kw in ("COST", "SPEND", "CLICKS", "IMPRESSIONS")
-        )
+        if any(kw in c for kw in ("COST", "SPEND", "CLICKS", "IMPRESSIONS"))
     ]
     if media_cols:
         df[media_cols] = df[media_cols].clip(lower=0)
@@ -383,13 +382,17 @@ def setup_variant(
     sc = build_selected_columns(
         mapping_path, df, dep_var, dep_var_type, timestamp, country_code
     )
-    logger.info(f"   paid_media_spends : {len(sc['paid_media_spends'])} channels")
+    logger.info(
+        f"   paid_media_spends : {len(sc['paid_media_spends'])} channels"
+    )
     logger.info(f"   paid_media_vars   : {len(sc['paid_media_vars'])} channels")
     logger.info(f"   context_vars      : {len(sc['context_vars'])}")
     logger.info(f"   factor_vars       : {len(sc['factor_vars'])}")
     logger.info(f"   organic_vars      : {len(sc['organic_vars'])}")
 
-    gcs_path = upload_selected_columns(sc, client, bucket_name, country_code, timestamp)
+    gcs_path = upload_selected_columns(
+        sc, client, bucket_name, country_code, timestamp
+    )
     return gcs_path
 
 
@@ -508,9 +511,7 @@ def main() -> None:
     for gcs_path in gcs_paths:
         print(f"# {gcs_path.split('training_data/')[-1].split('/selected')[0]}")
         print()
-        print(
-            "# Quick test run (geometric adstock, full window, 1 preset):"
-        )
+        print("# Quick test run (geometric adstock, full window, 1 preset):")
         print(
             f"python scripts/run_full_benchmark.py "
             f"--path {gcs_path} \\\n"
@@ -519,9 +520,7 @@ def main() -> None:
             f"  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json"
         )
         print()
-        print(
-            "# Standard full run (geometric adstock, full window, 1 preset):"
-        )
+        print("# Standard full run (geometric adstock, full window, 1 preset):")
         print(
             f"python scripts/run_full_benchmark.py \\\n"
             f"  --path {gcs_path} \\\n"
@@ -531,18 +530,10 @@ def main() -> None:
             f"  --channel-type-assignments-config benchmarks/channel_type_assignments_fleet_marketplace.json"
         )
         print()
-        print(
-            "# Sequential production — geometric adstock, full window,"
-        )
-        print(
-            "# all splits (3) + spend-var mappings (5) + 3 hyperparameter"
-        )
-        print(
-            "# Sequential: 1 adstock + 3 splits + 2 time-agg + 5 spend-var"
-        )
-        print(
-            "# + 3 hyperparameter presets = 14 combos (~$78, ~5 h):"
-        )
+        print("# Sequential production — geometric adstock, full window,")
+        print("# all splits (3) + spend-var mappings (5) + 3 hyperparameter")
+        print("# Sequential: 1 adstock + 3 splits + 2 time-agg + 5 spend-var")
+        print("# + 3 hyperparameter presets = 14 combos (~$78, ~5 h):")
         print(
             f"python scripts/run_full_benchmark.py \\\n"
             f"  --path {gcs_path} \\\n"

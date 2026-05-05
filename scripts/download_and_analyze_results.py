@@ -75,6 +75,7 @@ def _add_file_handler(path: Path) -> logging.FileHandler:
     logging.getLogger().addHandler(fh)
     return fh
 
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -108,10 +109,13 @@ OOM_INDICATORS = [
 # GCS helpers
 # ---------------------------------------------------------------------------
 
+
 def _storage_client():
     """Return an authenticated google-cloud-storage Client."""
     try:
-        from google.cloud import storage  # pylint: disable=import-outside-toplevel
+        from google.cloud import (  # pylint: disable=import-outside-toplevel
+            storage,
+        )
 
         return storage.Client()
     except ImportError:
@@ -145,13 +149,13 @@ def _read_blob_text(bucket, blob_path: str) -> Optional[str]:
         )
         return text
     except Exception as exc:  # pylint: disable=broad-except
-        logger.debug("Could not read gs://%s/%s: %s", bucket.name, blob_path, exc)
+        logger.debug(
+            "Could not read gs://%s/%s: %s", bucket.name, blob_path, exc
+        )
         return None
 
 
-def _save_locally(
-    text: Optional[str], local_path: Path
-) -> None:
+def _save_locally(text: Optional[str], local_path: Path) -> None:
     """Write text to *local_path*, creating parent dirs as needed."""
     if text is None:
         return
@@ -163,9 +167,8 @@ def _save_locally(
 # Benchmark discovery
 # ---------------------------------------------------------------------------
 
-def list_recent_benchmarks(
-    bucket, n: int = 10
-) -> List[Tuple[str, datetime]]:
+
+def list_recent_benchmarks(bucket, n: int = 10) -> List[Tuple[str, datetime]]:
     """
     Return the *n* most-recent benchmark IDs found under ``benchmarks/``.
 
@@ -197,6 +200,7 @@ def list_recent_benchmarks(
 # ---------------------------------------------------------------------------
 # Download
 # ---------------------------------------------------------------------------
+
 
 def download_benchmark(
     bucket,
@@ -241,7 +245,7 @@ def download_benchmark(
 
     for blob in all_blobs:
         # blob.name = benchmarks/{benchmark_id}/...
-        relative = blob.name[len(prefix):]  # strip prefix
+        relative = blob.name[len(prefix) :]  # strip prefix
         parts = relative.split("/", 1)
 
         if len(parts) == 1:
@@ -316,6 +320,7 @@ def load_from_local(
 # ---------------------------------------------------------------------------
 # Analysis
 # ---------------------------------------------------------------------------
+
 
 def _parse_status(text: Optional[str]) -> Dict[str, Any]:
     """Parse status.json text → dict with 'state' and raw fields."""
@@ -449,7 +454,9 @@ def analyse(
             "plan.json loaded — %d planned variant(s)", len(plan_variants)
         )
     else:
-        logger.warning("plan.json not found or unparseable — variant list from GCS only")
+        logger.warning(
+            "plan.json not found or unparseable — variant list from GCS only"
+        )
 
     # All keys except _plan are variant names
     variant_keys = sorted(k for k in data if k != "_plan")
@@ -481,7 +488,9 @@ def analyse(
         console_text = files.get("console.log")
 
         status = _parse_status(status_text)
-        error_type, error_message = _parse_panic(panic_json_text, panic_txt_text)
+        error_type, error_message = _parse_panic(
+            panic_json_text, panic_txt_text
+        )
         oom = _detect_oom(console_text, status, panic_json_text, panic_txt_text)
         summary = _parse_model_summary(summary_text)
         metrics = _extract_metrics(summary)
@@ -517,7 +526,9 @@ def analyse(
             "RUNNING": "▶",
         }.get(derived_status, "?")
         rsq_str = (
-            f"  R²={metrics['rsq_train']:.3f}" if metrics.get("rsq_train") else ""
+            f"  R²={metrics['rsq_train']:.3f}"
+            if metrics.get("rsq_train")
+            else ""
         )
         logger.info(
             "[%d/%d] %s %-40s  %s%s",
@@ -563,6 +574,7 @@ def analyse(
 # Reporting
 # ---------------------------------------------------------------------------
 
+
 def print_report(
     benchmark_id: str,
     records: List[Dict[str, Any]],
@@ -584,7 +596,9 @@ def print_report(
     _p()
     _p("=" * 72)
     _p(f"BENCHMARK ANALYSIS  —  {benchmark_id}")
-    _p(f"Generated : {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+    _p(
+        f"Generated : {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+    )
     _p("=" * 72)
     _p(f"\nTotal variants : {total}")
     _p("\nStatus breakdown:")
@@ -618,14 +632,14 @@ def print_report(
         _p("  " + "-" * (len(header) - 2))
         for r in sorted(succeeded, key=lambda x: x["variant"]):
             rsq_train = (
-                f"{r['rsq_train']:.3f}" if r["rsq_train"] is not None else "  —  "
+                f"{r['rsq_train']:.3f}"
+                if r["rsq_train"] is not None
+                else "  —  "
             )
             rsq_val = (
                 f"{r['rsq_val']:.3f}" if r["rsq_val"] is not None else "  —  "
             )
-            nrmse = (
-                f"{r['nrmse']:.4f}" if r["nrmse"] is not None else "   —   "
-            )
+            nrmse = f"{r['nrmse']:.4f}" if r["nrmse"] is not None else "   —   "
             rssd = (
                 f"{r['decomp_rssd']:.4f}"
                 if r["decomp_rssd"] is not None
@@ -641,14 +655,18 @@ def print_report(
 
     # Failed / OOM variants — detail
     bad = [
-        r for r in records if r["derived_status"] in ("FAILED", "OOM", "UNKNOWN")
+        r
+        for r in records
+        if r["derived_status"] in ("FAILED", "OOM", "UNKNOWN")
     ]
     if bad:
         _p(f"\n{'─'*72}")
         _p(f"FAILED / OOM variants ({len(bad)}):")
         for r in sorted(bad, key=lambda x: x["variant"]):
             _p(f"\n  Variant : {r['variant']}")
-            _p(f"  Status  : {r['derived_status']}  (raw state: {r['status_state']})")
+            _p(
+                f"  Status  : {r['derived_status']}  (raw state: {r['status_state']})"
+            )
             if r["oom"]:
                 _p("  OOM     : YES — container was likely killed by SIGKILL")
             if r["error_type"]:
@@ -684,9 +702,7 @@ def write_csv(records: List[Dict[str, Any]], path: str) -> None:
     skip_fields = {"console_tail"}
     fields = [k for k in records[0] if k not in skip_fields] if records else []
     with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(
-            fh, fieldnames=fields, extrasaction="ignore"
-        )
+        writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(records)
     logger.info("CSV written to %s", path)
@@ -705,6 +721,7 @@ def write_json(records: List[Dict[str, Any]], path: str) -> None:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -779,7 +796,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="List the N most-recent benchmarks and exit.",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable DEBUG logging",
     )
@@ -804,7 +822,9 @@ def main() -> int:  # noqa: C901 — intentionally linear
         if not recent:
             print("No benchmarks found.")
             return 0
-        print(f"\nMost-recent {len(recent)} benchmark(s) in gs://{args.bucket}/benchmarks/:")
+        print(
+            f"\nMost-recent {len(recent)} benchmark(s) in gs://{args.bucket}/benchmarks/:"
+        )
         for run_id, ts in recent:
             print(f"  {ts.strftime('%Y-%m-%d %H:%M UTC')}  {run_id}")
         print()
@@ -877,7 +897,9 @@ def main() -> int:  # noqa: C901 — intentionally linear
     # ------------------------------------------------------------------ #
     if args.skip_download:
         local_dir = Path(args.local_dir) if args.local_dir else output_dir
-        logger.info("Loading from local directory: %s", local_dir / benchmark_id)
+        logger.info(
+            "Loading from local directory: %s", local_dir / benchmark_id
+        )
         data = load_from_local(benchmark_id, local_dir)
     else:
         client = _storage_client()

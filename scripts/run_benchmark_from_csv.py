@@ -108,9 +108,7 @@ from typing import Any, Dict, List, Optional
 try:
     import pandas as pd
 except ImportError as exc:
-    sys.exit(
-        f"pandas is required: pip install pandas\n(original error: {exc})"
-    )
+    sys.exit(f"pandas is required: pip install pandas\n(original error: {exc})")
 
 try:
     import pyarrow as pa  # noqa: F401 – imported to verify availability
@@ -377,14 +375,11 @@ def load_columns_from_mapping(
     # Preserve var_to_spend_mapping entries only for columns that exist
     raw_vsm = mapping.get("var_to_spend_mapping") or {}
     var_to_spend_mapping = {
-        k: v
-        for k, v in raw_vsm.items()
-        if k in col_set and v in col_set
+        k: v for k, v in raw_vsm.items() if k in col_set and v in col_set
     }
 
     logger.info(
-        f"📊 Column classification summary "
-        f"(mapping: {mapping_path.name}):"
+        f"📊 Column classification summary " f"(mapping: {mapping_path.name}):"
     )
     logger.info(f"   paid_media_spends : {len(paid_media_spends)} columns")
     logger.info(f"   paid_media_vars   : {len(paid_media_vars)} columns")
@@ -445,14 +440,10 @@ def upload_parquet(
     versioned_path = (
         f"mapped-datasets/{country_code.lower()}/{timestamp}/raw.parquet"
     )
-    latest_path = (
-        f"mapped-datasets/{country_code.lower()}/latest/raw.parquet"
-    )
+    latest_path = f"mapped-datasets/{country_code.lower()}/latest/raw.parquet"
 
     logger.info("📤 Uploading data to GCS…")
-    _gcs_upload_bytes(
-        client, bucket_name, versioned_path, parquet_bytes
-    )
+    _gcs_upload_bytes(client, bucket_name, versioned_path, parquet_bytes)
     # Keep a "latest" pointer so Run_Experiment.py can find the data
     _gcs_upload_bytes(client, bucket_name, latest_path, parquet_bytes)
 
@@ -504,12 +495,12 @@ def upload_config_files(
         blob_path = f"{gcs_prefix}/{json_file.name}"
         data = json_file.read_bytes()
         _gcs_upload_bytes(
-            client, bucket_name, blob_path, data,
+            client,
+            bucket_name,
+            blob_path,
+            data,
             content_type="application/json",
         )
-
-
-
 
 
 def _make_timestamp() -> str:
@@ -639,16 +630,12 @@ def main() -> None:
             f"   Dropped {n_dropped} duplicate column(s) after uppercasing"
         )
 
-    logger.info(
-        f"   Loaded {len(df):,} rows × {len(df.columns)} columns"
-    )
+    logger.info(f"   Loaded {len(df):,} rows × {len(df.columns)} columns")
 
     # Apply column renames so the uploaded Parquet uses the same names as the
     # curated mapping JSON files (e.g. CRM_REACHABLE_AUDIENCE → CRM_REACHABLE_USERS)
     rename_applied = {
-        old: new
-        for old, new in COLUMN_RENAME_MAP.items()
-        if old in df.columns
+        old: new for old, new in COLUMN_RENAME_MAP.items() if old in df.columns
     }
     if rename_applied:
         df.rename(columns=rename_applied, inplace=True)
@@ -676,9 +663,7 @@ def main() -> None:
     # Filter to the requested country
     if "MARKET_NAME" in df.columns:
         original_rows = len(df)
-        available_markets = sorted(
-            df["MARKET_NAME"].dropna().unique().tolist()
-        )
+        available_markets = sorted(df["MARKET_NAME"].dropna().unique().tolist())
         df = df[
             df["MARKET_NAME"].str.strip().str.upper()
             == args.country_name.upper()
@@ -739,9 +724,7 @@ def main() -> None:
                 mapping_path = REPO_ROOT / mapping_path
         elif args.country_code.lower() == "dk" and DEFAULT_DK_MAPPING.exists():
             mapping_path = DEFAULT_DK_MAPPING
-            logger.info(
-                f"📄 Using default DK mapping: {mapping_path.name}"
-            )
+            logger.info(f"📄 Using default DK mapping: {mapping_path.name}")
         else:
             mapping_path = None
 
@@ -859,8 +842,12 @@ def main() -> None:
     HP_RANGES_FLAG = "--hyperparameter-ranges-config"
     CT_ASSIGNMENTS_FLAG = "--channel-type-assignments-config"
 
-    default_hp_ranges = REPO_ROOT / "benchmarks" / "generic_hyperparameter_ranges_v2.json"
-    default_ct_assign = REPO_ROOT / "benchmarks" / "channel_type_assignments.json"
+    default_hp_ranges = (
+        REPO_ROOT / "benchmarks" / "generic_hyperparameter_ranges_v2.json"
+    )
+    default_ct_assign = (
+        REPO_ROOT / "benchmarks" / "channel_type_assignments.json"
+    )
 
     if HP_RANGES_FLAG not in extra_args and default_hp_ranges.exists():
         auto_flags += [HP_RANGES_FLAG, str(default_hp_ranges)]
@@ -871,9 +858,7 @@ def main() -> None:
 
     if CT_ASSIGNMENTS_FLAG not in extra_args and default_ct_assign.exists():
         auto_flags += [CT_ASSIGNMENTS_FLAG, str(default_ct_assign)]
-        logger.info(
-            f"ℹ️  Auto-injecting {CT_ASSIGNMENTS_FLAG}"
-        )
+        logger.info(f"ℹ️  Auto-injecting {CT_ASSIGNMENTS_FLAG}")
 
     cmd = (
         [sys.executable, script, "--path", gcs_config_path]

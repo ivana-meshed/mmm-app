@@ -61,7 +61,7 @@ INTERESTING_FILES = {
 def parse_gcs_uri(uri: str) -> Tuple[str, str]:
     """Return (bucket_name, blob_path) from a gs:// URI."""
     assert uri.startswith("gs://"), f"Not a gs:// URI: {uri}"
-    without_scheme = uri[len("gs://"):]
+    without_scheme = uri[len("gs://") :]
     bucket, _, blob = without_scheme.partition("/")
     return bucket, blob
 
@@ -105,7 +105,9 @@ def read_blob_text(
             return None
         return blob.download_as_text(encoding="utf-8")
     except Exception as exc:  # pylint: disable=broad-except
-        logger.debug("Could not read gs://%s/%s: %s", bucket_name, blob_path, exc)
+        logger.debug(
+            "Could not read gs://%s/%s: %s", bucket_name, blob_path, exc
+        )
         return None
 
 
@@ -117,7 +119,7 @@ def variant_label(gcs_prefix: str) -> Tuple[str, str]:
          -> ("dk_benchmark_20260413", "geo_75_90")
     """
     # strip gs://bucket/benchmarks/
-    without_scheme = gcs_prefix[len("gs://"):]
+    without_scheme = gcs_prefix[len("gs://") :]
     parts = without_scheme.split("/")
     # parts: [bucket, "benchmarks", run_id, variant, ...]
     if len(parts) >= 4:
@@ -221,14 +223,10 @@ def print_summary(records: List[Dict]) -> None:
     total = len(records)
     status_counts: Counter = Counter(r["status"] for r in records)
     error_counts: Counter = Counter(
-        r["error_message"]
-        for r in records
-        if r["error_message"]
+        r["error_message"] for r in records if r["error_message"]
     )
     error_type_counts: Counter = Counter(
-        r["error_type"]
-        for r in records
-        if r["error_type"]
+        r["error_type"] for r in records if r["error_type"]
     )
     run_fail_counts: Counter = Counter(
         r["run_id"]
@@ -389,7 +387,9 @@ def main() -> int:
             )
             return 1
 
-    records = collect_variant_info(variants, storage_client, dry_run=args.dry_run)
+    records = collect_variant_info(
+        variants, storage_client, dry_run=args.dry_run
+    )
 
     print_summary(records)
 

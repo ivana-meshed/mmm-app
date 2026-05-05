@@ -450,9 +450,7 @@ class BenchmarkRunner:
             non_trivial_windows = [
                 w
                 for w in window_specs
-                if "weeks_back" in w
-                or "start_date" in w
-                or "end_date" in w
+                if "weeks_back" in w or "start_date" in w or "end_date" in w
             ]
             if non_trivial_windows:
                 variants.extend(
@@ -643,8 +641,7 @@ class BenchmarkRunner:
                 spends = variant.get("paid_media_spends", [])
                 if len(spends) == len(override):
                     variant["var_to_spend_mapping"] = {
-                        var: spend
-                        for var, spend in zip(override, spends)
+                        var: spend for var, spend in zip(override, spends)
                     }
                 elif spends and override:
                     # Lengths differ — create best-effort mapping using the
@@ -658,8 +655,7 @@ class BenchmarkRunner:
                         f"{min_len} pair(s)."
                     )
                     variant["var_to_spend_mapping"] = {
-                        var: spend
-                        for var, spend in zip(override, spends)
+                        var: spend for var, spend in zip(override, spends)
                     }
 
             variants.append(variant)
@@ -1131,9 +1127,7 @@ class BenchmarkRunner:
                 content_type="application/json",
             )
         except Exception as e:
-            logger.warning(
-                "Could not update plan.json with queue_name: %s", e
-            )
+            logger.warning("Could not update plan.json with queue_name: %s", e)
 
         # Kick the web app so it starts processing immediately (Cloud Tasks).
         # Falls back gracefully when env vars are not set (e.g. local runs).
@@ -1162,9 +1156,7 @@ class BenchmarkRunner:
                 goal = variant.get("selected_goal", "")
                 if goal:
                     try:
-                        data_version = self._find_latest_version(
-                            country, goal
-                        )
+                        data_version = self._find_latest_version(country, goal)
                         logger.info(
                             f"Resolved 'Latest' data_version for "
                             f"{country}/{goal} → {data_version}"
@@ -1189,9 +1181,7 @@ class BenchmarkRunner:
                     f"gs://{self.bucket_name}/mapped-datasets/"
                     f"{country.lower()}/{data_version}/raw.parquet"
                 )
-                blob_path = (
-                    f"mapped-datasets/{country.lower()}/{data_version}/raw.parquet"
-                )
+                blob_path = f"mapped-datasets/{country.lower()}/{data_version}/raw.parquet"
                 if self.bucket.blob(blob_path).exists():
                     data_gcs_path = candidate
                 else:
@@ -1358,9 +1348,7 @@ class BenchmarkRunner:
             from google.cloud import tasks_v2  # type: ignore[import-untyped]
 
             client = tasks_v2.CloudTasksClient()
-            target_url = (
-                f"{web_service_url}?queue_tick=1&name={queue_name}"
-            )
+            target_url = f"{web_service_url}?queue_tick=1&name={queue_name}"
             http_request: dict = {
                 "http_method": tasks_v2.HttpMethod.GET,
                 "url": target_url,
@@ -1371,18 +1359,14 @@ class BenchmarkRunner:
                     "audience": web_service_url,
                 }
             task: dict = {"http_request": http_request}
-            client.create_task(
-                parent=cloud_tasks_queue, task=task
-            )
+            client.create_task(parent=cloud_tasks_queue, task=task)
             logger.info(
                 "Scheduled immediate queue tick for '%s' via Cloud Tasks",
                 queue_name,
             )
             return True
         except Exception as exc:
-            logger.warning(
-                "Failed to schedule Cloud Tasks queue tick: %s", exc
-            )
+            logger.warning("Failed to schedule Cloud Tasks queue tick: %s", exc)
             return False
 
     def list_benchmarks(self) -> List[Dict[str, Any]]:
@@ -2319,7 +2303,9 @@ def main():
                     prefix = args.variant_prefix.rstrip("_")
                     for variant in variants:
                         existing = variant.get("benchmark_variant", "")
-                        variant["benchmark_variant"] = f"{prefix}_{existing}" if existing else prefix
+                        variant["benchmark_variant"] = (
+                            f"{prefix}_{existing}" if existing else prefix
+                        )
 
                 # Save plan
                 runner.save_benchmark_plan(
@@ -2460,7 +2446,9 @@ def main():
         freq = v.get("resample_freq", "none")
         preset = v.get("hyperparameter_preset", "—")
         label = v.get("preset_label", "")
-        preset_display = f"{preset}" + (f" ({label})" if label and label != preset else "")
+        preset_display = f"{preset}" + (
+            f" ({label})" if label and label != preset else ""
+        )
         hp_keys = len(v.get("custom_hyperparameters", {}))
         hp_str = f"{hp_keys} keys" if hp_keys else "none"
         train_size = v.get("train_size", "")
@@ -2491,8 +2479,7 @@ def main():
                 arrow = "→" if pvar != pspend else "="
                 mapping_lines.append(f"{pvar} {arrow} {pspend}")
             logger.info(
-                f"       var_to_spend_mapping: "
-                + " | ".join(mapping_lines)
+                f"       var_to_spend_mapping: " + " | ".join(mapping_lines)
             )
         else:
             logger.info(
@@ -2548,7 +2535,9 @@ def main():
         prefix = args.variant_prefix.rstrip("_")
         for variant in variants:
             existing = variant.get("benchmark_variant", "")
-            variant["benchmark_variant"] = f"{prefix}_{existing}" if existing else prefix
+            variant["benchmark_variant"] = (
+                f"{prefix}_{existing}" if existing else prefix
+            )
         logger.info(
             f"Applied variant prefix '{prefix}' to {len(variants)} variant(s)"
         )

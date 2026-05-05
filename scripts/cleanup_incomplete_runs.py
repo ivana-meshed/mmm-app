@@ -43,11 +43,14 @@ logger = logging.getLogger(__name__)
 try:
     from google.cloud import storage
 except ImportError:
-    logger.error("google-cloud-storage is not installed. Run: pip install google-cloud-storage")
+    logger.error(
+        "google-cloud-storage is not installed. Run: pip install google-cloud-storage"
+    )
     sys.exit(1)
 
 try:
     import pandas as pd
+
     _PANDAS_AVAILABLE = True
 except ImportError:
     _PANDAS_AVAILABLE = False
@@ -56,6 +59,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _group_by_run(blobs) -> Dict[tuple, List]:
     """Group blobs by (revision, country, stamp)."""
@@ -106,7 +110,9 @@ def _has_r2(blobs) -> bool:
                 if any("r2" in c or "rsq" in c for c in cols_l):
                     return True
                 # Fallback: allocator_metrics.csv with a real spend value
-                if name_l.endswith("allocator_metrics.csv") and _has_spend_value(df):
+                if name_l.endswith(
+                    "allocator_metrics.csv"
+                ) and _has_spend_value(df):
                     return True
             except Exception:
                 pass
@@ -152,6 +158,7 @@ def _run_label(rev: str, country: str, stamp: str) -> str:
 # ---------------------------------------------------------------------------
 # Main logic
 # ---------------------------------------------------------------------------
+
 
 def find_incomplete_runs(
     bucket_name: str, prefix: str, mode: str
@@ -209,7 +216,9 @@ def delete_runs(
         rev, country, stamp = key
         label = _run_label(rev, country, stamp)
         if dry_run:
-            logger.info("[DRY RUN] Would delete %d blobs from %s", len(blobs), label)
+            logger.info(
+                "[DRY RUN] Would delete %d blobs from %s", len(blobs), label
+            )
             deleted_blobs += len(blobs)
             deleted_runs += 1
         else:
@@ -225,7 +234,13 @@ def delete_runs(
 
     action = "Would delete" if dry_run else "Deleted"
     logger.info("=" * 60)
-    logger.info("%s %d run(s), %d blob(s). Failed: %d", action, deleted_runs, deleted_blobs, failed)
+    logger.info(
+        "%s %d run(s), %d blob(s). Failed: %d",
+        action,
+        deleted_runs,
+        deleted_blobs,
+        failed,
+    )
     if dry_run:
         logger.info("Re-run with --no-dry-run to actually delete.")
 
