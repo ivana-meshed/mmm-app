@@ -461,7 +461,7 @@ Processing job 10/12
    Results at: gs://mmm-app-output/robyn/default/de/20260212_172440_243/
    Verifying results in GCS...
    ✓ Results verified: Found 12 files
-   ✓ Key files found: model_summary.json, best_model_plots.png, console.log
+   ✓ Key files found: model_summary.json, <model_id>.png, allocator_metrics.csv, console.log
 ```
 
 ### Step 4: Check GCS for Results
@@ -470,17 +470,53 @@ Processing job 10/12
 # List result folders
 gsutil ls gs://mmm-app-output/robyn/default/de/ | tail -5
 
-# Check specific result
-gsutil ls gs://mmm-app-output/robyn/default/de/20260212_172440_243/
+# Check specific result  (replace timestamp with your run's timestamp)
+STAMP=20260212_172440_243
+gsutil ls gs://mmm-app-output/robyn/default/de/$STAMP/
 
 # Expected files:
-# - model_summary.json
-# - console.log
-# - best_model_plots.png
-# - allocator_metrics.csv
-# - status.json
-# - InputCollect.RDS
-# - OutputCollect.RDS
+# - model_summary.json          ← model config and fit metrics
+# - console.log                 ← full R training log
+# - status.json                 ← SUCCEEDED / FAILED
+# - InputCollect.RDS            ← Robyn input object
+# - OutputCollect.RDS           ← Robyn output object
+# - <model_id>.png              ← onepager (waterfall + decomposition chart)
+# - allocator_metrics.csv       ← budget allocator KPIs (response, spend)
+# - allocator_metrics.txt       ← same KPIs in plain text
+# - allocator_plots_<ts>/allocator_<model_id>_365d.png  ← allocator budget chart
+```
+
+#### Download the onepager
+
+```bash
+STAMP=20260212_172440_243
+# The onepager is named after the best model ID (e.g. 1_202_13).
+# Find the model ID first, then download:
+MODEL_ID=$(gsutil cat gs://mmm-app-output/robyn/default/de/$STAMP/model_summary.json \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['best_model_id'])")
+
+gsutil cp "gs://mmm-app-output/robyn/default/de/$STAMP/${MODEL_ID}.png" ./onepager.png
+open ./onepager.png          # macOS  — or `xdg-open` on Linux
+```
+
+#### Download the budget allocator plot
+
+```bash
+STAMP=20260212_172440_243
+# The allocator plot lives in an allocator_plots_<timestamp> sub-folder.
+# Find and download the 365-day plot:
+gsutil ls "gs://mmm-app-output/robyn/default/de/$STAMP/" \
+  | grep "allocator_plots_" \
+  | head -1 \
+  | xargs -I{} gsutil ls {} \
+  | grep "_365d.png" \
+  | head -1 \
+  | xargs -I{} gsutil cp {} ./allocator_plot.png
+open ./allocator_plot.png
+
+# Or download the allocator KPI CSV directly:
+gsutil cp "gs://mmm-app-output/robyn/default/de/$STAMP/allocator_metrics.csv" \
+  ./allocator_metrics.csv
 ```
 
 ## Troubleshooting
@@ -683,9 +719,16 @@ gs://mmm-app-output/
 │   └── default/
 │       └── de/
 │           ├── 20260225_112436/
-│           │   ├── model_summary.json  ← Must have config fields
-│           │   ├── console.log
-│           │   └── ...
+│           │   ├── model_summary.json          ← model config and fit metrics
+│           │   ├── status.json                 ← SUCCEEDED / FAILED
+│           │   ├── console.log                 ← full R training log
+│           │   ├── InputCollect.RDS
+│           │   ├── OutputCollect.RDS
+│           │   ├── 1_202_13.png                ← onepager (named after best model ID)
+│           │   ├── allocator_metrics.csv       ← budget allocator KPIs
+│           │   ├── allocator_metrics.txt
+│           │   └── allocator_plots_20260225_112436/
+│           │       └── allocator_1_202_13_365d.png  ← budget allocator chart
 │           └── ...
 └── robyn-queues/
     └── default-dev/

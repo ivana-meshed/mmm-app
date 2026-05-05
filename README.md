@@ -106,6 +106,13 @@ This single command:
 - CSV: `./benchmark_analysis/results_*.csv`
 - Plots: `./benchmark_analysis/*.png` (6 visualization plots)
 
+**Per-run GCS artifacts** (under `gs://mmm-app-output/robyn/<queue>/<country>/<timestamp>/`):
+- `<model_id>.png` — **onepager** (waterfall + decomposition chart for the best model)
+- `allocator_plots_<ts>/allocator_<model_id>_365d.png` — **budget allocator** chart (365-day optimised spend)
+- `allocator_metrics.csv` — allocator KPIs (total response, total spend)
+- `model_summary.json` — model config and fit metrics
+- `InputCollect.RDS` / `OutputCollect.RDS` — Robyn objects for further analysis
+
 ### Common Use Cases
 
 ```bash
