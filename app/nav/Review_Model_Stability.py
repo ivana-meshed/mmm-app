@@ -1020,7 +1020,7 @@ preset = {
 }
 
 if mode == "Custom":
-    rsq_min = st.sidebar.slider("Min R²", 0.0, 1.0, 0.50, 0.01)
+    rsq_min = st.sidebar.slider("Min R²", 0.0, 1.0, 0.70, 0.01)
     nrmse_max = st.sidebar.slider("Max NRMSE", 0.0, 1.0, 0.25, 0.01)
     decomp_max = st.sidebar.slider("Max decomp.rssd", 0.0, 1.0, 0.20, 0.01)
 else:
