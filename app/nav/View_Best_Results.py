@@ -6,6 +6,7 @@ import hashlib
 import io
 import os
 import re
+from itertools import islice
 from urllib.parse import quote
 
 import pandas as pd
@@ -1102,9 +1103,9 @@ def rank_runs_for_country(
     rows = []
     allowed_keys = set(candidate_keys) if candidate_keys else None
     for (rev, ctry, stamp), blobs in _runs.items():
-        if ctry != country:
-            continue
         if allowed_keys is not None and (rev, ctry, stamp) not in allowed_keys:
+            continue
+        if ctry != country:
             continue
         metrics = extract_core_metrics_from_blobs(blobs) or {}
         best_id, iters, trials = parse_best_meta(blobs)
@@ -1166,6 +1167,7 @@ def rank_runs_for_country(
 def build_ranked_run_keys(
     runs: dict, table: pd.DataFrame, fallback_keys: list[tuple]
 ) -> list[tuple]:
+    """Return up to the top 3 run keys from the ranking table or fallback list."""
     ranked_keys = []
     for _, row in table.head(TOP_MODELS_PER_CATEGORY).iterrows():
         key = (row["rev"], row["country"], row["stamp"])
@@ -1175,17 +1177,29 @@ def build_ranked_run_keys(
     if ranked_keys:
         return ranked_keys
 
-    return fallback_keys[:TOP_MODELS_PER_CATEGORY]
+    return list(
+        islice(
+            (key for key in fallback_keys if key in runs),
+            TOP_MODELS_PER_CATEGORY,
+        )
+    )
 
 
-def render_run_from_key(runs: dict, key: tuple, rank: int, score=None):
+def format_score(score: float | None) -> str:
+    """Format a ranking score for display."""
+    if score is None or pd.isna(score):
+        return ""
+    return f" · score={score:.4f}"
+
+
+def render_run_from_key(
+    runs: dict, key: tuple, rank: int, score: float | None = None
+):
     rev, country, stamp = key
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
     title = build_run_title(country, stamp, iters, trials)
-    score_text = (
-        f" · score={score:.4f}" if score is not None and pd.notna(score) else ""
-    )
+    score_text = format_score(score)
 
     with st.container(border=True):
         st.markdown(f"### #{rank} — {title}")
@@ -1322,6 +1336,7 @@ def render_top_runs(
     table: pd.DataFrame,
     header_text: str,
 ):
+    """Render the top-ranked runs for the selected country/filter."""
     if not candidate_keys:
         st.warning(f"No runs found for {country}.")
         return
