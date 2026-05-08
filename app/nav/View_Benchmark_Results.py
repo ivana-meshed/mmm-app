@@ -14,6 +14,7 @@ import base64
 import io
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -420,50 +421,42 @@ def load_benchmark_csv(benchmark_id):
 
 
 def load_benchmark_plots(benchmark_id):
-    """Load all plots for a benchmark.
-
-    Merges plots from all analyze-run directories so that a partially-failed
-    run (which only uploaded some plots before encountering a GCS error) does
-    not hide plots that were successfully uploaded in a previous run.  For
-    each plot name the most-recently-created file is used.
-    """
+    """Load all benchmark plot PNG files and their creation timestamps."""
     client = get_storage_client()
     bucket = client.bucket(GCS_BUCKET)
 
     prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/"
     blobs = list(bucket.list_blobs(prefix=prefix))
 
-    # Collect one blob per plot name; prefer the most recently created one.
-    # Support both current and legacy layouts, e.g.:
+    # Keep all PNG artifacts (do not collapse by filename) so the UI can show
+    # every file that exists in GCS.  Support both current and legacy layouts:
     # - benchmarks/{id}/plots_<timestamp>/<plot>.png
     # - benchmarks/{id}/plots/<plot>.png
     # - benchmarks/{id}/<plot>.png
-    plot_blobs: dict = {}  # plot_name (str) -> GCS blob
+    plot_blobs: dict = {}  # relative_path_without_ext (str) -> GCS blob
     for blob in blobs:
         if not blob.name.lower().endswith(".png"):
             continue
 
-        filename = blob.name.split("/")[-1]
-        plot_name = filename.rsplit(".", 1)[0]
-
-        if plot_name.startswith("plots_"):
-            plot_name = plot_name[len("plots_") :]
-
-        existing = plot_blobs.get(plot_name)
+        relative_name = blob.name[len(prefix) :]
+        plot_key = relative_name.rsplit(".", 1)[0]
+        existing = plot_blobs.get(plot_key)
         if existing is None or blob.time_created > existing.time_created:
-            plot_blobs[plot_name] = blob
+            plot_blobs[plot_key] = blob
 
     if not plot_blobs:
-        return {}
+        return {}, {}
 
     plots = {}
+    plot_created = {}
     failed = []
-    for plot_name, blob in plot_blobs.items():
+    for plot_key, blob in plot_blobs.items():
         try:
             img_data = blob.download_as_bytes()
-            plots[plot_name] = img_data  # store raw bytes; rendered via base64
+            plots[plot_key] = img_data
+            plot_created[plot_key] = blob.time_created
         except Exception as exc:  # noqa: BLE001
-            failed.append(f"{plot_name}: {exc}")
+            failed.append(f"{plot_key}: {exc}")
 
     if failed:
         print(
@@ -472,7 +465,7 @@ def load_benchmark_plots(benchmark_id):
             file=sys.stderr,
         )
 
-    return plots
+    return plots, plot_created
 
 
 # Sidebar - Benchmark Selection
@@ -1170,35 +1163,45 @@ for selected_benchmark in selected_benchmarks:
                         st.exception(_exc)
 
         try:
-            plots = load_benchmark_plots(selected_benchmark)
+            plots, plot_created = load_benchmark_plots(selected_benchmark)
 
             if not plots:
                 st.warning("No plots found for this benchmark")
             else:
                 st.success(f"Loaded {len(plots)} plots")
                 displayed_plot_keys = set()
+                default_dt = datetime.min.replace(tzinfo=timezone.utc)
+
+                def _created_at(plot_key: str):
+                    return plot_created.get(plot_key) or default_dt
 
                 def _resolve_plot_key(expected_key: str):
                     """Return best available plot key for an expected name."""
                     if expected_key in plots:
                         return expected_key
 
-                    # Common legacy naming variants:
-                    # - plot_<name>
-                    # - plots_<name>
-                    # - <prefix>_<name>
                     candidates = []
                     for key in plots:
-                        if key.endswith(expected_key):
-                            candidates.append(key)
-                        elif key.startswith(f"plot_{expected_key}"):
-                            candidates.append(key)
-                        elif key.startswith(f"plots_{expected_key}"):
+                        key_tail = key.split("/")[-1]
+                        key_variants = [key_tail]
+                        if key_tail.startswith("plot_"):
+                            key_variants.append(key_tail[len("plot_") :])
+                        if key_tail.startswith("plots_"):
+                            key_variants.append(key_tail[len("plots_") :])
+
+                        if (
+                            expected_key in key_variants
+                            or key_tail.endswith(expected_key)
+                            or key.endswith(expected_key)
+                        ):
                             candidates.append(key)
                     if not candidates:
                         return None
-                    # Prefer shortest key (closest to canonical expected name)
-                    return sorted(candidates, key=len)[0]
+                    return sorted(
+                        candidates,
+                        key=lambda k: (_created_at(k), -len(k)),
+                        reverse=True,
+                    )[0]
 
                 def _render_plot(plot_key: str, title: str, description: str):
                     displayed_plot_keys.add(plot_key)
@@ -1319,7 +1322,7 @@ for selected_benchmark in selected_benchmarks:
                     for extra_key in remaining_plot_keys:
                         _render_plot(
                             extra_key,
-                            extra_key.replace("_", " ").title(),
+                            extra_key.split("/")[-1].replace("_", " ").title(),
                             "Additional benchmark plot file discovered in GCS.",
                         )
 
