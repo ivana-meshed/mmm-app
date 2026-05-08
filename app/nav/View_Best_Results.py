@@ -46,6 +46,7 @@ DEFAULT_BUCKET = os.getenv("GCS_BUCKET", "mmm-app-output")
 DEFAULT_PREFIX = "robyn/"
 DATA_URI_MAX_BYTES = int(os.getenv("DATA_URI_MAX_BYTES", str(8 * 1024 * 1024)))
 IS_CLOUDRUN = bool(os.getenv("K_SERVICE"))
+TOP_MODELS_PER_CATEGORY = 3
 
 # ---------- Global defaults for sliders / scoring (persisted) ----------
 DEFAULT_WEIGHTS = (0.2, 0.5, 0.3)  # train, val, test
@@ -1081,7 +1082,12 @@ def extract_core_metrics_from_blobs(blobs: list) -> dict:
 
 @st.cache_data(ttl=600, show_spinner=False)
 def rank_runs_for_country(
-    _runs: dict, country: str, weights=(0.2, 0.5, 0.3), alpha=1.0, beta=1.0
+    _runs: dict,
+    country: str,
+    candidate_keys=None,
+    weights=(0.2, 0.5, 0.3),
+    alpha=1.0,
+    beta=1.0,
 ) -> tuple[tuple, pd.DataFrame]:
     """
     Build a summary table for all (rev, country, stamp) runs, compute a score:
@@ -1092,8 +1098,11 @@ def rank_runs_for_country(
     Note: _runs is prefixed with underscore to prevent Streamlit from hashing it.
     """
     rows = []
+    allowed_keys = set(candidate_keys) if candidate_keys else None
     for (rev, ctry, stamp), blobs in _runs.items():
         if ctry != country:
+            continue
+        if allowed_keys is not None and (rev, ctry, stamp) not in allowed_keys:
             continue
         metrics = extract_core_metrics_from_blobs(blobs) or {}
         best_id, iters, trials = parse_best_meta(blobs)
@@ -1152,29 +1161,40 @@ def rank_runs_for_country(
     return best_key, df_sorted
 
 
-def render_run_from_key(runs: dict, key: tuple, bucket_name: str):
+def build_ranked_run_keys(
+    runs: dict, table: pd.DataFrame, fallback_keys: list[tuple]
+) -> list[tuple]:
+    ranked_keys = []
+    for _, row in table.head(TOP_MODELS_PER_CATEGORY).iterrows():
+        key = (row["rev"], row["country"], row["stamp"])
+        if key in runs and key not in ranked_keys:
+            ranked_keys.append(key)
+
+    if ranked_keys:
+        return ranked_keys
+
+    return fallback_keys[:TOP_MODELS_PER_CATEGORY]
+
+
+def render_run_from_key(runs: dict, key: tuple, rank: int, score=None):
     rev, country, stamp = key
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
+    title = build_run_title(country, stamp, iters, trials)
+    score_text = (
+        f" · score={score:.4f}" if score is not None and pd.notna(score) else ""
+    )
 
-    # Render model metrics first
-    render_model_metrics_table(blobs, country, stamp)
+    with st.container(border=True):
+        st.markdown(f"### #{rank} — {title}")
+        st.caption(f"Revision: {rev}{score_text}")
+        tab1, tab2 = st.tabs(["Onepager", "Budget Allocator"])
 
-    # Create tabs for Model Performance and Budget Allocator
-    tab1, tab2 = st.tabs(["Model Performance", "Budget Allocator"])
+        with tab1:
+            render_onepager_section(blobs, best_id, country, stamp)
 
-    with tab1:
-        render_onepager_section(blobs, best_id, country, stamp)
-
-    with tab2:
-        render_allocator_section(blobs, country, stamp)
-
-    # Model Configuration in its own expander (just above All Files)
-    with st.expander("**Model Configuration**", expanded=False):
-        render_model_config_section(blobs, country, stamp, bucket_name)
-
-    # All Files at the end
-    render_all_files_section(blobs, bucket_name, country, stamp)
+        with tab2:
+            render_allocator_section(blobs, country, stamp)
 
 
 def build_run_title(country: str, stamp: str, iters, trials):
@@ -1293,46 +1313,29 @@ if not runs:
 
 
 # ---------- Manual browse helpers (for non-auto mode) ----------
-def render_run_for_country(bucket_name: str, rev: str, country: str):
-    # All candidate runs for this (rev, country), newest first
-    candidates = sorted(
-        [k for k in runs.keys() if k[0] == rev and k[1] == country],
-        key=lambda k: parse_stamp(k[2]),
-        reverse=True,
-    )
-    if not candidates:
-        st.warning(f"No runs found for {rev}/{country}.")
+def render_top_runs(
+    runs: dict,
+    country: str,
+    candidate_keys: list[tuple],
+    table: pd.DataFrame,
+    header_text: str,
+):
+    if not candidate_keys:
+        st.warning(f"No runs found for {country}.")
         return
 
-    # Prefer the newest run that HAS an allocator plot; fallback to newest
-    key = next(
-        (k for k in candidates if run_has_allocator_plot(runs[k])),
-        candidates[0],
-    )
+    st.caption(header_text)
+    ranked_keys = build_ranked_run_keys(runs, table, candidate_keys)
 
-    _, _, stamp = key
-    blobs = runs[key]
+    score_lookup = {}
+    if not table.empty and "score" in table.columns:
+        score_lookup = {
+            (row["rev"], row["country"], row["stamp"]): row["score"]
+            for _, row in table.iterrows()
+        }
 
-    best_id, iters, trials = parse_best_meta(blobs)
-
-    # Render model metrics first
-    render_model_metrics_table(blobs, country, stamp)
-
-    # Create tabs for Model Performance and Budget Allocator
-    tab1, tab2 = st.tabs(["Model Performance", "Budget Allocator"])
-
-    with tab1:
-        render_onepager_section(blobs, best_id, country, stamp)
-
-    with tab2:
-        render_allocator_section(blobs, country, stamp)
-
-    # Model Configuration in its own expander (just above All Files)
-    with st.expander("**Model Configuration**", expanded=False):
-        render_model_config_section(blobs, country, stamp, bucket_name)
-
-    # All Files at the end
-    render_all_files_section(blobs, bucket_name, country, stamp)
+    for rank, key in enumerate(ranked_keys, start=1):
+        render_run_from_key(runs, key, rank, score_lookup.get(key))
 
 
 # ---------- Mode: manual browse by revision ----------
@@ -1562,35 +1565,33 @@ if not auto_best:
         )
 
     for ctry in countries_sel:
-        # Use expander if multiple countries
-        if len(countries_sel) > 1:
-            # Get the run to build title
-            candidates = sorted(
-                [k for k in runs.keys() if k[0] == rev and k[1] == ctry],
-                key=lambda k: parse_stamp(k[2]),
-                reverse=True,
+        candidate_keys = sorted(
+            [k for k in rev_country_keys if k[1] == ctry],
+            key=lambda k: parse_stamp(k[2]),
+            reverse=True,
+        )
+        with st.spinner(f"Loading top models for {ctry.upper()}..."):
+            _, table = rank_runs_for_country(
+                runs,
+                ctry,
+                candidate_keys=candidate_keys,
+                weights=st.session_state["weights"],
+                alpha=st.session_state["alpha"],
+                beta=st.session_state["beta"],
             )
-            if candidates:
-                key = next(
-                    (k for k in candidates if run_has_allocator_plot(runs[k])),
-                    candidates[0],
+
+        header_text = (
+            f"Showing the top {min(TOP_MODELS_PER_CATEGORY, len(candidate_keys))} "
+            f"models for {ctry.upper()} in revision {rev}."
+        )
+
+        if len(countries_sel) > 1:
+            with st.expander(f"**{ctry.upper()}**", expanded=True):
+                render_top_runs(
+                    runs, ctry, candidate_keys, table, header_text
                 )
-                _, iters, trials = parse_best_meta(runs[key])
-                title = build_run_title(ctry, key[2], iters, trials)
-                with st.expander(f"**{title}**", expanded=True):
-                    with st.spinner(f"Loading results for {ctry.upper()}..."):
-                        render_run_for_country(
-                            bucket_name, rev, ctry
-                        )  # type: ignore
-            else:
-                with st.expander(f"**{ctry.upper()}**", expanded=True):
-                    with st.spinner(f"Loading results for {ctry.upper()}..."):
-                        render_run_for_country(
-                            bucket_name, rev, ctry
-                        )  # type: ignore
         else:
-            with st.spinner(f"Loading results for {ctry.upper()}..."):
-                render_run_for_country(bucket_name, rev, ctry)  # type: ignore
+            render_top_runs(runs, ctry, candidate_keys, table, header_text)
 
 # ---------- Mode: auto best across all revisions ----------
 else:
@@ -1715,99 +1716,29 @@ else:
             best_key, table = rank_runs_for_country(
                 runs,
                 ctry,
+                candidate_keys=all_country_keys,
                 weights=st.session_state["weights"],
                 alpha=st.session_state["alpha"],
                 beta=st.session_state["beta"],
             )
-        if best_key is None:
-            st.warning(
-                f"No metric-bearing runs found for {ctry}. Showing newest run instead."
-            )
-            candidates = sorted(
-                [k for k in runs.keys() if k[1] == ctry],
-                key=lambda k: parse_stamp(k[2]),
-                reverse=True,
-            )
-            if not candidates:
-                st.info(f"No runs at all for {ctry}.")
-                continue
-            best_key = candidates[0]
-
-            # Use expander if multiple countries
-            if len(countries_sel) > 1:
-                _, iters, trials = parse_best_meta(runs[best_key])
-                title = build_run_title(ctry, best_key[2], iters, trials)
-                with st.expander(f"**{title}**", expanded=True):
-                    with st.spinner("Rendering results..."):
-                        render_run_from_key(runs, best_key, bucket_name)
-            else:
-                with st.spinner("Rendering results..."):
-                    render_run_from_key(runs, best_key, bucket_name)
+        candidate_keys = sorted(
+            [k for k in all_country_keys if k[1] == ctry],
+            key=lambda k: parse_stamp(k[2]),
+            reverse=True,
+        )
+        if best_key is None and not candidate_keys:
+            st.info(f"No runs at all for {ctry}.")
             continue
 
-        # Use expander if multiple countries
+        header_text = (
+            f"Showing the top {min(TOP_MODELS_PER_CATEGORY, len(candidate_keys))} "
+            f"models for {ctry.upper()} across revisions."
+        )
+
         if len(countries_sel) > 1:
-            _, iters, trials = parse_best_meta(runs[best_key])
-            title = build_run_title(ctry, best_key[2], iters, trials)
-            with st.expander(f"**{title}**", expanded=True):
-                # Show ranking table
-                with st.expander(
-                    "Ranking table (higher score is better)",
-                    expanded=False,
-                ):
-                    cols = [
-                        "score",
-                        "r2_w",
-                        "nrmse_w",
-                        "drssd_w",
-                        "rev",
-                        "stamp",
-                        "best_id",
-                        "has_alloc",
-                        "r2_train",
-                        "r2_val",
-                        "r2_test",
-                        "nrmse_train",
-                        "nrmse_val",
-                        "nrmse_test",
-                        "decomp_rssd_train",
-                        "decomp_rssd_val",
-                        "decomp_rssd_test",
-                    ]
-                    display = table[
-                        [c for c in cols if c in table.columns]
-                    ].copy()
-                    st.dataframe(display, width="stretch")
-
-                with st.spinner("Rendering best results..."):
-                    render_run_from_key(runs, best_key, bucket_name)
+            with st.expander(f"**{ctry.upper()}**", expanded=True):
+                render_top_runs(
+                    runs, ctry, candidate_keys, table, header_text
+                )
         else:
-            # Show ranking table
-            with st.expander(
-                f"Ranking table for {ctry.upper()} (higher score is better)",
-                expanded=False,
-            ):
-                cols = [
-                    "score",
-                    "r2_w",
-                    "nrmse_w",
-                    "drssd_w",
-                    "rev",
-                    "stamp",
-                    "best_id",
-                    "has_alloc",
-                    "r2_train",
-                    "r2_val",
-                    "r2_test",
-                    "nrmse_train",
-                    "nrmse_val",
-                    "nrmse_test",
-                    "decomp_rssd_train",
-                    "decomp_rssd_val",
-                    "decomp_rssd_test",
-                ]
-                display = table[[c for c in cols if c in table.columns]].copy()
-                st.dataframe(display, width="stretch")
-
-            with st.spinner("Rendering best results..."):
-                render_run_from_key(runs, best_key, bucket_name)
+            render_top_runs(runs, ctry, candidate_keys, table, header_text)
