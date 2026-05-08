@@ -434,11 +434,21 @@ def load_benchmark_plots(benchmark_id):
     blobs = list(bucket.list_blobs(prefix=prefix))
 
     # Collect one blob per plot name; prefer the most recently created one.
+    # Support both current and legacy layouts, e.g.:
+    # - benchmarks/{id}/plots_<timestamp>/<plot>.png
+    # - benchmarks/{id}/plots/<plot>.png
+    # - benchmarks/{id}/<plot>.png
     plot_blobs: dict = {}  # plot_name (str) -> GCS blob
     for blob in blobs:
-        if "plots_" not in blob.name or not blob.name.endswith(".png"):
+        if not blob.name.lower().endswith(".png"):
             continue
-        plot_name = blob.name.split("/")[-1].replace(".png", "")
+
+        filename = blob.name.split("/")[-1]
+        plot_name = filename.rsplit(".", 1)[0]
+
+        if plot_name.startswith("plots_"):
+            plot_name = plot_name[len("plots_") :]
+
         existing = plot_blobs.get(plot_name)
         if existing is None or blob.time_created > existing.time_created:
             plot_blobs[plot_name] = blob
