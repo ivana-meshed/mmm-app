@@ -1176,6 +1176,43 @@ for selected_benchmark in selected_benchmarks:
                 st.warning("No plots found for this benchmark")
             else:
                 st.success(f"Loaded {len(plots)} plots")
+                displayed_plot_keys = set()
+
+                def _resolve_plot_key(expected_key: str):
+                    """Return best available plot key for an expected name."""
+                    if expected_key in plots:
+                        return expected_key
+
+                    # Common legacy naming variants:
+                    # - plot_<name>
+                    # - plots_<name>
+                    # - <prefix>_<name>
+                    candidates = []
+                    for key in plots:
+                        if key.endswith(expected_key):
+                            candidates.append(key)
+                        elif key.startswith(f"plot_{expected_key}"):
+                            candidates.append(key)
+                        elif key.startswith(f"plots_{expected_key}"):
+                            candidates.append(key)
+                    if not candidates:
+                        return None
+                    # Prefer shortest key (closest to canonical expected name)
+                    return sorted(candidates, key=len)[0]
+
+                def _render_plot(plot_key: str, title: str, description: str):
+                    displayed_plot_keys.add(plot_key)
+                    st.markdown(f"### {title}")
+                    st.caption(description)
+                    b64 = base64.b64encode(plots[plot_key]).decode()
+                    st.markdown(
+                        f'<img src="data:image/png;base64,{b64}" '
+                        f'style="width: 100%; height: auto;" '
+                        f'alt="{title}">',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(f"File key: `{plot_key}`")
+                    st.divider()
 
                 # Define plot order and titles
                 # Core metric plots — always expected; warn if missing.
@@ -1236,37 +1273,23 @@ for selected_benchmark in selected_benchmarks:
 
                 # Display core plots (warn loudly if missing)
                 for plot_name, title, description in core_plots:
-                    if plot_name in plots:
-                        st.markdown(f"### {title}")
-                        st.caption(description)
-                        b64 = base64.b64encode(plots[plot_name]).decode()
-                        st.markdown(
-                            f'<img src="data:image/png;base64,{b64}" '
-                            f'style="width: 100%; height: auto;" '
-                            f'alt="{title}">',
-                            unsafe_allow_html=True,
-                        )
-                        st.divider()
-                    else:
+                    plot_key = _resolve_plot_key(plot_name)
+                    if plot_key is None:
                         st.warning(f"Plot not available: {plot_name}")
+                    else:
+                        _render_plot(plot_key, title, description)
 
                 # Display enrichment plots (silent info if missing — data may not
                 # be present for benchmarks run with older training images)
                 enrichment_missing = [
-                    (n, t, d) for n, t, d in enrichment_plots if n not in plots
+                    (n, t, d)
+                    for n, t, d in enrichment_plots
+                    if _resolve_plot_key(n) is None
                 ]
                 for plot_name, title, description in enrichment_plots:
-                    if plot_name in plots:
-                        st.markdown(f"### {title}")
-                        st.caption(description)
-                        b64 = base64.b64encode(plots[plot_name]).decode()
-                        st.markdown(
-                            f'<img src="data:image/png;base64,{b64}" '
-                            f'style="width: 100%; height: auto;" '
-                            f'alt="{title}">',
-                            unsafe_allow_html=True,
-                        )
-                        st.divider()
+                    plot_key = _resolve_plot_key(plot_name)
+                    if plot_key is not None:
+                        _render_plot(plot_key, title, description)
 
                 if enrichment_missing:
                     missing_titles = ", ".join(
@@ -1281,6 +1304,24 @@ for selected_benchmark in selected_benchmarks:
                         "training image, or when `analyze_benchmark_results.py` "
                         "is run once the jobs complete."
                     )
+
+                # Show any remaining files so users can inspect all available plots
+                # even when filenames don't match canonical plot keys.
+                remaining_plot_keys = sorted(
+                    [k for k in plots.keys() if k not in displayed_plot_keys]
+                )
+                if remaining_plot_keys:
+                    st.subheader("🧾 Additional Plot Files")
+                    st.caption(
+                        "These files were found in GCS but do not match the "
+                        "standard benchmark plot names."
+                    )
+                    for extra_key in remaining_plot_keys:
+                        _render_plot(
+                            extra_key,
+                            extra_key.replace("_", " ").title(),
+                            "Additional benchmark plot file discovered in GCS.",
+                        )
 
         except Exception as e:
             st.error(f"Error loading plots: {e}")
