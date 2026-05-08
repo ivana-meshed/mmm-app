@@ -26,7 +26,8 @@ The web interface provides:
   - `3_Prepare_Training_Data.py` / `3_Prepare_Training_Datav2.py` - Data preparation
   - `Run_Experiment.py` - Single/batch experiment configuration
   - `5_View_Results.py` - Results visualization
-  - `6_View_Best_Results.py` - Best model results
+  - `6_View_Best_Results.py` - Best-results view showing the top 3
+    ranked models with onepager and budget allocator plots
 
 ### 2. Training Jobs (Cloud Run Jobs)
 
