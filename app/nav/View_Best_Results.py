@@ -446,11 +446,11 @@ def find_onepager_blob(blobs, model_id: str):
             if "onepager" in fn and id_lower in fn and fn.endswith(ext):
                 return b
 
-    # 3. Any file that contains model_id in the basename (not response/saturation)
+    # 3. Any file that contains model_id in the basename (not response/saturation/allocator)
     for ext in (".png", ".pdf"):
         for b in blobs:
             fn = os.path.basename(b.name).lower()
-            if fn.startswith(("response_", "saturation_", "allocator")):
+            if fn.startswith(("response_", "saturation_", "allocator_")):
                 continue
             if id_lower in fn and fn.endswith(ext):
                 idx = fn.find(id_lower)
@@ -458,13 +458,13 @@ def find_onepager_blob(blobs, model_id: str):
                 if after_id.startswith(("_", "-", ".", ext)):
                     return b
 
-    # 4. Last resort: largest non-response/saturation PNG/PDF (> 50 KB)
+    # 4. Last resort: largest non-response/saturation/allocator PNG/PDF (> 50 KB)
     candidates = []
     for b in blobs:
         fn = os.path.basename(b.name).lower()
         if not (fn.endswith(".png") or fn.endswith(".pdf")):
             continue
-        if fn.startswith(("response_", "saturation_", "allocator")):
+        if fn.startswith(("response_", "saturation_", "allocator_")):
             continue
         if getattr(b, "size", 0) > 50_000:
             candidates.append(b)
@@ -1203,7 +1203,8 @@ def _extract_from_model_summary_json(blob) -> dict:
                         out[dst_key] = fv
                 except (TypeError, ValueError):
                     pass
-        # decomp_rssd is a single value – propagate to all splits as a baseline
+        # decomp_rssd is a single value – propagate to all splits as a baseline.
+        # setdefault ensures split-specific values from other sources take priority.
         decomp = best.get("decomp_rssd")
         if decomp is not None:
             try:
