@@ -1308,7 +1308,7 @@ for selected_benchmark in selected_benchmarks:
                 # Show any remaining files so users can inspect all available plots
                 # even when filenames don't match canonical plot keys.
                 remaining_plot_keys = sorted(
-                    [k for k in plots.keys() if k not in displayed_plot_keys]
+                    [k for k in plots if k not in displayed_plot_keys]
                 )
                 if remaining_plot_keys:
                     st.subheader("🧾 Additional Plot Files")
