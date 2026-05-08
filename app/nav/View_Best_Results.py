@@ -6,7 +6,6 @@ import hashlib
 import io
 import os
 import re
-from itertools import islice
 from urllib.parse import quote
 
 import pandas as pd
@@ -237,6 +236,36 @@ def parse_best_meta(blobs):
     return best_id, iters, trials
 
 
+def extract_top_model_ids_from_blobs(blobs, best_id: str | None) -> list:
+    """Return up to 3 Robyn model IDs for the run in ranking order (best first).
+
+    Reads ``candidate_models`` from ``model_summary.json`` which preserves
+    Robyn's internal ranking (index 0 = best model = ``best_id``).
+    Falls back to ``[best_id]`` when the JSON is unavailable.
+    """
+    import json as _json
+
+    summary_blob = find_blob(blobs, "/model_summary.json") or find_blob(
+        blobs, "model_summary.json"
+    )
+    if summary_blob:
+        try:
+            data = download_bytes_safe(summary_blob)
+            if data:
+                summary = _json.loads(data)
+                candidates = summary.get("candidate_models", [])
+                ids = [
+                    c.get("model_id")
+                    for c in candidates[:TOP_MODELS_PER_CATEGORY]
+                    if c.get("model_id")
+                ]
+                if ids:
+                    return ids
+        except Exception:
+            pass
+    return [best_id] if best_id else []
+
+
 def latest_run_key(runs, rev_filter=None, country_filter=None):
     keys = list(runs.keys())
     if rev_filter:
@@ -388,47 +417,54 @@ def download_link_for_blob(
 
 
 # ---------- Discovery helpers ----------
-def find_onepager_blob(blobs, best_id: str):
-    """Try canonical <best_id>.png/.pdf with flexible matching for suffixes."""
-    if not best_id:
+def find_onepager_blob(blobs, model_id: str):
+    """Find the onepager file for a given Robyn model ID.
+
+    Search order:
+    1. Exact basename match: ``<model_id>.png`` / ``<model_id>.pdf``
+    2. Robyn-generated name containing ``onepager`` and ``<model_id>``
+    3. Any file containing ``<model_id>`` (non-response/saturation) as basename
+    4. Largest non-response/saturation PNG/PDF as last resort
+    """
+    if not model_id:
         return None
 
-    # Try exact match first
+    # 1. Exact canonical match (R code copies to <model_id>.png/.pdf)
     for ext in (".png", ".pdf"):
-        target = f"{best_id}{ext}".lower()
+        target = f"{model_id}{ext}".lower()
         for b in blobs:
             if os.path.basename(b.name).lower() == target:
                 return b
 
-    # Try pattern matching with suffix (e.g., 1_202_13_365d.png)
-    # Match files that start with best_id and end with .png/.pdf
-    # but exclude response/saturation prefixes (keep allocator_ + best_id pattern)
+    # 2. Robyn-generated onepager files: onepager*<model_id>*.png/.pdf
+    id_lower = model_id.lower()
     for ext in (".png", ".pdf"):
         for b in blobs:
             fn = os.path.basename(b.name).lower()
-            # Skip if it has excluded prefixes (but allow allocator_ + best_id)
             if fn.startswith(("response_", "saturation_")):
                 continue
-            # Check if filename contains best_id and ends with extension
-            # This handles patterns like:
-            # - 1_202_13_365d.png (direct match with suffix)
-            # - allocator_1_202_13_365d.png (allocator prefix + best_id + suffix)
-            if best_id.lower() in fn and fn.endswith(ext):
-                # Verify it's actually matching the best_id pattern, not just a substring
-                # Look for best_id followed by underscore, dash, dot, or extension
-                idx = fn.find(best_id.lower())
-                if idx >= 0:
-                    after_id = fn[idx + len(best_id.lower()) :]
-                    if after_id.startswith(("_", "-", ".", ext)):
-                        return b
+            if "onepager" in fn and id_lower in fn and fn.endswith(ext):
+                return b
 
-    # Fallback: largest non-response/saturation PNG/PDF
+    # 3. Any file that contains model_id in the basename (not response/saturation)
+    for ext in (".png", ".pdf"):
+        for b in blobs:
+            fn = os.path.basename(b.name).lower()
+            if fn.startswith(("response_", "saturation_", "allocator")):
+                continue
+            if id_lower in fn and fn.endswith(ext):
+                idx = fn.find(id_lower)
+                after_id = fn[idx + len(id_lower):]
+                if after_id.startswith(("_", "-", ".", ext)):
+                    return b
+
+    # 4. Last resort: largest non-response/saturation PNG/PDF (> 50 KB)
     candidates = []
     for b in blobs:
         fn = os.path.basename(b.name).lower()
         if not (fn.endswith(".png") or fn.endswith(".pdf")):
             continue
-        if fn.startswith(("response_", "saturation_")):
+        if fn.startswith(("response_", "saturation_", "allocator")):
             continue
         if getattr(b, "size", 0) > 50_000:
             candidates.append(b)
@@ -453,18 +489,26 @@ def find_allocator_plots(blobs):
     return plots
 
 
-def find_additional_benchmark_plots(blobs, best_id: str):
-    """Collect non-onepager, non-allocator plot files for the current run."""
-    alloc_names = {b.name for b in find_allocator_plots(blobs)}
-    onepager_blob = find_onepager_blob(blobs, best_id)
-    onepager_name = onepager_blob.name if onepager_blob else None
-    plots = []
+def find_additional_benchmark_plots(blobs, top_model_ids: list):
+    """Collect non-onepager, non-allocator plot files for the current run.
 
+    Excludes the onepager files for all top Robyn models (shown in the
+    Onepager tab) and all allocator plots (shown in the Budget Allocator tab).
+    Returns everything else: response curves, saturation curves, Pareto plots, etc.
+    """
+    alloc_names = {b.name for b in find_allocator_plots(blobs)}
+    onepager_names = set()
+    for model_id in top_model_ids or []:
+        ob = find_onepager_blob(blobs, model_id)
+        if ob:
+            onepager_names.add(ob.name)
+
+    plots = []
     for b in blobs:
         name_l = b.name.lower()
         if not (name_l.endswith(".png") or name_l.endswith(".pdf")):
             continue
-        if b.name in alloc_names or b.name == onepager_name:
+        if b.name in alloc_names or b.name in onepager_names:
             continue
         plots.append(b)
 
@@ -851,59 +895,83 @@ def render_allocator_section(blobs, country, stamp):
             st.error(f"Error with {os.path.basename(b.name)}: {e}")
 
 
-def render_onepager_section(blobs, best_id, country, stamp):
-    # Model Performance section - no subheader needed, will be in tab
-    if not best_id:
+def render_onepager_section(blobs, top_model_ids: list, country, stamp):
+    """Render onepager images for the top Robyn models in this run.
+
+    ``top_model_ids`` is an ordered list of Robyn model IDs (best first).
+    For each ID a separate onepager image/PDF is located and displayed.
+    """
+    if not top_model_ids:
         st.warning(
             "best_model_id.txt not found; cannot locate model performance summary."
         )
         return
 
-    op_blob = find_onepager_blob(blobs, best_id)
-    if not op_blob:
-        st.warning(
-            f"No model performance summary found for best model id '{best_id}' using standard patterns."
-        )
-        return
+    found_any = False
+    for i, model_id in enumerate(top_model_ids):
+        op_blob = find_onepager_blob(blobs, model_id)
+        if not op_blob:
+            continue
+        found_any = True
+        name = os.path.basename(op_blob.name)
+        lower = name.lower()
 
-    name = os.path.basename(op_blob.name)
-    lower = name.lower()
-    st.success(
-        f"Found model performance summary: **{name}** ({op_blob.size:,} bytes)"
-    )
-
-    if lower.endswith(".png"):
-        try:
-            image_data = download_bytes_safe(op_blob)
-            if not image_data:
-                st.warning("Image data is empty")
-                return
-            b64 = base64.b64encode(image_data).decode()
-            st.markdown(
-                f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="Model Performance">',
-                unsafe_allow_html=True,
+        if len(top_model_ids) > 1:
+            label = "🥇 Best Model" if i == 0 else f"#{i + 1} Model"
+            st.markdown(f"**{label}** — `{model_id}`")
+        else:
+            st.success(
+                f"Found model performance summary: **{name}** ({op_blob.size:,} bytes)"
             )
+
+        if lower.endswith(".png"):
+            try:
+                image_data = download_bytes_safe(op_blob)
+                if not image_data:
+                    st.warning("Image data is empty")
+                    continue
+                b64 = base64.b64encode(image_data).decode()
+                st.markdown(
+                    f'<img src="data:image/png;base64,{b64}" '
+                    f'style="width: 100%; height: auto;" alt="Model Performance">',
+                    unsafe_allow_html=True,
+                )
+                download_link_for_blob(
+                    op_blob,
+                    label=f"Download {name}",
+                    mime_hint="image/png",
+                    key_suffix=f"onepager|{country}|{stamp}|{i}",
+                )
+            except Exception as e:
+                st.error(f"Couldn't preview `{name}`: {e}")
+        elif lower.endswith(".pdf"):
+            st.info("Model Performance available as PDF (preview not supported).")
             download_link_for_blob(
                 op_blob,
                 label=f"Download {name}",
-                mime_hint="image/png",
-                key_suffix=(f"onepager|{country}|{stamp}"),
+                mime_hint="application/pdf",
+                key_suffix=f"onepager|{country}|{stamp}|{i}",
             )
-        except Exception as e:
-            st.error(f"Couldn't preview `{name}`: {e}")
-    elif lower.endswith(".pdf"):
-        st.info("Model Performance available as PDF (preview not supported).")
-        download_link_for_blob(
-            op_blob,
-            label=f"Download {name}",
-            mime_hint="application/pdf",
-            key_suffix=(f"onepager|{country}|{stamp}"),
+
+        if i < len(top_model_ids) - 1:
+            st.divider()
+
+    if not found_any:
+        best_id = top_model_ids[0] if top_model_ids else "unknown"
+        st.warning(
+            f"No model performance summary found for model '{best_id}' "
+            "using standard patterns."
         )
 
 
-def render_additional_benchmark_plots(blobs, best_id, country, stamp):
-    """Render additional benchmark plot artifacts for the selected run."""
-    extra_plots = find_additional_benchmark_plots(blobs, best_id)
+def render_additional_benchmark_plots(blobs, top_model_ids: list, country, stamp):
+    """Render additional benchmark plot artifacts for the selected run.
+
+    Shows response curves, saturation plots, Pareto plots, and other Robyn
+    output images.  Onepager and allocator files are shown in their dedicated
+    tabs and are excluded here.
+    """
+    extra_plots = find_additional_benchmark_plots(blobs, top_model_ids)
     if not extra_plots:
         st.info("No additional benchmark plots found.")
         return
@@ -1101,14 +1169,80 @@ def _try_read_csv(blob) -> pd.DataFrame | None:  # type: ignore
         return None
 
 
+def _extract_from_model_summary_json(blob) -> dict:
+    """Extract best-model metrics from ``model_summary.json``.
+
+    The JSON has a ``best_model`` section with ``rsq_train``, ``rsq_val``,
+    ``rsq_test``, ``nrmse_train/val/test``, and ``decomp_rssd``.  The
+    decomp_rssd is a single value (not split-wise) so we apply it to all splits.
+    """
+    import json as _json
+
+    try:
+        data = download_bytes_safe(blob)
+        if data is None:
+            return {}
+        summary = _json.loads(data)
+        best = summary.get("best_model", {})
+        if not best:
+            return {}
+        out: dict = {}
+        for src_key, dst_key in [
+            ("rsq_train", "r2_train"),
+            ("rsq_val", "r2_val"),
+            ("rsq_test", "r2_test"),
+            ("nrmse_train", "nrmse_train"),
+            ("nrmse_val", "nrmse_val"),
+            ("nrmse_test", "nrmse_test"),
+        ]:
+            v = best.get(src_key)
+            if v is not None:
+                try:
+                    fv = float(v)
+                    if not pd.isna(fv):
+                        out[dst_key] = fv
+                except (TypeError, ValueError):
+                    pass
+        # decomp_rssd is a single value – propagate to all splits as a baseline
+        decomp = best.get("decomp_rssd")
+        if decomp is not None:
+            try:
+                fv = float(decomp)
+                if not pd.isna(fv):
+                    for sp in ("train", "val", "test"):
+                        out.setdefault(f"decomp_rssd_{sp}", fv)
+            except (TypeError, ValueError):
+                pass
+        return out
+    except Exception:
+        return {}
+
+
 def extract_core_metrics_from_blobs(blobs: list) -> dict:
     """
-    Try to find a CSV that contains r2 / nrmse / decomp_rssd across train/val/test.
-    We scan likely metric/summary CSVs and fall back to anything that looks right.
+    Return a dict of r2/nrmse/decomp_rssd values for ranking.
+
+    Priority order:
+    1. ``model_summary.json`` – always generated, contains complete best-model
+       metrics with train / val / test splits.
+    2. CSVs that contain "metrics", "summary", or "performance" in their name.
+    3. Any other CSV that yields r2/nrmse data.
+    4. ``allocator_metrics.csv`` as a last resort.
+
     Returns dict like:
-      {'r2_train':..., 'r2_val':..., 'r2_test':..., 'nrmse_train':..., ..., 'decomp_rssd_test':...}
+      {'r2_train':..., 'r2_val':..., 'r2_test':..., 'nrmse_train':..., ...}
     Missing keys are OK.
     """
+    # 1. Preferred: model_summary.json (most reliable, always generated)
+    summary_blob = find_blob(blobs, "/model_summary.json") or find_blob(
+        blobs, "model_summary.json"
+    )
+    if summary_blob:
+        metrics = _extract_from_model_summary_json(summary_blob)
+        if any(k.startswith("r2_") for k in metrics) or any(
+            k.startswith("nrmse_") for k in metrics
+        ):
+            return metrics
     csvs = [b for b in blobs if b.name.lower().endswith(".csv")]
     preferred = [
         b
@@ -1227,22 +1361,30 @@ def rank_runs_for_country(
 def build_ranked_run_keys(
     runs: dict, table: pd.DataFrame, fallback_keys: list[tuple]
 ) -> list[tuple]:
-    """Return up to the top 3 run keys from the ranking table or fallback list."""
-    ranked_keys = []
+    """Return up to TOP_MODELS_PER_CATEGORY run keys, ranked best-first.
+
+    Takes ranked keys from the scoring table.  If fewer than
+    TOP_MODELS_PER_CATEGORY valid keys are found (e.g. stale cache), the
+    remaining slots are filled from ``fallback_keys`` in timestamp order so
+    we always show as many models as are available.
+    """
+    ranked_keys: list[tuple] = []
     for _, row in table.head(TOP_MODELS_PER_CATEGORY).iterrows():
         key = (row["rev"], row["country"], row["stamp"])
         if key in runs:
             ranked_keys.append(key)
 
-    if ranked_keys:
-        return ranked_keys
+    # Fill remaining slots from fallback_keys (sorted by stamp, newest first)
+    if len(ranked_keys) < TOP_MODELS_PER_CATEGORY:
+        ranked_set = set(ranked_keys)
+        for key in fallback_keys:
+            if len(ranked_keys) >= TOP_MODELS_PER_CATEGORY:
+                break
+            if key in runs and key not in ranked_set:
+                ranked_keys.append(key)
+                ranked_set.add(key)
 
-    return list(
-        islice(
-            (key for key in fallback_keys if key in runs),
-            TOP_MODELS_PER_CATEGORY,
-        )
-    )
+    return ranked_keys
 
 
 def format_score_display(score: float | None) -> str:
@@ -1269,6 +1411,10 @@ def render_ranked_run(
     rev, country, stamp = key
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
+    # Resolve the top-3 Robyn model IDs for this run (best first).
+    # Used to display all three onepagers and to exclude them from the
+    # "Other Benchmark Plots" tab where they would otherwise appear.
+    top_model_ids = extract_top_model_ids_from_blobs(blobs, best_id)
     title = build_run_title(country, stamp, iters, trials)
     score_text = format_score_display(score)
 
@@ -1280,13 +1426,15 @@ def render_ranked_run(
         )
 
         with tab1:
-            render_onepager_section(blobs, best_id, country, stamp)
+            render_onepager_section(blobs, top_model_ids, country, stamp)
 
         with tab2:
             render_allocator_section(blobs, country, stamp)
 
         with tab3:
-            render_additional_benchmark_plots(blobs, best_id, country, stamp)
+            render_additional_benchmark_plots(
+                blobs, top_model_ids, country, stamp
+            )
 
 
 def build_run_title(country: str, stamp: str, iters, trials):
