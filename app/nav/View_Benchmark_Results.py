@@ -1197,6 +1197,8 @@ for selected_benchmark in selected_benchmarks:
                             candidates.append(key)
                     if not candidates:
                         return None
+                    # Prefer newest file first; if timestamps tie, prefer shorter
+                    # keys (typically canonical names over verbose legacy paths).
                     return sorted(
                         candidates,
                         key=lambda k: (_created_at(k), -len(k)),
