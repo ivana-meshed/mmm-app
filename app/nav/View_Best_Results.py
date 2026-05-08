@@ -48,6 +48,7 @@ DEFAULT_PREFIX = "robyn/"
 DATA_URI_MAX_BYTES = int(os.getenv("DATA_URI_MAX_BYTES", str(8 * 1024 * 1024)))
 IS_CLOUDRUN = bool(os.getenv("K_SERVICE"))
 TOP_MODELS_PER_CATEGORY = 3
+SCORE_DISPLAY_PREFIX = " · score="
 
 # ---------- Global defaults for sliders / scoring (persisted) ----------
 DEFAULT_WEIGHTS = (0.2, 0.5, 0.3)  # train, val, test
@@ -450,6 +451,24 @@ def find_allocator_plots(blobs):
                 plots.append(b)
                 seen.add(b.name)
     return plots
+
+
+def find_additional_benchmark_plots(blobs, best_id: str):
+    """Collect non-onepager, non-allocator plot files for the current run."""
+    alloc_names = {b.name for b in find_allocator_plots(blobs)}
+    onepager_blob = find_onepager_blob(blobs, best_id)
+    onepager_name = onepager_blob.name if onepager_blob else None
+    plots = []
+
+    for b in blobs:
+        name_l = b.name.lower()
+        if not (name_l.endswith(".png") or name_l.endswith(".pdf")):
+            continue
+        if b.name in alloc_names or b.name == onepager_name:
+            continue
+        plots.append(b)
+
+    return sorted(plots, key=lambda blob: blob.name.lower())
 
 
 # ---------- Renderers ----------
@@ -882,6 +901,47 @@ def render_onepager_section(blobs, best_id, country, stamp):
         )
 
 
+def render_additional_benchmark_plots(blobs, best_id, country, stamp):
+    """Render additional benchmark plot artifacts for the selected run."""
+    extra_plots = find_additional_benchmark_plots(blobs, best_id)
+    if not extra_plots:
+        st.info("No additional benchmark plots found.")
+        return
+
+    st.success(f"Found {len(extra_plots)} additional benchmark plot(s)")
+    for i, b in enumerate(extra_plots):
+        fn = os.path.basename(b.name)
+        lower = fn.lower()
+        st.write(f"**{fn}** ({b.size:,} bytes)")
+
+        if lower.endswith(".png"):
+            image_data = download_bytes_safe(b)
+            if not image_data:
+                st.warning(f"Could not load {fn}")
+                continue
+            b64 = base64.b64encode(image_data).decode()
+            st.markdown(
+                f'<img src="data:image/png;base64,{b64}" '
+                f'style="width: 100%; height: auto;" alt="{fn}">',
+                unsafe_allow_html=True,
+            )
+            download_link_for_blob(
+                b,
+                label=f"Download {fn}",
+                mime_hint="image/png",
+                key_suffix=(f"extra_plot|{country}|{stamp}|{i}"),
+            )
+            continue
+
+        st.info(f"{fn} is available as PDF.")
+        download_link_for_blob(
+            b,
+            label=f"Download {fn}",
+            mime_hint="application/pdf",
+            key_suffix=(f"extra_plot|{country}|{stamp}|{i}"),
+        )
+
+
 def render_all_files_section(blobs, bucket_name, country, stamp):
     def guess_mime(name: str) -> str:
         n = name.lower()
@@ -1087,7 +1147,7 @@ def extract_core_metrics_from_blobs(blobs: list) -> dict:
 def rank_runs_for_country(
     _runs: dict,
     country: str,
-    candidate_keys=None,
+    candidate_keys: list[tuple] | None = None,
     weights=(0.2, 0.5, 0.3),
     alpha=1.0,
     beta=1.0,
@@ -1103,7 +1163,7 @@ def rank_runs_for_country(
     rows = []
     allowed_keys = set(candidate_keys) if candidate_keys else None
     for (rev, ctry, stamp), blobs in _runs.items():
-        if allowed_keys is not None and (rev, ctry, stamp) not in allowed_keys:
+        if allowed_keys and (rev, ctry, stamp) not in allowed_keys:
             continue
         if ctry != country:
             continue
@@ -1171,7 +1231,7 @@ def build_ranked_run_keys(
     ranked_keys = []
     for _, row in table.head(TOP_MODELS_PER_CATEGORY).iterrows():
         key = (row["rev"], row["country"], row["stamp"])
-        if key in runs and key not in ranked_keys:
+        if key in runs:
             ranked_keys.append(key)
 
     if ranked_keys:
@@ -1185,32 +1245,48 @@ def build_ranked_run_keys(
     )
 
 
-def format_score(score: float | None) -> str:
+def format_score_display(score: float | None) -> str:
     """Format a ranking score for display."""
     if score is None or pd.isna(score):
         return ""
-    return f" · score={score:.4f}"
+    return f"{SCORE_DISPLAY_PREFIX}{score:.4f}"
 
 
-def render_run_from_key(
+def build_top_models_header(
+    count: int, country: str, context_label: str
+) -> str:
+    """Build the caption shown above the ranked run cards."""
+    return (
+        f"Showing the top {min(TOP_MODELS_PER_CATEGORY, count)} "
+        f"models for {country.upper()} {context_label}."
+    )
+
+
+def render_ranked_run(
     runs: dict, key: tuple, rank: int, score: float | None = None
 ):
+    """Render one ranked run card with onepager, allocator, and extra plots."""
     rev, country, stamp = key
     blobs = runs[key]
     best_id, iters, trials = parse_best_meta(blobs)
     title = build_run_title(country, stamp, iters, trials)
-    score_text = format_score(score)
+    score_text = format_score_display(score)
 
     with st.container(border=True):
-        st.markdown(f"### #{rank} — {title}")
+        st.subheader(f"#{rank} — {title}")
         st.caption(f"Revision: {rev}{score_text}")
-        tab1, tab2 = st.tabs(["Onepager", "Budget Allocator"])
+        tab1, tab2, tab3 = st.tabs(
+            ["Onepager", "Budget Allocator", "Other Benchmark Plots"]
+        )
 
         with tab1:
             render_onepager_section(blobs, best_id, country, stamp)
 
         with tab2:
             render_allocator_section(blobs, country, stamp)
+
+        with tab3:
+            render_additional_benchmark_plots(blobs, best_id, country, stamp)
 
 
 def build_run_title(country: str, stamp: str, iters, trials):
@@ -1336,7 +1412,15 @@ def render_top_runs(
     table: pd.DataFrame,
     header_text: str,
 ):
-    """Render the top-ranked runs for the selected country/filter."""
+    """Render top-ranked run cards for one country.
+
+    Args:
+        runs: Mapping of (rev, country, stamp) tuples to that run's blob list.
+        country: Country currently being rendered.
+        candidate_keys: Filtered run keys eligible for rendering.
+        table: Ranked dataframe with rev/country/stamp/score columns.
+        header_text: Short UI caption shown above the ranked run cards.
+    """
     if not candidate_keys:
         st.warning(f"No runs found for {country}.")
         return
@@ -1352,7 +1436,7 @@ def render_top_runs(
         }
 
     for rank, key in enumerate(ranked_keys, start=1):
-        render_run_from_key(runs, key, rank, score_lookup.get(key))
+        render_ranked_run(runs, key, rank, score_lookup.get(key))
 
 
 # ---------- Mode: manual browse by revision ----------
@@ -1597,9 +1681,8 @@ if not auto_best:
                 beta=st.session_state["beta"],
             )
 
-        header_text = (
-            f"Showing the top {min(TOP_MODELS_PER_CATEGORY, len(candidate_keys))} "
-            f"models for {ctry.upper()} in revision {rev}."
+        header_text = build_top_models_header(
+            len(candidate_keys), ctry, f"in revision {rev}"
         )
 
         if len(countries_sel) > 1:
@@ -1745,9 +1828,8 @@ else:
             st.info(f"No runs at all for {ctry}.")
             continue
 
-        header_text = (
-            f"Showing the top {min(TOP_MODELS_PER_CATEGORY, len(candidate_keys))} "
-            f"models for {ctry.upper()} across revisions."
+        header_text = build_top_models_header(
+            len(candidate_keys), ctry, "across revisions"
         )
 
         if len(countries_sel) > 1:

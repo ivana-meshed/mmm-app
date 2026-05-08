@@ -115,7 +115,8 @@ This single command:
 
 In the **View Best Models** page, the UI now focuses on the **top 3 ranked
 models** for the selected country/goal filter and shows each model's
-**onepager** and **budget allocator** plots directly.
+**onepager**, **budget allocator**, and any other available benchmark plot
+artifacts directly.
 
 ### Common Use Cases
 
