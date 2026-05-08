@@ -367,6 +367,7 @@ def _aggregate_variant_summaries(benchmark_id: str):
                 json.dumps(channel_roas) if channel_roas else ""
             ),
             "channel_cpa_json": json.dumps(channel_cpa) if channel_cpa else "",
+            "sol_id": best_model.get("model_id", ""),
             "model_id": (
                 f"{variant_name}_{summary.get('timestamp', '')}"
                 if summary.get("timestamp")
@@ -466,6 +467,70 @@ def load_benchmark_plots(benchmark_id):
         )
 
     return plots, plot_created
+
+
+def _find_variant_onepager(
+    plots: dict, variant_name: str, sol_id: str = ""
+):
+    """Return the plot key for the onepager of *variant_name*.
+
+    Search order:
+    1. Exact key ``{variant_name}/{sol_id}`` (canonical upload from R).
+    2. Any key under ``{variant_name}/`` whose tail contains the sol_id
+       and is not an allocator file.
+    3. Any key under ``{variant_name}/`` containing "onepager".
+    """
+    prefix = f"{variant_name}/"
+    candidates = [k for k in plots if k.startswith(prefix)]
+
+    if sol_id:
+        exact = f"{variant_name}/{sol_id}"
+        if exact in plots:
+            return exact
+        for k in candidates:
+            tail = k.split("/")[-1]
+            if sol_id in tail and "allocator" not in tail.lower():
+                return k
+
+    for k in candidates:
+        if "onepager" in k.lower():
+            return k
+
+    return None
+
+
+def _find_variant_allocator(
+    plots: dict,
+    variant_name: str,
+    plot_created: dict,
+    sol_id: str = "",
+):
+    """Return the plot key for the budget allocator of *variant_name*.
+
+    Search order:
+    1. Allocator key under ``{variant_name}/`` containing the sol_id.
+    2. Most-recently-created allocator key under ``{variant_name}/``.
+    """
+    prefix = f"{variant_name}/"
+    alloc_keys = [
+        k
+        for k in plots
+        if k.startswith(prefix) and "allocator" in k.split("/")[-1].lower()
+    ]
+    if not alloc_keys:
+        return None
+
+    if sol_id:
+        for k in alloc_keys:
+            if sol_id in k:
+                return k
+
+    default_dt = datetime.min.replace(tzinfo=timezone.utc)
+    return sorted(
+        alloc_keys,
+        key=lambda k: plot_created.get(k) or default_dt,
+        reverse=True,
+    )[0]
 
 
 # Sidebar - Benchmark Selection
@@ -1164,6 +1229,121 @@ for selected_benchmark in selected_benchmarks:
 
         try:
             plots, plot_created = load_benchmark_plots(selected_benchmark)
+
+            # ── Top 2 Models by R² ───────────────────────────────────────
+            if df is not None and not df.empty and plots:
+                r2_col = next(
+                    (
+                        c
+                        for c in ["rsq_val", "rsq_train"]
+                        if c in df.columns and df[c].notna().any()
+                    ),
+                    None,
+                )
+                if r2_col:
+                    top2 = df.nlargest(2, r2_col, keep="first")
+                    if not top2.empty:
+                        st.subheader("🏆 Top 2 Models by R²")
+                        rank_labels = [
+                            "🥇 Best Model",
+                            "🥈 2nd Best Model",
+                        ]
+                        for rank, (_, mrow) in enumerate(
+                            top2.iterrows()
+                        ):
+                            label = (
+                                rank_labels[rank]
+                                if rank < len(rank_labels)
+                                else f"Model {rank + 1}"
+                            )
+                            variant = str(
+                                mrow.get("benchmark_variant", "")
+                            )
+                            sol_id = str(mrow.get("sol_id", "") or "")
+                            r2_val = mrow.get(r2_col)
+                            r2_lbl = (
+                                f"{r2_val:.4f}"
+                                if pd.notna(r2_val)
+                                else "N/A"
+                            )
+
+                            st.markdown(
+                                f"#### {label} — `{variant}` "
+                                f"(R²={r2_lbl})"
+                            )
+
+                            # Show key metrics inline
+                            _mc1, _mc2, _mc3 = st.columns(3)
+                            _mc1.metric("R² (val)", r2_lbl)
+                            _nrmse = mrow.get("nrmse_val") or mrow.get(
+                                "nrmse"
+                            )
+                            _mc2.metric(
+                                "NRMSE",
+                                (
+                                    f"{_nrmse:.4f}"
+                                    if pd.notna(_nrmse)
+                                    else "N/A"
+                                ),
+                            )
+                            _rssd = mrow.get("decomp_rssd")
+                            _mc3.metric(
+                                "Decomp RSSD",
+                                (
+                                    f"{_rssd:.4f}"
+                                    if pd.notna(_rssd)
+                                    else "N/A"
+                                ),
+                            )
+
+                            # Onepager
+                            op_key = _find_variant_onepager(
+                                plots, variant, sol_id
+                            )
+                            if op_key:
+                                st.markdown("**📋 Onepager**")
+                                _b64 = base64.b64encode(
+                                    plots[op_key]
+                                ).decode()
+                                st.markdown(
+                                    f'<img src="data:image/png;base64,'
+                                    f'{_b64}" '
+                                    f'style="width: 100%; height: auto;"'
+                                    f' alt="Onepager {variant}">',
+                                    unsafe_allow_html=True,
+                                )
+                                st.caption(f"File: `{op_key}`")
+                            else:
+                                st.info(
+                                    "Onepager not found for this variant "
+                                    "(may not have uploaded yet)."
+                                )
+
+                            # Budget allocator
+                            al_key = _find_variant_allocator(
+                                plots, variant, plot_created, sol_id
+                            )
+                            if al_key:
+                                st.markdown("**💰 Budget Allocator**")
+                                _b64 = base64.b64encode(
+                                    plots[al_key]
+                                ).decode()
+                                st.markdown(
+                                    f'<img src="data:image/png;base64,'
+                                    f'{_b64}" '
+                                    f'style="width: 100%; height: auto;"'
+                                    f' alt="Allocator {variant}">',
+                                    unsafe_allow_html=True,
+                                )
+                                st.caption(f"File: `{al_key}`")
+                            else:
+                                st.info(
+                                    "Budget allocator not found for this"
+                                    " variant (may not have uploaded"
+                                    " yet)."
+                                )
+
+                            st.divider()
 
             if not plots:
                 st.warning("No plots found for this benchmark")
