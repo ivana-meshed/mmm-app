@@ -161,6 +161,31 @@ def parse_path(name: str):
             "stamp": parts[3],
             "file": "/".join(parts[4:]),
         }
+    if len(parts) == 4 and parts[0] == "robyn":
+        # Legacy layout without explicit timestamp directory:
+        # robyn/<rev>/<country>/<file>
+        rev_part = parts[1]
+        if "_" in rev_part:
+            tag_num_parts = rev_part.rsplit("_", 1)
+            rev = rev_part
+            tag = tag_num_parts[0]
+            try:
+                number = int(tag_num_parts[1])
+            except (ValueError, IndexError):
+                number = None
+        else:
+            rev = rev_part
+            tag = rev_part
+            number = None
+
+        return {
+            "rev": rev,
+            "tag": tag,
+            "number": number,
+            "country": parts[2],
+            "stamp": "_root",
+            "file": parts[3],
+        }
     return None
 
 
