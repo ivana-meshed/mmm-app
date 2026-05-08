@@ -44,6 +44,9 @@ BENCHMARK_ROOT = "benchmarks"
 # analysis.  Must match the --min-r2 default in analyze_benchmark_results.py.
 MIN_R2_THRESHOLD = 0.70
 
+# Sentinel timestamp used when a blob has no creation time recorded.
+_EPOCH = datetime.min.replace(tzinfo=timezone.utc)
+
 # The 4 best benchmark configurations available for quick selection
 BEST_BENCHMARKS = [
     "dk_context_supply_geometric_75_90_daily_spend_to_clicks",
@@ -422,7 +425,20 @@ def load_benchmark_csv(benchmark_id):
 
 
 def load_benchmark_plots(benchmark_id):
-    """Load all benchmark plot PNG files and their creation timestamps."""
+    """Load all benchmark plot PNG files and their creation timestamps.
+
+    Returns a two-tuple ``(plots, plot_created)`` where:
+
+    * ``plots`` – ``dict[str, bytes]``: maps relative plot key (path without
+      extension, e.g. ``"variant_foo/1_202_13"`` or
+      ``"plots_20260410/rsq_comparison"``) to raw PNG bytes.
+    * ``plot_created`` – ``dict[str, datetime]``: maps the same keys to the
+      GCS blob creation timestamp (timezone-aware UTC).
+
+    All ``.png`` files found under ``benchmarks/{benchmark_id}/`` are
+    included.  Each key preserves folder context so same-named files from
+    different subfolders do not collide.
+    """
     client = get_storage_client()
     bucket = client.bucket(GCS_BUCKET)
 
@@ -525,10 +541,9 @@ def _find_variant_allocator(
             if sol_id in k:
                 return k
 
-    default_dt = datetime.min.replace(tzinfo=timezone.utc)
     return sorted(
         alloc_keys,
-        key=lambda k: plot_created.get(k) or default_dt,
+        key=lambda k: plot_created.get(k) or _EPOCH,
         reverse=True,
     )[0]
 
@@ -1350,7 +1365,7 @@ for selected_benchmark in selected_benchmarks:
             else:
                 st.success(f"Loaded {len(plots)} plots")
                 displayed_plot_keys = set()
-                default_dt = datetime.min.replace(tzinfo=timezone.utc)
+                default_dt = _EPOCH
 
                 def _created_at(plot_key: str):
                     return plot_created.get(plot_key) or default_dt
