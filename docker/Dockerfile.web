@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Python dependencies for web interface
 RUN pip install --no-cache-dir \
     "streamlit[auth]>=1.43" \
+    "httpx>=0.24,<1.0" \
     snowflake-connector-python \
     google-cloud-bigquery \
     google-cloud-storage \

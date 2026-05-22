@@ -114,6 +114,11 @@ This single command:
 - `model_summary.json` — model config and fit metrics
 - `InputCollect.RDS` / `OutputCollect.RDS` — Robyn objects for further analysis
 
+In the **View Best Models** page, the UI now focuses on the **top 3 ranked
+models** for the selected country/goal filter and shows each model's
+**onepager**, **budget allocator**, and any other available benchmark plot
+artifacts directly.
+
 ### Common Use Cases
 
 ```bash

@@ -1,4 +1,5 @@
 streamlit[auth]>=1.43
+httpx>=0.24,<1.0
 pandas
 snowflake-connector-python
 google-cloud-bigquery
