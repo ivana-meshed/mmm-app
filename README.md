@@ -107,9 +107,10 @@ This single command:
 - Plots: `./benchmark_analysis/*.png` (6 visualization plots)
 
 **Per-run GCS artifacts** (under `gs://mmm-app-output/robyn/<queue>/<country>/<timestamp>/`):
-- `<model_id>.png` — **onepager** (waterfall + decomposition chart for the best model)
-- `allocator_plots_<ts>/allocator_<model_id>_365d.png` — **budget allocator** chart (365-day optimised spend)
-- `allocator_metrics.csv` — allocator KPIs (total response, total spend)
+- `<model_id>.png` — **onepager** for each of the top 2 models (🥇 best, 🥈 2nd best); waterfall + decomposition chart
+- `top_model_ids.txt` — ordered list of the top 2 model IDs (best first)
+- `allocator_plots_<ts>/allocator_<model_id>_365d.png` — **budget allocator** chart for each of the top 2 models (365-day optimised spend)
+- `allocator_metrics.csv` — allocator KPIs (total response, total spend) for the best model
 - `model_summary.json` — model config and fit metrics
 - `InputCollect.RDS` / `OutputCollect.RDS` — Robyn objects for further analysis
 

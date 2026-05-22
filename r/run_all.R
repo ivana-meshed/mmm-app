@@ -2926,8 +2926,14 @@ flush_and_ship_log("before onepagers")
 message("🎨 Generating onepagers with baseline_level = 0")
 message("   Expected organic_vars to appear: ", paste(organic_vars, collapse = ", "))
 top_models <- OutputCollect$resultHypParam$solID[
-    1:min(3, nrow(OutputCollect$resultHypParam))
+    1:min(2, nrow(OutputCollect$resultHypParam))
 ]
+
+# Save top 2 model IDs for the UI (best first)
+writeLines(top_models, file.path(dir_path, "top_model_ids.txt"))
+gcs_put_safe(file.path(dir_path, "top_model_ids.txt"), file.path(gcs_prefix, "top_model_ids.txt"))
+message("💾 Saved top_model_ids.txt: ", paste(top_models, collapse = ", "))
+
 for (m in top_models) {
     message("   Generating onepager for model: ", m)
     tryCatch(
@@ -2947,10 +2953,7 @@ for (m in top_models) {
     message("Files in dir_path: ", paste(list.files(dir_path, pattern = "onepager|plot", recursive = TRUE), collapse = ", "))
 }
 
-# onepagers for top models
-top_models <- OutputCollect$resultHypParam$solID[
-    1:min(3, nrow(OutputCollect$resultHypParam))
-]
+# onepagers for top models (fallback attempt without explicit plot_folder)
 for (m in top_models) {
     try(
         robyn_onepagers(
@@ -2964,40 +2967,38 @@ for (m in top_models) {
     )
 }
 flush_and_ship_log("after onepagers")
-# Onepagers: try PNG first, then PDF (restored fallback)
+# Upload canonical onepager for each of the top 2 models (best first)
+# Try PNG first, then PDF fallback
 all_files <- list.files(dir_path, recursive = TRUE, full.names = TRUE)
-escaped_id <- gsub("\\.", "\\\\.", best_id)
-png_pat <- paste0("(?i)(onepager).*", escaped_id, ".*\\.png$")
-pdf_pat <- paste0("(?i)(onepager).*", escaped_id, ".*\\.pdf$")
+for (m_id in top_models) {
+    escaped_m <- gsub("\\.", "\\\\.", m_id)
+    png_pat_m <- paste0("(?i)(onepager).*", escaped_m, ".*\\.png$")
+    pdf_pat_m <- paste0("(?i)(onepager).*", escaped_m, ".*\\.pdf$")
 
-cand_png <- all_files[grepl(png_pat, all_files, perl = TRUE)]
-cand_pdf <- all_files[grepl(pdf_pat, all_files, perl = TRUE)]
+    cand_png_m <- all_files[grepl(png_pat_m, all_files, perl = TRUE)]
+    cand_pdf_m <- all_files[grepl(pdf_pat_m, all_files, perl = TRUE)]
 
-if (length(cand_png)) {
-    canonical <- file.path(dir_path, paste0(best_id, ".png"))
-    file.copy(cand_png[1], canonical, overwrite = TRUE)
-    gcs_put_safe(canonical, file.path(gcs_prefix, paste0(best_id, ".png")))
-} else if (length(cand_pdf)) {
-    canonical <- file.path(dir_path, paste0(best_id, ".pdf"))
-    file.copy(cand_pdf[1], canonical, overwrite = TRUE)
-    gcs_put_safe(canonical, file.path(gcs_prefix, paste0(best_id, ".pdf")))
-} else {
-    pdf_pat <- paste0("(?i)(onepager).*", escaped_id, ".*\\.pdf$")
-    cand_pdf <- all_files[
-        grepl(pdf_pat, all_files, perl = TRUE)
-    ]
-    if (!length(cand_pdf)) {
-        cand_pdf <- all_files[basename(all_files) == paste0(best_id, ".pdf")]
-    }
-    if (length(cand_pdf)) {
-        canonical <- file.path(dir_path, paste0(best_id, ".pdf"))
-        file.copy(cand_pdf[1], canonical, overwrite = TRUE)
-        gcs_put_safe(
-            canonical,
-            file.path(gcs_prefix, paste0(best_id, ".pdf"))
-        )
+    if (length(cand_png_m)) {
+        canonical_m <- file.path(dir_path, paste0(m_id, ".png"))
+        file.copy(cand_png_m[1], canonical_m, overwrite = TRUE)
+        gcs_put_safe(canonical_m, file.path(gcs_prefix, paste0(m_id, ".png")))
+        message("✅ Onepager uploaded for model ", m_id, " (PNG)")
+    } else if (length(cand_pdf_m)) {
+        canonical_m <- file.path(dir_path, paste0(m_id, ".pdf"))
+        file.copy(cand_pdf_m[1], canonical_m, overwrite = TRUE)
+        gcs_put_safe(canonical_m, file.path(gcs_prefix, paste0(m_id, ".pdf")))
+        message("✅ Onepager uploaded for model ", m_id, " (PDF)")
     } else {
-        message("No onepager image/pdf found for best_id=", best_id)
+        # Final fallback: look for any file with the model ID as basename
+        cand_fb <- all_files[basename(all_files) == paste0(m_id, ".pdf")]
+        if (length(cand_fb)) {
+            canonical_m <- file.path(dir_path, paste0(m_id, ".pdf"))
+            file.copy(cand_fb[1], canonical_m, overwrite = TRUE)
+            gcs_put_safe(canonical_m, file.path(gcs_prefix, paste0(m_id, ".pdf")))
+            message("✅ Onepager uploaded for model ", m_id, " (PDF fallback)")
+        } else {
+            message("⚠️ No onepager image/pdf found for model=", m_id)
+        }
     }
 }
 
@@ -3313,7 +3314,7 @@ tryCatch(
     }
 )
 
-# Allocator plot (restored)
+# Allocator plot for best model
 alloc_dir <- file.path(dir_path, paste0("allocator_plots_", timestamp))
 dir.create(alloc_dir, showWarnings = FALSE)
 
@@ -3328,13 +3329,50 @@ if (!inherits(AllocatorCollect, "try-error")) {
                 file.path(alloc_dir, paste0("allocator_", best_id, "_365d.png")),
                 file.path(gcs_prefix, paste0("allocator_plots_", timestamp, "/allocator_", best_id, "_365d.png"))
             )
-            message("✅ Allocator plot created successfully")
+            message("✅ Allocator plot created for best model ", best_id)
         },
         silent = TRUE
     )
 } else {
     message("⚠️ Skipping allocator plot - AllocatorCollect failed: ", conditionMessage(attr(AllocatorCollect, "condition")))
 }
+
+# Allocator plots for 2nd best model (best model already handled above)
+flush_and_ship_log("before allocator for 2nd best model")
+for (m_id in top_models) {
+    if (m_id == best_id) next  # already handled above
+    message("🔄 Running allocator for model ", m_id)
+    alloc_i <- try(
+        robyn_allocator(
+            InputCollect = InputCollect, OutputCollect = OutputCollect,
+            select_model = m_id, date_range = c(alloc_start, alloc_end),
+            total_budget = expected_spend_cfg, scenario = robyn_scenario,
+            channel_constr_low = low_bounds, channel_constr_up = up_bounds,
+            export = TRUE
+        ),
+        silent = TRUE
+    )
+    if (!inherits(alloc_i, "try-error")) {
+        try(
+            {
+                png_file <- file.path(alloc_dir, paste0("allocator_", m_id, "_365d.png"))
+                png(png_file, width = 1200, height = 800)
+                plot(alloc_i)
+                dev.off()
+                gcs_put_safe(
+                    png_file,
+                    file.path(gcs_prefix, paste0("allocator_plots_", timestamp, "/allocator_", m_id, "_365d.png"))
+                )
+                message("✅ Allocator plot created for model ", m_id)
+            },
+            silent = TRUE
+        )
+    } else {
+        message("⚠️ Allocator failed for model ", m_id, ": ",
+                conditionMessage(attr(alloc_i, "condition")))
+    }
+}
+flush_and_ship_log("after allocator for 2nd best model")
 
 ## ---------- UPLOAD EVERYTHING ----------
 flush_and_ship_log("before final upload")

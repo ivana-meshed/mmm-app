@@ -14,6 +14,7 @@ import base64
 import io
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -42,6 +43,9 @@ BENCHMARK_ROOT = "benchmarks"
 # Minimum R² threshold used to filter low-quality results from plots and
 # analysis.  Must match the --min-r2 default in analyze_benchmark_results.py.
 MIN_R2_THRESHOLD = 0.70
+
+# Sentinel timestamp used when a blob has no creation time recorded.
+_EPOCH = datetime.min.replace(tzinfo=timezone.utc)
 
 # The 4 best benchmark configurations available for quick selection
 BEST_BENCHMARKS = [
@@ -366,6 +370,7 @@ def _aggregate_variant_summaries(benchmark_id: str):
                 json.dumps(channel_roas) if channel_roas else ""
             ),
             "channel_cpa_json": json.dumps(channel_cpa) if channel_cpa else "",
+            "sol_id": best_model.get("model_id", ""),
             "model_id": (
                 f"{variant_name}_{summary.get('timestamp', '')}"
                 if summary.get("timestamp")
@@ -420,12 +425,19 @@ def load_benchmark_csv(benchmark_id):
 
 
 def load_benchmark_plots(benchmark_id):
-    """Load all plots for a benchmark.
+    """Load all benchmark plot PNG files and their creation timestamps.
 
-    Merges plots from all analyze-run directories so that a partially-failed
-    run (which only uploaded some plots before encountering a GCS error) does
-    not hide plots that were successfully uploaded in a previous run.  For
-    each plot name the most-recently-created file is used.
+    Returns a two-tuple ``(plots, plot_created)`` where:
+
+    * ``plots`` – ``dict[str, bytes]``: maps relative plot key (path without
+      extension, e.g. ``"variant_foo/1_202_13"`` or
+      ``"plots_20260410/rsq_comparison"``) to raw PNG bytes.
+    * ``plot_created`` – ``dict[str, datetime]``: maps the same keys to the
+      GCS blob creation timestamp (timezone-aware UTC).
+
+    All ``.png`` files found under ``benchmarks/{benchmark_id}/`` are
+    included.  Each key preserves folder context so same-named files from
+    different subfolders do not collide.
     """
     client = get_storage_client()
     bucket = client.bucket(GCS_BUCKET)
@@ -433,27 +445,35 @@ def load_benchmark_plots(benchmark_id):
     prefix = f"{BENCHMARK_ROOT}/{benchmark_id}/"
     blobs = list(bucket.list_blobs(prefix=prefix))
 
-    # Collect one blob per plot name; prefer the most recently created one.
-    plot_blobs: dict = {}  # plot_name (str) -> GCS blob
+    # Keep all PNG artifacts (do not collapse by filename) so the UI can show
+    # every file that exists in GCS.  Support both current and legacy layouts:
+    # - benchmarks/{id}/plots_<timestamp>/<plot>.png
+    # - benchmarks/{id}/plots/<plot>.png
+    # - benchmarks/{id}/<plot>.png
+    plot_blobs: dict = {}  # relative_path_without_ext (str) -> GCS blob
     for blob in blobs:
-        if "plots_" not in blob.name or not blob.name.endswith(".png"):
+        if not blob.name.lower().endswith(".png"):
             continue
-        plot_name = blob.name.split("/")[-1].replace(".png", "")
-        existing = plot_blobs.get(plot_name)
+
+        relative_name = blob.name[len(prefix) :]
+        plot_key = relative_name.rsplit(".", 1)[0]
+        existing = plot_blobs.get(plot_key)
         if existing is None or blob.time_created > existing.time_created:
-            plot_blobs[plot_name] = blob
+            plot_blobs[plot_key] = blob
 
     if not plot_blobs:
-        return {}
+        return {}, {}
 
     plots = {}
+    plot_created = {}
     failed = []
-    for plot_name, blob in plot_blobs.items():
+    for plot_key, blob in plot_blobs.items():
         try:
             img_data = blob.download_as_bytes()
-            plots[plot_name] = img_data  # store raw bytes; rendered via base64
+            plots[plot_key] = img_data
+            plot_created[plot_key] = blob.time_created
         except Exception as exc:  # noqa: BLE001
-            failed.append(f"{plot_name}: {exc}")
+            failed.append(f"{plot_key}: {exc}")
 
     if failed:
         print(
@@ -462,7 +482,70 @@ def load_benchmark_plots(benchmark_id):
             file=sys.stderr,
         )
 
-    return plots
+    return plots, plot_created
+
+
+def _find_variant_onepager(
+    plots: dict, variant_name: str, sol_id: str = ""
+):
+    """Return the plot key for the onepager of *variant_name*.
+
+    Search order:
+    1. Exact key ``{variant_name}/{sol_id}`` (canonical upload from R).
+    2. Any key under ``{variant_name}/`` whose tail contains the sol_id
+       and is not an allocator file.
+    3. Any key under ``{variant_name}/`` containing "onepager".
+    """
+    prefix = f"{variant_name}/"
+    candidates = [k for k in plots if k.startswith(prefix)]
+
+    if sol_id:
+        exact = f"{variant_name}/{sol_id}"
+        if exact in plots:
+            return exact
+        for k in candidates:
+            tail = k.split("/")[-1]
+            if sol_id in tail and "allocator" not in tail.lower():
+                return k
+
+    for k in candidates:
+        if "onepager" in k.lower():
+            return k
+
+    return None
+
+
+def _find_variant_allocator(
+    plots: dict,
+    variant_name: str,
+    plot_created: dict,
+    sol_id: str = "",
+):
+    """Return the plot key for the budget allocator of *variant_name*.
+
+    Search order:
+    1. Allocator key under ``{variant_name}/`` containing the sol_id.
+    2. Most-recently-created allocator key under ``{variant_name}/``.
+    """
+    prefix = f"{variant_name}/"
+    alloc_keys = [
+        k
+        for k in plots
+        if k.startswith(prefix) and "allocator" in k.split("/")[-1].lower()
+    ]
+    if not alloc_keys:
+        return None
+
+    if sol_id:
+        for k in alloc_keys:
+            if sol_id in k:
+                return k
+
+    return sorted(
+        alloc_keys,
+        key=lambda k: plot_created.get(k) or _EPOCH,
+        reverse=True,
+    )[0]
 
 
 # Sidebar - Benchmark Selection
@@ -1160,12 +1243,176 @@ for selected_benchmark in selected_benchmarks:
                         st.exception(_exc)
 
         try:
-            plots = load_benchmark_plots(selected_benchmark)
+            plots, plot_created = load_benchmark_plots(selected_benchmark)
+
+            # ── Top 2 Models by R² ───────────────────────────────────────
+            if df is not None and not df.empty and plots:
+                r2_col = next(
+                    (
+                        c
+                        for c in ["rsq_val", "rsq_train"]
+                        if c in df.columns and df[c].notna().any()
+                    ),
+                    None,
+                )
+                if r2_col:
+                    top2 = df.nlargest(2, r2_col, keep="first")
+                    if not top2.empty:
+                        st.subheader("🏆 Top 2 Models by R²")
+                        rank_labels = [
+                            "🥇 Best Model",
+                            "🥈 2nd Best Model",
+                        ]
+                        for rank, (_, mrow) in enumerate(
+                            top2.iterrows()
+                        ):
+                            label = (
+                                rank_labels[rank]
+                                if rank < len(rank_labels)
+                                else f"Model {rank + 1}"
+                            )
+                            variant = str(
+                                mrow.get("benchmark_variant", "")
+                            )
+                            sol_id = str(mrow.get("sol_id", "") or "")
+                            r2_val = mrow.get(r2_col)
+                            r2_lbl = (
+                                f"{r2_val:.4f}"
+                                if pd.notna(r2_val)
+                                else "N/A"
+                            )
+
+                            st.markdown(
+                                f"#### {label} — `{variant}` "
+                                f"(R²={r2_lbl})"
+                            )
+
+                            # Show key metrics inline
+                            _mc1, _mc2, _mc3 = st.columns(3)
+                            _mc1.metric("R² (val)", r2_lbl)
+                            _nrmse = mrow.get("nrmse_val") or mrow.get(
+                                "nrmse"
+                            )
+                            _mc2.metric(
+                                "NRMSE",
+                                (
+                                    f"{_nrmse:.4f}"
+                                    if pd.notna(_nrmse)
+                                    else "N/A"
+                                ),
+                            )
+                            _rssd = mrow.get("decomp_rssd")
+                            _mc3.metric(
+                                "Decomp RSSD",
+                                (
+                                    f"{_rssd:.4f}"
+                                    if pd.notna(_rssd)
+                                    else "N/A"
+                                ),
+                            )
+
+                            # Onepager
+                            op_key = _find_variant_onepager(
+                                plots, variant, sol_id
+                            )
+                            if op_key:
+                                st.markdown("**📋 Onepager**")
+                                _b64 = base64.b64encode(
+                                    plots[op_key]
+                                ).decode()
+                                st.markdown(
+                                    f'<img src="data:image/png;base64,'
+                                    f'{_b64}" '
+                                    f'style="width: 100%; height: auto;"'
+                                    f' alt="Onepager {variant}">',
+                                    unsafe_allow_html=True,
+                                )
+                                st.caption(f"File: `{op_key}`")
+                            else:
+                                st.info(
+                                    "Onepager not found for this variant "
+                                    "(may not have uploaded yet)."
+                                )
+
+                            # Budget allocator
+                            al_key = _find_variant_allocator(
+                                plots, variant, plot_created, sol_id
+                            )
+                            if al_key:
+                                st.markdown("**💰 Budget Allocator**")
+                                _b64 = base64.b64encode(
+                                    plots[al_key]
+                                ).decode()
+                                st.markdown(
+                                    f'<img src="data:image/png;base64,'
+                                    f'{_b64}" '
+                                    f'style="width: 100%; height: auto;"'
+                                    f' alt="Allocator {variant}">',
+                                    unsafe_allow_html=True,
+                                )
+                                st.caption(f"File: `{al_key}`")
+                            else:
+                                st.info(
+                                    "Budget allocator not found for this"
+                                    " variant (may not have uploaded"
+                                    " yet)."
+                                )
+
+                            st.divider()
 
             if not plots:
                 st.warning("No plots found for this benchmark")
             else:
                 st.success(f"Loaded {len(plots)} plots")
+                displayed_plot_keys = set()
+                default_dt = _EPOCH
+
+                def _created_at(plot_key: str):
+                    return plot_created.get(plot_key) or default_dt
+
+                def _resolve_plot_key(expected_key: str):
+                    """Return best available plot key for an expected name."""
+                    if expected_key in plots:
+                        return expected_key
+
+                    candidates = []
+                    for key in plots:
+                        key_tail = key.split("/")[-1]
+                        key_variants = [key_tail]
+                        if key_tail.startswith("plot_"):
+                            key_variants.append(key_tail[len("plot_") :])
+                        if key_tail.startswith("plots_"):
+                            key_variants.append(key_tail[len("plots_") :])
+
+                        if (
+                            expected_key in key_variants
+                            or key_tail.endswith(expected_key)
+                            or key.endswith(expected_key)
+                        ):
+                            candidates.append(key)
+                    if not candidates:
+                        return None
+                    # Prefer newest file first; if timestamps tie, prefer shorter
+                    # keys (typically canonical names over verbose legacy paths).
+                    return sorted(
+                        candidates,
+                        key=lambda k: (_created_at(k), -len(k)),
+                        reverse=True,
+                    )[0]
+
+                def _render_plot(plot_key: str, title: str, description: str):
+                    displayed_plot_keys.add(plot_key)
+                    st.markdown(f"### {title}")
+                    st.caption(description)
+                    b64 = base64.b64encode(plots[plot_key]).decode()
+                    st.markdown(
+                        f'<img src="data:image/png;base64,{b64}" '
+                        f'style="width: 100%; height: auto;" '
+                        f'alt="{title}">',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(f"File key: `{plot_key}`")
+                    st.divider()
 
                 # Define plot order and titles
                 # Core metric plots — always expected; warn if missing.
@@ -1226,37 +1473,23 @@ for selected_benchmark in selected_benchmarks:
 
                 # Display core plots (warn loudly if missing)
                 for plot_name, title, description in core_plots:
-                    if plot_name in plots:
-                        st.markdown(f"### {title}")
-                        st.caption(description)
-                        b64 = base64.b64encode(plots[plot_name]).decode()
-                        st.markdown(
-                            f'<img src="data:image/png;base64,{b64}" '
-                            f'style="width: 100%; height: auto;" '
-                            f'alt="{title}">',
-                            unsafe_allow_html=True,
-                        )
-                        st.divider()
-                    else:
+                    plot_key = _resolve_plot_key(plot_name)
+                    if plot_key is None:
                         st.warning(f"Plot not available: {plot_name}")
+                    else:
+                        _render_plot(plot_key, title, description)
 
                 # Display enrichment plots (silent info if missing — data may not
                 # be present for benchmarks run with older training images)
                 enrichment_missing = [
-                    (n, t, d) for n, t, d in enrichment_plots if n not in plots
+                    (n, t, d)
+                    for n, t, d in enrichment_plots
+                    if _resolve_plot_key(n) is None
                 ]
                 for plot_name, title, description in enrichment_plots:
-                    if plot_name in plots:
-                        st.markdown(f"### {title}")
-                        st.caption(description)
-                        b64 = base64.b64encode(plots[plot_name]).decode()
-                        st.markdown(
-                            f'<img src="data:image/png;base64,{b64}" '
-                            f'style="width: 100%; height: auto;" '
-                            f'alt="{title}">',
-                            unsafe_allow_html=True,
-                        )
-                        st.divider()
+                    plot_key = _resolve_plot_key(plot_name)
+                    if plot_key is not None:
+                        _render_plot(plot_key, title, description)
 
                 if enrichment_missing:
                     missing_titles = ", ".join(
@@ -1271,6 +1504,24 @@ for selected_benchmark in selected_benchmarks:
                         "training image, or when `analyze_benchmark_results.py` "
                         "is run once the jobs complete."
                     )
+
+                # Show any remaining files so users can inspect all available plots
+                # even when filenames don't match canonical plot keys.
+                remaining_plot_keys = sorted(
+                    [k for k in plots if k not in displayed_plot_keys]
+                )
+                if remaining_plot_keys:
+                    st.subheader("🧾 Additional Plot Files")
+                    st.caption(
+                        "These files were found in GCS but do not match the "
+                        "standard benchmark plot names."
+                    )
+                    for extra_key in remaining_plot_keys:
+                        _render_plot(
+                            extra_key,
+                            extra_key.split("/")[-1].replace("_", " ").title(),
+                            "Additional benchmark plot file discovered in GCS.",
+                        )
 
         except Exception as e:
             st.error(f"Error loading plots: {e}")

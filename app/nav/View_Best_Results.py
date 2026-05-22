@@ -237,6 +237,27 @@ def parse_best_meta(blobs):
     return best_id, iters, trials
 
 
+def parse_top_models(blobs) -> list:
+    """Return ordered list of top model IDs from top_model_ids.txt (best first).
+
+    Falls back to [best_id] when the file is absent.
+    """
+    b = find_blob(blobs, "/top_model_ids.txt") or find_blob(
+        blobs, "top_model_ids.txt"
+    )
+    if b:
+        ids = [
+            ln.strip()
+            for ln in read_text_blob(b).splitlines()
+            if ln.strip()
+        ]
+        if ids:
+            return ids
+    # Fallback: use best_id only
+    best_id, _, _ = parse_best_meta(blobs)
+    return [best_id] if best_id else []
+
+
 def latest_run_key(runs, rev_filter=None, country_filter=None):
     keys = list(runs.keys())
     if rev_filter:
@@ -800,7 +821,7 @@ def render_metrics_section(blobs, country, stamp):
 
 
 def render_allocator_section(blobs, country, stamp):
-    # Budget Allocator section - no subheader needed, will be in tab
+    # Budget Allocator section - show plots ordered by top model rank (best first)
     alloc_plots = find_allocator_plots(blobs)
 
     if not alloc_plots:
@@ -827,10 +848,30 @@ def render_allocator_section(blobs, country, stamp):
                         )
         return
 
-    st.success(f"Found {len(alloc_plots)} allocator plot(s)")
-    for i, b in enumerate(alloc_plots):
+    # Sort allocator plots by top model rank (best model first)
+    top_models = parse_top_models(blobs)
+
+    def _alloc_plot_rank(blob):
+        fn = os.path.basename(blob.name).lower()
+        for idx, m_id in enumerate(top_models):
+            if m_id.lower() in fn:
+                return idx
+        return len(top_models)
+
+    alloc_plots_sorted = sorted(alloc_plots, key=_alloc_plot_rank)
+
+    rank_labels = ["🥇 Best Model", "🥈 2nd Best Model"]
+    st.success(f"Found {len(alloc_plots_sorted)} allocator plot(s)")
+    for i, b in enumerate(alloc_plots_sorted):
         try:
             fn = os.path.basename(b.name)
+            plot_rank = _alloc_plot_rank(b)
+            rank_label = (
+                rank_labels[plot_rank]
+                if plot_rank < len(rank_labels)
+                else f"Model {plot_rank + 1}"
+            )
+            st.subheader(rank_label)
             st.write(f"**{fn}** ({b.size:,} bytes)")
             image_data = download_bytes_safe(b)
             if not image_data:
@@ -852,53 +893,64 @@ def render_allocator_section(blobs, country, stamp):
 
 
 def render_onepager_section(blobs, best_id, country, stamp):
-    # Model Performance section - no subheader needed, will be in tab
-    if not best_id:
-        st.warning(
-            "best_model_id.txt not found; cannot locate model performance summary."
-        )
-        return
-
-    op_blob = find_onepager_blob(blobs, best_id)
-    if not op_blob:
-        st.warning(
-            f"No model performance summary found for best model id '{best_id}' using standard patterns."
-        )
-        return
-
-    name = os.path.basename(op_blob.name)
-    lower = name.lower()
-    st.success(
-        f"Found model performance summary: **{name}** ({op_blob.size:,} bytes)"
-    )
-
-    if lower.endswith(".png"):
-        try:
-            image_data = download_bytes_safe(op_blob)
-            if not image_data:
-                st.warning("Image data is empty")
-                return
-            b64 = base64.b64encode(image_data).decode()
-            st.markdown(
-                f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="Model Performance">',
-                unsafe_allow_html=True,
+    # Model Performance section - show onepagers for top 2 models (best first)
+    top_models = parse_top_models(blobs)
+    if not top_models:
+        if not best_id:
+            st.warning(
+                "best_model_id.txt not found; cannot locate model performance summary."
             )
+            return
+        top_models = [best_id]
+
+    rank_labels = ["🥇 Best Model", "🥈 2nd Best Model"]
+    found_any = False
+    for rank, m_id in enumerate(top_models):
+        label = rank_labels[rank] if rank < len(rank_labels) else f"Model {rank + 1}"
+        op_blob = find_onepager_blob(blobs, m_id)
+        if not op_blob:
+            if rank == 0:
+                st.warning(
+                    f"No model performance summary found for {label} '{m_id}'."
+                )
+            continue
+        found_any = True
+        name = os.path.basename(op_blob.name)
+        lower = name.lower()
+        st.subheader(label)
+        st.success(
+            f"Found model performance summary: **{name}** ({op_blob.size:,} bytes)"
+        )
+        if lower.endswith(".png"):
+            try:
+                image_data = download_bytes_safe(op_blob)
+                if not image_data:
+                    st.warning("Image data is empty")
+                    continue
+                b64 = base64.b64encode(image_data).decode()
+                st.markdown(
+                    f'<img src="data:image/png;base64,{b64}" style="width: 100%; height: auto;" alt="Model Performance {label}">',
+                    unsafe_allow_html=True,
+                )
+                download_link_for_blob(
+                    op_blob,
+                    label=f"Download {name}",
+                    mime_hint="image/png",
+                    key_suffix=(f"onepager|{country}|{stamp}|{rank}"),
+                )
+            except Exception as e:
+                st.error(f"Couldn't preview `{name}`: {e}")
+        elif lower.endswith(".pdf"):
+            st.info("Model Performance available as PDF (preview not supported).")
             download_link_for_blob(
                 op_blob,
                 label=f"Download {name}",
-                mime_hint="image/png",
-                key_suffix=(f"onepager|{country}|{stamp}"),
+                mime_hint="application/pdf",
+                key_suffix=(f"onepager|{country}|{stamp}|{rank}"),
             )
-        except Exception as e:
-            st.error(f"Couldn't preview `{name}`: {e}")
-    elif lower.endswith(".pdf"):
-        st.info("Model Performance available as PDF (preview not supported).")
-        download_link_for_blob(
-            op_blob,
-            label=f"Download {name}",
-            mime_hint="application/pdf",
-            key_suffix=(f"onepager|{country}|{stamp}"),
-        )
+
+    if not found_any:
+        st.warning("No model performance summaries found for any of the top models.")
 
 
 def render_additional_benchmark_plots(blobs, best_id, country, stamp):
